@@ -6,6 +6,23 @@ Thanks for helping. jvid is small on purpose, so the bar for new features is "do
 
 Work is tracked as GitHub issues, grouped into milestones. [ROADMAP.md](docs/ROADMAP.md) gives the order they land in and what each one depends on. Pick an issue whose dependencies are closed, and comment on it before starting so work isn't duplicated.
 
+## Developer setup
+
+jvid links FFmpeg 4.4 to 8.x dynamically ([ADR 0001](docs/adr/0001-ffmpeg-binding.md)). Building needs the FFmpeg development libraries, `pkg-config` (Linux and macOS) and libclang (for bindgen).
+
+- **Linux (Debian/Ubuntu):**
+
+  ```sh
+  sudo apt install clang libclang-dev pkg-config \
+    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+  ```
+
+  Ubuntu 22.04's FFmpeg 4.4 is the oldest supported version.
+- **macOS:** `brew install ffmpeg pkg-config` (Xcode's command line tools provide libclang).
+- **Windows:** install LLVM (`winget install LLVM.LLVM`), download an LGPL shared build such as `ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip` from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases), unzip it to `C:\ffmpeg`, then set `FFMPEG_DIR=C:\ffmpeg`, `LIBCLANG_PATH=C:\Program Files\LLVM\bin`, and add `C:\ffmpeg\bin` to `PATH` so the DLLs load.
+
+The default build expects an LGPL FFmpeg. Build with `--features gpl-ffmpeg` if you link a GPL one (e.g. Homebrew's); otherwise jvid logs a warning at startup. The startup log line `ffmpeg loaded` shows the version, licence and codecs found.
+
 ## Making a change
 
 1. Branch from `main`.

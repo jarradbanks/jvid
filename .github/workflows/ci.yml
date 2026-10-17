@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -18,7 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Private repo: macOS bills 10x and Windows 2x, so PRs run Linux only; main and manual runs get all three.
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -26,10 +28,37 @@ jobs:
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # FFmpeg dev libraries (docs/adr/0001-ffmpeg-binding.md). bindgen's libclang ships on all runners.
       # suite-ui GPU tests render on Mesa lavapipe; required on Linux so they can't pass by skipping.
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+      - if: runner.os == 'macOS'
+        run: brew install ffmpeg
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+      - if: runner.os == 'Windows'
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\ffmpeg
+          key: ffmpeg-n8.1-win64-lgpl-shared
+      - if: runner.os == 'Windows' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          curl -fsSL -o ffmpeg.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip
+          unzip -q ffmpeg.zip -d /c/ffmpeg-tmp
+          mv /c/ffmpeg-tmp/ffmpeg-* /c/ffmpeg
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo 'FFMPEG_DIR=C:\ffmpeg' >> "$GITHUB_ENV"
+          echo 'LIBCLANG_PATH=C:\Program Files\LLVM\bin' >> "$GITHUB_ENV"
+          echo 'C:\ffmpeg\bin' >> "$GITHUB_PATH"
+      - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
         env:
           JVID_GPU_TESTS: ${{ runner.os == 'Linux' && 'required' || '' }}
