@@ -991,8 +991,12 @@ mod program_tests {
             opacity: 0.5,
             ..Transform::default()
         };
-        h.apply(Command::SetClipProps(vec![(red, half, Default::default())]))
-            .unwrap();
+        h.apply(Command::SetClipProps(vec![(
+            red,
+            half.clone(),
+            Default::default(),
+        )]))
+        .unwrap();
         let before = p.program_gen;
         assert!(before > shown);
         p.sync_program(h.project(), Time(0), false);

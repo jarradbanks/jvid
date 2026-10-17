@@ -104,6 +104,13 @@ const SECTIONS: [(&str, &[Prop]); 5] = [
             grade("saturation", "Saturation"),
             grade("temperature", "Temperature"),
             grade("tint", "Tint"),
+            Prop {
+                display: 100.0,
+                decimals: 0,
+                suffix: "%",
+                range: (0.0, 1.0),
+                ..prop("lut_intensity", "LUT mix", ONE)
+            },
         ],
     ),
     // Audio clips only.
@@ -163,6 +170,7 @@ fn get(x: &Transform, name: &str) -> Value {
         "saturation" => Value::Scalar(x.saturation),
         "temperature" => Value::Scalar(x.temperature),
         "tint" => Value::Scalar(x.tint),
+        "lut_intensity" => Value::Scalar(x.lut_intensity),
         "crop_left" => crop(0),
         "crop_top" => crop(1),
         "crop_right" => crop(2),
@@ -188,6 +196,7 @@ fn set(x: &mut Transform, name: &str, v: Value) {
         ("saturation", Value::Scalar(v)) => x.saturation = v.clamp(-1.0, 1.0),
         ("temperature", Value::Scalar(v)) => x.temperature = v.clamp(-1.0, 1.0),
         ("tint", Value::Scalar(v)) => x.tint = v.clamp(-1.0, 1.0),
+        ("lut_intensity", Value::Scalar(v)) => x.lut_intensity = v.clamp(0.0, 1.0),
         ("crop_left", Value::Scalar(v)) => x.crop[0] = v,
         ("crop_top", Value::Scalar(v)) => x.crop[1] = v,
         ("crop_right", Value::Scalar(v)) => x.crop[2] = v,
@@ -250,7 +259,7 @@ fn rewrite(
         clips
             .iter()
             .map(|c| {
-                let (mut x, mut keys) = (c.transform, c.keyframes.clone());
+                let (mut x, mut keys) = (c.transform.clone(), c.keyframes.clone());
                 f(c, &mut x, &mut keys);
                 (c.id, x, keys)
             })
@@ -430,6 +439,11 @@ pub fn show(
         {
             edit = Some(e);
         }
+        if title == "Color"
+            && let Some(e) = lut_row(ui, clips)
+        {
+            edit = Some(e);
+        }
     }
     // Only when every selected clip shows the same asset, so the editors edit them all.
     let same = clips.iter().all(|c| c.asset == clips[0].asset);
@@ -449,8 +463,6 @@ pub fn show(
         if let Some(e) = solid.and_then(|a| solid_color(ui, a)) {
             edit = Some(e);
         }
-        // shortcut: placeholder until M5's color adjustments (#66).
-        ui.label(egui::RichText::new("Color adjustments arrive in M5").color(color::INK_3));
     }
     (edit, seek)
 }
@@ -488,6 +500,46 @@ fn blend_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
         ui.add(Dropdown::new(&mut i, &BLENDS).width(132.0))
             .changed()
             .then(|| (set_blend(clips, Blend::ALL[i]), None))
+    })
+    .inner
+}
+
+/// Sets every clip's `.cube` LUT, or clears it; one undo step.
+fn set_lut(clips: &[&Clip], lut: Option<String>) -> Command {
+    rewrite(clips, |_, x, _| x.lut.clone_from(&lut))
+}
+
+/// The LUT picker, showing the first clip's file name, with a clear button when set.
+fn lut_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
+    let current = clips[0].transform.lut.as_deref();
+    let name = current.map_or("None".into(), |p| {
+        std::path::Path::new(p)
+            .file_name()
+            .map_or(p.into(), |n| n.to_string_lossy())
+    });
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = space::S4;
+        ui.allocate_ui_with_layout(
+            vec2(size::INSPECTOR_LABEL, size::CONTROL),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(size::INSPECTOR_LABEL);
+                ui.label(egui::RichText::new("LUT").color(color::INK_2))
+            },
+        );
+        let mut edit = None;
+        if ui.add(Button::secondary(&name).width(132.0)).clicked()
+            && let Some(path) = rfd::FileDialog::new()
+                .set_title("Choose a LUT")
+                .add_filter("Cube LUT", &["cube"])
+                .pick_file()
+        {
+            edit = Some((set_lut(clips, Some(path.to_string_lossy().into())), None));
+        }
+        if current.is_some() && ui.add(Button::ghost("Clear")).clicked() {
+            edit = Some((set_lut(clips, None), None));
+        }
+        edit
     })
     .inner
 }
@@ -1059,6 +1111,21 @@ mod tests {
         assert_eq!(clips[1].transform.opacity, 0.5);
         let names = Blend::ALL.map(|b| format!("{b:?}"));
         assert_eq!(names, BLENDS, "labels follow Blend::ALL");
+    }
+
+    #[test]
+    fn lut_sets_and_clears_every_clip() {
+        let mut clips = [clip(1, 0), clip(2, 0)];
+        clips[1].transform.lut_intensity = 0.5;
+        apply(&mut clips, |c| set_lut(c, Some("a.cube".into())));
+        assert!(
+            clips
+                .iter()
+                .all(|c| c.transform.lut.as_deref() == Some("a.cube"))
+        );
+        assert_eq!(clips[1].transform.lut_intensity, 0.5);
+        apply(&mut clips, |c| set_lut(c, None));
+        assert!(clips.iter().all(|c| c.transform.lut.is_none()));
     }
 
     #[test]

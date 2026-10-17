@@ -54,7 +54,7 @@ fn rewrite(c: &Clip, f: impl FnOnce(&mut BTreeMap<String, Vec<Keyframe>>)) -> Co
     let mut keys = c.keyframes.clone();
     f(&mut keys);
     keys.retain(|_, k| !k.is_empty());
-    Command::SetClipProps(vec![(c.id, c.transform, keys)])
+    Command::SetClipProps(vec![(c.id, c.transform.clone(), keys)])
 }
 
 fn picked<'a>(

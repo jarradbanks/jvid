@@ -29,7 +29,7 @@ fn v_of(y: f32, r: Rect) -> f64 {
 fn props(c: &Clip, keys: Vec<Keyframe>) -> Command {
     let mut all = c.keyframes.clone();
     all.insert("volume".into(), keys);
-    Command::SetClipProps(vec![(c.id, c.transform, all)])
+    Command::SetClipProps(vec![(c.id, c.transform.clone(), all)])
 }
 
 /// Adds a volume key at source time `at`. The first key starts from the static volume, so

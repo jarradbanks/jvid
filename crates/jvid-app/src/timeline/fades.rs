@@ -17,14 +17,14 @@ const GESTURE: GestureKey = 0x6661_6465_0000; // "fade"
 
 /// Sets the fade in (`out` false) or out of `c` to `len`, held to the clip's length.
 fn set(c: &Clip, out: bool, len: Time) -> Command {
-    let mut x = c.transform;
+    let mut x = c.transform.clone();
     let len = len.clamp(Time(0), c.duration());
     *if out { &mut x.fade_out } else { &mut x.fade_in } = len;
     Command::SetClipProps(vec![(c.id, x, c.keyframes.clone())])
 }
 
 fn toggle(c: &Clip) -> Command {
-    let mut x = c.transform;
+    let mut x = c.transform.clone();
     x.fade_curve = match x.fade_curve {
         FadeCurve::Linear => FadeCurve::EqualPower,
         FadeCurve::EqualPower => FadeCurve::Linear,

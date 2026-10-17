@@ -965,7 +965,10 @@ mod tests {
             opacity: 0.5,
             ..Transform::default()
         };
-        let edits = ids.iter().map(|&c| (c, x, BTreeMap::new())).collect();
+        let edits = ids
+            .iter()
+            .map(|&c| (c, x.clone(), BTreeMap::new()))
+            .collect();
         h.apply(Command::SetClipProps(edits)).unwrap();
         for c in &ids {
             assert_eq!(h.project().sequence().clip(*c).unwrap().1.transform, x);
@@ -974,8 +977,8 @@ mod tests {
         assert_eq!(h.project(), &before);
         // an unknown clip leaves the known one untouched
         let bad = vec![
-            (ids[0], x, BTreeMap::new()),
-            (ClipId(999), x, BTreeMap::new()),
+            (ids[0], x.clone(), BTreeMap::new()),
+            (ClipId(999), x.clone(), BTreeMap::new()),
         ];
         assert!(h.apply(Command::SetClipProps(bad)).is_err());
         assert_eq!(h.project(), &before);

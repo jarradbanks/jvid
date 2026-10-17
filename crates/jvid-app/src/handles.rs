@@ -30,7 +30,7 @@ enum Grab {
 }
 
 /// A drag's start: the pointer and transform when it began, and the drag count.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Start {
     grab: Grab,
     from: Pos2,
@@ -42,14 +42,14 @@ struct Start {
 /// `s` screen points per project pixel; Shift constrains move to one axis and snaps rotation.
 fn dragged(
     grab: Grab,
-    start: Transform,
+    start: &Transform,
     from: Pos2,
     to: Pos2,
     anchor: Pos2,
     s: f32,
     shift: bool,
 ) -> Transform {
-    let mut x = start;
+    let mut x = start.clone();
     match grab {
         Grab::Move => {
             let mut d = (to - from) / s;
@@ -207,14 +207,14 @@ pub fn show(
         if resp.drag_started()
             && let Some(from) = resp.interact_pointer_pos()
         {
-            let drag = start.map_or(0, |s| s.drag) + 1;
+            let drag = start.as_ref().map_or(0, |s| s.drag) + 1;
             ui.data_mut(|d| {
                 d.insert_temp(
                     id,
                     Start {
                         grab,
                         from,
-                        x,
+                        x: x.clone(),
                         drag,
                     },
                 )
@@ -232,7 +232,7 @@ pub fn show(
             let shift = ui.input(|i| i.modifiers.shift);
             let anchor =
                 frame.center() + vec2(st.x.position[0] as f32, st.x.position[1] as f32) * s;
-            let new = dragged(grab, st.x, st.from, to, anchor, s, shift);
+            let new = dragged(grab, &st.x, st.from, to, anchor, s, shift);
             if new != x {
                 let names: &[&str] = match grab {
                     Grab::Move => &["position"],
@@ -294,16 +294,16 @@ mod tests {
         let x = Transform::default();
         let a = pos2(100.0, 100.0);
         // Two screen points per project pixel.
-        let m = dragged(Grab::Move, x, a, pos2(120.0, 106.0), a, 2.0, false);
+        let m = dragged(Grab::Move, &x, a, pos2(120.0, 106.0), a, 2.0, false);
         assert_eq!(m.position, [10.0, 3.0]);
-        let m = dragged(Grab::Move, x, a, pos2(120.0, 106.0), a, 2.0, true);
+        let m = dragged(Grab::Move, &x, a, pos2(120.0, 106.0), a, 2.0, true);
         assert_eq!(m.position, [10.0, 0.0]);
-        let m = dragged(Grab::Move, x, a, pos2(104.0, 140.0), a, 2.0, true);
+        let m = dragged(Grab::Move, &x, a, pos2(104.0, 140.0), a, 2.0, true);
         assert_eq!(m.position, [0.0, 20.0]);
         // A corner twice as far from the anchor doubles scale; past the anchor it floors.
         let s = dragged(
             Grab::Scale,
-            x,
+            &x,
             pos2(150.0, 150.0),
             pos2(200.0, 200.0),
             a,
@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(s.scale, [2.0, 2.0]);
         let s = dragged(
             Grab::Scale,
-            x,
+            &x,
             pos2(150.0, 150.0),
             pos2(50.0, 50.0),
             a,
@@ -324,7 +324,7 @@ mod tests {
         // A quarter turn clockwise on screen (y down), and Shift snaps 50° to 45°.
         let r = dragged(
             Grab::Rotate,
-            x,
+            &x,
             pos2(200.0, 100.0),
             pos2(100.0, 200.0),
             a,
@@ -333,7 +333,7 @@ mod tests {
         );
         assert!((r.rotation - 90.0).abs() < 1e-4);
         let to = a + Vec2::angled(50f32.to_radians()) * 100.0;
-        let r = dragged(Grab::Rotate, x, pos2(200.0, 100.0), to, a, 2.0, true);
+        let r = dragged(Grab::Rotate, &x, pos2(200.0, 100.0), to, a, 2.0, true);
         assert_eq!(r.rotation, 45.0);
     }
 

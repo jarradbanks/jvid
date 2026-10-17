@@ -604,6 +604,9 @@ pub struct Gpu {
     layers: Vec<Preview>,
     /// Text uploads from the last draw, by raster; holding the `Arc` keeps its address unique.
     texts: Vec<(Arc<Vec<u8>>, wgpu::Texture)>,
+    /// `.cube` paths already read into the compositor, or that failed to.
+    /// shortcut: read once per session; a file edited on disk shows after a restart.
+    luts: HashSet<String>,
 }
 
 impl Gpu {
@@ -612,6 +615,7 @@ impl Gpu {
             compositor: Compositor::new(device),
             layers: Vec::new(),
             texts: Vec::new(),
+            luts: HashSet::new(),
         }
     }
 
@@ -659,6 +663,17 @@ impl Gpu {
             preview.upload(device, queue, &yuv, scale);
         }
         self.texts = texts;
+        for path in shown.layers.iter().filter_map(|(_, t)| t.lut.as_ref()) {
+            if self.luts.insert(path.clone()) {
+                let lut = std::fs::read_to_string(path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|text| jvid_render::lut::parse(&text));
+                match lut {
+                    Ok(lut) => self.compositor.add_lut(device, queue, path, &lut),
+                    Err(e) => tracing::warn!("LUT {path}: {e}"),
+                }
+            }
+        }
         let layers: Vec<_> = shown
             .layers
             .iter()
@@ -668,7 +683,7 @@ impl Gpu {
                     Pixels::Frame(_) => p.image().expect("uploaded above"),
                     Pixels::Solid(_) | Pixels::Text(_) => solids.next().expect("made above"),
                 };
-                Some((tex, *t))
+                Some((tex, t.clone()))
             })
             .collect();
         self.compositor.render(
