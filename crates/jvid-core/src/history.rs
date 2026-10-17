@@ -107,6 +107,8 @@ pub enum Command {
     },
     /// Removes the asset and every clip that uses it.
     RemoveAsset(AssetId),
+    /// Points assets at new paths as one step, e.g. after their media moved.
+    RelinkAssets(Vec<(AssetId, PathBuf)>),
 }
 
 /// The id a command created, if any.
@@ -258,6 +260,15 @@ impl Command {
                 let used: Vec<_> = used.filter(|c| c.asset == id).map(|c| c.id).collect();
                 for c in used {
                     s.remove_clip(c)?;
+                }
+                Created::Nothing
+            }
+            Self::RelinkAssets(items) => {
+                if let Some((id, _)) = items.iter().find(|(id, _)| p.asset(*id).is_none()) {
+                    return Err(ModelError::UnknownAsset(*id));
+                }
+                for (id, path) in items {
+                    p.asset_mut(id).expect("checked above").path = path;
                 }
                 Created::Nothing
             }
@@ -581,6 +592,25 @@ mod tests {
     }
 
     #[test]
+    fn relink_is_one_undo_step_and_unknown_ids_change_nothing() {
+        let mut h = History::new(Project::default());
+        h.apply(Command::AddAsset("old/a.mkv".into())).unwrap();
+        h.apply(Command::AddAsset("old/b.mkv".into())).unwrap();
+        let before = h.project().clone();
+        let bad = Command::RelinkAssets(vec![(AssetId(1), "x".into()), (AssetId(9), "y".into())]);
+        assert_eq!(h.apply(bad), Err(ModelError::UnknownAsset(AssetId(9))));
+        assert_eq!(h.project(), &before);
+        h.apply(Command::RelinkAssets(vec![
+            (AssetId(1), "new/a.mkv".into()),
+            (AssetId(2), "new/b.mkv".into()),
+        ]))
+        .unwrap();
+        assert_eq!(h.project().assets()[1].path, PathBuf::from("new/b.mkv"));
+        h.undo();
+        assert_eq!(h.project(), &before);
+    }
+
+    #[test]
     fn failed_command_and_rollback_change_nothing() {
         let mut h = History::new(Project::default());
         assert_eq!(
@@ -835,6 +865,8 @@ mod tests {
                 }
             }),
             id.clone().prop_map(|a| Command::RemoveAsset(AssetId(a))),
+            (id.clone(), "[a-z]{1,4}")
+                .prop_map(|(a, s)| Command::RelinkAssets(vec![(AssetId(a), s.into())])),
             (id, any::<bool>()).prop_map(|(a, some)| Command::SetAssetProbe {
                 id: AssetId(a),
                 probe: some.then(ProbeInfo::default),

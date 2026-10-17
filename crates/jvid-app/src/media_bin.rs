@@ -1,7 +1,7 @@
 //! The media bin: Media, Text and Effects tabs; a searchable, sortable grid or list
 //! of the project's assets with rename and remove.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -48,6 +48,8 @@ pub struct MediaBin {
 pub struct BinResponse {
     pub import: bool,
     pub command: Option<Command>,
+    /// The offline asset the user asked to relink.
+    pub relink: Option<AssetId>,
 }
 
 /// The assets matching `query` (case-insensitive, by name) in `sort` order.
@@ -107,6 +109,7 @@ impl MediaBin {
         project: &Project,
         focused: bool,
         importing: bool,
+        missing: &HashSet<PathBuf>,
     ) -> BinResponse {
         let mut out = BinResponse::default();
         // The new tab shows next frame; the click already repaints.
@@ -114,7 +117,7 @@ impl MediaBin {
         Panel::tabbed(&TABS, &mut tab)
             .focused(focused)
             .show(ui, |ui| match self.tab {
-                0 => self.media(ui, project, importing, &mut out),
+                0 => self.media(ui, project, importing, missing, &mut out),
                 1 => placeholder(ui, "Effects arrive in a later version"),
                 _ => placeholder(ui, "Text and titles arrive in a later version"),
             });
@@ -125,7 +128,14 @@ impl MediaBin {
         out
     }
 
-    fn media(&mut self, ui: &mut Ui, project: &Project, importing: bool, out: &mut BinResponse) {
+    fn media(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        importing: bool,
+        missing: &HashSet<PathBuf>,
+        out: &mut BinResponse,
+    ) {
         let mut rect = ui.max_rect();
         // Import stays pinned below the list, shown even when the bin is empty.
         let bar = Rect::from_min_max(pos2(rect.left(), rect.bottom() - size::CONTROL), rect.max);
@@ -173,7 +183,7 @@ impl MediaBin {
                         for a in &assets {
                             let r = ui
                                 .allocate_response(vec2(ui.available_width(), ROW), Sense::click());
-                            self.row(ui, r, a, project, out);
+                            self.row(ui, r, a, project, missing.contains(&a.path), out);
                         }
                     } else {
                         let gap = space::S8;
@@ -186,7 +196,7 @@ impl MediaBin {
                                 ui.spacing_mut().item_spacing.x = gap;
                                 for a in chunk {
                                     let r = ui.allocate_response(tile, Sense::click());
-                                    self.tile(ui, r, a, project, out);
+                                    self.tile(ui, r, a, project, missing.contains(&a.path), out);
                                 }
                             });
                         }
@@ -204,6 +214,7 @@ impl MediaBin {
         r: egui::Response,
         a: &MediaAsset,
         project: &Project,
+        offline: bool,
         out: &mut BinResponse,
     ) {
         let thumb = Rect::from_min_size(
@@ -215,9 +226,9 @@ impl MediaBin {
         let skim = ui
             .ctx()
             .pointer_hover_pos()
-            .filter(|p| thumb.contains(*p))
+            .filter(|p| !offline && thumb.contains(*p))
             .map(|p| (p.x - thumb.left()) / thumb.width());
-        self.thumbs.paint(ui, thumb, a, skim);
+        self.thumbs.paint(ui, thumb, a, offline, skim);
         if let Some(d) = duration_label(a) {
             let galley = p.layout_no_wrap(d, theme::small(), color::INK);
             let badge = Rect::from_min_size(
@@ -266,6 +277,15 @@ impl MediaBin {
                 StrokeKind::Inside,
             );
         }
+        if offline {
+            p.text(
+                thumb.center() + vec2(0.0, space::S12),
+                Align2::CENTER_TOP,
+                "Media offline",
+                theme::small(),
+                color::INK_2,
+            );
+        }
         let name = Rect::from_x_y_ranges(r.rect.x_range(), thumb.bottom()..=r.rect.bottom());
         self.name(ui, name, a, color::INK_2);
         if show_remove {
@@ -275,7 +295,7 @@ impl MediaBin {
             );
             self.remove_button(ui, btn, a, project, out);
         }
-        self.interact(r, a, project, out);
+        self.interact(r, a, project, offline, out);
     }
 
     fn row(
@@ -284,6 +304,7 @@ impl MediaBin {
         r: egui::Response,
         a: &MediaAsset,
         project: &Project,
+        offline: bool,
         out: &mut BinResponse,
     ) {
         let p = ui.painter();
@@ -309,7 +330,7 @@ impl MediaBin {
             pos2(badge.right() + space::S8, r.rect.top() + 2.0),
             vec2((ROW - 4.0) * 16.0 / 9.0, ROW - 4.0),
         );
-        self.thumbs.paint(ui, thumb, a, None);
+        self.thumbs.paint(ui, thumb, a, offline, None);
         let show_remove = self.shows_remove(ui, &r, a);
         let mut right = r.rect.right() - space::S8;
         if show_remove {
@@ -331,7 +352,7 @@ impl MediaBin {
             let btn = pos2(r.rect.right() - size::CONTROL, r.rect.top());
             self.remove_button(ui, btn, a, project, out);
         }
-        self.interact(r, a, project, out);
+        self.interact(r, a, project, offline, out);
     }
 
     /// Hovering or focusing a tile or row, or its remove button, shows the button.
@@ -409,8 +430,13 @@ impl MediaBin {
         r: egui::Response,
         a: &MediaAsset,
         project: &Project,
+        offline: bool,
         out: &mut BinResponse,
     ) {
+        if offline {
+            r.clone()
+                .on_hover_text(format!("Media offline: {}", a.path.display()));
+        }
         if r.clicked() {
             self.selected = Some(a.id);
             self.renaming = self.renaming.take().filter(|(id, _)| *id == a.id);
@@ -422,6 +448,9 @@ impl MediaBin {
         }
         r.context_menu(|ui| {
             self.selected = Some(a.id);
+            if offline && ui.button("Relink…").clicked() {
+                out.relink = Some(a.id);
+            }
             if ui.button("Rename").clicked() {
                 self.renaming = Some((a.id, stem.to_owned()));
             }
@@ -536,9 +565,19 @@ fn color_image(img: &image::RgbaImage) -> egui::ColorImage {
 impl Thumbs {
     /// The tile's picture: the cached poster, or a neutral placeholder until it's ready.
     /// `skim` is the hover position across the tile, 0 to 1, which swaps in a filmstrip frame.
-    fn paint(&mut self, ui: &Ui, rect: Rect, asset: &MediaAsset, skim: Option<f32>) {
+    fn paint(&mut self, ui: &Ui, rect: Rect, asset: &MediaAsset, offline: bool, skim: Option<f32>) {
         let p = ui.painter();
         p.rect_filled(rect, CornerRadius::same(radius::CONTROL), color::RAISED);
+        if offline {
+            p.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                icon::CIRCLE_ALERT,
+                theme::icon_font(),
+                color::RED,
+            );
+            return;
+        }
         if is_audio(asset) {
             p.text(
                 rect.center(),
@@ -801,7 +840,7 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         for i in 0.. {
             let mut out = ctx.run_ui(Default::default(), |ui| {
-                thumbs.paint(ui, rect, &a, Some((i % 20) as f32 / 20.0));
+                thumbs.paint(ui, rect, &a, false, Some((i % 20) as f32 / 20.0));
             });
             out.textures_delta.clear();
             let strip = matches!(thumbs.strips.get(&clip), Some(Some(v)) if v.len() == 10);

@@ -384,6 +384,25 @@ fn bin_snapshots() {
     results.add(h.try_snapshot("bin_remove_in_use"));
 }
 
+/// Offline placeholders in the bin's grid and list and in the Preview.
+#[test]
+fn offline_snapshots() {
+    if !gpu() {
+        return;
+    }
+    let mut results = egui_kittest::SnapshotResults::new();
+    let mut h = bin_harness();
+    let state = h.state_mut();
+    state.missing = ["/m/clutch_round_3.mkv", "/m/music.flac", "/m/finale.mkv"]
+        .map(PathBuf::from)
+        .into();
+    h.run();
+    results.add(h.try_snapshot("offline_grid"));
+    h.state_mut().bin.list = true;
+    h.run();
+    results.add(h.try_snapshot("offline_list"));
+}
+
 #[test]
 fn hover_remove_button_uses_the_remove_flow() {
     use jvid_core::model::AssetId;

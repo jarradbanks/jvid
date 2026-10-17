@@ -63,6 +63,9 @@ pub struct ProbeInfo {
     /// Every stream in file order.
     #[serde(default)]
     pub streams: Vec<StreamInfo>,
+    /// Bytes on disk when probed; relink uses it to tell same-named files apart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_size: Option<u64>,
 }
 
 /// One stream of a probed file.

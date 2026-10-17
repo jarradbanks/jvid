@@ -6,6 +6,7 @@ mod keymap;
 mod media_bin;
 mod preview;
 mod project_file;
+mod relink;
 mod settings_file;
 mod welcome;
 

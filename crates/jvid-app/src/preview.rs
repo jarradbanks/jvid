@@ -71,13 +71,14 @@ impl Preview {
         }
     }
 
-    /// Shows `source`'s first frame, decoding it first if it changed.
+    /// Shows `source`'s first frame, decoding it first if it changed; an `offline` source
+    /// shows a placeholder instead.
     // shortcut: always the first frame; the playhead and Source/Program split arrive with #24 and #25.
-    pub fn show(&mut self, ui: &mut Ui, source: Option<&Path>) {
-        if self.source.as_deref() != source {
+    pub fn show(&mut self, ui: &mut Ui, source: Option<&Path>, offline: bool) {
+        if self.source.as_deref() != source || (offline && self.error.is_none()) {
             self.source = source.map(Path::to_path_buf);
-            (self.frame, self.error) = (None, None);
-            if let Some(path) = source {
+            (self.frame, self.error) = (None, offline.then(|| "Media offline".to_owned()));
+            if let Some(path) = source.filter(|_| !offline) {
                 let (tx, ctx, p) = (self.tx.clone(), ui.ctx().clone(), path.to_path_buf());
                 self.pool.submit(
                     &self.jobs,
@@ -113,7 +114,22 @@ impl Preview {
         let rect = ui.max_rect();
         let viewer = Rect::from_min_max(rect.min, rect.max - vec2(0.0, size::HEADER));
         ui.painter().rect_filled(viewer, 0.0, color::VIEWER);
-        if let Some(e) = &self.error {
+        if offline {
+            ui.painter().text(
+                viewer.center(),
+                Align2::CENTER_BOTTOM,
+                theme::icon::CIRCLE_ALERT,
+                theme::icon_font(),
+                color::RED,
+            );
+            ui.painter().text(
+                viewer.center() + vec2(0.0, space::S8),
+                Align2::CENTER_TOP,
+                "Media offline. Relink it from the media bin.",
+                theme::body(),
+                color::INK_2,
+            );
+        } else if let Some(e) = &self.error {
             ui.painter().text(
                 viewer.center(),
                 Align2::CENTER_CENTER,
