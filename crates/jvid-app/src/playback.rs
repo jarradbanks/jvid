@@ -61,6 +61,7 @@ pub struct Shown {
     /// Top layer first, with its evaluated transform.
     pub layers: Vec<(Pixels, Transform)>,
     /// False while a parked seek shows keyframe stand-ins; the exact frame follows.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub exact: bool,
 }
 

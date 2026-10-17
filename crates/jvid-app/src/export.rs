@@ -129,7 +129,7 @@ fn render(
         let tex = gpu.draw(
             device,
             queue,
-            project,
+            project.settings(),
             1,
             &Shown {
                 index: k,
