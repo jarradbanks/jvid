@@ -41,6 +41,7 @@ const CLIP: &[&str] = &[
     "ripple_delete",
     "add_edit",
     "link",
+    "enable",
 ];
 
 /// Header toolbar, left to right.
@@ -69,7 +70,7 @@ impl Timeline {
         match id {
             "paste" => !self.clipboard.is_empty(),
             "delete" | "ripple_delete" => any || self.gap.is_some(),
-            "copy" | "cut" | "duplicate" | "link" => any,
+            "copy" | "cut" | "duplicate" | "link" | "enable" => any,
             // cut_action's only side effect is Q's seek, put back after.
             "add_edit" | "ripple_trim_prev" | "ripple_trim_next" => {
                 let seek = self.seek_after;
@@ -199,7 +200,9 @@ mod tests {
         let seq = p.sequence();
         let mut t = Timeline::default();
         t.sync(&p);
-        for id in ["copy", "cut", "paste", "delete", "link", "add_edit"] {
+        for id in [
+            "copy", "cut", "paste", "delete", "link", "enable", "add_edit",
+        ] {
             assert!(!t.can(id, seq), "{id}");
         }
         assert!(!t.can("select_all", Project::default().sequence()));

@@ -258,6 +258,17 @@ pub struct Clip {
     /// mixed. Older projects lack it and played the first.
     #[serde(default = "first_stream", skip_serializing_if = "is_first_stream")]
     pub stream: Option<u32>,
+    /// A disabled clip stays on the timeline but evaluation skips it.
+    #[serde(default = "enabled", skip_serializing_if = "is_enabled")]
+    pub enabled: bool,
+}
+
+fn enabled() -> bool {
+    true
+}
+
+fn is_enabled(e: &bool) -> bool {
+    *e
 }
 
 fn first_stream() -> Option<u32> {
@@ -607,6 +618,7 @@ impl Sequence {
                 keyframes: BTreeMap::new(),
                 transform: Transform::default(),
                 stream: Some(0),
+                enabled: true,
             },
         );
         Ok(id)
@@ -636,6 +648,7 @@ impl Sequence {
             keyframes: &mut c.keyframes,
             transform: &mut c.transform,
             stream: &mut c.stream,
+            enabled: &mut c.enabled,
         }))
     }
 
@@ -1013,6 +1026,7 @@ pub(crate) struct ClipProps<'a> {
     pub keyframes: &'a mut BTreeMap<String, Vec<Keyframe>>,
     pub transform: &'a mut Transform,
     pub stream: &'a mut Option<u32>,
+    pub enabled: &'a mut bool,
 }
 
 fn insert_sorted(clips: &mut Vec<Clip>, c: Clip) {
@@ -1596,6 +1610,7 @@ mod tests {
                 ..Default::default()
             },
             stream: Some(0),
+            enabled: true,
         };
         assert_eq!(c.transform_at(Time(0)), c.transform);
         let mut k = |name: &str, keys: Vec<Keyframe>| c.keyframes.insert(name.into(), keys);
