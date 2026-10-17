@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "project": {
+    "settings": {
+      "width": 1280,
+      "height": 720,
+      "frame_rate": { "num": 30000, "den": 1001 },
+      "sample_rate": 48000,
+      "background": [0, 0, 0, 255]
+    },
+    "assets": [
+      {
+        "id": 1,
+        "path": "/old/home/proj/media/rec.mkv",
+        "relative_path": "media/rec.mkv",
+        "probe": {
+          "duration": 7056000000,
+          "width": 1280,
+          "height": 720,
+          "frame_rate": { "num": 30000, "den": 1001 },
+          "sample_rate": 48000,
+          "audio_streams": 1
+        }
+      }
+    ],
+    "sequence": {
+      "tracks": [
+        {
+          "id": 1, "kind": "Video", "name": "V1",
+          "hidden": false, "locked": false, "muted": false, "solo": false,
+          "volume": 1.0, "pan": 0.0,
+          "clips": [
+            {
+              "id": 3, "asset": 1, "source_in": 0, "source_out": 705600000,
+              "start": 0, "link": 4, "params": { "opacity": 0.5 }
+            }
+          ]
+        },
+        {
+          "id": 2, "kind": "Audio", "name": "A1",
+          "hidden": false, "locked": false, "muted": true, "solo": false,
+          "volume": 0.8, "pan": -0.25,
+          "clips": [
+            {
+              "id": 5, "asset": 1, "source_in": 0, "source_out": 705600000,
+              "start": 0, "link": 4, "params": {}
+            }
+          ]
+        }
+      ],
+      "markers": [{ "id": 6, "time": 352800000, "duration": 0, "name": "kill" }],
+      "in_point": 0,
+      "out_point": 705600000,
+      "next_id": 6
+    },
+    "next_asset": 1
+  }
+}

@@ -620,5 +620,20 @@ mod tests {
             while h.redo() {}
             prop_assert_eq!(h.project(), &end);
         }
+
+        #[test]
+        fn save_load_is_lossless(ops in proptest::collection::vec(command(), 0..60)) {
+            let mut h = History::new(Project::default());
+            for c in ops {
+                let _ = h.apply(c);
+            }
+            let dir = std::path::Path::new("/proj");
+            let s = crate::file::to_json(h.project(), dir).unwrap();
+            let loaded = crate::file::from_json(&s, dir, |_| true).unwrap();
+            prop_assert_eq!(&loaded, h.project());
+            // the id counters came back too: the next id matches
+            let mut a = History::new(loaded);
+            prop_assert_eq!(a.apply(Command::NewLink), h.apply(Command::NewLink));
+        }
     }
 }

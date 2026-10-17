@@ -1,10 +1,14 @@
 //! Integer time in flicks, frame and sample rates, and non-drop-frame timecode.
 
+use serde::{Deserialize, Serialize};
+
 /// Flicks per second. Divides every common frame and sample rate exactly.
 pub const FLICKS_PER_SECOND: i64 = 705_600_000;
 
 /// A point or span on the timeline, in flicks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 pub struct Time(pub i64);
 
 impl std::ops::Add for Time {
@@ -22,7 +26,7 @@ impl std::ops::Sub for Time {
 }
 
 /// A frame or sample rate as an exact fraction, e.g. 24000/1001 for 23.976 fps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Rate {
     pub num: u32,
     pub den: u32,

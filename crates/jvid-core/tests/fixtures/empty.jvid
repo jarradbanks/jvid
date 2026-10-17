@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "project": {
+    "settings": {
+      "width": 1920,
+      "height": 1080,
+      "frame_rate": { "num": 30, "den": 1 },
+      "sample_rate": 48000,
+      "background": [0, 0, 0, 255]
+    },
+    "assets": [],
+    "sequence": { "tracks": [], "markers": [], "in_point": null, "out_point": null, "next_id": 0 },
+    "next_asset": 0
+  }
+}
