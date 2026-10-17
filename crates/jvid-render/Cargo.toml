@@ -11,9 +11,10 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+jvid-core.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
-jvid-core.workspace = true
+image.workspace = true
 jvid-media = { workspace = true, features = ["test-support"] }
 suite-ui = { workspace = true, features = ["test-support"] }

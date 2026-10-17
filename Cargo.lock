@@ -1969,6 +1969,7 @@ dependencies = [
 name = "jvid-render"
 version = "0.1.0"
 dependencies = [
+ "image",
  "jvid-core",
  "jvid-media",
  "suite-ui",

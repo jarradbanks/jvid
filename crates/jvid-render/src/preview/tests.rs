@@ -1,11 +1,11 @@
-use std::future::Future;
-
 use jvid_core::time::Time;
 use jvid_media::decode::VideoDecoder;
 use jvid_media::test_media::corpus;
 use suite_ui::test_support::gpu;
 
 use super::*;
+use crate::composite::read_back;
+use crate::composite::tests::device;
 
 /// The corpus bars: 75% white, yellow, cyan, green, magenta, red, blue, black, 80px each.
 const BARS: [[u8; 3]; 8] = [
@@ -21,61 +21,6 @@ const BARS: [[u8; 3]; 8] = [
 /// In 8-bit codes: limited-range rounding and 4:2:0 chroma cost a level or two.
 const TOLERANCE: i32 = 3;
 
-/// wgpu's native futures are ready when polled, so a busy poll stands in for an executor.
-fn block_on<F: Future>(f: F) -> F::Output {
-    let mut f = std::pin::pin!(f);
-    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
-    loop {
-        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
-            return v;
-        }
-        std::thread::yield_now();
-    }
-}
-
-fn device() -> (wgpu::Device, wgpu::Queue) {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let adapter = block_on(instance.request_adapter(&Default::default())).expect("adapter");
-    block_on(adapter.request_device(&Default::default())).expect("device")
-}
-
-fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture) -> Vec<u8> {
-    let row = (tex.width() * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-    let buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: (row * tex.height()) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = device.create_command_encoder(&Default::default());
-    encoder.copy_texture_to_buffer(
-        tex.as_image_copy(),
-        wgpu::TexelCopyBufferInfo {
-            buffer: &buf,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(row),
-                rows_per_image: None,
-            },
-        },
-        tex.size(),
-    );
-    queue.submit([encoder.finish()]);
-    buf.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
-    device
-        .poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: None,
-        })
-        .unwrap();
-    let data = buf.slice(..).get_mapped_range().unwrap();
-    data.chunks(row as usize)
-        .flat_map(|r| &r[..tex.width() as usize * 4])
-        .copied()
-        .collect()
-}
-
 #[test]
 fn corpus_colour_bars_match_reference_rgb() {
     let Some(dir) = corpus() else { return };
@@ -83,7 +28,7 @@ fn corpus_colour_bars_match_reference_rgb() {
         return;
     }
     jvid_media::ffmpeg::init().unwrap();
-    let (device, queue) = device();
+    let (device, queue) = device().unwrap();
     let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
     for file in [
         "bars-bt601-limited.mp4",
