@@ -35,7 +35,9 @@ ff -f lavfi -i testsrc2=s=3840x2160:r=30:d=2 -c:v libx265 -preset ultrafast -pix
   -x265-params log-level=error 4k-hevc.mp4
 ff -f lavfi -i testsrc2=s=1920x1080:r=25:d=2 -f lavfi -i "$(tone):d=2" \
   -c:v prores_ks -profile:v 2 -pix_fmt yuv422p10le -c:a pcm_s16le prores.mov
-ff -f lavfi -i testsrc2=s=1080x1920:r=30:d=3 -f lavfi -i "$(tone):d=3" "${x264[@]}" -c:a aac 9x16.mp4
+# Explicit limited-range BT.709 tags: FFmpeg 6.1 no longer infers a range for untagged streams.
+ff -f lavfi -i testsrc2=s=1080x1920:r=30:d=3 -f lavfi -i "$(tone):d=3" "${x264[@]}" -c:a aac \
+  -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 9x16.mp4
 ff -f lavfi -i testsrc2=s=1280x720:r=30:d=3 "${x264[@]}" no-audio.mp4
 
 # Landscape-coded phone clip tagged with a 90 degree display rotation. FFmpeg 7 dropped the rotate
@@ -69,6 +71,14 @@ ff -f lavfi -i testsrc2=s=2560x1440:r=60:d=10 -f lavfi -i "$(tone):d=10" \
   "${x264[@]}" -b:v 100k -g 600 -c:a aac -b:a 64k "$tmp/seg.mp4"
 for _ in $(seq 720); do echo "file '$tmp/seg.mp4'"; done >"$tmp/list.txt"
 ff -f concat -safe 0 -i "$tmp/list.txt" -c copy long-2h-1440p60.mp4
+
+# FFmpeg's own answers, which the decoder tests check against: every video frame's best-effort pts
+# (stream time base ticks), and the rotated clip's first frame as the CLI shows it (autorotated, I420).
+for f in vfr-phone.mp4 23.976fps.mp4 59.94fps.mp4 144fps.mp4 4k-hevc.mp4 prores.mov 9x16.mp4 \
+  no-audio.mp4 rotated-phone.mp4 three-audio.mkv screen-1440p60.mp4; do
+  ffprobe -v error -select_streams v:0 -show_entries frame=best_effort_timestamp -of csv=p=0 "$f" >"$f.pts"
+done
+ff -i rotated-phone.mp4 -frames:v 1 -f rawvideo -pix_fmt yuv420p rotated-phone.first.yuv
 
 touch .complete
 echo "test media written to $out"

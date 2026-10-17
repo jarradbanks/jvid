@@ -144,7 +144,7 @@ fn is_vfr(avg: Option<Rate>, real: Option<Rate>) -> bool {
 }
 
 /// From the display matrix, falling back to the legacy `rotate` tag.
-fn rotation(stream: &Stream) -> u32 {
+pub(crate) fn rotation(stream: &Stream) -> u32 {
     let degrees = stream
         .side_data()
         .find(|d| d.kind() == side_data::Type::DisplayMatrix && d.data().len() >= 36)
@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(v.sample_aspect, Some(Rate::new(1, 1)));
         assert_eq!(v.display_aspect, Some(Rate::new(9, 16)));
         assert_eq!(
-            video(&probe(&dir.join("prores.mov")).unwrap())
+            video(&probe(&dir.join("9x16.mp4")).unwrap())
                 .color_range
                 .as_deref(),
             Some("tv")
