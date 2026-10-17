@@ -204,7 +204,7 @@ I("app-shell", "App shell: window, dock layout and top bar", "M0", ["ui"], "M", 
       "egui_kittest snapshots at 1280×720 and 1920×1080, 100% and 150% scale: header dividers and label baselines in each row of panels share one y",
       "Switching a panel between one view and several tabs doesn't move its header or label",
       "Text and icons start 12px from every panel's left edge"],
-  refs=[f"[DESIGN.md · Layout]({DESIGN}#layout)", f"[01-editor.png]({PROTO}/01-editor.png)",
+  refs=[f"[DESIGN.md · Layout]({DESIGN}#layout)", f"[01-editor.png (layout only; styling per DESIGN.md)]({PROTO}/01-editor.png)",
         f"[Editor mockup in the DESIGN.md look]({PROTO}/v2/01-editor.png)"])
 
 I("actions", "Action registry and keymap with Premiere defaults", "M0", ["ui"], "M", ["app-shell", "config"],
@@ -289,7 +289,7 @@ I("bin", "Media bin panel", "M1", ["ui"], "M", ["import"],
       "Import button",
   ],
   ac=["Matches the bin in the main editor prototype"],
-  refs=[f"[01-editor.png]({PROTO}/01-editor.png)"])
+  refs=[f"[01-editor.png (layout only; styling per DESIGN.md)]({PROTO}/01-editor.png)"])
 
 I("thumbs", "Thumbnail generation and cache", "M1", ["media"], "M", ["video-decode", "jobs"],
   summary="Poster frames and filmstrips for the bin and timeline.",
@@ -331,7 +331,7 @@ I("source-viewer", "Source viewer: playback, J/K/L and source in/out", "M1", ["u
       "Transport row as in the prototype",
   ],
   ac=["Audio and video stay within one frame of sync over a 5-minute clip", "Source in/out survives save and reload"],
-  refs=[f"[01-editor.png]({PROTO}/01-editor.png)", f"[PLAN.md · In / Out points]({PLAN}#in--out-points)"])
+  refs=[f"[01-editor.png (layout only; styling per DESIGN.md)]({PROTO}/01-editor.png)", f"[PLAN.md · In / Out points]({PLAN}#in--out-points)"])
 
 I("skim", "Hover-skim in the media bin", "M1", ["ui"], "S", ["thumbs", "bin"],
   summary="Moving the cursor across a thumbnail scrubs through the clip.",
@@ -352,7 +352,7 @@ I("welcome", "Welcome screen and new-project flow", "M1", ["ui"], "M", ["app-she
       "Dropping a 1440p60 screen recording creates a 2560 × 1440, 60 fps project",
       "Dropping a vertical phone clip creates a 9:16 project at the clip's frame rate",
   ],
-  refs=[f"[04-welcome.png]({PROTO}/04-welcome.png)"])
+  refs=[f"[04-welcome.png (layout only; styling per DESIGN.md)]({PROTO}/04-welcome.png)"])
 
 I("relink", "Missing media detection and relink", "M1", ["ui", "media"], "S", ["import", "serialize"],
   summary="Handle projects whose media has moved.",
@@ -415,7 +415,7 @@ I("timeline-widget", "Timeline panel: ruler, tracks, clips, zoom and playhead", 
       "Only visible clips are drawn",
   ],
   ac=["Stays at 60 fps with 500 clips on the timeline"],
-  refs=[f"[01-editor.png]({PROTO}/01-editor.png)"])
+  refs=[f"[01-editor.png (layout only; styling per DESIGN.md)]({PROTO}/01-editor.png)"])
 
 I("tracks", "Track management and headers", "M2", ["timeline"], "M", ["timeline-widget", "undo"],
   summary="Add, arrange and control tracks.",
@@ -488,7 +488,7 @@ I("in-out", "In/Out points on the timeline", "M2", ["timeline"], "M", ["trim-spl
       "`;` lift (leave a gap) and `'` extract (close the gap)",
   ],
   ac=["Every shortcut in the PLAN.md table works", "In/out is saved with the project"],
-  refs=[f"[PLAN.md · In / Out points]({PLAN}#in--out-points)", f"[01-editor.png]({PROTO}/01-editor.png)"])
+  refs=[f"[PLAN.md · In / Out points]({PLAN}#in--out-points)", f"[01-editor.png (layout only; styling per DESIGN.md)]({PROTO}/01-editor.png)"])
 
 I("markers", "Markers", "M2", ["timeline"], "M", ["timeline-widget", "undo", "in-out"],
   summary="Mark moments on the timeline, including ranges you want to keep, while watching.",
@@ -556,7 +556,7 @@ I("inspector", "Inspector panel", "M3", ["ui"], "L", ["app-shell", "keyframes", 
       "Mixed-value display when several clips are selected",
   ],
   ac=["Matches the inspector in the main editor prototype", "Every change is undoable"],
-  refs=[f"[01-editor.png]({PROTO}/01-editor.png)"])
+  refs=[f"[01-editor.png (layout only; styling per DESIGN.md)]({PROTO}/01-editor.png)"])
 
 I("transform", "Transform, crop and opacity in the compositor", "M3", ["render"], "M", ["compositor", "keyframes"],
   summary="Apply keyframed clip properties when compositing.",
@@ -582,7 +582,7 @@ I("gizmo", "On-preview transform handles", "M3", ["ui", "render"], "M", ["transf
       "Creates keyframes automatically when the property is animated",
   ],
   ac=["Matches the keyframe editing prototype", "A whole drag is one undo step"],
-  refs=[f"[02-keyframes.png]({PROTO}/02-keyframes.png)"])
+  refs=[f"[02-keyframes.png (layout only; styling per DESIGN.md)]({PROTO}/02-keyframes.png)"])
 
 I("keyframe-lanes", "Keyframe lanes on the timeline", "M3", ["timeline"], "L", ["keyframes", "timeline-widget", "inspector"],
   summary="See and edit keyframes under each clip.",
@@ -593,7 +593,7 @@ I("keyframe-lanes", "Keyframe lanes on the timeline", "M3", ["timeline"], "L", [
       "Copy and paste keyframes relative to the playhead",
   ],
   ac=["Matches the keyframe lanes in the keyframe editing prototype"],
-  refs=[f"[02-keyframes.png]({PROTO}/02-keyframes.png)"])
+  refs=[f"[02-keyframes.png (layout only; styling per DESIGN.md)]({PROTO}/02-keyframes.png)"])
 
 I("easing-ui", "Easing picker and bezier curve editor", "M3", ["ui"], "M", ["keyframes", "inspector"],
   summary="Pick and shape easing for selected keyframes.",
@@ -603,7 +603,7 @@ I("easing-ui", "Easing picker and bezier curve editor", "M3", ["ui"], "M", ["key
       "Applies to all selected keyframes",
   ],
   ac=["Editing the curve updates playback immediately"],
-  refs=[f"[02-keyframes.png]({PROTO}/02-keyframes.png)"])
+  refs=[f"[02-keyframes.png (layout only; styling per DESIGN.md)]({PROTO}/02-keyframes.png)"])
 
 I("audio-keys", "Volume and pan keyframes with rubber band", "M3", ["audio", "timeline"], "M", ["keyframes", "mixer", "timeline-widget"],
   summary="Automate audio directly on the timeline.",
@@ -613,7 +613,7 @@ I("audio-keys", "Volume and pan keyframes with rubber band", "M3", ["audio", "ti
       "Sample-accurate gain ramps in the mixer",
   ],
   ac=["A volume ramp renders without zipper noise"],
-  refs=[f"[02-keyframes.png]({PROTO}/02-keyframes.png)"])
+  refs=[f"[02-keyframes.png (layout only; styling per DESIGN.md)]({PROTO}/02-keyframes.png)"])
 
 I("fades", "Clip fade handles", "M3", ["timeline"], "S", ["audio-keys", "transform"],
   summary="Drag a handle on a clip's corner to fade it in or out.",
@@ -656,7 +656,7 @@ I("export-dialog", "Export dialog with range selection", "M4", ["ui", "export"],
       "Cancel, Add to Queue, Export",
   ],
   ac=["Matches the export prototype", "Exporting In to Out produces exactly the marked range"],
-  refs=[f"[03-export.png]({PROTO}/03-export.png)", f"[PLAN.md · In / Out points]({PLAN}#in--out-points)"])
+  refs=[f"[03-export.png (layout only; styling per DESIGN.md)]({PROTO}/03-export.png)", f"[PLAN.md · In / Out points]({PLAN}#in--out-points)"])
 
 I("hw-encode", "Hardware encoding with software fallback", "M4", ["export", "media"], "M", ["encode"],
   summary="Use the GPU's encoder when it's available.",
