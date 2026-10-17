@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 image.workspace = true
 jvid-core.workspace = true
+jvid-jobs.workspace = true
 ffmpeg-next.workspace = true
 tracing.workspace = true
 

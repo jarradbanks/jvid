@@ -1880,6 +1880,7 @@ dependencies = [
  "ffmpeg-next",
  "image",
  "jvid-core",
+ "jvid-jobs",
  "jvid-media",
  "tracing",
 ]

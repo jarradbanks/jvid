@@ -144,7 +144,7 @@ fn is_vfr(avg: Option<Rate>, real: Option<Rate>) -> bool {
 }
 
 /// From the display matrix, falling back to the legacy `rotate` tag.
-fn rotation(stream: &Stream) -> u32 {
+pub(crate) fn rotation(stream: &Stream) -> u32 {
     let degrees = stream
         .side_data()
         .find(|d| d.kind() == side_data::Type::DisplayMatrix && d.data().len() >= 36)
