@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain.toml pins stable + rustfmt + clippy; rustup installs it on first cargo call.
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # suite-ui GPU tests render on Mesa lavapipe; required on Linux so they can't pass by skipping.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+      - run: cargo test --workspace
+        env:
+          JVID_GPU_TESTS: ${{ runner.os == 'Linux' && 'required' || '' }}
+      # jvid-core stays free of UI, media and I/O stacks.
+      - name: jvid-core boundary
+        shell: bash
+        run: |
+          if cargo tree -p jvid-core -e normal,build --prefix none | grep -E '^(egui|eframe|epaint|winit|wgpu|ffmpeg[a-z_-]*|rfd|cpal|image|jvid-media|jvid-render|jvid-audio|suite-ui) '; then
+            echo "::error::jvid-core depends on a UI/media/I/O crate"; exit 1
+          fi
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2

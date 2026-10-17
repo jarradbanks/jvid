@@ -1,0 +1,44 @@
+# cargo-deny: advisories and licenses. Copyleft (GPL/LGPL/AGPL) is not in
+# the allow list, so any such crate in our tree fails the check (PLAN.md "Licensing").
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+# Only fail on unmaintained crates we depend on directly; transitive ones are upstream's call.
+unmaintained = "workspace"
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+# egui's bundled default fonts; font licences, not code copyleft.
+[[licenses.exceptions]]
+crate = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
+
+# MPL-2.0 is file-level copyleft: fine to depend on unmodified (via dirs-sys).
+[[licenses.exceptions]]
+crate = "option-ext"
+allow = ["MPL-2.0"]
