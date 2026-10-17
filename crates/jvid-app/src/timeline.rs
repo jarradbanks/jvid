@@ -76,6 +76,10 @@ pub struct Timeline {
     trim: Option<Trim>,
     /// The clicked gap: its track and a time inside it.
     gap: Option<(TrackId, Time)>,
+    /// Lanes width last frame, for actions that fit to it.
+    width: f32,
+    /// The playhead last frame; a change is what makes the view follow it.
+    followed: Time,
 }
 
 /// A clip edge drag: how far, already held to what the media and neighbours allow.
@@ -109,6 +113,8 @@ impl Default for Timeline {
             razor: false,
             trim: None,
             gap: None,
+            width: 800.0,
+            followed: Time(0),
         }
     }
 }
@@ -223,6 +229,7 @@ impl Timeline {
                 let x = view.x(self.playhead());
                 self.zoom_by(f, view, x);
             }
+            "zoom_fit" => self.zoom_fit(project.sequence()),
             "linked_selection" => self.linked_selection = !self.linked_selection,
             "razor_tool" | "selection_tool" => self.razor = id == "razor_tool",
             "add_edit" | "ripple_trim_prev" | "ripple_trim_next" => {
@@ -515,6 +522,8 @@ impl Timeline {
         let lanes =
             Rect::from_x_y_ranges(lanes_left..=area.right(), ruler.bottom()..=area.bottom());
         let headers = Rect::from_x_y_ranges(area.left()..=lanes_left, lanes.y_range());
+        self.width = lanes.width();
+        self.follow();
 
         // Input first, so this frame draws the result.
         let view = self.view(lanes_left);
@@ -527,7 +536,7 @@ impl Timeline {
         if let Some(p) = scrub.interact_pointer_pos().or(drag.interact_pointer_pos())
             && (scrub.is_pointer_button_down_on() || drag.dragged())
         {
-            self.seek(view.time(p.x.max(lanes_left)));
+            self.scrub(ui, p.x, lanes);
         }
         if drag.hovered() || drag.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
@@ -554,6 +563,7 @@ impl Timeline {
         self.vscroll = self
             .vscroll
             .clamp(0.0, (content_h - lanes.height()).max(0.0));
+        self.clamp_scroll();
         let view = self.view(lanes_left);
         let (start, end) = (view.time(lanes.left()), view.time(lanes.right()));
 
@@ -776,6 +786,8 @@ impl Timeline {
         }
         r.on_hover_text("Zoom (= and -)");
 
+        self.scrollbars(ui, &painter, lanes, content_h, id);
+
         // Playhead: never eased, it reports time.
         let x = view.x(playhead);
         if lanes.x_range().contains(x) {
@@ -788,6 +800,101 @@ impl Timeline {
             playhead_head(&painter, pos2(x + line / 2.0, ruler.top()));
         }
         edit
+    }
+
+    /// Seconds of sequence the lanes show.
+    fn span(&self) -> f64 {
+        self.width as f64 / self.zoom
+    }
+
+    /// No further than one viewport past the end of the sequence (and its tail).
+    fn clamp_scroll(&mut self) {
+        self.scroll = self.scroll.clamp(0.0, secs(self.transport.duration));
+    }
+
+    /// Fits the whole sequence across the lanes.
+    fn zoom_fit(&mut self, seq: &Sequence) {
+        let end = secs(seq.duration());
+        if end > 0.0 {
+            self.zoom = (self.width as f64 * 0.95 / end).clamp(MIN_ZOOM, MAX_ZOOM);
+            self.scroll = 0.0;
+        }
+    }
+
+    /// When the playhead moved (playback, seeks, steps) out of view, pages the view so it
+    /// sits at the left edge. A playhead that stays put never overrides manual scrolling.
+    fn follow(&mut self) {
+        let t = self.playhead();
+        if std::mem::replace(&mut self.followed, t) == t {
+            return;
+        }
+        let s = secs(t);
+        if s < self.scroll || s >= self.scroll + self.span() {
+            self.scroll = s;
+            self.clamp_scroll();
+        }
+    }
+
+    /// Seeks to pointer x while scrubbing, scrolling when it's dragged past either edge.
+    fn scrub(&mut self, ui: &Ui, x: f32, lanes: Rect) {
+        let inside = x.clamp(lanes.left(), lanes.right());
+        if x != inside {
+            // Faster the further past the edge.
+            self.scroll += (x - inside) as f64 * 0.2 / self.zoom;
+            self.clamp_scroll();
+            ui.ctx().request_repaint();
+        }
+        self.seek(self.view(lanes.left()).time(inside));
+        // Scrubbing scrolls itself; don't page as well.
+        self.followed = self.playhead();
+    }
+
+    /// Horizontal and (when tracks overflow) vertical scrollbars along the lanes' edges.
+    fn scrollbars(
+        &mut self,
+        ui: &Ui,
+        painter: &egui::Painter,
+        lanes: Rect,
+        content_h: f32,
+        id: egui::Id,
+    ) {
+        let thick = 10.0;
+        let tall = content_h > lanes.height();
+        let right = if tall {
+            lanes.right() - thick
+        } else {
+            lanes.right()
+        };
+        let span = self.span();
+        let total = secs(self.transport.duration).max(self.scroll + span);
+        let bar = Rect::from_x_y_ranges(
+            lanes.left()..=right,
+            lanes.bottom() - thick..=lanes.bottom(),
+        );
+        self.scroll = scrollbar(
+            ui,
+            painter,
+            bar,
+            id.with("hbar"),
+            self.scroll,
+            span,
+            total,
+            true,
+        );
+        if tall {
+            let bar = Rect::from_x_y_ranges(right..=lanes.right(), lanes.y_range());
+            let (h, v) = (lanes.height() as f64, self.vscroll as f64);
+            self.vscroll = scrollbar(
+                ui,
+                painter,
+                bar,
+                id.with("vbar"),
+                v,
+                h,
+                content_h as f64,
+                false,
+            ) as f32;
+        }
     }
 
     /// Bin drops and clip drags: the ghosts to draw as (track, start, end), and the edit
@@ -1139,6 +1246,55 @@ fn to_targets(seq: &Sequence, clips: &[(TrackId, Clip)]) -> Vec<(TrackId, Clip)>
 }
 
 /// "V1" counts video tracks up from the bottom of the video stack, "A1" audio down from the top.
+/// A thin, arrowless scrollbar in `bar` for `view` of `total` starting at `offset`;
+/// returns the offset after any thumb drag.
+#[allow(clippy::too_many_arguments)]
+fn scrollbar(
+    ui: &Ui,
+    painter: &egui::Painter,
+    bar: Rect,
+    id: egui::Id,
+    offset: f64,
+    view: f64,
+    total: f64,
+    horizontal: bool,
+) -> f64 {
+    let along = |v: egui::Vec2| if horizontal { v.x } else { v.y } as f64;
+    let len = along(bar.size());
+    let thumb_len = (len * view / total).clamp(24.0_f64.min(len), len);
+    let room = (len - thumb_len).max(1.0);
+    let travel = (total - view).max(0.0);
+    let at = if travel > 0.0 {
+        offset / travel * room
+    } else {
+        0.0
+    };
+    let (a, b) = (at as f32, (at + thumb_len) as f32);
+    let thumb = if horizontal {
+        Rect::from_x_y_ranges(bar.left() + a..=bar.left() + b, bar.y_range())
+    } else {
+        Rect::from_x_y_ranges(bar.x_range(), bar.top() + a..=bar.top() + b)
+    };
+    if travel <= 0.0 {
+        return 0.0;
+    }
+    let r = ui.interact(thumb, id, Sense::drag());
+    let offset = (offset + along(r.drag_delta()) * travel / room).clamp(0.0, travel);
+    // Painted 4px thick, fully rounded, per DESIGN.md.
+    let paint = if horizontal {
+        Rect::from_center_size(thumb.center(), vec2(thumb.width() - 4.0, 4.0))
+    } else {
+        Rect::from_center_size(thumb.center(), vec2(4.0, thumb.height() - 4.0))
+    };
+    let ink = if r.hovered() || r.dragged() {
+        color::INK_2
+    } else {
+        color::INK_3
+    };
+    painter.rect_filled(paint, CornerRadius::same(2), ink);
+    offset
+}
+
 fn track_label(tracks: &[Track], index: usize) -> String {
     let t = &tracks[index];
     let same = |o: &&Track| o.kind == t.kind;
@@ -1918,6 +2074,75 @@ mod tests {
             wheel(&mut h, at, egui::vec2(0.0, 40.0), egui::Modifiers::COMMAND);
             assert!(h.state().0.zoom > zoom, "zoom at {x}");
         }
+    }
+
+    #[test]
+    fn view_pages_with_playback_and_follows_seeks_but_not_manual_scroll() {
+        let p = project(40);
+        let mut t = Timeline::default();
+        t.sync(&p);
+        t.width = 400.0; // 20s across at the default zoom.
+        // (a) Playback, frame by frame: the playhead never leaves view, and pages at the edge.
+        for f in 0..30 * 25 {
+            t.seek(Time(f * S / 30));
+            t.follow();
+            let s = secs(t.playhead());
+            assert!(s >= t.scroll && s < t.scroll + t.span(), "{s} out of view");
+        }
+        assert_eq!(t.scroll, 20.0, "paged so the playhead sat at the left edge");
+        // (b) A seek or step out of view brings it back.
+        assert!(t.action("go_to_start", &p));
+        t.follow();
+        assert_eq!(t.scroll, 0.0);
+        t.seek(Time(45 * S));
+        t.follow();
+        assert_eq!(t.scroll, 45.0);
+        // Manual scrolling with the playhead still isn't undone.
+        t.scroll = 0.0;
+        t.follow();
+        assert_eq!(t.scroll, 0.0);
+    }
+
+    #[test]
+    fn scrollbar_drag_scrolls_and_zoom_to_fit_shows_every_clip() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(20));
+        h.state_mut().0.zoom = 200.0;
+        h.run();
+        // The thumb sits at the left of a bar along the lanes' bottom edge.
+        let from = pos2(size::TRACK_HEADER + 10.0, 195.0);
+        h.event(egui::Event::PointerMoved(from));
+        h.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run();
+        for dx in [10.0, 50.0, 100.0] {
+            h.event(egui::Event::PointerMoved(from + vec2(dx, 0.0)));
+            h.run();
+        }
+        h.event(egui::Event::PointerButton {
+            pos: from + vec2(100.0, 0.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run();
+        assert!(h.state().0.scroll > 1.0, "scroll {}", h.state().0.scroll);
+
+        let p = h.state().1.project().clone();
+        assert!(h.state_mut().0.action("zoom_fit", &p));
+        h.run();
+        let t = &h.state().0;
+        assert_eq!(t.scroll, 0.0);
+        assert!(
+            secs(p.sequence().duration()) <= t.span(),
+            "last clip in view"
+        );
     }
 
     /// The bin and the timeline side by side: dragging a tile or row onto a new project's

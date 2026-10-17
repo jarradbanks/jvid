@@ -80,6 +80,7 @@ pub const ACTIONS: &[Action] = &[
     a("go_to_end", "Go to end", "End"),
     t("zoom_in", "Zoom in", "="),
     t("zoom_out", "Zoom out", "-"),
+    t("zoom_fit", "Zoom to fit", "\\"),
     a("focus_media", "Focus Media", "Shift+1"),
     a("focus_source", "Focus Source", "Shift+2"),
     a("focus_timeline", "Focus Timeline", "Shift+3"),
