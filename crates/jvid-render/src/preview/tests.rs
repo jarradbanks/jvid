@@ -95,7 +95,7 @@ fn corpus_bars_survive_compositing() {
         1,
     );
     let mut comp = crate::composite::Compositor::new(&device);
-    let layers = [(preview.image().unwrap(), 1.0)];
+    let layers = [(preview.image().unwrap(), Default::default())];
     let tex = comp.render(&device, &queue, (640, 360), 1, [0, 0, 0, 255], &layers);
     let rgba = read_back(&device, &queue, tex);
     for (i, want) in BARS.iter().enumerate() {

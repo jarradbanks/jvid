@@ -1,17 +1,34 @@
 //! The compositor: a layer stack from [`jvid_core::eval::video_at`] blended over the project
 //! background into one project-sized frame, at preview scale for the viewer or full size for export.
 
-use jvid_core::eval::Layer;
+use jvid_core::model::Transform;
 use wgpu::util::DeviceExt;
 
-use crate::preview::{place, scaled, to_clip};
+use crate::preview::{place, scaled};
 
-/// A layer's opacity param, 0..1; 1 when unset.
-pub fn opacity(layer: &Layer) -> f32 {
-    layer
-        .params
-        .get("opacity")
-        .map_or(1.0, |&o| o.clamp(0.0, 1.0) as f32)
+/// The four corners of an `image`-sized layer under `t` in a `frame`-sized project, as
+/// (clip x, clip y, u, v) in triangle-strip order; `None` when cropped away entirely.
+///
+/// The image is fitted whole and centred, then cropped, moved so its anchor sits at the frame
+/// centre plus position, scaled and rotated clockwise about the anchor, all in project pixels.
+pub fn quad(image: [f32; 2], frame: [f32; 2], t: &Transform) -> Option<[[f32; 4]; 4]> {
+    let [_, _, w, h] = place(image, [0.0, 0.0, frame[0], frame[1]], None);
+    let f = |v: f64| v as f32;
+    let [l, top, r, b] = t.crop.map(f);
+    let (u, v) = ([l / w, 1.0 - r / w], [top / h, 1.0 - b / h]);
+    if u[0] >= u[1] || v[0] >= v[1] {
+        return None;
+    }
+    let (sin, cos) = f(t.rotation).to_radians().sin_cos();
+    Some(std::array::from_fn(|i| {
+        let (u, v) = (u[i & 1], v[i >> 1]);
+        let x = ((u - 0.5) * w - f(t.anchor[0])) * f(t.scale[0]);
+        let y = ((v - 0.5) * h - f(t.anchor[1])) * f(t.scale[1]);
+        // y is down, so this standard rotation turns clockwise on screen.
+        let px = frame[0] / 2.0 + f(t.position[0]) + x * cos - y * sin;
+        let py = frame[1] / 2.0 + f(t.position[1]) + x * sin + y * cos;
+        [px / frame[0] * 2.0 - 1.0, 1.0 - py / frame[1] * 2.0, u, v]
+    }))
 }
 
 /// The composited frame format: premultiplied RGBA, which is straight when the background is opaque.
@@ -75,8 +92,8 @@ impl Compositor {
     }
 
     /// Composites `layers` (top first, as `video_at` returns them, each an RGBA image such as
-    /// [`crate::preview::Preview::image`] with its [`opacity`]) over `background` (straight RGBA)
-    /// into a `size` frame at 1/`scale` (1 for export), each fitted whole and centred.
+    /// [`crate::preview::Preview::image`] with its evaluated transform) over `background`
+    /// (straight RGBA) into a `size` frame at 1/`scale` (1 for export); see [`quad`].
     pub fn render(
         &mut self,
         device: &wgpu::Device,
@@ -84,7 +101,7 @@ impl Compositor {
         size: (u32, u32),
         scale: u32,
         background: [u8; 4],
-        layers: &[(&wgpu::Texture, f32)],
+        layers: &[(&wgpu::Texture, Transform)],
     ) -> &wgpu::Texture {
         let (w, h) = scaled(size.0, size.1, scale);
         if self
@@ -110,16 +127,16 @@ impl Compositor {
             }));
         }
         let target = self.target.as_ref().unwrap();
-        let view_rect = [0.0, 0.0, w as f32, h as f32];
+        let frame = [size.0 as f32, size.1 as f32];
         // shortcut: a uniform and bind group per layer per frame; pool them if playback (#32) profiles hot.
         let binds: Vec<_> = layers
             .iter()
             .rev()
-            .filter(|(_, o)| *o > 0.0)
-            .map(|(tex, o)| {
-                let rect = place([tex.width() as f32, tex.height() as f32], view_rect, None);
-                let mut p = to_clip(rect, view_rect).to_vec();
-                p.extend([*o, 0.0, 0.0, 0.0]);
+            .filter(|(_, t)| t.opacity > 0.0)
+            .filter_map(|(tex, t)| {
+                let corners = quad([tex.width() as f32, tex.height() as f32], frame, t)?;
+                let mut p = corners.concat();
+                p.extend([t.opacity.clamp(0.0, 1.0) as f32, 0.0, 0.0, 0.0]);
                 let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("layer"),
                     contents: &p.iter().flat_map(|f| f.to_ne_bytes()).collect::<Vec<_>>(),
@@ -129,7 +146,7 @@ impl Compositor {
                     format: Some(tex.format().remove_srgb_suffix()),
                     ..Default::default()
                 });
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: None,
                     layout: &self.pipeline.get_bind_group_layout(0),
                     entries: &[
@@ -146,7 +163,7 @@ impl Compositor {
                             resource: uniform.as_entire_binding(),
                         },
                     ],
-                })
+                }))
             })
             .collect();
         let a = background[3] as f64 / 255.0;
@@ -233,7 +250,7 @@ pub fn export_png(
     queue: &wgpu::Queue,
     size: (u32, u32),
     background: [u8; 4],
-    layers: &[(&wgpu::Texture, f32)],
+    layers: &[(&wgpu::Texture, Transform)],
     path: &std::path::Path,
 ) -> image::ImageResult<()> {
     let mut comp = Compositor::new(device);

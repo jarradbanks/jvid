@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{AssetId, Clip, ClipId, Sequence, Track, TrackId, TrackKind};
+use crate::model::{AssetId, Clip, ClipId, Sequence, Track, TrackId, TrackKind, Transform};
 use crate::time::Time;
 
 /// One visible clip at an instant.
@@ -15,6 +15,8 @@ pub struct Layer<'a> {
     /// Time within the asset to show.
     pub source_time: Time,
     pub params: &'a BTreeMap<String, f64>,
+    /// The clip's transform evaluated at this instant.
+    pub transform: Transform,
 }
 
 /// A piece of one clip to mix, clamped to the requested range.
@@ -61,6 +63,7 @@ pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
                 asset: c.asset,
                 source_time: c.source_in + (t - c.start),
                 params: &c.params,
+                transform: c.transform_at(t),
             })
         })
         .collect()

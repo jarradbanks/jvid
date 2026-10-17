@@ -1,4 +1,4 @@
-// One layer drawn fitted into the project frame, blended with its opacity.
+// One transformed layer drawn into the project frame, blended with its opacity.
 
 struct Out {
     @builtin(position) pos: vec4<f32>,
@@ -6,8 +6,8 @@ struct Out {
 }
 
 struct Params {
-    // Where the layer goes, in the frame's clip space: left, top, right, bottom.
-    dst: vec4<f32>,
+    // Corners in triangle-strip order: clip-space xy, then uv.
+    corners: array<vec4<f32>, 4>,
     // x: opacity 0..1.
     opacity: vec4<f32>,
 }
@@ -18,8 +18,8 @@ struct Params {
 
 @vertex
 fn vs_layer(@builtin(vertex_index) i: u32) -> Out {
-    let uv = vec2<f32>(f32(i & 1u), f32(i >> 1u));
-    return Out(vec4<f32>(mix(params.dst.xy, params.dst.zw, uv), 0.0, 1.0), uv);
+    let c = params.corners[i];
+    return Out(vec4<f32>(c.xy, 0.0, 1.0), c.zw);
 }
 
 // Straight-alpha source in, premultiplied out for premultiplied "over" blending.
