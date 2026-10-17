@@ -87,6 +87,8 @@ pub struct App {
     presets: Vec<jvid_core::preset::Preset>,
     /// Index into `presets`.
     preset: usize,
+    /// Export loudness target in LUFS; `None` leaves the mix alone.
+    loudness: Option<f64>,
     /// The running export and where its result arrives.
     export: Option<(jvid_jobs::Handle, Receiver<Result<ProbeInfo, ExportError>>)>,
 }
@@ -143,6 +145,7 @@ impl App {
             exports: jvid_jobs::Pool::new(1),
             presets: crate::export::presets(),
             preset: 0,
+            loudness: Some(-14.0),
             export: None,
         }
     }
@@ -392,6 +395,23 @@ impl App {
         if let Some(w) = &warning {
             ui.label("⚠").on_hover_text(w);
         }
+        let label = |l: Option<f64>| l.map_or("Loudness off".into(), |l| format!("{l} LUFS"));
+        egui::ComboBox::from_id_salt("export loudness")
+            .selected_text(label(self.loudness))
+            .show_ui(ui, |ui| {
+                for l in [None, Some(-14.0), Some(-16.0), Some(-23.0)] {
+                    ui.selectable_value(&mut self.loudness, l, label(l));
+                }
+                let mut custom = self.loudness.unwrap_or(-14.0);
+                let drag = egui::DragValue::new(&mut custom)
+                    .range(-40.0..=-5.0)
+                    .speed(0.1)
+                    .prefix("Custom ")
+                    .suffix(" LUFS");
+                if ui.add(drag).changed() {
+                    self.loudness = Some(custom);
+                }
+            });
         let preset = self.presets[self.preset].clone();
         let r = ui
             .add(Button::primary("Export").state(state))
@@ -416,6 +436,7 @@ impl App {
             path,
             range,
             preset,
+            loudness: self.loudness,
         };
         self.export = Some(crate::export::submit(&self.exports, project, req, gpu));
     }

@@ -101,6 +101,7 @@ fn export_matches_range_with_audio_in_sync() {
             path: path.clone(),
             range: (secs(1), secs(2)),
             preset: preset("YouTube 1080p"),
+            loudness: None,
         };
         let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{ext}: {e:?}"));
         assert_eq!((info.width, info.height), (Some(1920), Some(1080)), "{ext}");
@@ -152,6 +153,7 @@ fn cancelled_export_leaves_no_file() {
         path: path.clone(),
         range: (Time(0), secs(10)),
         preset: preset("YouTube 1080p"),
+        loudness: None,
     };
     assert_eq!(run_now(&project(&dir), &req, true), Err(Error::Cancelled));
     assert!(!path.exists());
@@ -168,6 +170,7 @@ fn failed_export_leaves_existing_file() {
         path: path.clone(),
         range: (secs(1), secs(1)),
         preset: preset("YouTube 1080p"),
+        loudness: None,
     };
     assert!(matches!(
         run_now(&project(&dir), &req, false),
@@ -193,6 +196,7 @@ fn every_builtin_preset_exports() {
             path: path.clone(),
             range: (secs(1), secs(2)),
             preset,
+            loudness: None,
         };
         let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
         if has_video {
@@ -228,6 +232,7 @@ fn screen_recording_keeps_text_sharp() {
         path: path.clone(),
         range: (secs(1), secs(2)),
         preset: preset("Screen recording (sharp text)"),
+        loudness: None,
     };
     run_now(h.project(), &req, false).unwrap();
     let got = VideoDecoder::open(&path)
@@ -249,6 +254,38 @@ fn screen_recording_keeps_text_sharp() {
     eprintln!("text luma diff {diff}");
     assert!(diff < 2.0, "mean luma difference over the text {diff}");
     std::fs::remove_file(&path).unwrap();
+}
+
+/// Normalized exports land within 0.5 LU of the target, under the true-peak ceiling.
+#[test]
+fn export_hits_loudness_target() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    for (name, target) in [("Audio only (WAV)", -14.0), ("Audio only (AAC)", -23.0)] {
+        let p = preset(name);
+        let path = out(&format!("loud.{}", p.extension));
+        let req = Request {
+            path: path.clone(),
+            range: (Time(0), secs(8)),
+            preset: p,
+            loudness: Some(target),
+        };
+        run_now(&project(&dir), &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        let mut a = AudioDecoder::open(&path, 0).unwrap();
+        let mut samples = Vec::new();
+        while let Some(c) = a.next_chunk().unwrap() {
+            samples.extend(c.samples);
+        }
+        let mut meter = jvid_audio::Meter::default();
+        meter.push(&samples);
+        let lufs = meter.integrated().unwrap();
+        assert!((lufs - target).abs() <= 0.5, "{name}: {lufs} LUFS");
+        let peak = 20.0 * jvid_audio::Limiter::true_peak(&samples).log10();
+        // AAC's own overshoot isn't the limiter's to hold.
+        assert!(peak <= CEILING + 0.5, "{name}: {peak} dBTP");
+        std::fs::remove_file(&path).unwrap();
+    }
 }
 
 #[test]
