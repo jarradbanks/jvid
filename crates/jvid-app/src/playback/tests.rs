@@ -849,6 +849,49 @@ fn merged_clip_mixes_every_stream() {
     assert_eq!(gains, [6.0, 6.0]);
 }
 
+/// Acceptance (#50): a keyframed volume ramp is applied per sample, so across block edges it
+/// rises in even steps with no zipper.
+#[test]
+fn volume_ramp_has_no_zipper() {
+    use jvid_core::keyframe::{Easing, Keyframe, Value};
+    let mut h = History::new(Project::default());
+    let id = add(&mut h, TrackKind::Audio, "/a.wav", secs(2));
+    let c = h.project().sequence().clip(id).unwrap().1.clone();
+    let key = |t, v| Keyframe {
+        time: c.source_in + t,
+        value: Value::Scalar(v),
+        easing: Easing::Linear,
+    };
+    let keys = [(
+        "volume".to_string(),
+        vec![key(Time(0), 0.0), key(secs(1), 1.0)],
+    )];
+    let x = Transform {
+        pan: -1.0,
+        ..c.transform
+    };
+    h.apply(Command::SetClipProps(vec![(id, x, keys.into())]))
+        .unwrap();
+    let mut audio = Audio::new(Box::new(|_, _| {
+        Box::new(|_, out: &mut [f32]| out.fill(1.0))
+    }));
+    let mut left: Vec<f32> = Vec::new();
+    let mut out = vec![0.0; 2 * 512];
+    for b in 0..(SAMPLE_RATE as i64 / 512) {
+        audio.mix(h.project(), b * 512, &mut out);
+        assert!(
+            out.iter().skip(1).step_by(2).all(|&r| r == 0.0),
+            "panned left"
+        );
+        left.extend(out.iter().step_by(2));
+    }
+    let step = pan_gains(0.0).0 / SAMPLE_RATE as f32;
+    for w in left.windows(2) {
+        let d = w[1] - w[0];
+        assert!(d > 0.0 && (d - step).abs() < step * 0.05, "{w:?}");
+    }
+}
+
 #[test]
 fn scrub_queues_a_snippet_from_the_parked_playhead() {
     let mut h = History::new(Project::default());

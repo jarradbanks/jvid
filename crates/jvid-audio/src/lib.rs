@@ -5,5 +5,5 @@ mod mixer;
 mod output;
 
 pub use loudness::{Limiter, Meter};
-pub use mixer::{Meters, Mixer, RAMP_FRAMES, Strip, audible, pan_gains};
+pub use mixer::{Meters, Mixer, RAMP_FRAMES, Strip, audible, automate, balance, pan_gains};
 pub use output::{Backend, CpalBackend, Feed, Output, SAMPLE_RATE};

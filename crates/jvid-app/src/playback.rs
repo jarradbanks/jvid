@@ -16,7 +16,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::wgpu;
-use jvid_audio::{Mixer, Output, SAMPLE_RATE, Strip};
+use jvid_audio::{Mixer, Output, SAMPLE_RATE, Strip, automate};
 use jvid_core::eval::{Layer, audio_in, video_at};
 use jvid_core::model::{
     AssetId, ClipId, MediaAsset, Project, ProjectSettings, TrackKind, Transform,
@@ -242,13 +242,26 @@ impl Audio {
             let out = &mut self.inputs[i][span(s.start)..span(s.end)];
             if let [src] = srcs.as_mut_slice() {
                 src(sample(s.source_start), out);
-                continue;
+            } else {
+                for src in srcs {
+                    self.scratch.clear();
+                    self.scratch.resize(out.len(), 0.0);
+                    src(sample(s.source_start), &mut self.scratch);
+                    out.iter_mut().zip(&self.scratch).for_each(|(o, x)| *o += x);
+                }
             }
-            for src in srcs {
-                self.scratch.clear();
-                self.scratch.resize(out.len(), 0.0);
-                src(sample(s.source_start), &mut self.scratch);
-                out.iter_mut().zip(&self.scratch).for_each(|(o, x)| *o += x);
+            if let Some((_, c)) = seq.clip(s.clip) {
+                let first = sample(s.start);
+                let at = |i: usize| {
+                    let (v, p) = c.gain_at(Time((first + i as i64) * FLICKS_PER_SAMPLE));
+                    (v as f32, p as f32)
+                };
+                if c.gain_animated() {
+                    automate(out, at);
+                } else if c.transform.volume != 1.0 || c.transform.pan != 0.0 {
+                    let g = at(0);
+                    automate(out, |_| g);
+                }
             }
         }
         let inputs: Vec<&[f32]> = self.inputs.iter().map(Vec::as_slice).collect();
