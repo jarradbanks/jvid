@@ -6,6 +6,8 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+# Only fail on unmaintained crates we depend on directly; transitive ones are upstream's call.
+unmaintained = "workspace"
 
 [licenses]
 version = 2
