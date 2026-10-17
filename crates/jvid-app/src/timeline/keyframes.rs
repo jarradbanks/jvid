@@ -33,7 +33,7 @@ pub struct Keys {
     /// The clip pasted keys go to: the last one a key was picked on.
     clip: Option<ClipId>,
     /// Timeline shift of the selected keys while they're dragged.
-    drag: Option<Time>,
+    pub(super) drag: Option<Time>,
 }
 
 /// The properties of `c` that have keyframes, in lane order.
@@ -125,9 +125,9 @@ fn copy(c: &Clip, sel: &BTreeSet<(ClipId, String, Time)>) -> Vec<(String, Keyfra
         .collect()
 }
 
-/// `copied` onto `c` with the earliest at timeline time `at`.
+/// `copied` onto `c` with the earliest at timeline time `at`, but no earlier than source 0.
 fn paste(c: &Clip, copied: &[(String, Keyframe)], at: Time) -> Command {
-    let base = c.source_in + (at - c.start);
+    let base = (c.source_in + (at - c.start)).max(Time(0));
     rewrite(c, |keys| {
         for (p, k) in copied {
             let time = k.time + base;
@@ -137,6 +137,12 @@ fn paste(c: &Clip, copied: &[(String, Keyframe)], at: Time) -> Command {
 }
 
 impl Keys {
+    /// Picks keys on `clip`, dropping any picked on other clips: edits go to one clip.
+    fn pick_clip(&mut self, clip: ClipId) {
+        self.clip = Some(clip);
+        self.selected.retain(|s| s.0 == clip);
+    }
+
     /// Extra height under `track`'s clips for its tallest expanded clip.
     pub fn extra(&self, track: &Track) -> f32 {
         let open = track
@@ -220,7 +226,10 @@ impl Timeline {
         let tl = |s: Time| clip.start + (s - clip.source_in);
         let mods = ui.input(|i| i.modifiers);
         let mut edit = None;
+        let marquee = bg.dragged() || bg.drag_stopped();
         let mut centers = Vec::new();
+        let (left, right) = (painter.clip_rect().left(), painter.clip_rect().right());
+        let shift_x = self.keys.drag.map_or(0.0, |d| view.x(d) - view.x(Time(0)));
         for (row, (name, keys)) in lanes(clip).enumerate() {
             let y = area.top() + (row as f32 + 0.5) * LANE_H;
             painter.text(
@@ -230,20 +239,27 @@ impl Timeline {
                 theme::small(),
                 color::INK_3,
             );
-            let xs: Vec<_> = keys.iter().map(|k| view.x(tl(k.time))).collect();
-            if let (Some(a), Some(b)) = (xs.first(), xs.last()) {
-                painter.line_segment([pos2(*a, y), pos2(*b, y)], Stroke::new(1.0, color::INK_4));
+            if let (Some(a), Some(b)) = (keys.first(), keys.last()) {
+                let (a, b) = (view.x(tl(a.time)), view.x(tl(b.time)));
+                painter.line_segment([pos2(a, y), pos2(b, y)], Stroke::new(1.0, color::INK_4));
             }
-            for (k, x) in keys.iter().zip(xs) {
-                let sel = (clip.id, name.clone(), k.time);
-                let on = self.keys.selected.contains(&sel);
-                let x = x + if on {
-                    self.keys.drag.map_or(0.0, |d| view.x(d) - view.x(Time(0)))
-                } else {
-                    0.0
-                };
+            let on_times: Vec<Time> = picked(&self.keys.selected, clip)
+                .filter(|s| s.0 == name)
+                .map(|s| s.1)
+                .collect();
+            for k in keys {
+                let on = on_times.contains(&k.time);
+                let x = view.x(tl(k.time)) + if on { shift_x } else { 0.0 };
+                // Off-screen keys need no hit box, except the one being dragged.
+                let dragging = on && self.keys.drag.is_some();
+                if (x < left - KEY_R || x > right + KEY_R) && !dragging {
+                    continue;
+                }
+                let sel = || (clip.id, name.clone(), k.time);
                 let c = pos2(x, y);
-                centers.push((sel.clone(), c));
+                if marquee {
+                    centers.push((sel(), c));
+                }
                 let r = ui.interact(
                     Rect::from_center_size(c, vec2(2.0 * KEY_R + 2.0, LANE_H)),
                     id.with((name, k.time.0)),
@@ -256,14 +272,14 @@ impl Timeline {
                     true,
                 );
                 if r.clicked() || r.drag_started() || r.secondary_clicked() {
-                    self.keys.clip = Some(clip.id);
+                    self.keys.pick_clip(clip.id);
                     self.selected.clear();
                     if mods.shift || mods.command {
-                        if r.clicked() && !self.keys.selected.remove(&sel) {
-                            self.keys.selected.insert(sel.clone());
+                        if r.clicked() && !self.keys.selected.remove(&sel()) {
+                            self.keys.selected.insert(sel());
                         }
                     } else if !on {
-                        self.keys.selected = BTreeSet::from([sel.clone()]);
+                        self.keys.selected = BTreeSet::from([sel()]);
                     }
                 }
                 if r.dragged()
@@ -279,6 +295,9 @@ impl Timeline {
                     let to = to + self.snap(seq, &[], &[to]);
                     let min = picked(&self.keys.selected, clip).map(|s| s.1).min();
                     let floor = min.map_or(Time(0), |m| Time(0) - m);
+                    if to - tl(k.time) < floor {
+                        self.snapped = None;
+                    }
                     self.keys.drag = Some((to - tl(k.time)).max(floor));
                 }
                 if r.drag_stopped()
@@ -330,7 +349,7 @@ impl Timeline {
                 if !mods.shift && !mods.command {
                     self.keys.selected.clear();
                 }
-                self.keys.clip = Some(clip.id);
+                self.keys.pick_clip(clip.id);
                 self.selected.clear();
                 let hit = centers.into_iter().filter(|(_, c)| band.contains(*c));
                 self.keys.selected.extend(hit.map(|h| h.0));
@@ -527,5 +546,75 @@ mod tests {
         h.state_mut().1.undo();
         let c = h.state().1.project().sequence().tracks()[0].clips()[0].clone();
         assert_eq!(c.keyframes["opacity"][1].time, Time(S));
+    }
+
+    fn keyed(n: usize) -> (History, ClipId) {
+        let mut h = History::new(project(n));
+        let id = h.project().sequence().tracks()[0].clips()[(n - 1) / 2].id;
+        h.apply(Command::AddKeyframe {
+            id,
+            param: "opacity".into(),
+            key: Keyframe {
+                time: Time(0),
+                value: Value::Scalar(1.0),
+                easing: Easing::Linear,
+            },
+        })
+        .unwrap();
+        (h, id)
+    }
+
+    #[test]
+    fn paste_before_the_clip_lands_at_source_zero() {
+        let (mut h, _) = keyed(4);
+        let c = h.project().sequence().tracks()[0].clips()[1].clone();
+        assert!(c.start > Time(0) && c.source_in < c.start);
+        let copied = copy(&c, &BTreeSet::from([(c.id, "opacity".into(), Time(0))]));
+        h.apply(paste(&c, &copied, Time(0))).unwrap();
+        let c = &h.project().sequence().tracks()[0].clips()[1];
+        assert_eq!(c.keyframes["opacity"][0].time, Time(0), "never negative");
+    }
+
+    #[test]
+    fn picking_on_another_clip_drops_the_first_clips_keys() {
+        let (h, id) = keyed(4);
+        let other = h.project().sequence().tracks()[0].clips()[0].id;
+        let mut keys = Keys::default();
+        keys.pick_clip(other);
+        keys.selected.insert((other, "opacity".into(), Time(0)));
+        keys.pick_clip(id);
+        keys.selected.insert((id, "opacity".into(), Time(0)));
+        assert_eq!(keys.selected.len(), 1);
+        assert_eq!(keys.clip, Some(id));
+        assert!(keys.selected.iter().all(|s| s.0 == id));
+    }
+
+    #[test]
+    fn height_grip_on_an_expanded_track_sizes_the_clip_row() {
+        use egui::pos2;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let (p, id) = keyed(1);
+        let height = p.project().sequence().tracks()[0].height;
+        let mut h = super::super::tests::harness(p.project().clone());
+        h.state_mut().0.keys.expanded.insert(id);
+        h.run();
+        // The grip sits at the bottom of the lanes, one lane under the clip row.
+        let lock = h.get_all_by_label("Lock").next().unwrap().rect();
+        let (x, edge) = (40.0, lock.center().y - 16.0 + height + LANE_H);
+        h.hover_at(pos2(x, edge));
+        h.run();
+        h.drag_at(pos2(x, edge));
+        h.run();
+        for dy in [5.0, 10.0, 21.0] {
+            h.hover_at(pos2(x, edge + dy));
+            h.run();
+        }
+        h.drop_at(pos2(x, edge + 21.0));
+        h.run();
+        let t = &h.state().1.project().sequence().tracks()[0];
+        assert_eq!(t.height, height + 20.0, "grows with the pointer, no jump");
     }
 }

@@ -326,6 +326,7 @@ impl Timeline {
             "select_all" => {
                 let clips = project.sequence().tracks().iter().flat_map(|t| t.clips());
                 self.selected = clips.map(|c| c.id).collect();
+                self.keys.selected.clear();
             }
             "add_edit" | "ripple_trim_prev" | "ripple_trim_next" => {
                 self.pending = self.cut_action(id, project.sequence());
@@ -607,6 +608,7 @@ impl Timeline {
         lanes: &[(TrackId, TrackKind, Rect)],
         p: Pos2,
     ) {
+        self.keys.selected.clear();
         let lane = lanes.iter().find(|l| l.2.contains(p));
         let at = view.time(p.x);
         self.gap = lane
@@ -913,6 +915,8 @@ impl Timeline {
         // After the clips, so the release frame still reaches an off-screen held clip.
         if !down {
             self.holding = None;
+            // A key drag whose clip scrolled away never sees its drag_stopped.
+            self.keys.drag = None;
         }
         let mods = ui.input(|i| i.modifiers);
         if marquee.clicked() && !mods.shift && !mods.command {
@@ -948,6 +952,7 @@ impl Timeline {
             let a = a + vec2(((ps - self.scroll) * self.zoom) as f32, pv - self.vscroll);
             let band = Rect::from_two_pos(a, b);
             if marquee.drag_stopped() {
+                self.keys.selected.clear();
                 if !mods.shift && !mods.command {
                     self.selected.clear();
                 }
@@ -1513,7 +1518,8 @@ impl Timeline {
         if g.dragged()
             && let Some(p) = g.interact_pointer_pos()
         {
-            let h = snap_height(p.y - rect.top());
+            // The header spans the keyframe lanes too; the grip sizes the clip row only.
+            let h = snap_height(p.y - rect.top() - self.keys.extra(track));
             if h != track.height {
                 let mut s = track.settings();
                 s.height = h;
