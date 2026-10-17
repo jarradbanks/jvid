@@ -23,6 +23,8 @@ struct Prop {
     speed: f64,
     decimals: usize,
     suffix: &'static str,
+    /// Bounds of the stored value.
+    range: (f64, f64),
 }
 
 const fn prop(name: &'static str, label: &'static str, fields: &'static [&'static str]) -> Prop {
@@ -34,6 +36,7 @@ const fn prop(name: &'static str, label: &'static str, fields: &'static [&'stati
         speed: 1.0,
         decimals: 1,
         suffix: "",
+        range: (f64::NEG_INFINITY, f64::INFINITY),
     }
 }
 
@@ -63,21 +66,34 @@ const SECTIONS: [(&str, &[Prop]); 3] = [
             display: 100.0,
             decimals: 0,
             suffix: "%",
+            range: (0.0, 1.0),
             ..prop("opacity", "Opacity", ONE)
         }],
     ),
     (
         "Crop",
         &[
-            prop("crop_left", "Left", ONE),
-            prop("crop_top", "Top", ONE),
-            prop("crop_right", "Right", ONE),
-            prop("crop_bottom", "Bottom", ONE),
+            Prop {
+                range: (0.0, f64::INFINITY),
+                ..prop("crop_left", "Left", ONE)
+            },
+            Prop {
+                range: (0.0, f64::INFINITY),
+                ..prop("crop_top", "Top", ONE)
+            },
+            Prop {
+                range: (0.0, f64::INFINITY),
+                ..prop("crop_right", "Right", ONE)
+            },
+            Prop {
+                range: (0.0, f64::INFINITY),
+                ..prop("crop_bottom", "Bottom", ONE)
+            },
         ],
     ),
 ];
 
-/// Undo gesture for drags in the inspector, xored with the property and field.
+/// Undo gesture for drags in the inspector, xored with the property, field and drag count.
 const GESTURE: GestureKey = 0x696e_7370_0000; // "insp"
 
 /// Undo gesture for picker edits to a solid's color, xored with its asset id.
@@ -103,6 +119,10 @@ fn set(x: &mut Transform, name: &str, v: Value) {
     match (name, v) {
         ("position", Value::Vec2(v)) => x.position = v,
         ("anchor", Value::Vec2(v)) => x.anchor = v,
+        // Keeps a non-uniform scale's ratio.
+        ("scale", Value::Scalar(v)) if x.scale[0] != 0.0 => {
+            x.scale = [v, x.scale[1] * v / x.scale[0]]
+        }
         ("scale", Value::Scalar(v)) => x.scale = [v; 2],
         ("rotation", Value::Scalar(v)) => x.rotation = v,
         ("opacity", Value::Scalar(v)) => x.opacity = v.clamp(0.0, 1.0),
@@ -136,9 +156,10 @@ fn with_field(v: Value, i: usize, n: f64) -> Value {
     }
 }
 
-/// The clip's source time at timeline time `t`, where its keyframes live.
+/// The clip's source time at timeline time `t`, where its keyframes live, clamped to the
+/// clip so a playhead outside it never keys beyond its media range.
 fn source(c: &Clip, t: Time) -> Time {
-    c.source_in + (t - c.start)
+    (c.source_in + (t - c.start)).clamp(c.source_in, c.source_out)
 }
 
 fn value(c: &Clip, name: &str, t: Time) -> Value {
@@ -206,10 +227,11 @@ fn put(
     }
 }
 
-/// Sets field `i` of `name` to `n` on every clip, keeping their other fields.
-fn set_field(clips: &[&Clip], name: &str, i: usize, n: f64, t: Time) -> Command {
+/// Sets field `i` of `name` to `f` of its old value on every clip, keeping their other fields.
+fn set_field(clips: &[&Clip], name: &str, i: usize, f: impl Fn(f64) -> f64, t: Time) -> Command {
     rewrite(clips, |c, x, keys| {
-        let v = with_field(value(c, name, t), i, n);
+        let old = value(c, name, t);
+        let v = with_field(old, i, f(fields(old)[i]));
         put(c, x, keys, name, t, v);
     })
 }
@@ -247,11 +269,21 @@ fn toggle_key(clips: &[&Clip], name: &str, t: Time) -> Command {
     })
 }
 
-fn reset(clips: &[&Clip], name: &str) -> Command {
-    let default = get(&Transform::default(), name);
+fn reset(clips: &[&Clip], names: &[&str]) -> Command {
     rewrite(clips, |_, x, keys| {
-        keys.remove(name);
-        set(x, name, default);
+        for name in names {
+            keys.remove(*name);
+            set(x, name, get(&Transform::default(), name));
+        }
+    })
+}
+
+/// Keys every one of `names` at `t`, from its current value.
+fn key_all(clips: &[&Clip], names: &[&str], t: Time) -> Command {
+    rewrite(clips, |c, _, keys| {
+        for name in names {
+            key(c, keys, name, t, value(c, name, t));
+        }
     })
 }
 
@@ -297,7 +329,14 @@ pub fn show(
         if clips.is_empty() {
             break;
         }
-        if !section(ui, title) {
+        let names: Vec<&str> = props.iter().map(|p| p.name).collect();
+        let (open, head) = section(ui, title, true);
+        match head {
+            Some(Head::Reset) => edit = Some((reset(&clips, &names), None)),
+            Some(Head::Key) => edit = Some((key_all(&clips, &names, t), None)),
+            None => {}
+        }
+        if !open {
             index += props.len() as u64;
             continue;
         }
@@ -308,9 +347,12 @@ pub fn show(
             }
         }
     }
-    if section(ui, "Color") {
+    if section(ui, "Color", false).0 {
+        // Only when every selected clip shows the same solid, so the picker edits them all.
+        let same = clips.iter().all(|c| c.asset == clips[0].asset);
         let solid = clips
             .first()
+            .filter(|_| same)
             .and_then(|c| project.asset(c.asset))
             .or(bin_selected)
             .filter(|a| a.solid.is_some());
@@ -323,14 +365,51 @@ pub fn show(
     (edit, seek)
 }
 
-/// A section header remembering whether it's open.
-fn section(ui: &mut Ui, title: &str) -> bool {
+/// A section head button.
+enum Head {
+    Reset,
+    Key,
+}
+
+/// A section header remembering whether it's open, with reset and keyframe-all buttons on
+/// the right if `buttons`.
+fn section(ui: &mut Ui, title: &str, buttons: bool) -> (bool, Option<Head>) {
     let id = ui.id().with(("inspector", title));
     let mut open = ui.data_mut(|d| *d.get_temp_mut_or(id, true));
-    ui.add(SectionHeader::new(title, &mut open));
+    let rect = ui.add(SectionHeader::new(title, &mut open)).rect;
     ui.data_mut(|d| d.insert_temp(id, open));
-    open
+    let mut head = None;
+    if buttons {
+        let mut right = egui::Rect::from_x_y_ranges(rect.x_range(), rect.y_range());
+        right.min.x = right.max.x - KEY_HIT - space::S4 - size::CONTROL;
+        let mut ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(right)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        );
+        ui.spacing_mut().item_spacing.x = space::S4;
+        if glyph(
+            &mut ui,
+            Glyph::Diamond,
+            false,
+            &format!("Keyframe all {title}"),
+        )
+        .clicked()
+        {
+            head = Some(Head::Key);
+        }
+        if ui
+            .add(Button::icon(icon::UNDO, &format!("Reset {title}")))
+            .clicked()
+        {
+            head = Some(Head::Reset);
+        }
+    }
+    (open, head)
 }
+
+/// The width of a keyframe toggle's hit area.
+const KEY_HIT: f32 = 20.0;
 
 fn row(
     ui: &mut Ui,
@@ -345,14 +424,13 @@ fn row(
     let mut edit = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = space::S4;
-        let animate = glyph(ui, Glyph::Diamond, anim, &format!("Animate {}", p.label));
-        if animate.clicked() {
-            edit = Some((toggle_animate(clips, p.name, t), None));
-        }
         ui.allocate_ui_with_layout(
             vec2(size::INSPECTOR_LABEL, size::CONTROL),
             egui::Layout::left_to_right(egui::Align::Center),
-            |ui| ui.label(egui::RichText::new(p.label).color(color::INK_2)),
+            |ui| {
+                ui.set_min_width(size::INSPECTOR_LABEL);
+                ui.label(egui::RichText::new(p.label).color(color::INK_2))
+            },
         );
         for (i, field) in p.fields.iter().enumerate() {
             let first = values[0][i];
@@ -367,26 +445,49 @@ fn row(
             if !field.is_empty() {
                 f = f.prefix(field);
             }
-            if ui.add(f).changed() {
-                let cmd = set_field(clips, p.name, i, shown / p.display, t);
-                edit = Some((cmd, Some(GESTURE ^ (index << 4 | i as u64))));
+            let (lo, hi) = p.range;
+            f = f.range(lo * p.display..=hi * p.display);
+            let r = ui.add(f);
+            // Each drag is its own undo step, even of the field the last one dragged.
+            let drags = ui.id().with("inspector drags");
+            if r.drag_started() {
+                ui.data_mut(|d| *d.get_temp_mut_or(drags, 0u64) += 1);
+            }
+            if r.changed() {
+                let n = shown / p.display;
+                // A drag of a mixed field moves each clip by the delta, not to the first's value.
+                let cmd = if mixed && r.dragged() {
+                    set_field(clips, p.name, i, |v| (v + n - first).clamp(lo, hi), t)
+                } else {
+                    set_field(clips, p.name, i, |_| n, t)
+                };
+                let drag = ui.data(|d| d.get_temp(drags).unwrap_or(0u64));
+                let key = GESTURE ^ (index << 4 | i as u64) ^ (drag << 16);
+                edit = Some((cmd, r.dragged().then_some(key)));
             }
         }
-        if anim {
-            if glyph(ui, Glyph::Left, false, "Previous keyframe").clicked() {
-                *seek = neighbour(clips, p.name, t, -1);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let animate = glyph(ui, Glyph::Diamond, anim, &format!("Animate {}", p.label));
+            if animate.clicked() {
+                edit = Some((toggle_animate(clips, p.name, t), None));
+            }
+            if ui.add(Button::icon(icon::UNDO, "Reset")).clicked() {
+                edit = Some((reset(clips, &[p.name]), None));
+            }
+            if !anim {
+                return;
+            }
+            if glyph(ui, Glyph::Right, false, "Next keyframe").clicked() {
+                *seek = neighbour(clips, p.name, t, 1);
             }
             let here = clips.iter().all(|c| key_at(c, p.name, t));
             if glyph(ui, Glyph::Diamond, here, "Keyframe at playhead").clicked() {
                 edit = Some((toggle_key(clips, p.name, t), None));
             }
-            if glyph(ui, Glyph::Right, false, "Next keyframe").clicked() {
-                *seek = neighbour(clips, p.name, t, 1);
+            if glyph(ui, Glyph::Left, false, "Previous keyframe").clicked() {
+                *seek = neighbour(clips, p.name, t, -1);
             }
-        }
-        if ui.add(Button::icon(icon::UNDO, "Reset")).clicked() {
-            edit = Some((reset(clips, p.name), None));
-        }
+        });
     });
     edit
 }
@@ -399,14 +500,15 @@ enum Glyph {
 
 /// A small painted icon button; `on` fills it.
 fn glyph(ui: &mut Ui, g: Glyph, on: bool, name: &str) -> egui::Response {
-    let (rect, r) = ui.allocate_exact_size(vec2(16.0, size::CONTROL), Sense::click());
+    let (rect, r) = ui.allocate_exact_size(vec2(KEY_HIT, size::CONTROL), Sense::click());
     r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, name));
     let ink = if r.hovered() {
         color::INK
     } else {
         color::INK_2
     };
-    let (c, h) = (rect.center(), 4.5);
+    // 4 makes an 8px diamond, as DESIGN.md asks.
+    let (c, h) = (rect.center(), 4.0);
     let points: Vec<Pos2> = match g {
         Glyph::Diamond => vec![
             c + vec2(0.0, -h),
@@ -426,8 +528,8 @@ fn glyph(ui: &mut Ui, g: Glyph, on: bool, name: &str) -> egui::Response {
         ],
     };
     let (fill, line) = match (g, on) {
-        (Glyph::Diamond, false) => (Color32::TRANSPARENT, Stroke::new(1.0, ink)),
-        (Glyph::Diamond, true) => (color::BLUE, Stroke::new(1.0, color::BLUE)),
+        (Glyph::Diamond, false) => (Color32::TRANSPARENT, Stroke::new(1.0, color::INK)),
+        (Glyph::Diamond, true) => (color::LIGHT_BLUE, Stroke::new(1.0, color::LIGHT_BLUE)),
         _ => (ink, Stroke::NONE),
     };
     ui.painter().add(Shape::convex_polygon(points, fill, line));
@@ -454,6 +556,7 @@ fn solid_color(ui: &mut Ui, a: &MediaAsset) -> Option<Edit> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jvid_core::history::History;
     use jvid_core::model::{AssetId, LinkId};
 
     fn clip(id: u64, start: i64) -> Clip {
@@ -490,7 +593,9 @@ mod tests {
     fn field_edits_keep_each_clips_other_field() {
         let mut clips = [clip(1, 0), clip(2, 0)];
         clips[1].transform.position = [5.0, 7.0];
-        apply(&mut clips, |c| set_field(c, "position", 0, 3.0, Time(0)));
+        apply(&mut clips, |c| {
+            set_field(c, "position", 0, |_| 3.0, Time(0))
+        });
         assert_eq!(clips[0].transform.position, [3.0, 0.0]);
         assert_eq!(clips[1].transform.position, [3.0, 7.0]);
     }
@@ -500,7 +605,9 @@ mod tests {
         let mut clips = [clip(1, 100)];
         apply(&mut clips, |c| toggle_animate(c, "opacity", Time(120)));
         assert_eq!(clips[0].keyframes["opacity"][0].time, Time(30));
-        apply(&mut clips, |c| set_field(c, "opacity", 0, 0.25, Time(150)));
+        apply(&mut clips, |c| {
+            set_field(c, "opacity", 0, |_| 0.25, Time(150))
+        });
         let keys = &clips[0].keyframes["opacity"];
         assert_eq!(keys.len(), 2);
         assert_eq!(clips[0].transform.opacity, 1.0, "static value untouched");
@@ -520,7 +627,9 @@ mod tests {
     fn removing_the_last_key_holds_its_value() {
         let mut clips = [clip(1, 0)];
         apply(&mut clips, |c| toggle_animate(c, "rotation", Time(5)));
-        apply(&mut clips, |c| set_field(c, "rotation", 0, 45.0, Time(5)));
+        apply(&mut clips, |c| {
+            set_field(c, "rotation", 0, |_| 45.0, Time(5))
+        });
         assert!(key_at(&clips[0], "rotation", Time(5)));
         apply(&mut clips, |c| toggle_key(c, "rotation", Time(5)));
         assert!(!animated(&clips[0], "rotation"));
@@ -543,8 +652,131 @@ mod tests {
         let mut clips = [clip(1, 0)];
         clips[0].transform.crop[2] = 9.0;
         apply(&mut clips, |c| toggle_animate(c, "crop_right", Time(0)));
-        apply(&mut clips, |c| reset(c, "crop_right"));
+        apply(&mut clips, |c| reset(c, &["crop_right"]));
         assert_eq!(clips[0].transform, Transform::default());
         assert!(clips[0].keyframes.is_empty());
+    }
+
+    #[test]
+    fn keys_stay_inside_the_clip() {
+        // Source 10..110 at timeline 100..200.
+        let mut clips = [clip(1, 100)];
+        apply(&mut clips, |c| toggle_animate(c, "rotation", Time(50)));
+        apply(&mut clips, |c| {
+            set_field(c, "rotation", 0, |_| 9.0, Time(500))
+        });
+        let times: Vec<_> = clips[0].keyframes["rotation"]
+            .iter()
+            .map(|k| k.time)
+            .collect();
+        assert_eq!(times, [Time(10), Time(110)]);
+        apply(&mut clips, |c| key_all(c, &["opacity"], Time(0)));
+        assert_eq!(clips[0].keyframes["opacity"][0].time, Time(10));
+    }
+
+    #[test]
+    fn scale_keeps_its_ratio() {
+        let mut x = Transform {
+            scale: [2.0, 1.0],
+            ..Transform::default()
+        };
+        set(&mut x, "scale", Value::Scalar(1.0));
+        assert_eq!(x.scale, [1.0, 0.5]);
+    }
+
+    #[test]
+    fn mixed_drags_move_each_clip_by_the_delta() {
+        let mut clips = [clip(1, 0), clip(2, 0)];
+        clips[1].transform.opacity = 0.5;
+        apply(&mut clips, |c| {
+            set_field(c, "opacity", 0, |v| (v - 0.25).clamp(0.0, 1.0), Time(0))
+        });
+        assert_eq!(clips[0].transform.opacity, 0.75);
+        assert_eq!(clips[1].transform.opacity, 0.25);
+    }
+
+    /// The inspector over a real history, with one video clip selected.
+    fn harness() -> egui_kittest::Harness<'static, History> {
+        use jvid_core::model::{NewClip, ProbeInfo};
+        use jvid_core::time::FLICKS_PER_SECOND as S;
+        let mut h = History::new(Project::default());
+        let _ = h.apply(Command::Import(vec![(
+            "/nonexistent/a.mp4".into(),
+            ProbeInfo {
+                duration: Time(60 * S),
+                width: Some(1920),
+                height: Some(1080),
+                ..Default::default()
+            },
+        )]));
+        let asset = h.project().assets()[0].id;
+        let _ = h.apply(Command::AddTrack {
+            kind: TrackKind::Video,
+            name: "V1".into(),
+        });
+        let track = h.project().sequence().tracks()[0].id;
+        let _ = h.apply(Command::AddClip {
+            track,
+            clip: NewClip {
+                asset,
+                source_in: Time(0),
+                source_out: Time(10 * S),
+                start: Time(0),
+                link: None,
+            },
+        });
+        let id = h.project().sequence().tracks()[0].clips()[0].id;
+        let mut fresh = true;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([340.0, 420.0])
+            .wgpu()
+            .build_ui_state(
+                move |ui, h: &mut History| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    ui.painter().rect_filled(ui.max_rect(), 0.0, color::PANEL);
+                    let (edit, _) = show(ui, h.project(), &HashSet::from([id]), None, Time(S));
+                    match edit {
+                        Some((c, Some(k))) => h.apply_coalesced(k, c).unwrap(),
+                        Some((c, None)) => h.apply(c).unwrap(),
+                        None => jvid_core::history::Created::Nothing,
+                    };
+                },
+                h,
+            );
+        harness.run();
+        harness
+    }
+
+    #[test]
+    fn snapshot_and_separate_drags_are_separate_steps() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness();
+        h.snapshot("inspector_clip");
+        let rotation = |h: &egui_kittest::Harness<'_, History>| {
+            h.state().project().sequence().tracks()[0].clips()[0]
+                .transform
+                .rotation
+        };
+        let field = h.get_all_by_label("").nth(1).unwrap().rect().center();
+        for _ in 0..2 {
+            h.hover_at(field);
+            h.run();
+            h.drag_at(field);
+            h.run();
+            h.hover_at(field + vec2(10.0, 0.0));
+            h.run();
+            h.drop_at(field + vec2(10.0, 0.0));
+            h.run();
+        }
+        assert_eq!(rotation(&h), 20.0);
+        assert!(h.state_mut().undo());
+        assert_eq!(rotation(&h), 10.0);
+        assert!(h.state_mut().undo());
+        assert_eq!(rotation(&h), 0.0);
     }
 }
