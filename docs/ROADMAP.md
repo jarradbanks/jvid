@@ -91,7 +91,7 @@ flowchart LR
 | [#6](https://github.com/jarradbanks/jvid/issues/6) | Rational time and timecode | done | S | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#7](https://github.com/jarradbanks/jvid/issues/7) | Project data model | done | M | core | [#6](https://github.com/jarradbanks/jvid/issues/6) |
 | [#8](https://github.com/jarradbanks/jvid/issues/8) | Command system and undo/redo | done | M | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
-| [#9](https://github.com/jarradbanks/jvid/issues/9) | Project file format (.jvid JSON) | in progress | S | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
+| [#9](https://github.com/jarradbanks/jvid/issues/9) | Project file format (.jvid JSON) | done | S | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
 | [#10](https://github.com/jarradbanks/jvid/issues/10) | Settings and config files (TOML) |  | S | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#11](https://github.com/jarradbanks/jvid/issues/11) | suite-ui: theme tokens, fonts and base widgets | need testing | M | suite-ui | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#12](https://github.com/jarradbanks/jvid/issues/12) | App shell: window, dock layout and top bar |  | M | ui | [#11](https://github.com/jarradbanks/jvid/issues/11), [#9](https://github.com/jarradbanks/jvid/issues/9), [#8](https://github.com/jarradbanks/jvid/issues/8) |
