@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Mixer, Output, SAMPLE_RATE, Strip};
 use jvid_core::eval::{audio_in, video_at};
-use jvid_core::model::{AssetId, ClipId, Project, ProjectSettings, TrackKind, Transform};
+use jvid_core::model::{
+    AssetId, ClipId, MediaAsset, Project, ProjectSettings, TrackKind, Transform,
+};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::decode::{DecoderPool, Frame};
@@ -45,8 +47,8 @@ pub type DecodeFn = Arc<dyn Fn(&Path, Time) -> Result<Frame, String> + Send + Sy
 /// One clip's audio: fills interleaved stereo from source sample frame `start` as far as it's
 /// decoded, like [`AudioSource::fill`]. An empty `out` just seeks there.
 pub type ClipAudio = Box<dyn FnMut(i64, &mut [f32])>;
-/// Opens a [`ClipAudio`] on a file.
-pub type OpenAudio = Box<dyn FnMut(&Path) -> ClipAudio>;
+/// Opens a [`ClipAudio`] on the nth audio stream of a file.
+pub type OpenAudio = Box<dyn FnMut(&Path, usize) -> ClipAudio>;
 
 /// A frame of an asset at a source time.
 type Key = (AssetId, Time);
@@ -147,7 +149,9 @@ pub(crate) fn sample(t: Time) -> i64 {
 /// Per-clip audio sources and the track mixer.
 pub(crate) struct Audio {
     open: OpenAudio,
-    clips: HashMap<ClipId, ClipAudio>,
+    /// One source per stream the clip plays; several are summed.
+    clips: HashMap<ClipId, Vec<ClipAudio>>,
+    scratch: Vec<f32>,
     mixer: Mixer,
     /// One buffer per audio track, reused across blocks.
     inputs: Vec<Vec<f32>>,
@@ -158,6 +162,7 @@ impl Audio {
         Self {
             open,
             clips: HashMap::new(),
+            scratch: Vec::new(),
             mixer: Mixer::new(0),
             inputs: Vec::new(),
         }
@@ -172,9 +177,10 @@ impl Audio {
             if let Some(a) = project.asset(s.asset)
                 && !self.clips.contains_key(&s.clip)
             {
-                let mut src = (self.open)(&a.path);
-                src(sample(s.source_start), &mut []);
-                self.clips.insert(s.clip, src);
+                let mut srcs = open_streams(&mut self.open, a, s.stream);
+                srcs.iter_mut()
+                    .for_each(|src| src(sample(s.source_start), &mut []));
+                self.clips.insert(s.clip, srcs);
             }
         }
     }
@@ -215,18 +221,32 @@ impl Audio {
             ) else {
                 continue;
             };
-            let src = self
+            let srcs = self
                 .clips
                 .entry(s.clip)
-                .or_insert_with(|| (self.open)(&asset.path));
-            src(
-                sample(s.source_start),
-                &mut self.inputs[i][span(s.start)..span(s.end)],
-            );
+                .or_insert_with(|| open_streams(&mut self.open, asset, s.stream));
+            let out = &mut self.inputs[i][span(s.start)..span(s.end)];
+            if let [src] = srcs.as_mut_slice() {
+                src(sample(s.source_start), out);
+                continue;
+            }
+            for src in srcs {
+                self.scratch.clear();
+                self.scratch.resize(out.len(), 0.0);
+                src(sample(s.source_start), &mut self.scratch);
+                out.iter_mut().zip(&self.scratch).for_each(|(o, x)| *o += x);
+            }
         }
         let inputs: Vec<&[f32]> = self.inputs.iter().map(Vec::as_slice).collect();
         self.mixer.mix(&inputs, out);
     }
+}
+
+/// Sources for `stream` of `asset`, or for every audio stream it has when `None`.
+fn open_streams(open: &mut OpenAudio, asset: &MediaAsset, stream: Option<u32>) -> Vec<ClipAudio> {
+    let all = asset.probe.as_ref().map_or(1, |p| p.audio_streams);
+    let streams = stream.map_or(0..all, |n| n..n + 1);
+    streams.map(|n| open(&asset.path, n as usize)).collect()
 }
 
 /// The timeline playback engine. See the module docs.
@@ -293,8 +313,8 @@ impl Playback {
         let quick = DecoderPool::default();
         let mut pb = Self::new(
             Arc::new(move |p, t| pool.frame_at(p, t).map_err(|e| e.to_string())),
-            Box::new(|p| {
-                let mut src = AudioSource::open(p, true);
+            Box::new(|p, nth| {
+                let mut src = AudioSource::stream(p, nth);
                 Box::new(move |start, out| src.fill(start, out))
             }),
             budget,

@@ -663,6 +663,7 @@ mod tests {
             params: BTreeMap::new(),
             keyframes: BTreeMap::new(),
             transform: Transform::default(),
+            stream: Some(0),
         }
     }
 

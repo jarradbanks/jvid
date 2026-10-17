@@ -68,6 +68,18 @@ pub struct ProbeInfo {
     pub file_size: Option<u64>,
 }
 
+impl ProbeInfo {
+    /// The nth audio stream's title, e.g. "Mic", else "Audio n" counting from 1.
+    pub fn audio_name(&self, n: u32) -> String {
+        let mut titles = self.streams.iter().filter_map(|s| match s {
+            StreamInfo::Audio(a) => Some(a.title.as_ref()),
+            _ => None,
+        });
+        let title = titles.nth(n as usize).flatten();
+        title.cloned().unwrap_or_else(|| format!("Audio {}", n + 1))
+    }
+}
+
 /// One stream of a probed file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StreamInfo {
@@ -242,6 +254,18 @@ pub struct Clip {
     /// Static transform, crop and opacity; keyframes of the same names override each field.
     #[serde(default, skip_serializing_if = "Transform::is_default")]
     pub transform: Transform,
+    /// The audio stream an audio clip plays, the nth in file order, or `None` for all of them
+    /// mixed. Older projects lack it and played the first.
+    #[serde(default = "first_stream", skip_serializing_if = "is_first_stream")]
+    pub stream: Option<u32>,
+}
+
+fn first_stream() -> Option<u32> {
+    Some(0)
+}
+
+fn is_first_stream(s: &Option<u32>) -> bool {
+    *s == Some(0)
 }
 
 /// Where a clip lands in the frame, in project pixels. The clip is first fitted whole and
@@ -439,7 +463,11 @@ pub struct Placement {
     pub source_out: Time,
     pub start: Time,
     pub video: Option<TrackId>,
+    /// The track for the first audio stream; the rest go on the audio tracks below it.
     pub audio: Option<TrackId>,
+    /// One audio clip per entry: its stream (`None` mixes all) and the name of a track made
+    /// for it when there's none below to land on.
+    pub streams: Vec<(Option<u32>, String)>,
     /// Make a new track for `video` or `audio` when it's `None`, for a file with no track of
     /// that kind to land on.
     pub add_video: bool,
@@ -578,6 +606,7 @@ impl Sequence {
                 params: BTreeMap::new(),
                 keyframes: BTreeMap::new(),
                 transform: Transform::default(),
+                stream: Some(0),
             },
         );
         Ok(id)
@@ -606,6 +635,7 @@ impl Sequence {
             params: &mut c.params,
             keyframes: &mut c.keyframes,
             transform: &mut c.transform,
+            stream: &mut c.stream,
         }))
     }
 
@@ -798,18 +828,35 @@ impl Sequence {
         let len = p.source_out - p.source_in;
         let mut s = self.clone();
         let mut links = BTreeMap::new();
-        let mut add = |t: Option<TrackId>, new, kind| match t {
-            None if new => Some(s.add_track(kind, "")),
-            t => t,
-        };
-        let video = add(p.video, p.add_video, TrackKind::Video);
-        let audio = add(p.audio, p.add_audio, TrackKind::Audio);
-        let targets = [(video, TrackKind::Video), (audio, TrackKind::Audio)];
-        let mut tracks = Vec::new();
-        for (t, kind) in targets {
-            if let Some(t) = t {
-                tracks.push((t, s.kind_check(t, kind)?));
+        let mut targets = Vec::new();
+        match p.video {
+            None if p.add_video => {
+                targets.push((s.add_track(TrackKind::Video, ""), TrackKind::Video, Some(0)))
             }
+            Some(t) => targets.push((t, TrackKind::Video, Some(0))),
+            None => {}
+        }
+        let mut audio = p.audio;
+        for (i, (stream, name)) in p.streams.iter().enumerate() {
+            audio = match audio {
+                None if i == 0 && p.add_audio => Some(s.add_track(TrackKind::Audio, name.clone())),
+                None => break,
+                Some(a) if i == 0 => Some(a),
+                // The next unlocked audio track below the previous stream's, else a new one.
+                Some(a) => {
+                    let at = s.index(a)?;
+                    let below = s.tracks[at + 1..]
+                        .iter()
+                        .find(|t| t.kind == TrackKind::Audio && !t.locked)
+                        .map(|t| t.id);
+                    Some(below.unwrap_or_else(|| s.add_track(TrackKind::Audio, name.clone())))
+                }
+            };
+            targets.push((audio.expect("set above"), TrackKind::Audio, *stream));
+        }
+        let mut tracks = Vec::new();
+        for (t, kind, stream) in targets {
+            tracks.push((t, s.kind_check(t, kind)?, stream));
         }
         if p.insert {
             for ti in 0..s.tracks.len() {
@@ -829,7 +876,7 @@ impl Sequence {
         }
         let link = (tracks.len() > 1).then(|| s.new_link());
         let mut ids = Vec::new();
-        for (t, ti) in tracks {
+        for (t, ti, stream) in tracks {
             s.clear(ti, p.start, p.start + len, &mut links);
             let clip = NewClip {
                 asset: p.asset,
@@ -838,7 +885,9 @@ impl Sequence {
                 start: p.start,
                 link,
             };
-            ids.push(s.add_clip(t, clip)?);
+            let id = s.add_clip(t, clip)?;
+            s.with_clip_mut(id, |c| *c.stream = stream)?;
+            ids.push(id);
         }
         *self = s;
         Ok(ids)
@@ -963,6 +1012,7 @@ pub(crate) struct ClipProps<'a> {
     pub params: &'a mut BTreeMap<String, f64>,
     pub keyframes: &'a mut BTreeMap<String, Vec<Keyframe>>,
     pub transform: &'a mut Transform,
+    pub stream: &'a mut Option<u32>,
 }
 
 fn insert_sorted(clips: &mut Vec<Clip>, c: Clip) {
@@ -1019,14 +1069,15 @@ impl Project {
 
     /// Places `asset`'s source in/out (default the whole file) at `start`: on `on` for its
     /// kind, and on the targeted track, else the top unlocked one, for the other kind the
-    /// file has, adding a track of a kind the sequence lacks. `None` when the file has no
-    /// duration.
+    /// file has, adding a track of a kind the sequence lacks. Each audio stream gets its own
+    /// clip and track unless `merge` mixes them into one. `None` when the file has no duration.
     pub fn placement(
         &self,
         asset: AssetId,
         start: Time,
         insert: bool,
         on: Option<TrackId>,
+        merge: bool,
     ) -> Option<Placement> {
         let a = self.asset(asset)?;
         let probe = a.probe.as_ref()?;
@@ -1060,6 +1111,7 @@ impl Project {
             start: start.max(Time(0)),
             video,
             audio,
+            streams: audio_streams(probe, merge),
             add_video,
             add_audio,
             insert,
@@ -1069,6 +1121,19 @@ impl Project {
     pub(crate) fn asset_mut(&mut self, id: AssetId) -> Option<&mut MediaAsset> {
         self.assets.iter_mut().find(|a| a.id == id)
     }
+}
+
+/// Each audio clip a placement makes: its stream and a name, the stream's title or "Audio n".
+fn audio_streams(probe: &ProbeInfo, merge: bool) -> Vec<(Option<u32>, String)> {
+    if merge || probe.audio_streams < 2 {
+        return (probe.audio_streams > 0)
+            .then(|| (if merge { None } else { Some(0) }, String::new()))
+            .into_iter()
+            .collect();
+    }
+    (0..probe.audio_streams)
+        .map(|n| (Some(n), probe.audio_name(n)))
+        .collect()
 }
 
 /// Which end of a clip a trim moves.
@@ -1285,6 +1350,7 @@ mod tests {
             start: Time(start),
             video: Some(v),
             audio: Some(a),
+            streams: vec![(Some(0), String::new())],
             add_video: false,
             add_audio: false,
             insert,
@@ -1463,17 +1529,19 @@ mod tests {
             ..Default::default()
         };
         p.asset_mut(id).unwrap().probe = Some(probe.clone());
-        let pl = p.placement(id, Time(5), true, None).unwrap();
+        let pl = p.placement(id, Time(5), true, None, false).unwrap();
         assert_eq!((pl.source_in, pl.source_out), (Time(0), Time(100)));
         assert_eq!((pl.video, pl.audio), (Some(v2), Some(a1)));
         // A drop picks the track under the pointer for its kind.
         assert_eq!(
-            p.placement(id, Time(5), false, Some(v1)).unwrap().video,
+            p.placement(id, Time(5), false, Some(v1), false)
+                .unwrap()
+                .video,
             Some(v1)
         );
         let a = p.asset_mut(id).unwrap();
         (a.in_point, a.out_point) = (Some(Time(10)), Some(Time(20)));
-        let pl = p.placement(id, Time(-5), false, None).unwrap();
+        let pl = p.placement(id, Time(-5), false, None, false).unwrap();
         assert_eq!(
             (pl.source_in, pl.source_out, pl.start),
             (Time(10), Time(20), Time(0))
@@ -1483,7 +1551,10 @@ mod tests {
             width: None,
             ..probe
         });
-        assert_eq!(p.placement(id, Time(0), false, None).unwrap().video, None);
+        assert_eq!(
+            p.placement(id, Time(0), false, None, false).unwrap().video,
+            None
+        );
     }
 
     #[test]
@@ -1496,7 +1567,7 @@ mod tests {
             audio_streams: 1,
             ..Default::default()
         });
-        let pl = p.placement(id, Time(5), false, None).unwrap();
+        let pl = p.placement(id, Time(5), false, None, false).unwrap();
         assert_eq!(p.sequence.place(pl).unwrap().len(), 2);
         let kinds: Vec<_> = p.sequence.tracks().iter().map(|t| t.kind).collect();
         assert_eq!(kinds, [TrackKind::Video, TrackKind::Audio]);
@@ -1524,6 +1595,7 @@ mod tests {
                 rotation: 30.0,
                 ..Default::default()
             },
+            stream: Some(0),
         };
         assert_eq!(c.transform_at(Time(0)), c.transform);
         let mut k = |name: &str, keys: Vec<Keyframe>| c.keyframes.insert(name.into(), keys);
@@ -1696,5 +1768,41 @@ mod tests {
     fn time_arithmetic() {
         assert_eq!(Time(5) + Time(3), Time(8));
         assert_eq!(Time(5) - Time(8), Time(-3));
+    }
+
+    #[test]
+    fn audio_streams_get_their_own_tracks_below_the_target() {
+        let mut p = Project::default();
+        let a1 = p.sequence.add_track(TrackKind::Audio, "A1");
+        let locked = p.sequence.add_track(TrackKind::Audio, "A2");
+        p.sequence
+            .tracks
+            .iter_mut()
+            .for_each(|t| t.locked = t.id == locked);
+        let a3 = p.sequence.add_track(TrackKind::Audio, "A3");
+        let id = p.add_asset("obs.mkv");
+        let audio = |title: Option<&str>| {
+            StreamInfo::Audio(AudioInfo {
+                title: title.map(Into::into),
+                ..Default::default()
+            })
+        };
+        p.asset_mut(id).unwrap().probe = Some(ProbeInfo {
+            duration: Time(100),
+            audio_streams: 3,
+            streams: vec![audio(Some("Game")), audio(None), audio(Some("Chat"))],
+            ..Default::default()
+        });
+        let pl = p.placement(id, Time(0), false, None, false).unwrap();
+        let names: Vec<_> = pl.streams.iter().map(|s| s.1.as_str()).collect();
+        assert_eq!(names, ["Game", "Audio 2", "Chat"]);
+        let ids = p.sequence.place(pl).unwrap();
+        // Skips the locked track, reuses A3, then adds one named for the stream.
+        let tracks: Vec<_> = ids.iter().map(|c| p.sequence.clip(*c).unwrap().0).collect();
+        assert_eq!(tracks[..2], [a1, a3]);
+        assert_eq!(p.sequence.track(tracks[2]).unwrap().name, "Chat");
+        assert_eq!(p.sequence.linked(ids[0]).len(), 3);
+        let pl = p.placement(id, Time(0), false, None, true).unwrap();
+        assert_eq!(pl.streams, [(None, String::new())]);
     }
 }

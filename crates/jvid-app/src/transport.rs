@@ -172,8 +172,17 @@ impl AudioSource {
     /// Silent when the file has no audio or it can't be opened. The file is opened on the feeder
     /// thread, so this does no I/O and is safe to call from the UI thread.
     pub fn open(path: &Path, has_audio: bool) -> Self {
+        let mut s = Self::stream(path, 0);
+        if !has_audio {
+            s.feeder = None;
+        }
+        s
+    }
+
+    /// Like [`Self::open`] on the nth audio stream.
+    pub fn stream(path: &Path, nth: usize) -> Self {
         Self {
-            feeder: has_audio.then(|| Feeder::spawn(path.to_owned())),
+            feeder: Some(Feeder::spawn(path.to_owned(), nth)),
             buf: Vec::new(),
             // Forces a seek on first use.
             at: i64::MAX,
@@ -211,14 +220,14 @@ impl AudioSource {
 }
 
 impl Feeder {
-    fn spawn(path: PathBuf) -> Self {
+    fn spawn(path: PathBuf, nth: usize) -> Self {
         let (seek, seeks) = channel::<(u64, i64)>();
         let (tx, chunks) = sync_channel(AHEAD);
         let thread = std::thread::Builder::new()
             .name("source-audio".into())
             .spawn(move || {
                 // On failure the thread exits, the next seek fails, and the source goes silent.
-                let mut dec = match AudioDecoder::open(&path, 0) {
+                let mut dec = match AudioDecoder::open(&path, nth) {
                     Ok(d) => d,
                     Err(e) => return tracing::warn!("source audio of {}: {e}", path.display()),
                 };

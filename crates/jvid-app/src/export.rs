@@ -103,7 +103,7 @@ fn render(
     let rate = project.settings().frame_rate;
     let (first, end) = frames(project, req.range);
     let decoders = DecoderPool::default();
-    let mut audio = Audio::new(Box::new(|p| blocking(p)));
+    let mut audio = Audio::new(Box::new(blocking));
     let mut gpu = Gpu::new(device);
     let mut readback = Readback::default();
     let mut mix = Vec::new();
@@ -195,8 +195,8 @@ fn validate(project: &Project, req: &Request) -> Result<ProbeInfo, Error> {
 
 /// Reads one clip's audio synchronously, for export: unlike playback's source it always fills
 /// all of `out` that the file has.
-fn blocking(path: &Path) -> ClipAudio {
-    let mut dec = AudioDecoder::open(path, 0)
+fn blocking(path: &Path, nth: usize) -> ClipAudio {
+    let mut dec = AudioDecoder::open(path, nth)
         .map_err(|e| tracing::debug!("export audio of {}: {e}", path.display()))
         .ok();
     let (mut buf, mut at) = (Vec::<f32>::new(), i64::MAX);

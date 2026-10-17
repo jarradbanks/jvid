@@ -1426,6 +1426,7 @@ mod tests {
                 start: fr(at),
                 video: Some(v),
                 audio: Some(a),
+                streams: vec![(Some(0), String::new())],
                 insert: false,
                 add_video: false,
                 add_audio: false,
