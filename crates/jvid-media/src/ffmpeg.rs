@@ -61,6 +61,7 @@ pub fn init() -> Result<Info, ffmpeg_next::Error> {
         encoders = ?info.encoders,
         "ffmpeg loaded"
     );
+    tracing::info!(hardware = ?crate::encode::hardware(), "hardware encoders");
     for problem in problems(info.avcodec, info.license, GPL_BUILD) {
         tracing::warn!("{problem}");
     }

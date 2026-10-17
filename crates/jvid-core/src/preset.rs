@@ -11,6 +11,7 @@ use crate::time::Rate;
 #[serde(rename_all = "lowercase")]
 pub enum VideoCodec {
     H264,
+    Hevc,
     ProRes,
     Gif,
 }
