@@ -318,7 +318,7 @@ flowchart LR
 | [#57](https://github.com/jarradbanks/jvid/issues/57) | Loudness normalization (EBU R128) | done | M | audio, export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#58](https://github.com/jarradbanks/jvid/issues/58) | Background render queue | done | M | export, ui | [#54](https://github.com/jarradbanks/jvid/issues/54), [#18](https://github.com/jarradbanks/jvid/issues/18) |
 | [#59](https://github.com/jarradbanks/jvid/issues/59) | Export current frame as PNG | done | S | export | [#30](https://github.com/jarradbanks/jvid/issues/30) |
-| [#60](https://github.com/jarradbanks/jvid/issues/60) | GIF export | in progress | S | export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
+| [#60](https://github.com/jarradbanks/jvid/issues/60) | GIF export | done | S | export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#91](https://github.com/jarradbanks/jvid/issues/91) | Lossless fast export |  | L | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52), [#54](https://github.com/jarradbanks/jvid/issues/54) |
 | [#92](https://github.com/jarradbanks/jvid/issues/92) | Export to a target file size |  | M | export | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53) |
 | [#61](https://github.com/jarradbanks/jvid/issues/61) | jvid render CLI | done | M | cli | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53), [#9](https://github.com/jarradbanks/jvid/issues/9) |
@@ -353,7 +353,7 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | [#63](https://github.com/jarradbanks/jvid/issues/63) | Text and title layers | done | L | render, ui | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44), [#20](https://github.com/jarradbanks/jvid/issues/20) |
 | [#64](https://github.com/jarradbanks/jvid/issues/64) | Solid color layers | done | S | render | [#45](https://github.com/jarradbanks/jvid/issues/45) |
-| [#65](https://github.com/jarradbanks/jvid/issues/65) | Transitions: crossfade and dip to black/white |  | M | timeline, render | [#43](https://github.com/jarradbanks/jvid/issues/43), [#45](https://github.com/jarradbanks/jvid/issues/45), [#50](https://github.com/jarradbanks/jvid/issues/50) |
+| [#65](https://github.com/jarradbanks/jvid/issues/65) | Transitions: crossfade and dip to black/white | in progress | M | timeline, render | [#43](https://github.com/jarradbanks/jvid/issues/43), [#45](https://github.com/jarradbanks/jvid/issues/45), [#50](https://github.com/jarradbanks/jvid/issues/50) |
 | [#66](https://github.com/jarradbanks/jvid/issues/66) | Color adjustments | done | M | render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#67](https://github.com/jarradbanks/jvid/issues/67) | .cube LUT support | done | S | render | [#66](https://github.com/jarradbanks/jvid/issues/66) |
 | [#68](https://github.com/jarradbanks/jvid/issues/68) | Clip speed, reverse and freeze frame | done | M | core, timeline | [#29](https://github.com/jarradbanks/jvid/issues/29), [#37](https://github.com/jarradbanks/jvid/issues/37), [#31](https://github.com/jarradbanks/jvid/issues/31) |
