@@ -65,6 +65,14 @@ pub const ACTIONS: &[Action] = &[
         "Q",
     ),
     t("ripple_trim_next", "Ripple trim next edit to playhead", "W"),
+    t("copy", "Copy", "Ctrl+C"),
+    t("cut", "Cut", "Ctrl+X"),
+    t("paste", "Paste", "Ctrl+V"),
+    t("duplicate", "Duplicate", "Ctrl+Shift+D"),
+    t("delete", "Delete", "Delete"),
+    t("ripple_delete", "Ripple Delete", "Shift+Delete"),
+    t("link", "Link/Unlink", "Ctrl+L"),
+    t("linked_selection", "Linked Selection", "Ctrl+Shift+L"),
     a("razor_tool", "Razor tool", "C"),
     a("selection_tool", "Selection tool", "V"),
     t("add_edit", "Add edit", "Ctrl+K"),
@@ -156,6 +164,23 @@ impl Keymap {
         }
         let mut out = Vec::new();
         for e in ctx.input(|i| i.events.clone()) {
+            // egui-winit turns these presses into clipboard events instead of key events;
+            // on Windows Shift+Delete arrives as Cut.
+            let clip = |modifiers, key| Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            };
+            let shift = ctx.input(|i| i.modifiers.shift);
+            let e = match e {
+                Event::Copy => clip(Modifiers::COMMAND, Key::C),
+                Event::Cut if shift => clip(Modifiers::SHIFT, Key::Delete),
+                Event::Cut => clip(Modifiers::COMMAND, Key::X),
+                Event::Paste(_) => clip(Modifiers::COMMAND, Key::V),
+                e => e,
+            };
             let Event::Key {
                 key,
                 physical_key,

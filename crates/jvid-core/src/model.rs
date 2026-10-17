@@ -842,6 +842,71 @@ impl Sequence {
     }
 }
 
+impl Sequence {
+    /// Removes the clips. Ripple closes each gap by pulling later clips on its track left.
+    pub(crate) fn remove_clips(&mut self, ids: &[ClipId], ripple: bool) -> Result<(), ModelError> {
+        let mut s = self.clone();
+        let mut gone = Vec::new();
+        for &id in ids {
+            gone.push(s.remove_clip(id)?);
+        }
+        if ripple {
+            gone.sort_by_key(|(_, c)| std::cmp::Reverse(c.start));
+            for (t, c) in gone {
+                let ti = s.index(t)?;
+                for later in &mut s.tracks[ti].clips {
+                    if later.start >= c.start {
+                        later.start = later.start - c.duration();
+                    }
+                }
+            }
+        }
+        *self = s;
+        Ok(())
+    }
+
+    /// Overwrites copies of `clips` onto their tracks, the earliest starting at `at`. Copies
+    /// get new ids, and new links shared the way the originals shared theirs.
+    pub(crate) fn paste(
+        &mut self,
+        clips: &[(TrackId, Clip)],
+        at: Time,
+    ) -> Result<Vec<ClipId>, ModelError> {
+        let Some(earliest) = clips.iter().map(|(_, c)| c.start).min() else {
+            return Ok(Vec::new());
+        };
+        let mut s = self.clone();
+        let mut links = BTreeMap::new();
+        let mut fresh = BTreeMap::new();
+        let mut ids = Vec::new();
+        for (t, c) in clips {
+            let ti = s.index(*t)?;
+            let mut c = c.clone();
+            c.id = ClipId(s.alloc());
+            c.start = c.start + (at - earliest);
+            c.link = c
+                .link
+                .map(|l| *fresh.entry(l).or_insert_with(|| s.new_link()));
+            s.clear(ti, c.start, c.end(), &mut links);
+            ids.push(c.id);
+            insert_sorted(&mut s.tracks[ti].clips, c);
+        }
+        *self = s;
+        Ok(ids)
+    }
+
+    /// Puts the clips in one new link group, or takes them out of theirs.
+    pub(crate) fn link_clips(&mut self, ids: &[ClipId], linked: bool) -> Result<(), ModelError> {
+        let mut s = self.clone();
+        let link = linked.then(|| s.new_link());
+        for &id in ids {
+            s.with_clip_mut(id, |c| *c.link = link)?;
+        }
+        *self = s;
+        Ok(())
+    }
+}
+
 /// The clip fields `Sequence::with_clip_mut` exposes.
 pub(crate) struct ClipProps<'a> {
     pub asset: &'a mut AssetId,
@@ -1102,6 +1167,51 @@ mod tests {
         s.drag_clip(cv, v2, Time(-50)).unwrap();
         assert_eq!(s.clip(cv).unwrap().1.start, Time(0));
         assert_eq!(s.drag_clip(cv, a, Time(0)), Err(ModelError::WrongKind(a)));
+    }
+
+    #[test]
+    fn delete_ripple_paste_and_link() {
+        let (mut s, v, a) = seq();
+        let l = s.new_link();
+        let linked = NewClip {
+            link: Some(l),
+            ..clip(0, 10)
+        };
+        let cv = s.add_clip(v, linked.clone()).unwrap();
+        let ca = s.add_clip(a, linked).unwrap();
+        let later = s.add_clip(v, clip(20, 10)).unwrap();
+
+        // Pasted copies overwrite at `at` and share a new link of their own.
+        let copied: Vec<_> = [cv, ca]
+            .map(|c| s.clip(c).map(|(t, c)| (t, c.clone())).unwrap())
+            .into();
+        let new = s.paste(&copied, Time(25)).unwrap();
+        assert_eq!(
+            spans(&s, v),
+            [(0, 100, 110), (20, 100, 105), (25, 100, 110)]
+        );
+        let links: Vec<_> = new.iter().map(|c| s.clip(*c).unwrap().1.link).collect();
+        assert!(links[0].is_some() && links[0] == links[1] && links[0] != Some(l));
+
+        // Delete leaves the gap; ripple closes it on the clip's own track.
+        let mut gap = s.clone();
+        gap.remove_clips(&[cv], false).unwrap();
+        assert_eq!(spans(&gap, v)[0], (20, 100, 105));
+        s.remove_clips(&[cv, ca], true).unwrap();
+        assert_eq!(spans(&s, v), [(10, 100, 105), (15, 100, 110)]);
+        assert_eq!(spans(&s, a), [(15, 100, 110)]);
+        let before = s.clone();
+        assert_eq!(
+            s.remove_clips(&[later, cv], false),
+            Err(ModelError::UnknownClip(cv))
+        );
+        assert_eq!(s, before);
+
+        // Unlink then relink.
+        s.link_clips(&new, false).unwrap();
+        assert_eq!(s.linked(new[0]).len(), 1);
+        s.link_clips(&new, true).unwrap();
+        assert_eq!(s.linked(new[0]).len(), 2);
     }
 
     #[test]

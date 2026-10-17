@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use crate::keyframe::{self, Keyframe};
 use crate::model::{
-    AssetId, ClipId, LinkId, MarkerId, ModelError, NewClip, Placement, ProbeInfo, Project,
+    AssetId, Clip, ClipId, LinkId, MarkerId, ModelError, NewClip, Placement, ProbeInfo, Project,
     ProjectSettings, TrackId, TrackKind, TrackSettings,
 };
 use crate::time::Time;
@@ -41,6 +41,21 @@ pub enum Command {
         id: ClipId,
         track: TrackId,
         start: Time,
+    },
+    /// Removes clips; `ripple` closes the gaps on their tracks.
+    RemoveClips {
+        ids: Vec<ClipId>,
+        ripple: bool,
+    },
+    /// Overwrites copies of clips onto their tracks, the earliest at `at`, keeping links.
+    Paste {
+        clips: Vec<(TrackId, Clip)>,
+        at: Time,
+    },
+    /// Links the clips into one new group, or unlinks them.
+    LinkClips {
+        ids: Vec<ClipId>,
+        linked: bool,
     },
     MoveClip {
         id: ClipId,
@@ -160,6 +175,10 @@ impl Command {
                 .iter()
                 .find_map(|(t, _)| track(*t))
                 .or_else(|| track(*to)),
+            Self::RemoveClips { ids, .. } | Self::LinkClips { ids, .. } => {
+                ids.iter().find_map(|id| clip(*id))
+            }
+            Self::Paste { clips, .. } => clips.iter().find_map(|(t, _)| track(*t)),
             Self::RemoveAsset(a) => s
                 .tracks()
                 .iter()
@@ -213,6 +232,18 @@ impl Command {
             },
             Self::DragClip { id, track, start } => {
                 s.drag_clip(id, track, start)?;
+                Created::Nothing
+            }
+            Self::RemoveClips { ids, ripple } => {
+                s.remove_clips(&ids, ripple)?;
+                Created::Nothing
+            }
+            Self::Paste { clips, at } => match s.paste(&clips, at)?.first() {
+                Some(c) => Created::Clip(*c),
+                None => Created::Nothing,
+            },
+            Self::LinkClips { ids, linked } => {
+                s.link_clips(&ids, linked)?;
                 Created::Nothing
             }
             Self::MoveClip { id, track, start } => {
