@@ -315,7 +315,6 @@ impl Timeline {
         let view = self.view(lanes_left);
         let id = ui.id().with("timeline");
         let scrub = ui.interact(ruler, id.with("ruler"), Sense::click_and_drag());
-        let body = ui.interact(lanes.union(headers), id.with("lanes"), Sense::hover());
         let marquee = ui.interact(lanes, id.with("marquee"), Sense::click_and_drag());
         let head_x = view.x(self.playhead());
         let grip = Rect::from_x_y_ranges(head_x - 4.0..=head_x + 4.0, lanes.y_range());
@@ -330,10 +329,16 @@ impl Timeline {
         }
         let tracks = project.sequence().tracks();
         let content_h: f32 = tracks.iter().map(|t| t.height).sum();
-        if (body.hovered() || scrub.hovered())
+        // Not `hovered()`: clips, the marquee and buttons sit on top of the body.
+        if ui.rect_contains_pointer(area)
             && let Some(p) = ui.input(|i| i.pointer.hover_pos())
         {
-            let (zoom, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
+            let (zoom, mut scroll, shift) =
+                ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta, i.modifiers.shift));
+            // egui maps Shift+wheel to x itself; cover backends that don't.
+            if shift && scroll.x == 0.0 {
+                scroll = egui::vec2(scroll.y, 0.0);
+            }
             if zoom != 1.0 {
                 self.zoom_by(zoom as f64, view, p.x.max(lanes_left));
             } else {
@@ -1493,6 +1498,45 @@ mod tests {
         );
         assert!(h.state_mut().1.undo());
         assert_eq!(seq(&h).tracks()[0].clips().len(), 1);
+    }
+
+    #[test]
+    fn wheel_scrolls_and_zooms_over_clips_and_empty_lanes() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(2));
+        let lane_y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let wheel =
+            |h: &mut egui_kittest::Harness<'_, (Timeline, History)>, at, delta, modifiers| {
+                h.hover_at(at);
+                h.run();
+                h.event(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta,
+                    modifiers,
+                    phase: egui::TouchPhase::Move,
+                });
+                h.event(egui::Event::PointerMoved(at));
+                for _ in 0..10 {
+                    h.run();
+                }
+            };
+        let none = egui::Modifiers::NONE;
+        // Over a clip (1s in) and over empty lane far right.
+        for x in [size::TRACK_HEADER + 20.0, 900.0] {
+            let at = pos2(x, lane_y);
+            h.state_mut().0.scroll = 5.0;
+            wheel(&mut h, at, egui::vec2(-40.0, 0.0), none);
+            assert!(h.state().0.scroll > 5.0, "x scroll at {x}");
+            let before = h.state().0.scroll;
+            wheel(&mut h, at, egui::vec2(0.0, -40.0), egui::Modifiers::SHIFT);
+            assert!(h.state().0.scroll > before, "shift scroll at {x}");
+            let zoom = h.state().0.zoom;
+            wheel(&mut h, at, egui::vec2(0.0, 40.0), egui::Modifiers::COMMAND);
+            assert!(h.state().0.zoom > zoom, "zoom at {x}");
+        }
     }
 
     /// The bin and the timeline side by side: dragging a tile or row onto a new project's
