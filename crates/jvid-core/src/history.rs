@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use crate::keyframe::{self, Keyframe};
 use crate::model::{
-    AssetId, ClipId, LinkId, MarkerId, ModelError, NewClip, ProbeInfo, Project, ProjectSettings,
-    TrackId, TrackKind, TrackSettings,
+    AssetId, ClipId, LinkId, MarkerId, ModelError, NewClip, Placement, ProbeInfo, Project,
+    ProjectSettings, TrackId, TrackKind, TrackSettings,
 };
 use crate::time::Time;
 
@@ -34,6 +34,14 @@ pub enum Command {
         clip: NewClip,
     },
     RemoveClip(ClipId),
+    /// Insert or overwrite edit; creates the video clip first when there are two.
+    Place(Placement),
+    /// Moves a clip and its linked clips, overwriting what they land on.
+    DragClip {
+        id: ClipId,
+        track: TrackId,
+        start: Time,
+    },
     MoveClip {
         id: ClipId,
         track: TrackId,
@@ -143,6 +151,15 @@ impl Command {
             | Self::AddKeyframe { id, .. }
             | Self::RemoveKeyframe { id, .. }
             | Self::MoveKeyframe { id, .. } => clip(*id),
+            Self::Place(p) => {
+                // Insert leaves locked tracks where they are rather than failing.
+                [p.video, p.audio].into_iter().flatten().find_map(track)
+            }
+            Self::DragClip { id, track: to, .. } => s
+                .linked(*id)
+                .iter()
+                .find_map(|(t, _)| track(*t))
+                .or_else(|| track(*to)),
             Self::RemoveAsset(a) => s
                 .tracks()
                 .iter()
@@ -188,6 +205,14 @@ impl Command {
             Self::AddClip { track, clip } => Created::Clip(s.add_clip(track, clip)?),
             Self::RemoveClip(id) => {
                 s.remove_clip(id)?;
+                Created::Nothing
+            }
+            Self::Place(placement) => match s.place(placement)?.first() {
+                Some(c) => Created::Clip(*c),
+                None => Created::Nothing,
+            },
+            Self::DragClip { id, track, start } => {
+                s.drag_clip(id, track, start)?;
                 Created::Nothing
             }
             Self::MoveClip { id, track, start } => {

@@ -217,8 +217,10 @@ impl MediaBin {
                 .show(ui, |ui| {
                     if self.list {
                         for a in &assets {
-                            let r = ui
-                                .allocate_response(vec2(ui.available_width(), ROW), Sense::click());
+                            let r = ui.allocate_response(
+                                vec2(ui.available_width(), ROW),
+                                Sense::click_and_drag(),
+                            );
                             self.row(ui, r, a, project, missing.contains(&a.path), out);
                         }
                     } else {
@@ -231,7 +233,7 @@ impl MediaBin {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = gap;
                                 for a in chunk {
-                                    let r = ui.allocate_response(tile, Sense::click());
+                                    let r = ui.allocate_response(tile, Sense::click_and_drag());
                                     self.tile(ui, r, a, project, missing.contains(&a.path), out);
                                 }
                             });
@@ -482,6 +484,8 @@ impl MediaBin {
         if r.double_clicked() {
             out.open = Some(a.id);
         }
+        // The timeline takes it on drop.
+        r.dnd_set_drag_payload(a.id);
         r.context_menu(|ui| {
             self.selected = Some(a.id);
             if offline && ui.button("Relink…").clicked() {

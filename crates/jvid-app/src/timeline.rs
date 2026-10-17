@@ -1,7 +1,8 @@
 //! The timeline panel: a timecode ruler, one lane per track, clips with filmstrips and
 //! waveforms, zoom, scroll and a draggable playhead. Only what's in view is drawn. Track
 //! headers on the left hold the lock, hide or mute, and solo toggles, the target, a height
-//! grip, and a menu to add, rename, reorder and remove tracks.
+//! grip, and a menu to add, rename, reorder and remove tracks. Media dropped from the bin
+//! overwrites at the drop point; dragged clips overwrite where they land.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -12,7 +13,7 @@ use egui::{
     TextureHandle, Ui, pos2, vec2,
 };
 use jvid_core::history::{Command, GestureKey};
-use jvid_core::model::{Clip, MediaAsset, Project, Track, TrackId, TrackKind};
+use jvid_core::model::{AssetId, Clip, MediaAsset, Project, Track, TrackId, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_jobs::Priority;
 use jvid_media::thumbnails;
@@ -51,6 +52,8 @@ pub struct Timeline {
     media: Media,
     /// The track being renamed and the name typed so far.
     renaming: Option<(TrackId, String)>,
+    /// Where the dragged clip would land; the press origin is gone by the release frame.
+    drag_to: Option<(TrackId, Time)>,
 }
 
 /// An edit made in the timeline, and the gesture it coalesces under, if any.
@@ -65,6 +68,7 @@ impl Default for Timeline {
             vscroll: 0.0,
             media: Media::default(),
             renaming: None,
+            drag_to: None,
         }
     }
 }
@@ -133,7 +137,7 @@ impl Timeline {
         self.transport.position(0)
     }
 
-    fn seek(&mut self, t: Time) {
+    pub fn seek(&mut self, t: Time) {
         let r = self.transport.rate;
         self.transport.seek(r.time_floor(r.index_nearest(t)), 0);
     }
@@ -256,9 +260,13 @@ impl Timeline {
         ui.interact(headers, id.with("headers"), Sense::click())
             .context_menu(|ui| add_menu(ui, &mut edit));
         let mut y = lanes.top() - self.vscroll;
+        let mut lane_rects = Vec::new();
+        // The clip being dragged, its track, and its response.
+        let mut held = None;
         for (i, track) in tracks.iter().enumerate() {
             let lane = Rect::from_x_y_ranges(lanes.x_range(), y..=y + track.height);
             y += track.height;
+            lane_rects.push((track.id, track.kind, lane));
             if lane.bottom() < lanes.top() || lane.top() > lanes.bottom() {
                 continue;
             }
@@ -286,6 +294,25 @@ impl Timeline {
                 }
                 self.paint_clip(
                     ui, &painter, r, lanes, view, clip, asset, track.kind, offline,
+                );
+                let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::drag());
+                if cr.dragged() || cr.drag_stopped() {
+                    held = Some((clip, track, cr));
+                }
+            }
+        }
+        let ghosts = self.drops(ui, project, view, &lane_rects, held, &mut edit);
+        for (t, from, to) in ghosts {
+            if let Some((_, _, lane)) = lane_rects.iter().find(|l| l.0 == t) {
+                let x = view.x(from)..=view.x(to);
+                let r = Rect::from_x_y_ranges(x, lane.y_range()).shrink2(vec2(1.0, 2.0));
+                let corner = CornerRadius::same(radius::SMALL);
+                clip_painter.rect_filled(r, corner, color::BLUE.gamma_multiply(0.3));
+                clip_painter.rect_stroke(
+                    r,
+                    corner,
+                    Stroke::new(1.0, color::LIGHT_BLUE),
+                    egui::StrokeKind::Inside,
                 );
             }
         }
@@ -375,6 +402,68 @@ impl Timeline {
             playhead_head(&painter, pos2(x + line / 2.0, ruler.top()));
         }
         edit
+    }
+
+    /// Bin drops and clip drags: the ghosts to draw as (track, start, end), and the edit
+    /// once the pointer is released.
+    fn drops(
+        &mut self,
+        ui: &Ui,
+        project: &Project,
+        view: View,
+        lanes: &[(TrackId, TrackKind, Rect)],
+        held: Option<(&Clip, &Track, egui::Response)>,
+        edit: &mut Option<Edit>,
+    ) -> Vec<(TrackId, Time, Time)> {
+        let rate = self.transport.rate;
+        let snap = |t: Time| rate.time_floor(rate.index_nearest(t)).max(Time(0));
+        let Some(p) = ui.input(|i| i.pointer.interact_pos()) else {
+            return Vec::new();
+        };
+        let lane_at = |kind: Option<TrackKind>| {
+            let hit = lanes.iter().find(|l| l.2.contains(p));
+            hit.filter(|l| kind.is_none_or(|k| k == l.1)).map(|l| l.0)
+        };
+        if let Some(asset) = egui::DragAndDrop::payload::<AssetId>(ui.ctx())
+            && let Some(on) = lane_at(None)
+            && let Some(pl) = project.placement(*asset, snap(view.time(p.x)), false, Some(on))
+        {
+            let end = pl.start + (pl.source_out - pl.source_in);
+            let ghosts = [pl.video, pl.audio].into_iter().flatten();
+            let ghosts = ghosts.map(|t| (t, pl.start, end)).collect();
+            if ui.input(|i| i.pointer.any_released()) {
+                *edit = Some((Command::Place(pl), None));
+            }
+            return ghosts;
+        }
+        let Some((clip, from, r)) = held else {
+            return Vec::new();
+        };
+        if r.drag_stopped() {
+            if let Some((to, start)) = self.drag_to.take()
+                && (start != clip.start || to != from.id)
+            {
+                let (id, track) = (clip.id, to);
+                *edit = Some((Command::DragClip { id, track, start }, None));
+            }
+            return Vec::new();
+        }
+        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
+        let start = snap(clip.start + (view.time(p.x) - view.time(origin.x)));
+        let to = lane_at(Some(from.kind)).unwrap_or(from.id);
+        self.drag_to = Some((to, start));
+        // Linked clips follow on their own tracks; the core clamps the move at zero.
+        let by = start - clip.start;
+        let group = project.sequence().linked(clip.id).into_iter();
+        group
+            .map(|(t, c)| {
+                (
+                    if c.id == clip.id { to } else { t },
+                    c.start + by,
+                    c.end() + by,
+                )
+            })
+            .collect()
     }
 
     /// One track's header: ID, name or rename field, toggles, menu and height grip.
@@ -1123,6 +1212,62 @@ mod tests {
             assert!(h.state_mut().1.undo());
         }
         assert_eq!(h.state().1.project(), &project(2));
+    }
+
+    #[test]
+    fn bin_drop_and_clip_drag_place_clips() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(2));
+        let seq = |h: &egui_kittest::Harness<'_, (Timeline, History)>| {
+            h.state().1.project().sequence().clone()
+        };
+        let lane_y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let x = size::TRACK_HEADER + 20.0; // 1s in at the default 20pt/s.
+
+        // Drag V1's clip 40pt right: 2s later, A1's unlinked clip stays.
+        h.hover_at(pos2(x, lane_y));
+        h.run();
+        h.drag_at(pos2(x, lane_y));
+        h.run();
+        for dx in [10.0, 40.0] {
+            h.hover_at(pos2(x + dx, lane_y));
+            h.run();
+        }
+        h.drop_at(pos2(x + 40.0, lane_y));
+        h.run();
+        let s = seq(&h);
+        let (v1, a1) = (&s.tracks()[0], &s.tracks()[1]);
+        assert_eq!(v1.clips()[0].start, Time(2 * S));
+        assert_eq!(a1.clips()[0].start, Time(0));
+
+        // A bin item dropped over V1 near 10s: linked video and audio overwrite there.
+        let asset = h.state().1.project().assets()[0].id;
+        let at = pos2(x + 9.0 * 20.0, lane_y);
+        h.hover_at(at);
+        h.run();
+        egui::DragAndDrop::set_payload(&h.ctx, asset);
+        h.drag_at(at);
+        h.run();
+        h.drop_at(at);
+        h.run();
+        let s = seq(&h);
+        let placed: Vec<_> = s
+            .tracks()
+            .iter()
+            .map(|t| t.clips().last().unwrap().clone())
+            .collect();
+        assert!(placed[0].link.is_some() && placed[0].link == placed[1].link);
+        assert_eq!(placed[0].start, placed[1].start);
+        assert!(
+            (placed[0].start.0 - 10 * S).abs() <= S,
+            "{:?}",
+            placed[0].start
+        );
+        assert!(h.state_mut().1.undo());
+        assert_eq!(seq(&h).tracks()[0].clips().len(), 1);
     }
 
     /// The acceptance budget: layout and tessellation of 500 clips inside one 60fps frame, with

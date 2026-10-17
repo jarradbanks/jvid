@@ -321,6 +321,23 @@ impl App {
         }
     }
 
+    /// `,` / `.`: the Source viewer's in/out at the playhead on the targeted tracks, then the
+    /// playhead moves to the end of the new clip, as in Premiere.
+    fn place_from_source(&mut self, insert: bool) {
+        let Some(asset) = self.preview.source_asset() else {
+            return;
+        };
+        let at = self.timeline.playhead();
+        let Some(p) = self.history.project().placement(asset, at, insert, None) else {
+            return;
+        };
+        let end = p.start + (p.source_out - p.source_in);
+        match self.history.apply(Command::Place(p)) {
+            Ok(_) => self.timeline.seek(end),
+            Err(e) => tracing::warn!("place failed: {e}"),
+        }
+    }
+
     /// Runs a keymap action. shortcut: only panel focus is real; the rest are stubs until
     /// their features land.
     fn run_action(&mut self, id: &str) {
@@ -361,6 +378,7 @@ impl App {
                 Tab::Preview
             }
             "export_frame" => return self.export_frame(),
+            "insert" | "overwrite" => return self.place_from_source(id == "insert"),
             _ => {
                 tracing::debug!("action {id} has no implementation yet");
                 return;
