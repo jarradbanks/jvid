@@ -1,5 +1,8 @@
 #[test]
 fn ci_probe() {
-    let x = 1;
-    assert!(x == x);
+    assert_eq!(probe(), 1);
+}
+
+fn probe() -> i32 {
+    return 1;
 }
