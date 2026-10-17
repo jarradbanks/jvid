@@ -35,6 +35,7 @@ use crate::transport::Transport;
 mod keyframes;
 mod markers;
 pub mod menus;
+mod rubber;
 
 /// The undo gesture a track-height drag coalesces under.
 pub const RESIZE_GESTURE: GestureKey = 0x7472_6163_6b68; // "trackh"
@@ -885,7 +886,14 @@ impl Timeline {
                 if self.razor && cr.hovered() {
                     ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
                 }
-                if cr.clicked()
+                let band = (track.kind == TrackKind::Audio && !offline).then(|| {
+                    let body =
+                        Rect::from_x_y_ranges(r.x_range(), r.top() + NAME_STRIP..=r.bottom());
+                    self.rubber_band(ui, &painter, view, clip, body, &cr, id)
+                });
+                if let Some(e) = band.flatten() {
+                    edit = Some(e);
+                } else if cr.clicked()
                     && self.razor
                     && let Some(p) = cr.interact_pointer_pos()
                 {

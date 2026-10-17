@@ -37,6 +37,24 @@ pub fn pan_gains(pan: f32) -> (f32, f32) {
     (a.cos(), a.sin())
 }
 
+/// Balance gains for a clip's `pan`: centre is unity on both sides, and turning one way
+/// fades the other side out.
+pub fn balance(pan: f32) -> (f32, f32) {
+    let p = pan.clamp(-1.0, 1.0);
+    ((1.0 - p).min(1.0), (1.0 + p).min(1.0))
+}
+
+/// Scales interleaved stereo `buf` by `gain(frame)` = (volume, pan), evaluated every frame so
+/// automation ramps are sample-accurate rather than stepping per block.
+pub fn automate(buf: &mut [f32], mut gain: impl FnMut(usize) -> (f32, f32)) {
+    for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+        let (v, p) = gain(i);
+        let (l, r) = balance(p);
+        f[0] *= v * l;
+        f[1] *= v * r;
+    }
+}
+
 /// Whether a strip is heard: not muted, and soloed if any strip is.
 pub fn audible(strip: &Strip, any_solo: bool) -> bool {
     !strip.muted && (!any_solo || strip.solo)
@@ -220,6 +238,16 @@ mod tests {
             let (l, r) = pan_gains(p);
             assert!(close(l * l + r * r, 1.0));
         }
+    }
+
+    #[test]
+    fn balance_and_per_frame_automation() {
+        assert_eq!(balance(0.0), (1.0, 1.0));
+        assert_eq!(balance(1.0), (0.0, 1.0));
+        assert_eq!(balance(-0.5), (1.0, 0.5));
+        let mut buf = vec![1.0f32; 8];
+        automate(&mut buf, |i| (i as f32, 0.5));
+        assert_eq!(buf, [0.0, 0.0, 0.5, 1.0, 1.0, 2.0, 1.5, 3.0]);
     }
 
     #[test]

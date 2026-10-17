@@ -436,7 +436,8 @@ fn is_first_stream(s: &Option<u32>) -> bool {
 /// centred, as in the compositor; this then applies in the fitted image's pixels.
 ///
 /// Keyframe names: `position`, `anchor` (`Vec2`), `scale` (`Scalar` for linked, `Vec2` for
-/// separate X/Y), `rotation`, `opacity`, `crop_left`, `crop_top`, `crop_right`, `crop_bottom`.
+/// separate X/Y), `rotation`, `opacity`, `crop_left`, `crop_top`, `crop_right`, `crop_bottom`,
+/// and for audio clips `volume` and `pan`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Transform {
@@ -453,6 +454,10 @@ pub struct Transform {
     pub opacity: f64,
     /// How the clip mixes with the layers below; not animatable.
     pub blend: Blend,
+    /// Audio clip gain, linear, 1.0 = unity; applied before the track's.
+    pub volume: f64,
+    /// Audio clip balance, -1.0 (left) to 1.0 (right); centre leaves both sides at unity.
+    pub pan: f64,
 }
 
 /// A layer blend mode, as in the W3C compositing spec; the index is the compositor's shader code.
@@ -493,6 +498,8 @@ impl Default for Transform {
             crop: [0.0; 4],
             opacity: 1.0,
             blend: Blend::Normal,
+            volume: 1.0,
+            pan: 0.0,
         }
     }
 }
@@ -550,7 +557,29 @@ impl Clip {
         scalar("rotation", &mut x.rotation);
         scalar("opacity", &mut x.opacity);
         x.opacity = x.opacity.clamp(0.0, 1.0);
+        scalar("volume", &mut x.volume);
+        scalar("pan", &mut x.pan);
         x
+    }
+
+    /// Volume and pan at timeline time `t`, cheaper than [`Clip::transform_at`] for per-sample use.
+    pub fn gain_at(&self, t: Time) -> (f64, f64) {
+        use crate::keyframe::Value::Scalar;
+        let get = |name, v: f64| match self.value_at(name, t) {
+            Some(Scalar(n)) => n,
+            _ => v,
+        };
+        (
+            get("volume", self.transform.volume),
+            get("pan", self.transform.pan),
+        )
+    }
+
+    /// Whether the clip has volume or pan keyframes, so its gain changes within a block.
+    pub fn gain_animated(&self) -> bool {
+        ["volume", "pan"]
+            .iter()
+            .any(|n| self.keyframes.get(*n).is_some_and(|k| !k.is_empty()))
     }
 
     /// Exclusive end on the timeline.
@@ -1843,6 +1872,15 @@ mod tests {
         c.keyframes
             .insert("scale".into(), vec![key(0, Value::Vec2([0.5, 2.0]))]);
         assert_eq!(c.transform_at(Time(10)).scale, [0.5, 2.0]);
+        assert!(!c.gain_animated());
+        assert_eq!(c.gain_at(Time(10)), (1.0, 0.0));
+        c.keyframes.insert(
+            "volume".into(),
+            vec![key(100, Value::Scalar(0.0)), key(120, Value::Scalar(1.0))],
+        );
+        assert!(c.gain_animated());
+        assert_eq!(c.gain_at(Time(5)), (0.25, 0.0));
+        assert_eq!(c.transform_at(Time(5)).volume, 0.25);
         // Old files without a transform load with the identity.
         let json =
             r#"{"id":1,"asset":1,"source_in":0,"source_out":1,"start":0,"link":null,"params":{}}"#;

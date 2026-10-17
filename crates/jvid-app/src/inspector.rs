@@ -43,7 +43,7 @@ const fn prop(name: &'static str, label: &'static str, fields: &'static [&'stati
 const XY: &[&str] = &["X", "Y"];
 const ONE: &[&str] = &[""];
 
-const SECTIONS: [(&str, &[Prop]); 3] = [
+const SECTIONS: [(&str, &[Prop]); 4] = [
     (
         "Transform",
         &[
@@ -91,6 +91,26 @@ const SECTIONS: [(&str, &[Prop]); 3] = [
             },
         ],
     ),
+    // Audio clips only.
+    (
+        "Audio",
+        &[
+            Prop {
+                display: 100.0,
+                decimals: 0,
+                suffix: "%",
+                range: (0.0, 2.0),
+                ..prop("volume", "Volume", ONE)
+            },
+            Prop {
+                display: 100.0,
+                decimals: 0,
+                speed: 0.5,
+                range: (-1.0, 1.0),
+                ..prop("pan", "Pan", ONE)
+            },
+        ],
+    ),
 ];
 
 /// Undo gesture for drags in the inspector, xored with the property, field and drag count.
@@ -116,6 +136,8 @@ fn get(x: &Transform, name: &str) -> Value {
         "crop_left" => crop(0),
         "crop_top" => crop(1),
         "crop_right" => crop(2),
+        "volume" => Value::Scalar(x.volume),
+        "pan" => Value::Scalar(x.pan),
         _ => crop(3),
     }
 }
@@ -135,6 +157,8 @@ fn set(x: &mut Transform, name: &str, v: Value) {
         ("crop_top", Value::Scalar(v)) => x.crop[1] = v,
         ("crop_right", Value::Scalar(v)) => x.crop[2] = v,
         ("crop_bottom", Value::Scalar(v)) => x.crop[3] = v,
+        ("volume", Value::Scalar(v)) => x.volume = v.clamp(0.0, 2.0),
+        ("pan", Value::Scalar(v)) => x.pan = v.clamp(-1.0, 1.0),
         _ => {}
     }
 }
@@ -325,29 +349,35 @@ pub fn show(
     t: Time,
 ) -> (Option<Edit>, Option<Time>) {
     let seq = project.sequence();
-    // Audio clips have no picture to transform.
-    let video = |t| seq.track(t).is_some_and(|t| t.kind == TrackKind::Video);
-    let mut clips: Vec<&Clip> = selected
-        .iter()
-        .filter_map(|id| seq.clip(*id))
-        .filter_map(|(t, c)| video(t).then_some(c))
-        .collect();
-    clips.sort_by_key(|c| c.id.0);
+    // Audio clips have no picture to transform, only the Audio section.
+    let of = |kind| {
+        let mut clips: Vec<&Clip> = selected
+            .iter()
+            .filter_map(|id| seq.clip(*id))
+            .filter(|(t, _)| seq.track(*t).is_some_and(|t| t.kind == kind))
+            .map(|(_, c)| c)
+            .collect();
+        clips.sort_by_key(|c| c.id.0);
+        clips
+    };
+    let (clips, audio) = (of(TrackKind::Video), of(TrackKind::Audio));
     let (mut edit, mut seek) = (None, None);
-    if clips.is_empty() && bin_selected.is_none_or(|a| !a.generated()) {
+    if clips.is_empty() && audio.is_empty() && bin_selected.is_none_or(|a| !a.generated()) {
         ui.label(egui::RichText::new("Select a clip to see its properties").color(color::INK_3));
         return (None, None);
     }
     let mut index = 0u64;
     for (title, props) in SECTIONS {
+        let clips = if title == "Audio" { &audio } else { &clips };
         if clips.is_empty() {
-            break;
+            index += props.len() as u64;
+            continue;
         }
         let names: Vec<&str> = props.iter().map(|p| p.name).collect();
         let (open, head) = section(ui, title, true);
         match head {
-            Some(Head::Reset) => edit = Some((reset(&clips, &names), None)),
-            Some(Head::Key) => edit = Some((key_all(&clips, &names, t), None)),
+            Some(Head::Reset) => edit = Some((reset(clips, &names), None)),
+            Some(Head::Key) => edit = Some((key_all(clips, &names, t), None)),
             None => {}
         }
         if !open {
@@ -356,12 +386,12 @@ pub fn show(
         }
         for p in props {
             index += 1;
-            if let Some(e) = row(ui, &clips, p, t, index, &mut seek) {
+            if let Some(e) = row(ui, clips, p, t, index, &mut seek) {
                 edit = Some(e);
             }
         }
         if title == "Opacity"
-            && let Some(e) = blend_row(ui, &clips)
+            && let Some(e) = blend_row(ui, clips)
         {
             edit = Some(e);
         }
@@ -379,7 +409,7 @@ pub fn show(
     {
         edit = Some(e);
     }
-    if section(ui, "Color", false).0 {
+    if (audio.is_empty() || !clips.is_empty()) && section(ui, "Color", false).0 {
         let solid = shared.filter(|a| a.solid.is_some());
         if let Some(e) = solid.and_then(|a| solid_color(ui, a)) {
             edit = Some(e);
