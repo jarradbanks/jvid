@@ -3,7 +3,7 @@
 
 use egui::emath::GuiRounding as _;
 use egui::{
-    CornerRadius, Rect, Role, Sense, StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, pos2, vec2,
+    CornerRadius, Rect, Sense, StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::theme::{self, hairline, icon};
@@ -184,9 +184,9 @@ fn tabs(
         )
         .round_to_pixels(ppp);
         x = pill.right() + gap;
-        let r = ui.interact(pill, ui.scope_id().with(("tab", i)), Sense::click());
+        let r = ui.interact(pill, ui.id().with(("tab", i)), Sense::click());
         let on = i == *active;
-        r.widget_info(|| WidgetInfo::selected(Role::Tab, true, on, *label));
+        r.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, on, *label));
         if r.clicked() {
             *active = i;
         }

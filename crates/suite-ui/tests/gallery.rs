@@ -14,11 +14,15 @@ fn gallery_snapshot() {
         return;
     }
     let mut state = gallery::Gallery::new();
+    let mut fresh = true;
     let mut harness = egui_kittest::Harness::builder()
         .with_size([1280.0, 860.0])
         .wgpu()
-        .with_context_setup(suite_ui::theme::install)
-        .build_ui(|ui| gallery::gallery(ui, &mut state));
+        .build_ui(|ui| {
+            if !common::install_theme(ui, &mut fresh) {
+                gallery::gallery(ui, &mut state);
+            }
+        });
     // The loading spinners never settle, so step a fixed number of frames.
     harness.run_steps(4);
     harness.snapshot("gallery");
