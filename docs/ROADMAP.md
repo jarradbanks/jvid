@@ -250,7 +250,7 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | [#43](https://github.com/jarradbanks/jvid/issues/43) | Keyframe model and interpolation | done | M | core | [#7](https://github.com/jarradbanks/jvid/issues/7), [#8](https://github.com/jarradbanks/jvid/issues/8) |
 | [#44](https://github.com/jarradbanks/jvid/issues/44) | Inspector panel |  | L | ui | [#12](https://github.com/jarradbanks/jvid/issues/12), [#43](https://github.com/jarradbanks/jvid/issues/43), [#36](https://github.com/jarradbanks/jvid/issues/36) |
-| [#45](https://github.com/jarradbanks/jvid/issues/45) | Transform, crop and opacity in the compositor |  | M | render | [#30](https://github.com/jarradbanks/jvid/issues/30), [#43](https://github.com/jarradbanks/jvid/issues/43) |
+| [#45](https://github.com/jarradbanks/jvid/issues/45) | Transform, crop and opacity in the compositor | done | M | render | [#30](https://github.com/jarradbanks/jvid/issues/30), [#43](https://github.com/jarradbanks/jvid/issues/43) |
 | [#46](https://github.com/jarradbanks/jvid/issues/46) | Blend modes |  | S | render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#47](https://github.com/jarradbanks/jvid/issues/47) | On-preview transform handles |  | M | ui, render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#48](https://github.com/jarradbanks/jvid/issues/48) | Keyframe lanes on the timeline |  | L | timeline | [#43](https://github.com/jarradbanks/jvid/issues/43), [#33](https://github.com/jarradbanks/jvid/issues/33), [#44](https://github.com/jarradbanks/jvid/issues/44) |
