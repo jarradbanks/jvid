@@ -64,6 +64,13 @@ fn clips_in(track: &Track, start: Time, end: Time) -> impl Iterator<Item = &Clip
         .filter(|c| c.enabled)
 }
 
+/// `c`'s transform at `t` with its fades on the opacity.
+fn faded(c: &Clip, t: Time) -> Transform {
+    let mut x = c.transform_at(t);
+    x.opacity *= c.fade_at(t);
+    x
+}
+
 /// Visible video layers at `t`, top to bottom.
 pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
     active(seq, TrackKind::Video, |t| t.hidden)
@@ -74,7 +81,7 @@ pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
                 asset: c.asset,
                 source_time: c.source_in + (t - c.start),
                 params: &c.params,
-                transform: c.transform_at(t),
+                transform: faded(c, t),
                 color: match c.value_at("color", t) {
                     Some(crate::keyframe::Value::Color(c)) => Some(c),
                     _ => None,
@@ -202,6 +209,33 @@ mod tests {
         // solo on a muted track stays silent
         s.track_mut(a1).unwrap().muted = true;
         assert_eq!(only(&s, 8, 12), Vec::<ClipId>::new());
+    }
+
+    #[test]
+    fn fades_scale_opacity_and_survive_trims() {
+        use crate::model::FadeCurve;
+        let mut s = Sequence::default();
+        let v = s.add_track(TrackKind::Video, "V1");
+        let c = s.add_clip(v, clip(0, 100)).unwrap();
+        s.with_clip_mut(c, |c| {
+            c.transform.fade_in = Time(20);
+            c.transform.fade_out = Time(50);
+        })
+        .unwrap();
+        let op = |s: &Sequence, t| video_at(s, Time(t))[0].transform.opacity;
+        assert_eq!(op(&s, 0), 0.0);
+        assert_eq!(op(&s, 10), 0.5);
+        assert_eq!(op(&s, 30), 1.0);
+        assert_eq!(op(&s, 75), 0.5);
+        let (_, k) = s.clip(c).unwrap();
+        assert!(k.gain_animated());
+        // Trimming the head shortens the clip; the fade-in still starts at the new edge.
+        s.set_clip_range(c, Time(40), Time(140), Time(200)).unwrap();
+        assert_eq!(op(&s, 40), 0.0);
+        assert_eq!(op(&s, 50), 0.5);
+        s.with_clip_mut(c, |c| c.transform.fade_curve = FadeCurve::EqualPower)
+            .unwrap();
+        assert!((op(&s, 50) - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-9);
     }
 
     #[test]

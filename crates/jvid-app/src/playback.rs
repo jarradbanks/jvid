@@ -253,8 +253,9 @@ impl Audio {
             if let Some((_, c)) = seq.clip(s.clip) {
                 let first = sample(s.start);
                 let at = |i: usize| {
-                    let (v, p) = c.gain_at(Time((first + i as i64) * FLICKS_PER_SAMPLE));
-                    (v as f32, p as f32)
+                    let t = Time((first + i as i64) * FLICKS_PER_SAMPLE);
+                    let (v, p) = c.gain_at(t);
+                    ((v * c.fade_at(t)) as f32, p as f32)
                 };
                 if c.gain_animated() {
                     automate(out, at);
