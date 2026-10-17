@@ -502,6 +502,15 @@ I("edit-ui", "Edit menu, timeline toolbar and clip context menu", "M2", ["ui", "
   ac=["Every action in keymap ACTIONS that edits the timeline appears in at least one menu or the toolbar",
       "Context menu actions run the same commands as their shortcuts and undo identically"])
 
+I("clip-enable", "Enable and disable clips", "M2", ["timeline", "render"], "S", ["edit-ui"],
+  summary="Turn a clip off without deleting it.",
+  scope=[
+      "Clip enabled flag in jvid-core (serde default true), undoable toggle command",
+      "Disabled clips are skipped by evaluation, so playback, compositor and export all ignore them",
+      "Disabled clips draw dimmed on the timeline; toggle from the clip context menu and Shift+E",
+  ],
+  ac=["A disabled clip is absent from playback and export and reappears after undo"])
+
 I("in-out", "In/Out points on the timeline", "M2", ["timeline"], "M", ["trim-split", "actions"],
   summary="Premiere-style range marking for playback, editing and export.",
   scope=[

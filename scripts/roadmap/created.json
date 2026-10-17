@@ -396,6 +396,10 @@
     "edit-ui": {
       "number": 155,
       "id": 5900672112
+    },
+    "clip-enable": {
+      "number": 157,
+      "id": 5900898527
     }
   },
   "links": [
@@ -1034,6 +1038,10 @@
     [
       "edit-ui",
       "snapping"
+    ],
+    [
+      "clip-enable",
+      "edit-ui"
     ]
   ]
 }
