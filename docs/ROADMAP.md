@@ -208,7 +208,7 @@ flowchart LR
 | [#35](https://github.com/jarradbanks/jvid/issues/35) | Place clips: drag from bin, insert and overwrite | done | M | timeline | [#34](https://github.com/jarradbanks/jvid/issues/34), [#25](https://github.com/jarradbanks/jvid/issues/25) |
 | [#89](https://github.com/jarradbanks/jvid/issues/89) | Multi-track audio sources |  | M | timeline, media | [#35](https://github.com/jarradbanks/jvid/issues/35), [#16](https://github.com/jarradbanks/jvid/issues/16) |
 | [#36](https://github.com/jarradbanks/jvid/issues/36) | Selection, clipboard and delete | done | M | timeline | [#35](https://github.com/jarradbanks/jvid/issues/35) |
-| [#37](https://github.com/jarradbanks/jvid/issues/37) | Trim, split, razor and ripple | in progress | L | timeline | [#36](https://github.com/jarradbanks/jvid/issues/36) |
+| [#37](https://github.com/jarradbanks/jvid/issues/37) | Trim, split, razor and ripple | done | L | timeline | [#36](https://github.com/jarradbanks/jvid/issues/36) |
 | [#38](https://github.com/jarradbanks/jvid/issues/38) | Snapping |  | S | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37) |
 | [#39](https://github.com/jarradbanks/jvid/issues/39) | In/Out points on the timeline |  | M | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37), [#13](https://github.com/jarradbanks/jvid/issues/13) |
 | [#40](https://github.com/jarradbanks/jvid/issues/40) | Markers |  | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8), [#39](https://github.com/jarradbanks/jvid/issues/39) |
@@ -254,7 +254,7 @@ flowchart LR
 | [#46](https://github.com/jarradbanks/jvid/issues/46) | Blend modes |  | S | render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#47](https://github.com/jarradbanks/jvid/issues/47) | On-preview transform handles |  | M | ui, render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#48](https://github.com/jarradbanks/jvid/issues/48) | Keyframe lanes on the timeline |  | L | timeline | [#43](https://github.com/jarradbanks/jvid/issues/43), [#33](https://github.com/jarradbanks/jvid/issues/33), [#44](https://github.com/jarradbanks/jvid/issues/44) |
-| [#49](https://github.com/jarradbanks/jvid/issues/49) | Easing picker and bezier curve editor |  | M | ui | [#43](https://github.com/jarradbanks/jvid/issues/43), [#44](https://github.com/jarradbanks/jvid/issues/44) |
+| [#49](https://github.com/jarradbanks/jvid/issues/49) | Easing picker and bezier curve editor | in progress | M | ui | [#43](https://github.com/jarradbanks/jvid/issues/43), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#50](https://github.com/jarradbanks/jvid/issues/50) | Volume and pan keyframes with rubber band |  | M | audio, timeline | [#43](https://github.com/jarradbanks/jvid/issues/43), [#31](https://github.com/jarradbanks/jvid/issues/31), [#33](https://github.com/jarradbanks/jvid/issues/33) |
 | [#51](https://github.com/jarradbanks/jvid/issues/51) | Clip fade handles |  | S | timeline | [#50](https://github.com/jarradbanks/jvid/issues/50), [#45](https://github.com/jarradbanks/jvid/issues/45) |
 
