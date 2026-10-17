@@ -28,3 +28,7 @@ jvid decodes and encodes through FFmpeg, dynamically linked ([PLAN.md · Licensi
 
 - Building needs FFmpeg dev libraries plus libclang (for bindgen) on every machine; see CONTRIBUTING.md.
 - Code that uses APIs newer than 4.4 must gate them with `ffmpeg-sys-next`'s `ffmpeg_x_y` cfgs.
+
+## Amendment (2026-10-18): hardware acceleration FFI
+
+`ffmpeg-next` 9 has no safe API for hardware decode or VAAPI encode. The owner approved a narrow exception: raw `ffmpeg-sys-next` calls for hwaccel (device context creation, `hw_device_ctx`/`hw_frames_ctx` setup, `av_hwframe_transfer_data`) may live in one module per use, `jvid-media/src/hwdec.rs` and `jvid-media/src/hwenc.rs`, each `#[allow(unsafe_code)]`. Every `unsafe` block carries a `// SAFETY:` comment, stays as small as possible, and is covered by a test; failures fall back to software. `unsafe` stays forbidden everywhere else.
