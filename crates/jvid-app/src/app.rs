@@ -289,6 +289,24 @@ impl App {
         }
     }
 
+    /// Saves the shown frame as a PNG at full project resolution.
+    fn export_frame(&self) {
+        let Some(path) = FileDialog::new()
+            .set_title("Export frame")
+            .add_filter("PNG image", &["png"])
+            .set_file_name("frame.png")
+            .save_file()
+        else {
+            return;
+        };
+        if let Err(e) = self
+            .preview
+            .export_frame(self.history.project().settings(), &path)
+        {
+            error_dialog(&format!("Couldn't export {}: {e}", path.display()));
+        }
+    }
+
     /// Runs a keymap action. shortcut: only panel focus is real; the rest are stubs until
     /// their features land.
     fn run_action(&mut self, id: &str) {
@@ -321,6 +339,7 @@ impl App {
                 self.preview_active = 1;
                 Tab::Preview
             }
+            "export_frame" => return self.export_frame(),
             _ => {
                 tracing::debug!("action {id} has no implementation yet");
                 return;
