@@ -86,7 +86,7 @@ flowchart LR
 | [#2](https://github.com/jarradbanks/jvid/issues/2) | CI: fmt, clippy and tests on Windows, macOS and Linux | done | S | infra | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#3](https://github.com/jarradbanks/jvid/issues/3) | Logging, tracing and crash logs | done | S | infra | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#96](https://github.com/jarradbanks/jvid/issues/96) | Roadmap shows live status | done | S | infra | — |
-| [#4](https://github.com/jarradbanks/jvid/issues/4) | FFmpeg linking and developer setup on all platforms |  | M | infra, media | [#2](https://github.com/jarradbanks/jvid/issues/2) |
+| [#4](https://github.com/jarradbanks/jvid/issues/4) | FFmpeg linking and developer setup on all platforms | done | M | infra, media | [#2](https://github.com/jarradbanks/jvid/issues/2) |
 | [#5](https://github.com/jarradbanks/jvid/issues/5) | Generated test media corpus |  | S | infra, media | [#4](https://github.com/jarradbanks/jvid/issues/4) |
 | [#6](https://github.com/jarradbanks/jvid/issues/6) | Rational time and timecode | done | S | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#7](https://github.com/jarradbanks/jvid/issues/7) | Project data model | done | M | core | [#6](https://github.com/jarradbanks/jvid/issues/6) |
