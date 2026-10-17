@@ -350,8 +350,8 @@ flowchart LR
 | [#69](https://github.com/jarradbanks/jvid/issues/69) | Proxy generation and switching |  | M | media | [#18](https://github.com/jarradbanks/jvid/issues/18), [#15](https://github.com/jarradbanks/jvid/issues/15) |
 | [#70](https://github.com/jarradbanks/jvid/issues/70) | Hardware video decoding |  | L | media, render | [#15](https://github.com/jarradbanks/jvid/issues/15), [#23](https://github.com/jarradbanks/jvid/issues/23) |
 | [#71](https://github.com/jarradbanks/jvid/issues/71) | Autosave and crash recovery |  | M | core | [#9](https://github.com/jarradbanks/jvid/issues/9), [#3](https://github.com/jarradbanks/jvid/issues/3) |
-| [#72](https://github.com/jarradbanks/jvid/issues/72) | Keyboard shortcut editor |  | M | ui | [#13](https://github.com/jarradbanks/jvid/issues/13) |
-| [#73](https://github.com/jarradbanks/jvid/issues/73) | Themes | in progress | S | suite-ui | [#11](https://github.com/jarradbanks/jvid/issues/11) |
+| [#72](https://github.com/jarradbanks/jvid/issues/72) | Keyboard shortcut editor | in progress | M | ui | [#13](https://github.com/jarradbanks/jvid/issues/13) |
+| [#73](https://github.com/jarradbanks/jvid/issues/73) | Themes | done | S | suite-ui | [#11](https://github.com/jarradbanks/jvid/issues/11) |
 | [#74](https://github.com/jarradbanks/jvid/issues/74) | Preview overlays: safe areas and grid | done | S | ui | [#23](https://github.com/jarradbanks/jvid/issues/23) |
 | [#75](https://github.com/jarradbanks/jvid/issues/75) | Project settings dialog | done | S | ui | [#27](https://github.com/jarradbanks/jvid/issues/27) |
 | [#76](https://github.com/jarradbanks/jvid/issues/76) | User guide and shortcut cheat sheet |  | M | docs | [#54](https://github.com/jarradbanks/jvid/issues/54) |
