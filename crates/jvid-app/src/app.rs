@@ -1,7 +1,7 @@
 //! The editor window: the app bar, a dock of empty panel shells, and the file actions.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use egui::{Align, Align2, Frame, Layout, Margin, Stroke, Ui, UiBuilder, ViewportCommand, vec2};
@@ -23,7 +23,7 @@ use crate::media_bin::MediaBin;
 use crate::preview::{PROGRAM_ACTIONS, Preview, SOURCE_ACTIONS};
 use crate::timeline::{MARK_ACTIONS, Timeline, menus};
 use crate::welcome::{self, Recent, Welcome};
-use crate::{project_file, relink};
+use crate::{autosave, project_file, relink};
 
 #[cfg(test)]
 mod tests;
@@ -91,6 +91,7 @@ pub struct App {
     loudness: Option<f64>,
     /// The running export and where its result arrives.
     export: Option<(jvid_jobs::Handle, Receiver<Result<ProbeInfo, ExportError>>)>,
+    autosave: crate::autosave::Autosave,
 }
 
 const TOAST_SECS: f64 = 6.0;
@@ -104,6 +105,15 @@ impl App {
         app.timeline = Timeline::new(caches);
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
         app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
+        if let Some(path) = autosave::untitled() {
+            if let Some(project) = offer_restore(&path) {
+                app.new_project(Some(project.settings().clone()));
+                app.history = History::new(project);
+                app.history.mark_unsaved();
+            } else {
+                autosave::clear(&path);
+            }
+        }
         app
     }
 
@@ -147,6 +157,7 @@ impl App {
             preset: 0,
             loudness: Some(-14.0),
             export: None,
+            autosave: Default::default(),
         }
     }
 
@@ -167,9 +178,14 @@ impl App {
     fn open(&mut self, path: PathBuf) {
         match project_file::load(&path) {
             Ok(project) => {
+                let restored = offer_restore(&path);
+                let dirty = restored.is_some();
                 welcome::remember(&mut self.welcome.recent, Recent::of(&path, &project));
                 self.missing = relink::missing(&project);
-                self.history = History::new(project);
+                self.history = History::new(restored.unwrap_or(project));
+                if dirty {
+                    self.history.mark_unsaved();
+                }
                 self.path = Some(path);
                 self.match_source = false;
                 self.on_welcome = false;
@@ -348,6 +364,11 @@ impl App {
         match project_file::save(self.history.project(), &path) {
             Ok(()) => {
                 self.history.mark_saved();
+                if self.path.is_none()
+                    && let Some(p) = autosave::untitled()
+                {
+                    autosave::clear(&p);
+                }
                 welcome::remember(
                     &mut self.welcome.recent,
                     Recent::of(&path, self.history.project()),
@@ -634,6 +655,10 @@ impl App {
         }
     }
 
+    fn autosave_target(&self) -> Option<PathBuf> {
+        self.path.clone().or_else(autosave::untitled)
+    }
+
     /// Before replacing the project: true if it's clean, saved, or the user discards it.
     fn confirm_discard(&mut self) -> bool {
         if !self.history.is_dirty() {
@@ -646,7 +671,12 @@ impl App {
             .show();
         match answer {
             MessageDialogResult::Yes => self.save(false),
-            MessageDialogResult::No => true,
+            MessageDialogResult::No => {
+                if let Some(p) = self.autosave_target() {
+                    autosave::clear(&p);
+                }
+                true
+            }
             _ => false,
         }
     }
@@ -693,6 +723,10 @@ impl eframe::App for App {
         let now = ctx.input(|i| i.time);
         self.poll_import(now);
         self.poll_export(now);
+        let target = self.autosave_target().filter(|_| !self.on_welcome);
+        if let Some(due) = self.autosave.tick(&self.history, target.as_deref(), now) {
+            ctx.request_repaint_after(due);
+        }
         if self.importer.is_busy() || !self.toasts.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
@@ -822,6 +856,25 @@ enum FileAction {
 
 fn project_dialog() -> FileDialog {
     FileDialog::new().add_filter("jvid project", &["jvid"])
+}
+
+/// Asks to restore `path`'s autosave if it is newer than `path`; the restored project, if loaded.
+fn offer_restore(path: &Path) -> Option<Project> {
+    let auto = autosave::newer(path)?;
+    let answer = MessageDialog::new()
+        .set_title("jvid")
+        .set_description(format!(
+            "{} has an autosave newer than its last save, probably from a crash. Restore it?",
+            path.file_stem().unwrap_or_default().to_string_lossy()
+        ))
+        .set_buttons(MessageButtons::YesNo)
+        .show();
+    if answer != MessageDialogResult::Yes {
+        return None;
+    }
+    project_file::load(&auto)
+        .inspect_err(|e| error_dialog(&format!("Couldn't restore {}: {e}", auto.display())))
+        .ok()
 }
 
 fn error_dialog(message: &str) {
