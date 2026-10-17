@@ -64,6 +64,8 @@ Select a clip and use the Inspector. It holds Transform (position, scale, rotati
 
 On the timeline, an animated clip has a toggle in its name strip that shows a lane per animated property. Keys there click and marquee select, drag (snapping to frames, the playhead, clip edges and markers), delete, copy and paste at the playhead. Right-click a key to open the easing editor.
 
+**Zoom to a region.** Select a video clip, hold `Alt` and drag a rectangle on the Program monitor. From the playhead the clip zooms in on it, holds for 2 seconds and zooms back out. The rectangle keeps the project's shape. Pick **Quick** or **Smooth** in the bar that appears while `Alt` is held. The zoom is one undo step, made of scale and position keyframes you can edit like any others.
+
 ## Export
 
 Click **Export** in the header. The dialog opens on In to Out when you've marked a range, otherwise the whole timeline.

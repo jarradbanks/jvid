@@ -285,7 +285,7 @@ pub fn show(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use egui::pos2;
 
@@ -338,7 +338,7 @@ mod tests {
     }
 
     /// A clip filling a 1920x1080 project with position animated from a key at 0.
-    fn history() -> (jvid_core::history::History, ClipId) {
+    pub(crate) fn history() -> (jvid_core::history::History, ClipId) {
         use jvid_core::history::{Command, History};
         use jvid_core::keyframe::{Easing, Keyframe, Value};
         use jvid_core::model::{NewClip, ProbeInfo};
