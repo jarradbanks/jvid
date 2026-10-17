@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use jvid_jobs::{Handle, Priority};
 
@@ -15,12 +15,16 @@ use crate::thumbnails::{evict, key};
 pub const BUCKET: i64 = 256;
 /// Bump when the peak format changes so old entries miss.
 const VERSION: u32 = 1;
+/// How often a scan in progress hands out what it has so far.
+const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 
 /// Lowest and highest sample (over both channels) in a span.
 pub type Peak = [f32; 2];
 
-/// Returns the finest-level peaks of audio stream `nth` of `path`.
-pub type Scan = dyn Fn(&Path, usize) -> Result<Vec<Peak>, String> + Send + Sync;
+/// Returns the finest-level peaks of audio stream `nth` of `path`, showing each partial result
+/// to the callback as it grows.
+pub type Scan =
+    dyn Fn(&Path, usize, &mut dyn FnMut(&[Peak])) -> Result<Vec<Peak>, String> + Send + Sync;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pyramid {
@@ -94,6 +98,17 @@ impl Cache {
 
     /// The peak pyramid of audio stream `nth` of `path`, from disk when cached.
     pub fn load(&self, path: &Path, nth: usize) -> Result<Pyramid, String> {
+        self.load_with(path, nth, |_| {})
+    }
+
+    /// [`Self::load`], handing a pyramid of the audio scanned so far to `progress` every
+    /// [`PROGRESS_EVERY`] when not cached, so a long recording's waveform fills in as it scans.
+    pub fn load_with(
+        &self,
+        path: &Path,
+        nth: usize,
+        mut progress: impl FnMut(Pyramid),
+    ) -> Result<Pyramid, String> {
         let file = self
             .dir
             .join(format!("{}.{nth}.v{VERSION}.peaks", key(path)?));
@@ -111,26 +126,34 @@ impl Cache {
                 .collect();
             return Ok(Pyramid::new(f.as_chunks::<2>().0.to_vec()));
         }
-        let finest = (self.scan)(path, nth)?;
+        let mut last = Instant::now();
+        let finest = (self.scan)(path, nth, &mut |partial| {
+            if last.elapsed() >= PROGRESS_EVERY {
+                progress(Pyramid::new(partial.to_vec()));
+                last = Instant::now();
+            }
+        })?;
         if let Err(e) = self.store(&file, &finest) {
             tracing::warn!("waveforms: can't write {}: {e}", file.display());
         }
         Ok(Pyramid::new(finest))
     }
 
-    /// Loads on `jobs` at preview priority and hands the pyramid to `done` there.
+    /// Loads on `jobs` at preview priority and hands the pyramid to `done` there: partial ones
+    /// while scanning, then the whole one or the error.
     pub fn submit(
         self: &Arc<Self>,
         jobs: &jvid_jobs::Pool,
         path: PathBuf,
         nth: usize,
-        done: impl FnOnce(Result<Pyramid, String>) + Send + 'static,
+        mut done: impl FnMut(Result<Pyramid, String>) + Send + 'static,
     ) -> Handle {
         let cache = self.clone();
         let key = format!("peaks:{}:{nth}", path.display());
         jobs.submit(key, Priority::Preview, move |ctx| {
             if !ctx.is_cancelled() {
-                done(cache.load(&path, nth));
+                let r = cache.load_with(&path, nth, |p| done(Ok(p)));
+                done(r);
             }
         })
     }
@@ -151,7 +174,7 @@ impl Cache {
     }
 }
 
-fn scan(path: &Path, nth: usize) -> Result<Vec<Peak>, String> {
+fn scan(path: &Path, nth: usize, progress: &mut dyn FnMut(&[Peak])) -> Result<Vec<Peak>, String> {
     let mut d = AudioDecoder::open(path, nth).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     while let Some(c) = d.next_chunk().map_err(|e| e.to_string())? {
@@ -163,6 +186,7 @@ fn scan(path: &Path, nth: usize) -> Result<Vec<Peak>, String> {
             let p = &mut out[b];
             *p = [p[0].min(f[0]).min(f[1]), p[1].max(f[0]).max(f[1])];
         }
+        progress(&out);
     }
     Ok(out)
 }
@@ -189,7 +213,7 @@ mod tests {
     fn counting(dir: PathBuf, cap: u64) -> (Cache, Arc<AtomicUsize>) {
         let n = Arc::new(AtomicUsize::new(0));
         let c = n.clone();
-        let scan = Box::new(move |_: &Path, _| {
+        let scan = Box::new(move |_: &Path, _, _: &mut dyn FnMut(&[Peak])| {
             c.fetch_add(1, Ordering::SeqCst);
             Ok(ramp(1000))
         });
@@ -221,6 +245,38 @@ mod tests {
         // Zoomed past the finest level, and past the end.
         assert_eq!(p.query(0, BUCKET, 4), vec![[0.0, 0.0]; 4]);
         assert_eq!(p.query(total, total + BUCKET, 2), vec![[0.0; 2]; 2]);
+    }
+
+    #[test]
+    fn scan_progress_is_throttled_and_partial() {
+        let d = tmp("progress");
+        let a = d.join("a.wav");
+        fs::write(&a, b"x").unwrap();
+        // Grows by 100 peaks every 100 ms: about one partial per 250 ms.
+        let scan = Box::new(|_: &Path, _, progress: &mut dyn FnMut(&[Peak])| {
+            let all = ramp(1000);
+            for n in (100..=1000).step_by(100) {
+                std::thread::sleep(Duration::from_millis(100));
+                progress(&all[..n]);
+            }
+            Ok(all)
+        });
+        let c = Cache::with_scan(d.join("cache"), u64::MAX, scan);
+        let mut partials = Vec::new();
+        let full = c.load_with(&a, 0, |p| partials.push(p)).unwrap();
+        assert!((2..=5).contains(&partials.len()), "{}", partials.len());
+        // Each partial reads like the finished pyramid over what it has, and silent past it
+        // (but for the pixel either side of its end, which may overshoot).
+        for p in &partials {
+            let n = p.levels[0].len() as i64;
+            assert!(n < 1000);
+            // The last pixel may overshoot into audio only the finished one has.
+            let (a, b) = (p.query(0, n * BUCKET, 10), full.query(0, n * BUCKET, 10));
+            assert_eq!(a[..9], b[..9]);
+            assert_eq!(p.query(n * BUCKET, 1000 * BUCKET, 3)[1..], [[0.0; 2]; 2]);
+        }
+        // Cached: no partials.
+        c.load_with(&a, 0, |_| panic!("cached")).unwrap();
     }
 
     #[test]

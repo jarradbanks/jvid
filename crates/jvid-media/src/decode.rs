@@ -76,6 +76,18 @@ impl VideoDecoder {
                 _ => break,
             }
         }
+        self.current()
+    }
+
+    /// The keyframe at or before `t`: one seek and one decode, so a stand-in shows at once while
+    /// [`Self::frame_at`] decodes the rest of a long GOP.
+    pub fn keyframe_at(&mut self, t: Time) -> Result<Frame, Error> {
+        self.seek(self.to_ticks(t))?;
+        self.cur = self.next.take();
+        self.current()
+    }
+
+    fn current(&self) -> Result<Frame, Error> {
         let cur = self.cur.as_ref().ok_or(Error::Eof)?;
         let time = self.to_time(pts(cur));
         let mut frame = upright(&to_i420(cur)?, self.rotation);
@@ -266,6 +278,19 @@ pub struct DecoderPool {
 impl DecoderPool {
     /// Decodes on the calling thread with an idle decoder for `path`, opening one if none is free.
     pub fn frame_at(&self, path: &Path, t: Time) -> Result<Frame, Error> {
+        self.with(path, |d| d.frame_at(t))
+    }
+
+    /// [`VideoDecoder::keyframe_at`] with a pooled decoder.
+    pub fn keyframe_at(&self, path: &Path, t: Time) -> Result<Frame, Error> {
+        self.with(path, |d| d.keyframe_at(t))
+    }
+
+    fn with(
+        &self,
+        path: &Path,
+        f: impl FnOnce(&mut VideoDecoder) -> Result<Frame, Error>,
+    ) -> Result<Frame, Error> {
         let idle = self
             .idle
             .lock()
@@ -277,7 +302,7 @@ impl DecoderPool {
             Some(d) => d,
             None => VideoDecoder::open(path)?,
         };
-        let frame = dec.frame_at(t);
+        let frame = f(&mut dec);
         // After a hard error the decoder may be half-advanced, so it isn't reused.
         if frame.is_ok() {
             let mut idle = self.idle.lock().unwrap();
@@ -469,6 +494,20 @@ mod tests {
                 "t={t:?}"
             );
         }
+    }
+
+    #[test]
+    fn keyframe_at_lands_on_the_keyframe_before() {
+        let Some(dir) = corpus() else { return };
+        crate::ffmpeg::init().unwrap();
+        // Keyframes every 30 frames (-g 30); 3.5 s is frame 105, so keyframe 90.
+        let mut dec = VideoDecoder::open(&dir.join("frame-index-1080p30.mp4")).unwrap();
+        let f = dec.keyframe_at(Time(7 * FLICKS_PER_SECOND / 2)).unwrap();
+        assert_eq!(frame_index(&f.planes[0], f.width as usize), 90);
+        assert_eq!(f.pts, Time(3 * FLICKS_PER_SECOND));
+        // The same decoder then finds the exact frame.
+        let f = dec.frame_at(Time(7 * FLICKS_PER_SECOND / 2)).unwrap();
+        assert_eq!(frame_index(&f.planes[0], f.width as usize), 105);
     }
 
     #[test]

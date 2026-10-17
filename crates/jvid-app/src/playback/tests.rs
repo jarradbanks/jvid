@@ -95,7 +95,7 @@ fn catch_up(pb: &mut Playback, p: &Project, clock: u64, last: &mut Option<Shown>
         if let Some(s) = pb.show(p, clock) {
             *last = Some(s);
         }
-        if pb.shown == Some(pb.transport.frame(clock)) {
+        if pb.shown == Some((pb.transport.frame(clock), true)) {
             return;
         }
         std::thread::sleep(Duration::from_micros(100));
@@ -594,4 +594,145 @@ pub(crate) fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
         wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
     let adapter = block_on(instance.request_adapter(&Default::default())).expect("adapter");
     Some(block_on(adapter.request_device(&Default::default())).expect("device"))
+}
+
+/// Acceptance (#90): a 2-hour 1440p60 recording is editable within 2 s of import, and a seek
+/// anywhere shows a frame in under 150 ms.
+#[test]
+fn long_recording_imports_and_seeks_fast() {
+    if cfg!(debug_assertions) {
+        eprintln!("skipping long recording timing in a debug build; run with --release");
+        return;
+    }
+    let Some(dir) = jvid_media::test_media::corpus() else {
+        return;
+    };
+    jvid_media::ffmpeg::init().unwrap();
+    let path = dir.join("long-2h-1440p60.mp4");
+    let start = Instant::now();
+    let probe = jvid_media::probe::probe(&path).unwrap();
+    let mut h = History::new(Project::default());
+    add(
+        &mut h,
+        TrackKind::Video,
+        path.to_str().unwrap(),
+        probe.duration,
+    );
+    let p = h.project();
+    let mut pb = Playback::from_files(DEFAULT_BUDGET);
+    let mut out = Output::new(Box::new(Fake::default()), None);
+    while pb.tick(p, &mut out).is_none_or(|s| s.layers.is_empty()) {
+        std::thread::sleep(Duration::from_micros(200));
+    }
+    // Editable means seeks are quick too: the stand-in decoder, queued for frame 0, is open.
+    let warm = pb.quick_jobs.submit("warm", Priority::Interactive, |_| {});
+    while !warm.is_finished() {
+        std::thread::sleep(Duration::from_micros(200));
+    }
+    let import = start.elapsed();
+    let rate = p.settings().frame_rate;
+    let last = rate.index_floor(probe.duration) - 1;
+    let (mut first, mut exact) = (Vec::new(), Vec::new());
+    // Spread over the whole file and out of order, so every one is a real seek.
+    for k in [7, 2, 9, 0, 5, 3, 8, 1, 6, 4] {
+        let frame = last * k / 9 - k;
+        pb.transport.seek(rate.time_floor(frame), out.clock());
+        let start = Instant::now();
+        loop {
+            if let Some(s) = pb.tick(p, &mut out).filter(|s| s.index == frame) {
+                assert_eq!(s.layers.len(), 1);
+                if first.len() < exact.len() + 1 {
+                    first.push(start.elapsed());
+                }
+                if s.exact {
+                    exact.push(start.elapsed());
+                    break;
+                }
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "frame {frame} never exact"
+            );
+            std::thread::sleep(Duration::from_micros(200));
+        }
+    }
+    let ms = |v: &mut Vec<Duration>| {
+        v.sort();
+        (v[v.len() / 2].as_secs_f64() * 1e3, v[v.len() - 1])
+    };
+    let ((first_med, worst), (exact_med, exact_worst)) = (ms(&mut first), ms(&mut exact));
+    println!(
+        "PERF long 2h 1440p60: import to first frame {:.0} ms (budget 2000), seek to first frame median {first_med:.1} ms, worst {:.1} ms (budget 150), to exact frame median {exact_med:.0} ms, worst {:.0} ms",
+        import.as_secs_f64() * 1e3,
+        worst.as_secs_f64() * 1e3,
+        exact_worst.as_secs_f64() * 1e3,
+    );
+    assert!(import < Duration::from_secs(2), "import took {import:?}");
+    assert!(worst < Duration::from_millis(150), "seek took {worst:?}");
+}
+
+#[test]
+fn parked_seek_shows_a_keyframe_stand_in_then_the_exact_frame() {
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, "/a.mp4", secs(10));
+    let p = h.project();
+    // Exact decodes wait for the release; the stand-in is always the frame at 0.
+    let release = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let r = release.clone();
+    let decode: DecodeFn = Arc::new(move |_, t| {
+        while !r.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Ok(tiny(t))
+    });
+    let mut pb = Playback::new(decode, silent(), DEFAULT_BUDGET);
+    pb.quick = Some(Arc::new(|_, _| Ok(tiny(Time(0)))));
+    let mut out = Output::new(Box::new(Fake::default()), None);
+    pb.tick(p, &mut out);
+    pb.transport.seek(secs(5), out.clock());
+    let mut next = |pb: &mut Playback| {
+        let start = Instant::now();
+        loop {
+            if let Some(s) = pb.tick(p, &mut out).filter(|s| s.index == 150) {
+                let Pixels::Frame(f) = &s.layers[0].0 else {
+                    panic!("frame")
+                };
+                return (s.exact, f.pts);
+            }
+            assert!(start.elapsed() < Duration::from_secs(5), "nothing shown");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    assert_eq!(next(&mut pb), (false, Time(0)));
+    release.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(next(&mut pb), (true, secs(5)));
+}
+
+/// Acceptance (#90): a 144 fps clip in a 60 fps project shows, at every project frame over its
+/// whole length, the source frame at that frame's time. Conformed by timestamp, so it can't drift.
+#[test]
+fn high_fps_clip_conforms_to_the_project_rate_without_drift() {
+    let Some(dir) = jvid_media::test_media::corpus() else {
+        return;
+    };
+    jvid_media::ffmpeg::init().unwrap();
+    let path = dir.join("144fps.mp4");
+    let duration = jvid_media::probe::probe(&path).unwrap().duration;
+    let mut h = History::new(Project::default());
+    let mut settings = h.project().settings().clone();
+    settings.frame_rate = Rate::new(60, 1);
+    h.apply(Command::SetSettings(settings)).unwrap();
+    add(&mut h, TrackKind::Video, path.to_str().unwrap(), duration);
+    let p = h.project();
+    let rate = p.settings().frame_rate;
+    let pool = DecoderPool::default();
+    let frames = rate.index_floor(duration);
+    assert_eq!(frames, 180);
+    for k in 0..frames {
+        let layers = video_at(p.sequence(), rate.time_floor(k));
+        let got = pool.frame_at(&path, layers[0].source_time).unwrap().pts;
+        // Source frame floor(k * 144 / 60), exactly: flicks divide both rates.
+        let want = Time(k * 144 / 60 * FLICKS_PER_SECOND / 144);
+        assert_eq!(got, want, "project frame {k}");
+    }
 }

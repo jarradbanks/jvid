@@ -93,7 +93,7 @@ jobs:
           status=0
           {
             cargo test --release -p jvid-app --bin jvid-app -- perf_cold_start --nocapture
-            cargo test --release -p jvid-app --bin jvid-app -- seek_latency five_hundred_clips --nocapture
+            cargo test --release -p jvid-app --bin jvid-app -- seek_latency long_recording five_hundred_clips --nocapture
             cargo test --release -p jvid-media -p jvid-audio -- one_hour_query sixteen_tracks --nocapture
             cargo bench -p jvid-core --bench core -- --quick
           } 2>&1 | tee -a perf.log || status=1
