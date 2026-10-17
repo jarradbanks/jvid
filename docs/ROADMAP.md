@@ -94,7 +94,7 @@ flowchart LR
 | [#9](https://github.com/jarradbanks/jvid/issues/9) | Project file format (.jvid JSON) | done | S | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
 | [#10](https://github.com/jarradbanks/jvid/issues/10) | Settings and config files (TOML) | done | S | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#11](https://github.com/jarradbanks/jvid/issues/11) | suite-ui: theme tokens, fonts and base widgets | need testing | M | suite-ui | [#1](https://github.com/jarradbanks/jvid/issues/1) |
-| [#12](https://github.com/jarradbanks/jvid/issues/12) | App shell: window, dock layout and top bar |  | M | ui | [#11](https://github.com/jarradbanks/jvid/issues/11), [#9](https://github.com/jarradbanks/jvid/issues/9), [#8](https://github.com/jarradbanks/jvid/issues/8) |
+| [#12](https://github.com/jarradbanks/jvid/issues/12) | App shell: window, dock layout and top bar | need testing | M | ui | [#11](https://github.com/jarradbanks/jvid/issues/11), [#9](https://github.com/jarradbanks/jvid/issues/9), [#8](https://github.com/jarradbanks/jvid/issues/8) |
 | [#13](https://github.com/jarradbanks/jvid/issues/13) | Action registry and keymap with Premiere defaults |  | M | ui | [#12](https://github.com/jarradbanks/jvid/issues/12), [#10](https://github.com/jarradbanks/jvid/issues/10) |
 
 ### [M1 · Media & Preview](https://github.com/jarradbanks/jvid/milestone/2)
