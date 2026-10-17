@@ -15,6 +15,7 @@ jvid-log.workspace = true
 jvid-media.workspace = true
 directories.workspace = true
 tracing.workspace = true
+image.workspace = true
 jvid-render.workspace = true
 suite-ui.workspace = true
 eframe = { workspace = true, features = ["persistence"] }

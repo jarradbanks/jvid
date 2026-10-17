@@ -34,6 +34,8 @@ pub struct MediaBin {
     pub selected: Option<AssetId>,
     /// The asset being renamed and its name stem typed so far; the extension stays.
     pub renaming: Option<(AssetId, String)>,
+    /// Where the rename field was drawn last frame; a press outside it commits.
+    rename_field: Option<Rect>,
     /// The asset whose hover remove button holds keyboard focus, so it stays shown.
     remove_focus: Option<AssetId>,
     /// An in-use asset waiting on the remove warning.
@@ -210,7 +212,12 @@ impl MediaBin {
         );
         let corner = CornerRadius::same(radius::CONTROL);
         let p = ui.painter();
-        self.thumbs.paint(ui, thumb, a);
+        let skim = ui
+            .ctx()
+            .pointer_hover_pos()
+            .filter(|p| thumb.contains(*p))
+            .map(|p| (p.x - thumb.left()) / thumb.width());
+        self.thumbs.paint(ui, thumb, a, skim);
         if let Some(d) = duration_label(a) {
             let galley = p.layout_no_wrap(d, theme::small(), color::INK);
             let badge = Rect::from_min_size(
@@ -302,7 +309,7 @@ impl MediaBin {
             pos2(badge.right() + space::S8, r.rect.top() + 2.0),
             vec2((ROW - 4.0) * 16.0 / 9.0, ROW - 4.0),
         );
-        self.thumbs.paint(ui, thumb, a);
+        self.thumbs.paint(ui, thumb, a, None);
         let show_remove = self.shows_remove(ui, &r, a);
         let mut right = r.rect.right() - space::S8;
         if show_remove {
@@ -377,6 +384,7 @@ impl MediaBin {
                 pos2(rect.left(), rect.center().y - size::CONTROL / 2.0),
                 vec2(w, size::CONTROL),
             );
+            self.rename_field = Some(field);
             let r = ui.put(field, TextInput::new(text).width(w));
             r.request_focus();
             let pos = pos2(
@@ -424,9 +432,17 @@ impl MediaBin {
         if let Some((id, text)) = &self.renaming
             && *id == a.id
         {
-            let (enter, esc) = r
-                .ctx
-                .input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+            let (enter, esc) = r.ctx.input(|i| {
+                // Clicking away commits, like Enter.
+                let away = i.pointer.any_pressed()
+                    && i.pointer
+                        .press_origin()
+                        .is_some_and(|p| !self.rename_field.is_some_and(|f| f.contains(p)));
+                (
+                    i.key_pressed(Key::Enter) || away,
+                    i.key_pressed(Key::Escape),
+                )
+            });
             if enter {
                 out.command = Some(Command::RenameAsset {
                     id: *id,
@@ -490,20 +506,37 @@ impl MediaBin {
     }
 }
 
+/// Results finished off-thread, per path, waiting for the UI thread.
+type Done<T> = Arc<Mutex<Vec<(PathBuf, T)>>>;
+
 /// Poster thumbnails, made on a job pool and kept on disk by `jvid_media::thumbnails`.
 #[derive(Default)]
 struct Thumbs {
     /// Started on first paint, so tests and empty bins spawn nothing.
     cache: Option<(Arc<Cache>, Pool)>,
     /// Posters finished off-thread, waiting to become textures.
-    done: Arc<Mutex<Vec<(PathBuf, egui::ColorImage)>>>,
+    done: Done<egui::ColorImage>,
     /// `None` while a poster is in flight or failed; the placeholder shows.
     textures: HashMap<PathBuf, Option<TextureHandle>>,
+    /// Filmstrips, loaded on first hover and skimmed from memory after.
+    strip_done: Done<Vec<egui::ColorImage>>,
+    strips: HashMap<PathBuf, Option<Vec<TextureHandle>>>,
+}
+
+/// The filmstrip frame under the cursor, `frac` of the way across a tile, of `n` frames.
+fn skim_index(frac: f32, n: usize) -> usize {
+    ((frac.clamp(0.0, 1.0) * n as f32) as usize).min(n.saturating_sub(1))
+}
+
+fn color_image(img: &image::RgbaImage) -> egui::ColorImage {
+    let size = [img.width() as usize, img.height() as usize];
+    egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw())
 }
 
 impl Thumbs {
     /// The tile's picture: the cached poster, or a neutral placeholder until it's ready.
-    fn paint(&mut self, ui: &Ui, rect: Rect, asset: &MediaAsset) {
+    /// `skim` is the hover position across the tile, 0 to 1, which swaps in a filmstrip frame.
+    fn paint(&mut self, ui: &Ui, rect: Rect, asset: &MediaAsset, skim: Option<f32>) {
         let p = ui.painter();
         p.rect_filled(rect, CornerRadius::same(radius::CONTROL), color::RAISED);
         if is_audio(asset) {
@@ -523,39 +556,58 @@ impl Thumbs {
                 .load_texture(path.display().to_string(), img, Default::default());
             self.textures.insert(path, Some(tex));
         }
-        match self.textures.get(&asset.path) {
-            Some(Some(tex)) => {
-                // Letterbox inside the 16:9 tile.
-                let t = tex.size_vec2();
-                let r = Rect::from_center_size(rect.center(), t * (rect.size() / t).min_elem());
-                egui::Image::new(tex)
-                    .corner_radius(radius::CONTROL)
-                    .paint_at(ui, r);
+        for (path, imgs) in self.strip_done.lock().unwrap().drain(..) {
+            let texs = imgs
+                .into_iter()
+                .enumerate()
+                .map(|(i, img)| {
+                    let name = format!("{}#{i}", path.display());
+                    ui.ctx().load_texture(name, img, Default::default())
+                })
+                .collect();
+            self.strips.insert(path, Some(texs));
+        }
+        if let Some(frac) = skim {
+            match self.strips.get(&asset.path) {
+                Some(Some(texs)) if !texs.is_empty() => {
+                    letterbox(ui, rect, &texs[skim_index(frac, texs.len())]);
+                    return;
+                }
+                Some(_) => {}
+                None => {
+                    self.strips.insert(asset.path.clone(), None);
+                    let (done, ctx) = (self.strip_done.clone(), ui.ctx().clone());
+                    let (cache, jobs) = self.cache();
+                    let cache = cache.clone();
+                    let (path, duration) = (asset.path.clone(), probe.duration);
+                    let key = format!("strip:{}", path.display());
+                    jobs.submit(key, jvid_jobs::Priority::Preview, move |c| {
+                        if c.is_cancelled() {
+                            return;
+                        }
+                        match cache.filmstrip(&path, duration) {
+                            Ok(v) => {
+                                done.lock()
+                                    .unwrap()
+                                    .push((path, v.iter().map(color_image).collect()));
+                                ctx.request_repaint();
+                            }
+                            Err(e) => tracing::warn!("filmstrip for {}: {e}", path.display()),
+                        }
+                    });
+                }
             }
+        }
+        match self.textures.get(&asset.path) {
+            Some(Some(tex)) => letterbox(ui, rect, tex),
             Some(None) => {}
             None => {
                 self.textures.insert(asset.path.clone(), None);
-                let (cache, jobs) = self.cache.get_or_insert_with(|| {
-                    let s = crate::settings_file::load();
-                    let dir = s
-                        .cache_dir
-                        .or_else(|| {
-                            directories::ProjectDirs::from("", "", "jvid")
-                                .map(|d| d.cache_dir().to_owned())
-                        })
-                        .unwrap_or_else(std::env::temp_dir)
-                        .join("thumbnails");
-                    (
-                        Arc::new(Cache::new(dir, s.cache_max_mb << 20)),
-                        Pool::new(2),
-                    )
-                });
                 let (done, ctx, path) = (self.done.clone(), ui.ctx().clone(), asset.path.clone());
+                let (cache, jobs) = self.cache();
                 cache.submit_poster(jobs, path.clone(), probe.duration, move |r| match r {
                     Ok(img) => {
-                        let size = [img.width() as usize, img.height() as usize];
-                        let img = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-                        done.lock().unwrap().push((path, img));
+                        done.lock().unwrap().push((path, color_image(&img)));
                         ctx.request_repaint();
                     }
                     Err(e) => tracing::warn!("thumbnail for {}: {e}", path.display()),
@@ -563,6 +615,31 @@ impl Thumbs {
             }
         }
     }
+    fn cache(&mut self) -> &(Arc<Cache>, Pool) {
+        self.cache.get_or_insert_with(|| {
+            let s = crate::settings_file::load();
+            let dir = s
+                .cache_dir
+                .or_else(|| {
+                    directories::ProjectDirs::from("", "", "jvid").map(|d| d.cache_dir().to_owned())
+                })
+                .unwrap_or_else(std::env::temp_dir)
+                .join("thumbnails");
+            (
+                Arc::new(Cache::new(dir, s.cache_max_mb << 20)),
+                Pool::new(2),
+            )
+        })
+    }
+}
+
+/// Paints `tex` letterboxed inside the 16:9 tile.
+fn letterbox(ui: &Ui, rect: Rect, tex: &TextureHandle) {
+    let t = tex.size_vec2();
+    let r = Rect::from_center_size(rect.center(), t * (rect.size() / t).min_elem());
+    egui::Image::new(tex)
+        .corner_radius(radius::CONTROL)
+        .paint_at(ui, r);
 }
 
 fn placeholder(ui: &mut Ui, text: &str) {
@@ -671,6 +748,70 @@ mod tests {
         assert_eq!(split_ext("clip.v2.mkv"), ("clip.v2", ".mkv"));
         assert_eq!(split_ext("noext"), ("noext", ""));
         assert_eq!(split_ext(".hidden"), (".hidden", ""));
+    }
+
+    #[test]
+    fn skim_maps_cursor_x_to_frame() {
+        assert_eq!(skim_index(0.0, 10), 0);
+        assert_eq!(skim_index(0.55, 10), 5);
+        assert_eq!(skim_index(1.0, 10), 9);
+        assert_eq!(skim_index(-0.2, 10), 0);
+        assert_eq!(skim_index(3.0, 10), 9);
+        assert_eq!(skim_index(0.5, 0), 0);
+        // Frame i of a 10 s clip's strip sits at i seconds.
+        let clip = asset(1, "a", 10);
+        assert_eq!(
+            skim_index(0.35, 10) as i64 * FLICKS_PER_SECOND,
+            3 * FLICKS_PER_SECOND
+        );
+        assert!(!is_audio(&clip));
+    }
+
+    #[test]
+    fn skimming_a_cached_strip_decodes_nothing() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let d = std::env::temp_dir().join(format!("jvid-skim-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let clip = d.join("clip.mp4");
+        std::fs::write(&clip, [0]).unwrap();
+        let grabs = Arc::new(AtomicUsize::new(0));
+        let g = grabs.clone();
+        let cache = Arc::new(Cache::with_grab(
+            d.join("cache"),
+            u64::MAX,
+            Box::new(move |_, _| {
+                g.fetch_add(1, Ordering::SeqCst);
+                Ok(image::RgbaImage::new(jvid_media::thumbnails::WIDTH, 90))
+            }),
+        ));
+        let a = asset(1, clip.to_str().unwrap(), 10);
+        let dur = a.probe.as_ref().unwrap().duration;
+        // Warm the disk cache, as an earlier session would have.
+        cache.poster(&clip, dur).unwrap();
+        cache.filmstrip(&clip, dur).unwrap();
+        grabs.store(0, Ordering::SeqCst);
+
+        let mut thumbs = Thumbs {
+            cache: Some((cache, Pool::new(1))),
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(160.0, 90.0));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        for i in 0.. {
+            let mut out = ctx.run_ui(Default::default(), |ui| {
+                thumbs.paint(ui, rect, &a, Some((i % 20) as f32 / 20.0));
+            });
+            out.textures_delta.clear();
+            let strip = matches!(thumbs.strips.get(&clip), Some(Some(v)) if v.len() == 10);
+            if (strip && i > 50) || std::time::Instant::now() > deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(matches!(thumbs.strips.get(&clip), Some(Some(v)) if v.len() == 10));
+        assert_eq!(grabs.load(Ordering::SeqCst), 0);
     }
 
     /// The reported 0:00 WAV: probe truncated durations and the label floored them.
