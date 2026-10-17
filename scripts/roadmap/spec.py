@@ -523,14 +523,6 @@ I("program-monitor", "Program monitor plays the timeline", "M2", ["ui", "render"
   ac=["A two-layer timeline with opacity/blend shows the composite in the Program tab and plays with audio",
       "Moving the playhead while paused updates the frame without playing"])
 
-I("vaapi-encode", "VAAPI hardware encoding on Linux", None, ["export", "media"], "S", ["hw-encode"],
-  summary="Hardware H.264/HEVC export on Linux via VAAPI.",
-  scope=[
-      "VAAPI encoders need GPU hardware frames, which ffmpeg-next has no safe API for; needs a small audited unsafe block (ADR 0001 exception) or an upstream safe API",
-      "Same probe/fallback path as the other hardware encoders",
-  ],
-  ac=["On a Linux machine with VAAPI, export uses h264_vaapi and falls back to software when it fails"])
-
 I("in-out", "In/Out points on the timeline", "M2", ["timeline"], "M", ["trim-split", "actions"],
   summary="Premiere-style range marking for playback, editing and export.",
   scope=[
@@ -719,6 +711,14 @@ I("hw-encode", "Hardware encoding with software fallback", "M4", ["export", "med
       "Map the quality slider to each encoder's rate control",
   ],
   ac=["Export works on a machine with no hardware encoder", "Hardware export is at least 3× faster than software on supported hardware"])
+
+I("vaapi-encode", "VAAPI hardware encoding on Linux", None, ["export", "media"], "S", ["hw-encode"],
+  summary="Hardware H.264/HEVC export on Linux via VAAPI.",
+  scope=[
+      "VAAPI encoders need GPU hardware frames, which ffmpeg-next has no safe API for; needs a small audited unsafe block (ADR 0001 exception) or an upstream safe API",
+      "Same probe/fallback path as the other hardware encoders",
+  ],
+  ac=["On a Linux machine with VAAPI, export uses h264_vaapi and falls back to software when it fails"])
 
 I("audio-export", "Audio-only export", "M4", ["export", "audio"], "S", ["encode"],
   summary="Export just the mix.",

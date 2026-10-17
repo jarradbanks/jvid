@@ -313,7 +313,7 @@ flowchart LR
 | [#52](https://github.com/jarradbanks/jvid/issues/52) | Export pipeline: render, encode and mux | done | L | export, media | [#30](https://github.com/jarradbanks/jvid/issues/30), [#31](https://github.com/jarradbanks/jvid/issues/31), [#45](https://github.com/jarradbanks/jvid/issues/45) |
 | [#53](https://github.com/jarradbanks/jvid/issues/53) | Export presets | done | M | export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#54](https://github.com/jarradbanks/jvid/issues/54) | Export dialog with range selection |  | M | ui, export | [#53](https://github.com/jarradbanks/jvid/issues/53), [#39](https://github.com/jarradbanks/jvid/issues/39), [#36](https://github.com/jarradbanks/jvid/issues/36) |
-| [#55](https://github.com/jarradbanks/jvid/issues/55) | Hardware encoding with software fallback |  | M | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52) |
+| [#55](https://github.com/jarradbanks/jvid/issues/55) | Hardware encoding with software fallback | in progress | M | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#56](https://github.com/jarradbanks/jvid/issues/56) | Audio-only export |  | S | export, audio | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#57](https://github.com/jarradbanks/jvid/issues/57) | Loudness normalization (EBU R128) |  | M | audio, export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#58](https://github.com/jarradbanks/jvid/issues/58) | Background render queue |  | M | export, ui | [#54](https://github.com/jarradbanks/jvid/issues/54), [#18](https://github.com/jarradbanks/jvid/issues/18) |
@@ -387,6 +387,7 @@ flowchart LR
 
 Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](https://github.com/jarradbanks/jvid/labels/later) label.
 
+- [#169](https://github.com/jarradbanks/jvid/issues/169) **VAAPI hardware encoding on Linux** — Hardware H.264/HEVC export on Linux via VAAPI.
 - [#79](https://github.com/jarradbanks/jvid/issues/79) **Chroma key** — Green and blue screen keying with spill suppression.
 - [#80](https://github.com/jarradbanks/jvid/issues/80) **Masks** — Rectangle, ellipse and bezier masks with feather, animatable.
 - [#81](https://github.com/jarradbanks/jvid/issues/81) **Video scopes** — Waveform, vectorscope and histogram.

@@ -404,6 +404,10 @@
     "program-monitor": {
       "number": 159,
       "id": 5901104819
+    },
+    "vaapi-encode": {
+      "number": 169,
+      "id": 5902442765
     }
   },
   "links": [
@@ -1054,6 +1058,10 @@
     [
       "program-monitor",
       "timeline-widget"
+    ],
+    [
+      "vaapi-encode",
+      "hw-encode"
     ]
   ]
 }
