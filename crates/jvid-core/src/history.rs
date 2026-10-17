@@ -672,6 +672,16 @@ impl History {
         self.rev != self.saved_rev
     }
 
+    /// Changes on every edit, undo and redo; equal revisions mean equal projects.
+    pub fn rev(&self) -> u64 {
+        self.rev
+    }
+
+    /// Makes the project dirty without an edit, e.g. after restoring an autosave.
+    pub fn mark_unsaved(&mut self) {
+        self.saved_rev = u64::MAX;
+    }
+
     pub fn mark_saved(&mut self) {
         self.saved_rev = self.rev;
     }
