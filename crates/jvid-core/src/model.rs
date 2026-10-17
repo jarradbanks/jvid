@@ -57,6 +57,57 @@ pub struct ProbeInfo {
     pub frame_rate: Option<Rate>,
     pub sample_rate: Option<u32>,
     pub audio_streams: u32,
+    /// Demuxer name(s), e.g. `mov,mp4,m4a,3gp,3g2,mj2`.
+    #[serde(default)]
+    pub container: String,
+    /// Every stream in file order.
+    #[serde(default)]
+    pub streams: Vec<StreamInfo>,
+}
+
+/// One stream of a probed file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum StreamInfo {
+    Video(VideoInfo),
+    Audio(AudioInfo),
+    /// Subtitles, data, attachments: kept so stream indices line up, otherwise ignored.
+    Other {
+        codec: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct VideoInfo {
+    pub codec: String,
+    /// Coded size, before rotation.
+    pub width: u32,
+    pub height: u32,
+    pub sample_aspect: Option<Rate>,
+    pub display_aspect: Option<Rate>,
+    /// Frames over duration.
+    pub avg_frame_rate: Option<Rate>,
+    /// Lowest rate that represents every timestamp (FFmpeg's `r_frame_rate`).
+    pub real_frame_rate: Option<Rate>,
+    /// Variable frame rate: average and real rates disagree.
+    pub vfr: bool,
+    /// Clockwise degrees to turn decoded frames upright: 0, 90, 180 or 270.
+    pub rotation: u32,
+    /// FFmpeg names, e.g. `bt709`; `None` when unspecified.
+    pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
+    /// `tv` (limited) or `pc` (full).
+    pub color_range: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct AudioInfo {
+    pub codec: String,
+    pub sample_rate: u32,
+    pub channels: u32,
+    /// FFmpeg channel mask (`AV_CH_*` bits); 0 when unspecified.
+    pub channel_layout: u64,
+    /// Stream title tag, e.g. "Mic" in an OBS recording.
+    pub title: Option<String>,
 }
 
 /// A source file referenced by clips.
