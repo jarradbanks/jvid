@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 93838f4d0537f326aaae5aa22ec2ace48eca5b82c288414dd0f05c70b9bc62e5 # shrinks to ops = [Cmd(AddTrack { kind: Audio, name: "" }), Undo, EndGesture]

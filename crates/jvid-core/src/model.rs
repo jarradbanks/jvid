@@ -140,6 +140,8 @@ pub enum ModelError {
     Overlap(ClipId),
     /// `source_out` is not after `source_in`.
     EmptyClip,
+    UnknownMarker(MarkerId),
+    UnknownAsset(AssetId),
 }
 
 impl std::fmt::Display for ModelError {
@@ -149,6 +151,8 @@ impl std::fmt::Display for ModelError {
             Self::UnknownClip(id) => write!(f, "unknown clip {}", id.0),
             Self::Overlap(id) => write!(f, "clip would overlap clip {}", id.0),
             Self::EmptyClip => f.write_str("clip source out must be after source in"),
+            Self::UnknownMarker(id) => write!(f, "unknown marker {}", id.0),
+            Self::UnknownAsset(id) => write!(f, "unknown asset {}", id.0),
         }
     }
 }
@@ -159,9 +163,9 @@ impl std::error::Error for ModelError {}
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Sequence {
     tracks: Vec<Track>,
-    pub markers: Vec<Marker>,
-    pub in_point: Option<Time>,
-    pub out_point: Option<Time>,
+    pub(crate) markers: Vec<Marker>,
+    pub(crate) in_point: Option<Time>,
+    pub(crate) out_point: Option<Time>,
     next_id: u64,
 }
 
@@ -181,6 +185,18 @@ impl Sequence {
         self.next_id
     }
 
+    pub fn markers(&self) -> &[Marker] {
+        &self.markers
+    }
+
+    pub fn in_point(&self) -> Option<Time> {
+        self.in_point
+    }
+
+    pub fn out_point(&self) -> Option<Time> {
+        self.out_point
+    }
+
     pub fn tracks(&self) -> &[Track] {
         &self.tracks
     }
@@ -190,11 +206,11 @@ impl Sequence {
     }
 
     /// Track settings (name, flags, volume, pan) are free to edit; clips are not.
-    pub fn track_mut(&mut self, id: TrackId) -> Option<&mut Track> {
+    pub(crate) fn track_mut(&mut self, id: TrackId) -> Option<&mut Track> {
         self.tracks.iter_mut().find(|t| t.id == id)
     }
 
-    pub fn add_track(&mut self, kind: TrackKind, name: impl Into<String>) -> TrackId {
+    pub(crate) fn add_track(&mut self, kind: TrackKind, name: impl Into<String>) -> TrackId {
         let id = TrackId(self.alloc());
         self.tracks.push(Track {
             id,
@@ -212,7 +228,7 @@ impl Sequence {
     }
 
     /// Removes the track and its clips.
-    pub fn remove_track(&mut self, id: TrackId) -> Result<Track, ModelError> {
+    pub(crate) fn remove_track(&mut self, id: TrackId) -> Result<Track, ModelError> {
         let i = self
             .tracks
             .iter()
@@ -221,11 +237,11 @@ impl Sequence {
         Ok(self.tracks.remove(i))
     }
 
-    pub fn new_link(&mut self) -> LinkId {
+    pub(crate) fn new_link(&mut self) -> LinkId {
         LinkId(self.alloc())
     }
 
-    pub fn add_clip(&mut self, track: TrackId, new: NewClip) -> Result<ClipId, ModelError> {
+    pub(crate) fn add_clip(&mut self, track: TrackId, new: NewClip) -> Result<ClipId, ModelError> {
         if new.source_out <= new.source_in {
             return Err(ModelError::EmptyClip);
         }
@@ -255,7 +271,7 @@ impl Sequence {
     }
 
     /// Fields that cannot break the overlap invariant: asset, link, params.
-    pub fn with_clip_mut<R>(
+    pub(crate) fn with_clip_mut<R>(
         &mut self,
         id: ClipId,
         f: impl FnOnce(&mut ClipProps<'_>) -> R,
@@ -272,7 +288,7 @@ impl Sequence {
         }))
     }
 
-    pub fn remove_clip(&mut self, id: ClipId) -> Result<(TrackId, Clip), ModelError> {
+    pub(crate) fn remove_clip(&mut self, id: ClipId) -> Result<(TrackId, Clip), ModelError> {
         for t in &mut self.tracks {
             if let Some(i) = t.clips.iter().position(|c| c.id == id) {
                 return Ok((t.id, t.clips.remove(i)));
@@ -282,7 +298,12 @@ impl Sequence {
     }
 
     /// Moves a clip to `start` on `track` (which may be its current track).
-    pub fn move_clip(&mut self, id: ClipId, track: TrackId, start: Time) -> Result<(), ModelError> {
+    pub(crate) fn move_clip(
+        &mut self,
+        id: ClipId,
+        track: TrackId,
+        start: Time,
+    ) -> Result<(), ModelError> {
         let (_, c) = self.clip(id).ok_or(ModelError::UnknownClip(id))?;
         let end = start + c.duration();
         self.check_free(track, start, end, Some(id))?;
@@ -293,7 +314,7 @@ impl Sequence {
     }
 
     /// Trims a clip: new source range and timeline start.
-    pub fn set_clip_range(
+    pub(crate) fn set_clip_range(
         &mut self,
         id: ClipId,
         start: Time,
@@ -327,7 +348,12 @@ impl Sequence {
         }
     }
 
-    pub fn add_marker(&mut self, time: Time, duration: Time, name: impl Into<String>) -> MarkerId {
+    pub(crate) fn add_marker(
+        &mut self,
+        time: Time,
+        duration: Time,
+        name: impl Into<String>,
+    ) -> MarkerId {
         let id = MarkerId(self.alloc());
         self.markers.push(Marker {
             id,
@@ -338,7 +364,7 @@ impl Sequence {
         id
     }
 
-    pub fn remove_marker(&mut self, id: MarkerId) -> Option<Marker> {
+    pub(crate) fn remove_marker(&mut self, id: MarkerId) -> Option<Marker> {
         let i = self.markers.iter().position(|m| m.id == id)?;
         Some(self.markers.remove(i))
     }
@@ -381,7 +407,7 @@ impl Sequence {
 }
 
 /// The clip fields `Sequence::with_clip_mut` exposes.
-pub struct ClipProps<'a> {
+pub(crate) struct ClipProps<'a> {
     pub asset: &'a mut AssetId,
     pub link: &'a mut Option<LinkId>,
     pub params: &'a mut BTreeMap<String, f64>,
@@ -394,14 +420,27 @@ fn insert_sorted(clips: &mut Vec<Clip>, c: Clip) {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Project {
-    pub settings: ProjectSettings,
-    pub assets: Vec<MediaAsset>,
-    pub sequence: Sequence,
+    pub(crate) settings: ProjectSettings,
+    pub(crate) assets: Vec<MediaAsset>,
+    pub(crate) sequence: Sequence,
     next_asset: u64,
 }
 
+/// Read-only from outside the crate; edit it through [`crate::history::History`].
 impl Project {
-    pub fn add_asset(&mut self, path: impl Into<PathBuf>) -> AssetId {
+    pub fn settings(&self) -> &ProjectSettings {
+        &self.settings
+    }
+
+    pub fn assets(&self) -> &[MediaAsset] {
+        &self.assets
+    }
+
+    pub fn sequence(&self) -> &Sequence {
+        &self.sequence
+    }
+
+    pub(crate) fn add_asset(&mut self, path: impl Into<PathBuf>) -> AssetId {
         self.next_asset += 1;
         let id = AssetId(self.next_asset);
         self.assets.push(MediaAsset {
@@ -416,7 +455,7 @@ impl Project {
         self.assets.iter().find(|a| a.id == id)
     }
 
-    pub fn asset_mut(&mut self, id: AssetId) -> Option<&mut MediaAsset> {
+    pub(crate) fn asset_mut(&mut self, id: AssetId) -> Option<&mut MediaAsset> {
         self.assets.iter_mut().find(|a| a.id == id)
     }
 }
