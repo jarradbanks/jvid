@@ -1059,6 +1059,18 @@ impl Sequence {
                 s.split(ti, id, at, &mut links);
             }
         }
+        // A tail whose partner wasn't cut has nothing to be linked to.
+        for l in links.into_values() {
+            let tails = s
+                .tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .filter(|c| c.link == Some(l));
+            if tails.count() == 1 {
+                let t = s.tracks.iter_mut().flat_map(|t| &mut t.clips);
+                t.filter(|c| c.link == Some(l)).for_each(|c| c.link = None);
+            }
+        }
         *self = s;
         Ok(())
     }
@@ -1079,9 +1091,39 @@ impl Sequence {
     pub(crate) fn close_gap(&mut self, track: TrackId, at: Time) -> Result<(), ModelError> {
         let ti = self.index(track)?;
         let (a, b) = self.gap_at(track, at).ok_or(ModelError::NoGap(track))?;
-        for c in &mut self.tracks[ti].clips {
-            if c.start >= b {
-                c.start = c.start - (b - a);
+        let later = self.tracks[ti].clips.iter().filter(|c| c.start >= b);
+        let later: Vec<_> = later.map(|c| c.id).collect();
+        let mut s = self.clone();
+        s.shift_synced(later, a - b)?;
+        *self = s;
+        Ok(())
+    }
+
+    /// Moves `ids` and their linked partners on other tracks by `by`, so ripples keep sync.
+    /// Fails, leaving `self` half-moved, if a moved clip would land on another or before zero.
+    fn shift_synced(&mut self, mut ids: Vec<ClipId>, by: Time) -> Result<(), ModelError> {
+        for id in ids.clone() {
+            for (_, c) in self.linked(id) {
+                if !ids.contains(&c.id) {
+                    ids.push(c.id);
+                }
+            }
+        }
+        for t in &mut self.tracks {
+            for c in t.clips.iter_mut().filter(|c| ids.contains(&c.id)) {
+                c.start = c.start + by;
+                if c.start < Time(0) {
+                    return Err(ModelError::Overlap(c.id));
+                }
+            }
+            t.clips.sort_by_key(|c| c.start);
+            if let Some(w) = t.clips.windows(2).find(|w| w[0].end() > w[1].start) {
+                let hit = if ids.contains(&w[0].id) {
+                    w[1].id
+                } else {
+                    w[0].id
+                };
+                return Err(ModelError::Overlap(hit));
             }
         }
         Ok(())
@@ -1142,14 +1184,11 @@ impl Project {
             let by = p.trim_limit(id, edge, by, ripple);
             let group = p.sequence.linked(id).into_iter();
             let group: Vec<_> = group.map(|(t, c)| (t, c.id, c.end())).collect();
+            let mut later = Vec::new();
             for (t, cid, end) in group {
                 done.push(cid);
                 let s = &mut p.sequence;
                 let ti = s.index(t)?;
-                let shift = match edge {
-                    Edge::Head => Time(0) - by,
-                    Edge::Tail => by,
-                };
                 for c in &mut s.tracks[ti].clips {
                     if c.id == cid {
                         match edge {
@@ -1158,10 +1197,15 @@ impl Project {
                             Edge::Tail => c.source_out = c.source_out + by,
                         }
                     } else if ripple && c.start >= end {
-                        c.start = c.start + shift;
+                        later.push(c.id);
                     }
                 }
             }
+            let shift = match edge {
+                Edge::Head => Time(0) - by,
+                Edge::Tail => by,
+            };
+            p.sequence.shift_synced(later, shift)?;
         }
         *self = p;
         Ok(())

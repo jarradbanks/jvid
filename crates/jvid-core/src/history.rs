@@ -523,8 +523,10 @@ impl History {
     ) -> Result<Created, ModelError> {
         if self.txn.is_some() || self.gesture != Some(key) {
             self.gesture = None;
+            let rev = self.rev;
             let r = self.apply_step(cmd);
-            if r.is_ok() && self.txn.is_none() {
+            // Only a gesture that opened an undo step may coalesce into it.
+            if r.is_ok() && self.txn.is_none() && self.rev != rev {
                 self.gesture = Some(key);
             }
             return r;
@@ -539,14 +541,15 @@ impl History {
     }
 
     fn apply_step(&mut self, cmd: Command) -> Result<Created, ModelError> {
-        if self.txn.is_some() {
-            let r = cmd.apply(&mut self.project)?;
-            self.bump();
-            return Ok(r);
-        }
         let before = (self.project.clone(), self.rev);
         let r = cmd.apply(&mut self.project)?;
-        self.push_undo(before);
+        // A no-op (a split on a cut, a trim held at its limit) leaves no undo step.
+        if self.project == before.0 {
+            return Ok(r);
+        }
+        if self.txn.is_none() {
+            self.push_undo(before);
+        }
         self.bump();
         Ok(r)
     }
@@ -826,7 +829,7 @@ mod tests {
         assert!(!h.is_dirty());
         h.undo();
         assert!(h.is_dirty());
-        h.redo();
+        assert!(h.redo());
         assert!(!h.is_dirty());
         h.undo();
         track(&mut h); // a different edit from the saved state stays dirty
@@ -1510,8 +1513,9 @@ mod tests {
             at: fr(50),
         })
         .unwrap();
+        // The video partner follows, keeping sync.
+        assert_eq!(frames(&h, f), both(vec![(5, 10, 50), (45, 60, 70)]));
         let s = h.project().sequence();
-        assert_eq!(s.track(a).unwrap().clips()[1].start, fr(45));
         assert_eq!(s.gap_at(a, fr(10)), None);
         assert!(
             h.apply(Command::CloseGap {
@@ -1522,5 +1526,80 @@ mod tests {
         );
         assert!(h.undo());
         assert_eq!(h.project(), &before);
+    }
+
+    #[test]
+    fn ripples_refuse_when_a_partner_would_collide() {
+        let (mut h, f, [c, _], a) = cut_project();
+        let fr = |n: i64| Time(f.0 * n);
+        let v = h.project().sequence().tracks()[0].id;
+        let asset = h.project().assets()[0].id;
+        let clip = NewClip {
+            asset,
+            source_in: Time(0),
+            source_out: fr(5),
+            start: fr(50),
+            link: None,
+        };
+        h.apply(Command::AddClip { track: v, clip }).unwrap();
+        let before = h.project().clone();
+        let gap = Command::CloseGap {
+            track: a,
+            at: fr(50),
+        };
+        assert!(matches!(h.apply(gap), Err(ModelError::Overlap(_))));
+        // A ripple trim of the audio alone pulls the later video partner into it too.
+        let audio = h.project().sequence().track(a).unwrap().clips()[0].id;
+        let trims = vec![(audio, Edge::Tail, fr(-10))];
+        h.apply(Command::LinkClips {
+            ids: vec![c],
+            linked: false,
+        })
+        .unwrap();
+        let ripple = Command::Trim {
+            trims,
+            ripple: true,
+        };
+        assert!(matches!(h.apply(ripple), Err(ModelError::Overlap(_))));
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+    }
+
+    #[test]
+    fn no_op_edits_leave_no_undo_step() {
+        let (mut h, f, [c, _], _) = cut_project();
+        let fr = |n: i64| Time(f.0 * n);
+        // A cut on a clip's edge, and a trim already at its limit.
+        h.apply(Command::Split {
+            ids: vec![c],
+            at: fr(5),
+        })
+        .unwrap();
+        assert!(h.undo());
+        // Undo skips the no-op and takes back the last placement.
+        assert_eq!(h.project().sequence().clips_at(fr(65)).count(), 0);
+        assert!(h.redo());
+        let before = h.project().clone();
+        let trims = vec![(c, Edge::Head, fr(-100))];
+        h.apply(Command::Trim {
+            trims: trims.clone(),
+            ripple: false,
+        })
+        .unwrap();
+        h.apply(Command::Trim {
+            trims,
+            ripple: false,
+        })
+        .unwrap();
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        // A tail whose partner wasn't cut gets no link of its own.
+        h.apply(Command::Split {
+            ids: vec![c],
+            at: fr(20),
+        })
+        .unwrap();
+        let tail = h.project().sequence().tracks()[0].clips()[1].id;
+        assert_eq!(h.project().sequence().clip(tail).unwrap().1.link, None);
     }
 }

@@ -66,6 +66,8 @@ pub struct Timeline {
     clipboard: Vec<(TrackId, Clip)>,
     /// An edit from a keymap action, handed out by the next `show`.
     pending: Option<Command>,
+    /// Where Q puts the playhead once its trim applies.
+    seek_after: Option<Time>,
     /// Copy or cut ran since the last `show`.
     copied: bool,
     /// The razor tool (C) is on instead of selection (V).
@@ -102,6 +104,7 @@ impl Default for Timeline {
             linked_selection: true,
             clipboard: Vec::new(),
             pending: None,
+            seek_after: None,
             copied: false,
             razor: false,
             trim: None,
@@ -181,6 +184,16 @@ impl Timeline {
     pub fn seek(&mut self, t: Time) {
         let r = self.transport.rate;
         self.transport.seek(r.time_floor(r.index_nearest(t)), 0);
+    }
+
+    /// Tells the timeline whether its last edit applied, so Q only moves the playhead
+    /// when its trim did.
+    pub fn applied(&mut self, ok: bool) {
+        if let Some(t) = self.seek_after.take()
+            && ok
+        {
+            self.seek(t);
+        }
     }
 
     /// Multiplies the zoom, keeping the time under `anchor` (an x on `view`) still.
@@ -289,7 +302,12 @@ impl Timeline {
         let under: Vec<_> = under.map(|(_, c)| c).collect();
         let cmd = match id {
             "add_edit" => {
-                let picked = under.iter().filter(|c| self.selected.contains(&c.id));
+                let picked = under.iter().filter(|c| {
+                    let partners = || seq.linked(c.id).into_iter();
+                    let partners = self.linked_selection
+                        && partners().any(|(_, p)| self.selected.contains(&p.id));
+                    self.selected.contains(&c.id) || partners
+                });
                 let ids: Vec<_> = if self.selected.is_empty() {
                     under.iter().map(|c| c.id).collect()
                 } else {
@@ -305,7 +323,7 @@ impl Timeline {
                     trims: trims.collect(),
                     ripple: true,
                 };
-                self.seek(back);
+                self.seek_after = Some(back);
                 cmd
             }
             _ => Command::Trim {
@@ -1566,6 +1584,7 @@ mod tests {
             t.seek(Time(at * S));
             assert!(t.action(id, h.project()));
             h.apply(t.pending.take().expect("an edit")).unwrap();
+            t.applied(true);
         };
         let before = h.project().clone();
 
@@ -1584,12 +1603,25 @@ mod tests {
         run(&mut t, &mut h, "add_edit", 1);
         assert_eq!(spans(&h), vec![vec![(0, 1), (1, 2), (2, 4)]; 2]);
         assert!(h.undo());
+        // Linked selection brings in the partner, as the razor does.
         t.selected.insert(pair(&h, 0)[0]);
+        run(&mut t, &mut h, "add_edit", 1);
+        assert_eq!(spans(&h), vec![vec![(0, 1), (1, 2), (2, 4)]; 2]);
+        assert!(h.undo());
+        t.linked_selection = false;
         run(&mut t, &mut h, "add_edit", 1);
         assert_eq!(spans(&h)[0].len(), 3);
         assert_eq!(spans(&h)[1].len(), 2);
         assert!(h.undo());
         t.selected.clear();
+        t.linked_selection = true;
+
+        // A refused Q leaves the playhead where it was.
+        t.seek(Time(S));
+        assert!(t.action("ripple_trim_prev", h.project()));
+        t.applied(false);
+        assert_eq!(t.playhead(), Time(S));
+        t.pending = None;
 
         // The razor cuts the clip and its partner where it's clicked.
         let view = t.view(0.0);
@@ -1605,8 +1637,9 @@ mod tests {
         })
         .unwrap();
         t.gap = Some((all[0], Time(S)));
+        // The partner on A1 follows to stay in sync.
         run(&mut t, &mut h, "delete", 0);
-        assert_eq!(spans(&h), vec![vec![(0, 2)], vec![(2, 4)]]);
+        assert_eq!(spans(&h), vec![vec![(0, 2)]; 2]);
     }
 
     #[test]
@@ -1634,6 +1667,35 @@ mod tests {
         let s = h.state().1.project().sequence().clone();
         assert_eq!(s.tracks()[0].clips()[0].end(), Time(3 * S));
         assert_eq!(s.tracks()[1].clips()[0].end(), Time(2 * S));
+        assert!(h.state_mut().1.undo());
+        assert_eq!(h.state().1.project(), &before);
+    }
+
+    #[test]
+    fn ctrl_dragging_a_tail_ripples_later_clips() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(4));
+        let lane_y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let before = h.state().1.project().clone();
+        let x = 8.0 + size::TRACK_HEADER + 36.0;
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+        h.hover_at(pos2(x, lane_y));
+        h.run();
+        h.drag_at(pos2(x, lane_y));
+        h.run();
+        for dx in [10.0, 20.0] {
+            h.hover_at(pos2(x + dx, lane_y));
+            h.run();
+        }
+        h.drop_at(pos2(x + 20.0, lane_y));
+        h.run();
+        // V1's first clip grows a second and its next clip follows instead of blocking it.
+        let s = h.state().1.project().sequence().clone();
+        let v1 = s.tracks()[0].clips();
+        assert_eq!((v1[0].end(), v1[1].start), (Time(3 * S), Time(3 * S)));
         assert!(h.state_mut().1.undo());
         assert_eq!(h.state().1.project(), &before);
     }

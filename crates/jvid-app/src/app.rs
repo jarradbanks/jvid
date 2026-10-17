@@ -585,6 +585,9 @@ impl eframe::App for App {
                 (Some(c), None) => Some(self.history.apply(c)),
                 (None, _) => None,
             };
+            if let Some(r) = &applied {
+                self.timeline.applied(r.is_ok());
+            }
             if let Some(Err(e)) = applied {
                 tracing::warn!("edit failed: {e}");
             }
