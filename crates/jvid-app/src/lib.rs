@@ -19,3 +19,4 @@ pub mod settings_file;
 mod timeline;
 mod transport;
 mod welcome;
+mod zoom;

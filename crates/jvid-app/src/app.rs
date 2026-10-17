@@ -972,6 +972,10 @@ impl TabViewer for Viewer<'_> {
                 if let Some((c, g)) = crate::handles::show(ui, self.project, selected, t, frame) {
                     (self.command, self.gesture) = (Some(c), g);
                 }
+                // After the handles, so an Alt-drag draws a zoom instead of moving the clip.
+                if let Some(c) = crate::zoom::show(ui, self.project, selected, t, frame) {
+                    (self.command, self.gesture) = (Some(c), None);
+                }
                 if let Some(id) = crate::handles::double_clicked_text(ui, self.project, t, frame) {
                     self.timeline.select_clip(self.project.sequence(), id);
                     crate::inspector::focus_text(ui.ctx());
