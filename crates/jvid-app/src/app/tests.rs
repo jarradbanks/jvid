@@ -861,3 +861,36 @@ fn source_actions_step_and_mark_the_open_clip_undoably() {
     app.run_action("mark_in");
     assert_eq!(marks(&app), (None, None));
 }
+
+/// Release only. Perf (docs/perf.md): app construction to first rendered frame, then resident
+/// memory after idling. In-process, so it leaves out exec and dynamic linking, and RSS includes
+/// the test harness; run it alone (`-- perf_cold_start --test-threads 1`) for a clean number.
+#[test]
+fn perf_cold_start_and_idle_memory() {
+    if cfg!(debug_assertions) || !gpu() {
+        return;
+    }
+    let start = std::time::Instant::now();
+    let mut h = welcome_harness([1280.0, 720.0], 1.0);
+    h.render().expect("render");
+    let cold = start.elapsed();
+    for _ in 0..60 {
+        h.run();
+    }
+    println!(
+        "PERF cold start (in-process, to first frame): {:.0} ms (budget 1000 ms)",
+        cold.as_secs_f64() * 1e3
+    );
+    // shortcut: Linux only (/proc); add macOS/Windows readings when the harness runs there.
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        let kb: u64 = status
+            .lines()
+            .find_map(|l| l.strip_prefix("VmRSS:"))
+            .and_then(|v| v.trim().trim_end_matches("kB").trim().parse().ok())
+            .expect("VmRSS");
+        println!(
+            "PERF idle memory (RSS after 60 idle frames): {} MB (budget 150 MB)",
+            kb / 1024
+        );
+    }
+}

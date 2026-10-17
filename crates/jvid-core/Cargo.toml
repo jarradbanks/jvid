@@ -18,3 +18,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+criterion = { version = "0.8", default-features = false }
+
+[[bench]]
+name = "core"
+harness = false
