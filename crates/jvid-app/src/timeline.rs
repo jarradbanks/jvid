@@ -32,6 +32,7 @@ use crate::keymap::Keymap;
 use crate::media_bin::Caches;
 use crate::transport::Transport;
 
+mod fades;
 mod keyframes;
 mod markers;
 pub mod menus;
@@ -907,6 +908,9 @@ impl Timeline {
                 }
                 cr.context_menu(|ui| self.clip_menu(ui, seq, keymap, clip.asset));
                 if let Some(e) = self.trim_handles(ui, project, view, clip, r) {
+                    edit = Some(e);
+                }
+                if let Some(e) = self.fade_handles(ui, &painter, view, clip, r, id) {
                     edit = Some(e);
                 }
                 self.key_toggle(ui, &painter, clip, r, id);

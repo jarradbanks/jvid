@@ -467,6 +467,21 @@ pub struct Transform {
     pub saturation: f64,
     pub temperature: f64,
     pub tint: f64,
+    /// Fade lengths from the clip's start and end; they scale opacity and gain, and trims keep
+    /// them since they hang off the edges. Longer than the clip clamps to it.
+    pub fade_in: Time,
+    pub fade_out: Time,
+    pub fade_curve: FadeCurve,
+}
+
+/// The shape of a clip fade.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FadeCurve {
+    #[default]
+    Linear,
+    /// sin(x·π/2): two overlapping fades keep constant power.
+    EqualPower,
 }
 
 /// A layer blend mode, as in the W3C compositing spec; the index is the compositor's shader code.
@@ -514,6 +529,9 @@ impl Default for Transform {
             saturation: 0.0,
             temperature: 0.0,
             tint: 0.0,
+            fade_in: Time(0),
+            fade_out: Time(0),
+            fade_curve: FadeCurve::Linear,
         }
     }
 }
@@ -611,11 +629,31 @@ impl Clip {
         )
     }
 
-    /// Whether the clip has volume or pan keyframes, so its gain changes within a block.
+    /// Whether the clip has volume or pan keyframes or fades, so its gain changes within a
+    /// block.
     pub fn gain_animated(&self) -> bool {
-        ["volume", "pan"]
-            .iter()
-            .any(|n| self.keyframes.get(*n).is_some_and(|k| !k.is_empty()))
+        let x = &self.transform;
+        x.fade_in > Time(0)
+            || x.fade_out > Time(0)
+            || ["volume", "pan"]
+                .iter()
+                .any(|n| self.keyframes.get(*n).is_some_and(|k| !k.is_empty()))
+    }
+
+    /// The fade multiplier at timeline time `t`, 0..=1, for opacity and gain.
+    pub fn fade_at(&self, t: Time) -> f64 {
+        let d = self.duration().0.max(1);
+        let ramp = |len: Time, from: i64| match len.0.min(d) {
+            n if n > 0 => (from as f64 / n as f64).clamp(0.0, 1.0),
+            _ => 1.0,
+        };
+        let x = &self.transform;
+        // Measured to the last instant shown, so a fade out reaches 0 on the final frame's start.
+        let x = ramp(x.fade_in, (t - self.start).0) * ramp(x.fade_out, (self.end() - t).0);
+        match self.transform.fade_curve {
+            FadeCurve::Linear => x,
+            FadeCurve::EqualPower => (x * std::f64::consts::FRAC_PI_2).sin(),
+        }
     }
 
     /// Exclusive end on the timeline.
