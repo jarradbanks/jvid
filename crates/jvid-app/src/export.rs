@@ -81,6 +81,32 @@ pub fn submit(
     (handle, rx)
 }
 
+/// A device for exporting without a window: the default adapter, else a software one.
+pub fn headless_gpu() -> Result<(wgpu::Device, wgpu::Queue), String> {
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let adapter = block_on(instance.request_adapter(&Default::default())).or_else(|_| {
+        block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            force_fallback_adapter: true,
+            ..Default::default()
+        }))
+    });
+    let adapter = adapter.map_err(|e| format!("no GPU adapter: {e}"))?;
+    block_on(adapter.request_device(&Default::default())).map_err(|e| format!("GPU device: {e}"))
+}
+
+/// wgpu's native futures are ready when polled, so a busy poll stands in for an executor.
+pub(crate) fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    loop {
+        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
+        std::thread::yield_now();
+    }
+}
+
 /// Why an export didn't produce a file.
 #[derive(Debug, PartialEq)]
 pub enum Error {

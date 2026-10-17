@@ -2042,11 +2042,12 @@ dependencies = [
 name = "jvid-cli"
 version = "0.1.0"
 dependencies = [
- "jvid-audio",
+ "jvid-app",
  "jvid-core",
+ "jvid-jobs",
  "jvid-log",
  "jvid-media",
- "jvid-render",
+ "suite-ui",
 ]
 
 [[package]]

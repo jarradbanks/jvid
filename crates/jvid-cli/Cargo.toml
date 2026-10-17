@@ -7,12 +7,19 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "jvid"
+path = "src/main.rs"
+
 [dependencies]
-jvid-audio.workspace = true
+jvid-app = { path = "../jvid-app" }
 jvid-core.workspace = true
+jvid-jobs.workspace = true
 jvid-log.workspace = true
-jvid-media.workspace = true
-jvid-render.workspace = true
+
+[dev-dependencies]
+jvid-media = { workspace = true, features = ["test-support"] }
+suite-ui = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

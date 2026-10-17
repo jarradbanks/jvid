@@ -1,23 +1,6 @@
 //! The jvid desktop video editor, built with eframe and suite-ui.
 
-mod app;
-mod easing;
-mod export;
-mod handles;
-mod import;
-mod inspector;
-mod keymap;
-mod keymap_editor;
-mod media_bin;
-mod playback;
-mod preview;
-mod project_file;
-mod project_settings;
-mod relink;
-mod settings_file;
-mod timeline;
-mod transport;
-mod welcome;
+use jvid_app::{app, settings_file};
 
 fn main() -> eframe::Result {
     let _log = jvid_log::init("jvid-app", jvid_log::log_dir());
