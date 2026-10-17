@@ -40,6 +40,8 @@ const AUDIO_AHEAD: Time = Time(FLICKS_PER_SECOND);
 const RETRY: Duration = Duration::from_secs(1);
 /// Default frame cache budget: about 170 1080p frames.
 pub const DEFAULT_BUDGET: usize = 512 << 20;
+/// Sample frames heard per scrub step: a bit over a UI frame, so a steady drag sounds continuous.
+const SCRUB_SAMPLES: usize = SAMPLE_RATE as usize / 15;
 const FLICKS_PER_SAMPLE: i64 = FLICKS_PER_SECOND / SAMPLE_RATE as i64;
 
 /// Decodes the frame of `path` shown at source time `t`; runs on a decode thread.
@@ -272,6 +274,8 @@ pub struct Playback {
     paths: HashMap<AssetId, PathBuf>,
     /// Forward play loops the sequence's in/out range (all of it where a mark is unset).
     pub looping: bool,
+    /// Parked seeks while dragging play a short snippet (Shift+S toggles).
+    pub scrub_audio: bool,
     done_tx: Sender<Done>,
     done: Receiver<Done>,
     /// The frame index last returned by `tick`, and whether it was exact.
@@ -298,6 +302,7 @@ impl Playback {
             failed: HashMap::new(),
             paths: HashMap::new(),
             looping: false,
+            scrub_audio: true,
             done_tx,
             done,
             shown: None,
@@ -341,6 +346,16 @@ impl Playback {
         self.audio.prime(project, self.transport.position(clock));
         self.decode_ahead(project, clock);
         self.show(project, clock)
+    }
+
+    /// Queues a short snippet of the mix from the parked playhead, for audio scrubbing. The
+    /// first snippet after a jump may be silent while the clips' audio seeks.
+    pub fn scrub(&mut self, project: &Project, out: &mut Output) {
+        let pos = self.transport.position(0);
+        self.audio.prime(project, pos);
+        let mut buf = vec![0.0; SCRUB_SAMPLES * 2];
+        self.audio.mix(project, sample(pos), &mut buf);
+        out.push(&buf);
     }
 
     /// [`Playback::tick`] while stopped and before an audio output is open: decodes and returns

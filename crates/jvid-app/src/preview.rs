@@ -108,6 +108,7 @@ pub const PROGRAM_ACTIONS: &[&str] = &[
     "shuttle_stop",
     "shuttle_right",
     "loop_playback",
+    "audio_scrub",
 ];
 
 /// The clip open in the Source tab.
@@ -367,6 +368,10 @@ impl Preview {
             self.program.looping = !self.program.looping;
             return;
         }
+        if id == "audio_scrub" {
+            self.program.scrub_audio = !self.program.scrub_audio;
+            return;
+        }
         let out = self
             .output
             .get_or_insert_with(|| Output::new(Box::new(CpalBackend::default()), None));
@@ -402,7 +407,8 @@ impl Preview {
             self.show(ui, trim, offline, None, None);
             return None;
         }
-        let follow = self.sync_program(project, playhead);
+        let dragging = ui.input(|i| i.pointer.primary_down());
+        let follow = self.sync_program(project, playhead, dragging);
         if self.program.transport.speed() != 0 {
             ui.ctx().request_repaint();
         }
@@ -411,7 +417,8 @@ impl Preview {
     }
 
     /// Seeks timeline playback to a moved `playhead` and runs it a frame; see `show_program`.
-    fn sync_program(&mut self, project: &Project, playhead: Time) -> Option<Time> {
+    /// A parked seek while `dragging` scrubs audio.
+    fn sync_program(&mut self, project: &Project, playhead: Time, dragging: bool) -> Option<Time> {
         let pb = &mut self.program;
         let seq = project.sequence();
         if self.program_seq.as_ref() != Some(seq) {
@@ -427,6 +434,12 @@ impl Preview {
             pb.transport.duration = seq.duration();
             pb.transport.seek(playhead, clock);
             pb.refresh();
+            if dragging && pb.scrub_audio && pb.transport.speed() == 0 {
+                let out = self
+                    .output
+                    .get_or_insert_with(|| Output::new(Box::new(CpalBackend::default()), None));
+                pb.scrub(project, out);
+            }
         }
         let playing = pb.transport.speed() != 0;
         let shown = match &mut self.output {
@@ -913,18 +926,18 @@ mod program_tests {
         let red = add_solid(&mut h, [1.0, 0.0, 0.0, 1.0], Time(0));
         add_solid(&mut h, [0.0, 0.0, 1.0, 1.0], Time(FLICKS_PER_SECOND));
         let mut p = Preview::new(None);
-        assert_eq!(p.sync_program(h.project(), Time(0)), None);
+        assert_eq!(p.sync_program(h.project(), Time(0), false), None);
         assert_eq!(color(&p), [[255, 0, 0, 255]]);
         // Moving the playhead while paused shows the frame there and doesn't play.
         assert_eq!(
-            p.sync_program(h.project(), Time(FLICKS_PER_SECOND * 3 / 2)),
+            p.sync_program(h.project(), Time(FLICKS_PER_SECOND * 3 / 2), false),
             None
         );
         assert_eq!(color(&p), [[0, 0, 255, 255]]);
         assert_eq!(p.program.transport.speed(), 0);
         // An edit under the parked playhead redraws it.
         let shown = p.program_gen;
-        assert_eq!(p.sync_program(h.project(), Time(0)), None);
+        assert_eq!(p.sync_program(h.project(), Time(0), false), None);
         let half = Transform {
             opacity: 0.5,
             ..Transform::default()
@@ -933,11 +946,11 @@ mod program_tests {
             .unwrap();
         let before = p.program_gen;
         assert!(before > shown);
-        p.sync_program(h.project(), Time(0));
+        p.sync_program(h.project(), Time(0), false);
         assert_eq!(p.program_gen, before + 1);
         assert_eq!(p.program_shown.as_ref().unwrap().layers[0].1, half);
         // Nothing changed: nothing new to composite.
-        p.sync_program(h.project(), Time(0));
+        p.sync_program(h.project(), Time(0), false);
         assert_eq!(p.program_gen, before + 1);
     }
 }
