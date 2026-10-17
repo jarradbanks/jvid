@@ -11,6 +11,7 @@ use jvid_core::history::Command;
 use suite_ui::test_support::gpu;
 
 use super::*;
+use crate::import::Importer;
 
 const SIZES: [[f32; 2]; 2] = [[1280.0, 720.0], [1920.0, 1080.0]];
 const SCALES: [f32; 2] = [1.0, 1.5];
@@ -28,6 +29,13 @@ fn builder(size: [f32; 2], ppp: f32) -> egui_kittest::HarnessBuilder<App> {
 }
 
 fn harness(size: [f32; 2], ppp: f32) -> Harness<'static, App> {
+    let mut h = welcome_harness(size, ppp);
+    h.state_mut().on_welcome = false;
+    h.run();
+    h
+}
+
+fn welcome_harness(size: [f32; 2], ppp: f32) -> Harness<'static, App> {
     let mut h = builder(size, ppp).wgpu().build_eframe(|cc| App::new(cc));
     h.run();
     h
@@ -402,7 +410,8 @@ fn enabled(h: &Harness<'_, App>, label: &str) -> bool {
 
 #[test]
 fn undo_redo_and_dirty_marker_follow_history() {
-    let mut h = builder([1280.0, 720.0], 1.0).build_eframe(|cc| App::new(cc));
+    let mut h = plain_harness();
+    h.state_mut().on_welcome = false;
     h.run();
     assert!(!enabled(&h, "Undo") && !enabled(&h, "Redo"));
     assert_eq!(h.state().window_title, "Untitled — jvid");
@@ -543,4 +552,137 @@ fn preview_draws_the_newest_clip_through_the_gpu() {
         );
     }
     assert!(row.contains(&color::VIEWER));
+}
+
+#[test]
+fn welcome_snapshots() {
+    if !gpu() {
+        return;
+    }
+    let mut results = egui_kittest::SnapshotResults::new();
+    for (size, ppp) in configs() {
+        let mut h = welcome_harness(size, ppp);
+        results.add(h.try_snapshot(format!("welcome_{}x{}_{ppp}x", size[0], size[1])));
+    }
+    // Recent projects (no posters: their media doesn't exist) and a fixed preset picked.
+    let mut h = welcome_harness([1280.0, 720.0], 1.0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // Dates that read the same whenever the test runs: minutes ago, then last year's.
+    let names = [
+        "summer-road-trip",
+        "product-demo",
+        "gym-reel",
+        "coastal-broll",
+    ];
+    h.state_mut().welcome.recent = names
+        .iter()
+        .zip([now - 10, now - 300, 1_760_227_200, 1_759_795_200])
+        .map(|(n, opened)| welcome::Recent {
+            path: format!("/p/{n}.jvid").into(),
+            opened,
+            poster: None,
+        })
+        .collect();
+    h.get_by_label("9:16 · Vertical").click();
+    h.run();
+    results.add(h.try_snapshot("welcome_recent"));
+}
+
+fn fake_probe(p: &std::path::Path) -> Result<jvid_core::model::ProbeInfo, String> {
+    let (w, h, fps) = match p.file_name().unwrap().to_str().unwrap() {
+        "screen-1440p60.mp4" => (2560, 1440, 60),
+        "phone.mp4" => (1080, 1920, 30),
+        _ => (1280, 720, 25),
+    };
+    Ok(jvid_core::model::ProbeInfo {
+        width: Some(w),
+        height: Some(h),
+        frame_rate: Some(jvid_core::time::Rate::new(fps, 1)),
+        ..Default::default()
+    })
+}
+
+/// No GPU: state-transition tests run everywhere.
+fn plain_harness() -> Harness<'static, App> {
+    let mut h = builder([1280.0, 720.0], 1.0).build_eframe(|cc| App::new(cc));
+    h.run();
+    h
+}
+
+#[derive(Debug)]
+struct Dropped(PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        Err("not read".into())
+    }
+}
+
+/// Drops `files` on the welcome screen and waits for the import.
+fn drop_on_welcome(files: &[&str]) -> Harness<'static, App> {
+    let mut h = plain_harness();
+    h.state_mut().importer = Importer::new(jvid_jobs::Pool::new(1), fake_probe);
+    h.input_mut().dropped_files = files
+        .iter()
+        .map(|f| std::sync::Arc::new(Dropped(PathBuf::from("/m").join(f))) as _)
+        .collect();
+    h.step();
+    assert!(!h.state().on_welcome);
+    while h.state().importer.is_busy() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    h
+}
+
+#[test]
+fn dropping_media_on_welcome_matches_the_first_clip() {
+    use jvid_core::time::Rate;
+    let settings = |h: &Harness<'_, App>| {
+        let s = h.state().history.project().settings().clone();
+        (s.width, s.height, s.frame_rate)
+    };
+    let h = drop_on_welcome(&["screen-1440p60.mp4"]);
+    assert_eq!(settings(&h), (2560, 1440, Rate::new(60, 1)));
+    assert!(!h.state().match_source);
+
+    let mut h = drop_on_welcome(&["phone.mp4", "other.mp4"]);
+    assert_eq!(settings(&h), (1080, 1920, Rate::new(30, 1)));
+    assert_eq!(h.state().history.project().assets().len(), 2);
+    // Later imports leave the settings alone.
+    h.state_mut()
+        .import([PathBuf::from("/m/screen-1440p60.mp4")]);
+    while h.state().importer.is_busy() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    assert_eq!(settings(&h), (1080, 1920, Rate::new(30, 1)));
+}
+
+#[test]
+fn new_project_uses_the_chosen_preset() {
+    let mut h = plain_harness();
+    assert_eq!(h.state().welcome.preset, 0, "Match source is the default");
+    h.get_by_label("16:9 · 4K").click();
+    h.get_by_label("60 fps").click();
+    h.run();
+    h.get_by_label("New project").click();
+    h.run();
+    let app = h.state();
+    assert!(!app.on_welcome && !app.match_source && !app.history.is_dirty());
+    let s = app.history.project().settings();
+    assert_eq!((s.width, s.height, s.frame_rate.num), (3840, 2160, 60));
+
+    // Match source keeps the default settings until media arrives.
+    let mut h = plain_harness();
+    h.get_by_label("New project").click();
+    h.run();
+    assert!(h.state().match_source && !h.state().on_welcome);
 }
