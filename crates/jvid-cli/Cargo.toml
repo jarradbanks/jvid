@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 jvid-audio.workspace = true
 jvid-core.workspace = true
+jvid-log.workspace = true
 jvid-media.workspace = true
 jvid-render.workspace = true
 

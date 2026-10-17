@@ -13,6 +13,7 @@ publish = false
 jvid-audio = { path = "crates/jvid-audio" }
 jvid-core = { path = "crates/jvid-core" }
 jvid-media = { path = "crates/jvid-media" }
+jvid-log = { path = "crates/jvid-log" }
 jvid-render = { path = "crates/jvid-render" }
 suite-ui = { path = "crates/suite-ui" }
 proptest = "1.5"
