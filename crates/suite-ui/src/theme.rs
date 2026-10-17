@@ -19,6 +19,8 @@ pub mod icon {
     pub const PLUS: &str = "\u{E141}";
     pub const ELLIPSIS: &str = "\u{E0BA}";
     pub const CIRCLE_ALERT: &str = "\u{E07B}";
+    pub const UNDO: &str = "\u{E2A1}";
+    pub const REDO: &str = "\u{E2A0}";
 }
 
 /// Inter Medium (500), for Body Strong, buttons, tabs and the timecode.

@@ -4,8 +4,8 @@
 
 use egui::emath::GuiRounding as _;
 use egui::{
-    Align2, Color32, CornerRadius, FontId, Id, Key, Rect, Response, Role, Sense, Shape, Stroke,
-    StrokeKind, TextEdit, Ui, Vec2, Widget, WidgetInfo, pos2, vec2,
+    Align2, Color32, CornerRadius, FontId, Id, Key, Rect, Response, Sense, Shape, Stroke,
+    StrokeKind, TextEdit, Ui, Vec2, Widget, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::theme::{self, hairline, icon};
@@ -201,7 +201,13 @@ impl Widget for Button<'_> {
             self.state,
             Sense::click(),
         );
-        response.widget_info(|| WidgetInfo::labeled(Role::Button, true, self.label));
+        response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Button,
+                self.state != State::Disabled,
+                self.label,
+            )
+        });
         if !ui.is_rect_visible(rect) {
             return response;
         }
@@ -608,8 +614,9 @@ impl Widget for DragField<'_> {
                 ink,
             );
         }
-        response
-            .widget_info(|| WidgetInfo::labeled(Role::SpinButton, true, self.prefix.unwrap_or("")));
+        response.widget_info(|| {
+            WidgetInfo::labeled(WidgetType::DragValue, true, self.prefix.unwrap_or(""))
+        });
         let mut l = look(&response, self.state);
         l.focus |= self.state == State::Live && focus;
         ui.painter().set(frame, field_frame(ui, rect, l, false));
@@ -656,7 +663,7 @@ impl Widget for Dropdown<'_> {
             Sense::click(),
         );
         let current = self.options.get(*self.selected).copied().unwrap_or("");
-        response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, current));
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, current));
         let l = look(&response, self.state);
         ui.painter().add(field_frame(ui, rect, l, false));
         let ink = if l.disabled { color::INK_4 } else { color::INK };
@@ -707,8 +714,9 @@ impl Widget for MenuRow<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let width = ui.available_width();
         let (rect, response) = ui.allocate_exact_size(vec2(width, size::CONTROL), Sense::click());
-        response
-            .widget_info(|| WidgetInfo::selected(Role::MenuItem, true, self.checked, self.label));
+        response.widget_info(|| {
+            WidgetInfo::selected(WidgetType::SelectableLabel, true, self.checked, self.label)
+        });
         if response.hovered() || response.has_focus() {
             ui.painter()
                 .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::BORDER);
@@ -798,8 +806,9 @@ impl Widget for Segmented<'_> {
                 },
             );
             let on = i == *self.selected;
-            seg_response
-                .widget_info(|| WidgetInfo::selected(Role::RadioButton, !disabled, on, *option));
+            seg_response.widget_info(|| {
+                WidgetInfo::selected(WidgetType::RadioButton, !disabled, on, *option)
+            });
             if seg_response.clicked() {
                 *self.selected = i;
                 response.mark_changed();
@@ -876,8 +885,9 @@ impl Widget for Checkbox<'_> {
             *self.checked = !*self.checked;
             response.mark_changed();
         }
-        response
-            .widget_info(|| WidgetInfo::selected(Role::CheckBox, true, *self.checked, self.label));
+        response.widget_info(|| {
+            WidgetInfo::selected(WidgetType::Checkbox, true, *self.checked, self.label)
+        });
         let l = look(&response, self.state);
         let ppp = ui.pixels_per_point();
         let check = Rect::from_min_size(
@@ -976,7 +986,8 @@ impl Widget for SectionHeader<'_> {
             *self.open = !*self.open;
             response.mark_changed();
         }
-        response.widget_info(|| WidgetInfo::selected(Role::Button, true, *self.open, self.title));
+        response
+            .widget_info(|| WidgetInfo::selected(WidgetType::Button, true, *self.open, self.title));
         let l = look(&response, self.state);
         let (ink, chevron_ink) = match () {
             _ if l.disabled => (color::INK_4, color::INK_4),

@@ -1,13 +1,12 @@
 //! DESIGN.md Layout > Checks for the panel frame, 32px header and tabs, measured on
 //! rendered pixels at 100% and 150% scale. Headless wgpu on any Vulkan driver;
-//! `common::gpu()` picks Mesa lavapipe when installed (see CONTRIBUTING.md).
+//! `suite_ui::test_support::gpu()` picks Mesa lavapipe when installed (see CONTRIBUTING.md).
 
-mod common;
+use suite_ui::test_support as common;
 
 use egui::Color32;
 use egui_kittest::Harness;
 use suite_ui::panel::Panel;
-use suite_ui::theme;
 use suite_ui::tokens::{color, size, space};
 
 const SCALES: [f32; 2] = [1.0, 1.5];
@@ -24,12 +23,15 @@ enum Mode {
 
 fn harness(ppp: f32, mode: Mode, focused: bool) -> Harness<'static> {
     let mut active = 0;
+    let mut fresh = true;
     Harness::builder()
         .with_size([W + 2.0 * ORIGIN, H + 2.0 * ORIGIN])
         .with_pixels_per_point(ppp)
         .wgpu()
-        .with_context_setup(theme::install)
         .build_ui(move |ui| {
+            if common::install_theme(ui, &mut fresh) {
+                return;
+            }
             ui.painter()
                 .rect_filled(ui.ctx().content_rect(), 0.0, color::GROUND);
             let rect = egui::Rect::from_min_size(egui::pos2(ORIGIN, ORIGIN), egui::vec2(W, H));

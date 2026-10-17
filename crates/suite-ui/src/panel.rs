@@ -3,7 +3,7 @@
 
 use egui::emath::GuiRounding as _;
 use egui::{
-    CornerRadius, Rect, Role, Sense, StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, pos2, vec2,
+    CornerRadius, Rect, Sense, StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::theme::{self, hairline, icon};
@@ -68,7 +68,14 @@ impl<'a> Panel<'a> {
 
     pub fn show<R>(self, ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> PanelResponse<R> {
         let ppp = ui.pixels_per_point();
-        let rect = ui.available_rect_before_wrap().round_to_pixels(ppp);
+        // Round inward, so the border stays inside a clip rect on fractional pixels.
+        let r = ui.available_rect_before_wrap();
+        let up = |v: f32| (v * ppp).ceil() / ppp;
+        let down = |v: f32| (v * ppp).floor() / ppp;
+        let rect = Rect::from_min_max(
+            pos2(up(r.left()), up(r.top())),
+            pos2(down(r.right()), down(r.bottom())),
+        );
         let response = ui.allocate_rect(rect, Sense::hover());
         let corner = CornerRadius::same(radius::PANEL);
         let painter = ui.painter().clone();
@@ -184,9 +191,9 @@ fn tabs(
         )
         .round_to_pixels(ppp);
         x = pill.right() + gap;
-        let r = ui.interact(pill, ui.scope_id().with(("tab", i)), Sense::click());
+        let r = ui.interact(pill, ui.id().with(("tab", i)), Sense::click());
         let on = i == *active;
-        r.widget_info(|| WidgetInfo::selected(Role::Tab, true, on, *label));
+        r.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, on, *label));
         if r.clicked() {
             *active = i;
         }

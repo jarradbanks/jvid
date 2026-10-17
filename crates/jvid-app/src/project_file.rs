@@ -1,8 +1,5 @@
 //! Reading and atomically saving `.jvid` files; the format lives in `jvid_core::file`.
 
-// shortcut: nothing calls these until the app has open/save UI; drop the allow then.
-#![allow(dead_code)]
-
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;

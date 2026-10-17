@@ -1,4 +1,4 @@
-//! GPU test setup shared by the rendering tests.
+//! GPU test setup shared by rendering tests here and in the apps (feature `test-support`).
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -33,4 +33,16 @@ pub fn gpu() -> bool {
         );
         false
     })
+}
+
+/// Installs the suite theme on a harness's first frame, which then draws nothing:
+/// egui 0.36's kittest has no context setup hook and fonts apply from the next frame.
+/// Returns true on that first frame.
+pub fn install_theme(ui: &egui::Ui, fresh: &mut bool) -> bool {
+    if std::mem::take(fresh) {
+        crate::theme::install(ui.ctx());
+        ui.ctx().request_repaint();
+        return true;
+    }
+    false
 }
