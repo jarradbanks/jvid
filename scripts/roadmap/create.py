@@ -1,7 +1,8 @@
 """Create labels, milestones and issues on GitHub from spec.py.
 
-usage: python3 create.py [--dry-run]
-Writes created.json (key -> number/id) next to this script. Re-running skips issues already in created.json.
+usage: python3 create.py [--dry-run] [--update KEY [KEY ...]]
+Writes created.json (key -> number/id) next to this script. Re-running skips issues and blocked-by links
+already in created.json. --update re-renders the title, body, labels and milestone of existing issues from the spec.
 """
 import json
 import pathlib
@@ -16,6 +17,7 @@ REPO = "jarradbanks/jvid"
 HERE = pathlib.Path(__file__).parent
 STATE = HERE / "created.json"
 DRY = "--dry-run" in sys.argv
+UPDATE = sys.argv[sys.argv.index("--update") + 1:] if "--update" in sys.argv else []
 
 
 def gh(args, payload=None):
@@ -62,8 +64,18 @@ def labels_for(i):
     return out + i["labels"]
 
 
+def payload_for(i, numbers, state):
+    payload = {"title": i["title"], "body": body(i, numbers), "labels": labels_for(i)}
+    if i["ms"] is not None:
+        payload["milestone"] = state["milestones"][i["ms"]]
+    return payload
+
+
 def main():
     validate()
+    by_key = {i["key"]: i for i in spec.ISSUES}
+    unknown = [k for k in UPDATE if k not in by_key]
+    assert not unknown, f"--update: unknown keys {unknown}"
     print(f"spec ok: {len(spec.ISSUES)} issues")
     if DRY:
         fake = {i["key"]: n for n, i in enumerate(spec.ISSUES, 1)}
@@ -75,7 +87,7 @@ def main():
     for name, (color, desc) in ({f"area:{k}": v for k, v in spec.AREAS.items()}
                                 | {f"size:{k}": v for k, v in spec.SIZES.items()}
                                 | spec.EXTRA_LABELS).items():
-        # This gh version has no `label` command, so go through the REST API.
+        # REST API rather than `gh label`, which old gh versions lack.
         try:
             gh([f"repos/{REPO}/labels"], {"name": name, "color": color, "description": desc})
         except RuntimeError:  # already exists
@@ -93,15 +105,18 @@ def main():
     for i in spec.ISSUES:
         if i["key"] in state["issues"]:
             continue
-        payload = {"title": i["title"], "body": body(i, numbers), "labels": labels_for(i)}
-        if i["ms"] is not None:
-            payload["milestone"] = state["milestones"][i["ms"]]
-        r = gh([f"repos/{REPO}/issues"], payload)
+        r = gh([f"repos/{REPO}/issues"], payload_for(i, numbers, state))
         state["issues"][i["key"]] = {"number": r["number"], "id": r["id"]}
         numbers[i["key"]] = r["number"]
         STATE.write_text(json.dumps(state, indent=2))
         print(f"#{r['number']} {i['title']}")
         time.sleep(1.5)  # stay under GitHub's content-creation rate limits
+
+    for key in UPDATE:
+        assert key in state["issues"], f"--update: {key} has not been created yet"
+        gh(["-X", "PATCH", f"repos/{REPO}/issues/{numbers[key]}"], payload_for(by_key[key], numbers, state))
+        print(f"updated #{numbers[key]} {by_key[key]['title']}")
+        time.sleep(1)
 
     # Native "blocked by" relationships; skipped if the API isn't available.
     links = state.setdefault("links", [])

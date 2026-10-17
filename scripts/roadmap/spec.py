@@ -110,8 +110,15 @@ I("test-media", "Generated test media corpus", "M0", ["infra", "media"], "S", ["
       "Phone clip with rotation metadata, 9:16 clip, a clip with no audio",
       "Audio-only WAV/MP3/AAC with a 1 kHz tone at a known level; PNG/JPG/WebP stills",
       "CI caches the generated corpus",
+      "A 2-hour 1440p60 recording, encoded cheaply (low bitrate, fast preset) so it stays small and quick to generate",
+      "A 144 fps clip",
+      "An MKV with three audio streams (game, mic, voice chat), each with a distinct tone and a stream title",
+      "A 1440p screen-recording-style clip with fine text and UI lines, to catch scaling and encode blur",
   ],
-  ac=["`cargo test` can locate the corpus, and a helper decodes the frame index from a frame"])
+  ac=[
+      "`cargo test` can locate the corpus, and a helper decodes the frame index from a frame",
+      "The long recording is generated in under 2 minutes on CI",
+  ])
 
 I("time", "Rational time and timecode", "M0", ["core"], "S", ["workspace"],
   summary="Integer time in flicks (705,600,000 per second) so frame and sample positions never drift.",
@@ -326,11 +333,15 @@ I("welcome", "Welcome screen and new-project flow", "M1", ["ui"], "M", ["app-she
   summary="The start screen from the prototype.",
   scope=[
       "New Project and Open Project buttons",
-      "Preset cards: 16:9 · 1080p, 16:9 · 4K, 9:16 · Vertical, 1:1 · Square",
+      "Preset cards, with Match source first and selected by default: Match source, 16:9 · 1080p, 16:9 · 1440p, 16:9 · 4K, 9:16 · Vertical, 1:1 · Square",
+      "Match source takes resolution and frame rate from the first clip added; the fixed presets offer 30 and 60 fps",
       "Recent projects with poster thumbnails and relative dates",
-      "Drop zone: dropping media creates a project whose settings match the first clip, then imports everything",
+      "Drop zone: dropping media creates a Match source project, then imports everything",
   ],
-  ac=["Dropping a vertical phone clip creates a 9:16 project at the clip's frame rate"],
+  ac=[
+      "Dropping a 1440p60 screen recording creates a 2560 × 1440, 60 fps project",
+      "Dropping a vertical phone clip creates a 9:16 project at the clip's frame rate",
+  ],
   refs=[f"[04-welcome.png]({PROTO}/04-welcome.png)"])
 
 I("relink", "Missing media detection and relink", "M1", ["ui", "media"], "S", ["import", "serialize"],
@@ -428,6 +439,19 @@ I("select-clipboard", "Selection, clipboard and delete", "M2", ["timeline"], "M"
 
 I("trim-split", "Trim, split, razor and ripple", "M2", ["timeline"], "L", ["select-clipboard"],
   summary="The core cutting tools.",
+I("multi-audio", "Multi-track audio sources", "M2", ["timeline", "media"], "M", ["place-clips", "audio-decode"],
+  summary="Recordings with several audio streams, such as OBS saving game audio, mic and voice chat separately.",
+  scope=[
+      "Each audio stream becomes its own audio clip on its own track, linked to the video clip",
+      "Clips and tracks are named from stream metadata (e.g. \"Game\", \"Mic\"), falling back to \"Audio 1\", \"Audio 2\"",
+      "Per-stream mute/solo and volume work through the normal track controls",
+      "Option, per import or per clip, to merge all streams into a single clip",
+  ],
+  ac=[
+      "The three-stream test MKV lands as one video clip and three linked audio clips on three tracks",
+      "Trimming or moving the video clip moves all its linked audio clips",
+  ])
+
   scope=[
       "Drag clip edges to trim, limited by available media",
       "Ripple trim with a modifier",
@@ -456,11 +480,19 @@ I("in-out", "In/Out points on the timeline", "M2", ["timeline"], "M", ["trim-spl
   ac=["Every shortcut in the PLAN.md table works", "In/out is saved with the project"],
   refs=[f"[PLAN.md · In / Out points]({PLAN}#in--out-points)", f"[01-editor.png]({PROTO}/01-editor.png)"])
 
-I("markers", "Markers", "M2", ["timeline"], "S", ["timeline-widget", "undo"],
-  summary="Mark moments on the timeline.",
-  scope=["`M` adds a marker at the playhead", "Name, color and note", "Jump to next/previous marker", "Markers are snap targets"],
-  ac=["Markers survive save and reload"],
-  labels=["good first issue"])
+I("markers", "Markers", "M2", ["timeline"], "M", ["timeline-widget", "undo", "in-out"],
+  summary="Mark moments on the timeline, including ranges you want to keep, while watching.",
+  scope=[
+      "`M` adds a marker at the playhead, during playback too, without stopping",
+      "Ranged markers: a marker with a duration, created from the current in/out (or by `M` on press and release while playing)",
+      "Name, color and note",
+      "Jump to next/previous marker",
+      "Markers are snap targets",
+  ],
+  ac=[
+      "Pressing `M` repeatedly during playback drops markers without a pause or dropped frames",
+      "Markers, including ranged markers, survive save and reload",
+  ])
 
 I("scrub", "Scrubbing and audio scrub", "M2", ["timeline", "render"], "M", ["playback"],
   summary="Low-latency scrubbing on the timeline.",
@@ -481,6 +513,19 @@ I("perf-harness", "Performance harness and budgets", "M2", ["infra"], "M", ["pla
   refs=[f"[PLAN.md · Performance targets]({PLAN}#performance-targets)"])
 
 # ───────────────────────── M3 · Animate ─────────────────────────
+
+I("long-hfr", "Long and high-frame-rate recordings", "M2", ["media", "timeline"], "M", ["playback", "thumbs", "waveforms"],
+  summary="Gameplay recordings can be hours long and recorded at 120 fps or more. Both need to feel as quick as a short clip.",
+  scope=[
+      "Progressive thumbnails and waveforms: the timeline is usable immediately and fills in as generation proceeds",
+      "Timeline zoom that goes from the whole recording to single frames, with ruler ticks that stay readable at every level",
+      "Fast seeks anywhere in a long file, without decoding from the start",
+      "120, 144 and 240 fps sources conform to the project frame rate by timestamp, with no drift",
+  ],
+  ac=[
+      "A 2-hour 1440p60 recording is editable within 2 seconds of import, and seeking to any point shows a frame in under 150 ms",
+      "A 144 fps clip in a 60 fps project plays in sync and exports at 60 fps with no drift over its full length",
+  ])
 
 I("keyframes", "Keyframe model and interpolation", "M3", ["core"], "M", ["model", "undo"],
   summary="Any numeric property can be animated.",
@@ -581,11 +626,15 @@ I("encode", "Export pipeline: render, encode and mux", "M4", ["export", "media"]
 I("presets", "Export presets", "M4", ["export"], "M", ["encode"],
   summary="One click to the right settings.",
   scope=[
-      "Built-in: YouTube 1080p, YouTube 4K, Shorts/Reels 9:16, ProRes master, GIF, audio only (WAV, MP3, AAC)",
+      "Built-in, in this order: Highlight 1080p60, Highlight 1440p60, Screen recording (sharp text), YouTube 1080p, YouTube 4K, Shorts/Reels 9:16, ProRes master, GIF, audio only (WAV, MP3, AAC)",
+      "Screen recording (sharp text) keeps source resolution and uses encoder settings that keep small text crisp",
       "User presets as TOML in the config directory",
       "Warn when a preset's aspect ratio doesn't match the project",
   ],
-  ac=["Each built-in preset produces a file that plays in VLC and uploads to YouTube"])
+  ac=[
+      "Each built-in preset produces a file that plays in VLC and uploads to YouTube",
+      "Text in the test screen recording stays legible at 100% zoom after a Screen recording export",
+  ])
 
 I("export-dialog", "Export dialog with range selection", "M4", ["ui", "export"], "M", ["presets", "in-out", "select-clipboard"],
   summary="The export dialog from the prototype, including In to Out.",
@@ -652,9 +701,31 @@ I("cli", "jvid render CLI", "M4", ["cli"], "M", ["encode", "presets", "serialize
   ],
   ac=["The CLI and the app produce identical output for the same project and range"])
 
-I("release", "Packaging and v0.1.0 release", "M4", ["infra"], "L", ["cli", "export-dialog", "hw-encode", "loudness"],
+I("release", "Packaging and v0.1.0 release", "M4", ["infra"], "L", ["cli", "export-dialog", "hw-encode", "loudness", "lossless-export", "target-size"],
   summary="Installable builds for all three platforms.",
   scope=[
+I("lossless-export", "Lossless fast export", "M4", ["export", "media"], "L", ["encode", "export-dialog"],
+  summary="When all you did was cut, copy the original video instead of re-encoding it: no quality loss and close to disk speed.",
+  scope=[
+      "Available when the range contains only cuts: no transforms, effects, titles, speed changes or audio changes, and all clips share one source format",
+      "Stream copy into the same container, with cut points snapped to the nearest keyframe",
+      "Smart render option: re-encode only the GOPs at each cut edge so cuts land on the exact frame",
+      "The export dialog shows whether lossless is available, and if not, which clips or changes prevent it",
+  ],
+  ac=[
+      "Exporting a 1-minute cut from the 2-hour test recording takes under 3 seconds",
+      "With smart render, the output starts and ends on the exact marked frames",
+  ])
+
+I("target-size", "Export to a target file size", "M4", ["export"], "M", ["encode", "presets"],
+  summary="Hit an upload limit without trial and error.",
+  scope=[
+      "Two-pass encode with the video bitrate worked out from duration, audio bitrate and container overhead",
+      "Quick picks for common upload limits: 10, 25, 50, 100 and 500 MB, plus a custom size",
+      "Warn when the target is too small for the chosen resolution, and suggest a lower one",
+  ],
+  ac=["Outputs land under the target and within about 3% of it, across the test corpus"])
+
       "Windows zip/MSI with FFmpeg DLLs",
       "macOS `.app`/`.dmg` with bundled dylibs, signing and notarization",
       "Linux AppImage and tarball",
@@ -777,6 +848,24 @@ I("wgsl", "WGSL shader effects", "M6", ["render", "ui"], "L", ["color", "inspect
       "Hot reload on file change",
       "Bundled examples: vignette, chromatic aberration, film grain; an authoring guide",
   ],
+I("batch-highlights", "Export marked highlights as separate files", "M5", ["export", "timeline"], "M", ["markers", "queue"],
+  summary="Mark several highlights while watching a recording, then export each one as its own file in one go.",
+  scope=[
+      "Choose which ranged markers to export, or all of them",
+      "Filename template, e.g. `{project}-{marker}-{index}`",
+      "One render-queue job per highlight, using the selected preset",
+  ],
+  ac=["Ten ranged markers on the 2-hour test recording export as ten correctly trimmed files"])
+
+I("zoom-region", "Zoom-to-region for screen recordings", "M5", ["ui", "render"], "M", ["gizmo", "keyframes", "easing-ui"],
+  summary="Draw a rectangle on the preview to zoom in on part of the screen, hold, then zoom back out.",
+  scope=[
+      "Draw the target region on the preview; jvid creates eased scale and position keyframes for zoom in, hold and zoom out",
+      "Duration and easing presets (e.g. quick, smooth), editable afterwards like any keyframes",
+      "Region keeps the project aspect ratio so nothing letterboxes",
+  ],
+  ac=["A zoom is one undo step and its keyframes show in the clip's keyframe lanes"])
+
   ac=["Dropping a new `.wgsl` file in the folder makes it usable without restarting"],
   refs=[f"[PLAN.md · Customization]({PLAN}#customization-wgsl-shader-effects)"])
 
@@ -803,3 +892,4 @@ for key, title, summary in [
     ("graph-editor", "Curve graph editor", "A full graph editor for keyframe curves."),
 ]:
     I(key, title, None, [], None, summary=summary, labels=["later"])
+    ("silence-detect", "Silence detection to cut dead air", "Find silent stretches in screen recordings and offer to cut or speed them up."),

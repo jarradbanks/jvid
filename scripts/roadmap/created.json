@@ -356,6 +356,34 @@
     "graph-editor": {
       "number": 87,
       "id": 5894596074
+    },
+    "multi-audio": {
+      "number": 89,
+      "id": 5894678427
+    },
+    "long-hfr": {
+      "number": 90,
+      "id": 5894678851
+    },
+    "lossless-export": {
+      "number": 91,
+      "id": 5894679367
+    },
+    "target-size": {
+      "number": 92,
+      "id": 5894679715
+    },
+    "batch-highlights": {
+      "number": 93,
+      "id": 5894680255
+    },
+    "zoom-region": {
+      "number": 94,
+      "id": 5894680721
+    },
+    "silence-detect": {
+      "number": 95,
+      "id": 5894681009
     }
   },
   "links": [
@@ -922,6 +950,74 @@
     [
       "srt",
       "encode"
+    ],
+    [
+      "multi-audio",
+      "place-clips"
+    ],
+    [
+      "multi-audio",
+      "audio-decode"
+    ],
+    [
+      "markers",
+      "in-out"
+    ],
+    [
+      "long-hfr",
+      "playback"
+    ],
+    [
+      "long-hfr",
+      "thumbs"
+    ],
+    [
+      "long-hfr",
+      "waveforms"
+    ],
+    [
+      "lossless-export",
+      "encode"
+    ],
+    [
+      "lossless-export",
+      "export-dialog"
+    ],
+    [
+      "target-size",
+      "encode"
+    ],
+    [
+      "target-size",
+      "presets"
+    ],
+    [
+      "release",
+      "lossless-export"
+    ],
+    [
+      "release",
+      "target-size"
+    ],
+    [
+      "batch-highlights",
+      "markers"
+    ],
+    [
+      "batch-highlights",
+      "queue"
+    ],
+    [
+      "zoom-region",
+      "gizmo"
+    ],
+    [
+      "zoom-region",
+      "keyframes"
+    ],
+    [
+      "zoom-region",
+      "easing-ui"
     ]
   ]
 }

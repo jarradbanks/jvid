@@ -19,8 +19,8 @@ jvid is a lightweight, cross-platform video editor written in Rust, and the firs
 - **Autosave and crash recovery.**
 - **Headless CLI render** — `jvid render project.jvid -o out.mp4 [--in 00:00:08:12 --out 00:00:42:03]`.
 - **Proxies and preview scaling** — full, ½, ¼ preview resolution; optional low-res proxy generation.
-- **Timestamp-based frame lookup** — so variable-frame-rate phone footage never drifts out of sync.
-- **Project settings** — resolution, frame rate, aspect. Presets: 16:9 1080p, 16:9 4K, 9:16 vertical, 1:1 square.
+- **Timestamp-based frame lookup** — so variable-frame-rate recordings and phone footage never drift out of sync.
+- **Project settings** — resolution, frame rate, aspect. Presets: *Match source* (the default: takes resolution and frame rate from the first clip), 16:9 1080p, 1440p and 4K at 30 or 60 fps, 9:16 vertical, 1:1 square.
 - **Rational time** — all times are integer ticks (flicks, 705,600,000/s), which divide every common frame rate and sample rate exactly. No float drift.
 
 ### Import and media
@@ -29,6 +29,8 @@ jvid is a lightweight, cross-platform video editor written in Rust, and the firs
 - Video, audio, still images (PNG/JPG/WebP)
 - Media bin with thumbnails, duration, search, and relinking of missing files
 - Thumbnails and waveforms generated in the background
+- **Multi-track audio sources:** each audio stream in a recording (e.g. OBS saving game audio, mic and voice chat separately) becomes its own linked audio clip on its own track, named from the stream. Streams can be merged into one clip instead.
+- **Long and high-frame-rate recordings:** hours-long sources open and seek as quickly as short clips, with thumbnails and waveforms filling in progressively; 120, 144 and 240 fps sources conform to the project frame rate.
 
 ### Timeline and editing
 
@@ -37,7 +39,7 @@ jvid is a lightweight, cross-platform video editor written in Rust, and the firs
 - Ripple trim previous/next edit to playhead (`Q` / `W`) — the fastest way to cut down clips
 - Linked audio/video clips, with unlink
 - Track mute, solo, lock, hide
-- Markers
+- Markers, including ranged markers (a marker with a duration), added during playback without stopping
 - Clip speed (constant, reversed) and freeze frame
 - Copy/paste of clips and keyframes
 
@@ -79,6 +81,7 @@ Premiere-style marking, used for playback, editing, and export.
 - Keyframe lanes under a clip on the timeline, and diamond toggles in the inspector
 - On-preview transform handles create keyframes when animation is armed
 - Volume rubber-band line drawn directly on audio clips
+- **Zoom-to-region:** draw a rectangle on the preview to get an eased zoom in, hold and zoom out, built from ordinary keyframes. Made for screen recordings.
 
 ### Audio
 
@@ -98,8 +101,11 @@ Premiere-style marking, used for playback, editing, and export.
 
 ### Export
 
-- Presets: YouTube 1080p, YouTube 4K, Shorts/Reels 9:16, ProRes master, GIF, audio only (WAV, MP3, AAC)
+- Presets: Highlight 1080p60, Highlight 1440p60, Screen recording (sharp text), YouTube 1080p, YouTube 4K, Shorts/Reels 9:16, ProRes master, GIF, audio only (WAV, MP3, AAC)
 - Range: entire timeline, in to out, selected clips
+- **Lossless fast export:** when a range contains only cuts, copy the original video instead of re-encoding it. Cuts snap to keyframes, or a smart render re-encodes just the frames around each cut. The dialog says when lossless isn't available and why.
+- **Export to a target file size:** a two-pass encode sized to fit an upload limit (10, 25, 50, 100 or 500 MB, or custom)
+- **Export marked highlights:** export each ranged marker as its own file, named from a template, through the render queue
 - Export current frame as PNG
 - Hardware encode: NVENC, QSV, VideoToolbox, AMF, with a software fallback
 - Background render queue
@@ -125,7 +131,7 @@ jvid generates inspector sliders for each parameter, and they are keyframeable l
 
 ### Later, or as plugins
 
-Chroma key, masks, scopes, speed ramps, nested sequences, voiceover recording, audio EQ/compressor, HDR, curve graph editor.
+Chroma key, masks, scopes, speed ramps, nested sequences, voiceover recording, audio EQ/compressor, HDR, curve graph editor, silence detection to cut dead air.
 
 ### Out of scope
 

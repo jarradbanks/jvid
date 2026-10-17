@@ -48,7 +48,7 @@ w = out.append
 w("# jvid roadmap\n")
 w("The order jvid gets built in. Every item is a GitHub issue with scope, acceptance criteria and dependencies. "
   "The feature set and architecture behind them are in [PLAN.md](PLAN.md).\n")
-w("**Picking up work:** take the lowest-numbered open issue in the current milestone whose dependencies are all closed. "
+w("**Picking up work:** take the first open issue in the current milestone's table whose dependencies are all closed. The tables below are in build order, so issue numbers don't always follow it. "
   "Issues tagged [`good first issue`](" + REPO_URL + "/labels/good%20first%20issue) are self-contained.\n")
 
 w("## Releases\n")

@@ -2,7 +2,7 @@
 
 The order jvid gets built in. Every item is a GitHub issue with scope, acceptance criteria and dependencies. The feature set and architecture behind them are in [PLAN.md](PLAN.md).
 
-**Picking up work:** take the lowest-numbered open issue in the current milestone whose dependencies are all closed. Issues tagged [`good first issue`](https://github.com/jarradbanks/jvid/labels/good%20first%20issue) are self-contained.
+**Picking up work:** take the first open issue in the current milestone's table whose dependencies are all closed. The tables below are in build order, so issue numbers don't always follow it. Issues tagged [`good first issue`](https://github.com/jarradbanks/jvid/labels/good%20first%20issue) are self-contained.
 
 ## Releases
 
@@ -22,9 +22,9 @@ The order jvid gets built in. Every item is a GitHub issue with scope, acceptanc
 
 ## Critical path
 
-The longest chain of dependent issues, about **59 person-days**. Everything else can happen alongside it.
+The longest chain of dependent issues, about **67 person-days**. Everything else can happen alongside it.
 
-[#1](https://github.com/jarradbanks/jvid/issues/1) Set up the cargo workspace, licenses and README → [#2](https://github.com/jarradbanks/jvid/issues/2) CI: fmt, clippy and tests on Windows, macOS and Linux → [#4](https://github.com/jarradbanks/jvid/issues/4) FFmpeg linking and developer setup on all platforms → [#5](https://github.com/jarradbanks/jvid/issues/5) Generated test media corpus → [#14](https://github.com/jarradbanks/jvid/issues/14) Media probing → [#15](https://github.com/jarradbanks/jvid/issues/15) Video decoder with frame-accurate seeking → [#21](https://github.com/jarradbanks/jvid/issues/21) Thumbnail generation and cache → [#33](https://github.com/jarradbanks/jvid/issues/33) Timeline panel: ruler, tracks, clips, zoom and playhead → [#34](https://github.com/jarradbanks/jvid/issues/34) Track management and headers → [#35](https://github.com/jarradbanks/jvid/issues/35) Place clips: drag from bin, insert and overwrite → [#36](https://github.com/jarradbanks/jvid/issues/36) Selection, clipboard and delete → [#37](https://github.com/jarradbanks/jvid/issues/37) Trim, split, razor and ripple → [#39](https://github.com/jarradbanks/jvid/issues/39) In/Out points on the timeline → [#54](https://github.com/jarradbanks/jvid/issues/54) Export dialog with range selection → [#62](https://github.com/jarradbanks/jvid/issues/62) Packaging and v0.1.0 release
+[#1](https://github.com/jarradbanks/jvid/issues/1) Set up the cargo workspace, licenses and README → [#2](https://github.com/jarradbanks/jvid/issues/2) CI: fmt, clippy and tests on Windows, macOS and Linux → [#4](https://github.com/jarradbanks/jvid/issues/4) FFmpeg linking and developer setup on all platforms → [#5](https://github.com/jarradbanks/jvid/issues/5) Generated test media corpus → [#14](https://github.com/jarradbanks/jvid/issues/14) Media probing → [#15](https://github.com/jarradbanks/jvid/issues/15) Video decoder with frame-accurate seeking → [#21](https://github.com/jarradbanks/jvid/issues/21) Thumbnail generation and cache → [#33](https://github.com/jarradbanks/jvid/issues/33) Timeline panel: ruler, tracks, clips, zoom and playhead → [#34](https://github.com/jarradbanks/jvid/issues/34) Track management and headers → [#35](https://github.com/jarradbanks/jvid/issues/35) Place clips: drag from bin, insert and overwrite → [#36](https://github.com/jarradbanks/jvid/issues/36) Selection, clipboard and delete → [#37](https://github.com/jarradbanks/jvid/issues/37) Trim, split, razor and ripple → [#39](https://github.com/jarradbanks/jvid/issues/39) In/Out points on the timeline → [#54](https://github.com/jarradbanks/jvid/issues/54) Export dialog with range selection → [#91](https://github.com/jarradbanks/jvid/issues/91) Lossless fast export → [#62](https://github.com/jarradbanks/jvid/issues/62) Packaging and v0.1.0 release
 
 ## Parallel tracks
 
@@ -33,11 +33,11 @@ After M0, work splits into tracks that rarely block each other:
 | Track | Crates | Issues |
 | --- | --- | --- |
 | Core | `jvid-core` | [#6](https://github.com/jarradbanks/jvid/issues/6) [#7](https://github.com/jarradbanks/jvid/issues/7) [#8](https://github.com/jarradbanks/jvid/issues/8) [#9](https://github.com/jarradbanks/jvid/issues/9) [#10](https://github.com/jarradbanks/jvid/issues/10) [#18](https://github.com/jarradbanks/jvid/issues/18) [#29](https://github.com/jarradbanks/jvid/issues/29) [#43](https://github.com/jarradbanks/jvid/issues/43) [#68](https://github.com/jarradbanks/jvid/issues/68) [#71](https://github.com/jarradbanks/jvid/issues/71) |
-| Media | `jvid-media` | [#4](https://github.com/jarradbanks/jvid/issues/4) [#5](https://github.com/jarradbanks/jvid/issues/5) [#14](https://github.com/jarradbanks/jvid/issues/14) [#15](https://github.com/jarradbanks/jvid/issues/15) [#16](https://github.com/jarradbanks/jvid/issues/16) [#17](https://github.com/jarradbanks/jvid/issues/17) [#19](https://github.com/jarradbanks/jvid/issues/19) [#21](https://github.com/jarradbanks/jvid/issues/21) [#28](https://github.com/jarradbanks/jvid/issues/28) [#52](https://github.com/jarradbanks/jvid/issues/52) [#55](https://github.com/jarradbanks/jvid/issues/55) [#69](https://github.com/jarradbanks/jvid/issues/69) [#70](https://github.com/jarradbanks/jvid/issues/70) |
-| Render | `jvid-render` | [#23](https://github.com/jarradbanks/jvid/issues/23) [#30](https://github.com/jarradbanks/jvid/issues/30) [#32](https://github.com/jarradbanks/jvid/issues/32) [#41](https://github.com/jarradbanks/jvid/issues/41) [#45](https://github.com/jarradbanks/jvid/issues/45) [#46](https://github.com/jarradbanks/jvid/issues/46) [#47](https://github.com/jarradbanks/jvid/issues/47) [#63](https://github.com/jarradbanks/jvid/issues/63) [#64](https://github.com/jarradbanks/jvid/issues/64) [#65](https://github.com/jarradbanks/jvid/issues/65) [#66](https://github.com/jarradbanks/jvid/issues/66) [#67](https://github.com/jarradbanks/jvid/issues/67) [#70](https://github.com/jarradbanks/jvid/issues/70) [#77](https://github.com/jarradbanks/jvid/issues/77) [#78](https://github.com/jarradbanks/jvid/issues/78) |
+| Media | `jvid-media` | [#4](https://github.com/jarradbanks/jvid/issues/4) [#5](https://github.com/jarradbanks/jvid/issues/5) [#14](https://github.com/jarradbanks/jvid/issues/14) [#15](https://github.com/jarradbanks/jvid/issues/15) [#16](https://github.com/jarradbanks/jvid/issues/16) [#17](https://github.com/jarradbanks/jvid/issues/17) [#19](https://github.com/jarradbanks/jvid/issues/19) [#21](https://github.com/jarradbanks/jvid/issues/21) [#28](https://github.com/jarradbanks/jvid/issues/28) [#89](https://github.com/jarradbanks/jvid/issues/89) [#90](https://github.com/jarradbanks/jvid/issues/90) [#52](https://github.com/jarradbanks/jvid/issues/52) [#55](https://github.com/jarradbanks/jvid/issues/55) [#91](https://github.com/jarradbanks/jvid/issues/91) [#69](https://github.com/jarradbanks/jvid/issues/69) [#70](https://github.com/jarradbanks/jvid/issues/70) |
+| Render | `jvid-render` | [#23](https://github.com/jarradbanks/jvid/issues/23) [#30](https://github.com/jarradbanks/jvid/issues/30) [#32](https://github.com/jarradbanks/jvid/issues/32) [#41](https://github.com/jarradbanks/jvid/issues/41) [#45](https://github.com/jarradbanks/jvid/issues/45) [#46](https://github.com/jarradbanks/jvid/issues/46) [#47](https://github.com/jarradbanks/jvid/issues/47) [#63](https://github.com/jarradbanks/jvid/issues/63) [#64](https://github.com/jarradbanks/jvid/issues/64) [#65](https://github.com/jarradbanks/jvid/issues/65) [#66](https://github.com/jarradbanks/jvid/issues/66) [#67](https://github.com/jarradbanks/jvid/issues/67) [#70](https://github.com/jarradbanks/jvid/issues/70) [#94](https://github.com/jarradbanks/jvid/issues/94) [#77](https://github.com/jarradbanks/jvid/issues/77) [#78](https://github.com/jarradbanks/jvid/issues/78) |
 | Audio | `jvid-audio` | [#16](https://github.com/jarradbanks/jvid/issues/16) [#22](https://github.com/jarradbanks/jvid/issues/22) [#24](https://github.com/jarradbanks/jvid/issues/24) [#31](https://github.com/jarradbanks/jvid/issues/31) [#32](https://github.com/jarradbanks/jvid/issues/32) [#50](https://github.com/jarradbanks/jvid/issues/50) [#56](https://github.com/jarradbanks/jvid/issues/56) [#57](https://github.com/jarradbanks/jvid/issues/57) |
-| UI and timeline | `jvid-app`, `suite-ui` | [#11](https://github.com/jarradbanks/jvid/issues/11) [#12](https://github.com/jarradbanks/jvid/issues/12) [#13](https://github.com/jarradbanks/jvid/issues/13) [#19](https://github.com/jarradbanks/jvid/issues/19) [#20](https://github.com/jarradbanks/jvid/issues/20) [#25](https://github.com/jarradbanks/jvid/issues/25) [#26](https://github.com/jarradbanks/jvid/issues/26) [#27](https://github.com/jarradbanks/jvid/issues/27) [#28](https://github.com/jarradbanks/jvid/issues/28) [#33](https://github.com/jarradbanks/jvid/issues/33) [#34](https://github.com/jarradbanks/jvid/issues/34) [#35](https://github.com/jarradbanks/jvid/issues/35) [#36](https://github.com/jarradbanks/jvid/issues/36) [#37](https://github.com/jarradbanks/jvid/issues/37) [#38](https://github.com/jarradbanks/jvid/issues/38) [#39](https://github.com/jarradbanks/jvid/issues/39) [#40](https://github.com/jarradbanks/jvid/issues/40) [#41](https://github.com/jarradbanks/jvid/issues/41) [#44](https://github.com/jarradbanks/jvid/issues/44) [#47](https://github.com/jarradbanks/jvid/issues/47) [#48](https://github.com/jarradbanks/jvid/issues/48) [#49](https://github.com/jarradbanks/jvid/issues/49) [#50](https://github.com/jarradbanks/jvid/issues/50) [#51](https://github.com/jarradbanks/jvid/issues/51) [#54](https://github.com/jarradbanks/jvid/issues/54) [#58](https://github.com/jarradbanks/jvid/issues/58) [#63](https://github.com/jarradbanks/jvid/issues/63) [#65](https://github.com/jarradbanks/jvid/issues/65) [#68](https://github.com/jarradbanks/jvid/issues/68) [#72](https://github.com/jarradbanks/jvid/issues/72) [#73](https://github.com/jarradbanks/jvid/issues/73) [#74](https://github.com/jarradbanks/jvid/issues/74) [#75](https://github.com/jarradbanks/jvid/issues/75) [#77](https://github.com/jarradbanks/jvid/issues/77) |
-| Export and CLI | `jvid-media`, `jvid-cli` | [#52](https://github.com/jarradbanks/jvid/issues/52) [#53](https://github.com/jarradbanks/jvid/issues/53) [#54](https://github.com/jarradbanks/jvid/issues/54) [#55](https://github.com/jarradbanks/jvid/issues/55) [#56](https://github.com/jarradbanks/jvid/issues/56) [#57](https://github.com/jarradbanks/jvid/issues/57) [#58](https://github.com/jarradbanks/jvid/issues/58) [#59](https://github.com/jarradbanks/jvid/issues/59) [#60](https://github.com/jarradbanks/jvid/issues/60) [#61](https://github.com/jarradbanks/jvid/issues/61) [#78](https://github.com/jarradbanks/jvid/issues/78) |
+| UI and timeline | `jvid-app`, `suite-ui` | [#11](https://github.com/jarradbanks/jvid/issues/11) [#12](https://github.com/jarradbanks/jvid/issues/12) [#13](https://github.com/jarradbanks/jvid/issues/13) [#19](https://github.com/jarradbanks/jvid/issues/19) [#20](https://github.com/jarradbanks/jvid/issues/20) [#25](https://github.com/jarradbanks/jvid/issues/25) [#26](https://github.com/jarradbanks/jvid/issues/26) [#27](https://github.com/jarradbanks/jvid/issues/27) [#28](https://github.com/jarradbanks/jvid/issues/28) [#33](https://github.com/jarradbanks/jvid/issues/33) [#34](https://github.com/jarradbanks/jvid/issues/34) [#35](https://github.com/jarradbanks/jvid/issues/35) [#89](https://github.com/jarradbanks/jvid/issues/89) [#36](https://github.com/jarradbanks/jvid/issues/36) [#37](https://github.com/jarradbanks/jvid/issues/37) [#38](https://github.com/jarradbanks/jvid/issues/38) [#39](https://github.com/jarradbanks/jvid/issues/39) [#40](https://github.com/jarradbanks/jvid/issues/40) [#41](https://github.com/jarradbanks/jvid/issues/41) [#90](https://github.com/jarradbanks/jvid/issues/90) [#44](https://github.com/jarradbanks/jvid/issues/44) [#47](https://github.com/jarradbanks/jvid/issues/47) [#48](https://github.com/jarradbanks/jvid/issues/48) [#49](https://github.com/jarradbanks/jvid/issues/49) [#50](https://github.com/jarradbanks/jvid/issues/50) [#51](https://github.com/jarradbanks/jvid/issues/51) [#54](https://github.com/jarradbanks/jvid/issues/54) [#58](https://github.com/jarradbanks/jvid/issues/58) [#63](https://github.com/jarradbanks/jvid/issues/63) [#65](https://github.com/jarradbanks/jvid/issues/65) [#68](https://github.com/jarradbanks/jvid/issues/68) [#72](https://github.com/jarradbanks/jvid/issues/72) [#73](https://github.com/jarradbanks/jvid/issues/73) [#74](https://github.com/jarradbanks/jvid/issues/74) [#75](https://github.com/jarradbanks/jvid/issues/75) [#93](https://github.com/jarradbanks/jvid/issues/93) [#94](https://github.com/jarradbanks/jvid/issues/94) [#77](https://github.com/jarradbanks/jvid/issues/77) |
+| Export and CLI | `jvid-media`, `jvid-cli` | [#52](https://github.com/jarradbanks/jvid/issues/52) [#53](https://github.com/jarradbanks/jvid/issues/53) [#54](https://github.com/jarradbanks/jvid/issues/54) [#55](https://github.com/jarradbanks/jvid/issues/55) [#56](https://github.com/jarradbanks/jvid/issues/56) [#57](https://github.com/jarradbanks/jvid/issues/57) [#58](https://github.com/jarradbanks/jvid/issues/58) [#59](https://github.com/jarradbanks/jvid/issues/59) [#60](https://github.com/jarradbanks/jvid/issues/60) [#91](https://github.com/jarradbanks/jvid/issues/91) [#92](https://github.com/jarradbanks/jvid/issues/92) [#61](https://github.com/jarradbanks/jvid/issues/61) [#93](https://github.com/jarradbanks/jvid/issues/93) [#78](https://github.com/jarradbanks/jvid/issues/78) |
 
 ## Milestones
 
@@ -157,7 +157,7 @@ flowchart LR
 
 ### [M2 · Timeline](https://github.com/jarradbanks/jvid/milestone/3)
 
-Timeline panel, tracks, clip placement, trim/split/ripple, snapping, in/out, compositor, mixer, playback. 14 issues, about 58 person-days.
+Timeline panel, tracks, clip placement, trim/split/ripple, snapping, in/out, compositor, mixer, playback. 16 issues, about 66 person-days.
 
 ```mermaid
 flowchart LR
@@ -168,12 +168,14 @@ flowchart LR
   timeline_widget["#35;33 Timeline panel: ruler, tracks, clips, zoom and playhead"]
   tracks["#35;34 Track management and headers"]
   place_clips["#35;35 Place clips: drag from bin, insert and overwrite"]
+  multi_audio["#35;89 Multi-track audio sources"]
   select_clipboard["#35;36 Selection, clipboard and delete"]
   trim_split["#35;37 Trim, split, razor and ripple"]
   snapping["#35;38 Snapping"]
   in_out["#35;39 In/Out points on the timeline"]
   markers["#35;40 Markers"]
   scrub["#35;41 Scrubbing and audio scrub"]
+  long_hfr["#35;90 Long and high-frame-rate recordings"]
   perf_harness["#35;42 Performance harness and budgets"]
   eval --> compositor
   eval --> mixer
@@ -181,12 +183,15 @@ flowchart LR
   mixer --> playback
   timeline_widget --> tracks
   tracks --> place_clips
+  place_clips --> multi_audio
   place_clips --> select_clipboard
   select_clipboard --> trim_split
   trim_split --> snapping
   trim_split --> in_out
   timeline_widget --> markers
+  in_out --> markers
   playback --> scrub
+  playback --> long_hfr
   playback --> perf_harness
 ```
 
@@ -199,12 +204,14 @@ flowchart LR
 | [#33](https://github.com/jarradbanks/jvid/issues/33) | Timeline panel: ruler, tracks, clips, zoom and playhead | L | ui, timeline | [#12](https://github.com/jarradbanks/jvid/issues/12), [#7](https://github.com/jarradbanks/jvid/issues/7), [#21](https://github.com/jarradbanks/jvid/issues/21), [#22](https://github.com/jarradbanks/jvid/issues/22) |
 | [#34](https://github.com/jarradbanks/jvid/issues/34) | Track management and headers | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8) |
 | [#35](https://github.com/jarradbanks/jvid/issues/35) | Place clips: drag from bin, insert and overwrite | M | timeline | [#34](https://github.com/jarradbanks/jvid/issues/34), [#25](https://github.com/jarradbanks/jvid/issues/25) |
+| [#89](https://github.com/jarradbanks/jvid/issues/89) | Multi-track audio sources | M | timeline, media | [#35](https://github.com/jarradbanks/jvid/issues/35), [#16](https://github.com/jarradbanks/jvid/issues/16) |
 | [#36](https://github.com/jarradbanks/jvid/issues/36) | Selection, clipboard and delete | M | timeline | [#35](https://github.com/jarradbanks/jvid/issues/35) |
 | [#37](https://github.com/jarradbanks/jvid/issues/37) | Trim, split, razor and ripple | L | timeline | [#36](https://github.com/jarradbanks/jvid/issues/36) |
 | [#38](https://github.com/jarradbanks/jvid/issues/38) | Snapping | S | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37) |
 | [#39](https://github.com/jarradbanks/jvid/issues/39) | In/Out points on the timeline | M | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37), [#13](https://github.com/jarradbanks/jvid/issues/13) |
-| [#40](https://github.com/jarradbanks/jvid/issues/40) | Markers | S | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8) |
+| [#40](https://github.com/jarradbanks/jvid/issues/40) | Markers | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8), [#39](https://github.com/jarradbanks/jvid/issues/39) |
 | [#41](https://github.com/jarradbanks/jvid/issues/41) | Scrubbing and audio scrub | M | timeline, render | [#32](https://github.com/jarradbanks/jvid/issues/32) |
+| [#90](https://github.com/jarradbanks/jvid/issues/90) | Long and high-frame-rate recordings | M | media, timeline | [#32](https://github.com/jarradbanks/jvid/issues/32), [#21](https://github.com/jarradbanks/jvid/issues/21), [#22](https://github.com/jarradbanks/jvid/issues/22) |
 | [#42](https://github.com/jarradbanks/jvid/issues/42) | Performance harness and budgets | M | infra | [#32](https://github.com/jarradbanks/jvid/issues/32) |
 
 ### [M3 · Animate](https://github.com/jarradbanks/jvid/milestone/4)
@@ -251,7 +258,7 @@ flowchart LR
 
 ### [M4 · Export & v0.1.0](https://github.com/jarradbanks/jvid/milestone/5)
 
-Export pipeline, presets, export dialog with In to Out, hardware encode, loudness, queue, CLI render, release packaging. 11 issues, about 37 person-days.
+Export pipeline, presets, export dialog with In to Out, hardware encode, loudness, queue, CLI render, release packaging. 13 issues, about 48 person-days.
 
 ```mermaid
 flowchart LR
@@ -264,6 +271,8 @@ flowchart LR
   queue["#35;58 Background render queue"]
   frame_png["#35;59 Export current frame as PNG"]
   gif["#35;60 GIF export"]
+  lossless_export["#35;91 Lossless fast export"]
+  target_size["#35;92 Export to a target file size"]
   cli["#35;61 jvid render CLI"]
   release["#35;62 Packaging and v0.1.0 release"]
   encode --> presets
@@ -273,12 +282,18 @@ flowchart LR
   encode --> loudness
   export_dialog --> queue
   encode --> gif
+  encode --> lossless_export
+  export_dialog --> lossless_export
+  encode --> target_size
+  presets --> target_size
   encode --> cli
   presets --> cli
   cli --> release
   export_dialog --> release
   hw_encode --> release
   loudness --> release
+  lossless_export --> release
+  target_size --> release
 ```
 
 | Issue | Title | Size | Area | Depends on |
@@ -292,12 +307,14 @@ flowchart LR
 | [#58](https://github.com/jarradbanks/jvid/issues/58) | Background render queue | M | export, ui | [#54](https://github.com/jarradbanks/jvid/issues/54), [#18](https://github.com/jarradbanks/jvid/issues/18) |
 | [#59](https://github.com/jarradbanks/jvid/issues/59) | Export current frame as PNG | S | export | [#30](https://github.com/jarradbanks/jvid/issues/30) |
 | [#60](https://github.com/jarradbanks/jvid/issues/60) | GIF export | S | export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
+| [#91](https://github.com/jarradbanks/jvid/issues/91) | Lossless fast export | L | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52), [#54](https://github.com/jarradbanks/jvid/issues/54) |
+| [#92](https://github.com/jarradbanks/jvid/issues/92) | Export to a target file size | M | export | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53) |
 | [#61](https://github.com/jarradbanks/jvid/issues/61) | jvid render CLI | M | cli | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53), [#9](https://github.com/jarradbanks/jvid/issues/9) |
-| [#62](https://github.com/jarradbanks/jvid/issues/62) | Packaging and v0.1.0 release | L | infra | [#61](https://github.com/jarradbanks/jvid/issues/61), [#54](https://github.com/jarradbanks/jvid/issues/54), [#55](https://github.com/jarradbanks/jvid/issues/55), [#57](https://github.com/jarradbanks/jvid/issues/57) |
+| [#62](https://github.com/jarradbanks/jvid/issues/62) | Packaging and v0.1.0 release | L | infra | [#61](https://github.com/jarradbanks/jvid/issues/61), [#54](https://github.com/jarradbanks/jvid/issues/54), [#55](https://github.com/jarradbanks/jvid/issues/55), [#57](https://github.com/jarradbanks/jvid/issues/57), [#91](https://github.com/jarradbanks/jvid/issues/91), [#92](https://github.com/jarradbanks/jvid/issues/92) |
 
 ### [M5 · Polish (v0.2.0)](https://github.com/jarradbanks/jvid/milestone/6)
 
-Text, transitions, color and LUTs, speed, proxies, hardware decode, autosave, keymap editor, themes. 14 issues, about 42 person-days.
+Text, transitions, color and LUTs, speed, proxies, hardware decode, autosave, keymap editor, themes. 16 issues, about 48 person-days.
 
 ```mermaid
 flowchart LR
@@ -315,6 +332,8 @@ flowchart LR
   overlays["#35;74 Preview overlays: safe areas and grid"]
   project_settings["#35;75 Project settings dialog"]
   user_docs["#35;76 User guide and shortcut cheat sheet"]
+  batch_highlights["#35;93 Export marked highlights as separate files"]
+  zoom_region["#35;94 Zoom-to-region for screen recordings"]
   color --> lut
 ```
 
@@ -334,6 +353,8 @@ flowchart LR
 | [#74](https://github.com/jarradbanks/jvid/issues/74) | Preview overlays: safe areas and grid | S | ui | [#23](https://github.com/jarradbanks/jvid/issues/23) |
 | [#75](https://github.com/jarradbanks/jvid/issues/75) | Project settings dialog | S | ui | [#27](https://github.com/jarradbanks/jvid/issues/27) |
 | [#76](https://github.com/jarradbanks/jvid/issues/76) | User guide and shortcut cheat sheet | M | docs | [#54](https://github.com/jarradbanks/jvid/issues/54) |
+| [#93](https://github.com/jarradbanks/jvid/issues/93) | Export marked highlights as separate files | M | export, timeline | [#40](https://github.com/jarradbanks/jvid/issues/40), [#58](https://github.com/jarradbanks/jvid/issues/58) |
+| [#94](https://github.com/jarradbanks/jvid/issues/94) | Zoom-to-region for screen recordings | M | ui, render | [#47](https://github.com/jarradbanks/jvid/issues/47), [#43](https://github.com/jarradbanks/jvid/issues/43), [#49](https://github.com/jarradbanks/jvid/issues/49) |
 
 ### [M6 · Extend (v0.3.0)](https://github.com/jarradbanks/jvid/milestone/7)
 
@@ -363,6 +384,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#85](https://github.com/jarradbanks/jvid/issues/85) **Audio EQ and compressor** — Basic per-clip and per-track audio effects.
 - [#86](https://github.com/jarradbanks/jvid/issues/86) **HDR support** — PQ/HLG sources, tone mapping and HDR export.
 - [#87](https://github.com/jarradbanks/jvid/issues/87) **Curve graph editor** — A full graph editor for keyframe curves.
+- [#95](https://github.com/jarradbanks/jvid/issues/95) **Silence detection to cut dead air** — Find silent stretches in screen recordings and offer to cut or speed them up.
 
 ---
 
