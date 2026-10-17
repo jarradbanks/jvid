@@ -357,6 +357,8 @@ pub enum ModelError {
     Locked(TrackId),
     /// The clip can't go on a track of that kind.
     WrongKind(TrackId),
+    /// No gap on the track at that time.
+    NoGap(TrackId),
 }
 
 impl std::fmt::Display for ModelError {
@@ -371,6 +373,7 @@ impl std::fmt::Display for ModelError {
             Self::UnknownKeyframe(id, t) => write!(f, "no keyframe at {} on clip {}", t.0, id.0),
             Self::Locked(id) => write!(f, "track {} is locked", id.0),
             Self::WrongKind(id) => write!(f, "track {} is the wrong kind", id.0),
+            Self::NoGap(id) => write!(f, "no gap there on track {}", id.0),
         }
     }
 }
@@ -1034,6 +1037,178 @@ impl Project {
 
     pub(crate) fn asset_mut(&mut self, id: AssetId) -> Option<&mut MediaAsset> {
         self.assets.iter_mut().find(|a| a.id == id)
+    }
+}
+
+/// Which end of a clip a trim moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Edge {
+    Head,
+    Tail,
+}
+
+impl Sequence {
+    /// Cuts each listed clip that crosses `at`; tails of linked clips share a new link.
+    pub(crate) fn split_at(&mut self, ids: &[ClipId], at: Time) -> Result<(), ModelError> {
+        let mut s = self.clone();
+        let mut links = BTreeMap::new();
+        for &id in ids {
+            let (t, c) = s.clip(id).ok_or(ModelError::UnknownClip(id))?;
+            if c.start < at && at < c.end() {
+                let ti = s.index(t)?;
+                s.split(ti, id, at, &mut links);
+            }
+        }
+        // A tail whose partner wasn't cut has nothing to be linked to.
+        for l in links.into_values() {
+            let tails = s
+                .tracks
+                .iter()
+                .flat_map(|t| &t.clips)
+                .filter(|c| c.link == Some(l));
+            if tails.count() == 1 {
+                let t = s.tracks.iter_mut().flat_map(|t| &mut t.clips);
+                t.filter(|c| c.link == Some(l)).for_each(|c| c.link = None);
+            }
+        }
+        *self = s;
+        Ok(())
+    }
+
+    /// The empty span on `track` containing `at`, from the previous clip's end (or zero) to
+    /// the next clip's start. `None` inside a clip or past the last one.
+    pub fn gap_at(&self, track: TrackId, at: Time) -> Option<(Time, Time)> {
+        let clips = self.track(track)?.clips();
+        let next = clips.iter().find(|c| c.end() > at)?;
+        if next.start <= at || at < Time(0) {
+            return None;
+        }
+        let prev = clips.iter().rev().find(|c| c.end() <= at);
+        Some((prev.map_or(Time(0), Clip::end), next.start))
+    }
+
+    /// Ripple deletes the gap containing `at`: later clips on the track move left to close it.
+    pub(crate) fn close_gap(&mut self, track: TrackId, at: Time) -> Result<(), ModelError> {
+        let ti = self.index(track)?;
+        let (a, b) = self.gap_at(track, at).ok_or(ModelError::NoGap(track))?;
+        let later = self.tracks[ti].clips.iter().filter(|c| c.start >= b);
+        let later: Vec<_> = later.map(|c| c.id).collect();
+        let mut s = self.clone();
+        s.shift_synced(later, a - b)?;
+        *self = s;
+        Ok(())
+    }
+
+    /// Moves `ids` and their linked partners on other tracks by `by`, so ripples keep sync.
+    /// Fails, leaving `self` half-moved, if a moved clip would land on another or before zero.
+    fn shift_synced(&mut self, mut ids: Vec<ClipId>, by: Time) -> Result<(), ModelError> {
+        for id in ids.clone() {
+            for (_, c) in self.linked(id) {
+                if !ids.contains(&c.id) {
+                    ids.push(c.id);
+                }
+            }
+        }
+        for t in &mut self.tracks {
+            for c in t.clips.iter_mut().filter(|c| ids.contains(&c.id)) {
+                c.start = c.start + by;
+                if c.start < Time(0) {
+                    return Err(ModelError::Overlap(c.id));
+                }
+            }
+            t.clips.sort_by_key(|c| c.start);
+            if let Some(w) = t.clips.windows(2).find(|w| w[0].end() > w[1].start) {
+                let hit = if ids.contains(&w[0].id) {
+                    w[1].id
+                } else {
+                    w[0].id
+                };
+                return Err(ModelError::Overlap(hit));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Project {
+    /// How far `id`'s `edge`, with its linked clips', can move from `by`: held to the media,
+    /// a one-frame minimum length and, without ripple, the neighbouring clips and zero.
+    pub fn trim_limit(&self, id: ClipId, edge: Edge, by: Time, ripple: bool) -> Time {
+        let s = &self.sequence;
+        let min = self.settings.frame_rate.time_floor(1);
+        let (mut lo, mut hi) = (Time(i64::MIN / 4), Time(i64::MAX / 4));
+        for (t, c) in s.linked(id) {
+            let clips = s.track(t).expect("listed").clips();
+            match edge {
+                Edge::Head => {
+                    lo = lo.max(Time(0) - c.source_in);
+                    hi = hi.min(c.duration() - min);
+                    if !ripple {
+                        let prev = clips.iter().map(Clip::end).filter(|&e| e <= c.start);
+                        lo = lo.max(prev.max().unwrap_or(Time(0)) - c.start);
+                    }
+                }
+                Edge::Tail => {
+                    lo = lo.max(min - c.duration());
+                    // Stills and solids report no duration and extend freely.
+                    let media = self.asset(c.asset).filter(|a| a.solid.is_none());
+                    let media = media.and_then(|a| a.probe.as_ref()).map(|p| p.duration);
+                    if let Some(d) = media.filter(|d| *d > Time(0)) {
+                        hi = hi.min(d - c.source_out);
+                    }
+                    let next = clips.iter().map(|o| o.start).filter(|&o| o >= c.end());
+                    if let (false, Some(n)) = (ripple, next.min()) {
+                        hi = hi.min(n - c.end());
+                    }
+                }
+            }
+        }
+        if lo > hi { Time(0) } else { by.clamp(lo, hi) }
+    }
+
+    /// Moves each clip's edge by its amount, as far as [`trim_limit`](Self::trim_limit)
+    /// allows, its linked clips' with it. Ripple keeps the head in place and shifts the
+    /// later clips on each trimmed track by the change in length.
+    pub(crate) fn trim(
+        &mut self,
+        trims: &[(ClipId, Edge, Time)],
+        ripple: bool,
+    ) -> Result<(), ModelError> {
+        let mut p = self.clone();
+        let mut done = Vec::new();
+        for &(id, edge, by) in trims {
+            p.sequence.clip(id).ok_or(ModelError::UnknownClip(id))?;
+            if done.contains(&id) {
+                continue;
+            }
+            let by = p.trim_limit(id, edge, by, ripple);
+            let group = p.sequence.linked(id).into_iter();
+            let group: Vec<_> = group.map(|(t, c)| (t, c.id, c.end())).collect();
+            let mut later = Vec::new();
+            for (t, cid, end) in group {
+                done.push(cid);
+                let s = &mut p.sequence;
+                let ti = s.index(t)?;
+                for c in &mut s.tracks[ti].clips {
+                    if c.id == cid {
+                        match edge {
+                            Edge::Head if ripple => c.source_in = c.source_in + by,
+                            Edge::Head => (c.source_in, c.start) = (c.source_in + by, c.start + by),
+                            Edge::Tail => c.source_out = c.source_out + by,
+                        }
+                    } else if ripple && c.start >= end {
+                        later.push(c.id);
+                    }
+                }
+            }
+            let shift = match edge {
+                Edge::Head => Time(0) - by,
+                Edge::Tail => by,
+            };
+            p.sequence.shift_synced(later, shift)?;
+        }
+        *self = p;
+        Ok(())
     }
 }
 
