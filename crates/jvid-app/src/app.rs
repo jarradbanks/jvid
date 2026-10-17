@@ -84,11 +84,7 @@ pub struct App {
     theme: suite_ui::themes::LiveTheme,
     keymap_editor: crate::keymap_editor::KeymapEditor,
     exports: jvid_jobs::Pool,
-    presets: Vec<jvid_core::preset::Preset>,
-    /// Index into `presets`.
-    preset: usize,
-    /// Export loudness target in LUFS; `None` leaves the mix alone.
-    loudness: Option<f64>,
+    export_dialog: crate::export::dialog::ExportDialog,
     /// The running export and where its result arrives.
     export: Option<(jvid_jobs::Handle, Receiver<Result<ProbeInfo, ExportError>>)>,
 }
@@ -143,9 +139,7 @@ impl App {
             theme: suite_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
             exports: jvid_jobs::Pool::new(1),
-            presets: crate::export::presets(),
-            preset: 0,
-            loudness: Some(-14.0),
+            export_dialog: Default::default(),
             export: None,
         }
     }
@@ -362,9 +356,7 @@ impl App {
         }
     }
 
-    /// Exports In to Out (or the whole sequence) with the chosen preset to a chosen file; while
-    /// running, shows progress and cancels on click.
-    /// shortcut: a preset picker but no range choice; the export dialog (#54) replaces this.
+    /// Opens the export dialog; while an export runs, shows progress and cancels on click.
     fn export_button(&mut self, ui: &mut Ui) {
         if let Some((h, _)) = &self.export {
             let label = format!("Exporting {:.0}%", h.progress() * 100.0);
@@ -379,66 +371,18 @@ impl App {
             return;
         }
         let seq = self.history.project().sequence();
-        let gpu = self.preview.gpu();
-        let state = if seq.duration() > Time(0) && gpu.is_some() {
+        let state = if seq.duration() > Time(0) && self.preview.gpu().is_some() {
             State::Live
         } else {
             State::Disabled
         };
-        let s = self.history.project().settings();
-        let warning = self.presets[self.preset].aspect_warning((s.width, s.height));
-        egui::ComboBox::from_id_salt("export preset")
-            .selected_text(&self.presets[self.preset].name)
-            .show_index(ui, &mut self.preset, self.presets.len(), |i| {
-                self.presets[i].name.clone()
-            });
-        if let Some(w) = &warning {
-            ui.label("⚠").on_hover_text(w);
-        }
-        let label = |l: Option<f64>| l.map_or("Loudness off".into(), |l| format!("{l} LUFS"));
-        egui::ComboBox::from_id_salt("export loudness")
-            .selected_text(label(self.loudness))
-            .show_ui(ui, |ui| {
-                for l in [None, Some(-14.0), Some(-16.0), Some(-23.0)] {
-                    ui.selectable_value(&mut self.loudness, l, label(l));
-                }
-                let mut custom = self.loudness.unwrap_or(-14.0);
-                let drag = egui::DragValue::new(&mut custom)
-                    .range(-40.0..=-5.0)
-                    .speed(0.1)
-                    .prefix("Custom ")
-                    .suffix(" LUFS");
-                if ui.add(drag).changed() {
-                    self.loudness = Some(custom);
-                }
-            });
-        let preset = self.presets[self.preset].clone();
-        let r = ui
+        if ui
             .add(Button::primary("Export").state(state))
-            .on_disabled_hover_text("Nothing to export yet");
-        let (true, Some(gpu)) = (r.clicked(), gpu) else {
-            return;
-        };
-        let Some(path) = FileDialog::new()
-            .set_title("Export")
-            .add_filter(&preset.name, &[&preset.extension])
-            .set_file_name(format!("{}.{}", self.name(), preset.extension))
-            .save_file()
-        else {
-            return;
-        };
-        let range = (
-            seq.in_point().unwrap_or(Time(0)),
-            seq.out_point().unwrap_or(seq.duration()),
-        );
-        let project = self.history.project().clone();
-        let req = crate::export::Request {
-            path,
-            range,
-            preset,
-            loudness: self.loudness,
-        };
-        self.export = Some(crate::export::submit(&self.exports, project, req, gpu));
+            .on_disabled_hover_text("Nothing to export yet")
+            .clicked()
+        {
+            self.export_dialog.open(seq, &self.name());
+        }
     }
 
     /// Takes a finished export's result; failures become toasts.
@@ -783,6 +727,15 @@ impl eframe::App for App {
                 && let Err(e) = keymap::save(&self.keymap)
             {
                 tracing::warn!("keymap: can't save: {e}");
+            }
+            let selected = self.timeline.selected();
+            if let Some(req) = self
+                .export_dialog
+                .show(ui, self.history.project(), selected)
+                && let Some(gpu) = self.preview.gpu()
+            {
+                let project = self.history.project().clone();
+                self.export = Some(crate::export::submit(&self.exports, project, req, gpu));
             }
             if let Some(c) = self.settings_dialog.show(ui, self.history.project())
                 && let Err(e) = self.history.apply(c)

@@ -351,5 +351,7 @@ fn blocking(path: &Path, nth: usize) -> ClipAudio {
     })
 }
 
+pub mod dialog;
+
 #[cfg(test)]
 mod tests;
