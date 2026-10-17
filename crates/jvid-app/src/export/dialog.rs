@@ -254,7 +254,7 @@ fn video_summary(p: &Preset, w: u32, h: u32, rate: Rate) -> String {
     let Some(v) = p.video else {
         return "None".into();
     };
-    let [w, h] = p.size.unwrap_or([w, h]);
+    let (w, h) = p.output_size((w, h));
     let rate = p.frame_rate.unwrap_or(rate);
     let fps = rate.num as f64 / rate.den as f64;
     let codec = match v {
@@ -281,7 +281,7 @@ fn audio_name(a: AudioCodec) -> &'static str {
 pub fn estimate(p: &Preset, (w, h): (u32, u32), rate: Rate, len: Time) -> u64 {
     let secs = len.0.max(0) as f64 / FLICKS_PER_SECOND as f64;
     let video = p.video.map_or(0.0, |v| {
-        let [w, h] = p.size.unwrap_or([w, h]);
+        let (w, h) = p.output_size((w, h));
         let r = p.frame_rate.unwrap_or(rate);
         let bpp = match v {
             VideoCodec::H264 => 0.1,

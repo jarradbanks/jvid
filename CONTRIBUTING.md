@@ -14,7 +14,7 @@ jvid links FFmpeg 4.4 to 8.x dynamically ([ADR 0001](docs/adr/0001-ffmpeg-bindin
 
   ```sh
   sudo apt install clang libclang-dev pkg-config \
-    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+    libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev
   ```
 
   Ubuntu 22.04's FFmpeg 4.4 is the oldest supported version.
