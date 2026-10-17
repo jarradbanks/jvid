@@ -50,7 +50,12 @@ pub fn to_json(project: &Project, project_dir: &Path) -> Result<String, FileErro
         let rel = a["path"]
             .as_str()
             .and_then(|s| relativize(Path::new(s), project_dir));
-        if let Some(rel) = rel.as_deref().and_then(Path::to_str) {
+        // `/` separators so a project saved on Windows also opens on Unix.
+        let rel = rel.and_then(|r| {
+            let parts: Option<Vec<_>> = r.iter().map(|c| c.to_str()).collect();
+            Some(parts?.join("/"))
+        });
+        if let Some(rel) = rel {
             a["relative_path"] = rel.into();
         }
     }
@@ -150,29 +155,50 @@ fn normalize(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
+    /// A Unix-style absolute path, on drive `C:` under Windows.
+    fn abs(p: &str) -> PathBuf {
+        if cfg!(windows) {
+            format!("C:{p}").into()
+        } else {
+            p.into()
+        }
+    }
+
     #[test]
     fn relativize_and_rebase() {
-        let dir = Path::new("/home/me/proj");
+        let dir = &abs("/home/me/proj");
         let cases = [
             ("/home/me/proj/media/a.mkv", "media/a.mkv"),
             ("/home/me/clips/b.mkv", "../clips/b.mkv"),
             ("/c.mkv", "../../../c.mkv"),
         ];
-        for (abs, rel) in cases {
-            assert_eq!(relativize(Path::new(abs), dir).unwrap(), Path::new(rel));
-            assert_eq!(rebase(Path::new(rel), dir), Path::new(abs));
+        for (a, rel) in cases {
+            assert_eq!(relativize(&abs(a), dir).unwrap(), Path::new(rel));
+            assert_eq!(rebase(Path::new(rel), dir), abs(a));
         }
         assert_eq!(relativize(Path::new("a.mkv"), dir), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn other_drive_keeps_only_absolute() {
+        let dir = Path::new(r"C:\proj");
+        assert_eq!(relativize(Path::new(r"D:\media\a.mkv"), dir), None);
+        assert_eq!(relativize(Path::new(r"\\?\C:\proj\a.mkv"), dir), None);
+        let mut p = Project::default();
+        p.add_asset(r"D:\media\a.mkv");
+        assert!(!to_json(&p, dir).unwrap().contains("relative_path"));
     }
 
     #[test]
     fn moved_folder_keeps_links() {
         let mut p = Project::default();
-        p.add_asset("/old/proj/media/a.mkv");
-        p.add_asset("/library/b.mkv"); // outside the folder, not moved
-        let s = to_json(&p, Path::new("/old/proj")).unwrap();
-        let moved = Path::new("/new/place/proj");
-        let on_disk = [moved.join("media/a.mkv"), PathBuf::from("/library/b.mkv")];
+        p.add_asset(abs("/old/proj/media/a.mkv"));
+        p.add_asset(abs("/library/b.mkv")); // outside the folder, not moved
+        let s = to_json(&p, &abs("/old/proj")).unwrap();
+        assert!(s.contains(r#""relative_path": "media/a.mkv""#));
+        let moved = &abs("/new/place/proj");
+        let on_disk = [moved.join("media/a.mkv"), abs("/library/b.mkv")];
         let loaded = from_json(&s, moved, |f| on_disk.iter().any(|d| d == f)).unwrap();
         let paths: Vec<_> = loaded.assets().iter().map(|a| a.path.clone()).collect();
         assert_eq!(paths, on_disk);
