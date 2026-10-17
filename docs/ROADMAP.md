@@ -199,7 +199,7 @@ flowchart LR
 
 | Issue | Title | Status | Size | Area | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [#29](https://github.com/jarradbanks/jvid/issues/29) | Timeline evaluation: time to layer stack |  | M | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
+| [#29](https://github.com/jarradbanks/jvid/issues/29) | Timeline evaluation: time to layer stack | done | M | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
 | [#30](https://github.com/jarradbanks/jvid/issues/30) | GPU compositor: layer stack with opacity |  | L | render | [#29](https://github.com/jarradbanks/jvid/issues/29), [#23](https://github.com/jarradbanks/jvid/issues/23) |
 | [#31](https://github.com/jarradbanks/jvid/issues/31) | Audio mixer: tracks, volume, pan, mute and solo |  | M | audio | [#29](https://github.com/jarradbanks/jvid/issues/29), [#16](https://github.com/jarradbanks/jvid/issues/16) |
 | [#32](https://github.com/jarradbanks/jvid/issues/32) | Timeline playback engine |  | L | render, audio | [#30](https://github.com/jarradbanks/jvid/issues/30), [#31](https://github.com/jarradbanks/jvid/issues/31), [#24](https://github.com/jarradbanks/jvid/issues/24) |
