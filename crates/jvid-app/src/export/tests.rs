@@ -358,7 +358,10 @@ fn editing_after_queueing_doesnt_change_the_export() {
         loudness: None,
     };
     let mut q = queue::Queue::default();
-    assert!(q.push(path.clone(), submit(&pool, h.project().clone(), req.clone(), gpu)));
+    assert!(q.push(
+        path.clone(),
+        submit(&pool, h.project().clone(), req.clone(), gpu)
+    ));
     assert!(!q.writing(&out("other.mp4")) && q.writing(&path));
     let video = h.project().sequence().tracks()[0].clips()[0].id;
     h.apply(Command::RemoveClip(video)).unwrap();
