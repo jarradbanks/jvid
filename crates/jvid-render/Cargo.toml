@@ -9,3 +9,11 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+wgpu.workspace = true
+
+[dev-dependencies]
+jvid-core.workspace = true
+jvid-media = { workspace = true, features = ["test-support"] }
+suite-ui = { workspace = true, features = ["test-support"] }

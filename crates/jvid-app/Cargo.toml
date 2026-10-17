@@ -30,6 +30,7 @@ gpl-ffmpeg = ["jvid-media/gpl-ffmpeg"]
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["eframe"] }
 suite-ui = { workspace = true, features = ["test-support"] }
+jvid-media = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
