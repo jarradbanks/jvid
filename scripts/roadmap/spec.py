@@ -523,6 +523,16 @@ I("program-monitor", "Program monitor plays the timeline", "M2", ["ui", "render"
   ac=["A two-layer timeline with opacity/blend shows the composite in the Program tab and plays with audio",
       "Moving the playhead while paused updates the frame without playing"])
 
+I("program-transport", "Program monitor transport bar", "M2", ["ui"], "S", ["program-monitor"],
+  summary="The Program tab gets the same transport bar as the Source tab, driving timeline playback.",
+  scope=[
+      "Reuse the Source monitor's transport bar (timecode, go-to-start, step back, play/pause, step forward, go-to-end, duration, scrub strip) in the Program tab, wired to the timeline playback engine",
+      "Timecode and duration show sequence time; the scrub strip moves the timeline playhead",
+      "Keep the existing Fit / quality / Proxies / grid controls in the same row as the Source tab does",
+  ],
+  ac=["Program tab shows play/pause and step buttons that play and step the timeline",
+      "Program tab timecode tracks the timeline playhead while playing and scrubbing"])
+
 I("in-out", "In/Out points on the timeline", "M2", ["timeline"], "M", ["trim-split", "actions"],
   summary="Premiere-style range marking for playback, editing and export.",
   scope=[

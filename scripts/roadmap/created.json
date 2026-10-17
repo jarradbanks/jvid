@@ -408,6 +408,10 @@
     "vaapi-encode": {
       "number": 169,
       "id": 5902442765
+    },
+    "program-transport": {
+      "number": 191,
+      "id": 5904265912
     }
   },
   "links": [
@@ -1062,6 +1066,10 @@
     [
       "vaapi-encode",
       "hw-encode"
+    ],
+    [
+      "program-transport",
+      "program-monitor"
     ]
   ]
 }
