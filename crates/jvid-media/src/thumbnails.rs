@@ -117,39 +117,43 @@ impl Cache {
         img.save_with_format(&tmp, ImageFormat::Png)
             .map_err(|e| e.to_string())?;
         fs::rename(&tmp, file).map_err(|e| e.to_string())?;
-        self.evict();
+        evict(&self.dir, self.cap_bytes);
         Ok(())
     }
+}
 
-    /// Deletes least recently used entries until the cache fits in `cap_bytes`.
-    fn evict(&self) {
-        let Ok(dir) = fs::read_dir(&self.dir) else {
-            return;
-        };
-        let mut entries: Vec<_> = dir
-            .flatten()
-            .filter(|e| e.path().extension().is_some_and(|x| x == "png"))
-            .filter_map(|e| {
-                let m = e.metadata().ok()?;
-                Some((m.modified().ok()?, m.len(), e.path()))
-            })
-            .collect();
-        let mut total: u64 = entries.iter().map(|e| e.1).sum();
-        entries.sort();
-        for (_, len, path) in entries {
-            if total <= self.cap_bytes {
-                break;
-            }
-            if fs::remove_file(&path).is_ok() {
-                total -= len;
-            }
+/// Deletes least recently used entries (thumbnails and waveforms) until `dir` fits in `cap_bytes`.
+pub(crate) fn evict(dir: &Path, cap_bytes: u64) {
+    let Ok(dir) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = dir
+        .flatten()
+        .filter(|e| {
+            e.path()
+                .extension()
+                .is_some_and(|x| x == "png" || x == "peaks")
+        })
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            Some((m.modified().ok()?, m.len(), e.path()))
+        })
+        .collect();
+    let mut total: u64 = entries.iter().map(|e| e.1).sum();
+    entries.sort();
+    for (_, len, path) in entries {
+        if total <= cap_bytes {
+            break;
+        }
+        if fs::remove_file(&path).is_ok() {
+            total -= len;
         }
     }
 }
 
 /// Changes whenever the file is moved, resized or rewritten.
 // shortcut: DefaultHasher may change between Rust releases, which only costs a regeneration.
-fn key(path: &Path) -> Result<String, String> {
+pub(crate) fn key(path: &Path) -> Result<String, String> {
     let m = fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut h = DefaultHasher::new();
     (VERSION, path, m.len(), m.modified().ok()).hash(&mut h);

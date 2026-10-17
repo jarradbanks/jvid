@@ -1,0 +1,324 @@
+//! Min/max peak pyramids for drawing waveforms at any zoom, cached on disk next to the
+//! thumbnails (same key and LRU cap, see [`crate::thumbnails`]).
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use jvid_jobs::{Handle, Priority};
+
+use crate::audio::AudioDecoder;
+use crate::thumbnails::{evict, key};
+
+/// Sample frames per finest-level peak; each level above doubles it.
+pub const BUCKET: i64 = 256;
+/// Bump when the peak format changes so old entries miss.
+const VERSION: u32 = 1;
+
+/// Lowest and highest sample (over both channels) in a span.
+pub type Peak = [f32; 2];
+
+/// Returns the finest-level peaks of audio stream `nth` of `path`.
+pub type Scan = dyn Fn(&Path, usize) -> Result<Vec<Peak>, String> + Send + Sync;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pyramid {
+    /// `levels[l][i]` covers sample frames `[i, i + 1) * (BUCKET << l)`.
+    levels: Vec<Vec<Peak>>,
+}
+
+impl Pyramid {
+    pub fn new(finest: Vec<Peak>) -> Self {
+        let mut levels = vec![finest];
+        while levels.last().unwrap().len() > 1 {
+            let next = levels.last().unwrap().chunks(2).map(merge).collect();
+            levels.push(next);
+        }
+        Self { levels }
+    }
+
+    /// One peak per pixel for `width` pixels spanning sample frames `[start, end)`. Pixels past
+    /// the end of the audio are `[0, 0]`.
+    pub fn query(&self, start: i64, end: i64, width: usize) -> Vec<Peak> {
+        let spp = (end - start) as f64 / width.max(1) as f64;
+        // The coarsest level whose peaks are no wider than a pixel, so each pixel reads 1–3.
+        let l = (0..self.levels.len())
+            .rev()
+            .find(|&l| (BUCKET << l) as f64 <= spp)
+            .unwrap_or(0);
+        let (level, size) = (&self.levels[l], BUCKET << l);
+        (0..width)
+            .map(|x| {
+                let lo = start + (x as f64 * spp) as i64;
+                let hi = (start + ((x + 1) as f64 * spp) as i64).max(lo + 1);
+                let a = lo.div_euclid(size).clamp(0, level.len() as i64) as usize;
+                let b = (hi + size - 1)
+                    .div_euclid(size)
+                    .clamp(0, level.len() as i64) as usize;
+                if a >= b {
+                    [0.0; 2]
+                } else {
+                    merge(&level[a..b])
+                }
+            })
+            .collect()
+    }
+}
+
+fn merge(p: &[Peak]) -> Peak {
+    p.iter().fold([f32::MAX, f32::MIN], |m, p| {
+        [m[0].min(p[0]), m[1].max(p[1])]
+    })
+}
+
+pub struct Cache {
+    dir: PathBuf,
+    cap_bytes: u64,
+    scan: Box<Scan>,
+}
+
+impl Cache {
+    /// A cache in `dir` (the thumbnail cache's) decoding through [`AudioDecoder`].
+    pub fn new(dir: PathBuf, cap_bytes: u64) -> Self {
+        Self::with_scan(dir, cap_bytes, Box::new(scan))
+    }
+
+    pub fn with_scan(dir: PathBuf, cap_bytes: u64, scan: Box<Scan>) -> Self {
+        Self {
+            dir,
+            cap_bytes,
+            scan,
+        }
+    }
+
+    /// The peak pyramid of audio stream `nth` of `path`, from disk when cached.
+    pub fn load(&self, path: &Path, nth: usize) -> Result<Pyramid, String> {
+        let file = self
+            .dir
+            .join(format!("{}.{nth}.v{VERSION}.peaks", key(path)?));
+        if let Ok(bytes) = fs::read(&file) {
+            // The file's mtime is its last use, for LRU eviction.
+            let _ = fs::File::options()
+                .write(true)
+                .open(&file)
+                .and_then(|f| f.set_modified(SystemTime::now()));
+            let f: Vec<f32> = bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b))
+                .collect();
+            return Ok(Pyramid::new(f.as_chunks::<2>().0.to_vec()));
+        }
+        let finest = (self.scan)(path, nth)?;
+        if let Err(e) = self.store(&file, &finest) {
+            tracing::warn!("waveforms: can't write {}: {e}", file.display());
+        }
+        Ok(Pyramid::new(finest))
+    }
+
+    /// Loads on `jobs` at preview priority and hands the pyramid to `done` there.
+    pub fn submit(
+        self: &Arc<Self>,
+        jobs: &jvid_jobs::Pool,
+        path: PathBuf,
+        nth: usize,
+        done: impl FnOnce(Result<Pyramid, String>) + Send + 'static,
+    ) -> Handle {
+        let cache = self.clone();
+        let key = format!("peaks:{}:{nth}", path.display());
+        jobs.submit(key, Priority::Preview, move |ctx| {
+            if !ctx.is_cancelled() {
+                done(cache.load(&path, nth));
+            }
+        })
+    }
+
+    fn store(&self, file: &Path, finest: &[Peak]) -> Result<(), String> {
+        fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
+        let bytes: Vec<u8> = finest
+            .iter()
+            .flatten()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        // Write then rename, so a crash never leaves a half-written entry.
+        let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
+        fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+        fs::rename(&tmp, file).map_err(|e| e.to_string())?;
+        evict(&self.dir, self.cap_bytes);
+        Ok(())
+    }
+}
+
+fn scan(path: &Path, nth: usize) -> Result<Vec<Peak>, String> {
+    let mut d = AudioDecoder::open(path, nth).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    while let Some(c) = d.next_chunk().map_err(|e| e.to_string())? {
+        for (i, f) in c.samples.as_chunks::<2>().0.iter().enumerate() {
+            let b = ((c.start + i as i64) / BUCKET) as usize;
+            if b >= out.len() {
+                out.resize(b + 1, [f32::MAX, f32::MIN]);
+            }
+            let p = &mut out[b];
+            *p = [p[0].min(f[0]).min(f[1]), p[1].max(f[0]).max(f[1])];
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("jvid-peaks-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// Peak `i` is `[i, i]`, so a span's merge is its first and last index.
+    fn ramp(n: usize) -> Vec<Peak> {
+        (0..n).map(|i| [i as f32; 2]).collect()
+    }
+
+    fn counting(dir: PathBuf, cap: u64) -> (Cache, Arc<AtomicUsize>) {
+        let n = Arc::new(AtomicUsize::new(0));
+        let c = n.clone();
+        let scan = Box::new(move |_: &Path, _| {
+            c.fetch_add(1, Ordering::SeqCst);
+            Ok(ramp(1000))
+        });
+        (Cache::with_scan(dir, cap, scan), n)
+    }
+
+    #[test]
+    fn query_matches_brute_force_at_every_zoom() {
+        let finest = ramp(1000);
+        let p = Pyramid::new(finest.clone());
+        let total = 1000 * BUCKET;
+        for (start, end, w) in [
+            (0, total, 7),
+            (0, total, 1000),
+            (BUCKET * 3, BUCKET * 900, 50),
+        ] {
+            let got = p.query(start, end, w);
+            for (x, peak) in got.iter().enumerate() {
+                let lo = start + (end - start) * x as i64 / w as i64;
+                let hi = start + (end - start) * (x as i64 + 1) / w as i64;
+                let spp = (end - start) / w as i64;
+                // Covers the pixel's samples, overshooting by at most one pixel each side.
+                assert!(peak[1] >= ((hi - 1) / BUCKET) as f32, "{x}: {peak:?}");
+                assert!(peak[1] <= ((hi + spp) / BUCKET) as f32, "{x}: {peak:?}");
+                assert!(peak[0] <= (lo / BUCKET) as f32, "{x}: {peak:?}");
+                assert!(peak[0] >= ((lo - spp) / BUCKET) as f32, "{x}: {peak:?}");
+            }
+        }
+        // Zoomed past the finest level, and past the end.
+        assert_eq!(p.query(0, BUCKET, 4), vec![[0.0, 0.0]; 4]);
+        assert_eq!(p.query(total, total + BUCKET, 2), vec![[0.0; 2]; 2]);
+    }
+
+    #[test]
+    fn second_load_hits_disk_cache_with_zero_decodes() {
+        let d = tmp("hit");
+        let a = d.join("a.wav");
+        fs::write(&a, b"x").unwrap();
+        let (first, n) = counting(d.join("cache"), u64::MAX);
+        let made = first.load(&a, 0).unwrap();
+        assert_eq!(n.load(Ordering::SeqCst), 1);
+        let (second, n) = counting(d.join("cache"), u64::MAX);
+        assert_eq!(second.load(&a, 0).unwrap(), made);
+        assert_eq!(n.load(Ordering::SeqCst), 0);
+        // Another stream of the same file is its own entry.
+        second.load(&a, 1).unwrap();
+        assert_eq!(n.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn size_or_mtime_change_invalidates() {
+        let d = tmp("inval");
+        let p = d.join("a.wav");
+        fs::write(&p, b"one").unwrap();
+        let (c, n) = counting(d.join("cache"), u64::MAX);
+        c.load(&p, 0).unwrap();
+        c.load(&p, 0).unwrap();
+        assert_eq!(n.load(Ordering::SeqCst), 1);
+        fs::write(&p, b"longer").unwrap();
+        c.load(&p, 0).unwrap();
+        assert_eq!(n.load(Ordering::SeqCst), 2);
+        let f = fs::File::options().write(true).open(&p).unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(3600))
+            .unwrap();
+        c.load(&p, 0).unwrap();
+        assert_eq!(n.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn shares_the_lru_cap() {
+        let d = tmp("lru");
+        let cache = d.join("cache");
+        let paths: Vec<_> = (0..3u8)
+            .map(|i| {
+                let p = d.join(format!("{i}.wav"));
+                fs::write(&p, [i]).unwrap();
+                p
+            })
+            .collect();
+        // Room for two entries.
+        let (c, n) = counting(cache.clone(), 2 * 1000 * 8);
+        for p in &paths {
+            c.load(p, 0).unwrap();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(fs::read_dir(&cache).unwrap().count(), 2);
+        c.load(&paths[0], 0).unwrap();
+        assert_eq!(n.load(Ordering::SeqCst), 4);
+    }
+
+    /// Acceptance: drawing a 1-hour waveform at any zoom takes under 1 ms per frame.
+    #[test]
+    fn one_hour_query_under_1ms_at_any_zoom() {
+        if cfg!(debug_assertions) {
+            eprintln!("skipping timing: run with --release");
+            return;
+        }
+        let total = 3600 * crate::audio::SAMPLE_RATE as i64;
+        let finest = (0..total / BUCKET)
+            .map(|i| [-((i % 97) as f32) / 97.0, (i % 89) as f32 / 89.0])
+            .collect();
+        let p = Pyramid::new(finest);
+        let s = crate::audio::SAMPLE_RATE as i64;
+        for span in [total, 600 * s, 60 * s, s, s / 100] {
+            let start = (total - span) / 2;
+            let t = Instant::now();
+            let mut out = p.query(start, start + span, 2000);
+            for _ in 0..9 {
+                out = p.query(start, start + span, 2000);
+            }
+            let each = t.elapsed() / 10;
+            assert_eq!(out.len(), 2000);
+            eprintln!("span {span} samples: {each:?} per 2000 px query");
+            assert!(each < Duration::from_millis(1), "span {span}: {each:?}");
+        }
+    }
+
+    #[test]
+    fn tone_peaks_at_its_level() {
+        let Some(dir) = crate::test_media::corpus() else {
+            return;
+        };
+        crate::ffmpeg::init().unwrap();
+        let c = Cache::new(tmp("tone"), u64::MAX);
+        let p = c.load(&dir.join("tone-1khz.wav"), 0).unwrap();
+        let s = crate::audio::SAMPLE_RATE as i64;
+        for peak in p.query(s, 4 * s, 30) {
+            assert!((peak[1] - 0.1).abs() < 0.005, "{peak:?}");
+            assert!((peak[0] + 0.1).abs() < 0.005, "{peak:?}");
+        }
+    }
+}
