@@ -219,11 +219,11 @@ flowchart LR
 | [#38](https://github.com/jarradbanks/jvid/issues/38) | Snapping | done | S | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37) |
 | [#155](https://github.com/jarradbanks/jvid/issues/155) | Edit menu, timeline toolbar and clip context menu | done | M | ui, timeline | [#38](https://github.com/jarradbanks/jvid/issues/38) |
 | [#157](https://github.com/jarradbanks/jvid/issues/157) | Enable and disable clips |  | S | timeline, render | [#155](https://github.com/jarradbanks/jvid/issues/155) |
-| [#159](https://github.com/jarradbanks/jvid/issues/159) | Program monitor plays the timeline |  | M | ui, render | [#32](https://github.com/jarradbanks/jvid/issues/32), [#33](https://github.com/jarradbanks/jvid/issues/33) |
+| [#159](https://github.com/jarradbanks/jvid/issues/159) | Program monitor plays the timeline | in progress | M | ui, render | [#32](https://github.com/jarradbanks/jvid/issues/32), [#33](https://github.com/jarradbanks/jvid/issues/33) |
 | [#39](https://github.com/jarradbanks/jvid/issues/39) | In/Out points on the timeline |  | M | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37), [#13](https://github.com/jarradbanks/jvid/issues/13) |
 | [#40](https://github.com/jarradbanks/jvid/issues/40) | Markers |  | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8), [#39](https://github.com/jarradbanks/jvid/issues/39) |
 | [#41](https://github.com/jarradbanks/jvid/issues/41) | Scrubbing and audio scrub |  | M | timeline, render | [#32](https://github.com/jarradbanks/jvid/issues/32) |
-| [#90](https://github.com/jarradbanks/jvid/issues/90) | Long and high-frame-rate recordings |  | M | media, timeline | [#32](https://github.com/jarradbanks/jvid/issues/32), [#21](https://github.com/jarradbanks/jvid/issues/21), [#22](https://github.com/jarradbanks/jvid/issues/22) |
+| [#90](https://github.com/jarradbanks/jvid/issues/90) | Long and high-frame-rate recordings | done | M | media, timeline | [#32](https://github.com/jarradbanks/jvid/issues/32), [#21](https://github.com/jarradbanks/jvid/issues/21), [#22](https://github.com/jarradbanks/jvid/issues/22) |
 | [#42](https://github.com/jarradbanks/jvid/issues/42) | Performance harness and budgets | done | M | infra | [#32](https://github.com/jarradbanks/jvid/issues/32) |
 
 ### [M3 · Animate](https://github.com/jarradbanks/jvid/milestone/4)
@@ -310,7 +310,7 @@ flowchart LR
 
 | Issue | Title | Status | Size | Area | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [#52](https://github.com/jarradbanks/jvid/issues/52) | Export pipeline: render, encode and mux | in progress | L | export, media | [#30](https://github.com/jarradbanks/jvid/issues/30), [#31](https://github.com/jarradbanks/jvid/issues/31), [#45](https://github.com/jarradbanks/jvid/issues/45) |
+| [#52](https://github.com/jarradbanks/jvid/issues/52) | Export pipeline: render, encode and mux | done | L | export, media | [#30](https://github.com/jarradbanks/jvid/issues/30), [#31](https://github.com/jarradbanks/jvid/issues/31), [#45](https://github.com/jarradbanks/jvid/issues/45) |
 | [#53](https://github.com/jarradbanks/jvid/issues/53) | Export presets |  | M | export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#54](https://github.com/jarradbanks/jvid/issues/54) | Export dialog with range selection |  | M | ui, export | [#53](https://github.com/jarradbanks/jvid/issues/53), [#39](https://github.com/jarradbanks/jvid/issues/39), [#36](https://github.com/jarradbanks/jvid/issues/36) |
 | [#55](https://github.com/jarradbanks/jvid/issues/55) | Hardware encoding with software fallback |  | M | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52) |
