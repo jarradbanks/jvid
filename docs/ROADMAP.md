@@ -207,7 +207,7 @@ flowchart LR
 | [#34](https://github.com/jarradbanks/jvid/issues/34) | Track management and headers | done | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8) |
 | [#35](https://github.com/jarradbanks/jvid/issues/35) | Place clips: drag from bin, insert and overwrite | done | M | timeline | [#34](https://github.com/jarradbanks/jvid/issues/34), [#25](https://github.com/jarradbanks/jvid/issues/25) |
 | [#89](https://github.com/jarradbanks/jvid/issues/89) | Multi-track audio sources |  | M | timeline, media | [#35](https://github.com/jarradbanks/jvid/issues/35), [#16](https://github.com/jarradbanks/jvid/issues/16) |
-| [#36](https://github.com/jarradbanks/jvid/issues/36) | Selection, clipboard and delete |  | M | timeline | [#35](https://github.com/jarradbanks/jvid/issues/35) |
+| [#36](https://github.com/jarradbanks/jvid/issues/36) | Selection, clipboard and delete | done | M | timeline | [#35](https://github.com/jarradbanks/jvid/issues/35) |
 | [#37](https://github.com/jarradbanks/jvid/issues/37) | Trim, split, razor and ripple |  | L | timeline | [#36](https://github.com/jarradbanks/jvid/issues/36) |
 | [#38](https://github.com/jarradbanks/jvid/issues/38) | Snapping |  | S | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37) |
 | [#39](https://github.com/jarradbanks/jvid/issues/39) | In/Out points on the timeline |  | M | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37), [#13](https://github.com/jarradbanks/jvid/issues/13) |
@@ -342,7 +342,7 @@ flowchart LR
 | Issue | Title | Status | Size | Area | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | [#63](https://github.com/jarradbanks/jvid/issues/63) | Text and title layers |  | L | render, ui | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44), [#20](https://github.com/jarradbanks/jvid/issues/20) |
-| [#64](https://github.com/jarradbanks/jvid/issues/64) | Solid color layers |  | S | render | [#45](https://github.com/jarradbanks/jvid/issues/45) |
+| [#64](https://github.com/jarradbanks/jvid/issues/64) | Solid color layers | done | S | render | [#45](https://github.com/jarradbanks/jvid/issues/45) |
 | [#65](https://github.com/jarradbanks/jvid/issues/65) | Transitions: crossfade and dip to black/white |  | M | timeline, render | [#43](https://github.com/jarradbanks/jvid/issues/43), [#45](https://github.com/jarradbanks/jvid/issues/45), [#50](https://github.com/jarradbanks/jvid/issues/50) |
 | [#66](https://github.com/jarradbanks/jvid/issues/66) | Color adjustments |  | M | render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#67](https://github.com/jarradbanks/jvid/issues/67) | .cube LUT support |  | S | render | [#66](https://github.com/jarradbanks/jvid/issues/66) |
