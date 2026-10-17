@@ -4,12 +4,17 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::time::{Rate, Time};
 
 macro_rules! id {
     ($name:ident) => {
         /// Stable id, unique within its project or sequence and never reused.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+        )]
+        #[serde(transparent)]
         pub struct $name(pub u64);
     };
 }
@@ -20,7 +25,7 @@ id!(MarkerId);
 id!(LinkId);
 
 /// Project-wide output settings.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectSettings {
     pub width: u32,
     pub height: u32,
@@ -43,7 +48,7 @@ impl Default for ProjectSettings {
 }
 
 /// What probing found in a media file.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProbeInfo {
     pub duration: Time,
     pub width: Option<u32>,
@@ -54,7 +59,7 @@ pub struct ProbeInfo {
 }
 
 /// A source file referenced by clips.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaAsset {
     pub id: AssetId,
     pub path: PathBuf,
@@ -62,13 +67,13 @@ pub struct MediaAsset {
     pub probe: Option<ProbeInfo>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TrackKind {
     Video,
     Audio,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     pub id: TrackId,
     pub kind: TrackKind,
@@ -99,7 +104,7 @@ impl Track {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Clip {
     pub id: ClipId,
     pub asset: AssetId,
@@ -124,7 +129,7 @@ impl Clip {
 }
 
 /// A point marker, or a ranged one when `duration` is non-zero.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Marker {
     pub id: MarkerId,
     pub time: Time,
@@ -160,7 +165,7 @@ impl std::fmt::Display for ModelError {
 impl std::error::Error for ModelError {}
 
 /// Tracks (video top-first, then audio), markers and in/out points.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Sequence {
     tracks: Vec<Track>,
     pub(crate) markers: Vec<Marker>,
@@ -418,7 +423,7 @@ fn insert_sorted(clips: &mut Vec<Clip>, c: Clip) {
     clips.insert(i, c);
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Project {
     pub(crate) settings: ProjectSettings,
     pub(crate) assets: Vec<MediaAsset>,
