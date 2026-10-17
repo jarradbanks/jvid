@@ -1100,7 +1100,9 @@ impl Timeline {
         };
         if let Some(asset) = egui::DragAndDrop::payload::<AssetId>(ui.ctx())
             && area.contains(p)
-            && let Some(pl) = project.placement(*asset, snap(view.time(p.x)), false, lane_at(None))
+            // Alt merges a multi-stream file's audio into one clip.
+            && let merge = ui.input(|i| i.modifiers.alt)
+            && let Some(pl) = project.placement(*asset, snap(view.time(p.x)), false, lane_at(None), merge)
         {
             let end = pl.start + (pl.source_out - pl.source_in);
             let ghosts = [(pl.video, pl.add_video), (pl.audio, pl.add_audio)].into_iter();
@@ -1389,11 +1391,22 @@ impl Timeline {
                     self.media
                         .filmstrip(ui, &clipped, content, view.x(clip.start), a, &source)
                 }
-                TrackKind::Audio => self.media.waveform(ui, &clipped, content, a, &source),
+                TrackKind::Audio => {
+                    let nth = clip.stream.unwrap_or(0) as usize;
+                    self.media.waveform(ui, &clipped, content, a, nth, &source)
+                }
                 TrackKind::Video => {}
             }
         }
-        let name = asset.map_or("Missing asset".into(), MediaAsset::display_name);
+        let mut name = asset.map_or("Missing asset".into(), MediaAsset::display_name);
+        // A multi-stream file's audio clips say which stream they play.
+        if let Some(p) = asset.and_then(|a| a.probe.as_ref())
+            && kind == TrackKind::Audio
+            && p.audio_streams > 1
+        {
+            let stream = clip.stream.map_or("All audio".into(), |n| p.audio_name(n));
+            name = format!("{name} · {stream}");
+        }
         let name = if offline {
             format!("{name}  Offline")
         } else {
@@ -1563,7 +1576,7 @@ fn playhead_head(painter: &egui::Painter, top_center: Pos2) {
 }
 
 /// Results finished off-thread, per path, waiting for the UI thread; `None` is a failure.
-type Done<T> = Arc<Mutex<Vec<(PathBuf, Option<T>)>>>;
+type Done<T, K = PathBuf> = Arc<Mutex<Vec<(K, Option<T>)>>>;
 
 /// Filmstrips and waveform pyramids per asset, loaded on a job pool the first time a clip
 /// using it is in view. `None` while loading; a failure is forgotten so the next paint retries.
@@ -1573,8 +1586,9 @@ struct Media {
     caches: Option<Arc<Caches>>,
     strip_done: Done<Vec<egui::ColorImage>>,
     strips: HashMap<PathBuf, Option<Vec<TextureHandle>>>,
-    peaks_done: Done<Pyramid>,
-    peaks: HashMap<PathBuf, Option<Pyramid>>,
+    peaks_done: Done<Pyramid, (PathBuf, usize)>,
+    /// By file and audio stream.
+    peaks: HashMap<(PathBuf, usize), Option<Pyramid>>,
 }
 
 impl Media {
@@ -1681,6 +1695,8 @@ impl Media {
         painter: &egui::Painter,
         rect: Rect,
         a: &MediaAsset,
+        // shortcut: a merged clip draws its first stream, until merged peaks are worth a scan.
+        nth: usize,
         source: &dyn Fn(f32) -> Time,
     ) {
         for (path, p) in self.peaks_done.lock().unwrap().drain(..) {
@@ -1689,22 +1705,23 @@ impl Media {
                 None => self.peaks.remove(&path),
             };
         }
-        let pyramid = match self.peaks.get(&a.path) {
+        let pyramid = match self.peaks.get(&(a.path.clone(), nth)) {
             Some(Some(p)) => p,
             Some(None) => return,
             None => {
                 let Some(caches) = &self.caches else { return };
-                self.peaks.insert(a.path.clone(), None);
-                let (done, ctx, path) = (self.peaks_done.clone(), ui.ctx().clone(), a.path.clone());
+                let path = (a.path.clone(), nth);
+                self.peaks.insert(path.clone(), None);
+                let (done, ctx) = (self.peaks_done.clone(), ui.ctx().clone());
                 caches
                     .peaks
-                    .submit(&caches.jobs, path.clone(), 0, move |r| match r {
+                    .submit(&caches.jobs, path.0.clone(), nth, move |r| match r {
                         Ok(p) => {
                             done.lock().unwrap().push((path.clone(), Some(p)));
                             ctx.request_repaint();
                         }
                         Err(e) => {
-                            tracing::warn!("waveform for {}: {e}", path.display());
+                            tracing::warn!("waveform for {}: {e}", path.0.display());
                             done.lock().unwrap().push((path.clone(), None));
                         }
                     });
@@ -2532,7 +2549,7 @@ mod tests {
             (0..750).map(|i| [-(i as f32 * 0.1).sin().abs(), (i as f32 * 0.1).sin().abs()]);
         t.media
             .peaks
-            .insert(path, Some(Pyramid::new(finest.collect())));
+            .insert((path, 0), Some(Pyramid::new(finest.collect())));
         let input = || egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1920.0, 400.0))),
             ..Default::default()
@@ -2566,5 +2583,83 @@ mod tests {
         let ms = start.elapsed().as_secs_f64() * 1000.0 / n as f64;
         println!("timeline layout+paint, 500 clips ({lines} waveform lines): {ms:.3} ms/frame");
         assert!(ms < 16.6, "{ms:.3} ms/frame");
+    }
+}
+
+#[cfg(test)]
+mod multitrack_tests {
+    use jvid_core::history::{Command, History};
+    use jvid_core::model::{Edge, Project, TrackKind};
+    use jvid_core::time::{FLICKS_PER_SECOND, Time};
+
+    /// The OBS-style corpus file: one video clip and three linked audio clips on three tracks,
+    /// named from the stream titles, that move and trim with the video.
+    #[test]
+    fn three_stream_mkv_places_linked_clip_per_stream() {
+        let Some(dir) = jvid_media::test_media::corpus() else {
+            return;
+        };
+        jvid_media::ffmpeg::init().unwrap();
+        let placed = |merge| {
+            let path = dir.join("three-audio.mkv");
+            let probe = jvid_media::probe::probe(&path).unwrap();
+            let mut h = History::new(Project::default());
+            h.apply(Command::Import(vec![(path, probe)])).unwrap();
+            let asset = h.project().assets()[0].id;
+            let p = h.project().placement(asset, Time(0), false, None, merge);
+            h.apply(Command::Place(p.unwrap())).unwrap();
+            h
+        };
+        let mut h = placed(false);
+        let seq = h.project().sequence();
+        let audio: Vec<_> = seq
+            .tracks()
+            .iter()
+            .filter(|t| t.kind == TrackKind::Audio)
+            .collect();
+        let names: Vec<_> = audio.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["Game", "Mic", "Voice chat"]);
+        let streams: Vec<_> = audio.iter().map(|t| t.clips()[0].stream).collect();
+        assert_eq!(streams, [Some(0), Some(1), Some(2)]);
+        let video = seq
+            .tracks()
+            .iter()
+            .find(|t| t.kind == TrackKind::Video)
+            .unwrap();
+        let v = video.clips()[0].id;
+        assert_eq!(video.clips().len(), 1);
+        assert_eq!(seq.linked(v).len(), 4);
+
+        let sec = Time(FLICKS_PER_SECOND);
+        let track = video.id;
+        h.apply(Command::DragClip {
+            id: v,
+            track,
+            start: sec,
+        })
+        .unwrap();
+        let trims = vec![(v, Edge::Tail, Time(-FLICKS_PER_SECOND))];
+        h.apply(Command::Trim {
+            trims,
+            ripple: false,
+        })
+        .unwrap();
+        let seq = h.project().sequence();
+        let (_, vc) = seq.clip(v).unwrap();
+        for (_, c) in seq.linked(v) {
+            assert_eq!((c.start, c.end()), (vc.start, vc.end()));
+        }
+        assert_eq!(vc.start, sec);
+
+        // Merged: one audio clip mixing every stream.
+        let h = placed(true);
+        let seq = h.project().sequence();
+        let audio: Vec<_> = seq
+            .tracks()
+            .iter()
+            .filter(|t| t.kind == TrackKind::Audio)
+            .collect();
+        assert_eq!(audio.len(), 1);
+        assert_eq!(audio[0].clips()[0].stream, None);
     }
 }

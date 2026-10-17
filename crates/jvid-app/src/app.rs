@@ -446,7 +446,11 @@ impl App {
             return;
         };
         let at = self.timeline.playhead();
-        let Some(p) = self.history.project().placement(asset, at, insert, None) else {
+        let Some(p) = self
+            .history
+            .project()
+            .placement(asset, at, insert, None, false)
+        else {
             return;
         };
         let end = p.start + (p.source_out - p.source_in);

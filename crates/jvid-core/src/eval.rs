@@ -33,6 +33,8 @@ pub struct AudioSegment {
     pub end: Time,
     /// Asset time matching `start`.
     pub source_start: Time,
+    /// The clip's audio stream; `None` mixes all of them.
+    pub stream: Option<u32>,
     pub volume: f32,
     pub pan: f32,
 }
@@ -89,6 +91,7 @@ pub fn audio_in(seq: &Sequence, start: Time, end: Time) -> Vec<AudioSegment> {
                     start: s,
                     end: end.min(c.end()),
                     source_start: c.source_in + (s - c.start),
+                    stream: c.stream,
                     volume: tr.volume,
                     pan: tr.pan,
                 }

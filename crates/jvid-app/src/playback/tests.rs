@@ -61,7 +61,7 @@ fn frame_of(px: &Pixels) -> &Frame {
 }
 
 fn silent() -> OpenAudio {
-    Box::new(|_| Box::new(|_, _| {}))
+    Box::new(|_, _| Box::new(|_, _| {}))
 }
 
 #[test]
@@ -212,7 +212,7 @@ fn play(pb: &mut Playback, p: &Project, until: u64, mut each: impl FnMut(&Shown)
 
 /// Audio whose every sample holds its own source index + 1.
 fn indexed() -> OpenAudio {
-    Box::new(|_| {
+    Box::new(|_, _| {
         Box::new(|start, out| {
             for (i, f) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
                 f.fill((start + i as i64 + 1) as f32);
@@ -287,7 +287,7 @@ fn clip_boundaries_play_without_drops() {
     let p = h.project();
     let calls = Arc::new(Mutex::new(Vec::new()));
     let log = calls.clone();
-    let open: OpenAudio = Box::new(move |path| {
+    let open: OpenAudio = Box::new(move |path, _| {
         let (log, path) = (log.clone(), path.to_owned());
         Box::new(move |start, out| log.lock().unwrap().push((path.clone(), start, out.len())))
     });
@@ -793,4 +793,33 @@ fn two_layers_composite_with_opacity() {
         "{:?}",
         &px[..4]
     );
+}
+
+/// A merged clip sums a source per stream; a per-stream clip opens only its own.
+#[test]
+fn merged_clip_mixes_every_stream() {
+    use jvid_core::model::ProbeInfo;
+    let probe = ProbeInfo {
+        duration: secs(1),
+        audio_streams: 3,
+        ..Default::default()
+    };
+    let mut gains = Vec::new();
+    for merge in [true, false] {
+        let mut h = History::new(Project::default());
+        h.apply(Command::Import(vec![("obs.mkv".into(), probe.clone())]))
+            .unwrap();
+        let asset = h.project().assets()[0].id;
+        let p = h.project().placement(asset, Time(0), false, None, merge);
+        h.apply(Command::Place(p.unwrap())).unwrap();
+        // Stream n holds n + 1, so the sum says which streams were heard.
+        let mut audio = Audio::new(Box::new(|_, nth| {
+            Box::new(move |_, out: &mut [f32]| out.fill(nth as f32 + 1.0))
+        }));
+        let mut out = vec![0.0; 8];
+        audio.mix(h.project(), 0, &mut out);
+        gains.push(out[0] / pan_gains(0.0).0);
+    }
+    // Merged: 1 + 2 + 3; separate tracks: the same total, one stream per clip.
+    assert_eq!(gains, [6.0, 6.0]);
 }

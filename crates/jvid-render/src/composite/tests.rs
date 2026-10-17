@@ -308,6 +308,7 @@ fn transform_crop_and_opacity_static_and_animated() {
             params: Default::default(),
             keyframes: [(param.to_string(), vec![key(0, a), key(10, b)])].into(),
             transform: base,
+            stream: Some(0),
         };
         assert_eq!(clip.transform_at(Time(5)), still, "{name} midpoint");
         let first = frame(clip.transform_at(Time(0)));
