@@ -620,12 +620,12 @@ fn corrupt_dock_layout_falls_back_to_default() {
 fn focus_actions_focus_panels_and_missing_panels_are_no_ops() {
     let mut app = App::restore(None);
     let focused = |app: &mut App| app.dock.find_active_focused().map(|(_, t)| *t);
-    app.run_action("focus_media");
+    app.run_action("focus_media", false);
     assert_eq!(focused(&mut app), Some(Tab::Media));
-    app.run_action("focus_source");
+    app.run_action("focus_source", false);
     assert_eq!(focused(&mut app), Some(Tab::Preview));
     assert_eq!(app.preview_active, 0);
-    app.run_action("focus_timeline");
+    app.run_action("focus_timeline", false);
     assert_eq!(focused(&mut app), Some(Tab::Timeline));
 }
 
@@ -816,7 +816,7 @@ fn source_actions_step_and_mark_the_open_clip_undoably() {
     app.history.apply(import).unwrap();
     let id = AssetId(1);
     app.preview.open(app.history.project(), id);
-    app.run_action("focus_source");
+    app.run_action("focus_source", false);
     let marks = |app: &App| {
         let a = app.history.project().asset(id).unwrap();
         (a.in_point, a.out_point)
@@ -829,36 +829,36 @@ fn source_actions_step_and_mark_the_open_clip_undoably() {
         "go_to_end",
         "mark_out",
     ] {
-        app.run_action(a);
+        app.run_action(a, false);
     }
     assert_eq!(marks(&app), (Some(frame(2)), Some(frame(250))));
     // Marking out before the in clears the in.
-    app.run_action("go_to_start");
-    app.run_action("mark_out");
+    app.run_action("go_to_start", false);
+    app.run_action("mark_out", false);
     assert_eq!(marks(&app), (None, Some(frame(1))));
     assert!(app.history.undo());
     assert_eq!(marks(&app), (Some(frame(2)), Some(frame(250))));
     // Go to in/out land on the marked frames: marking the other side there marks one frame.
-    app.run_action("go_to_start");
-    app.run_action("step_forward");
-    app.run_action("mark_in");
-    app.run_action("go_to_end");
-    app.run_action("step_back");
-    app.run_action("mark_out");
+    app.run_action("go_to_start", false);
+    app.run_action("step_forward", false);
+    app.run_action("mark_in", false);
+    app.run_action("go_to_end", false);
+    app.run_action("step_back", false);
+    app.run_action("mark_out", false);
     assert_eq!(marks(&app), (Some(frame(1)), Some(frame(249))));
-    app.run_action("go_to_in");
-    app.run_action("mark_out");
+    app.run_action("go_to_in", false);
+    app.run_action("mark_out", false);
     assert_eq!(marks(&app), (Some(frame(1)), Some(frame(2))));
-    app.run_action("go_to_end");
-    app.run_action("mark_out");
-    app.run_action("go_to_out");
-    app.run_action("mark_in");
+    app.run_action("go_to_end", false);
+    app.run_action("mark_out", false);
+    app.run_action("go_to_out", false);
+    app.run_action("mark_in", false);
     assert_eq!(marks(&app), (Some(frame(249)), Some(frame(250))));
-    app.run_action("clear_in_out");
+    app.run_action("clear_in_out", false);
     assert_eq!(marks(&app), (None, None));
     // With another panel focused the keys aren't the Source tab's.
-    app.run_action("focus_timeline");
-    app.run_action("mark_in");
+    app.run_action("focus_timeline", false);
+    app.run_action("mark_in", false);
     assert_eq!(marks(&app), (None, None));
 }
 
@@ -893,4 +893,49 @@ fn perf_cold_start_and_idle_memory() {
             kb / 1024
         );
     }
+}
+
+#[test]
+fn menu_actions_reach_the_timeline_from_any_panel_and_undo_is_an_action() {
+    use jvid_core::model::{NewClip, ProbeInfo, TrackKind};
+    use jvid_core::time::{FLICKS_PER_SECOND, Time};
+    let mut app = App::restore(None);
+    let probe = ProbeInfo {
+        duration: Time(10 * FLICKS_PER_SECOND),
+        width: Some(64),
+        ..Default::default()
+    };
+    app.history
+        .apply(Command::Import(vec![("/m/a.mkv".into(), probe)]))
+        .unwrap();
+    let kind = TrackKind::Video;
+    let name = String::new();
+    app.history.apply(Command::AddTrack { kind, name }).unwrap();
+    let track = app.history.project().sequence().tracks()[0].id;
+    let clip = NewClip {
+        asset: app.history.project().assets()[0].id,
+        source_in: Time(0),
+        source_out: Time(FLICKS_PER_SECOND),
+        start: Time(0),
+        link: None,
+    };
+    app.history.apply(Command::AddClip { track, clip }).unwrap();
+    app.run_action("focus_media", false);
+    // Ctrl+A with the bin focused isn't the timeline's; the Edit menu's row is.
+    app.run_action("select_all", false);
+    assert!(app.timeline.selected().is_empty());
+    app.run_action("select_all", true);
+    assert_eq!(app.timeline.selected().len(), 1);
+
+    app.run_action("undo", false);
+    assert!(
+        app.history.project().sequence().tracks()[0]
+            .clips()
+            .is_empty()
+    );
+    app.run_action("redo_alt", false);
+    assert_eq!(
+        app.history.project().sequence().tracks()[0].clips().len(),
+        1
+    );
 }
