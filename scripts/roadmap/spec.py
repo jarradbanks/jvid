@@ -511,6 +511,18 @@ I("clip-enable", "Enable and disable clips", "M2", ["timeline", "render"], "S", 
   ],
   ac=["A disabled clip is absent from playback and export and reappears after undo"])
 
+I("program-monitor", "Program monitor plays the timeline", "M2", ["ui", "render"], "M", ["playback", "timeline-widget"],
+  summary="The Program tab shows and plays the composited timeline at the playhead.",
+  scope=[
+      "Wire the playback engine (playback.rs, currently dead code) into the app: the Program tab draws the composited frame at the timeline playhead, paused or playing",
+      "Space / J/K/L / loop drive timeline playback when the timeline or Program tab has focus; the playhead follows the engine while playing",
+      "Seeking (clicking the ruler, dragging the playhead, edits under the playhead) redraws the composited frame",
+      "Replace the newest-asset placeholder in the Program tab; keep the trim-point frame while a clip edge is dragged",
+      "Transform handles (#47) line up with the composited frame",
+  ],
+  ac=["A two-layer timeline with opacity/blend shows the composite in the Program tab and plays with audio",
+      "Moving the playhead while paused updates the frame without playing"])
+
 I("in-out", "In/Out points on the timeline", "M2", ["timeline"], "M", ["trim-split", "actions"],
   summary="Premiere-style range marking for playback, editing and export.",
   scope=[

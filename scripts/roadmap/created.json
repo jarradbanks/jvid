@@ -400,6 +400,10 @@
     "clip-enable": {
       "number": 157,
       "id": 5900898527
+    },
+    "program-monitor": {
+      "number": 159,
+      "id": 5901104819
     }
   },
   "links": [
@@ -1042,6 +1046,14 @@
     [
       "clip-enable",
       "edit-ui"
+    ],
+    [
+      "program-monitor",
+      "playback"
+    ],
+    [
+      "program-monitor",
+      "timeline-widget"
     ]
   ]
 }
