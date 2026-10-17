@@ -2,12 +2,11 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, TryRecvError};
 
 use egui::{Align, Align2, Frame, Layout, Margin, Stroke, Ui, UiBuilder, ViewportCommand, vec2};
 use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
 use jvid_core::history::{Command, History};
-use jvid_core::model::{AssetId, ProbeInfo, Project, ProjectSettings};
+use jvid_core::model::{AssetId, Project, ProjectSettings};
 use jvid_core::time::Time;
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use serde::{Deserialize, Serialize};
@@ -16,7 +15,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, State};
 
-use crate::export::Error as ExportError;
+use crate::export::{Error as ExportError, Request};
 use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
@@ -24,6 +23,7 @@ use crate::preview::{PROGRAM_ACTIONS, Preview, SOURCE_ACTIONS};
 use crate::timeline::{MARK_ACTIONS, Timeline, menus};
 use crate::welcome::{self, Recent, Welcome};
 use crate::{autosave, project_file, relink};
+use eframe::egui_wgpu::wgpu;
 
 #[cfg(test)]
 mod tests;
@@ -85,9 +85,8 @@ pub struct App {
     keymap_editor: crate::keymap_editor::KeymapEditor,
     exports: jvid_jobs::Pool,
     export_dialog: crate::export::dialog::ExportDialog,
-    /// The running export and where its result arrives.
-    export: Option<(jvid_jobs::Handle, Receiver<Result<ProbeInfo, ExportError>>)>,
     autosave: crate::autosave::Autosave,
+    queue: crate::export::queue::Queue,
 }
 
 const TOAST_SECS: f64 = 6.0;
@@ -155,8 +154,8 @@ impl App {
             keymap_editor: Default::default(),
             exports,
             export_dialog: Default::default(),
-            export: None,
             autosave: Default::default(),
+            queue: Default::default(),
         }
     }
 
@@ -382,19 +381,14 @@ impl App {
         }
     }
 
-    /// Opens the export dialog; while an export runs, shows progress and cancels on click.
+    /// Opens the export dialog; while exports run, a progress button beside it opens the queue.
     fn export_button(&mut self, ui: &mut Ui) {
-        if let Some((h, _)) = &self.export {
-            let label = format!("Exporting {:.0}%", h.progress() * 100.0);
-            if ui
-                .add(Button::primary(&label))
-                .on_hover_text("Cancel export")
-                .clicked()
-            {
-                h.cancel();
+        if let Some(p) = self.queue.running() {
+            let label = format!("Exporting {:.0}%", p * 100.0);
+            let tip = format!("{} in the render queue", self.queue.pending());
+            if ui.add(Button::primary(&label)).on_hover_text(tip).clicked() {
+                self.queue.open = true;
             }
-            ui.ctx().request_repaint();
-            return;
         }
         let seq = self.history.project().sequence();
         let state = if seq.duration() > Time(0) && self.preview.gpu().is_some() {
@@ -411,24 +405,39 @@ impl App {
         }
     }
 
-    /// Takes a finished export's result; failures become toasts.
+    /// Queues `req` on a snapshot of the project, so later edits don't change the file.
+    fn queue_export(
+        &mut self,
+        req: Request,
+        gpu: (wgpu::Device, wgpu::Queue),
+        show: bool,
+        now: f64,
+    ) {
+        if self.queue.writing(&req.path) {
+            let msg = format!("{} is already being exported", req.path.display());
+            self.toasts.push((msg, now + TOAST_SECS));
+            return;
+        }
+        let project = self.history.project().clone();
+        let path = req.path.clone();
+        let job = crate::export::submit(&self.exports, project, req, gpu);
+        self.queue.push(path, job);
+        self.queue.open |= show;
+    }
+
+    /// Takes finished exports' results: each posts a notification, failures also a toast.
     fn poll_export(&mut self, now: f64) {
-        let Some((_, rx)) = &self.export else { return };
-        match rx.try_recv() {
-            Ok(Ok(_)) => self.export = None,
-            Ok(Err(e)) => {
-                if let ExportError::Failed(e) = e {
+        for (path, r) in self.queue.poll() {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            match r {
+                Ok(()) => crate::export::queue::notify("Export finished", &name),
+                Err(ExportError::Failed(e)) => {
+                    crate::export::queue::notify("Export failed", &format!("{name}: {e}"));
                     self.toasts
                         .push((format!("Export failed: {e}"), now + TOAST_SECS));
                 }
-                self.export = None;
+                Err(ExportError::Cancelled) => {}
             }
-            // A panicked job drops its sender.
-            Err(TryRecvError::Disconnected) => {
-                self.toasts.push(("Export failed".into(), now + TOAST_SECS));
-                self.export = None;
-            }
-            Err(TryRecvError::Empty) => {}
         }
     }
 
@@ -768,14 +777,14 @@ impl eframe::App for App {
                 tracing::warn!("keymap: can't save: {e}");
             }
             let selected = self.timeline.selected();
-            if let Some(req) = self
-                .export_dialog
-                .show(ui, self.history.project(), selected)
+            if let Some((req, export)) =
+                self.export_dialog
+                    .show(ui, self.history.project(), selected)
                 && let Some(gpu) = self.preview.gpu()
             {
-                let project = self.history.project().clone();
-                self.export = Some(crate::export::submit(&self.exports, project, req, gpu));
+                self.queue_export(req, gpu, export, now);
             }
+            self.queue.show(ui.ctx());
             if let Some(c) = self.settings_dialog.show(ui, self.history.project())
                 && let Err(e) = self.history.apply(c)
             {

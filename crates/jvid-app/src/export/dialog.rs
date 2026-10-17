@@ -65,13 +65,14 @@ impl ExportDialog {
         self.range = Some(range);
     }
 
-    /// Shows the dialog while open; returns the request when the user clicks Export.
+    /// Shows the dialog while open; returns the request when the user clicks Export or Add to
+    /// Queue, with `true` for Export, which also shows the queue.
     pub fn show(
         &mut self,
         ui: &mut Ui,
         project: &Project,
         selected: &HashSet<ClipId>,
-    ) -> Option<Request> {
+    ) -> Option<(Request, bool)> {
         let range = self.range.as_mut()?;
         let path = &mut self.path;
         let seq = project.sequence();
@@ -182,19 +183,22 @@ impl ExportDialog {
                     let span = span(*range, seq, selected).filter(|(a, b)| b > a);
                     let ok = span.is_some() && path.file_name().is_some();
                     let state = if ok { State::Live } else { State::Disabled };
-                    if ui.add(Button::primary("Export").state(state)).clicked()
+                    let export = ui.add(Button::primary("Export").state(state)).clicked();
+                    let queue = ui
+                        .add(Button::secondary("Add to Queue").state(state))
+                        .clicked();
+                    if (export || queue)
                         && let Some(range) = span
                     {
-                        request = Some(Request {
+                        let req = Request {
                             path: path.clone(),
                             range,
                             preset: self.presets[self.preset].clone(),
                             loudness: self.loudness,
-                        });
+                        };
+                        request = Some((req, export));
                         ui.close();
                     }
-                    ui.add(Button::secondary("Add to Queue").state(State::Disabled))
-                        .on_disabled_hover_text("The render queue arrives with #58");
                     if ui.add(Button::secondary("Cancel")).clicked() {
                         ui.close();
                     }
