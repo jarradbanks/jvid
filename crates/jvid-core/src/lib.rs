@@ -10,9 +10,3 @@ pub mod keyframe;
 pub mod model;
 pub mod settings;
 pub mod time;
-
-#[allow(dead_code)]
-fn gate_probe() -> bool {
-    let x = 1;
-    x == x
-}
