@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use ffmpeg_next::format::{self, Pixel, Sample, sample};
 use ffmpeg_next::software::scaling;
-use ffmpeg_next::{ChannelLayout, Dictionary, Error, Packet, Rational, codec, encoder, ffi, frame};
+use ffmpeg_next::{ChannelLayout, Dictionary, Error, Packet, Rational, codec, encoder, frame};
 use jvid_core::preset::{AudioCodec, Preset, VideoCodec};
 use jvid_core::time::Rate;
 
@@ -24,21 +24,9 @@ const HEVC_CODECS: &[&str] = &["libx265"];
 #[cfg(not(feature = "gpl-ffmpeg"))]
 const HEVC_CODECS: &[&str] = &[];
 
-/// Hardware encoders, best first. They all take NV12 (VAAPI after an upload).
-const HW_H264: &[&str] = &[
-    "h264_nvenc",
-    "h264_qsv",
-    "h264_amf",
-    "h264_videotoolbox",
-    "h264_vaapi",
-];
-const HW_HEVC: &[&str] = &[
-    "hevc_nvenc",
-    "hevc_qsv",
-    "hevc_amf",
-    "hevc_videotoolbox",
-    "hevc_vaapi",
-];
+/// Hardware encoders, best first. They all take NV12.
+const HW_H264: &[&str] = &["h264_nvenc", "h264_qsv", "h264_amf", "h264_videotoolbox"];
+const HW_HEVC: &[&str] = &["hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_videotoolbox"];
 
 /// Software encoder names to try, the pixel format they take, and the hardware encoders.
 /// shortcut: GIF uses a fixed 3-3-2 palette; a generated palette is a follow-up.
@@ -116,7 +104,6 @@ fn rate_control(
             ("qp_b", q),
             zero,
         ],
-        Some("vaapi") => vec![("rc_mode", "CQP".into()), ("qp", q), zero],
         // x264/x265 use crf; VideoToolbox, OpenH264 and MPEG-4 use the bit rate.
         _ => vec![("crf", q), ("b", format!("{}", bits as u64))],
     }
@@ -130,7 +117,7 @@ fn open_video(
     rate: Rate,
     global: bool,
     options: &BTreeMap<String, String>,
-) -> Option<(ffmpeg_next::Codec, encoder::Video, Option<HwFrames>)> {
+) -> Option<(ffmpeg_next::Codec, encoder::Video)> {
     let c = encoder::find_by_name(name)?;
     let mut e = codec::Context::new_with_codec(c).encoder().video().ok()?;
     e.set_width(width);
@@ -140,16 +127,7 @@ fn open_video(
     if global {
         e.set_flags(codec::Flags::GLOBAL_HEADER);
     }
-    let hw = name.ends_with("_vaapi");
-    let frames = if hw {
-        let f = HwFrames::new(width, height)?;
-        e.set_format(Pixel::from(ffi::AVPixelFormat::AV_PIX_FMT_VAAPI));
-        f.attach(&mut e);
-        Some(f)
-    } else {
-        e.set_format(pixel);
-        None
-    };
+    e.set_format(pixel);
     let mut opts = Dictionary::new();
     let software = HW_H264.iter().chain(HW_HEVC).all(|n| *n != name);
     if software {
@@ -165,78 +143,7 @@ fn open_video(
             opts.set(k, v);
         }
     }
-    Some((c, e.open_with(opts).ok()?, frames))
-}
-
-/// A VAAPI frame pool: VAAPI encoders take GPU frames, so NV12 frames are uploaded first.
-/// ffmpeg-next has no hardware-frame API, so this is the one `unsafe` corner of the encoder.
-struct HwFrames(*mut ffi::AVBufferRef);
-
-#[allow(unsafe_code)]
-// SAFETY: the pool is only used by the encoder that owns it, one thread at a time.
-unsafe impl Send for HwFrames {}
-
-#[allow(unsafe_code)]
-impl HwFrames {
-    /// Gives the encoder its own reference to the pool.
-    fn attach(&self, e: &mut encoder::video::Video) {
-        // SAFETY: the context owns the new reference and unrefs it when freed.
-        unsafe { (*e.as_mut_ptr()).hw_frames_ctx = ffi::av_buffer_ref(self.0) };
-    }
-
-    fn new(width: u32, height: u32) -> Option<Self> {
-        // SAFETY: plain FFmpeg calls; every failure path unrefs what it allocated.
-        unsafe {
-            let mut device = std::ptr::null_mut();
-            let t = ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI;
-            if ffi::av_hwdevice_ctx_create(
-                &mut device,
-                t,
-                std::ptr::null(),
-                std::ptr::null_mut(),
-                0,
-            ) < 0
-            {
-                return None;
-            }
-            let frames = Self(ffi::av_hwframe_ctx_alloc(device));
-            ffi::av_buffer_unref(&mut device);
-            if frames.0.is_null() {
-                return None;
-            }
-            let fc = (*frames.0).data as *mut ffi::AVHWFramesContext;
-            (*fc).format = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
-            (*fc).sw_format = ffi::AVPixelFormat::AV_PIX_FMT_NV12;
-            (*fc).width = width as i32;
-            (*fc).height = height as i32;
-            (*fc).initial_pool_size = 20;
-            (ffi::av_hwframe_ctx_init(frames.0) >= 0).then_some(frames)
-        }
-    }
-
-    fn upload(&self, src: &frame::Video) -> Result<frame::Video, Error> {
-        let mut dst = frame::Video::empty();
-        // SAFETY: `dst` gets a pool frame, then `src`'s pixels are copied into it.
-        unsafe {
-            for r in [
-                ffi::av_hwframe_get_buffer(self.0, dst.as_mut_ptr(), 0),
-                ffi::av_hwframe_transfer_data(dst.as_mut_ptr(), src.as_ptr(), 0),
-            ] {
-                if r < 0 {
-                    return Err(Error::from(r));
-                }
-            }
-        }
-        Ok(dst)
-    }
-}
-
-#[allow(unsafe_code)]
-impl Drop for HwFrames {
-    fn drop(&mut self) {
-        // SAFETY: we own this reference.
-        unsafe { ffi::av_buffer_unref(&mut self.0) };
-    }
+    Some((c, e.open_with(opts).ok()?))
 }
 
 fn audio_codec(c: AudioCodec) -> (&'static str, Sample) {
@@ -250,7 +157,6 @@ fn audio_codec(c: AudioCodec) -> (&'static str, Sample) {
 struct Video {
     stream: Stream<encoder::Video>,
     scaler: scaling::Context,
-    hw: Option<HwFrames>,
     name: &'static str,
 }
 
@@ -291,12 +197,12 @@ impl Encoder {
         let video = match preset.video {
             None => None,
             Some(vc) => {
-                let (name, pixel, codec, enc, hw) = candidates(vc, hardware(), &preset.options)
+                let (name, pixel, codec, enc) = candidates(vc, hardware(), &preset.options)
                     .into_iter()
                     .find_map(|(n, pixel)| {
-                        let (c, e, hw) =
+                        let (c, e) =
                             open_video(n, pixel, (width, height), rate, global, &preset.options)?;
-                        Some((n, pixel, c, e, hw))
+                        Some((n, pixel, c, e))
                     })
                     .ok_or(Error::EncoderNotFound)?;
                 tracing::info!(encoder = name, "video encoder");
@@ -315,7 +221,6 @@ impl Encoder {
                 Some(Video {
                     stream,
                     scaler,
-                    hw,
                     name,
                 })
             }
@@ -367,10 +272,7 @@ impl Encoder {
     /// Encodes the next frame: tight RGBA rows at the source size given to [`Encoder::create`].
     /// Ignored without a video stream.
     pub fn video(&mut self, rgba: &[u8]) -> Result<(), Error> {
-        let Some(Video {
-            stream, scaler, hw, ..
-        }) = &mut self.video
-        else {
+        let Some(Video { stream, scaler, .. }) = &mut self.video else {
             return Ok(());
         };
         let (w, h) = self.src;
@@ -381,9 +283,6 @@ impl Encoder {
         }
         let mut yuv = frame::Video::empty();
         scaler.run(&src, &mut yuv)?;
-        if let Some(hw) = hw {
-            yuv = hw.upload(&yuv)?;
-        }
         yuv.set_pts(Some(self.frames));
         self.frames += 1;
         stream.enc.send_frame(&yuv)?;
@@ -499,9 +398,9 @@ mod tests {
         let names = |c, hw: &[&str], o| -> Vec<_> {
             candidates(c, hw, &o).into_iter().map(|(n, _)| n).collect()
         };
-        let hw = ["h264_vaapi", "h264_nvenc", "hevc_qsv"];
+        let hw = ["h264_qsv", "h264_nvenc", "hevc_qsv"];
         let got = names(VideoCodec::H264, &hw, opts(&[]));
-        assert_eq!(got[..2], ["h264_nvenc", "h264_vaapi"]);
+        assert_eq!(got[..2], ["h264_nvenc", "h264_qsv"]);
         assert_eq!(got[2..], *H264_CODECS);
         assert_eq!(names(VideoCodec::H264, &[], opts(&[])), H264_CODECS);
         let soft = opts(&[("encoder", "software")]);
@@ -530,7 +429,7 @@ mod tests {
             Some("14")
         );
         assert_eq!(
-            get(&rc("h264_vaapi", Some("99")), "qp").as_deref(),
+            get(&rc("h264_amf", Some("99")), "qp_i").as_deref(),
             Some("51")
         );
         // Bit-rate encoders: 6 bits per pixel at crf 20, half that 6 steps worse.
