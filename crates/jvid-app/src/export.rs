@@ -126,7 +126,18 @@ fn render(
                 .map_err(|e| format!("decoding {}: {e}", asset.path.display()))?;
             layers.push((Pixels::Frame(Arc::new(f)), layer.transform));
         }
-        let tex = gpu.draw(device, queue, project, 1, &Shown { index: k, layers });
+        let tex = gpu.draw(
+            device,
+            queue,
+            project,
+            1,
+            &Shown {
+                index: k,
+                layers,
+                // Decoded synchronously with frame_at, never a keyframe stand-in.
+                exact: true,
+            },
+        );
         if let Some(rgba) = readback.push(device, queue, tex) {
             enc.video(&rgba).map_err(err)?;
         }
