@@ -14,8 +14,8 @@ for w in Regular Medium SemiBold; do
   pyftsubset frozen-$w.ttf --unicodes="U+0020-007E,U+00A0-00FF,U+2013-2014,U+2018-201D,U+2022,U+2026,U+2212,U+00D7" \
     --layout-features='kern,liga,calt' --no-hinting --output-file=Inter-$w.ttf
 done
-# chevron-down, chevron-right, search, check, x, plus, ellipsis, circle-alert
-pyftsubset lucide.ttf --unicodes="U+E071,U+E073,U+E155,U+E070,U+E1B2,U+E141,U+E0BA,U+E07B" --output-file=lucide-subset.ttf
+# chevron-down, chevron-right, search, check, x, plus, ellipsis, circle-alert, undo-2, redo-2
+pyftsubset lucide.ttf --unicodes="U+E071,U+E073,U+E155,U+E070,U+E1B2,U+E141,U+E0BA,U+E07B,U+E2A1,U+E2A0" --output-file=lucide-subset.ttf
 ```
 
-To add an icon, look up its code point in lucide-static's `font/info.json`, add it to the last command, and add a constant to `src/icons.rs`.
+To add an icon, look up its code point in lucide-static's `font/info.json`, add it to the last command, and add a constant to `icon` in `src/theme.rs`.

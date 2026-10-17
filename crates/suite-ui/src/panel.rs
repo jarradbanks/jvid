@@ -68,7 +68,14 @@ impl<'a> Panel<'a> {
 
     pub fn show<R>(self, ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> PanelResponse<R> {
         let ppp = ui.pixels_per_point();
-        let rect = ui.available_rect_before_wrap().round_to_pixels(ppp);
+        // Round inward, so the border stays inside a clip rect on fractional pixels.
+        let r = ui.available_rect_before_wrap();
+        let up = |v: f32| (v * ppp).ceil() / ppp;
+        let down = |v: f32| (v * ppp).floor() / ppp;
+        let rect = Rect::from_min_max(
+            pos2(up(r.left()), up(r.top())),
+            pos2(down(r.right()), down(r.bottom())),
+        );
         let response = ui.allocate_rect(rect, Sense::hover());
         let corner = CornerRadius::same(radius::PANEL);
         let painter = ui.painter().clone();

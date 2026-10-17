@@ -201,7 +201,13 @@ impl Widget for Button<'_> {
             self.state,
             Sense::click(),
         );
-        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, self.label));
+        response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Button,
+                self.state != State::Disabled,
+                self.label,
+            )
+        });
         if !ui.is_rect_visible(rect) {
             return response;
         }
