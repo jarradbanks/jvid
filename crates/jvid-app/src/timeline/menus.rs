@@ -53,6 +53,9 @@ const CLIP: &[&str] = &[
     "add_edit",
     "link",
     "enable",
+    "",
+    "reverse",
+    "freeze_frame",
 ];
 
 /// Header toolbar, left to right.
@@ -81,7 +84,8 @@ impl Timeline {
         match id {
             "paste" => !self.clipboard.is_empty(),
             "delete" | "ripple_delete" => any || self.gap.is_some(),
-            "copy" | "cut" | "duplicate" | "link" | "enable" => any,
+            "copy" | "cut" | "duplicate" | "link" | "enable" | "reverse" => any,
+            "freeze_frame" => self.clip_action(id, seq).is_some(),
             // cut_action's only side effect is Q's seek, put back after.
             "add_edit" | "ripple_trim_prev" | "ripple_trim_next" => {
                 let seek = self.seek_after;

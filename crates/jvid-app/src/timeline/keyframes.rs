@@ -127,7 +127,7 @@ fn copy(c: &Clip, sel: &BTreeSet<(ClipId, String, Time)>) -> Vec<(String, Keyfra
 
 /// `copied` onto `c` with the earliest at timeline time `at`, but no earlier than source 0.
 fn paste(c: &Clip, copied: &[(String, Keyframe)], at: Time) -> Command {
-    let base = (c.source_in + (at - c.start)).max(Time(0));
+    let base = c.source_at(at).max(Time(0));
     rewrite(c, |keys| {
         for (p, k) in copied {
             let time = k.time + base;
@@ -223,7 +223,7 @@ impl Timeline {
         let painter = painter.with_clip_rect(area.intersect(painter.clip_rect()));
         painter.rect_filled(area, 0.0, color::RAISED);
         let bg = ui.interact(area, id, Sense::click_and_drag());
-        let tl = |s: Time| clip.start + (s - clip.source_in);
+        let tl = |s: Time| clip.timeline_at(s);
         let mods = ui.input(|i| i.modifiers);
         let mut edit = None;
         let marquee = bg.dragged() || bg.drag_stopped();

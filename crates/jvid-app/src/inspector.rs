@@ -232,7 +232,7 @@ fn with_field(v: Value, i: usize, n: f64) -> Value {
 /// The clip's source time at timeline time `t`, where its keyframes live, clamped to the
 /// clip so a playhead outside it never keys beyond its media range.
 fn source(c: &Clip, t: Time) -> Time {
-    (c.source_in + (t - c.start)).clamp(c.source_in, c.source_out)
+    c.source_at(t)
 }
 
 fn value(c: &Clip, name: &str, t: Time) -> Value {
@@ -374,7 +374,7 @@ fn key_all(clips: &[&Clip], names: &[&str], t: Time) -> Command {
 fn neighbour(clips: &[&Clip], name: &str, t: Time, dir: i64) -> Option<Time> {
     let times = clips.iter().flat_map(|c| {
         let keys = c.keyframes.get(name).map(Vec::as_slice).unwrap_or_default();
-        keys.iter().map(move |k| c.start + (k.time - c.source_in))
+        keys.iter().map(move |k| c.timeline_at(k.time))
     });
     if dir < 0 {
         times.filter(|k| *k < t).max()
@@ -444,6 +444,12 @@ pub fn show(
         {
             edit = Some(e);
         }
+    }
+    if let Some(c) = clips.first().or(audio.first())
+        && section(ui, "Speed", false).0
+        && let Some(e) = speed_row(ui, c)
+    {
+        edit = Some(e);
     }
     // Only when every selected clip shows the same asset, so the editors edit them all.
     let same = clips.iter().all(|c| c.asset == clips[0].asset);
@@ -542,6 +548,40 @@ fn lut_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
         edit
     })
     .inner
+}
+
+/// Undo gesture for speed drags, xored with the clip id.
+const SPEED_GESTURE: GestureKey = 0x7370_6565_6400; // "speed"
+
+/// Speed percentage, reverse and ripple for the first selected clip and its links.
+fn speed_row(ui: &mut Ui, c: &Clip) -> Option<Edit> {
+    let ripple_id = egui::Id::new("speed_ripple");
+    let mut ripple = ui.data(|d| d.get_temp(ripple_id)).unwrap_or(true);
+    let (mut pct, mut reverse) = (c.speed * 100.0, c.reverse);
+    let changed = ui
+        .horizontal(|ui| {
+            ui.label(egui::RichText::new("Speed").color(color::INK_2));
+            let drag = egui::DragValue::new(&mut pct)
+                .range(1.0..=10000.0)
+                .suffix("%")
+                .speed(1.0);
+            let a = ui.add_enabled(c.freeze.is_none(), drag).changed();
+            let b = ui.checkbox(&mut reverse, "Reverse").changed();
+            ui.checkbox(&mut ripple, "Ripple")
+                .on_hover_text("Move later clips by the change in length");
+            a || b
+        })
+        .inner;
+    ui.data_mut(|d| d.insert_temp(ripple_id, ripple));
+    changed.then(|| {
+        let cmd = Command::SetClipSpeed {
+            id: c.id,
+            speed: pct / 100.0,
+            reverse,
+            ripple,
+        };
+        (cmd, Some(SPEED_GESTURE ^ c.id.0))
+    })
 }
 
 /// A section head button.
@@ -991,6 +1031,9 @@ mod tests {
             transform: Transform::default(),
             stream: Some(0),
             enabled: true,
+            speed: 1.0,
+            reverse: false,
+            freeze: None,
         }
     }
 
@@ -1150,7 +1193,7 @@ mod tests {
             .iter()
             .map(|k| k.time)
             .collect();
-        assert_eq!(times, [Time(10), Time(110)]);
+        assert_eq!(times, [Time(10), Time(109)]);
         apply(&mut clips, |c| key_all(c, &["opacity"], Time(0)));
         assert_eq!(clips[0].keyframes["opacity"][0].time, Time(10));
     }

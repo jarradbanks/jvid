@@ -80,8 +80,8 @@ impl Timeline {
         }
         let painter = painter.with_clip_rect(body.intersect(painter.clip_rect()));
         let shown = painter.clip_rect();
-        let src = |t: Time| clip.source_in + (t - clip.start);
-        let tl = |s: Time| clip.start + (s - clip.source_in);
+        let src = |t: Time| clip.source_at(t);
+        let tl = |s: Time| clip.timeline_at(s);
         let gain = |x: f32| clip.gain_at(view.time(x)).0;
         // Sampled every few points, so easing curves show.
         let mut line = Vec::new();

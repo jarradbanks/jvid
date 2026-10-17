@@ -67,6 +67,8 @@ Work while the timeline has focus.
 | Ripple Delete | `Shift+Delete` |
 | Link/Unlink | `Ctrl+L` |
 | Enable/Disable | `Shift+E` |
+| Reverse | `Ctrl+R` |
+| Freeze frame at playhead | `Shift+F` |
 | Linked Selection | `Ctrl+Shift+L` |
 | Snapping | `S` |
 | Split at playhead | `Ctrl+K` |
