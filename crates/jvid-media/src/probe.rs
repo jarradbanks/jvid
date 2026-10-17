@@ -202,7 +202,7 @@ mod tests {
         #[rustfmt::skip]
         let cases = [
             ("frame-index-1080p30.mp4", Some("h264"), Some((1920, 1080)), Some((30, 1)), 0, 10.0),
-            ("vfr-phone.mp4", Some("h264"), Some((1280, 720)), none, 1, 5.5),
+            ("vfr-phone.mp4", Some("h264"), Some((1280, 720)), none, 1, 5.0),
             ("23.976fps.mp4", Some("h264"), Some((1920, 1080)), Some((24000, 1001)), 1, 5.0),
             ("59.94fps.mp4", Some("h264"), Some((1920, 1080)), Some((60000, 1001)), 1, 5.0),
             ("144fps.mp4", Some("h264"), Some((1920, 1080)), Some((144, 1)), 0, 3.0),

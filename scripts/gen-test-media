@@ -22,9 +22,10 @@ ff -f lavfi -i testsrc2=s=1920x1080:r=30:d=10 \
   "${x264[@]}" -crf 18 -g 30 frame-index-1080p30.mp4
 
 # Phone-style VFR: frame gaps alternate 1/30 s and 2/30 s. Encoded to MKV then copied into MP4,
-# since the CLI would resample to CFR when writing MP4 directly.
+# since the CLI would resample to CFR when writing MP4 directly. trim, not -shortest: FFmpeg 4.4
+# lets ~0.5 s of extra video past -shortest, 6.x does not.
 ff -f lavfi -i testsrc2=s=1280x720:r=30:d=5 -f lavfi -i "$(tone):d=5" \
-  -vf "setpts='(N+floor(N/2))/30/TB'" "${x264[@]}" -c:a aac -shortest "$tmp/vfr.mkv"
+  -vf "setpts='(N+floor(N/2))/30/TB',trim=end=5" "${x264[@]}" -c:a aac "$tmp/vfr.mkv"
 ff -i "$tmp/vfr.mkv" -c copy vfr-phone.mp4
 
 ff -f lavfi -i testsrc2=s=1920x1080:r=24000/1001:d=5 -f lavfi -i "$(tone):d=5" "${x264[@]}" -c:a aac 23.976fps.mp4
