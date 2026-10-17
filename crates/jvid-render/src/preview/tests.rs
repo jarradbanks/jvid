@@ -68,6 +68,48 @@ fn corpus_colour_bars_match_reference_rgb() {
     }
 }
 
+/// End to end: a decoded corpus frame through the preview upload, the compositor and read-back.
+#[test]
+fn corpus_bars_survive_compositing() {
+    let Some(dir) = corpus() else { return };
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping compositor end-to-end test: no software adapter on this platform");
+        return;
+    };
+    jvid_media::ffmpeg::init().unwrap();
+    let f = VideoDecoder::open(&dir.join("bars-bt709-limited.mp4"))
+        .unwrap()
+        .frame_at(Time(0))
+        .unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    preview.upload(
+        &device,
+        &queue,
+        &Yuv {
+            width: f.width,
+            height: f.height,
+            planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
+            bt709: f.bt709,
+            full_range: f.full_range,
+        },
+        1,
+    );
+    let mut comp = crate::composite::Compositor::new(&device);
+    let layers = [(preview.image().unwrap(), 1.0)];
+    let tex = comp.render(&device, &queue, (640, 360), 1, [0, 0, 0, 255], &layers);
+    let rgba = read_back(&device, &queue, tex);
+    for (i, want) in BARS.iter().enumerate() {
+        let px = (180 * 640 + 80 * i + 40) * 4;
+        let got = &rgba[px..px + 3];
+        for c in 0..3 {
+            assert!(
+                (got[c] as i32 - want[c] as i32).abs() <= TOLERANCE,
+                "bar {i} is {got:?}, want {want:?}"
+            );
+        }
+    }
+}
+
 /// The same bars through the matrix on the CPU: the WGSL is a straight dot product of these rows.
 #[test]
 fn matrix_inverts_ffmpeg_encode() {

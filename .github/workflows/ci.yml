@@ -70,9 +70,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg
           time bash scripts/gen-test-media
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # macOS has no software adapter, so its GPU tests skip; Linux (lavapipe) and Windows (WARP) must run them.
+      - if: runner.os == 'macOS'
+        run: echo "::notice::GPU tests skip on macOS (no software adapter on hosted runners)"
       - run: cargo test --workspace
         env:
-          JVID_GPU_TESTS: ${{ runner.os == 'Linux' && 'required' || '' }}
+          JVID_GPU_TESTS: ${{ runner.os != 'macOS' && 'required' || '' }}
           JVID_TEST_MEDIA_REQUIRED: ${{ runner.os == 'Linux' && '1' || '' }}
       # jvid-core stays free of UI, media and I/O stacks.
       - name: jvid-core boundary

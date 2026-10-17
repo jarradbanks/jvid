@@ -39,7 +39,7 @@ The default build expects an LGPL FFmpeg. Build with `--features gpl-ffmpeg` if 
 
 ### GPU tests
 
-`suite-ui`'s snapshot and layout tests render headless through wgpu on Mesa's lavapipe (software Vulkan, no GPU needed). Install it with `sudo apt install mesa-vulkan-drivers`; the tests then select it themselves, which also avoids the default WSL2 Vulkan driver, which segfaults. Without lavapipe they print one line and skip. Set `JVID_GPU_TESTS=required` to make them run on whatever driver is present instead (CI does this so it can't pass by skipping), or set `VK_ICD_FILENAMES` to pick a driver yourself. Snapshots are recorded with lavapipe; `UPDATE_SNAPSHOTS=1 cargo test -p suite-ui` rewrites them.
+`suite-ui`'s snapshot and layout tests render headless through wgpu on Mesa's lavapipe (software Vulkan, no GPU needed). Install it with `sudo apt install mesa-vulkan-drivers`; the tests then select it themselves, which also avoids the default WSL2 Vulkan driver, which segfaults. Without lavapipe they print one line and skip. Set `JVID_GPU_TESTS=required` to make them run on whatever driver is present instead (CI does this so it can't pass by skipping), or set `VK_ICD_FILENAMES` to pick a driver yourself. Snapshots are recorded with lavapipe; `UPDATE_SNAPSHOTS=1 cargo test -p suite-ui` rewrites them. `jvid-render` compositor goldens (`crates/jvid-render/testdata`) fail when missing; `JVID_BLESS=1 cargo test -p jvid-render` writes them.
 
 ## Ground rules
 

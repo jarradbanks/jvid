@@ -15,6 +15,11 @@ pub fn opacity(layer: &Layer) -> f32 {
 }
 
 /// The composited frame format: premultiplied RGBA, which is straight when the background is opaque.
+///
+/// Blending is deliberately in gamma space: the stored values are non-linear sRGB and are mixed
+/// as-is (an `Unorm`, not `UnormSrgb`, target), matching most NLEs' default and the decoded frames.
+/// shortcut: gamma-space blending darkens soft edges and cross-fades; switch to linear light
+/// (an `Rgba16Float` target, decode to linear before blending) as a follow-up.
 pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// GPU state for compositing; the output texture is kept while the frame size stays the same.
@@ -180,6 +185,12 @@ impl Compositor {
 
 /// Copies an RGBA8 texture back to the CPU as tight rows, blocking until the GPU is done.
 pub fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture) -> Vec<u8> {
+    assert_eq!(
+        tex.format().block_copy_size(None),
+        Some(4),
+        "read_back expects 4 bytes/px, got {:?}",
+        tex.format()
+    );
     let row = (tex.width() * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
     let buf = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,

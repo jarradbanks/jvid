@@ -72,13 +72,19 @@ fn image(
     )
 }
 
-/// Compares against `testdata/<name>.png`, writing it when missing or with `UPDATE_SNAPSHOTS=1`.
+/// Compares against `testdata/<name>.png`. To bless (add or update) goldens, run
+/// `JVID_BLESS=1 cargo test -p jvid-render` and commit the PNGs; a missing golden fails otherwise.
 fn golden(name: &str, w: u32, h: u32, rgba: &[u8]) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("testdata/{name}.png"));
-    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() || !path.exists() {
+    if std::env::var_os("JVID_BLESS").is_some() {
         image::save_buffer(&path, rgba, w, h, image::ExtendedColorType::Rgba8).unwrap();
         return;
     }
+    assert!(
+        path.exists(),
+        "missing golden {}; bless with JVID_BLESS=1",
+        path.display()
+    );
     let want = image::open(&path).unwrap().into_rgba8();
     assert_eq!(want.dimensions(), (w, h), "{name}");
     for (i, (g, e)) in rgba.iter().zip(want.as_raw()).enumerate() {
