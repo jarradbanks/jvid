@@ -761,7 +761,14 @@ impl TabViewer for Viewer<'_> {
             let trim = trim.and_then(|(a, t)| Some((self.project.asset(a)?.path.as_path(), t)));
             let source = trim.or(source.map(|p| (p, jvid_core::time::Time(0))));
             let offline = source.is_some_and(|(p, _)| self.missing.contains(p));
-            panel.show(ui, |ui| self.preview.show_frame(ui, source, offline));
+            panel.show(ui, |ui| {
+                let frame = self.preview.project_rect(ui, self.project.settings());
+                self.preview.show_frame(ui, source, offline);
+                let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
+                if let Some((c, g)) = crate::handles::show(ui, self.project, selected, t, frame) {
+                    (self.command, self.gesture) = (Some(c), g);
+                }
+            });
             return;
         }
         if *tab == Tab::Timeline {

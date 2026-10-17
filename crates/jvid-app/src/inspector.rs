@@ -239,6 +239,15 @@ fn set_field(clips: &[&Clip], name: &str, i: usize, f: impl Fn(f64) -> f64, t: T
     })
 }
 
+/// Sets each of `names` to its value in `x` on every clip, keying animated ones at `t`.
+pub fn set_props(clips: &[&Clip], names: &[&str], x: &Transform, t: Time) -> Command {
+    rewrite(clips, |c, st, keys| {
+        for name in names {
+            put(c, st, keys, name, t, get(x, name));
+        }
+    })
+}
+
 /// Animates `name` from its value at `t`, or, if any clip animates it, stops animating
 /// and keeps the value at `t`.
 fn toggle_animate(clips: &[&Clip], name: &str, t: Time) -> Command {
