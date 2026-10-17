@@ -4,8 +4,7 @@ use std::path::Path;
 
 use image::{ImageDecoder, ImageReader, RgbaImage};
 
-/// Default length of a still clip in seconds; settings (#10) will override it.
-pub const DEFAULT_STILL_SECS: u32 = 5;
+pub use jvid_core::settings::DEFAULT_STILL_SECS;
 
 /// Decodes a still image to RGBA, applying its EXIF orientation.
 pub fn decode_still(path: &Path) -> image::ImageResult<RgbaImage> {

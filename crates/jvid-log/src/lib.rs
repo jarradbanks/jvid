@@ -18,7 +18,7 @@ static PANIC_CALLBACKS: Mutex<Vec<PanicCallback>> = Mutex::new(Vec::new());
 
 /// `<platform local data dir>/jvid/logs`, or `None` if the platform has no data dir.
 pub fn log_dir() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|d| d.join("jvid").join("logs"))
+    directories::ProjectDirs::from("", "", "jvid").map(|d| d.data_local_dir().join("logs"))
 }
 
 /// Sets up tracing (level from `JVID_LOG`, default `info`) to stderr and a daily rolling file

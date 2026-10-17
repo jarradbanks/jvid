@@ -6,4 +6,5 @@
 pub mod file;
 pub mod history;
 pub mod model;
+pub mod settings;
 pub mod time;
