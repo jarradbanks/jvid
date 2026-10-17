@@ -7,6 +7,7 @@ mod media_bin;
 mod playback;
 mod preview;
 mod project_file;
+mod project_settings;
 mod relink;
 mod settings_file;
 mod timeline;
