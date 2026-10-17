@@ -7,6 +7,20 @@ pub const FLICKS_PER_SECOND: i64 = 705_600_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Time(pub i64);
 
+impl std::ops::Add for Time {
+    type Output = Time;
+    fn add(self, rhs: Time) -> Time {
+        Time(self.0 + rhs.0)
+    }
+}
+
+impl std::ops::Sub for Time {
+    type Output = Time;
+    fn sub(self, rhs: Time) -> Time {
+        Time(self.0 - rhs.0)
+    }
+}
+
 /// A frame or sample rate as an exact fraction, e.g. 24000/1001 for 23.976 fps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rate {
