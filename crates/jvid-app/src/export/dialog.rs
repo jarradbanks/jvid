@@ -271,6 +271,7 @@ fn audio_name(a: AudioCodec) -> &'static str {
         AudioCodec::Aac => "AAC stereo",
         AudioCodec::Mp3 => "MP3 stereo",
         AudioCodec::Pcm => "PCM 16-bit stereo",
+        AudioCodec::Pcm24 => "PCM 24-bit stereo",
     }
 }
 
@@ -293,6 +294,7 @@ pub fn estimate(p: &Preset, (w, h): (u32, u32), rate: Rate, len: Time) -> u64 {
     let audio = p.audio.map_or(0.0, |a| match a {
         AudioCodec::Aac | AudioCodec::Mp3 => 192_000.0,
         AudioCodec::Pcm => 1_536_000.0,
+        AudioCodec::Pcm24 => 2_304_000.0,
     });
     ((video + audio) * secs / 8.0) as u64
 }
