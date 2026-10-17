@@ -913,5 +913,6 @@ for key, title, summary in [
     ("hdr", "HDR support", "PQ/HLG sources, tone mapping and HDR export."),
     ("graph-editor", "Curve graph editor", "A full graph editor for keyframe curves."),
     ("silence-detect", "Silence detection to cut dead air", "Find silent stretches in screen recordings and offer to cut or speed them up."),
+    ("in-app-dialogs", "In-app confirm dialogs", "Replace native rfd message boxes (unsaved changes on exit, errors) with suite-ui modals that match DESIGN.md."),
 ]:
     I(key, title, None, [], None, summary=summary, labels=["later"])
