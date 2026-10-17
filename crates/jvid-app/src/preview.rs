@@ -330,6 +330,21 @@ impl Preview {
         self.show(ui, source, offline, None);
     }
 
+    /// Where the project frame sits in the viewer `ui` draws into, at the current zoom.
+    pub fn project_rect(&self, ui: &Ui, settings: &ProjectSettings) -> Rect {
+        let rect = ui.max_rect();
+        let view = [
+            rect.left(),
+            rect.top(),
+            rect.width(),
+            rect.height() - size::HEADER,
+        ];
+        let zoom = ZOOMS[self.zoom].1.map(|z| z / ui.pixels_per_point());
+        let size = [settings.width as f32, settings.height as f32];
+        let [x, y, w, h] = render::place(size, view, zoom);
+        Rect::from_min_size(pos2(x, y), vec2(w, h))
+    }
+
     /// Draws `source` at a time, decoding it first if it changed; an `offline` source shows a
     /// placeholder instead. Returns a transport button's action id when one was clicked.
     fn show(

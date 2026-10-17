@@ -2,6 +2,7 @@
 
 mod app;
 mod easing;
+mod handles;
 mod import;
 mod inspector;
 mod keymap;
