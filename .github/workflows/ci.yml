@@ -68,7 +68,7 @@ jobs:
       - if: runner.os == 'Linux' && steps.media-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get install -y --no-install-recommends ffmpeg
-          time scripts/gen-test-media
+          time bash scripts/gen-test-media
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
         env:
