@@ -36,6 +36,9 @@ pub const EDIT: &[&str] = &[
     "lift",
     "extract",
     "",
+    "add_marker",
+    "add_range_marker",
+    "",
     "select_all",
 ];
 
@@ -90,6 +93,7 @@ impl Timeline {
             "clear_in_out" | "lift" | "extract" => {
                 seq.in_point().is_some() || seq.out_point().is_some()
             }
+            "add_range_marker" => seq.in_point().is_some() || seq.out_point().is_some(),
             "mark_clip" => seq.clips_at(self.playhead()).next().is_some(),
             "mark_selection" => any,
             _ => true,

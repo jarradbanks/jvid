@@ -58,3 +58,24 @@ fn in_out_is_saved() {
     let seq = again.sequence();
     assert_eq!((seq.in_point(), seq.out_point()), marks);
 }
+
+#[test]
+fn markers_are_saved() {
+    let dir = Path::new("/new/proj");
+    let mut h = History::new(load("basic.jvid", dir));
+    let Ok(Created::Marker(id)) = h.apply(Command::AddMarker {
+        time: jvid_core::time::Time(10),
+        duration: jvid_core::time::Time(80),
+        name: "round".into(),
+    }) else {
+        panic!("no marker");
+    };
+    let mut m = h.project().sequence().markers()[1].clone();
+    assert_eq!(m.id, id);
+    (m.color, m.note) = (3, "clutch".into());
+    h.apply(Command::SetMarker(m.clone())).unwrap();
+    let again = from_json(&to_json(h.project(), dir).unwrap(), dir, |_| true).unwrap();
+    let seq = again.sequence();
+    assert_eq!(seq.markers()[0].name, "kill");
+    assert_eq!(seq.markers()[1], m);
+}

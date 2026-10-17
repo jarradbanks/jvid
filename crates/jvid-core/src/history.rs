@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use crate::keyframe::{self, Keyframe};
 use crate::model::{
-    AssetId, Clip, ClipId, Edge, LinkId, MarkerId, ModelError, NewClip, Placement, ProbeInfo,
-    Project, ProjectSettings, TrackId, TrackKind, TrackSettings, Transform,
+    AssetId, Clip, ClipId, Edge, LinkId, Marker, MarkerId, ModelError, NewClip, Placement,
+    ProbeInfo, Project, ProjectSettings, TrackId, TrackKind, TrackSettings, Transform,
 };
 use crate::time::Time;
 
@@ -132,6 +132,8 @@ pub enum Command {
         name: String,
     },
     RemoveMarker(MarkerId),
+    /// Replaces a marker's fields (name, color, note, range) by id.
+    SetMarker(Marker),
     SetInOut {
         in_point: Option<Time>,
         out_point: Option<Time>,
@@ -235,6 +237,7 @@ impl Command {
             | Self::NewLink
             | Self::AddMarker { .. }
             | Self::RemoveMarker(_)
+            | Self::SetMarker(_)
             | Self::SetInOut { .. }
             | Self::RemoveRange { .. }
             | Self::SetSettings(_)
@@ -386,6 +389,11 @@ impl Command {
             } => Created::Marker(s.add_marker(time, duration, name)),
             Self::RemoveMarker(id) => {
                 s.remove_marker(id).ok_or(ModelError::UnknownMarker(id))?;
+                Created::Nothing
+            }
+            Self::SetMarker(m) => {
+                let id = m.id;
+                s.set_marker(m).ok_or(ModelError::UnknownMarker(id))?;
                 Created::Nothing
             }
             Self::SetInOut {
