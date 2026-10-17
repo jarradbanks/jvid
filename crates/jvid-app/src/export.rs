@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 use eframe::egui_wgpu::wgpu;
+use jvid_audio::{Limiter, Meter};
 use jvid_core::eval::video_at;
 use jvid_core::model::{ProbeInfo, Project};
 use jvid_core::preset::Preset;
@@ -25,7 +26,12 @@ pub struct Request {
     pub path: PathBuf,
     pub range: (Time, Time),
     pub preset: Preset,
+    /// Integrated loudness target in LUFS; `None` exports the mix as is.
+    pub loudness: Option<f64>,
 }
+
+/// Normalized exports' true-peak ceiling, in dBTP.
+const CEILING: f32 = -1.0;
 
 /// Built-in presets, then user presets from `presets/*.toml` in the config directory.
 pub fn presets() -> Vec<Preset> {
@@ -115,7 +121,12 @@ pub fn run(
     let enc = Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
         .map_err(|e| format!("couldn't create {}: {e}", req.path.display()))?;
     let partial = Partial(&req.path);
-    render(project, req, enc, device, queue, ctx)?;
+    let limiter = match req.loudness.filter(|_| req.preset.audio.is_some()) {
+        Some(target) => measure(project, req, ctx)?
+            .map(|lufs| Limiter::new(10f64.powf((target - lufs) / 20.0) as f32, CEILING)),
+        None => None,
+    };
+    render(project, req, enc, limiter, device, queue, ctx)?;
     let info = validate(project, req)?;
     std::mem::forget(partial);
     Ok(info)
@@ -135,26 +146,54 @@ fn frames(project: &Project, req: &Request) -> (i64, i64) {
     (rate.index_floor(start), rate.index_floor(end - Time(1)) + 1)
 }
 
+/// Each output frame's timeline time and its samples `[a, b)`, so audio and video advance together
+/// and end together.
+fn spans(project: &Project, req: &Request) -> impl Iterator<Item = (i64, Time, i64, i64)> {
+    let rate = rate(project, req);
+    let (first, end) = frames(project, req);
+    (first..end).map(move |k| {
+        let time = rate.time_floor(k);
+        (k, time, sample(time), sample(rate.time_floor(k + 1)))
+    })
+}
+
+/// First pass for normalization: the range's integrated loudness, or `None` if it's silent.
+fn measure(project: &Project, req: &Request, ctx: &Ctx) -> Result<Option<f64>, Error> {
+    let mut audio = Audio::new(Box::new(blocking));
+    let mut meter = Meter::default();
+    let mut mix = Vec::new();
+    for (_, time, a, b) in spans(project, req) {
+        if ctx.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        mix.clear();
+        mix.resize((b - a) as usize * 2, 0.0);
+        audio.prime(project, time);
+        audio.mix(project, a, &mut mix);
+        meter.push(&mix);
+    }
+    Ok(meter.integrated())
+}
+
 fn render(
     project: &Project,
     req: &Request,
     mut enc: Encoder,
+    mut limiter: Option<Limiter>,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     ctx: &Ctx,
 ) -> Result<(), Error> {
-    let rate = rate(project, req);
     let (first, end) = frames(project, req);
     let decoders = DecoderPool::default();
     let mut audio = Audio::new(Box::new(blocking));
     let mut gpu = Gpu::new(device);
     let mut readback = Readback::default();
-    let mut mix = Vec::new();
-    for k in first..end {
+    let (mut mix, mut limited) = (Vec::new(), Vec::new());
+    for (k, time, a, b) in spans(project, req) {
         if ctx.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        let time = rate.time_floor(k);
         let mut layers = Vec::new();
         let video = if enc.has_video() {
             video_at(project.sequence(), time)
@@ -191,18 +230,28 @@ fn render(
                 enc.video(&rgba).map_err(err)?;
             }
         }
-        // Each frame's own samples, so audio and video advance together and end together.
-        let (a, b) = (sample(time), sample(rate.time_floor(k + 1)));
         mix.clear();
         mix.resize((b - a) as usize * 2, 0.0);
         // Closes clips no longer heard, as playback does, so a long timeline doesn't pile up decoders.
         audio.prime(project, time);
         audio.mix(project, a, &mut mix);
-        enc.audio(&mix).map_err(err)?;
+        match &mut limiter {
+            Some(l) => {
+                limited.clear();
+                l.process(&mix, &mut limited);
+                enc.audio(&limited).map_err(err)?;
+            }
+            None => enc.audio(&mix).map_err(err)?,
+        }
         ctx.set_progress((k + 1 - first) as f32 / (end - first) as f32);
     }
     if let Some(rgba) = readback.take(device) {
         enc.video(&rgba).map_err(err)?;
+    }
+    if let Some(l) = &mut limiter {
+        limited.clear();
+        l.flush(&mut limited);
+        enc.audio(&limited).map_err(err)?;
     }
     if ctx.is_cancelled() {
         return Err(Error::Cancelled);
