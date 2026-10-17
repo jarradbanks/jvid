@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashSet};
 use egui::{Color32, Pos2, Sense, Shape, Stroke, Ui, vec2};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
-use jvid_core::model::{Blend, Clip, ClipId, MediaAsset, Project, TrackKind, Transform};
+use jvid_core::model::{Blend, Clip, ClipId, MediaAsset, Project, Text, TrackKind, Transform};
 use jvid_core::time::Time;
 use suite_ui::theme::icon;
 use suite_ui::tokens::{color, size, space};
@@ -375,7 +375,7 @@ pub fn show(
         .or(bin_selected);
     if let Some(a) = shared.filter(|a| a.text.is_some())
         && section(ui, "Text", false).0
-        && let Some(e) = text_props(ui, a)
+        && let Some(e) = text_props(ui, a, if same { &clips } else { &[] }, t)
     {
         edit = Some(e);
     }
@@ -654,93 +654,205 @@ fn solid_color(ui: &mut Ui, a: &MediaAsset) -> Option<Edit> {
     ))
 }
 
-/// A straight 0..=1 RGBA picker; true once changed.
-fn color_field(ui: &mut Ui, label: &str, c: &mut [f64; 4]) -> bool {
+/// Text style keyframe names: the animated style and the fill, a clip `color` keyframe.
+fn text_names() -> impl Iterator<Item = &'static str> {
+    Text::ANIMATED.into_iter().chain(["color"])
+}
+
+fn text_get(t: &Text, name: &str) -> Option<Value> {
+    match name {
+        "color" => Some(Value::Color(t.color)),
+        _ => t.get(name),
+    }
+}
+
+fn text_set(t: &mut Text, name: &str, v: Value) {
+    match (name, v) {
+        ("color", Value::Color(c)) => t.color = c,
+        _ => t.set(name, v),
+    }
+}
+
+/// Egui id of the Inspector's text content field.
+fn content_id() -> egui::Id {
+    egui::Id::new("inspector text content")
+}
+
+/// Asks the Inspector to focus its text content field next frame.
+pub fn focus_text(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(content_id().with("focus"), true));
+}
+
+/// A text style row's animate toggle, when clips are selected; sets `toggle` once clicked.
+fn animate(ui: &mut Ui, clips: &[&Clip], name: &'static str, toggle: &mut Option<&'static str>) {
+    let on = clips.iter().any(|c| animated(c, name));
+    if !clips.is_empty() && glyph(ui, Glyph::Diamond, on, &format!("Animate {name}")).clicked() {
+        *toggle = Some(name);
+    }
+}
+
+/// A straight 0..=1 RGBA picker with `name`'s animate toggle; true once changed.
+fn color_field(
+    ui: &mut Ui,
+    label: &str,
+    c: &mut [f64; 4],
+    (clips, name, toggle): (&[&Clip], &'static str, &mut Option<&'static str>),
+) -> bool {
     let mut rgba = jvid_render::solid::rgba8(*c);
     let changed = ui
         .horizontal(|ui| {
             ui.label(label);
-            ui.color_edit_button_srgba_unmultiplied(&mut rgba).changed()
+            let changed = ui.color_edit_button_srgba_unmultiplied(&mut rgba).changed();
+            animate(ui, clips, name, toggle);
+            changed
         })
         .inner;
-    *c = rgba.map(|v| v as f64 / 255.0);
+    if changed {
+        *c = rgba.map(|v| v as f64 / 255.0);
+    }
     changed
 }
 
-/// The editors for a text asset's style; the edit once anything changes.
-// shortcut: edits the asset, so every clip of it changes; only fill color (clip `color`
-// keyframes) and the transform animate per clip.
-fn text_props(ui: &mut Ui, a: &MediaAsset) -> Option<Edit> {
+/// The editors for a text asset's style at playhead `t`, with `clips` (all showing it) for
+/// keyframes; the edit once anything changes. Animated properties key every clip at `t`;
+/// the rest edit the asset, so every clip of it changes.
+// shortcut: a per-clip caption needs its own asset; add a Duplicate action if users ask.
+fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<Edit> {
     use jvid_core::model::Align;
-    let mut t = a.text.clone()?;
-    let mut changed = ui
-        .add(egui::TextEdit::multiline(&mut t.content).desired_rows(2))
-        .changed();
+    let base = a.text.clone()?;
+    let anim = |name: &str| clips.iter().any(|c| animated(c, name));
+    // `clips` share the asset, so the first stands for all at the playhead.
+    let mut s = clips.first().map_or(base.clone(), |c| {
+        let mut s = base.with(&c.text_keys(t));
+        if let Some(Value::Color(f)) = c.value_at("color", t) {
+            s.color = f;
+        }
+        s
+    });
+    let before = s.clone();
+    let mut toggle = None;
+    let content = ui.add(
+        egui::TextEdit::multiline(&mut s.content)
+            .id(content_id())
+            .desired_rows(2),
+    );
+    if ui.data_mut(|d| d.remove_temp::<bool>(content_id().with("focus")).is_some()) {
+        content.request_focus();
+        content.scroll_to_me(None);
+    }
+    let mut changed = content.changed();
     ui.horizontal(|ui| {
         ui.label("Font");
         changed |= ui
-            .add(egui::TextEdit::singleline(&mut t.family).hint_text("Sans-serif"))
+            .add(egui::TextEdit::singleline(&mut s.family).hint_text("Sans-serif"))
             .changed();
     });
     ui.horizontal(|ui| {
         ui.label("Size");
         changed |= ui
-            .add(egui::DragValue::new(&mut t.size).range(1.0..=1000.0))
+            .add(egui::DragValue::new(&mut s.size).range(1.0..=1000.0))
             .changed();
+        animate(ui, clips, "text_size", &mut toggle);
         ui.label("Weight");
         changed |= ui
             .add(
-                egui::DragValue::new(&mut t.weight)
+                egui::DragValue::new(&mut s.weight)
                     .range(100..=900)
                     .speed(10),
             )
             .changed();
     });
-    changed |= color_field(ui, "Color", &mut t.color);
+    changed |= color_field(ui, "Color", &mut s.color, (clips, "color", &mut toggle));
     ui.horizontal(|ui| {
         for (al, name) in [
             (Align::Left, "Left"),
             (Align::Center, "Center"),
             (Align::Right, "Right"),
         ] {
-            changed |= ui.selectable_value(&mut t.align, al, name).changed();
+            changed |= ui.selectable_value(&mut s.align, al, name).changed();
         }
     });
     ui.horizontal(|ui| {
         ui.label("Position");
-        for v in &mut t.anchor {
+        for v in &mut s.anchor {
             changed |= ui
                 .add(egui::DragValue::new(v).range(0.0..=1.0).speed(0.005))
                 .changed();
         }
+        animate(ui, clips, "text_anchor", &mut toggle);
     });
     ui.horizontal(|ui| {
         ui.label("Outline");
         changed |= ui
-            .add(egui::DragValue::new(&mut t.outline).range(0.0..=32.0))
+            .add(egui::DragValue::new(&mut s.outline).range(0.0..=32.0))
             .changed();
+        animate(ui, clips, "outline", &mut toggle);
     });
-    changed |= color_field(ui, "Outline color", &mut t.outline_color);
+    let outline = (clips, "outline_color", &mut toggle);
+    changed |= color_field(ui, "Outline color", &mut s.outline_color, outline);
     ui.horizontal(|ui| {
         ui.label("Shadow");
-        for v in &mut t.shadow {
+        for v in &mut s.shadow {
             changed |= ui
                 .add(egui::DragValue::new(v).range(-64.0..=64.0))
                 .changed();
         }
+        animate(ui, clips, "shadow", &mut toggle);
     });
-    changed |= color_field(ui, "Shadow color", &mut t.shadow_color);
+    let shadow = (clips, "shadow_color", &mut toggle);
+    changed |= color_field(ui, "Shadow color", &mut s.shadow_color, shadow);
     ui.horizontal(|ui| {
         ui.label("Box padding");
         changed |= ui
-            .add(egui::DragValue::new(&mut t.box_padding).range(0.0..=200.0))
+            .add(egui::DragValue::new(&mut s.box_padding).range(0.0..=200.0))
             .changed();
+        animate(ui, clips, "box_padding", &mut toggle);
     });
-    changed |= color_field(ui, "Box color", &mut t.box_color);
-    changed.then_some((
-        Command::SetText { id: a.id, text: t },
+    changed |= color_field(
+        ui,
+        "Box color",
+        &mut s.box_color,
+        (clips, "box_color", &mut toggle),
+    );
+    if let Some(name) = toggle {
+        return Some((text_animate(clips, &before, name, t), None));
+    }
+    if !changed {
+        return None;
+    }
+    let keyed: Vec<_> = text_names()
+        .filter(|n| anim(n) && text_get(&before, n) != text_get(&s, n))
+        .collect();
+    if !keyed.is_empty() {
+        let cmd = rewrite(clips, |c, _, keys| {
+            for n in &keyed {
+                key(c, keys, n, t, text_get(&s, n).expect("a text name"));
+            }
+        });
+        return Some((cmd, Some(TEXT_GESTURE ^ a.id.0 ^ 1 << 40)));
+    }
+    // Animated values stay the asset's; the keys showed over them.
+    for n in text_names().filter(|n| anim(n)) {
+        text_set(&mut s, n, text_get(&base, n).expect("a text name"));
+    }
+    (s != base).then_some((
+        Command::SetText { id: a.id, text: s },
         Some(TEXT_GESTURE ^ a.id.0),
     ))
+}
+
+/// Animates text property `name` from its value in `shown`, or, if any clip animates it,
+/// drops its keys so the asset's value shows again.
+fn text_animate(clips: &[&Clip], shown: &Text, name: &str, t: Time) -> Command {
+    let on = clips.iter().any(|c| animated(c, name));
+    let v = text_get(shown, name).expect("a text name");
+    rewrite(clips, |c, _, keys| {
+        if on {
+            keys.remove(name);
+        } else {
+            key(c, keys, name, t, v);
+        }
+    })
 }
 
 #[cfg(test)]
@@ -779,6 +891,22 @@ mod tests {
 
     fn refs(clips: &[Clip]) -> Vec<&Clip> {
         clips.iter().collect()
+    }
+
+    #[test]
+    fn text_style_animates_per_clip_and_stops() {
+        let mut clips = [clip(1, 0), clip(2, 50)];
+        let shown = Text {
+            outline: 3.0,
+            ..Text::default()
+        };
+        apply(&mut clips, |c| text_animate(c, &shown, "outline", Time(60)));
+        assert_eq!(clips[0].keyframes["outline"][0].time, Time(70));
+        assert_eq!(clips[1].keyframes["outline"][0].time, Time(20));
+        let t = Text::default().with(&clips[1].text_keys(Time(60)));
+        assert_eq!(t.outline, 3.0, "the key shows over the asset");
+        apply(&mut clips, |c| text_animate(c, &shown, "outline", Time(60)));
+        assert!(clips.iter().all(|c| c.keyframes.is_empty()));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::keyframe::Keyframe;
+use crate::keyframe::{Keyframe, Value};
 use crate::time::{Rate, Time};
 
 macro_rules! id {
@@ -206,6 +206,61 @@ impl Default for Text {
 }
 
 impl Text {
+    /// Style properties clips animate with keyframes of these names; fill is the clip's
+    /// `color` keyframe, as for a solid. `anchor` and `size` are prefixed so they don't
+    /// collide with the transform's.
+    pub const ANIMATED: [&'static str; 8] = [
+        "text_size",
+        "text_anchor",
+        "outline",
+        "outline_color",
+        "shadow",
+        "shadow_color",
+        "box_padding",
+        "box_color",
+    ];
+
+    /// The value of `name`, one of [`Self::ANIMATED`].
+    pub fn get(&self, name: &str) -> Option<Value> {
+        let v2 = |v: [f32; 2]| Value::Vec2(v.map(f64::from));
+        Some(match name {
+            "text_size" => Value::Scalar(self.size.into()),
+            "text_anchor" => v2(self.anchor),
+            "outline" => Value::Scalar(self.outline.into()),
+            "outline_color" => Value::Color(self.outline_color),
+            "shadow" => v2(self.shadow),
+            "shadow_color" => Value::Color(self.shadow_color),
+            "box_padding" => Value::Scalar(self.box_padding.into()),
+            "box_color" => Value::Color(self.box_color),
+            _ => return None,
+        })
+    }
+
+    /// Sets `name` to `v`; unknown names and mismatched kinds are ignored.
+    pub fn set(&mut self, name: &str, v: Value) {
+        let v2 = |v: [f64; 2]| v.map(|n| n as f32);
+        match (name, v) {
+            ("text_size", Value::Scalar(n)) => self.size = n.max(1.0) as f32,
+            ("text_anchor", Value::Vec2(n)) => self.anchor = v2(n),
+            ("outline", Value::Scalar(n)) => self.outline = n.max(0.0) as f32,
+            ("outline_color", Value::Color(c)) => self.outline_color = c,
+            ("shadow", Value::Vec2(n)) => self.shadow = v2(n),
+            ("shadow_color", Value::Color(c)) => self.shadow_color = c,
+            ("box_padding", Value::Scalar(n)) => self.box_padding = n.max(0.0) as f32,
+            ("box_color", Value::Color(c)) => self.box_color = c,
+            _ => {}
+        }
+    }
+
+    /// This style with `keyed` values (from [`Clip::text_keys`]) applied over it.
+    pub fn with(&self, keyed: &[(&str, Value)]) -> Text {
+        let mut t = self.clone();
+        for (name, v) in keyed {
+            t.set(name, *v);
+        }
+        t
+    }
+
     /// The bin's presets: name and style.
     pub fn presets() -> [(&'static str, Text); 3] {
         let d = Text::default();
@@ -457,6 +512,14 @@ impl Clip {
     pub fn value_at(&self, param: &str, t: Time) -> Option<crate::keyframe::Value> {
         let keys = self.keyframes.get(param)?;
         crate::keyframe::value_at(keys, self.source_in + (t - self.start))
+    }
+
+    /// The keyed [`Text::ANIMATED`] values at timeline time `t`.
+    pub fn text_keys(&self, t: Time) -> Vec<(&'static str, Value)> {
+        let keyed = Text::ANIMATED
+            .iter()
+            .filter_map(|n| Some((*n, self.value_at(n, t)?)));
+        keyed.collect()
     }
 
     /// The transform at timeline time `t`, keyframes applied over the static values.

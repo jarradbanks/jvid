@@ -114,6 +114,11 @@ impl App {
                     .all(|t| d.iter_all_tabs().filter(|(_, x)| *x == t).count() == 1)
             })
             .unwrap_or_else(default_dock);
+        let exports = jvid_jobs::Pool::new(1);
+        // The system font scan can take seconds; done here, the first text frame doesn't stall.
+        exports.submit("fonts", jvid_jobs::Priority::Preview, |_| {
+            jvid_render::text::warm()
+        });
         Self {
             history: History::new(Project::default()),
             path: None,
@@ -138,7 +143,7 @@ impl App {
             settings_dialog: Default::default(),
             theme: suite_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
-            exports: jvid_jobs::Pool::new(1),
+            exports,
             export_dialog: Default::default(),
             export: None,
         }
@@ -903,6 +908,10 @@ impl TabViewer for Viewer<'_> {
                 let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
                 if let Some((c, g)) = crate::handles::show(ui, self.project, selected, t, frame) {
                     (self.command, self.gesture) = (Some(c), g);
+                }
+                if let Some(id) = crate::handles::double_clicked_text(ui, self.project, t, frame) {
+                    self.timeline.select_clip(self.project.sequence(), id);
+                    crate::inspector::focus_text(ui.ctx());
                 }
             });
             return;

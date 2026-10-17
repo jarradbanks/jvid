@@ -11,12 +11,21 @@ use wgpu::util::DeviceExt;
 /// A style and frame size.
 type Key = (Text, (u32, u32));
 
+/// Glyph coverage and the outline-grown shape, one byte per pixel, and the shape's bounds.
+struct Masks {
+    fill: Vec<u8>,
+    shape: Vec<u8>,
+    bounds: Option<[u32; 4]>,
+}
+
 struct Fonts {
     system: FontSystem,
     swash: SwashCache,
     /// Recent rasters, newest last.
     // shortcut: a linear scan over 8 entries; key by hash if many text layers show at once.
     recent: Vec<(Key, Arc<Vec<u8>>)>,
+    /// Recent masks keyed by colorless styles, so animated colors only re-tint.
+    masks: Vec<(Key, Arc<Masks>)>,
 }
 
 fn fonts() -> &'static Mutex<Fonts> {
@@ -26,8 +35,23 @@ fn fonts() -> &'static Mutex<Fonts> {
             system: FontSystem::new(),
             swash: SwashCache::new(),
             recent: Vec::new(),
+            masks: Vec::new(),
         })
     })
+}
+
+/// Loads the system fonts, which takes seconds on some systems; call it off the UI thread
+/// before the first text frame.
+pub fn warm() {
+    drop(fonts().lock());
+}
+
+/// Pushes `v` under `k`, keeping the newest 8.
+fn remember<T>(list: &mut Vec<(Key, T)>, k: Key, v: T) {
+    if list.len() >= 8 {
+        list.remove(0);
+    }
+    list.push((k, v));
 }
 
 /// Glyph coverage of `text` laid out on a `size` frame: one byte per pixel.
@@ -47,8 +71,10 @@ fn coverage(f: &mut Fonts, text: &Text, size: (u32, u32)) -> Vec<u8> {
         Align::Center => cosmic_text::Align::Center,
         Align::Right => cosmic_text::Align::Right,
     };
-    // Wrap at the frame width; lines align within the widest one.
-    buf.set_size(&mut f.system, Some(w as f32), None);
+    // Wrap so a block centered on the anchor stays in frame; lines align within the widest.
+    let ax = text.anchor[0].clamp(0.0, 1.0);
+    let wrap = (2.0 * ax.min(1.0 - ax) * w as f32).max(text.size);
+    buf.set_size(&mut f.system, Some(wrap), None);
     buf.set_text(
         &mut f.system,
         &text.content,
@@ -66,8 +92,8 @@ fn coverage(f: &mut Fonts, text: &Text, size: (u32, u32)) -> Vec<u8> {
     // Alignment places lines across the full wrap width; shift the widest to the anchor.
     let left = match text.align {
         Align::Left => 0.0,
-        Align::Center => (w as f32 - block_w) / 2.0,
-        Align::Right => w as f32 - block_w,
+        Align::Center => (wrap - block_w) / 2.0,
+        Align::Right => wrap - block_w,
     };
     let dx = (text.anchor[0] * w as f32 - block_w / 2.0 - left).round() as i32;
     let dy = (text.anchor[1] * h as f32 - block_h / 2.0).round() as i32;
@@ -122,6 +148,37 @@ fn bounds(mask: &[u8], w: u32) -> Option<[u32; 4]> {
     b
 }
 
+/// The masks of `text` on a `size` frame, cached by its colorless style.
+fn masks(f: &mut Fonts, text: &Text, size: (u32, u32)) -> Arc<Masks> {
+    let key = (
+        Text {
+            color: [0.0; 4],
+            outline_color: [0.0; 4],
+            shadow_color: [0.0; 4],
+            box_color: [0.0; 4],
+            ..text.clone()
+        },
+        size,
+    );
+    if let Some((_, m)) = f.masks.iter().find(|(k, _)| *k == key) {
+        return m.clone();
+    }
+    let fill = coverage(f, text, size);
+    let shape = if text.outline > 0.0 {
+        dilate(&fill, size, text.outline)
+    } else {
+        fill.clone()
+    };
+    let bounds = bounds(&shape, size.0);
+    let m = Arc::new(Masks {
+        fill,
+        shape,
+        bounds,
+    });
+    remember(&mut f.masks, key, m.clone());
+    m
+}
+
 /// `text` on a transparent `size` frame, straight RGBA8. `fill` overrides `text.color`, so a
 /// clip's `color` keyframes animate it.
 pub fn rasterize(text: &Text, fill: Option<[f64; 4]>, size: (u32, u32)) -> Arc<Vec<u8>> {
@@ -135,63 +192,60 @@ pub fn rasterize(text: &Text, fill: Option<[f64; 4]>, size: (u32, u32)) -> Arc<V
         return img.clone();
     }
     let (text, (w, h)) = &key;
-    let fill = coverage(&mut f, text, size);
-    // Premultiplied layers, bottom first: box, shadow, outline, fill.
-    let mut px = vec![[0f32; 4]; fill.len()];
-    let mut over = |mask: &dyn Fn(i64, i64) -> f32, c: [f64; 4]| {
-        for (k, p) in px.iter_mut().enumerate() {
-            let a = mask((k as u32 % w) as i64, (k as u32 / w) as i64) * c[3] as f32;
-            if a > 0.0 {
-                for i in 0..3 {
-                    p[i] = c[i] as f32 * a + p[i] * (1.0 - a);
-                }
-                p[3] = a + p[3] * (1.0 - a);
-            }
-        }
+    let (w, h) = (*w as i64, *h as i64);
+    let m = masks(&mut f, text, size);
+    let mut img = vec![0u8; (w * h * 4) as usize];
+    let Some([x0, y0, x1, y1]) = m.bounds.map(|b| b.map(i64::from)) else {
+        let img = Arc::new(img);
+        remember(&mut f.recent, key, img.clone());
+        return img;
     };
+    // Only the pixels the box, shadow and glyphs can reach.
+    let [sx, sy] = text.shadow.map(|v| v.round() as i64);
+    let p = text.box_padding.max(0.0) as i64;
+    let p = if text.box_color[3] > 0.0 { p } else { 0 };
+    let rx = (x0.min(x0 + sx) - p).max(0)..(x1.max(x1 + sx) + p).min(w);
+    let ry = (y0.min(y0 + sy) - p).max(0)..(y1.max(y1 + sy) + p).min(h);
     let at = |m: &[u8], x: i64, y: i64| {
-        if (0..*w as i64).contains(&x) && (0..*h as i64).contains(&y) {
-            m[(y * *w as i64 + x) as usize] as f32 / 255.0
+        if (0..w).contains(&x) && (0..h).contains(&y) {
+            m[(y * w + x) as usize] as f32 / 255.0
         } else {
             0.0
         }
     };
-    let shape = if text.outline > 0.0 {
-        dilate(&fill, (*w, *h), text.outline)
-    } else {
-        fill.clone()
-    };
-    if text.box_color[3] > 0.0
-        && let Some([x0, y0, x1, y1]) = bounds(&shape, *w)
-    {
-        let p = text.box_padding.max(0.0) as i64;
-        let inside = |x, y| {
-            ((x0 as i64 - p..x1 as i64 + p).contains(&x)
-                && (y0 as i64 - p..y1 as i64 + p).contains(&y)) as u8 as f32
-        };
-        over(&inside, text.box_color);
-    }
-    if text.shadow != [0.0, 0.0] {
-        let [sx, sy] = text.shadow.map(|v| v.round() as i64);
-        over(&|x, y| at(&shape, x - sx, y - sy), text.shadow_color);
-    }
-    if text.outline > 0.0 {
-        over(&|x, y| at(&shape, x, y), text.outline_color);
-    }
-    over(&|x, y| at(&fill, x, y), text.color);
-    let img: Vec<u8> = px
-        .iter()
-        .flat_map(|p| {
-            let a = p[3];
+    for y in ry {
+        for x in rx.clone() {
+            // Premultiplied layers, bottom first: box, shadow, outline, fill.
+            let mut px = [0f32; 4];
+            let mut over = |a: f32, c: [f64; 4]| {
+                let a = a * c[3] as f32;
+                if a > 0.0 {
+                    for i in 0..3 {
+                        px[i] = c[i] as f32 * a + px[i] * (1.0 - a);
+                    }
+                    px[3] = a + px[3] * (1.0 - a);
+                }
+            };
+            let inside = (x0 - p..x1 + p).contains(&x) && (y0 - p..y1 + p).contains(&y);
+            over(inside as u8 as f32, text.box_color);
+            if text.shadow != [0.0, 0.0] {
+                over(at(&m.shape, x - sx, y - sy), text.shadow_color);
+            }
+            if text.outline > 0.0 {
+                over(at(&m.shape, x, y), text.outline_color);
+            }
+            over(at(&m.fill, x, y), text.color);
+            let a = px[3];
             let un = |v: f32| if a > 0.0 { v / a } else { 0.0 };
-            [un(p[0]), un(p[1]), un(p[2]), a].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
-        })
-        .collect();
-    let img = Arc::new(img);
-    if f.recent.len() >= 8 {
-        f.recent.remove(0);
+            let rgba = [un(px[0]), un(px[1]), un(px[2]), a];
+            let o = ((y * w + x) * 4) as usize;
+            for (d, v) in img[o..o + 4].iter_mut().zip(rgba) {
+                *d = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+        }
     }
-    f.recent.push((key, img.clone()));
+    let img = Arc::new(img);
+    remember(&mut f.recent, key, img.clone());
     img
 }
 
@@ -291,7 +345,7 @@ mod tests {
         let blue = (0..img.len() / 4).filter(|k| img[k * 4..][..4] == [0, 0, 255, 255]);
         let (red, blue): (Vec<_>, Vec<_>) = (red.collect(), blue.collect());
         if red.is_empty() {
-            eprintln!("skipping: no installed font");
+            no_font("Latin");
             return;
         }
         assert!(!blue.is_empty(), "the box shows around the glyphs");
@@ -301,6 +355,19 @@ mod tests {
             &img,
             &rasterize(&text, Some([1.0, 0.0, 0.0, 1.0]), size)
         ));
+    }
+
+    #[test]
+    fn recoloring_reuses_the_masks() {
+        let mut f = fonts().lock().unwrap();
+        let t = Text::default();
+        let red = Text {
+            color: [1.0, 0.0, 0.0, 1.0],
+            box_color: [0.0, 0.0, 1.0, 1.0],
+            ..t.clone()
+        };
+        let a = masks(&mut f, &t, (64, 36));
+        assert!(Arc::ptr_eq(&a, &masks(&mut f, &red, (64, 36))));
     }
 
     #[test]

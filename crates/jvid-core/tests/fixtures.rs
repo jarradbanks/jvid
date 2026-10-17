@@ -25,6 +25,12 @@ fn fixtures_load_and_round_trip() {
     }
     let p = load("basic.jvid", dir);
     assert_eq!(p.assets()[0].path, Path::new("/new/proj/media/rec.mkv"));
+    // Saved before text layers (#63): no asset has a `text` field.
+    assert!(
+        p.assets()
+            .iter()
+            .all(|a| a.text.is_none() && !a.generated())
+    );
     let seq = p.sequence();
     assert_eq!(seq.tracks().len(), 2);
     assert_eq!(seq.markers()[0].name, "kill");

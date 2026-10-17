@@ -261,6 +261,11 @@ impl Timeline {
         &self.selected
     }
 
+    /// Selects only `id`, as a plain click on it would.
+    pub fn select_clip(&mut self, seq: &Sequence, id: ClipId) {
+        self.select(seq, id, egui::Modifiers::NONE);
+    }
+
     pub fn seek(&mut self, t: Time) {
         let r = self.transport.rate;
         self.transport.seek(r.time_floor(r.index_nearest(t)), 0);

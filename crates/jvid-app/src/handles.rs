@@ -101,6 +101,43 @@ fn corners(project: &Project, c: &Clip, x: &Transform, frame: Rect) -> Option<[P
     }))
 }
 
+/// The top text clip with glyphs (or its box) near a double-click at playhead `t`, inside
+/// `frame`, the project's on-screen rect.
+// shortcut: maps the click through the layer's uncropped quad; a cropped text layer hits
+// slightly off. Invert the crop if it matters.
+pub fn double_clicked_text(ui: &Ui, project: &Project, t: Time, frame: Rect) -> Option<ClipId> {
+    let primary = egui::PointerButton::Primary;
+    let pos = ui.input(|i| {
+        let p = i.pointer.interact_pos();
+        p.filter(|_| i.pointer.button_double_clicked(primary))
+    });
+    let pos = pos.filter(|p| frame.contains(*p) && ui.max_rect().contains(*p))?;
+    let st = project.settings();
+    let (w, h) = (st.width as i64, st.height as i64);
+    let seq = project.sequence();
+    jvid_core::eval::video_at(seq, t).into_iter().find_map(|l| {
+        let text = project.asset(l.asset)?.text.as_ref()?;
+        let (_, c) = seq.clip(l.clip)?;
+        let [tl, tr, bl, _] = corners(project, c, &l.transform, frame)?;
+        // Where `pos` sits across the layer's image, 0..1 on each axis.
+        let (u, v, d) = (tr - tl, bl - tl, pos - tl);
+        let det = u.x * v.y - u.y * v.x;
+        let a = (d.x * v.y - d.y * v.x) / det;
+        let b = (u.x * d.y - u.y * d.x) / det;
+        if !(0.0..1.0).contains(&a) || !(0.0..1.0).contains(&b) {
+            return None;
+        }
+        let img = jvid_render::text::rasterize(&text.with(&l.text), l.color, (st.width, st.height));
+        let (x, y) = ((a * w as f32) as i64, (b * h as f32) as i64);
+        // A few pixels of slack, so the gaps between glyphs still hit.
+        let r = 8;
+        let near = (y - r..=y + r).flat_map(|y| (x - r..=x + r).map(move |x| (x, y)));
+        near.filter(|(x, y)| (0..w).contains(x) && (0..h).contains(y))
+            .any(|(x, y)| img[((y * w + x) * 4 + 3) as usize] > 0)
+            .then_some(l.clip)
+    })
+}
+
 /// Handles over the lowest-id selected video clip at playhead `t`, inside `frame`, the
 /// project's on-screen rect; a drag's edit.
 pub fn show(
@@ -386,5 +423,74 @@ mod tests {
         );
         assert!(harness.state_mut().undo());
         assert_eq!(keys(&harness), before);
+    }
+
+    #[test]
+    fn double_click_finds_the_text_under_it() {
+        use jvid_core::history::{Command, Created, History};
+        use jvid_core::model::{NewClip, Text};
+        use jvid_core::time::FLICKS_PER_SECOND as S;
+        let mut h = History::new(Project::default());
+        // A box makes the hit independent of the installed fonts.
+        let text = Text {
+            box_color: [0.0, 0.0, 0.0, 1.0],
+            ..Text::default()
+        };
+        let Ok(Created::Asset(asset)) = h.apply(Command::AddText {
+            name: "Title".into(),
+            text,
+        }) else {
+            panic!("text")
+        };
+        let Ok(Created::Track(track)) = h.apply(Command::AddTrack {
+            kind: TrackKind::Video,
+            name: "V1".into(),
+        }) else {
+            panic!("track")
+        };
+        let clip = NewClip {
+            asset,
+            source_in: Time(0),
+            source_out: Time(S),
+            start: Time(0),
+            link: None,
+        };
+        h.apply(Command::AddClip { track, clip }).unwrap();
+        let id = h.project().sequence().tracks()[0].clips()[0].id;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([960.0, 540.0])
+            .with_step_dt(0.05)
+            .build_ui_state(
+                |ui, (p, hit): &mut (Project, Option<ClipId>)| {
+                    let frame = Rect::from_min_size(Pos2::ZERO, vec2(960.0, 540.0));
+                    *hit = hit.or(double_clicked_text(ui, p, Time(0), frame));
+                },
+                (h.project().clone(), None),
+            );
+        harness.run();
+        let click = |harness: &mut egui_kittest::Harness<'_, _>, p| {
+            for _ in 0..2 {
+                harness.hover_at(p);
+                harness.event(egui::Event::PointerButton {
+                    pos: p,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                });
+                harness.event(egui::Event::PointerButton {
+                    pos: p,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: Default::default(),
+                });
+                harness.step();
+            }
+        };
+        click(&mut harness, pos2(20.0, 20.0));
+        assert_eq!(harness.state().1, None, "a corner is empty");
+        // Past the triple-click window.
+        (0..20).for_each(|_| harness.step());
+        click(&mut harness, pos2(480.0, 270.0));
+        assert_eq!(harness.state().1, Some(id));
     }
 }

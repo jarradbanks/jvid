@@ -82,7 +82,8 @@ pub enum Pixels {
 /// The pixels of a solid or text asset's `layer` on a `size` frame; `None` for a file.
 pub fn generated(asset: &MediaAsset, layer: &Layer, size: (u32, u32)) -> Option<Pixels> {
     if let Some(t) = &asset.text {
-        return Some(Pixels::Text(text::rasterize(t, layer.color, size)));
+        let t = t.with(&layer.text);
+        return Some(Pixels::Text(text::rasterize(&t, layer.color, size)));
     }
     let c = layer.color.or(asset.solid)?;
     Some(Pixels::Solid(solid::rgba8(c)))
@@ -575,6 +576,8 @@ impl Playback {
 pub struct Gpu {
     compositor: Compositor,
     layers: Vec<Preview>,
+    /// Text uploads from the last draw, by raster; holding the `Arc` keeps its address unique.
+    texts: Vec<(Arc<Vec<u8>>, wgpu::Texture)>,
 }
 
 impl Gpu {
@@ -582,6 +585,7 @@ impl Gpu {
         Self {
             compositor: Compositor::new(device),
             layers: Vec::new(),
+            texts: Vec::new(),
         }
     }
 
@@ -599,6 +603,7 @@ impl Gpu {
         }
         // shortcut: a solid texture per layer per frame; cache by color if playback profiles hot.
         let mut solids = Vec::new();
+        let mut texts = Vec::new();
         for ((px, _), preview) in shown.layers.iter().zip(&mut self.layers) {
             let f = match px {
                 Pixels::Frame(f) => f,
@@ -607,7 +612,14 @@ impl Gpu {
                     continue;
                 }
                 Pixels::Text(rgba) => {
-                    solids.push(text::texture(device, queue, (s.width, s.height), rgba));
+                    // A cached raster is the same Arc, so its texture is reused, not re-uploaded.
+                    let old = self.texts.iter().find(|(r, _)| Arc::ptr_eq(r, rgba));
+                    let tex = old.map_or_else(
+                        || text::texture(device, queue, (s.width, s.height), rgba),
+                        |(_, t)| t.clone(),
+                    );
+                    texts.push((rgba.clone(), tex.clone()));
+                    solids.push(tex);
                     continue;
                 }
             };
@@ -620,6 +632,7 @@ impl Gpu {
             };
             preview.upload(device, queue, &yuv, scale);
         }
+        self.texts = texts;
         let layers: Vec<_> = shown
             .layers
             .iter()
