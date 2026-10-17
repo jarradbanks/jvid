@@ -4,7 +4,6 @@ usage: python3 roadmap.py <output path>
 """
 import json
 import pathlib
-import re
 import subprocess
 import sys
 
@@ -17,11 +16,12 @@ DAYS = {"S": 1, "M": 3, "L": 8}  # rough person-days per size label
 
 
 def statuses(issues, prs):
-    """Map issue number to Status, from `gh issue list` and `gh pr list` JSON. Issues with no status are left out."""
-    in_pr = set()
-    for pr in prs:
-        in_pr.update(ref["number"] for ref in pr.get("closingIssuesReferences") or [])
-        in_pr.update(int(n) for n in re.findall(r"#(\d+)\b", pr.get("body") or ""))
+    """Map issue number to Status, from `gh issue list` and `gh pr list` JSON. Issues with no status are left out.
+
+    An open PR works on an issue when GitHub links it (closingIssuesReferences: closing keywords in the body,
+    which GitHub parses properly, plus manual links). Bare #N mentions in a PR body don't count.
+    """
+    in_pr = {ref["number"] for pr in prs for ref in pr.get("closingIssuesReferences") or []}
     out = {}
     for i in issues:
         if i["state"] == "CLOSED":
@@ -44,7 +44,7 @@ def fetch_statuses():
         issues = gh_json("issue", "list", "-R", REPO, "--state", "all", "--limit", "1000",
                          "--json", "number,state,labels")
         prs = gh_json("pr", "list", "-R", REPO, "--state", "open", "--limit", "1000",
-                      "--json", "body,closingIssuesReferences")
+                      "--json", "closingIssuesReferences")
     except (OSError, subprocess.SubprocessError, ValueError) as e:
         err = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) and e.stderr else ""
         why = err.splitlines()[0] if err else e
