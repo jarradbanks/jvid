@@ -56,6 +56,10 @@ const CLIP: &[&str] = &[
     "",
     "reverse",
     "freeze_frame",
+    "",
+    "crossfade",
+    "dip_to_black",
+    "dip_to_white",
 ];
 
 /// Header toolbar, left to right.

@@ -37,6 +37,7 @@ mod keyframes;
 mod markers;
 pub mod menus;
 mod rubber;
+mod transitions;
 
 /// The undo gesture a track-height drag coalesces under.
 pub const RESIZE_GESTURE: GestureKey = 0x7472_6163_6b68; // "trackh"
@@ -103,6 +104,8 @@ pub struct Timeline {
     mark_drag: Option<(bool, Time)>,
     /// "Reveal in media bin" asked for this asset; the app takes it.
     pub reveal: Option<AssetId>,
+    /// A message for the app to show, such as why a transition couldn't be added.
+    pub notice: Option<String>,
     /// Keyframe lanes: expanded clips, picked keys and their clipboard.
     keys: keyframes::Keys,
 }
@@ -160,6 +163,7 @@ impl Default for Timeline {
             menu: None,
             mark_drag: None,
             reveal: None,
+            notice: None,
             keys: keyframes::Keys::default(),
         }
     }
@@ -341,6 +345,12 @@ impl Timeline {
             "delete" | "ripple_delete" if self.selected.is_empty() && self.gap.is_some() => {
                 let (track, at) = self.gap.take().expect("checked");
                 self.pending = Some(Command::CloseGap { track, at });
+            }
+            "crossfade" | "dip_to_black" | "dip_to_white" => {
+                match self.transition_action(id, project) {
+                    Ok(c) => self.pending = Some(c),
+                    Err(e) => self.notice = Some(e),
+                }
             }
             "copy" | "cut" | "paste" | "duplicate" | "delete" | "ripple_delete" | "link"
             | "enable" | "reverse" | "freeze_frame" => {
@@ -930,6 +940,9 @@ impl Timeline {
                     edit = Some(e);
                 }
                 if let Some(e) = self.fade_handles(ui, &painter, view, clip, r, id) {
+                    edit = Some(e);
+                }
+                if let Some(e) = self.transition_block(ui, &painter, project, view, clip, r) {
                     edit = Some(e);
                 }
                 self.key_toggle(ui, &painter, clip, r, id);
