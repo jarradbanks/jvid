@@ -2,4 +2,6 @@
 
 mod project_file;
 
-fn main() {}
+fn main() {
+    let _log = jvid_log::init("jvid-app", jvid_log::log_dir());
+}
