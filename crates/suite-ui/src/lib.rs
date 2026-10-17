@@ -7,5 +7,6 @@ pub mod panel;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 pub mod theme;
+pub mod themes;
 pub mod tokens;
 pub mod widgets;

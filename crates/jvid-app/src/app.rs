@@ -78,6 +78,7 @@ pub struct App {
     /// Match source: the next imported video sets the project's size and frame rate.
     match_source: bool,
     settings_dialog: crate::project_settings::SettingsDialog,
+    theme: suite_ui::themes::LiveTheme,
 }
 
 const TOAST_SECS: f64 = 6.0;
@@ -90,6 +91,7 @@ impl App {
         app.bin = MediaBin::new(caches.clone());
         app.timeline = Timeline::new(caches);
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
+        app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
         app
     }
 
@@ -126,6 +128,7 @@ impl App {
             on_welcome: true,
             match_source: false,
             settings_dialog: Default::default(),
+            theme: suite_ui::themes::LiveTheme::new("dark"),
         }
     }
 
@@ -472,6 +475,10 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if let Some(e) = self.theme.poll(&ctx) {
+            let until = ctx.input(|i| i.time) + TOAST_SECS;
+            self.toasts.push((e, until));
+        }
         if ctx.input(|i| i.viewport().close_requested()) && !self.confirm_discard() {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
         }

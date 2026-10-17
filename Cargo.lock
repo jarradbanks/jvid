@@ -3739,7 +3739,9 @@ dependencies = [
  "eframe",
  "egui",
  "egui_kittest",
+ "serde",
  "suite-ui",
+ "toml",
 ]
 
 [[package]]

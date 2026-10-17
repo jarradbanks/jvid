@@ -7,7 +7,8 @@ use egui::{
     Style, TextStyle, Visuals,
 };
 
-use crate::tokens::{color, font, radius, size, space};
+use crate::themes::{self, Palette};
+use crate::tokens::{font, radius, size, space};
 
 /// Lucide glyphs bundled in `assets/lucide-subset.ttf`. Draw with [`icon_font`].
 pub mod icon {
@@ -142,25 +143,36 @@ pub fn style() -> Style {
 }
 
 pub fn visuals() -> Visuals {
-    let mut v = Visuals::dark();
+    visuals_with(&themes::DARK)
+}
+
+/// The suite's visuals in `p`'s colours.
+pub fn visuals_with(p: &Palette) -> Visuals {
+    let color = p;
+    // A light panel needs egui's light defaults for anything not set below.
+    let mut v = if crate::tokens::contrast(p.panel, egui::Color32::BLACK) > 10.0 {
+        Visuals::light()
+    } else {
+        Visuals::dark()
+    };
     let control = CornerRadius::same(radius::CONTROL);
     let w = &mut v.widgets;
-    w.noninteractive.bg_fill = color::PANEL;
-    w.noninteractive.weak_bg_fill = color::PANEL;
-    w.noninteractive.bg_stroke = Stroke::new(1.0, color::BORDER);
-    w.noninteractive.fg_stroke = Stroke::new(1.0, color::INK);
-    w.inactive.bg_fill = color::FIELD;
-    w.inactive.weak_bg_fill = color::RAISED;
-    w.inactive.bg_stroke = Stroke::new(1.0, color::BORDER);
-    w.inactive.fg_stroke = Stroke::new(1.0, color::INK);
-    w.hovered.bg_fill = color::FIELD;
-    w.hovered.weak_bg_fill = color::RAISED;
-    w.hovered.bg_stroke = Stroke::new(1.0, color::BORDER_STRONG);
-    w.hovered.fg_stroke = Stroke::new(1.0, color::INK);
-    w.active.bg_fill = color::FIELD;
-    w.active.weak_bg_fill = color::BORDER;
-    w.active.bg_stroke = Stroke::new(1.0, color::BORDER_STRONG);
-    w.active.fg_stroke = Stroke::new(1.0, color::INK);
+    w.noninteractive.bg_fill = color.panel;
+    w.noninteractive.weak_bg_fill = color.panel;
+    w.noninteractive.bg_stroke = Stroke::new(1.0, color.border);
+    w.noninteractive.fg_stroke = Stroke::new(1.0, color.ink);
+    w.inactive.bg_fill = color.field;
+    w.inactive.weak_bg_fill = color.raised;
+    w.inactive.bg_stroke = Stroke::new(1.0, color.border);
+    w.inactive.fg_stroke = Stroke::new(1.0, color.ink);
+    w.hovered.bg_fill = color.field;
+    w.hovered.weak_bg_fill = color.raised;
+    w.hovered.bg_stroke = Stroke::new(1.0, color.border_strong);
+    w.hovered.fg_stroke = Stroke::new(1.0, color.ink);
+    w.active.bg_fill = color.field;
+    w.active.weak_bg_fill = color.border;
+    w.active.bg_stroke = Stroke::new(1.0, color.border_strong);
+    w.active.fg_stroke = Stroke::new(1.0, color.ink);
     w.open = w.active;
     for wv in [
         &mut w.noninteractive,
@@ -172,17 +184,17 @@ pub fn visuals() -> Visuals {
         wv.corner_radius = control;
         wv.expansion = 0.0;
     }
-    v.selection.bg_fill = color::BLUE.gamma_multiply(0.2);
-    v.selection.stroke = Stroke::new(1.0, color::LIGHT_BLUE);
-    v.hyperlink_color = color::LIGHT_BLUE;
-    v.faint_bg_color = color::RAISED;
-    v.extreme_bg_color = color::FIELD;
-    v.code_bg_color = color::FIELD;
-    v.warn_fg_color = color::AMBER;
-    v.error_fg_color = color::RED;
-    v.panel_fill = color::PANEL;
-    v.window_fill = color::RAISED;
-    v.window_stroke = Stroke::new(1.0, color::BORDER);
+    v.selection.bg_fill = color.blue.gamma_multiply(0.2);
+    v.selection.stroke = Stroke::new(1.0, color.light_blue);
+    v.hyperlink_color = color.light_blue;
+    v.faint_bg_color = color.raised;
+    v.extreme_bg_color = color.field;
+    v.code_bg_color = color.field;
+    v.warn_fg_color = color.amber;
+    v.error_fg_color = color.red;
+    v.panel_fill = color.panel;
+    v.window_fill = color.raised;
+    v.window_stroke = Stroke::new(1.0, color.border);
     v.window_corner_radius = CornerRadius::same(radius::DIALOG);
     v.menu_corner_radius = CornerRadius::same(radius::PANEL);
     let overlay = Shadow {
@@ -193,8 +205,8 @@ pub fn visuals() -> Visuals {
     };
     v.window_shadow = overlay;
     v.popup_shadow = overlay;
-    v.text_cursor.stroke = Stroke::new(1.0, color::LIGHT_BLUE);
-    v.weak_text_color = Some(color::INK_3);
+    v.text_cursor.stroke = Stroke::new(1.0, color.light_blue);
+    v.weak_text_color = Some(color.ink_3);
     v.button_frame = true;
     v.collapsing_header_frame = false;
     v.indent_has_left_vline = false;

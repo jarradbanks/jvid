@@ -31,6 +31,8 @@ pub struct Settings {
     /// Most recent first.
     pub recent_projects: Vec<PathBuf>,
     pub still_duration_secs: u32,
+    /// `dark`, `light`, `high-contrast` or the path of a theme `.toml` file.
+    pub theme: String,
 }
 
 impl Default for Settings {
@@ -42,6 +44,7 @@ impl Default for Settings {
             cache_max_mb: 10 * 1024,
             recent_projects: Vec::new(),
             still_duration_secs: DEFAULT_STILL_SECS,
+            theme: "dark".into(),
         }
     }
 }
@@ -76,6 +79,7 @@ impl Settings {
                 "still_duration_secs" => set(&mut out.still_duration_secs, &key, value, |v| {
                     STILL_SECS_RANGE.contains(v)
                 }),
+                "theme" => set(&mut out.theme, &key, value, |v: &String| !v.is_empty()),
                 _ => tracing::warn!("settings: ignoring unknown key `{key}`"),
             }
         }
@@ -143,6 +147,7 @@ mod tests {
             cache_max_mb: 500,
             recent_projects: vec!["a.jvid".into(), "b/c.jvid".into()],
             still_duration_secs: 3,
+            theme: "/home/me/mine.toml".into(),
         };
         assert_eq!(Settings::from_toml(&s.to_toml()).unwrap(), s);
         let d = Settings::default();
