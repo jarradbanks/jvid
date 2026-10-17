@@ -212,7 +212,8 @@ fn render(
     let (first, end) = frames(project, req);
     let decoders = DecoderPool::default();
     let mut audio = Audio::new(Box::new(blocking));
-    let mut gpu = Gpu::new(device);
+    // Audio-only presets never touch the GPU.
+    let mut gpu = enc.has_video().then(|| Gpu::new(device));
     let mut readback = Readback::default();
     let (mut mix, mut limited) = (Vec::new(), Vec::new());
     for (k, time, a, b) in spans(project, req) {
@@ -240,7 +241,7 @@ fn render(
             layers.push((Pixels::Frame(Arc::new(f)), layer.transform));
         }
         if enc.has_video() {
-            let tex = gpu.draw(
+            let tex = gpu.get_or_insert_with(|| Gpu::new(device)).draw(
                 device,
                 queue,
                 project.settings(),

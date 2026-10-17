@@ -23,6 +23,8 @@ pub enum AudioCodec {
     Mp3,
     /// 16-bit PCM.
     Pcm,
+    /// 24-bit PCM.
+    Pcm24,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -144,6 +146,15 @@ pub fn builtin() -> Vec<Preset> {
         ),
         p("GIF", "gif", Some(Gif), None, None, Some(25), &[]),
         p("Audio only (WAV)", "wav", None, Some(Pcm), None, None, &[]),
+        p(
+            "Audio only (WAV 24-bit)",
+            "wav",
+            None,
+            Some(Pcm24),
+            None,
+            None,
+            &[],
+        ),
         p("Audio only (MP3)", "mp3", None, Some(Mp3), None, None, &[]),
         p("Audio only (AAC)", "m4a", None, Some(Aac), None, None, &[]),
     ]

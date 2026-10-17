@@ -325,6 +325,51 @@ fn export_hits_loudness_target() {
     }
 }
 
+/// Audio-only WAV of 1 s to 3 s holds exactly the mixer's samples for that range, at 16 and 24
+/// bits: each decoded sample is the mix quantized the way the encoder does.
+#[test]
+fn audio_only_wav_is_the_mix() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let p = project(&dir);
+    for (name, bits) in [("Audio only (WAV)", 16), ("Audio only (WAV 24-bit)", 24)] {
+        let path = out(&format!("mix{bits}.wav"));
+        let req = Request {
+            path: path.clone(),
+            range: (secs(1), secs(3)),
+            preset: preset(name),
+            loudness: None,
+        };
+        let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        assert_eq!((info.width, info.audio_streams), (None, 1), "{name}");
+        let mut want = Vec::new();
+        let mut audio = Audio::new(Box::new(blocking));
+        for (_, time, a, b) in spans(&p, &req) {
+            let mut mix = vec![0.0; (b - a) as usize * 2];
+            audio.prime(&p, time);
+            audio.mix(&p, a, &mut mix);
+            want.extend(mix);
+        }
+        let mut got = Vec::new();
+        let mut a = AudioDecoder::open(&path, 0).unwrap();
+        while let Some(c) = a.next_chunk().unwrap() {
+            got.extend(c.samples);
+        }
+        assert_eq!(got.len(), want.len(), "{name}");
+        let scale = (1i64 << (bits - 1)) as f64;
+        let q = |s: f32| (s.clamp(-1.0, 1.0) as f64 * (scale - 1.0)) as i64;
+        let d = |s: f32| (s as f64 * scale).round() as i64;
+        let diff = got.iter().zip(&want).position(|(g, w)| d(*g) != q(*w));
+        assert_eq!(diff, None, "{name}: first differing sample");
+        assert!(
+            want.iter().any(|s| s.abs() > 0.02),
+            "{name}: the range has the tone"
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
+}
+
 #[test]
 fn user_presets_skip_bad_files() {
     let dir = out("presets");

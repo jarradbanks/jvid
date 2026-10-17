@@ -151,6 +151,7 @@ fn audio_codec(c: AudioCodec) -> (&'static str, Sample) {
         AudioCodec::Aac => ("aac", Sample::F32(sample::Type::Planar)),
         AudioCodec::Mp3 => ("libmp3lame", Sample::F32(sample::Type::Planar)),
         AudioCodec::Pcm => ("pcm_s16le", Sample::I16(sample::Type::Packed)),
+        AudioCodec::Pcm24 => ("pcm_s24le", Sample::I32(sample::Type::Packed)),
     }
 }
 
@@ -316,11 +317,19 @@ impl Encoder {
                     f.plane_mut::<f32>(i % 2)[i / 2] = s;
                 }
             } else {
-                // Packed is only ever 16-bit PCM; plane_mut would only cover one channel.
+                // Packed is only ever PCM; plane_mut would only cover one channel.
+                let wide = f.format() == Sample::I32(sample::Type::Packed);
                 let data = f.data_mut(0);
                 for (i, s) in samples.enumerate() {
-                    let v = (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
-                    data[i * 2..][..2].copy_from_slice(&v.to_le_bytes());
+                    let s = s.clamp(-1.0, 1.0);
+                    if wide {
+                        // pcm_s24le reads the top 24 bits of each s32.
+                        let v = ((s as f64 * 8_388_607.0) as i32) << 8;
+                        data[i * 4..][..4].copy_from_slice(&v.to_le_bytes());
+                    } else {
+                        let v = (s * i16::MAX as f32) as i16;
+                        data[i * 2..][..2].copy_from_slice(&v.to_le_bytes());
+                    }
                 }
             }
             f.set_pts(Some(self.samples));
