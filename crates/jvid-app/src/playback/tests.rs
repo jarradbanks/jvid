@@ -823,3 +823,65 @@ fn merged_clip_mixes_every_stream() {
     // Merged: 1 + 2 + 3; separate tracks: the same total, one stream per clip.
     assert_eq!(gains, [6.0, 6.0]);
 }
+
+#[test]
+fn scrub_queues_a_snippet_from_the_parked_playhead() {
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Audio, "/a.wav", secs(10));
+    let p = h.project();
+    let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), indexed(), DEFAULT_BUDGET);
+    let fake = Fake::default();
+    let mut out = Output::new(Box::new(fake.clone()), None);
+    pb.tick(p, &mut out);
+    pb.transport.seek(secs(2), out.clock());
+    pb.scrub(p, &mut out);
+    let heard = fake.pull(SCRUB_SAMPLES);
+    let gain = pan_gains(0.0).0;
+    let first = sample(secs(2)) as f32 + 1.0;
+    assert_eq!(heard[0], first * gain);
+    assert_eq!(
+        heard[(SCRUB_SAMPLES - 1) * 2],
+        (first + SCRUB_SAMPLES as f32 - 1.0) * gain
+    );
+    assert_eq!(pb.transport.speed(), 0, "scrubbing doesn't start playback");
+}
+
+/// Acceptance (#41): dragging the playhead across 1080p H.264, the Program monitor updates 30+
+/// times a second, showing keyframe stand-ins first and exact frames once decoded.
+#[test]
+fn scrub_1080p30_updates_30_per_second() {
+    if cfg!(debug_assertions) {
+        eprintln!("skipping scrub rate in a debug build; run with --release");
+        return;
+    }
+    let Some(dir) = jvid_media::test_media::corpus() else {
+        return;
+    };
+    jvid_media::ffmpeg::init().unwrap();
+    let path = dir.join("frame-index-1080p30.mp4");
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, path.to_str().unwrap(), secs(10));
+    let p = h.project();
+    let mut pb = Playback::from_files(DEFAULT_BUDGET);
+    let mut out = Output::new(Box::new(Fake::default()), None);
+    pb.tick(p, &mut out);
+    // A 60 Hz UI dragging the playhead across all ten seconds in three.
+    let start = Instant::now();
+    let (mut updates, mut exact) = (0, 0);
+    for ui_frame in 0..180 {
+        let frame = ui_frame * 300 / 180;
+        pb.transport.seek(FPS30.time_floor(frame), out.clock());
+        pb.refresh();
+        if let Some(s) = pb.tick(p, &mut out) {
+            updates += 1;
+            exact += s.exact as u32;
+        }
+        let due = Duration::from_secs_f64((ui_frame + 1) as f64 / 60.0);
+        std::thread::sleep(due.saturating_sub(start.elapsed()));
+    }
+    let rate = updates as f64 / start.elapsed().as_secs_f64();
+    println!(
+        "PERF scrub 1080p30 H.264: {rate:.1} updates/s ({exact} exact of {updates}, budget 30)"
+    );
+    assert!(rate >= 30.0, "{rate:.1} updates/s");
+}
