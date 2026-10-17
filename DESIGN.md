@@ -9,192 +9,194 @@ description: A small, fast video editor for cutting gaming highlights and screen
 
 ## Overview
 
-**Creative North Star: "The Clean Cut"**
+**Creative North Star: "The Quiet Frame"**
 
-jvid takes its look from late-90s game graphics: PS1-era menus and racing-game livery, the tech-graphic style of The Designers Republic and wipEout. That look is held to the finish of Linear and arranged the way Premiere is. Near-black plates float on a darker ground. Small wide capitals name each panel, prefixed with the number that focuses it. Bold monospace numerals carry time. One acid yellow-green marks where you are and what you've picked. Nothing is rounded: anything you act on has its top-left corner cut at 45°. A cut is the editor's basic act, and on a clip the cut corner sits exactly on its in-point.
+jvid is a quiet frame around the footage. It has Premiere's layout and conventions and the calm precision of Linear: neutral dark surfaces, thin borders, subtle rounded corners, clean inputs, one typeface and one blue accent. The chrome steps back so the picture is the brightest, most colourful thing on screen, and the polish shows in the details: exact alignment, consistent spacing, real hover and focus states, and numbers that don't jitter.
 
-The world supplies four things: type, palette, density and the cut corner. It never supplies layout, navigation or controls. Those follow Premiere and ordinary desktop conventions, so an editor knows where everything is before they notice the style. Density is compact (12px text, 24px controls) to fit as much timeline on screen as possible.
+Density is compact (12px text, 24px controls) to fit as much timeline on screen as possible. Panels sit where Premiere puts them, so an editor knows where everything is before they notice anything about the style.
 
-The usual scene is an evening at a desk after a gaming session, or a screen recording made beside the app, often in a dim room. The footage has to be the brightest, most colourful thing on screen. So the chrome is dark, the viewer is neutral black, and colour in the chrome is spent only on meaning.
+The usual scene is an evening at a desk after a gaming session, or a screen recording made beside the app, often in a dim room. So the UI is dark, the viewer is neutral black, and colour in the chrome is spent only on meaning.
 
-The look of the first prototypes in `docs/prototypes/` (warm greys, one amber accent, Inter) was rejected. Their panel layout stands.
+Two looks have been tried and rejected. The first prototypes' warm greys with an amber accent felt generic. The "Clean Cut" Y2K tech-graphic direction (cut corners, wide capitals, acid accent) was too stylised once seen in a mockup. The panel layout from the first prototypes stands.
 
 **Key Characteristics:**
-- Near-black plates on a darker ground, 4px apart
+- Neutral, faintly cool dark surfaces separated by thin borders and 4px gaps
+- Subtle rounding: 4px on small things, 6px on controls, 8px on panels
 - One header height for every panel, so header lines run straight across the window
-- Wide capital labels prefixed with each panel's focus shortcut; bold monospace numerals for anything that changes
-- Acid accent for position, focus, selection and the one primary action, nothing else
-- Square corners, with a 45° cut on the top-left corner of objects
-- Clip colours are the only large areas of colour
+- Inter for everything, with tabular figures so numbers hold still
+- One blue accent for focus, selection, the playhead and the primary action
+- Muted clip colours that stay out of the accent's way
 
 ## Colors
 
-Restrained and cool: blue-tinted near-blacks, one acid accent that carries state, and four clip colours that own the timeline. These are starting values from the direction round. Confirm them in the first `suite-ui` build, then re-run `/impeccable document` to make them normative.
+Restrained: neutral darks with a faint cool tint, one blue accent in two tones, and four muted clip colours. These are starting values. Confirm them in the first `suite-ui` build, then re-run `/impeccable document` to make them normative.
 
 ### Primary
-- **Acid** (#CEFE34; pressed #B3DE1E): the playhead and the current timecode, the focused panel's number and tab underline, keyboard focus rings, selection outlines, the in/out range, and the single primary button. Text on Acid is Ground (17:1).
+- **Blue** (#2368C9; hover #2C70D3, pressed #215DB3): fills. Used for the primary button, the focused panel's border, the in/out band (at 25%) and selected rows in lists (at 20%). White text on it is 4.6:1.
+- **Light Blue** (#7AACF6): lines and text on dark. Used for the playhead, focus rings, selection outlines on clips, selected keyframes, in/out brackets and links (8:1 on Panel).
 
 ### Clips
-- **Ultramarine** (#3453D3): video clips.
-- **Violet** (#763EBD): text and title clips.
-- **Magenta** (#AB3276): still images and solid colour layers.
-- **Teal** (#037465): audio clips.
+- **Muted Violet** (#5E589F): video clips.
+- **Muted Plum** (#8E4771): text and title clips.
+- **Muted Ochre** (#88602D): still images and solid colour layers.
+- **Muted Green** (#30715D): audio clips.
 
-Every clip colour carries Ink clip names at 4.7:1 or better. A new clip colour has to clear 4.5:1 against Ink before it ships.
+Every clip colour carries Ink clip names at 4.8:1 or better, and none sits close enough to the accent blue to be mistaken for selection. A new clip colour has to clear 4.5:1 against Ink.
 
 ### State
-- **Signal Red** (#F4514F): errors, offline media, meter clipping at 0 dBFS, destructive confirmations.
-- **Amber** (#FCA443): warnings (a proxy is missing, lossless export isn't available), solo engaged, meter level above −6 dBFS.
+- **Red** (#EC5B57): errors, offline media, meter clipping at 0 dBFS, destructive confirmations.
+- **Amber** (#F2AF48): warnings (a proxy is missing, lossless export isn't available), solo engaged, meter level above −6 dBFS.
+- **Green** (#4EBE7D): finished renders, meter level below −6 dBFS.
 
 ### Neutral
-- **Ground** (#050608): the window background, seen in the gutters between plates.
-- **Plate** (#14171C): every panel's surface, its header included.
-- **Raised** (#1E2227): hover fills, secondary buttons, menus, popovers, tooltips.
-- **Well** (#0C0F12): one step below Plate, so it reads as recessed. Used for input fields, dropdowns and empty timeline lanes.
-- **Line** (#272C32): the only hairline. Header dividers, section rules, track separators, overlay borders.
-- **Line Strong** (#3D434A): hover outlines on fields and secondary buttons, ruler ticks.
-- **Ink** (#E8EBF1): primary text and values, the active tab, clip names, on-state icons.
-- **Ink 2** (#9EA5AE): secondary text, inactive tabs, inspector labels, icons at rest.
-- **Ink 3** (#7C828B): unfocused panel numbers, field prefixes, ruler labels, shortcut hints, disabled text. At 4.6:1 on Plate it is the dimmest colour allowed for readable text.
-- **Viewer** (#060606): the neutral, untinted black behind the picture in the preview.
+- **Ground** (#0A0B0D): the window background, seen in the gutters between panels and behind the app bar.
+- **Panel** (#121416): every panel's surface, its header included.
+- **Raised** (#1C1E21): the active tab, hover fills, secondary buttons, menus, popovers, tooltips.
+- **Field** (#0D0E11): input and dropdown fills, and empty timeline lanes.
+- **Border** (#232529): panel borders, header dividers, input borders, section rules, track separators.
+- **Border Strong** (#36383C): borders on hover.
+- **Ink** (#EDEEF1): primary text and values, the active tab, clip names.
+- **Ink 2** (#ADB1B8): secondary text, inspector labels, icons at rest.
+- **Ink 3** (#82868E): inactive tabs, field prefixes, ruler labels, shortcut hints, placeholders. At 5:1 on Panel it is the dimmest colour allowed for readable text.
+- **Ink 4** (#5A5E63): disabled text and icons only.
+- **Viewer** (#040404): the neutral, untinted black behind the picture in the preview.
 
 ### Named Rules
-**The Acid Means Here Rule.** Acid marks where you are (playhead, current timecode, focused panel, keyboard focus), what you've picked (selection, in/out) and the one thing to do next (the primary button). Nothing decorative is ever acid. With no dialog open, acid covers well under 2% of the window.
+**The One Blue Rule.** Blue marks focus, selection, the playhead, the in/out range and the single primary action. Nothing decorative is ever blue, and no other accent exists.
 
-**The Neutral Viewer Rule.** Nothing tinted touches the picture. The viewer surround is neutral black. Overlays on the frame (safe areas, grid, transform handles) are 1px Ink or Acid lines.
+**The Neutral Viewer Rule.** Nothing tinted touches the picture. The viewer surround is neutral black. Overlays on the frame (safe areas, grid, transform handles) are 1px Ink or Light Blue lines.
 
 **The Clips Own Colour Rule.** Clip colours appear only on clips, their keyframe lanes and the type badges in the media bin. They never appear in chrome, buttons or text.
 
 ## Typography
 
-**Body Font:** Archivo (Omnibus-Type, OFL) at normal width
-**Label Font:** Archivo Expanded (width 125), SemiBold, in capitals
-**Numeral Font:** Martian Mono (Evil Martians, OFL)
+**Font:** Inter (OFL), embedded in `suite-ui` with tabular figures made the default (frozen in with fonttools' feature freezer), because egui can't switch OpenType features on.
 
-**Character:** A wide technical capital over a sturdy, plain grotesk, with a square monospace for every number that moves. The wide capitals carry the tech-graphic voice, and the normal-width body keeps 12px text readable. Embed static instances of each weight and width in `suite-ui` rather than depending on variable-font axis support.
+**Character:** One neutral, highly legible UI face at small sizes, the way Linear uses it. Hierarchy comes from weight and colour, not from extra families or capitals. Every digit is tabular, so timecodes and dragged values never change width.
 
 ### Hierarchy
 Sizes are egui points; the scale steps by about 1.17.
-- **Display** (Archivo Expanded Bold 700, 22px, line 28): the welcome screen and its lowercase "jvid" wordmark only.
-- **Headline** (Archivo SemiBold 600, 16px, line 22): dialog titles.
-- **Title** (Archivo SemiBold 600, 14px, line 20): dialog section titles, empty-state headings. The app bar wordmark uses this size in Archivo Expanded Bold.
-- **Body** (Archivo Regular 400, Medium 500 for emphasis, 12px, line 16): every control, list row, menu item, clip name, inspector label and message.
-- **Label** (Archivo Expanded SemiBold 600, 10px, line 12, +0.06em tracking, capitals): panel names and tabs, inspector section heads, column heads.
-- **Timecode** (Martian Mono Bold 700, 16px): the current time under the preview.
-- **Value** (Martian Mono Medium 500, 12px): numeric fields, timecodes in lists and in the timeline's corner cell, track IDs (V1, A2), durations, panel numbers.
-- **Small numerals** (Martian Mono Regular 400, 10px): ruler labels, shortcut hints, meter scale.
+- **Display** (SemiBold 600, 22px, line 28, −0.01em): the welcome screen only.
+- **Headline** (SemiBold 600, 16px, line 22): dialog titles.
+- **Title** (SemiBold 600, 14px, line 20): dialog section titles, empty-state headings, the app bar wordmark.
+- **Body** (Regular 400, 12px, line 16): every control, list row, menu item, message and inspector label.
+- **Body Strong** (Medium 500, 12px, line 16): tabs, panel titles, inspector section heads, clip names, button labels.
+- **Small** (Regular 400, 10px, line 12): ruler labels, duration badges, shortcut hints, meter scale.
+- **Timecode** (Medium 500, 16px): the current time under the preview.
 
 ### Named Rules
-**The Numbers Hold Still Rule.** Any number that can change while you watch it (timecodes, dragged values, durations, meter readouts) is set in Martian Mono, so digits never shift width under the cursor.
+**The Sentence Case Rule.** Labels, tabs, section heads and buttons are in sentence case. Nothing in the UI is set in capitals or letter-spaced; user content such as title clips keeps whatever case the user typed.
 
-**The Index Is the Shortcut Rule.** The number in front of a panel's name ("01 MEDIA") is the Shift+number shortcut that focuses it in the default keymap, which follows Premiere: 1 Media, 2 Source, 3 Timeline, 4 Program, 5 Inspector, 7 Effects. A view without a shortcut has no number, and when a user remaps a shortcut the label changes with it. Never number things for decoration.
+**The Numbers Hold Still Rule.** Every number uses tabular figures, so timecodes, dragged values and meter readouts never shift width under the cursor.
 
 ## Layout
 
 Panels sit where Premiere puts them, as in the first prototypes: media bin on the left, preview in the centre, inspector on the right, and the timeline across the bottom, all under a 40px app bar. Docking can rearrange them, and every rule below holds in any arrangement. Units are egui points; every edge lands on a whole physical pixel at every UI scale.
 
-**Spacing scale (4px base):** 4 (gutters, icon-to-label gaps), 8 (between controls, list padding), 12 (the inset inside a plate), 16 (between inspector sections), 24, 32. 2px exists only for underline and focus-ring offsets.
+**Spacing scale (4px base):** 4 (gutters, icon-to-label gaps), 8 (between controls, list padding), 12 (the inset inside a panel), 16 (between inspector sections), 24, 32.
 
 | Size | Value | Used for |
 | --- | --- | --- |
 | App bar | 40px | The window's top bar |
 | Header | 32px | Every panel header and tab bar, inspector section heads, the preview's transport row |
 | Ruler | 24px | The timeline ruler and the corner cell beside it |
-| Control | 24px | Buttons, fields, dropdowns, list rows, menu rows, inspector property rows |
+| Control | 24px | Buttons, inputs, dropdowns, tab pills, list rows, menu rows, inspector property rows |
+| Tab | up to 160px | Tab width; tabs share the header equally up to this, at least 64px |
 | Small control | 20px | Track-header toggles |
 | Icon | 16px | Every glyph, centred in its control |
-| Gutter | 4px | Between plates, and between plates and the window edge |
-| Inset | 12px | Left and right padding inside a plate and its header |
+| Gutter | 4px | Between panels, and between panels and the window edge |
+| Inset | 12px | Left and right padding inside a panel and its header |
 | Track header | 160px | Width of the timeline's track-header column |
 | Track | 40px | Default lane height; resizable from 24 to 120 in 4px steps |
 | Inspector label | 72px | Width of the inspector's label column |
-| Plate minimum | 240px | Narrowest a docked plate may get |
+| Panel minimum | 240px | Narrowest a docked panel may get |
 
 ### Named Rules
-**The One Header Line Rule.** Every panel header is exactly 32px tall, sits at the top of its plate and ends in the same 1px Line divider. Plates side by side start at the same y, so their headers and dividers form one straight line across the window. A panel with a single view shows its title where a tab would be, so a titled panel and a tabbed panel match in height, type and label position. Tabs, toolbars and actions share that one row; a search field or filter goes in the panel's content, never in a second header row. This prevents the misalignment in `01-editor.png`, where the bin's tabs and divider sat on a different line from the preview's.
+**The One Header Line Rule.** Every panel header is exactly 32px tall, sits at the top of its panel and ends in the same 1px Border divider. Panels side by side start at the same y, so their headers and dividers form one straight line across the window. A panel with a single view shows its title where a tab would be, so a titled panel and a tabbed panel match in height, type and label position. Tabs, toolbars and actions share that one row; a search field or filter goes in the panel's content, never in a second header row. This prevents the misalignment in `01-editor.png`, where the bin's tabs and divider sat on a different line from the preview's.
 
 **The Rows Face Each Other Rule.** Rows that sit side by side line up. The timeline ruler and its corner cell are one 24px row. Each track header is exactly as tall as its lane and starts at the same y. Inspector section heads use the 32px header height, so a fully collapsed inspector reads as a stack of headers.
 
-**The Twelve Inset Rule.** Text and icons inside a plate start 12px from its left edge, header labels included. Header action buttons sit 8px from the right edge, so their 16px glyphs end at 12px.
+**The Twelve Inset Rule.** Text and icons inside a panel start 12px from its left edge, header labels included. Tabs are the exception: the tab group starts 4px in, and each label is centred in its pill. Header action buttons sit 8px from the right edge, so their 16px glyphs end at 12px.
 
-**The Single Hairline Rule.** Lines are 1 physical pixel of Line, never doubled. Where a header divider meets a plate edge or another rule, there is one line, not two. Plates have no border at all; their tone separates them from the ground.
+**The Single Hairline Rule.** Borders and dividers are 1 physical pixel, never doubled. Where a header divider meets a panel border or another rule, there is one line, not two.
 
 ### Checks
 Acceptance criteria for `suite-ui` and the app shell, run as egui_kittest snapshot tests:
-- Render the default layout at 1280×720 and 1920×1080, at 100% and 150% scale. In each row of plates, every header divider is at the same y and every header label's baseline is at the same y.
+- Render the default layout at 1280×720 and 1920×1080, at 100% and 150% scale. In each row of panels, every header divider is at the same y and every header label's baseline is at the same y.
 - Switch a panel between one view and several tabs. Its header height and label position don't move.
-- Sample along each divider: no line is wider than 1 physical pixel.
-- Measure the left edge of the first text or icon in every plate: it is 12px from the plate edge.
+- Sample along each divider and border: no line is wider than 1 physical pixel.
+- Measure the left edge of the first text or icon in every panel: it is 12px from the panel edge.
 
 ## Elevation & Depth
 
-Flat and tonal. Depth comes from three tones: Ground behind, Plate for panels, Raised for whatever sits on top (hover fills, menus, popovers). Wells sit one step below Plate to read as recessed. Nothing inside the window casts a shadow except floating overlays (menus, popovers, dialogs, toasts). Those use one shadow (0 8px 24px, black at 55%) and a 1px Line border.
+Flat, tonal and bordered. Depth comes from three tones (Ground behind, Panel for panels, Raised for things on top) and 1px Border lines. Fields sit one step below Panel to read as recessed. Nothing inside the window casts a shadow except floating overlays (menus, popovers, dialogs, toasts). Those use one soft shadow (0 8px 24px, black at 40%) on top of their Border.
 
 ### Named Rules
-**The No Glow Rule.** Nothing glows: no outer glows, gradients, blur or glass. Acid is only ever a flat fill or a 1px line.
+**The Flat Inside Rule.** No glows, gradients, blur or glass, and no shadows on anything that isn't floating.
 
 ## Shapes
 
-Corners are square. The only exception is the cut: a 45° chamfer on the top-left corner of objects you act on or that hold work.
-- **8px cut:** plates and dialogs.
-- **4px cut:** clips, buttons, menus, popovers, toasts, bin thumbnails.
-- **Pointed tag:** the playhead head and marker flags, with both lower corners cut to a point.
-- **Square, no cut:** everything you type into (fields, dropdowns), tabs, checkboxes, scrollbars, tooltips, and anything under 20px tall.
+Subtle, consistent rounding from one scale:
+- **4px:** clips, checkboxes, badges, tooltips, the playhead head.
+- **6px:** buttons, inputs, dropdowns, tab pills, segmented controls, bin thumbnails, hover rows inside menus.
+- **8px:** panels, menus, popovers, toasts.
+- **12px:** dialogs and the welcome screen's cards.
 
-45° is the only angle in the system. Hatching on disabled and offline clips runs at 45°, and keyframe diamonds are squares turned 45°.
+Keyframes are 8px diamonds (squares turned 45° with 1px rounding). Scrollbars are 4px wide with fully rounded ends.
 
 ### Named Rules
-**The Cut Marks a Start Rule.** One corner, always the top-left, always 45°. Never cut two corners of one object (pointed tags excepted), never round a corner, never use another angle.
+**The Radius Scale Rule.** Corners use only 4, 6, 8 or 12px, matched to the object's size, and a nested element's radius is never larger than its container's. No sharp corners on objects, and no pill shapes larger than a scrollbar.
 
 ## Components
 
 These specs are for the first `suite-ui` build. The next `/impeccable document` run replaces them with the components as built.
 
-### Panel headers and tabs
-- **Structure:** a 32px row on Plate with a Line divider at its bottom. The first label starts at 12px; tabs are 16px apart.
-- **Tab:** the panel number in Value numerals, then the name in Label type ("01 MEDIA"). Active: Ink text and a 2px underline sitting on the divider, the width of the label. Inactive: Ink 2, turning Ink on hover.
-- **Focus:** when the panel has keyboard focus, the active tab's number and underline turn Acid. Unfocused panels show the number in Ink 3 and the underline in Ink.
+### Panels, headers and tabs
+- **Panel:** Panel fill, 1px Border, 8px radius. A panel with keyboard focus swaps its border to Blue, as Premiere does, because focus decides what shortcuts do.
+- **Header:** a 32px row with a Border divider at its bottom.
+- **Tabs:** a panel's tabs fill its header. The group runs from 4px in on the left to the header actions, or to 4px from the right edge, and the tabs share that width equally, 4px apart, up to 160px each. A wide panel such as the preview keeps its tabs at 160px, left-aligned. Each tab is a 24px pill centred vertically in the header (4px above and below), with its Body Strong label centred in the pill. Active: Ink text on Raised. Inactive: Ink 3, turning Ink 2 on hover. Tabs that would shrink below 64px move into a chevron menu at the end of the group.
 - **Actions:** 24px icon buttons at the right, 4px apart.
 
 ### Buttons
-- **Shape:** 24px tall (32px in dialog footers), 4px cut, 12px side padding, Body Medium.
-- **Primary:** Acid fill, Ground text; hover is a slightly lighter Acid, pressed is Acid pressed (#B3DE1E). One per surface: Export in the app bar, or the confirm button in a dialog.
-- **Secondary:** Raised fill, Ink text. Hover adds a 1px Line Strong outline that follows the cut. Pressed fills Well.
-- **Icon and ghost:** no fill, Ink 2 glyph. Hover fills Raised and turns the glyph Ink. A toggle that's on shows an Ink glyph on Raised.
-- **Focus-visible:** a 1px Acid outline 2px outside the shape (Ink on a primary button).
-- **Disabled:** Raised fill, Ink 3 text, no hover. **Loading:** the label stays, the button keeps its width, and a 12px spinner replaces the icon.
-- **Destructive:** secondary styling with Signal Red text, only in confirmation dialogs.
+- **Shape:** 24px tall (28px in dialog footers), 6px radius, 12px side padding, Body Strong.
+- **Primary:** Blue fill, white text; hover and pressed use Blue's hover and pressed values. One per surface: Export in the app bar, or the confirm button in a dialog.
+- **Secondary:** Raised fill with a 1px Border, Ink text. Hover swaps in Border Strong.
+- **Ghost and icon:** no fill, Ink 2 text or glyph. Hover fills Raised and turns it Ink. A toggle that's on shows Ink on Raised.
+- **Focus-visible:** a 2px Light Blue ring 1px outside the shape, at 60%.
+- **Disabled:** Raised fill, Ink 4 text, no hover. **Loading:** the label stays, the button keeps its width, and a 12px spinner replaces the icon.
+- **Destructive:** secondary styling with Red text, only in confirmation dialogs.
 
-### Fields
-- **Style:** a square Well, 24px tall, no border at rest. An inline prefix (X, Y, W, H, ∠) in Ink 3 Body, then the value in Value numerals and Ink, like the inline-labelled grids in the reference inspectors.
-- **States:** hover adds a 1px Line Strong border; editing uses a 1px Acid border; an error uses a 1px Signal Red border with the message in Signal Red Body under the row; disabled shows the value in Ink 3 with no hover.
-- **Numeric fields:** drag sideways to scrub, double-click or press Enter to type.
-- **Dropdowns:** the same Well with a chevron at the right.
+### Inputs
+- **Style:** 24px tall, 6px radius, Field fill, 1px Border, 8px side padding. An optional inline prefix (X, Y, W, H) in Ink 3, then the value in Ink.
+- **States:** hover swaps in Border Strong. Focus uses a Blue border plus the Light Blue focus ring. An error uses a Red border, with the message in Red Body under the row. Disabled drops the border and shows Ink 4 text.
+- **Numeric inputs:** drag sideways to scrub; double-click or press Enter to type.
+- **Dropdowns:** the same input with a chevron at the right.
+- **Search:** the same input with a search icon as its prefix and an Ink 3 placeholder.
 
 ### Inspector rows
-A 72px label column (Body, Ink 2), then a grid of fields 4px apart, then a keyframe toggle at the right edge: an 8px diamond in a 20px hit area. Rows are 24px tall and 4px apart. Section heads use the panel header style: Label type, a chevron, and reset and keyframe-all buttons on the right.
+A 72px label column (Body, Ink 2), then inputs 4px apart, then a keyframe toggle at the right edge: an 8px diamond in a 20px hit area. Rows are 24px tall and 4px apart. Section heads use the 32px header row: Body Strong in Ink, a chevron, and reset and keyframe-all buttons on the right.
 
 ### Clips
-- **Shape:** the lane height minus 2px at top and bottom, with a 4px cut at the top-left, which is the clip's in-point. Adjacent clips are 1px apart, so every edit point shows.
-- **Content:** a 16px name strip in Body Medium Ink, starting 8px in. Video clips show thumbnails below the strip; audio clips show a waveform in a lighter tint of Teal; title clips show only the name.
-- **States:** hover lightens the fill slightly. Selected adds a 2px Acid inner outline that follows the cut. A trim edge under the pointer shows a 4px Ink bracket, which turns Acid while dragging. Disabled clips and clips on hidden tracks get 45° Ground hatching at 50% and an Ink 2 name. Offline clips show Signal Red 45° hatching on Well with "Offline" after the name.
-- **Keyframes:** 8px diamonds in Ink, Acid when selected. Hold keyframes are squares; eased keyframes are diamonds with their side points cut flat.
+- **Shape:** the lane height minus 2px at top and bottom, 4px radius, with 2px between adjacent clips, so every edit point shows.
+- **Content:** a 16px name strip in Body Strong and Ink, starting 6px in. Video clips show thumbnails below the strip, audio clips show a waveform in a lighter tint of Muted Green, and title clips show only the name.
+- **States:** hover lightens the fill slightly. Selected adds a 2px Light Blue inner outline. A trim edge under the pointer shows a 4px Ink bracket, which turns Light Blue while dragging. Disabled clips and clips on hidden tracks drop to 40% opacity. Offline clips show a Red fill at 30% with "Offline" after the name.
+- **Keyframes:** Ink diamonds, Light Blue when selected. Hold keyframes are squares and eased keyframes are circles.
 
 ### Playhead, ruler, in/out and markers
-- **Playhead:** a 1px Acid line through the ruler and every lane, with a 10×12 Acid pointed tag in the ruler. The current time shows in Acid twice: Timecode numerals in the preview's transport row and Value numerals in the timeline's corner cell.
-- **Ruler:** Plate, with Line Strong ticks and Small numerals in Ink 3.
-- **In/out:** the ruler between in and out is filled with Acid at 20%, and the lanes between them are lifted by Ink at 4%. The in and out points are 1px Acid brackets with 4px feet in the ruler.
-- **Markers:** Ink pointed flags in the ruler. A ranged marker adds a 2px Ink bar along its length.
+- **Playhead:** a 1px Light Blue line through the ruler and every lane, with a 10×12 Light Blue head in the ruler (rounded top, pointed bottom). The current time shows in Timecode type in the preview's transport row and in Body Strong in the timeline's corner cell.
+- **Ruler:** Panel fill, Border Strong ticks, Small labels in Ink 3.
+- **In/out:** the ruler between in and out is filled with Blue at 25%, and the lanes between them are lifted by Ink at 3%. The in and out points are 1px Light Blue brackets.
+- **Markers:** small Ink flags in the ruler. A ranged marker adds a 2px Ink bar along its length.
 
 ### Track headers
-A 160px column on Plate. The track ID (V1, A1) in Value numerals and Ink, the name in Body and Ink 2, then 20px toggles (lock, hide or mute, solo) in Ink 3. A toggle that's on shows an Ink glyph on Raised; solo shows an Amber fill, because it silences everything else.
+A 160px column on Panel. The track ID (V1, A1) in Body Strong and Ink, the name in Body and Ink 2, then 20px ghost toggles (lock, hide or mute, solo). A toggle that's on shows Ink on Raised; solo uses an Amber fill, because it silences everything else.
 
 ### Menus, popovers and tooltips
-- **Menus and popovers:** Raised, with a 1px Line border, the overlay shadow and a 4px cut. Rows are 24px with Body Ink text and shortcuts right-aligned in Small numerals and Ink 3. Hover fills a row with Line. Separators are 1px Line with 4px above and below.
-- **Tooltips:** Raised and square, Body text, with the shortcut in Small numerals. They appear after 500ms.
+- **Menus and popovers:** Raised, 1px Border, 8px radius, the overlay shadow, 4px internal padding. Rows are 24px with 6px-radius hover fills in Border colour, Body Ink text, and shortcuts right-aligned in Small Ink 3. Separators are 1px Border with 4px above and below.
+- **Tooltips:** Raised, 4px radius, Body text, with the shortcut in Small Ink 3. They appear after 500ms.
 
 ### Motion and state
-- Hover and press are instant; a tool feels faster with no transition on them. Menus, popovers, dialogs and toasts open over 150ms (ease-out, opacity plus a 4px slide) and close over 100ms. Docking and resizing don't animate. The playhead and timeline never ease, because they report time.
+- Hover and press colours fade over 100ms. Menus, popovers, dialogs and toasts open over 150ms (ease-out, opacity plus a 4px slide) and close over 100ms. Docking and resizing don't animate. The playhead and timeline never ease, because they report time.
 - With the OS reduced-motion setting on, overlays appear and disappear instantly.
 - Every interactive component defines default, hover, focus-visible, pressed and disabled states, plus loading and error wherever they can occur.
 
@@ -202,18 +204,17 @@ A 160px column on Plate. The track ID (V1, A1) in Value numerals and Ink, the na
 
 ### Do:
 - **Do** give every panel the same 32px header, and check that the header line runs straight across the window (The One Header Line Rule).
-- **Do** start text, icons and header labels 12px in from the plate edge.
-- **Do** set every changing number in Martian Mono.
-- **Do** keep Acid for the playhead, the current time, focus, selection, in/out and the one primary button.
+- **Do** start text, icons and header labels 12px in from the panel edge.
+- **Do** take every corner from the 4, 6, 8, 12px scale.
+- **Do** keep blue for focus, selection, the playhead, in/out and the one primary button.
 - **Do** keep the viewer neutral black, with nothing tinted touching the picture.
 - **Do** build every control's full set of states: default, hover, focus-visible, pressed and disabled, plus loading and error where they apply.
 - **Do** check that Ink clip names reach 4.5:1 on any new clip colour.
 
 ### Don't:
-- **Don't** round a corner. Cut the top-left corner at 45° (8px on plates, 4px on objects) or leave it square.
 - **Don't** add a second header row for tabs, toolbars or search.
+- **Don't** set labels in capitals or letter-space them.
+- **Don't** add a second typeface or a second accent colour.
 - **Don't** use glows, gradients, blur, glass, or shadows on anything that isn't floating.
-- **Don't** put clip colours in the chrome or use Acid as decoration.
-- **Don't** return to the first prototypes' look: warm greys, an amber accent and Inter.
-- **Don't** number panels for decoration; the number is the shortcut.
-- **Don't** set controls or values in Archivo Expanded. Wide capitals appear only at Label size, plus the wordmark.
+- **Don't** put clip colours in the chrome or use blue as decoration.
+- **Don't** return to either rejected look: warm greys with an amber accent, or cut corners, wide capitals and an acid accent.

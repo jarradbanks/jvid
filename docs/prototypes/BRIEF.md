@@ -1,6 +1,6 @@
 # jvid UI prototype brief
 
-> **Superseded look.** The four screens below set the panel layout, which still stands. Their look (warm greys, amber accent, Inter) was replaced by the Clean Cut direction in [`DESIGN.md`](../../DESIGN.md); mockups in that look are in [`clean-cut/`](clean-cut/).
+> **Superseded look.** The four screens below set the panel layout, which still stands. Their look (warm greys, amber accent) was replaced by the one in [`DESIGN.md`](../../DESIGN.md); mockups in that look are in [`v2/`](v2/).
 
 These prompts went to Codex's built-in `image_gen` tool to generate the four screens. Every screen shares the design language below so they read as one app.
 
@@ -56,26 +56,28 @@ A calm, minimal start screen. The top bar shows only the "jvid" wordmark: no pro
 - **Right side: "Recent"** — a list of 5 projects with small thumbnails, names (e.g. "summer-road-trip", "product-demo", "gym-reel"), and relative dates ("2 hours ago", "Yesterday", "Oct 12").
 - **Footer:** "v0.1.0" at left and a shortcut hint "Ctrl+N new · Ctrl+O open" at right.
 
-## Clean Cut mockups
+## v2 mockups
 
-The look in [`DESIGN.md`](../../DESIGN.md). `clean-cut/01-editor.png` was generated with `01-editor.png` attached for layout only, from this prompt:
+The look in [`DESIGN.md`](../../DESIGN.md) ("The Quiet Frame"). `v2/01-editor.png` was generated with the Clean Cut mockup attached for layout and content, from this prompt:
 
 ```text
 Use case: ui-mockup. A realistic, shippable desktop application screenshot of "jvid", a lightweight video editor. Flat, viewed straight on, no device frame, no perspective, no shadow around the window.
-Layout reference: the attached image shows the panel arrangement to keep (media bin left, preview centre, inspector right, timeline across the bottom). Keep its arrangement only; replace all of its colours, typography and styling.
-Style: Y2K tech-graphic (late-90s game menu graphics) cleaned up to the precise, minimal finish of a modern pro tool. Clean, compact, perfectly aligned, uncluttered.
-Ground and plates: window background very dark blue-black #050608. Each panel is a separate flat plate #14171C floating on that ground, with 4px gaps between plates and around the window edge. NO rounded corners anywhere. Each plate has only its top-left corner cut off at 45 degrees (a small chamfer); every other corner is a sharp square.
-Header line: every panel has the same 32px header row with a 1px divider #272C32 under it. The three upper panels' headers and dividers sit on one perfectly straight horizontal line across the window.
-Header labels: tiny, wide, extended capitals with letter-spacing, each preceded by a two-digit monospace number. Left panel tabs "01 MEDIA", "07 EFFECTS", "08 TEXT" (MEDIA active). Centre tabs "02 SOURCE", "04 PROGRAM" (PROGRAM active). Right panel "05 INSPECTOR". Timeline "03 TIMELINE". Active tab: white text with a 2px underline on the divider; inactive tabs grey. The timeline has keyboard focus, so its "03" and its underline are acid yellow-green #CEFE34.
-Top bar (40px, ground colour): lowercase "jvid" wordmark in a wide bold sans at left; project name "ranked-highlights" in the centre; small undo and redo icons; at right an acid #CEFE34 "Export" button with near-black text and its top-left corner cut at 45 degrees.
-Left panel, media bin: a square dark search field; a 2-column grid of thumbnails from fictional sci-fi arena shooter gameplay and one desktop screen recording, each with its top-left corner cut and a duration in monospace ("2:04:31", "0:47", "12:09").
-Centre panel, preview: neutral pure-black viewer showing a 16:9 frame of fictional sci-fi arena shooter gameplay with a minimal HUD. Under it a 32px transport row: current timecode "00:01:12:08" in bold monospace acid #CEFE34, duration "00:02:04:20" in grey monospace, thin transport icons (go to in, step back, play, step forward, go to out, loop) centred, a "1/2" resolution dropdown at right.
-Right panel, inspector: clip name "clutch_round_3.mkv"; section heads in the same tiny wide capitals: "TRANSFORM", "OPACITY", "VOLUME"; property rows with a grey label column ("Position", "Scale", "Rotation", "Anchor", "Level") and square, borderless, darker input wells holding a grey inline prefix and a white monospace value ("X 960", "Y 540", "100%", "0°", "-3.0 dB"); a small diamond keyframe toggle at the right of each row, one of them acid.
-Bottom, timeline (about 40% of the height): a track header column with "V3", "V2", "V1", "A1", "A2", "A3" in bold monospace and tiny lock, eye, mute and solo icons; above it a corner cell showing "00:01:12:08" in acid monospace; a ruler with tiny monospace timecodes. Flat clip blocks: ultramarine #3453D3 video clips with thumbnail strips, a violet #763EBD title clip "TRIPLE KILL", a magenta #AB3276 still clip "logo.png", teal #037465 audio clips with waveforms named "game audio", "mic", "music". Every clip has its top-left corner cut at 45 degrees and a 1px gap from its neighbour. One video clip is selected with a 2px acid outline. An in/out range is a translucent acid band across the ruler with thin acid brackets at each end. The playhead is a thin 1px acid #CEFE34 vertical line with a small pointed tag in the ruler.
-Colours: text white #E8EBF1, secondary text grey #9EA5AE; acid #CEFE34 appears only on the Export button, the playhead, the current timecode, the focused "03", the selection outline, the in/out band and one keyframe.
-Typography: tiny wide extended capitals only for panel labels and section heads; a plain clean grotesk for body text at small sizes; a bold square monospace for every timecode and number.
-Avoid: rounded corners, glows, gradients, glassmorphism, shadows inside the window, amber or orange accents, real game titles or brand logos, watermarks.
+Reference: the attached image is this same screen. Keep its layout, panel arrangement, header alignment and content (the desert racing footage, thumbnails, clip names, timecodes and inspector values), but restyle it completely in the style below. Remove its cut corners, wide all-caps labels, two-digit panel numbers and acid yellow-green colour.
+Style: minimal and refined, in the spirit of Linear's desktop app and modern Premiere Pro. Quiet, precise and calm, so the footage is the brightest thing on screen. Neutral dark greys with a faint cool tint, one blue accent, subtle rounded corners, thin 1px borders.
+Ground and panels: window background #0A0B0D. Each panel is a #121416 surface with a 1px #232529 border and 8px rounded corners, with 4px gaps between panels and around the window edge.
+Header line: every panel has the same 32px header row with a 1px #232529 divider under it. The three upper panels' headers and dividers sit on one perfectly straight horizontal line.
+Tabs: sentence-case 12px medium sans labels. Left panel "Media", "Effects", "Text" (Media active). Centre "Source", "Program" (Program active). Right "Inspector". Bottom "Timeline". The active tab is white text on a subtle rounded pill #1C1E21; inactive tabs are grey #82868E. The timeline panel has keyboard focus, so its 1px border is blue #2368C9.
+Top bar (40px, background colour): lowercase "jvid" wordmark in a semibold sans at left; project name "ranked-highlights" in the centre; thin undo and redo icons; at right a blue #2368C9 "Export" button with white text and 6px rounded corners.
+Left panel, media bin: a search input with 6px rounded corners, a 1px border and placeholder "Search"; a 2-column grid of thumbnails with 6px rounded corners, durations in small dark rounded badges ("2:04:31", "0:47", "12:09", "1:33", "0:28", "4:21").
+Centre panel, preview: neutral pure-black viewer showing the desert racing frame with its HUD. Under it a 32px transport row: current timecode "00:01:12:08" in white medium tabular numerals, duration "00:02:04:20" in grey, thin line transport icons (go to in, step back, play, step forward, go to out, loop) centred, a "1/2" dropdown at right.
+Right panel, inspector: file name "clutch_round_3.mkv"; sentence-case semibold section heads "Transform", "Opacity", "Volume" with small chevrons; property rows with grey labels "Position", "Scale", "Rotation", "Anchor", "Opacity", "Level". Clean inputs: 24px tall, 6px rounded corners, 1px #232529 border, dark #0D0E11 fill, a grey inline prefix and a white value ("X 960", "Y 540", "100%", "0°", "X 0", "Y 0", "100%", "-3.0 dB"). A small diamond keyframe toggle at the right of each row, one of them blue.
+Bottom, timeline (about 40% of the height): a track header column with "V3", "V2", "V1", "A1", "A2", "A3" in medium white text, small grey line icons for lock and visibility, and small "M" and "S" toggles; above it a corner cell showing "00:01:12:08"; a ruler with tiny grey timecodes. Clips have 4px rounded corners and 2px gaps between neighbours: muted violet #5E589F video clips with thumbnail strips ("arena_01.mkv", "clutch_round_3.mkv", "push.mp4", "finale.mkv"), a muted plum #8E4771 title clip "TRIPLE KILL", a muted ochre #88602D still clip "logo.png", muted green #30715D audio clips with waveforms ("game audio", "mic", "music"). The "clutch_round_3.mkv" clip is selected with a 2px light blue #7AACF6 outline. An in/out range is a translucent blue band in the ruler with thin light blue brackets at each end. The playhead is a thin 1px light blue #7AACF6 line with a small rounded head in the ruler.
+Colours: text #EDEEF1, secondary text #ADB1B8, tertiary #82868E. Blue appears only on the Export button, the focused timeline border, the playhead, the selection outline, the in/out range and one keyframe.
+Typography: one clean, neutral UI sans (Inter-like) for everything, sentence case, 12px UI text, tabular numerals for timecodes. No all-caps labels, no monospace.
+Avoid: cut or chamfered corners, wide or all-caps labels, panel numbers, acid or neon colours, glows, gradients, glassmorphism, heavy shadows, real game titles or brand logos, watermarks.
 Text: render every quoted label verbatim and legibly.
 ```
 
-A follow-up edit replaced the gameplay in the viewer, bin thumbnails and V1 clips with an original desert racing scene, because the first render resembled an existing game.
+Since this was generated, tabs changed to fill their header in equal widths with centred labels (see `DESIGN.md`, Panels, headers and tabs); where the mockup and `DESIGN.md` disagree, `DESIGN.md` wins.
+
+A Y2K tech-graphic direction ("Clean Cut": cut corners, wide capitals, acid accent) was mocked up first and rejected; it is in git history.
