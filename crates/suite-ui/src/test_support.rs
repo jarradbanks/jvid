@@ -1,4 +1,4 @@
-//! GPU test setup shared by the rendering tests.
+//! GPU test setup shared by rendering tests here and in the apps (feature `test-support`).
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -40,7 +40,7 @@ pub fn gpu() -> bool {
 /// Returns true on that first frame.
 pub fn install_theme(ui: &egui::Ui, fresh: &mut bool) -> bool {
     if std::mem::take(fresh) {
-        suite_ui::theme::install(ui.ctx());
+        crate::theme::install(ui.ctx());
         ui.ctx().request_repaint();
         return true;
     }

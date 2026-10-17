@@ -4,7 +4,7 @@
 #[path = "../examples/gallery.rs"]
 mod gallery;
 
-mod common;
+use suite_ui::test_support as common;
 
 use suite_ui::tokens::radius;
 

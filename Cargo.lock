@@ -2729,6 +2729,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_kittest",
+ "suite-ui",
 ]
 
 [[package]]

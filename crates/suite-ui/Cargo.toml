@@ -13,6 +13,11 @@ workspace = true
 [dependencies]
 egui.workspace = true
 
+[features]
+# Headless GPU setup for egui_kittest tests; dev-dependency use only.
+test-support = []
+
 [dev-dependencies]
+suite-ui = { path = ".", features = ["test-support"] }
 eframe.workspace = true
 egui_kittest.workspace = true
