@@ -96,6 +96,9 @@ const SECTIONS: [(&str, &[Prop]); 3] = [
 /// Undo gesture for drags in the inspector, xored with the property, field and drag count.
 const GESTURE: GestureKey = 0x696e_7370_0000; // "insp"
 
+/// Undo gesture for easing handle drags, xored with the property and drag count.
+const EASING_GESTURE: GestureKey = 0x6561_7365_0000; // "ease"
+
 /// Undo gesture for picker edits to a solid's color, xored with its asset id.
 const SOLID_GESTURE: GestureKey = 0x736f_6c69_6400; // "solid"
 
@@ -481,8 +484,18 @@ fn row(
                 *seek = neighbour(clips, p.name, t, 1);
             }
             let here = clips.iter().all(|c| key_at(c, p.name, t));
-            if glyph(ui, Glyph::Diamond, here, "Keyframe at playhead").clicked() {
+            let diamond = glyph(ui, Glyph::Diamond, here, "Keyframe at playhead");
+            if diamond.clicked() {
                 edit = Some((toggle_key(clips, p.name, t), None));
+            }
+            if here {
+                egui::Popup::context_menu(&diamond)
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .show(|ui| {
+                        if let Some(e) = easing_menu(ui, clips, p.name, t, index) {
+                            edit = Some(e);
+                        }
+                    });
             }
             if glyph(ui, Glyph::Left, false, "Previous keyframe").clicked() {
                 *seek = neighbour(clips, p.name, t, -1);
@@ -490,6 +503,35 @@ fn row(
         });
     });
     edit
+}
+
+/// The easing editor for the keyframes of `name` at `t`, opened by right-clicking their diamond.
+fn easing_menu(ui: &mut Ui, clips: &[&Clip], name: &str, t: Time, index: u64) -> Option<Edit> {
+    let s = source(clips[0], t);
+    let k = clips[0].keyframes.get(name)?.iter().find(|k| k.time == s)?;
+    let (e, dragging) = crate::easing::editor(ui, k.easing)?;
+    // One undo step per handle drag.
+    let drags = ui.id().with("easing drags");
+    let drag = ui.data_mut(|d| {
+        let n = d.get_temp_mut_or(drags, (0u64, false));
+        n.0 += u64::from(dragging && !n.1);
+        n.1 = dragging;
+        n.0
+    });
+    let key = EASING_GESTURE ^ index ^ (drag << 16);
+    Some((set_easing(clips, name, t, e), dragging.then_some(key)))
+}
+
+/// Sets the easing of every clip's keyframe of `name` at `t`.
+fn set_easing(clips: &[&Clip], name: &str, t: Time, e: Easing) -> Command {
+    rewrite(clips, |c, _, keys| {
+        let s = source(c, t);
+        for k in keys.get_mut(name).into_iter().flatten() {
+            if k.time == s {
+                k.easing = e;
+            }
+        }
+    })
 }
 
 enum Glyph {
@@ -587,6 +629,24 @@ mod tests {
 
     fn refs(clips: &[Clip]) -> Vec<&Clip> {
         clips.iter().collect()
+    }
+
+    #[test]
+    fn easing_applies_to_every_clips_key_and_changes_playback() {
+        let mut clips = [clip(1, 0), clip(2, 50)];
+        apply(&mut clips, |c| toggle_animate(c, "opacity", Time(50)));
+        apply(&mut clips, |c| {
+            set_field(c, "opacity", 0, |_| 0.0, Time(80))
+        });
+        let before = clips[1].transform_at(Time(65)).opacity;
+        apply(&mut clips, |c| {
+            set_easing(c, "opacity", Time(50), Easing::Hold)
+        });
+        assert_eq!(clips[0].keyframes["opacity"][0].easing, Easing::Hold);
+        assert_eq!(clips[1].keyframes["opacity"][0].easing, Easing::Hold);
+        // Other keys keep theirs.
+        assert_eq!(clips[0].keyframes["opacity"][1].easing, Easing::Linear);
+        assert_ne!(clips[1].transform_at(Time(65)).opacity, before);
     }
 
     #[test]
