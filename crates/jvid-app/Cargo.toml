@@ -12,6 +12,8 @@ jvid-audio.workspace = true
 jvid-core.workspace = true
 jvid-log.workspace = true
 jvid-media.workspace = true
+directories.workspace = true
+tracing.workspace = true
 jvid-render.workspace = true
 suite-ui.workspace = true
 
