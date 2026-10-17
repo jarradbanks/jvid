@@ -75,6 +75,7 @@ pub const ACTIONS: &[Action] = &[
     t("delete", "Delete", "Delete"),
     t("ripple_delete", "Ripple Delete", "Shift+Delete"),
     t("link", "Link/Unlink", "Ctrl+L"),
+    t("enable", "Enable/Disable", "Shift+E"),
     t("linked_selection", "Linked Selection", "Ctrl+Shift+L"),
     t("snapping", "Snapping", "S"),
     a("razor_tool", "Razor tool", "C"),

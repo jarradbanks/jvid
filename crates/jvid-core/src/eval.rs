@@ -55,7 +55,10 @@ fn clips_in(track: &Track, start: Time, end: Time) -> impl Iterator<Item = &Clip
     let clips = track.clips();
     let first = clips.partition_point(|c| c.end() <= start);
     let clips = if start < end { &clips[first..] } else { &[] };
-    clips.iter().take_while(move |c| c.start < end)
+    clips
+        .iter()
+        .take_while(move |c| c.start < end)
+        .filter(|c| c.enabled)
 }
 
 /// Visible video layers at `t`, top to bottom.

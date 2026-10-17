@@ -57,6 +57,11 @@ pub enum Command {
         ids: Vec<ClipId>,
         linked: bool,
     },
+    /// Enables or disables clips; disabled clips are skipped by evaluation.
+    SetClipsEnabled {
+        ids: Vec<ClipId>,
+        enabled: bool,
+    },
     MoveClip {
         id: ClipId,
         track: TrackId,
@@ -212,6 +217,7 @@ impl Command {
                 .find_map(|(t, _)| track(t)),
             Self::RemoveClips { ids, .. }
             | Self::LinkClips { ids, .. }
+            | Self::SetClipsEnabled { ids, .. }
             | Self::Split { ids, .. } => ids.iter().find_map(|id| clip(*id)),
             Self::Paste { clips, .. } => clips.iter().find_map(|(t, _)| track(*t)),
             Self::RemoveAsset(a) => s
@@ -281,6 +287,15 @@ impl Command {
             },
             Self::LinkClips { ids, linked } => {
                 s.link_clips(&ids, linked)?;
+                Created::Nothing
+            }
+            Self::SetClipsEnabled { ids, enabled } => {
+                if let Some(id) = ids.iter().find(|id| s.clip(**id).is_none()) {
+                    return Err(ModelError::UnknownClip(*id));
+                }
+                for id in ids {
+                    s.with_clip_mut(id, |c| *c.enabled = enabled)?;
+                }
                 Created::Nothing
             }
             Self::MoveClip { id, track, start } => {
@@ -671,6 +686,56 @@ mod tests {
                 link: None,
             },
         }
+    }
+
+    #[test]
+    fn disabled_clips_leave_evaluation_until_undone() {
+        use crate::eval::{audio_in, video_at};
+        let mut h = History::new(Project::default());
+        let v = track(&mut h);
+        let a = match h.apply(Command::AddTrack {
+            kind: TrackKind::Audio,
+            name: "A1".into(),
+        }) {
+            Ok(Created::Track(t)) => t,
+            r => panic!("{r:?}"),
+        };
+        let Created::Clip(cv) = h.apply(add_clip(v, 0)).unwrap() else {
+            panic!()
+        };
+        let Created::Clip(ca) = h.apply(add_clip(a, 0)).unwrap() else {
+            panic!()
+        };
+        let before = h.project().clone();
+        let seen = |h: &History| {
+            let s = h.project().sequence();
+            (
+                video_at(s, Time(5)).len(),
+                audio_in(s, Time(0), Time(10)).len(),
+            )
+        };
+        h.apply(Command::SetClipsEnabled {
+            ids: vec![cv, ca],
+            enabled: false,
+        })
+        .unwrap();
+        assert_eq!(seen(&h), (0, 0));
+        // Disabled survives a save; enabled is the default and not written.
+        let off = h.project().sequence().clip(cv).unwrap().1.clone();
+        let json = serde_json::to_string(&off).unwrap();
+        assert_eq!(serde_json::from_str::<Clip>(&json).unwrap(), off);
+        let on = before.sequence().clip(cv).unwrap().1;
+        assert!(!serde_json::to_string(on).unwrap().contains("enabled"));
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert_eq!(seen(&h), (1, 1));
+        // An unknown id changes nothing.
+        let bad = Command::SetClipsEnabled {
+            ids: vec![cv, ClipId(999)],
+            enabled: false,
+        };
+        assert!(h.apply(bad).is_err());
+        assert_eq!(h.project(), &before);
     }
 
     #[test]

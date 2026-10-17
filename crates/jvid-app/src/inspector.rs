@@ -664,6 +664,7 @@ mod tests {
             keyframes: BTreeMap::new(),
             transform: Transform::default(),
             stream: Some(0),
+            enabled: true,
         }
     }
 

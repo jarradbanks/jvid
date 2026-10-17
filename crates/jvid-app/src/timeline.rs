@@ -290,7 +290,8 @@ impl Timeline {
                 let (track, at) = self.gap.take().expect("checked");
                 self.pending = Some(Command::CloseGap { track, at });
             }
-            "copy" | "cut" | "paste" | "duplicate" | "delete" | "ripple_delete" | "link" => {
+            "copy" | "cut" | "paste" | "duplicate" | "delete" | "ripple_delete" | "link"
+            | "enable" => {
                 self.pending = self.clip_action(id, project.sequence());
             }
             _ => return false,
@@ -340,6 +341,11 @@ impl Timeline {
                     linked: !whole,
                 }
             }
+            // Disables unless every chosen clip is already disabled.
+            "enable" if !ids.is_empty() => Command::SetClipsEnabled {
+                enabled: chosen.iter().all(|(_, c)| !c.enabled),
+                ids,
+            },
             _ => return None,
         };
         if matches!(cmd, Command::RemoveClips { .. }) {
@@ -735,9 +741,9 @@ impl Timeline {
                 let r = Rect::from_x_y_ranges(x, lane.y_range()).shrink2(vec2(1.0, 2.0));
                 let asset = project.asset(clip.asset);
                 let offline = asset.is_some_and(|a| missing.contains(&a.path));
-                // Clips on hidden tracks drop to 40%.
+                // Clips on hidden tracks and disabled clips drop to 40%.
                 let mut painter = clip_painter.clone();
-                if track.hidden {
+                if track.hidden || !clip.enabled {
                     painter.multiply_opacity(0.4);
                 }
                 self.paint_clip(
@@ -1904,6 +1910,13 @@ mod tests {
         run(&mut t, &mut h, "link");
         t.select(&seq(&h), v, M::NONE);
         assert_eq!(t.selected, HashSet::from([v, a]));
+
+        // Shift+E disables the pair, then enables it again.
+        let enabled = |h: &History| seq(h).clip(v).unwrap().1.enabled;
+        run(&mut t, &mut h, "enable");
+        assert!(!enabled(&h) && !seq(&h).clip(a).unwrap().1.enabled);
+        run(&mut t, &mut h, "enable");
+        assert!(enabled(&h));
 
         // Pasted at the playhead, the copies are linked to each other only.
         assert!(t.clip_action("copy", h.project().sequence()).is_none());
