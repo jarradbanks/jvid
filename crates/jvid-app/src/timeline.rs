@@ -1518,15 +1518,16 @@ impl Media {
                 self.strips.remove(&path);
                 continue;
             };
-            let texs = imgs
-                .into_iter()
-                .enumerate()
-                .map(|(i, img)| {
-                    let name = format!("{}#{i}", path.display());
-                    ui.ctx().load_texture(name, img, Default::default())
-                })
-                .collect();
-            self.strips.insert(path, Some(texs));
+            // Frames arrive in order as they're made; each batch extends the strip.
+            let texs = self
+                .strips
+                .entry(path.clone())
+                .or_default()
+                .get_or_insert_default();
+            for img in imgs {
+                let name = format!("{}#{}", path.display(), texs.len());
+                texs.push(ui.ctx().load_texture(name, img, Default::default()));
+            }
         }
         let Some(probe) = &a.probe else { return };
         let texs = match self.strips.get(&a.path) {
@@ -1543,16 +1544,23 @@ impl Media {
                     if c.is_cancelled() {
                         return;
                     }
-                    match cache.filmstrip(&path, duration) {
+                    let color = |img: &image::RgbaImage| {
+                        let size = [img.width() as usize, img.height() as usize];
+                        egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw())
+                    };
+                    let mut sent = 0;
+                    let r = cache.filmstrip_with(&path, duration, |img| {
+                        done.lock()
+                            .unwrap()
+                            .push((path.clone(), Some(vec![color(img)])));
+                        ctx.request_repaint();
+                        sent += 1;
+                    });
+                    match r {
+                        // From the disk cache, nothing was sent as it was made.
                         Ok(v) => {
-                            let imgs = v
-                                .iter()
-                                .map(|img| {
-                                    let size = [img.width() as usize, img.height() as usize];
-                                    egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw())
-                                })
-                                .collect();
-                            done.lock().unwrap().push((path, Some(imgs)));
+                            let rest = v[sent..].iter().map(color).collect();
+                            done.lock().unwrap().push((path, Some(rest)));
                             ctx.request_repaint();
                         }
                         Err(e) => {
@@ -1566,15 +1574,21 @@ impl Media {
         };
         // Same spacing `thumbnails::Cache::filmstrip` samples at.
         let step = FLICKS_PER_SECOND.max(probe.duration.0 / thumbnails::STRIP_MAX);
+        let n = (probe.duration.0 / step).max(1);
         let size = texs[0].size_vec2();
         let w = size.x * rect.height() / size.y;
         // Tiles sit on a grid from the clip's start, so they don't swim while scrolling.
         let mut x = origin + ((rect.left() - origin) / w).floor() * w;
         while x < rect.right() {
-            let i = (source(x).0 / step).clamp(0, texs.len() as i64 - 1) as usize;
+            let i = (source(x).0 / step).clamp(0, n - 1) as usize;
+            // Past what's made so far: blank until it fills in.
+            let Some(tex) = texs.get(i) else {
+                x += w;
+                continue;
+            };
             let tile = Rect::from_min_size(pos2(x, rect.top()), vec2(w, rect.height()));
             painter.image(
-                texs[i].id(),
+                tex.id(),
                 tile,
                 Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
@@ -1609,12 +1623,12 @@ impl Media {
                     .peaks
                     .submit(&caches.jobs, path.clone(), 0, move |r| match r {
                         Ok(p) => {
-                            done.lock().unwrap().push((path, Some(p)));
+                            done.lock().unwrap().push((path.clone(), Some(p)));
                             ctx.request_repaint();
                         }
                         Err(e) => {
                             tracing::warn!("waveform for {}: {e}", path.display());
-                            done.lock().unwrap().push((path, None));
+                            done.lock().unwrap().push((path.clone(), None));
                         }
                     });
                 return;
@@ -1680,12 +1694,14 @@ mod tests {
         assert_eq!((major, minor), (1800 * 30, 120 * 30));
         assert!(major % minor == 0);
         // Every zoom keeps labels apart and minor ticks dividing them.
-        for z in [0.5, 3.0, 47.0, 333.0] {
+        for z in [MIN_ZOOM, 0.5, 3.0, 47.0, 333.0, MAX_ZOOM] {
             for r in [
                 Rate::new(24, 1),
                 Rate::new(25, 1),
                 Rate::new(30000, 1001),
                 Rate::new(60, 1),
+                Rate::new(144, 1),
+                Rate::new(240, 1),
             ] {
                 let (major, minor) = tick_steps(z, r);
                 assert!(major as f64 * r.den as f64 / r.num as f64 * z >= MAJOR_PX);

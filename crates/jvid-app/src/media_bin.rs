@@ -884,7 +884,7 @@ mod tests {
         let cache = Arc::new(Cache::with_grab(
             d.join("cache"),
             u64::MAX,
-            Box::new(move |_, _| {
+            Box::new(move |_, _, _| {
                 g.fetch_add(1, Ordering::SeqCst);
                 Ok(image::RgbaImage::new(jvid_media::thumbnails::WIDTH, 90))
             }),

@@ -10,6 +10,8 @@ Hard gates that already existed stay as plain tests and still fail CI (marked *g
 | Cold start, app construction to first frame | 1000 ms | `jvid-app` `app::tests::perf_cold_start_and_idle_memory` | report |
 | Idle memory, RSS after 60 idle frames | 150 MB | same test (Linux only) | report |
 | Seek latency, parked seek on 1080p30 H.264 | 33 ms (one frame) | `jvid-app` `playback::tests::seek_latency_1080p30` | report |
+| Long recording, 2 h 1440p60: import to editable | 2000 ms | `jvid-app` `playback::tests::long_recording_imports_and_seeks_fast` (#90) | report |
+| Long recording, seek anywhere to a frame on screen (keyframe stand-in) | 150 ms | same test | report |
 | Playback, two 1080p30 layers + audio, decode | 30 fps, zero drops | `jvid-app` `playback::tests::two_layer_1080p30_plays_in_real_time` (#32) | gated |
 | Composite, same timeline at preview scale | 33 ms/frame on a real GPU | same test | report |
 | Timeline layout + paint, 500 clips | 16.6 ms | `jvid-app` `timeline::tests::five_hundred_clips_fit_a_frame` (#33) | gated |
@@ -22,7 +24,7 @@ The release tests print a `PERF …` line each. Run them all locally (needs `scr
 
 ```sh
 cargo test --release -p jvid-app --bin jvid-app -- perf_cold_start --nocapture   # alone, so RSS is clean
-cargo test --release -p jvid-app --bin jvid-app -- seek_latency two_layer five_hundred_clips --nocapture
+cargo test --release -p jvid-app --bin jvid-app -- seek_latency long_recording two_layer five_hundred_clips --nocapture
 cargo test --release -p jvid-media -p jvid-audio -- one_hour_query sixteen_tracks --nocapture
 cargo bench -p jvid-core --bench core
 ```

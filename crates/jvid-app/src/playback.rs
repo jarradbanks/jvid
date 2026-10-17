@@ -62,6 +62,8 @@ pub struct Shown {
     pub index: i64,
     /// Top layer first, with its evaluated transform.
     pub layers: Vec<(Pixels, Transform)>,
+    /// False while a parked seek shows keyframe stand-ins; the exact frame follows.
+    pub exact: bool,
 }
 
 /// What one layer shows.
@@ -225,6 +227,14 @@ pub struct Playback {
     jobs: Pool,
     decode: DecodeFn,
     pending: HashMap<Key, Handle>,
+    /// Decodes the keyframe before a source time, for stand-ins; `None` shows none.
+    pub quick: Option<DecodeFn>,
+    /// One thread, so a stand-in never waits behind the long exact decodes.
+    quick_jobs: Pool,
+    /// Keyframe stand-ins for the parked frame's layers, `None` while decoding.
+    stand_ins: HashMap<Key, Option<Arc<Frame>>>,
+    quick_tx: Sender<(Key, Result<Frame, String>)>,
+    quick_done: Receiver<(Key, Result<Frame, String>)>,
     /// Smoothed time a decode takes.
     latency: Duration,
     /// Frames that failed to decode and when, so they're left out until [`RETRY`].
@@ -235,20 +245,26 @@ pub struct Playback {
     pub looping: bool,
     done_tx: Sender<Done>,
     done: Receiver<Done>,
-    /// The frame index last returned by `tick`.
-    shown: Option<i64>,
+    /// The frame index last returned by `tick`, and whether it was exact.
+    shown: Option<(i64, bool)>,
     audio: Audio,
 }
 
 impl Playback {
     pub fn new(decode: DecodeFn, open_audio: OpenAudio, budget: usize) -> Self {
         let (done_tx, done) = channel();
+        let (quick_tx, quick_done) = channel();
         Self {
             transport: Transport::new(Time(0), Rate::new(30, 1)),
             cache: FrameCache::new(budget),
             jobs: Pool::new(DECODE_THREADS),
             decode,
             pending: HashMap::new(),
+            quick: None,
+            quick_jobs: Pool::new(1),
+            stand_ins: HashMap::new(),
+            quick_tx,
+            quick_done,
             latency: Duration::ZERO,
             failed: HashMap::new(),
             paths: HashMap::new(),
@@ -268,14 +284,21 @@ impl Playback {
     /// Decodes project media from files.
     pub fn from_files(budget: usize) -> Self {
         let pool = Arc::new(DecoderPool::default());
-        Self::new(
+        // Its own pool, so the stand-in thread always finds its file open: opening a long MP4
+        // reads an index of every frame, which alone can blow the seek budget.
+        let quick = DecoderPool::default();
+        let mut pb = Self::new(
             Arc::new(move |p, t| pool.frame_at(p, t).map_err(|e| e.to_string())),
             Box::new(|p| {
                 let mut src = AudioSource::open(p, true);
                 Box::new(move |start, out| src.fill(start, out))
             }),
             budget,
-        )
+        );
+        pb.quick = Some(Arc::new(move |p, t| {
+            quick.keyframe_at(p, t).map_err(|e| e.to_string())
+        }));
+        pb
     }
 
     /// Makes the next `tick` return the frame even if the playhead hasn't moved.
@@ -333,6 +356,7 @@ impl Playback {
             }
         }
         self.failed.retain(|_, at| at.elapsed() < RETRY);
+        self.stand_in(project, clock);
         let t = &self.transport;
         // Parked: just ahead, so pressing play starts on decoded frames.
         let step = match t.speed() {
@@ -406,12 +430,53 @@ impl Playback {
         });
     }
 
-    /// The frame at the clock, once all its layers are decoded and if it isn't the one shown.
+    /// Parked on a frame whose layers aren't decoded, queues each one's keyframe as a stand-in,
+    /// since an exact frame deep in a long GOP can take a second. Playing, there are none.
+    fn stand_in(&mut self, project: &Project, clock: u64) {
+        while let Ok((k, r)) = self.quick_done.try_recv() {
+            match r {
+                Ok(f) => self.stand_ins.insert(k, Some(Arc::new(f))),
+                Err(_) => self.stand_ins.remove(&k),
+            };
+        }
+        let t = &self.transport;
+        let Some(quick) = self.quick.as_ref().filter(|_| t.speed() == 0) else {
+            self.stand_ins.clear();
+            return;
+        };
+        let time = t.rate.time_floor(t.frame(clock));
+        let mut want = HashSet::new();
+        for layer in video_at(project.sequence(), time) {
+            let key = (layer.asset, layer.source_time);
+            let Some(asset) = project.asset(layer.asset).filter(|a| a.solid.is_none()) else {
+                continue;
+            };
+            if self.cache.contains(&key) || self.failed.contains_key(&key) {
+                continue;
+            }
+            want.insert(key);
+            if self.stand_ins.contains_key(&key) {
+                continue;
+            }
+            self.stand_ins.insert(key, None);
+            let (quick, tx, path) = (quick.clone(), self.quick_tx.clone(), asset.path.clone());
+            let job = format!("keyframe:{}:{}", key.0.0, key.1.0);
+            self.quick_jobs
+                .submit(job, Priority::Interactive, move |_| {
+                    let _ = tx.send((key, quick(&path, key.1)));
+                });
+        }
+        self.stand_ins.retain(|k, _| want.contains(k));
+    }
+
+    /// The frame at the clock, once all its layers are decoded (or stood in for) and if it isn't
+    /// the one shown.
     fn show(&mut self, project: &Project, clock: u64) -> Option<Shown> {
         let index = self.transport.frame(clock);
-        if self.shown == Some(index) {
+        if self.shown == Some((index, true)) {
             return None;
         }
+        let mut exact = true;
         let time = self.transport.rate.time_floor(index);
         let mut layers = Vec::new();
         for layer in video_at(project.sequence(), time) {
@@ -425,11 +490,25 @@ impl Playback {
             // Not decoded yet: keep what's on screen. A failed decode leaves the layer out.
             let key = (layer.asset, layer.source_time);
             if !self.failed.contains_key(&key) {
-                layers.push((Pixels::Frame(self.cache.get(&key)?), layer.transform));
+                let f = match self.cache.get(&key) {
+                    Some(f) => f,
+                    None => {
+                        exact = false;
+                        self.stand_ins.get(&key)?.clone()?
+                    }
+                };
+                layers.push((Pixels::Frame(f), layer.transform));
             }
         }
-        self.shown = Some(index);
-        Some(Shown { index, layers })
+        if self.shown == Some((index, exact)) {
+            return None;
+        }
+        self.shown = Some((index, exact));
+        Some(Shown {
+            index,
+            layers,
+            exact,
+        })
     }
 }
 

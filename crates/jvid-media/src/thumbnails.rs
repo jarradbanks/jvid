@@ -21,8 +21,14 @@ pub const STRIP_MAX: i64 = 100;
 /// Bump when the thumbnail format changes so old entries miss.
 const VERSION: u32 = 1;
 
-/// Returns a `WIDTH`-wide RGBA thumbnail of `path` at `t`.
-pub type Grab = dyn Fn(&Path, Time) -> Result<RgbaImage, String> + Send + Sync;
+/// Filmstrip steps at least this long sample the keyframe before each step rather than the exact
+/// frame: a whole GOP decode per thumbnail makes a long recording's strip take minutes, and a GOP
+/// is a small part of such a step.
+pub const KEYFRAME_STEP: Time = Time(10 * FLICKS_PER_SECOND);
+
+/// Returns a `WIDTH`-wide RGBA thumbnail of `path` at `t`: the exact frame, or with `exact` false
+/// the keyframe before it.
+pub type Grab = dyn Fn(&Path, Time, bool) -> Result<RgbaImage, String> + Send + Sync;
 
 pub struct Cache {
     dir: PathBuf,
@@ -34,7 +40,11 @@ impl Cache {
     /// A cache in `dir` decoding through FFmpeg (videos) or `decode_still` (images).
     pub fn new(dir: PathBuf, cap_bytes: u64) -> Self {
         let pool = DecoderPool::default();
-        Self::with_grab(dir, cap_bytes, Box::new(move |p, t| grab(&pool, p, t)))
+        Self::with_grab(
+            dir,
+            cap_bytes,
+            Box::new(move |p, t, exact| grab(&pool, p, t, exact)),
+        )
     }
 
     pub fn with_grab(dir: PathBuf, cap_bytes: u64, grab: Box<Grab>) -> Self {
@@ -48,17 +58,33 @@ impl Cache {
     /// The poster frame: one second in, or halfway through a shorter clip.
     pub fn poster(&self, path: &Path, duration: Time) -> Result<RgbaImage, String> {
         let t = Time(FLICKS_PER_SECOND.min(duration.0 / 2).max(0));
-        self.cached(path, "poster", || (self.grab)(path, t))
+        self.cached(path, "poster", || (self.grab)(path, t, true))
     }
 
     /// Frames at a fixed interval: every second, widened so there are at most [`STRIP_MAX`].
     pub fn filmstrip(&self, path: &Path, duration: Time) -> Result<Vec<RgbaImage>, String> {
+        self.filmstrip_with(path, duration, |_| {})
+    }
+
+    /// [`Self::filmstrip`], handing each frame to `progress` as it's made when not cached, so a
+    /// long recording's strip fills in rather than appearing all at once.
+    pub fn filmstrip_with(
+        &self,
+        path: &Path,
+        duration: Time,
+        mut progress: impl FnMut(&RgbaImage),
+    ) -> Result<Vec<RgbaImage>, String> {
         let step = FLICKS_PER_SECOND.max(duration.0 / STRIP_MAX);
         let n = (duration.0 / step).max(1);
+        let exact = step < KEYFRAME_STEP.0;
         let strip = self.cached(path, "strip", || {
             let frames = (0..n)
-                .map(|i| (self.grab)(path, Time(i * step)))
-                .collect::<Result<Vec<_>, _>>()?;
+                .map(|i| {
+                    let f = (self.grab)(path, Time(i * step), exact)?;
+                    progress(&f);
+                    Ok(f)
+                })
+                .collect::<Result<Vec<_>, String>>()?;
             let h = frames.iter().map(|f| f.height()).max().unwrap_or(1);
             let mut strip = RgbaImage::new(WIDTH * frames.len() as u32, h);
             for (i, f) in frames.iter().enumerate() {
@@ -160,13 +186,18 @@ pub(crate) fn key(path: &Path) -> Result<String, String> {
     Ok(format!("{:016x}", h.finish()))
 }
 
-fn grab(pool: &DecoderPool, path: &Path, t: Time) -> Result<RgbaImage, String> {
+fn grab(pool: &DecoderPool, path: &Path, t: Time, exact: bool) -> Result<RgbaImage, String> {
     if ImageFormat::from_path(path).is_ok() {
         let img = crate::stills::decode_still(path).map_err(|e| e.to_string())?;
         let h = (WIDTH as u64 * img.height() as u64 / img.width().max(1) as u64).max(1) as u32;
         return Ok(imageops::thumbnail(&img, WIDTH, h));
     }
-    let f = pool.frame_at(path, t).map_err(|e| e.to_string())?;
+    let f = if exact {
+        pool.frame_at(path, t)
+    } else {
+        pool.keyframe_at(path, t)
+    };
+    let f = f.map_err(|e| e.to_string())?;
     Ok(to_rgba(&f, WIDTH))
 }
 
@@ -209,7 +240,7 @@ mod tests {
     fn counting(dir: PathBuf, cap: u64) -> (Cache, Arc<AtomicUsize>) {
         let n = Arc::new(AtomicUsize::new(0));
         let c = n.clone();
-        let grab = Box::new(move |_: &Path, t: Time| {
+        let grab = Box::new(move |_: &Path, t: Time, _| {
             c.fetch_add(1, Ordering::SeqCst);
             Ok(RgbaImage::from_pixel(
                 WIDTH,
@@ -330,5 +361,40 @@ mod tests {
         let poster = c.poster(&p, SECS).unwrap();
         assert_eq!((poster.width(), poster.height()), (WIDTH, 90));
         assert_eq!(c.filmstrip(&p, SECS).unwrap().len(), 10);
+    }
+
+    #[test]
+    fn filmstrip_reports_progress_then_hits_cache() {
+        let d = tmp("progress");
+        let p = d.join("a.mp4");
+        fs::write(&p, b"x").unwrap();
+        let (c, _) = counting(d.join("cache"), u64::MAX);
+        let mut seen = Vec::new();
+        let strip = c
+            .filmstrip_with(&p, SECS, |f| seen.push(f.get_pixel(0, 0)[0]))
+            .unwrap();
+        assert_eq!(seen, (0..10).collect::<Vec<u8>>());
+        assert_eq!(strip.len(), 10);
+        // Cached: all at once, nothing to report.
+        c.filmstrip_with(&p, SECS, |_| panic!("cached")).unwrap();
+    }
+
+    #[test]
+    fn long_filmstrips_sample_keyframes() {
+        let d = tmp("keyframes");
+        let p = d.join("a.mp4");
+        fs::write(&p, b"x").unwrap();
+        let modes = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let m = modes.clone();
+        let grab = Box::new(move |_: &Path, _: Time, exact: bool| {
+            m.lock().unwrap().push(exact);
+            Ok(RgbaImage::new(WIDTH, 90))
+        });
+        let c = Cache::with_grab(d.join("cache"), u64::MAX, grab);
+        c.poster(&p, Time(7200 * FLICKS_PER_SECOND)).unwrap();
+        c.filmstrip(&p, Time(7200 * FLICKS_PER_SECOND)).unwrap();
+        let modes = modes.lock().unwrap();
+        assert_eq!(modes.len(), 1 + STRIP_MAX as usize);
+        assert!(modes[0] && !modes[1..].contains(&true));
     }
 }
