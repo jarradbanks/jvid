@@ -322,6 +322,14 @@ fn undo_redo_and_dirty_marker_follow_history() {
     h.get_by_label("Redo").click();
     h.run();
     assert!(enabled(&h, "Undo") && !enabled(&h, "Redo"));
+    assert_eq!(h.state().window_title, "Untitled • — jvid");
+
+    let path = std::env::temp_dir().join(format!("jvid-dirty-{}.jvid", std::process::id()));
+    h.state_mut().path = Some(path.clone());
+    assert!(h.state_mut().save(false));
+    h.run();
+    std::fs::remove_file(&path).unwrap();
+    assert!(!h.state().window_title.contains('•'));
 }
 
 #[derive(Default)]
@@ -349,11 +357,39 @@ fn dock_layout_persists() {
     let mut storage = Memory::default();
     eframe::App::save(&mut app, &mut storage);
 
+    // A layout missing a panel falls back to the default.
     let restored = App::restore(Some(&storage));
-    assert!(restored.dock.find_tab(&Tab::Inspector).is_none());
-    assert!(restored.dock.find_tab(&Tab::Timeline).is_some());
+    assert!(restored.dock.find_tab(&Tab::Inspector).is_some());
+
+    // A rearranged layout with every panel is kept: the inspector joins the timeline.
+    let mut app = App::restore(None);
+    let inspector = app.dock.find_tab(&Tab::Inspector).unwrap();
+    app.dock.remove_tab(inspector);
+    let timeline = app.dock.find_tab(&Tab::Timeline).unwrap();
+    app.dock.set_focused_node_and_surface(egui_dock::NodePath {
+        surface: timeline.surface,
+        node: timeline.node,
+    });
+    app.dock.push_to_focused_leaf(Tab::Inspector);
+    let mut storage = Memory::default();
+    eframe::App::save(&mut app, &mut storage);
+    let restored = App::restore(Some(&storage));
+    let (i, t) = (
+        restored.dock.find_tab(&Tab::Inspector).unwrap(),
+        restored.dock.find_tab(&Tab::Timeline).unwrap(),
+    );
+    assert_eq!((i.surface, i.node), (t.surface, t.node));
     for (_, node) in restored.dock.iter_all_nodes() {
         assert!(!node.is_leaf() || node.is_tab_bar_hidden());
     }
-    assert!(App::restore(None).dock.find_tab(&Tab::Inspector).is_some());
+}
+
+#[test]
+fn corrupt_dock_layout_falls_back_to_default() {
+    let mut storage = Memory::default();
+    eframe::Storage::set_string(&mut storage, DOCK_KEY, "(old: \"layout\")".into());
+    let restored = App::restore(Some(&storage));
+    for tab in [Tab::Media, Tab::Preview, Tab::Inspector, Tab::Timeline] {
+        assert!(restored.dock.find_tab(&tab).is_some());
+    }
 }

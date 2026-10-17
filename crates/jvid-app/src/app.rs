@@ -62,7 +62,13 @@ impl App {
     /// A new project in the dock layout saved last time, or the default one.
     fn restore(storage: Option<&dyn eframe::Storage>) -> Self {
         let dock = storage
-            .and_then(|s| eframe::get_value(s, DOCK_KEY))
+            .and_then(|s| eframe::get_value::<DockState<Tab>>(s, DOCK_KEY))
+            // A layout missing or duplicating a panel can't be fixed from the UI.
+            .filter(|d| {
+                [Tab::Media, Tab::Preview, Tab::Inspector, Tab::Timeline]
+                    .iter()
+                    .all(|t| d.iter_all_tabs().filter(|(_, x)| *x == t).count() == 1)
+            })
             .unwrap_or_else(default_dock);
         Self {
             history: History::new(Project::default()),
@@ -187,8 +193,8 @@ impl App {
                 else {
                     return false;
                 };
-                if p.extension().is_none() {
-                    p.set_extension("jvid");
+                if p.extension().is_none_or(|e| e != "jvid") {
+                    p.as_mut_os_string().push(".jvid");
                 }
                 p
             }
