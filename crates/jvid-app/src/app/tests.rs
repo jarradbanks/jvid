@@ -238,7 +238,8 @@ fn titles_start_twelve_in() {
         return;
     }
     for s in shots() {
-        for (t, r) in s.panels.iter().filter(|(t, _)| *t != Tab::Preview) {
+        let titled = |t: &Tab| ![Tab::Preview, Tab::Media].contains(t);
+        for (t, r) in s.panels.iter().filter(|(t, _)| titled(t)) {
             let inset = s.left_border(*r) + s.px(space::INSET);
             let left = s.label(*r).0;
             // Inter's left side bearing is under 1pt.
@@ -248,19 +249,21 @@ fn titles_start_twelve_in() {
                 s.ctx
             );
         }
-        // The tabbed preview: the tab group starts 4px in, so its active pill does too
+        // The tabbed panels: the tab group starts 4px in, so the active pill does too
         // once it is the first tab.
         let mut h = harness([1280.0, 720.0], s.ppp);
         h.state_mut().preview_active = 0;
         h.run();
         let s2 = Shot::take(&mut h, s.ctx.clone());
-        let r = s2.panel(Tab::Preview);
-        let y = s2.px(r.top() + size::HEADER / 2.0);
-        let border = s2.left_border(r);
-        let pill = (border..)
-            .find(|&x| near(s2.at(x, y), color::RAISED))
-            .unwrap();
-        assert_eq!(pill - border, s2.px(space::S4), "{}", s2.ctx);
+        for tab in [Tab::Preview, Tab::Media] {
+            let r = s2.panel(tab);
+            let y = s2.px(r.top() + size::HEADER / 2.0);
+            let border = s2.left_border(r);
+            let pill = (border..)
+                .find(|&x| near(s2.at(x, y), color::RAISED))
+                .unwrap();
+            assert_eq!(pill - border, s2.px(space::S4), "{}: {tab:?}", s2.ctx);
+        }
     }
 }
 
@@ -295,6 +298,94 @@ fn snapshots() {
         let mut h = harness(size, ppp);
         results.add(h.try_snapshot(format!("editor_{}x{}_{ppp}x", size[0], size[1])));
     }
+}
+
+/// A bin of five assets, the second used by two clips.
+fn bin_harness() -> Harness<'static, App> {
+    use jvid_core::model::{AssetId, NewClip, ProbeInfo, TrackKind};
+    use jvid_core::time::{FLICKS_PER_SECOND, Time};
+    let mut h = harness([1280.0, 720.0], 1.0);
+    let history = &mut h.state_mut().history;
+    let video = |secs: i64| ProbeInfo {
+        duration: Time(secs * FLICKS_PER_SECOND),
+        width: Some(1920),
+        height: Some(1080),
+        ..Default::default()
+    };
+    let audio = ProbeInfo {
+        duration: Time(185 * FLICKS_PER_SECOND),
+        audio_streams: 1,
+        ..Default::default()
+    };
+    let items = vec![
+        ("/m/arena_01.mkv".into(), video(7471)),
+        ("/m/clutch_round_3.mkv".into(), video(47)),
+        ("/m/push.mp4".into(), video(729)),
+        ("/m/music.flac".into(), audio),
+        ("/m/finale.mkv".into(), video(93)),
+    ];
+    history.apply(Command::Import(items)).unwrap();
+    let Ok(jvid_core::history::Created::Track(track)) = history.apply(Command::AddTrack {
+        kind: TrackKind::Video,
+        name: "V1".into(),
+    }) else {
+        panic!()
+    };
+    for start in [0, 100] {
+        let clip = NewClip {
+            asset: AssetId(2),
+            source_in: Time(0),
+            source_out: Time(50),
+            start: Time(start),
+            link: None,
+        };
+        history.apply(Command::AddClip { track, clip }).unwrap();
+    }
+    h.run();
+    h
+}
+
+#[test]
+fn bin_snapshots() {
+    if !gpu() {
+        return;
+    }
+    let mut results = egui_kittest::SnapshotResults::new();
+    let mut h = bin_harness();
+    h.state_mut().bin.selected = Some(jvid_core::model::AssetId(2));
+    h.run();
+    results.add(h.try_snapshot("bin_grid"));
+    h.state_mut().bin.list = true;
+    h.run();
+    results.add(h.try_snapshot("bin_list"));
+    h.state_mut().bin.query = "MKV".into();
+    h.state_mut().bin.sort = 1;
+    h.run();
+    results.add(h.try_snapshot("bin_search"));
+    h.state_mut().bin.confirm_remove = Some(jvid_core::model::AssetId(2));
+    h.run();
+    results.add(h.try_snapshot("bin_remove_in_use"));
+}
+
+#[test]
+fn remove_in_use_warns_then_removes_asset_and_clips() {
+    let mut h = bin_harness();
+    h.state_mut().bin.confirm_remove = Some(jvid_core::model::AssetId(2));
+    h.run();
+    h.get_by_label("Cancel").click();
+    h.run();
+    assert_eq!(h.state().history.project().assets().len(), 5);
+    assert!(h.state().bin.confirm_remove.is_none());
+
+    h.state_mut().bin.confirm_remove = Some(jvid_core::model::AssetId(2));
+    h.run();
+    h.get_by_label("Remove").click();
+    h.run();
+    let p = h.state().history.project();
+    assert_eq!(p.assets().len(), 4);
+    assert_eq!(p.clips_using(jvid_core::model::AssetId(2)), 0);
+    h.state_mut().history.undo();
+    assert_eq!(h.state().history.project().assets().len(), 5);
 }
 
 fn enabled(h: &Harness<'_, App>, label: &str) -> bool {

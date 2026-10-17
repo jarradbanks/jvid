@@ -100,6 +100,13 @@ pub enum Command {
     },
     /// Adds probed media as one step, skipping paths already in the project.
     Import(Vec<(PathBuf, ProbeInfo)>),
+    /// Sets the bin name; `None` or blank goes back to the file name.
+    RenameAsset {
+        id: AssetId,
+        name: Option<String>,
+    },
+    /// Removes the asset and every clip that uses it.
+    RemoveAsset(AssetId),
 }
 
 /// The id a command created, if any.
@@ -235,6 +242,22 @@ impl Command {
                         let id = p.add_asset(path);
                         p.asset_mut(id).expect("just added").probe = Some(probe);
                     }
+                }
+                Created::Nothing
+            }
+            Self::RenameAsset { id, name } => {
+                let name = name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty());
+                p.asset_mut(id).ok_or(ModelError::UnknownAsset(id))?.name = name;
+                Created::Nothing
+            }
+            Self::RemoveAsset(id) => {
+                let i = p.assets.iter().position(|a| a.id == id);
+                p.assets.remove(i.ok_or(ModelError::UnknownAsset(id))?);
+                let s = &mut p.sequence;
+                let used = s.tracks().iter().flat_map(|t| t.clips());
+                let used: Vec<_> = used.filter(|c| c.asset == id).map(|c| c.id).collect();
+                for c in used {
+                    s.remove_clip(c)?;
                 }
                 Created::Nothing
             }
@@ -525,6 +548,39 @@ mod tests {
     }
 
     #[test]
+    fn rename_and_remove_asset_undo() {
+        let mut h = History::new(Project::default());
+        h.apply(Command::AddAsset("dir/a.mkv".into())).unwrap();
+        h.apply(Command::AddAsset("b.mkv".into())).unwrap();
+        let a = AssetId(1);
+        let rename = |name: &str| Command::RenameAsset {
+            id: a,
+            name: Some(name.into()),
+        };
+        h.apply(rename("  Intro ")).unwrap();
+        assert_eq!(h.project().asset(a).unwrap().display_name(), "Intro");
+        h.apply(rename(" ")).unwrap();
+        assert_eq!(h.project().asset(a).unwrap().display_name(), "a.mkv");
+
+        let t = track(&mut h);
+        h.apply(add_clip(t, 0)).unwrap();
+        h.apply(add_clip(t, 20)).unwrap();
+        assert_eq!(h.project().clips_using(a), 2);
+        assert_eq!(h.project().clips_using(AssetId(2)), 0);
+        let before = h.project().clone();
+        h.apply(Command::RemoveAsset(a)).unwrap();
+        assert!(h.project().asset(a).is_none());
+        assert_eq!(h.project().clips_using(a), 0);
+        assert!(h.project().sequence().track(t).unwrap().clips().is_empty());
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert_eq!(
+            h.apply(Command::RemoveAsset(AssetId(9))),
+            Err(ModelError::UnknownAsset(AssetId(9)))
+        );
+    }
+
+    #[test]
     fn failed_command_and_rollback_change_nothing() {
         let mut h = History::new(Project::default());
         assert_eq!(
@@ -772,6 +828,13 @@ mod tests {
                 }
             )),
             "[a-z]{1,4}".prop_map(|s| Command::AddAsset(s.into())),
+            (id.clone(), proptest::option::of("[a-z ]{0,4}")).prop_map(|(a, name)| {
+                Command::RenameAsset {
+                    id: AssetId(a),
+                    name,
+                }
+            }),
+            id.clone().prop_map(|a| Command::RemoveAsset(AssetId(a))),
             (id, any::<bool>()).prop_map(|(a, some)| Command::SetAssetProbe {
                 id: AssetId(a),
                 probe: some.then(ProbeInfo::default),

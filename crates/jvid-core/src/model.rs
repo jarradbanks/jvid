@@ -117,6 +117,20 @@ pub struct MediaAsset {
     pub path: PathBuf,
     /// `None` until the file has been probed.
     pub probe: Option<ProbeInfo>,
+    /// The bin name; `None` shows the file name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl MediaAsset {
+    pub fn display_name(&self) -> String {
+        self.name.clone().unwrap_or_else(|| {
+            self.path.file_name().map_or_else(
+                || self.path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            )
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -519,12 +533,19 @@ impl Project {
             id,
             path: path.into(),
             probe: None,
+            name: None,
         });
         id
     }
 
     pub fn asset(&self, id: AssetId) -> Option<&MediaAsset> {
         self.assets.iter().find(|a| a.id == id)
+    }
+
+    /// How many clips use the asset; removing it removes them too.
+    pub fn clips_using(&self, id: AssetId) -> usize {
+        let clips = self.sequence.tracks.iter().flat_map(|t| &t.clips);
+        clips.filter(|c| c.asset == id).count()
     }
 
     pub(crate) fn asset_mut(&mut self, id: AssetId) -> Option<&mut MediaAsset> {

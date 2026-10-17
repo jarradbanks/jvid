@@ -3,6 +3,7 @@
 mod app;
 mod import;
 mod keymap;
+mod media_bin;
 mod project_file;
 mod settings_file;
 
