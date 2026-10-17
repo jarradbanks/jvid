@@ -141,7 +141,7 @@ impl Preview {
             &rs.queue,
             (settings.width, settings.height),
             settings.background,
-            &[(image, 1.0)],
+            &[(image, Default::default())],
             path,
         )
         .map_err(|e| e.to_string())

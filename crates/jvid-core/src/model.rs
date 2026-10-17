@@ -192,6 +192,49 @@ pub struct Clip {
     /// Animated params by name, sorted by time; see [`crate::keyframe`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub keyframes: BTreeMap<String, Vec<Keyframe>>,
+    /// Static transform, crop and opacity; keyframes of the same names override each field.
+    #[serde(default, skip_serializing_if = "Transform::is_default")]
+    pub transform: Transform,
+}
+
+/// Where a clip lands in the frame, in project pixels. The clip is first fitted whole and
+/// centred, as in the compositor; this then applies in the fitted image's pixels.
+///
+/// Keyframe names: `position`, `anchor` (`Vec2`), `scale` (`Scalar` for linked, `Vec2` for
+/// separate X/Y), `rotation`, `opacity`, `crop_left`, `crop_top`, `crop_right`, `crop_bottom`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Transform {
+    /// Where the anchor lands, as an offset from the frame centre, y down.
+    pub position: [f64; 2],
+    pub scale: [f64; 2],
+    /// Degrees clockwise about the anchor.
+    pub rotation: f64,
+    /// Offset from the image centre, y down; the point that position places and rotation pivots on.
+    pub anchor: [f64; 2],
+    /// Pixels removed from the left, top, right and bottom; the rest stays where it was.
+    pub crop: [f64; 4],
+    /// 0..=1.
+    pub opacity: f64,
+}
+
+impl Default for Transform {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 2],
+            scale: [1.0; 2],
+            rotation: 0.0,
+            anchor: [0.0; 2],
+            crop: [0.0; 4],
+            opacity: 1.0,
+        }
+    }
+}
+
+impl Transform {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 impl Clip {
@@ -203,6 +246,37 @@ impl Clip {
     pub fn value_at(&self, param: &str, t: Time) -> Option<crate::keyframe::Value> {
         let keys = self.keyframes.get(param)?;
         crate::keyframe::value_at(keys, self.source_in + (t - self.start))
+    }
+
+    /// The transform at timeline time `t`, keyframes applied over the static values.
+    pub fn transform_at(&self, t: Time) -> Transform {
+        use crate::keyframe::Value::{Scalar, Vec2};
+        let mut x = self.transform;
+        let vec2 = |name, v: &mut [f64; 2]| {
+            if let Some(Vec2(n)) = self.value_at(name, t) {
+                *v = n;
+            }
+        };
+        vec2("position", &mut x.position);
+        vec2("anchor", &mut x.anchor);
+        match self.value_at("scale", t) {
+            Some(Scalar(s)) => x.scale = [s; 2],
+            Some(Vec2(s)) => x.scale = s,
+            _ => {}
+        }
+        let scalar = |name, v: &mut f64| {
+            if let Some(Scalar(n)) = self.value_at(name, t) {
+                *v = n;
+            }
+        };
+        let crop = ["crop_left", "crop_top", "crop_right", "crop_bottom"];
+        for (name, v) in crop.into_iter().zip(&mut x.crop) {
+            scalar(name, v);
+        }
+        scalar("rotation", &mut x.rotation);
+        scalar("opacity", &mut x.opacity);
+        x.opacity = x.opacity.clamp(0.0, 1.0);
+        x
     }
 
     /// Exclusive end on the timeline.
@@ -351,6 +425,7 @@ impl Sequence {
                 link: new.link,
                 params: BTreeMap::new(),
                 keyframes: BTreeMap::new(),
+                transform: Transform::default(),
             },
         );
         Ok(id)
@@ -586,6 +661,60 @@ mod tests {
 
     fn ids<'a>(it: impl Iterator<Item = (TrackId, &'a Clip)>) -> Vec<ClipId> {
         it.map(|(_, c)| c.id).collect()
+    }
+
+    #[test]
+    fn transform_keyframes_override_static_values() {
+        use crate::keyframe::{Easing, Value};
+        let key = |t, value| Keyframe {
+            time: Time(t),
+            value,
+            easing: Easing::Linear,
+        };
+        let mut c = Clip {
+            id: ClipId(1),
+            asset: AssetId(1),
+            source_in: Time(100),
+            source_out: Time(200),
+            start: Time(0),
+            link: None,
+            params: BTreeMap::new(),
+            keyframes: BTreeMap::new(),
+            transform: Transform {
+                position: [5.0, 6.0],
+                rotation: 30.0,
+                ..Default::default()
+            },
+        };
+        assert_eq!(c.transform_at(Time(0)), c.transform);
+        let mut k = |name: &str, keys: Vec<Keyframe>| c.keyframes.insert(name.into(), keys);
+        // Keyframe times are source time: timeline 10 is source 110.
+        k(
+            "scale",
+            vec![key(100, Value::Scalar(1.0)), key(120, Value::Scalar(3.0))],
+        );
+        k(
+            "anchor",
+            vec![
+                key(100, Value::Vec2([0.0, 0.0])),
+                key(120, Value::Vec2([10.0, -20.0])),
+            ],
+        );
+        k("crop_top", vec![key(100, Value::Scalar(4.0))]);
+        k("opacity", vec![key(100, Value::Scalar(2.0))]);
+        let x = c.transform_at(Time(10));
+        assert_eq!(x.scale, [2.0, 2.0]);
+        assert_eq!(x.anchor, [5.0, -10.0]);
+        assert_eq!(x.crop, [0.0, 4.0, 0.0, 0.0]);
+        assert_eq!((x.position, x.rotation, x.opacity), ([5.0, 6.0], 30.0, 1.0));
+        c.keyframes
+            .insert("scale".into(), vec![key(0, Value::Vec2([0.5, 2.0]))]);
+        assert_eq!(c.transform_at(Time(10)).scale, [0.5, 2.0]);
+        // Old files without a transform load with the identity.
+        let json =
+            r#"{"id":1,"asset":1,"source_in":0,"source_out":1,"start":0,"link":null,"params":{}}"#;
+        let old: Clip = serde_json::from_str(json).unwrap();
+        assert_eq!(old.transform, Transform::default());
     }
 
     #[test]
