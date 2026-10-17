@@ -61,7 +61,6 @@ type Done = (Key, Duration, Result<Frame, String>);
 /// What to draw for one timeline frame.
 pub struct Shown {
     /// Timeline frame index.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub index: i64,
     /// Top layer first, with its evaluated transform.
     pub layers: Vec<(Pixels, Transform)>,
@@ -644,6 +643,9 @@ pub struct Gpu {
     /// `.cube` paths already read into the compositor, or that failed to.
     /// shortcut: read once per session; a file edited on disk shows after a restart.
     luts: HashSet<String>,
+    /// The [`crate::effects::Library::generation`] last loaded into the compositor, and the
+    /// effect stems set there.
+    effects: (u64, HashSet<String>),
 }
 
 impl Gpu {
@@ -653,6 +655,7 @@ impl Gpu {
             layers: Vec::new(),
             texts: Vec::new(),
             luts: HashSet::new(),
+            effects: Default::default(),
         }
     }
 
@@ -711,6 +714,26 @@ impl Gpu {
                 }
             }
         }
+        crate::effects::with(|lib| {
+            if lib.generation == self.effects.0 {
+                return;
+            }
+            let old = std::mem::take(&mut self.effects.1);
+            for stem in &old {
+                let _ = self.compositor.set_effect(device, stem, None);
+            }
+            for (stem, entry) in lib.entries() {
+                let Ok(shader) = entry else { continue };
+                match self.compositor.set_effect(device, stem, Some(shader)) {
+                    Ok(()) => {
+                        self.effects.1.insert(stem.to_owned());
+                    }
+                    Err(e) => tracing::warn!("effect {stem}: {e}"),
+                }
+            }
+            self.effects.0 = lib.generation;
+        });
+        self.compositor.frame = shown.index as u32;
         let layers: Vec<_> = shown
             .layers
             .iter()

@@ -3,6 +3,7 @@
 pub mod app;
 mod autosave;
 mod easing;
+mod effects;
 pub mod export;
 mod handles;
 mod import;

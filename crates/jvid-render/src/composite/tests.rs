@@ -581,3 +581,55 @@ fn lut_matches_a_trilinear_reference_and_mixes_by_intensity() {
         }
     }
 }
+
+#[test]
+fn effects_run_in_order_and_unknown_ones_pass_through() {
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping effect test: no software adapter on this platform");
+        return;
+    };
+    let src = image(&device, &queue, (8, 8), |_, _| [200, 100, 50, 255]);
+    let invert = crate::effect::parse(
+        "// @jvid effect \"Invert\"
+// @param amount float 0.0..1.0 = 1.0
+fn effect(uv: vec2<f32>) -> vec4<f32> {
+    let c = textureSample(src, smp, uv);
+    return vec4<f32>(mix(c.rgb, 1.0 - c.rgb, fx.amount), c.a);
+}",
+    )
+    .unwrap();
+    let mut comp = Compositor::new(&device);
+    comp.set_effect(&device, "invert", Some(&invert)).unwrap();
+    let fx = |shader: &str, amount: f64| Effect {
+        shader: shader.into(),
+        params: [("amount".to_owned(), amount)].into(),
+    };
+    let run = |comp: &mut Compositor, effects: Vec<Effect>| {
+        let t = Transform {
+            effects,
+            ..Default::default()
+        };
+        let tex = comp.render(&device, &queue, (8, 8), 1, [0, 0, 0, 255], &[(&src, t)]);
+        read_back(&device, &queue, tex)[..3].to_vec()
+    };
+    let same = |a: &[u8], b: [i32; 3]| a.iter().zip(b).all(|(a, b)| near(*a, b));
+    assert!(same(&run(&mut comp, vec![]), [200, 100, 50]));
+    assert!(same(
+        &run(&mut comp, vec![fx("invert", 1.0)]),
+        [55, 155, 205]
+    ));
+    // Missing (or failed) shaders are skipped; two inverts cancel.
+    assert!(same(
+        &run(&mut comp, vec![fx("gone", 1.0), fx("invert", 0.0)]),
+        [200, 100, 50]
+    ));
+    assert!(same(
+        &run(&mut comp, vec![fx("invert", 1.0), fx("invert", 1.0)]),
+        [200, 100, 50]
+    ));
+    comp.set_effect(&device, "invert", None).unwrap();
+    assert!(same(
+        &run(&mut comp, vec![fx("invert", 1.0)]),
+        [200, 100, 50]
+    ));
+}

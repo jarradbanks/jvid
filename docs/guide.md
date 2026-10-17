@@ -68,6 +68,12 @@ On the timeline, an animated clip has a toggle in its name strip that shows a la
 
 **Zoom to a region.** Select a video clip, hold `Alt` and drag a rectangle on the Program monitor. From the playhead the clip zooms in on it, holds for 2 seconds and zooms back out. The rectangle keeps the project's shape. Pick **Quick** or **Smooth** in the bar that appears while `Alt` is held. The zoom is one undo step, made of scale and position keyframes you can edit like any others.
 
+## Effects
+
+The bin's Effects tab lists the WGSL effects in your effects folder; add one to the selected clips
+from the Inspector's Effects section, where each parameter is a keyframeable slider. To write
+your own, see [Writing effects](effects.md).
+
 ## Export
 
 Click **Export** in the header. The dialog opens on In to Out when you've marked a range, otherwise the whole timeline.

@@ -1,7 +1,7 @@
 //! The compositor: a layer stack from [`jvid_core::eval::video_at`] blended over the project
 //! background into one project-sized frame, at preview scale for the viewer or full size for export.
 
-use jvid_core::model::{Blend, Transform};
+use jvid_core::model::{Blend, Effect, Transform};
 use wgpu::util::DeviceExt;
 
 use crate::preview::{place, scaled};
@@ -50,6 +50,11 @@ pub struct Compositor {
     /// Uploaded LUTs by [`Transform::lut`] path, and the stand-in bound for layers without one.
     luts: std::collections::HashMap<String, wgpu::Texture>,
     no_lut: wgpu::Texture,
+    /// Effect pipelines by [`Effect::shader`], with their parameters in uniform order; layers
+    /// naming an effect not set skip it.
+    effects: std::collections::HashMap<String, (wgpu::RenderPipeline, Vec<crate::effect::Param>)>,
+    /// The timeline frame number effects see as `fx.frame`.
+    pub frame: u32,
 }
 
 impl Compositor {
@@ -116,7 +121,155 @@ impl Compositor {
                 usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             }),
+            effects: Default::default(),
+            frame: 0,
         }
+    }
+
+    /// Builds `shader` for layers whose effects name `key`, or removes it when `None`. A shader
+    /// the device rejects is removed too, so those layers draw as if it weren't there.
+    pub fn set_effect(
+        &mut self,
+        device: &wgpu::Device,
+        key: &str,
+        shader: Option<&crate::effect::Shader>,
+    ) -> Result<(), String> {
+        self.effects.remove(key);
+        let Some(shader) = shader else {
+            return Ok(());
+        };
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(key),
+            source: wgpu::ShaderSource::Wgsl(shader.module.as_str().into()),
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(key),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("jvid_vs"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("jvid_fs"),
+                targets: &[Some(FORMAT.into())],
+                compilation_options: Default::default(),
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        // wgpu's native error futures are ready at once; still pending counts as a failure.
+        let mut pop = std::pin::pin!(scope.pop());
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        match pop.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(None) => {
+                self.effects
+                    .insert(key.to_owned(), (pipeline, shader.params.clone()));
+                Ok(())
+            }
+            std::task::Poll::Ready(Some(e)) => Err(e.to_string()),
+            std::task::Poll::Pending => Err("the GPU didn't report whether it compiled".into()),
+        }
+    }
+
+    /// `tex` with `effects` applied in order, or `None` when none of them is set.
+    /// shortcut: a new texture and uniform per effect per frame; pool them if playback profiles hot.
+    fn apply_effects(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        tex: &wgpu::Texture,
+        effects: &[Effect],
+    ) -> Option<wgpu::Texture> {
+        if effects.is_empty() {
+            return None;
+        }
+        let mut out: Option<wgpu::Texture> = None;
+        let mut encoder = device.create_command_encoder(&Default::default());
+        for e in effects {
+            let Some((pipeline, params)) = self.effects.get(&e.shader) else {
+                continue;
+            };
+            let input = out.as_ref().unwrap_or(tex);
+            let mut p = vec![
+                input.width() as f32,
+                input.height() as f32,
+                self.frame as f32,
+            ];
+            p.extend(params.iter().map(|q| {
+                let v = e.params.get(&q.name).copied().unwrap_or(q.default);
+                v.clamp(q.min, q.max) as f32
+            }));
+            p.resize(p.len().next_multiple_of(4), 0.0);
+            let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("effect"),
+                contents: &p.iter().flat_map(|f| f.to_ne_bytes()).collect::<Vec<_>>(),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let view = input.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(input.format().remove_srgb_suffix()),
+                ..Default::default()
+            });
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform.as_entire_binding(),
+                    },
+                ],
+            });
+            let next = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("effect"),
+                size: input.size(),
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let target = next.create_view(&Default::default());
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("effect"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.draw(0..4, 0..1);
+            drop(pass);
+            out = Some(next);
+        }
+        queue.submit([encoder.finish()]);
+        out
     }
 
     /// Uploads `lut` for layers whose [`Transform::lut`] is `path`; layers naming a path not
@@ -186,9 +339,15 @@ impl Compositor {
             .unwrap()
             .create_view(&Default::default());
         let frame = [size.0 as f32, size.1 as f32];
+        let effected: Vec<_> = layers
+            .iter()
+            .map(|(tex, t)| self.apply_effects(device, queue, tex, &t.effects))
+            .collect();
         // shortcut: a uniform and bind group per layer per frame; pool them if playback (#32) profiles hot.
         let binds: Vec<_> = layers
             .iter()
+            .zip(&effected)
+            .map(|((tex, t), fx)| (fx.as_ref().unwrap_or(tex), t))
             .rev()
             .filter(|(_, t)| t.opacity > 0.0)
             .filter_map(|(tex, t)| {

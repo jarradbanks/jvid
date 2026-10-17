@@ -2174,6 +2174,7 @@ dependencies = [
  "image",
  "jvid-core",
  "jvid-media",
+ "naga",
  "suite-ui",
  "wgpu",
 ]
