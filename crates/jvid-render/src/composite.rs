@@ -165,6 +165,10 @@ impl Compositor {
                 let mut p = corners.concat();
                 let mode = Blend::ALL.iter().position(|b| *b == t.blend).unwrap_or(0);
                 p.extend([t.opacity.clamp(0.0, 1.0) as f32, mode as f32, 0.0, 0.0]);
+                let g = t.grade();
+                let on = g.iter().any(|v| *v != 0.0);
+                p.extend(g.map(|v| v as f32));
+                p.extend([f32::from(u8::from(on)), 0.0, 0.0]);
                 let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("layer"),
                     contents: &p.iter().flat_map(|f| f.to_ne_bytes()).collect::<Vec<_>>(),

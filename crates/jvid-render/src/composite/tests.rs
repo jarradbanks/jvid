@@ -442,3 +442,61 @@ fn blend_over_transparent_background_keeps_the_layer() {
         &rgba[..4]
     );
 }
+
+#[test]
+fn neutral_grade_is_bit_identical_and_adjustments_apply_in_linear_light() {
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping grade test: no software adapter on this platform");
+        return;
+    };
+    // Every 8-bit code on each channel, one texel per project pixel.
+    let px = |x: u32, y: u32| {
+        [
+            x as u8,
+            (x as u8).wrapping_add(85 * y as u8),
+            255 - x as u8,
+            255,
+        ]
+    };
+    let img = image(&device, &queue, (256, 4), px);
+    let mut comp = Compositor::new(&device);
+    let mut run = |t: Transform| {
+        let tex = comp.render(&device, &queue, (256, 4), 1, [0, 0, 0, 255], &[(&img, t)]);
+        read_back(&device, &queue, tex)
+    };
+    let want: Vec<u8> = (0..256 * 4).flat_map(|i| px(i % 256, i / 256)).collect();
+    assert_eq!(
+        run(Transform::default()),
+        want,
+        "neutral leaves pixels untouched"
+    );
+    let blended = Transform {
+        blend: jvid_core::model::Blend::Lighten,
+        ..Default::default()
+    };
+    assert_eq!(run(blended), want, "neutral through the blend pipeline too");
+
+    let at = |rgba: &[u8], x: usize| [rgba[x * 4], rgba[x * 4 + 1], rgba[x * 4 + 2]];
+    // +1 stop doubles linear light: sRGB 128 (0.216) -> 0.432 -> 176.
+    let up = run(Transform {
+        exposure: 1.0,
+        ..Default::default()
+    });
+    assert!(near(at(&up, 128)[0], 176), "{:?}", at(&up, 128));
+    // No saturation leaves linear Rec.709 luma: pure red (x 255 has r 255, b 0) -> 0.2126 -> 127.
+    let grey = run(Transform {
+        saturation: -1.0,
+        ..Default::default()
+    });
+    let g = at(&grey, 255);
+    assert!(
+        g.iter().all(|c| (*c as i32 - g[0] as i32).abs() <= 1),
+        "{g:?}"
+    );
+    // Warmer raises red and lowers blue.
+    let warm = run(Transform {
+        temperature: 1.0,
+        ..Default::default()
+    });
+    assert!(at(&warm, 128)[0] > 128 && at(&warm, 128)[2] < 127);
+}
