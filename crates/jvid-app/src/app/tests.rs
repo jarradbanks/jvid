@@ -36,7 +36,9 @@ fn harness(size: [f32; 2], ppp: f32) -> Harness<'static, App> {
 }
 
 fn welcome_harness(size: [f32; 2], ppp: f32) -> Harness<'static, App> {
-    let mut h = builder(size, ppp).wgpu().build_eframe(|cc| App::new(cc));
+    let mut h = builder(size, ppp)
+        .wgpu()
+        .build_eframe(|cc| App::new(cc, &Default::default()));
     h.run();
     h
 }
@@ -231,6 +233,10 @@ fn hairlines_are_one_physical_pixel() {
             assert_eq!(down[1].0 - down[0].0, s.px(size::HEADER) - 1, "{ctx}");
         }
         for row in s.rows() {
+            // The timeline isn't empty: its lanes are Field.
+            if row.iter().any(|(t, _)| *t == Tab::Timeline) {
+                continue;
+            }
             // Across the (empty) content of every panel in the row, gutters included,
             // above the media bin's pinned Import button.
             let y = s.px(row[0].1.bottom() - 56.0);
@@ -716,7 +722,7 @@ fn fake_probe(p: &std::path::Path) -> Result<jvid_core::model::ProbeInfo, String
 
 /// No GPU: state-transition tests run everywhere.
 fn plain_harness() -> Harness<'static, App> {
-    let mut h = builder([1280.0, 720.0], 1.0).build_eframe(|cc| App::new(cc));
+    let mut h = builder([1280.0, 720.0], 1.0).build_eframe(|cc| App::new(cc, &Default::default()));
     h.run();
     h
 }

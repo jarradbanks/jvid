@@ -18,6 +18,7 @@ use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
 use crate::preview::{Preview, SOURCE_ACTIONS};
+use crate::timeline::Timeline;
 use crate::welcome::{self, Recent, Welcome};
 use crate::{project_file, relink};
 
@@ -36,7 +37,7 @@ pub enum Tab {
     Timeline,
 }
 
-pub fn run() -> eframe::Result {
+pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("jvid")
@@ -47,7 +48,11 @@ pub fn run() -> eframe::Result {
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
-    eframe::run_native("jvid", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+    eframe::run_native(
+        "jvid",
+        options,
+        Box::new(move |cc| Ok(Box::new(App::new(cc, &settings)))),
+    )
 }
 
 pub struct App {
@@ -62,6 +67,7 @@ pub struct App {
     importer: Importer,
     bin: MediaBin,
     preview: Preview,
+    timeline: Timeline,
     /// Asset paths found missing when the project was opened; see [`relink::missing`].
     missing: HashSet<PathBuf>,
     /// Error toasts and the time each expires.
@@ -76,9 +82,12 @@ pub struct App {
 const TOAST_SECS: f64 = 6.0;
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, settings: &jvid_core::settings::Settings) -> Self {
         theme::install(&cc.egui_ctx);
         let mut app = Self::restore(cc.storage);
+        let caches = crate::media_bin::Caches::new(settings);
+        app.bin = MediaBin::new(caches.clone());
+        app.timeline = Timeline::new(caches);
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
         app
     }
@@ -105,6 +114,7 @@ impl App {
             importer: Importer::media(),
             bin: MediaBin::default(),
             preview: Preview::new(None),
+            timeline: Timeline::default(),
             missing: HashSet::new(),
             toasts: Vec::new(),
             welcome: Welcome::new(
@@ -327,6 +337,13 @@ impl App {
             }
             return;
         }
+        let timeline_focused = self
+            .dock
+            .find_active_focused()
+            .is_some_and(|(_, t)| *t == Tab::Timeline);
+        if timeline_focused && self.timeline.action(id, self.history.project()) {
+            return;
+        }
         let tab = match id {
             "focus_media" => Tab::Media,
             "focus_timeline" => Tab::Timeline,
@@ -501,6 +518,7 @@ impl eframe::App for App {
                 command: None,
                 open: None,
                 preview: &mut self.preview,
+                timeline: &mut self.timeline,
             };
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
@@ -629,6 +647,7 @@ struct Viewer<'a> {
     command: Option<Command>,
     open: Option<jvid_core::model::AssetId>,
     preview: &'a mut Preview,
+    timeline: &'a mut Timeline,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -679,6 +698,10 @@ impl TabViewer for Viewer<'_> {
             });
             let offline = source.is_some_and(|p| self.missing.contains(p));
             panel.show(ui, |ui| self.preview.show_frame(ui, source, offline));
+            return;
+        }
+        if *tab == Tab::Timeline {
+            panel.show(ui, |ui| self.timeline.show(ui, self.project, self.missing));
             return;
         }
         // shortcut: panels are empty shells; their content lands in later issues.

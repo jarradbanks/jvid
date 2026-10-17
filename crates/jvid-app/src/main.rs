@@ -8,6 +8,7 @@ mod preview;
 mod project_file;
 mod relink;
 mod settings_file;
+mod timeline;
 mod transport;
 mod welcome;
 
@@ -17,6 +18,5 @@ fn main() -> eframe::Result {
     if let Err(e) = jvid_media::ffmpeg::init() {
         tracing::error!("ffmpeg failed to initialise: {e}");
     }
-    let _settings = settings_file::load();
-    app::run()
+    app::run(settings_file::load())
 }

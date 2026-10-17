@@ -13,6 +13,7 @@ use jvid_core::model::{AssetId, MediaAsset, Project};
 use jvid_core::time::FLICKS_PER_SECOND;
 use jvid_jobs::Pool;
 use jvid_media::thumbnails::Cache;
+use jvid_media::waveforms;
 use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
@@ -23,6 +24,33 @@ pub const SORTS: [&str; 3] = ["Added", "Name", "Duration"];
 /// Grid tiles shrink to this width before a column drops.
 const TILE_MIN: f32 = 120.0;
 const ROW: f32 = 24.0;
+
+/// The disk caches and job pool shared by the media bin and the timeline, built once at startup.
+pub struct Caches {
+    pub thumbs: Arc<Cache>,
+    /// Shares the thumbnails' directory, so one eviction keeps both under the cap.
+    pub peaks: Arc<waveforms::Cache>,
+    pub jobs: Pool,
+}
+
+impl Caches {
+    pub fn new(s: &jvid_core::settings::Settings) -> Arc<Self> {
+        let dir = s
+            .cache_dir
+            .clone()
+            .or_else(|| {
+                directories::ProjectDirs::from("", "", "jvid").map(|d| d.cache_dir().to_owned())
+            })
+            .unwrap_or_else(std::env::temp_dir)
+            .join("thumbnails");
+        let cap = s.cache_max_mb << 20;
+        Arc::new(Self {
+            thumbs: Arc::new(Cache::new(dir.clone(), cap)),
+            peaks: Arc::new(waveforms::Cache::new(dir, cap)),
+            jobs: Pool::new(2),
+        })
+    }
+}
 
 #[derive(Default)]
 pub struct MediaBin {
@@ -105,6 +133,12 @@ fn is_audio(asset: &MediaAsset) -> bool {
 }
 
 impl MediaBin {
+    pub fn new(caches: Arc<Caches>) -> Self {
+        let mut bin = Self::default();
+        bin.thumbs.cache = Some(caches);
+        bin
+    }
+
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -543,8 +577,8 @@ type Done<T> = Arc<Mutex<Vec<(PathBuf, T)>>>;
 /// Poster thumbnails, made on a job pool and kept on disk by `jvid_media::thumbnails`.
 #[derive(Default)]
 struct Thumbs {
-    /// Started on first paint, so tests and empty bins spawn nothing.
-    cache: Option<(Arc<Cache>, Pool)>,
+    /// `None` in tests, which then load nothing.
+    cache: Option<Arc<Caches>>,
     /// Posters finished off-thread, waiting to become textures.
     done: Done<egui::ColorImage>,
     /// `None` while a poster is in flight or failed; the placeholder shows.
@@ -618,8 +652,8 @@ impl Thumbs {
                 None => {
                     self.strips.insert(asset.path.clone(), None);
                     let (done, ctx) = (self.strip_done.clone(), ui.ctx().clone());
-                    let (cache, jobs) = self.cache();
-                    let cache = cache.clone();
+                    let Some(c) = &self.cache else { return };
+                    let (cache, jobs) = (c.thumbs.clone(), &c.jobs);
                     let (path, duration) = (asset.path.clone(), probe.duration);
                     let key = format!("strip:{}", path.display());
                     jobs.submit(key, jvid_jobs::Priority::Preview, move |c| {
@@ -645,32 +679,17 @@ impl Thumbs {
             None => {
                 self.textures.insert(asset.path.clone(), None);
                 let (done, ctx, path) = (self.done.clone(), ui.ctx().clone(), asset.path.clone());
-                let (cache, jobs) = self.cache();
-                cache.submit_poster(jobs, path.clone(), probe.duration, move |r| match r {
-                    Ok(img) => {
-                        done.lock().unwrap().push((path, color_image(&img)));
-                        ctx.request_repaint();
-                    }
-                    Err(e) => tracing::warn!("thumbnail for {}: {e}", path.display()),
-                });
+                let Some(c) = &self.cache else { return };
+                c.thumbs
+                    .submit_poster(&c.jobs, path.clone(), probe.duration, move |r| match r {
+                        Ok(img) => {
+                            done.lock().unwrap().push((path, color_image(&img)));
+                            ctx.request_repaint();
+                        }
+                        Err(e) => tracing::warn!("thumbnail for {}: {e}", path.display()),
+                    });
             }
         }
-    }
-    fn cache(&mut self) -> &(Arc<Cache>, Pool) {
-        self.cache.get_or_insert_with(|| {
-            let s = crate::settings_file::load();
-            let dir = s
-                .cache_dir
-                .or_else(|| {
-                    directories::ProjectDirs::from("", "", "jvid").map(|d| d.cache_dir().to_owned())
-                })
-                .unwrap_or_else(std::env::temp_dir)
-                .join("thumbnails");
-            (
-                Arc::new(Cache::new(dir, s.cache_max_mb << 20)),
-                Pool::new(2),
-            )
-        })
     }
 }
 
@@ -836,7 +855,11 @@ mod tests {
         grabs.store(0, Ordering::SeqCst);
 
         let mut thumbs = Thumbs {
-            cache: Some((cache, Pool::new(1))),
+            cache: Some(Arc::new(Caches {
+                thumbs: cache,
+                peaks: Arc::new(waveforms::Cache::new(d.join("cache"), u64::MAX)),
+                jobs: Pool::new(1),
+            })),
             ..Default::default()
         };
         let ctx = egui::Context::default();
