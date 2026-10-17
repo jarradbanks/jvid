@@ -107,7 +107,7 @@ pub(crate) fn block_on<F: std::future::Future>(f: F) -> F::Output {
 }
 
 /// Why an export didn't produce a file.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     Cancelled,
     Failed(String),
@@ -352,6 +352,7 @@ fn blocking(path: &Path, nth: usize) -> ClipAudio {
 }
 
 pub mod dialog;
+pub mod queue;
 
 #[cfg(test)]
 mod tests;

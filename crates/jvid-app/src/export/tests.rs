@@ -337,3 +337,67 @@ fn user_presets_skip_bad_files() {
     assert_eq!(names, ["Mine"]);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A job queued behind a busy pool still renders the project as it was when queued.
+#[test]
+fn editing_after_queueing_doesnt_change_the_export() {
+    let (Some(dir), Some(gpu)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let mut h = History::new(project(&dir));
+    let pool = Pool::new(1);
+    let (go, wait) = channel::<()>();
+    pool.submit("busy", Priority::Interactive, move |_| {
+        let _ = wait.recv();
+    });
+    let path = out("snapshot.mp4");
+    let req = Request {
+        path: path.clone(),
+        range: (secs(1), secs(2)),
+        preset: preset("YouTube 1080p"),
+        loudness: None,
+    };
+    let mut q = queue::Queue::default();
+    assert!(q.push(
+        path.clone(),
+        submit(&pool, h.project().clone(), req.clone(), gpu)
+    ));
+    assert!(!q.writing(&out("other.mp4")) && q.writing(&path));
+    let video = h.project().sequence().tracks()[0].clips()[0].id;
+    h.apply(Command::RemoveClip(video)).unwrap();
+    go.send(()).unwrap();
+    let r = loop {
+        if let Some((_, r)) = q.poll().pop() {
+            break r;
+        }
+        std::thread::yield_now();
+    };
+    assert_eq!(r, Ok(()));
+    assert!(!q.writing(&path));
+    let mut v = VideoDecoder::open(&path).unwrap();
+    let f = v.frame_at(Time(0)).unwrap();
+    assert_eq!(frame_index(&f.planes[0], f.width as usize), 30);
+    std::fs::remove_file(&path).unwrap();
+}
+
+/// Cancelling a job before it starts reports it cancelled, not crashed.
+#[test]
+fn queue_reports_cancelled_waiting_job() {
+    let pool = Pool::new(1);
+    let (go, wait) = channel::<()>();
+    pool.submit("busy", Priority::Interactive, move |_| {
+        let _ = wait.recv();
+    });
+    let (tx, rx) = channel::<Result<ProbeInfo, Error>>();
+    let h = pool.submit("job", Priority::Interactive, move |_| drop(tx));
+    let mut q = queue::Queue::default();
+    assert!(q.push("a.mp4".into(), (h.clone(), rx)));
+    assert_eq!(q.running(), Some(0.0));
+    h.cancel();
+    go.send(()).unwrap();
+    while !h.is_finished() {
+        std::thread::yield_now();
+    }
+    assert_eq!(q.poll(), vec![("a.mp4".into(), Err(Error::Cancelled))]);
+    assert_eq!((q.running(), q.pending()), (None, 0));
+}
