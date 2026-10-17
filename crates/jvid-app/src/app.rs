@@ -77,6 +77,7 @@ pub struct App {
     on_welcome: bool,
     /// Match source: the next imported video sets the project's size and frame rate.
     match_source: bool,
+    settings_dialog: crate::project_settings::SettingsDialog,
 }
 
 const TOAST_SECS: f64 = 6.0;
@@ -124,6 +125,7 @@ impl App {
             ),
             on_welcome: true,
             match_source: false,
+            settings_dialog: Default::default(),
         }
     }
 
@@ -204,6 +206,7 @@ impl App {
                 (FileAction::Open, "Open…"),
                 (FileAction::Save, "Save"),
                 (FileAction::SaveAs, "Save as…"),
+                (FileAction::Settings, "Project settings…"),
             ] {
                 if ui.button(label).clicked() {
                     action = Some(a);
@@ -261,6 +264,7 @@ impl App {
             FileAction::SaveAs => {
                 self.save(true);
             }
+            FileAction::Settings => self.settings_dialog.open(self.history.project()),
         }
     }
 
@@ -556,6 +560,11 @@ impl eframe::App for App {
             if let Some(id) = relink {
                 self.relink_dialog(id);
             }
+            if let Some(c) = self.settings_dialog.show(ui, self.history.project())
+                && let Err(e) = self.history.apply(c)
+            {
+                tracing::warn!("edit failed: {e}");
+            }
         });
 
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
@@ -583,6 +592,7 @@ enum FileAction {
     Open,
     Save,
     SaveAs,
+    Settings,
 }
 
 fn project_dialog() -> FileDialog {
