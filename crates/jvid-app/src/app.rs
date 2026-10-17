@@ -15,6 +15,7 @@ use suite_ui::widgets::{Button, State};
 
 use crate::import::Importer;
 use crate::keymap::{self, Keymap};
+use crate::media_bin::MediaBin;
 use crate::project_file;
 
 #[cfg(test)]
@@ -55,6 +56,7 @@ pub struct App {
     window_title: String,
     keymap: Keymap,
     importer: Importer,
+    bin: MediaBin,
     /// Error toasts and the time each expires.
     toasts: Vec<(String, f64)>,
 }
@@ -87,6 +89,7 @@ impl App {
             window_title: String::new(),
             keymap: keymap::load(),
             importer: Importer::media(),
+            bin: MediaBin::default(),
             toasts: Vec::new(),
         }
     }
@@ -345,7 +348,9 @@ impl eframe::App for App {
                 focused,
                 project: self.history.project(),
                 importing: self.importer.is_busy(),
+                bin: &mut self.bin,
                 import_clicked: false,
+                command: None,
             };
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
@@ -357,7 +362,13 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            if viewer.import_clicked {
+            let (import, command) = (viewer.import_clicked, viewer.command);
+            if let Some(c) = command
+                && let Err(e) = self.history.apply(c)
+            {
+                tracing::warn!("bin edit failed: {e}");
+            }
+            if import {
                 self.import_dialog();
             }
         });
@@ -448,7 +459,9 @@ struct Viewer<'a> {
     focused: Option<Tab>,
     project: &'a Project,
     importing: bool,
+    bin: &'a mut MediaBin,
     import_clicked: bool,
+    command: Option<Command>,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -463,22 +476,21 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
+        let focused = self.focused == Some(*tab);
+        if *tab == Tab::Media {
+            let r = self.bin.show(ui, self.project, focused, self.importing);
+            self.import_clicked |= r.import;
+            self.command = r.command;
+            return;
+        }
         let title = format!("{tab:?}");
         let panel = match (*tab, self.preview_views) {
             (Tab::Preview, [one]) => Panel::titled(one),
             (Tab::Preview, views) => Panel::tabbed(views, self.preview_active),
             _ => Panel::titled(&title),
         };
-        let panel = panel.focused(self.focused == Some(*tab));
-        if *tab != Tab::Media {
-            // shortcut: panels are empty shells; their content lands in later issues.
-            panel.show(ui, |_| {});
-            return;
-        }
-        let r = panel
-            .actions(&[(icon::PLUS, "Import media")])
-            .show(ui, |ui| media_list(ui, self.project, self.importing));
-        self.import_clicked |= r.action == Some(0);
+        // shortcut: panels are empty shells; their content lands in later issues.
+        panel.focused(focused).show(ui, |_| {});
     }
 
     fn clear_background(&self, _tab: &Tab) -> bool {
@@ -488,34 +500,6 @@ impl TabViewer for Viewer<'_> {
     fn scroll_bars(&self, _tab: &Tab) -> [bool; 2] {
         [false, false]
     }
-}
-
-/// shortcut: a plain name list standing in for the bin; #20 replaces it.
-fn media_list(ui: &mut Ui, project: &Project, importing: bool) {
-    let assets = project.assets();
-    let rect = ui.max_rect();
-    ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
-        let n = assets.len();
-        let mut status = format!("{n} item{}", if n == 1 { "" } else { "s" });
-        if importing {
-            status.push_str(" · importing…");
-        }
-        ui.label(egui::RichText::new(status).color(color::INK_3));
-        if assets.is_empty() && !importing {
-            ui.label(
-                egui::RichText::new("Drop media here or click + to import").color(color::INK_2),
-            );
-        }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for a in assets {
-                let name = a
-                    .path
-                    .file_name()
-                    .map_or_else(|| a.path.to_string_lossy(), |n| n.to_string_lossy());
-                ui.label(name);
-            }
-        });
-    });
 }
 
 /// A Light Blue outline over the window while files are dragged over it.
