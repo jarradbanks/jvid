@@ -45,13 +45,14 @@ Sizes: **S** up to a day, **M** two to four days, **L** one to two weeks. Person
 
 ### [M0 · Foundations](https://github.com/jarradbanks/jvid/milestone/1)
 
-Workspace, CI, FFmpeg setup, project model, undo/redo, file format, app shell, theme, keymap. 13 issues, about 25 person-days.
+Workspace, CI, FFmpeg setup, project model, undo/redo, file format, app shell, theme, keymap. 14 issues, about 26 person-days.
 
 ```mermaid
 flowchart LR
   workspace["#35;1 Set up the cargo workspace, licenses and README"]
   ci["#35;2 CI: fmt, clippy and tests on Windows, macOS and Linux"]
   logging["#35;3 Logging, tracing and crash logs"]
+  roadmap_status["#35;96 Roadmap shows live status"]
   ffmpeg_setup["#35;4 FFmpeg linking and developer setup on all platforms"]
   test_media["#35;5 Generated test media corpus"]
   time["#35;6 Rational time and timecode"]
@@ -84,6 +85,7 @@ flowchart LR
 | [#1](https://github.com/jarradbanks/jvid/issues/1) | Set up the cargo workspace, licenses and README | S | infra | — |
 | [#2](https://github.com/jarradbanks/jvid/issues/2) | CI: fmt, clippy and tests on Windows, macOS and Linux | S | infra | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#3](https://github.com/jarradbanks/jvid/issues/3) | Logging, tracing and crash logs | S | infra | [#1](https://github.com/jarradbanks/jvid/issues/1) |
+| [#96](https://github.com/jarradbanks/jvid/issues/96) | Roadmap shows live status | S | infra | — |
 | [#4](https://github.com/jarradbanks/jvid/issues/4) | FFmpeg linking and developer setup on all platforms | M | infra, media | [#2](https://github.com/jarradbanks/jvid/issues/2) |
 | [#5](https://github.com/jarradbanks/jvid/issues/5) | Generated test media corpus | S | infra, media | [#4](https://github.com/jarradbanks/jvid/issues/4) |
 | [#6](https://github.com/jarradbanks/jvid/issues/6) | Rational time and timecode | S | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |

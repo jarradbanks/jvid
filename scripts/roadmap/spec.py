@@ -90,6 +90,18 @@ I("logging", "Logging, tracing and crash logs", "M0", ["infra"], "S", ["workspac
   ac=["A forced panic produces a crash log file with a backtrace"],
   labels=["good first issue"])
 
+I("roadmap-status", "Roadmap shows live status", "M0", ["infra"], "S",
+  summary="ROADMAP.md shows where each issue stands, so the plan doubles as a progress board.",
+  scope=[
+      "`scripts/roadmap/roadmap.py` reads issue state with one `gh issue list --state all` call (plus one `gh pr list` call for open PRs)",
+      "New Status column in every issue table: done (closed), need testing (label), in progress (an open PR references the issue), blank otherwise",
+      "If `gh` is missing or fails, print a warning and render the Status column blank instead of failing",
+  ],
+  ac=[
+      "Regenerating ROADMAP.md marks closed, `need testing` and open-PR issues correctly",
+      "The status mapping has a small test that runs without network access",
+  ])
+
 I("ffmpeg-setup", "FFmpeg linking and developer setup on all platforms", "M0", ["infra", "media"], "M", ["ci"],
   summary="Pick the FFmpeg binding and make it build everywhere. This is the riskiest setup task, so it goes first.",
   scope=[
