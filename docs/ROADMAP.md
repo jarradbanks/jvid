@@ -352,7 +352,7 @@ flowchart LR
 | [#71](https://github.com/jarradbanks/jvid/issues/71) | Autosave and crash recovery |  | M | core | [#9](https://github.com/jarradbanks/jvid/issues/9), [#3](https://github.com/jarradbanks/jvid/issues/3) |
 | [#72](https://github.com/jarradbanks/jvid/issues/72) | Keyboard shortcut editor |  | M | ui | [#13](https://github.com/jarradbanks/jvid/issues/13) |
 | [#73](https://github.com/jarradbanks/jvid/issues/73) | Themes | in progress | S | suite-ui | [#11](https://github.com/jarradbanks/jvid/issues/11) |
-| [#74](https://github.com/jarradbanks/jvid/issues/74) | Preview overlays: safe areas and grid | in progress | S | ui | [#23](https://github.com/jarradbanks/jvid/issues/23) |
+| [#74](https://github.com/jarradbanks/jvid/issues/74) | Preview overlays: safe areas and grid | done | S | ui | [#23](https://github.com/jarradbanks/jvid/issues/23) |
 | [#75](https://github.com/jarradbanks/jvid/issues/75) | Project settings dialog | done | S | ui | [#27](https://github.com/jarradbanks/jvid/issues/27) |
 | [#76](https://github.com/jarradbanks/jvid/issues/76) | User guide and shortcut cheat sheet |  | M | docs | [#54](https://github.com/jarradbanks/jvid/issues/54) |
 | [#93](https://github.com/jarradbanks/jvid/issues/93) | Export marked highlights as separate files |  | M | export, timeline | [#40](https://github.com/jarradbanks/jvid/issues/40), [#58](https://github.com/jarradbanks/jvid/issues/58) |
