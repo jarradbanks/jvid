@@ -3,7 +3,6 @@ name = "jvid-cli"
 description = "Headless render for jvid projects."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true

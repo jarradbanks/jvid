@@ -3,7 +3,6 @@ name = "jvid-media"
 description = "FFmpeg probe, decode and encode, thumbnails, waveforms and proxies for jvid."
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
