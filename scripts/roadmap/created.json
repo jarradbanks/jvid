@@ -1,0 +1,927 @@
+{
+  "milestones": {
+    "M0": 1,
+    "M1": 2,
+    "M2": 3,
+    "M3": 4,
+    "M4": 5,
+    "M5": 6,
+    "M6": 7
+  },
+  "issues": {
+    "workspace": {
+      "number": 1,
+      "id": 5894567654
+    },
+    "ci": {
+      "number": 2,
+      "id": 5894568080
+    },
+    "logging": {
+      "number": 3,
+      "id": 5894568363
+    },
+    "ffmpeg-setup": {
+      "number": 4,
+      "id": 5894568709
+    },
+    "test-media": {
+      "number": 5,
+      "id": 5894569017
+    },
+    "time": {
+      "number": 6,
+      "id": 5894569321
+    },
+    "model": {
+      "number": 7,
+      "id": 5894569625
+    },
+    "undo": {
+      "number": 8,
+      "id": 5894570004
+    },
+    "serialize": {
+      "number": 9,
+      "id": 5894570344
+    },
+    "config": {
+      "number": 10,
+      "id": 5894570619
+    },
+    "suite-ui-theme": {
+      "number": 11,
+      "id": 5894570901
+    },
+    "app-shell": {
+      "number": 12,
+      "id": 5894571192
+    },
+    "actions": {
+      "number": 13,
+      "id": 5894571608
+    },
+    "probe": {
+      "number": 14,
+      "id": 5894571896
+    },
+    "video-decode": {
+      "number": 15,
+      "id": 5894572153
+    },
+    "audio-decode": {
+      "number": 16,
+      "id": 5894572458
+    },
+    "stills": {
+      "number": 17,
+      "id": 5894572719
+    },
+    "jobs": {
+      "number": 18,
+      "id": 5894573002
+    },
+    "import": {
+      "number": 19,
+      "id": 5894573343
+    },
+    "bin": {
+      "number": 20,
+      "id": 5894573596
+    },
+    "thumbs": {
+      "number": 21,
+      "id": 5894573961
+    },
+    "waveforms": {
+      "number": 22,
+      "id": 5894574241
+    },
+    "preview-gpu": {
+      "number": 23,
+      "id": 5894574566
+    },
+    "audio-out": {
+      "number": 24,
+      "id": 5894574839
+    },
+    "source-viewer": {
+      "number": 25,
+      "id": 5894575191
+    },
+    "skim": {
+      "number": 26,
+      "id": 5894575541
+    },
+    "welcome": {
+      "number": 27,
+      "id": 5894575968
+    },
+    "relink": {
+      "number": 28,
+      "id": 5894576222
+    },
+    "eval": {
+      "number": 29,
+      "id": 5894576546
+    },
+    "compositor": {
+      "number": 30,
+      "id": 5894576843
+    },
+    "mixer": {
+      "number": 31,
+      "id": 5894577246
+    },
+    "playback": {
+      "number": 32,
+      "id": 5894577540
+    },
+    "timeline-widget": {
+      "number": 33,
+      "id": 5894577811
+    },
+    "tracks": {
+      "number": 34,
+      "id": 5894578136
+    },
+    "place-clips": {
+      "number": 35,
+      "id": 5894578408
+    },
+    "select-clipboard": {
+      "number": 36,
+      "id": 5894578849
+    },
+    "trim-split": {
+      "number": 37,
+      "id": 5894579118
+    },
+    "snapping": {
+      "number": 38,
+      "id": 5894579370
+    },
+    "in-out": {
+      "number": 39,
+      "id": 5894579688
+    },
+    "markers": {
+      "number": 40,
+      "id": 5894580100
+    },
+    "scrub": {
+      "number": 41,
+      "id": 5894580483
+    },
+    "perf-harness": {
+      "number": 42,
+      "id": 5894580734
+    },
+    "keyframes": {
+      "number": 43,
+      "id": 5894581053
+    },
+    "inspector": {
+      "number": 44,
+      "id": 5894581416
+    },
+    "transform": {
+      "number": 45,
+      "id": 5894581717
+    },
+    "blend": {
+      "number": 46,
+      "id": 5894582225
+    },
+    "gizmo": {
+      "number": 47,
+      "id": 5894582575
+    },
+    "keyframe-lanes": {
+      "number": 48,
+      "id": 5894582900
+    },
+    "easing-ui": {
+      "number": 49,
+      "id": 5894583217
+    },
+    "audio-keys": {
+      "number": 50,
+      "id": 5894583532
+    },
+    "fades": {
+      "number": 51,
+      "id": 5894584064
+    },
+    "encode": {
+      "number": 52,
+      "id": 5894584386
+    },
+    "presets": {
+      "number": 53,
+      "id": 5894584729
+    },
+    "export-dialog": {
+      "number": 54,
+      "id": 5894585106
+    },
+    "hw-encode": {
+      "number": 55,
+      "id": 5894585427
+    },
+    "audio-export": {
+      "number": 56,
+      "id": 5894585921
+    },
+    "loudness": {
+      "number": 57,
+      "id": 5894586272
+    },
+    "queue": {
+      "number": 58,
+      "id": 5894586585
+    },
+    "frame-png": {
+      "number": 59,
+      "id": 5894587012
+    },
+    "gif": {
+      "number": 60,
+      "id": 5894587333
+    },
+    "cli": {
+      "number": 61,
+      "id": 5894587621
+    },
+    "release": {
+      "number": 62,
+      "id": 5894588056
+    },
+    "text": {
+      "number": 63,
+      "id": 5894588442
+    },
+    "solids": {
+      "number": 64,
+      "id": 5894588733
+    },
+    "transitions": {
+      "number": 65,
+      "id": 5894589172
+    },
+    "color": {
+      "number": 66,
+      "id": 5894589460
+    },
+    "lut": {
+      "number": 67,
+      "id": 5894589702
+    },
+    "speed": {
+      "number": 68,
+      "id": 5894590175
+    },
+    "proxies": {
+      "number": 69,
+      "id": 5894590495
+    },
+    "hw-decode": {
+      "number": 70,
+      "id": 5894590826
+    },
+    "autosave": {
+      "number": 71,
+      "id": 5894591110
+    },
+    "keymap-editor": {
+      "number": 72,
+      "id": 5894591412
+    },
+    "themes": {
+      "number": 73,
+      "id": 5894591678
+    },
+    "overlays": {
+      "number": 74,
+      "id": 5894592166
+    },
+    "project-settings": {
+      "number": 75,
+      "id": 5894592426
+    },
+    "user-docs": {
+      "number": 76,
+      "id": 5894592706
+    },
+    "wgsl": {
+      "number": 77,
+      "id": 5894593017
+    },
+    "srt": {
+      "number": 78,
+      "id": 5894593313
+    },
+    "chroma-key": {
+      "number": 79,
+      "id": 5894593577
+    },
+    "masks": {
+      "number": 80,
+      "id": 5894594004
+    },
+    "scopes": {
+      "number": 81,
+      "id": 5894594286
+    },
+    "speed-ramps": {
+      "number": 82,
+      "id": 5894594568
+    },
+    "nested": {
+      "number": 83,
+      "id": 5894594810
+    },
+    "voiceover": {
+      "number": 84,
+      "id": 5894595134
+    },
+    "audio-fx": {
+      "number": 85,
+      "id": 5894595382
+    },
+    "hdr": {
+      "number": 86,
+      "id": 5894595669
+    },
+    "graph-editor": {
+      "number": 87,
+      "id": 5894596074
+    }
+  },
+  "links": [
+    [
+      "ci",
+      "workspace"
+    ],
+    [
+      "logging",
+      "workspace"
+    ],
+    [
+      "ffmpeg-setup",
+      "ci"
+    ],
+    [
+      "test-media",
+      "ffmpeg-setup"
+    ],
+    [
+      "time",
+      "workspace"
+    ],
+    [
+      "model",
+      "time"
+    ],
+    [
+      "undo",
+      "model"
+    ],
+    [
+      "serialize",
+      "model"
+    ],
+    [
+      "config",
+      "workspace"
+    ],
+    [
+      "suite-ui-theme",
+      "workspace"
+    ],
+    [
+      "app-shell",
+      "suite-ui-theme"
+    ],
+    [
+      "app-shell",
+      "serialize"
+    ],
+    [
+      "app-shell",
+      "undo"
+    ],
+    [
+      "actions",
+      "app-shell"
+    ],
+    [
+      "actions",
+      "config"
+    ],
+    [
+      "probe",
+      "ffmpeg-setup"
+    ],
+    [
+      "probe",
+      "model"
+    ],
+    [
+      "probe",
+      "test-media"
+    ],
+    [
+      "video-decode",
+      "probe"
+    ],
+    [
+      "audio-decode",
+      "probe"
+    ],
+    [
+      "stills",
+      "model"
+    ],
+    [
+      "jobs",
+      "workspace"
+    ],
+    [
+      "import",
+      "probe"
+    ],
+    [
+      "import",
+      "stills"
+    ],
+    [
+      "import",
+      "jobs"
+    ],
+    [
+      "import",
+      "app-shell"
+    ],
+    [
+      "bin",
+      "import"
+    ],
+    [
+      "thumbs",
+      "video-decode"
+    ],
+    [
+      "thumbs",
+      "jobs"
+    ],
+    [
+      "waveforms",
+      "audio-decode"
+    ],
+    [
+      "waveforms",
+      "jobs"
+    ],
+    [
+      "preview-gpu",
+      "video-decode"
+    ],
+    [
+      "preview-gpu",
+      "app-shell"
+    ],
+    [
+      "audio-out",
+      "audio-decode"
+    ],
+    [
+      "source-viewer",
+      "preview-gpu"
+    ],
+    [
+      "source-viewer",
+      "audio-out"
+    ],
+    [
+      "source-viewer",
+      "actions"
+    ],
+    [
+      "source-viewer",
+      "bin"
+    ],
+    [
+      "skim",
+      "thumbs"
+    ],
+    [
+      "skim",
+      "bin"
+    ],
+    [
+      "welcome",
+      "app-shell"
+    ],
+    [
+      "welcome",
+      "config"
+    ],
+    [
+      "welcome",
+      "import"
+    ],
+    [
+      "relink",
+      "import"
+    ],
+    [
+      "relink",
+      "serialize"
+    ],
+    [
+      "eval",
+      "model"
+    ],
+    [
+      "compositor",
+      "eval"
+    ],
+    [
+      "compositor",
+      "preview-gpu"
+    ],
+    [
+      "mixer",
+      "eval"
+    ],
+    [
+      "mixer",
+      "audio-decode"
+    ],
+    [
+      "playback",
+      "compositor"
+    ],
+    [
+      "playback",
+      "mixer"
+    ],
+    [
+      "playback",
+      "audio-out"
+    ],
+    [
+      "timeline-widget",
+      "app-shell"
+    ],
+    [
+      "timeline-widget",
+      "model"
+    ],
+    [
+      "timeline-widget",
+      "thumbs"
+    ],
+    [
+      "timeline-widget",
+      "waveforms"
+    ],
+    [
+      "tracks",
+      "timeline-widget"
+    ],
+    [
+      "tracks",
+      "undo"
+    ],
+    [
+      "place-clips",
+      "tracks"
+    ],
+    [
+      "place-clips",
+      "source-viewer"
+    ],
+    [
+      "select-clipboard",
+      "place-clips"
+    ],
+    [
+      "trim-split",
+      "select-clipboard"
+    ],
+    [
+      "snapping",
+      "trim-split"
+    ],
+    [
+      "in-out",
+      "trim-split"
+    ],
+    [
+      "in-out",
+      "actions"
+    ],
+    [
+      "markers",
+      "timeline-widget"
+    ],
+    [
+      "markers",
+      "undo"
+    ],
+    [
+      "scrub",
+      "playback"
+    ],
+    [
+      "perf-harness",
+      "playback"
+    ],
+    [
+      "keyframes",
+      "model"
+    ],
+    [
+      "keyframes",
+      "undo"
+    ],
+    [
+      "inspector",
+      "app-shell"
+    ],
+    [
+      "inspector",
+      "keyframes"
+    ],
+    [
+      "inspector",
+      "select-clipboard"
+    ],
+    [
+      "transform",
+      "compositor"
+    ],
+    [
+      "transform",
+      "keyframes"
+    ],
+    [
+      "blend",
+      "transform"
+    ],
+    [
+      "blend",
+      "inspector"
+    ],
+    [
+      "gizmo",
+      "transform"
+    ],
+    [
+      "gizmo",
+      "inspector"
+    ],
+    [
+      "keyframe-lanes",
+      "keyframes"
+    ],
+    [
+      "keyframe-lanes",
+      "timeline-widget"
+    ],
+    [
+      "keyframe-lanes",
+      "inspector"
+    ],
+    [
+      "easing-ui",
+      "keyframes"
+    ],
+    [
+      "easing-ui",
+      "inspector"
+    ],
+    [
+      "audio-keys",
+      "keyframes"
+    ],
+    [
+      "audio-keys",
+      "mixer"
+    ],
+    [
+      "audio-keys",
+      "timeline-widget"
+    ],
+    [
+      "fades",
+      "audio-keys"
+    ],
+    [
+      "fades",
+      "transform"
+    ],
+    [
+      "encode",
+      "compositor"
+    ],
+    [
+      "encode",
+      "mixer"
+    ],
+    [
+      "encode",
+      "transform"
+    ],
+    [
+      "presets",
+      "encode"
+    ],
+    [
+      "export-dialog",
+      "presets"
+    ],
+    [
+      "export-dialog",
+      "in-out"
+    ],
+    [
+      "export-dialog",
+      "select-clipboard"
+    ],
+    [
+      "hw-encode",
+      "encode"
+    ],
+    [
+      "audio-export",
+      "encode"
+    ],
+    [
+      "loudness",
+      "encode"
+    ],
+    [
+      "queue",
+      "export-dialog"
+    ],
+    [
+      "queue",
+      "jobs"
+    ],
+    [
+      "frame-png",
+      "compositor"
+    ],
+    [
+      "gif",
+      "encode"
+    ],
+    [
+      "cli",
+      "encode"
+    ],
+    [
+      "cli",
+      "presets"
+    ],
+    [
+      "cli",
+      "serialize"
+    ],
+    [
+      "release",
+      "cli"
+    ],
+    [
+      "release",
+      "export-dialog"
+    ],
+    [
+      "release",
+      "hw-encode"
+    ],
+    [
+      "release",
+      "loudness"
+    ],
+    [
+      "text",
+      "transform"
+    ],
+    [
+      "text",
+      "inspector"
+    ],
+    [
+      "text",
+      "bin"
+    ],
+    [
+      "solids",
+      "transform"
+    ],
+    [
+      "transitions",
+      "keyframes"
+    ],
+    [
+      "transitions",
+      "transform"
+    ],
+    [
+      "transitions",
+      "audio-keys"
+    ],
+    [
+      "color",
+      "transform"
+    ],
+    [
+      "color",
+      "inspector"
+    ],
+    [
+      "lut",
+      "color"
+    ],
+    [
+      "speed",
+      "eval"
+    ],
+    [
+      "speed",
+      "trim-split"
+    ],
+    [
+      "speed",
+      "mixer"
+    ],
+    [
+      "proxies",
+      "jobs"
+    ],
+    [
+      "proxies",
+      "video-decode"
+    ],
+    [
+      "hw-decode",
+      "video-decode"
+    ],
+    [
+      "hw-decode",
+      "preview-gpu"
+    ],
+    [
+      "autosave",
+      "serialize"
+    ],
+    [
+      "autosave",
+      "logging"
+    ],
+    [
+      "keymap-editor",
+      "actions"
+    ],
+    [
+      "themes",
+      "suite-ui-theme"
+    ],
+    [
+      "overlays",
+      "preview-gpu"
+    ],
+    [
+      "project-settings",
+      "welcome"
+    ],
+    [
+      "user-docs",
+      "export-dialog"
+    ],
+    [
+      "wgsl",
+      "color"
+    ],
+    [
+      "wgsl",
+      "inspector"
+    ],
+    [
+      "wgsl",
+      "keyframes"
+    ],
+    [
+      "srt",
+      "text"
+    ],
+    [
+      "srt",
+      "encode"
+    ]
+  ]
+}

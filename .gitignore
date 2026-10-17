@@ -1,0 +1,7 @@
+/target
+
+# Impeccable: the engine binary is platform-specific; the launcher downloads and verifies it on first use.
+.claude/skills/impeccable/scripts/bin/
+.impeccable/config.local.json
+.claude/settings.local.json
+__pycache__/
