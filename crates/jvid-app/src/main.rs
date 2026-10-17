@@ -1,6 +1,7 @@
 //! The jvid desktop video editor, built with eframe and suite-ui.
 
 mod app;
+mod import;
 mod keymap;
 mod project_file;
 mod settings_file;
