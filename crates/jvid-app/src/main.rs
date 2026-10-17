@@ -4,6 +4,7 @@ mod app;
 mod import;
 mod keymap;
 mod media_bin;
+mod preview;
 mod project_file;
 mod settings_file;
 

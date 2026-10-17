@@ -1967,6 +1967,12 @@ dependencies = [
 [[package]]
 name = "jvid-render"
 version = "0.1.0"
+dependencies = [
+ "jvid-core",
+ "jvid-media",
+ "suite-ui",
+ "wgpu",
+]
 
 [[package]]
 name = "khronos-egl"

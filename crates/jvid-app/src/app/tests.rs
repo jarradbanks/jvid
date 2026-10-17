@@ -341,7 +341,15 @@ fn bin_harness() -> Harness<'static, App> {
         };
         history.apply(Command::AddClip { track, clip }).unwrap();
     }
-    h.run();
+    // The preview's decode of the (missing) newest asset is async; wait so its error is drawn.
+    for _ in 0..500 {
+        h.run();
+        if h.state().preview.settled() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(h.state().preview.settled(), "preview decode never finished");
     h
 }
 
@@ -495,4 +503,44 @@ fn focus_actions_focus_panels_and_missing_panels_are_no_ops() {
     assert_eq!(focused(&mut app), Some(Tab::Media));
     app.run_action("focus_timeline");
     assert_eq!(focused(&mut app), Some(Tab::Timeline));
+}
+
+#[test]
+fn preview_draws_the_newest_clip_through_the_gpu() {
+    let Some(dir) = jvid_media::test_media::corpus() else {
+        return;
+    };
+    if !gpu() {
+        return;
+    }
+    jvid_media::ffmpeg::init().unwrap();
+    let mut h = harness([1280.0, 720.0], 1.0);
+    let path = dir.join("bars-bt709-limited.mp4");
+    let probe = jvid_media::probe::probe(&path).unwrap();
+    let import = Command::Import(vec![(path, probe)]);
+    h.state_mut().history.apply(import).unwrap();
+    for _ in 0..500 {
+        h.run();
+        if h.state().preview.has_frame() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(h.state().preview.has_frame(), "decode never finished");
+    h.run();
+    let shot = Shot::take(&mut h, "preview".into());
+    let r = shot.panel(Tab::Preview);
+    let y = shot.px(r.center().y);
+    let row: Vec<Color32> = (shot.px(r.left())..shot.px(r.right()))
+        .map(|x| shot.at(x, y))
+        .collect();
+    // Fitted bars, decoded and converted on the GPU, between Viewer black.
+    for bar in [[191, 191, 0], [0, 191, 191], [191, 0, 191], [0, 0, 191]] {
+        let want = Color32::from_rgb(bar[0], bar[1], bar[2]);
+        assert!(
+            row.iter().any(|&c| near(c, want)),
+            "no {want:?} across the preview"
+        );
+    }
+    assert!(row.contains(&color::VIEWER));
 }

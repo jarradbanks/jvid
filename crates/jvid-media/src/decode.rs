@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use ffmpeg_next::color::{Range, Space};
 use ffmpeg_next::format::{self, Pixel};
 use ffmpeg_next::software::scaling;
 use ffmpeg_next::{Error, Rational, decoder, frame, media};
@@ -17,6 +18,10 @@ pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub planes: [Vec<u8>; 3],
+    /// YUV→RGB matrix: BT.709 when true, BT.601 when false.
+    pub bt709: bool,
+    /// Full (0–255) rather than limited (16–235) range.
+    pub full_range: bool,
 }
 
 /// One open file. Not shared: take one from a [`DecoderPool`] per request.
@@ -149,7 +154,20 @@ fn pts(f: &frame::Video) -> i64 {
 fn to_i420(f: &frame::Video) -> Result<Frame, Error> {
     let (w, h) = (f.width(), f.height());
     let converted;
-    let f = if f.format() == Pixel::YUV420P {
+    // Untagged: BT.709 for HD, BT.601 for SD, as players guess.
+    let bt709 = match f.color_space() {
+        Space::BT470BG | Space::SMPTE170M | Space::FCC => false,
+        Space::Unspecified => h > 576,
+        _ => true,
+    };
+    // swscale turns the JPEG (yuvj) formats into limited range; other formats keep their values.
+    let jpeg = matches!(
+        f.format(),
+        Pixel::YUVJ422P | Pixel::YUVJ444P | Pixel::YUVJ440P | Pixel::YUVJ411P
+    );
+    let full_range = f.color_range() == Range::JPEG && !jpeg;
+    // yuvj420p is I420 already, just tagged full range.
+    let f = if matches!(f.format(), Pixel::YUV420P | Pixel::YUVJ420P) {
         f
     } else {
         // shortcut: a scaler per frame (it isn't Send, so can't live in the pooled decoder);
@@ -185,6 +203,8 @@ fn to_i420(f: &frame::Video) -> Result<Frame, Error> {
             plane(1, cw, ch),
             plane(2, cw, ch),
         ],
+        bt709,
+        full_range,
     })
 }
 
@@ -220,6 +240,7 @@ fn upright(f: &Frame, rotation: u32) -> Frame {
             turn(&f.planes[1], cw, ch),
             turn(&f.planes[2], cw, ch),
         ],
+        ..*f
     }
 }
 
@@ -330,6 +351,8 @@ mod tests {
             width: 2,
             height: 2,
             planes: [vec![1, 2, 3, 4], vec![5], vec![6]],
+            bt709: true,
+            full_range: false,
         };
         assert_eq!(upright(&f, 90).planes[0], [3, 1, 4, 2]);
         assert_eq!(upright(&f, 180).planes[0], [4, 3, 2, 1]);
@@ -567,5 +590,29 @@ mod tests {
                 .sum::<usize>()
                 >= 1
         );
+    }
+
+    #[test]
+    fn frames_carry_matrix_and_range() {
+        let Some(dir) = corpus() else { return };
+        crate::ffmpeg::init().unwrap();
+        for (file, bt709, full_range) in [
+            ("bars-bt601-limited.mp4", false, false),
+            ("bars-bt601-full.mp4", false, true),
+            ("bars-bt709-limited.mp4", true, false),
+            ("bars-bt709-full.mp4", true, true),
+        ] {
+            let f = VideoDecoder::open(&dir.join(file))
+                .unwrap()
+                .frame_at(Time(0))
+                .unwrap();
+            assert_eq!((f.bt709, f.full_range), (bt709, full_range), "{file}");
+            // Full range keeps 75% white at 191 rather than squeezing it to 180.
+            assert_eq!(
+                f.planes[0][40],
+                if full_range { 191 } else { 180 },
+                "{file}"
+            );
+        }
     }
 }

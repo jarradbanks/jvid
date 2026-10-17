@@ -16,6 +16,7 @@ use suite_ui::widgets::{Button, State};
 use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
+use crate::preview::Preview;
 use crate::project_file;
 
 #[cfg(test)]
@@ -57,6 +58,7 @@ pub struct App {
     keymap: Keymap,
     importer: Importer,
     bin: MediaBin,
+    preview: Preview,
     /// Error toasts and the time each expires.
     toasts: Vec<(String, f64)>,
 }
@@ -66,7 +68,9 @@ const TOAST_SECS: f64 = 6.0;
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::install(&cc.egui_ctx);
-        Self::restore(cc.storage)
+        let mut app = Self::restore(cc.storage);
+        app.preview = Preview::new(cc.wgpu_render_state.as_ref());
+        app
     }
 
     /// A new project in the dock layout saved last time, or the default one.
@@ -90,6 +94,7 @@ impl App {
             keymap: keymap::load(),
             importer: Importer::media(),
             bin: MediaBin::default(),
+            preview: Preview::new(None),
             toasts: Vec::new(),
         }
     }
@@ -351,6 +356,7 @@ impl eframe::App for App {
                 bin: &mut self.bin,
                 import_clicked: false,
                 command: None,
+                preview: &mut self.preview,
             };
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
@@ -462,6 +468,7 @@ struct Viewer<'a> {
     bin: &'a mut MediaBin,
     import_clicked: bool,
     command: Option<Command>,
+    preview: &'a mut Preview,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -489,8 +496,18 @@ impl TabViewer for Viewer<'_> {
             (Tab::Preview, views) => Panel::tabbed(views, self.preview_active),
             _ => Panel::titled(&title),
         };
+        let panel = panel.focused(focused);
+        if *tab == Tab::Preview {
+            // The newest video (or still) asset, until the timeline and source viewer exist.
+            let source = self.project.assets().iter().rev().find_map(|a| {
+                a.probe.as_ref()?.width?;
+                Some(a.path.as_path())
+            });
+            panel.show(ui, |ui| self.preview.show(ui, source));
+            return;
+        }
         // shortcut: panels are empty shells; their content lands in later issues.
-        panel.focused(focused).show(ui, |_| {});
+        panel.show(ui, |_| {});
     }
 
     fn clear_background(&self, _tab: &Tab) -> bool {
