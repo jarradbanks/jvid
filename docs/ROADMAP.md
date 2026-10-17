@@ -263,7 +263,7 @@ flowchart LR
 | [#45](https://github.com/jarradbanks/jvid/issues/45) | Transform, crop and opacity in the compositor | done | M | render | [#30](https://github.com/jarradbanks/jvid/issues/30), [#43](https://github.com/jarradbanks/jvid/issues/43) |
 | [#46](https://github.com/jarradbanks/jvid/issues/46) | Blend modes | done | S | render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#47](https://github.com/jarradbanks/jvid/issues/47) | On-preview transform handles | done | M | ui, render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
-| [#48](https://github.com/jarradbanks/jvid/issues/48) | Keyframe lanes on the timeline | in progress | L | timeline | [#43](https://github.com/jarradbanks/jvid/issues/43), [#33](https://github.com/jarradbanks/jvid/issues/33), [#44](https://github.com/jarradbanks/jvid/issues/44) |
+| [#48](https://github.com/jarradbanks/jvid/issues/48) | Keyframe lanes on the timeline | done | L | timeline | [#43](https://github.com/jarradbanks/jvid/issues/43), [#33](https://github.com/jarradbanks/jvid/issues/33), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#49](https://github.com/jarradbanks/jvid/issues/49) | Easing picker and bezier curve editor | done | M | ui | [#43](https://github.com/jarradbanks/jvid/issues/43), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#50](https://github.com/jarradbanks/jvid/issues/50) | Volume and pan keyframes with rubber band |  | M | audio, timeline | [#43](https://github.com/jarradbanks/jvid/issues/43), [#31](https://github.com/jarradbanks/jvid/issues/31), [#33](https://github.com/jarradbanks/jvid/issues/33) |
 | [#51](https://github.com/jarradbanks/jvid/issues/51) | Clip fade handles |  | S | timeline | [#50](https://github.com/jarradbanks/jvid/issues/50), [#45](https://github.com/jarradbanks/jvid/issues/45) |
@@ -312,7 +312,7 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | [#52](https://github.com/jarradbanks/jvid/issues/52) | Export pipeline: render, encode and mux | done | L | export, media | [#30](https://github.com/jarradbanks/jvid/issues/30), [#31](https://github.com/jarradbanks/jvid/issues/31), [#45](https://github.com/jarradbanks/jvid/issues/45) |
 | [#53](https://github.com/jarradbanks/jvid/issues/53) | Export presets | done | M | export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
-| [#54](https://github.com/jarradbanks/jvid/issues/54) | Export dialog with range selection |  | M | ui, export | [#53](https://github.com/jarradbanks/jvid/issues/53), [#39](https://github.com/jarradbanks/jvid/issues/39), [#36](https://github.com/jarradbanks/jvid/issues/36) |
+| [#54](https://github.com/jarradbanks/jvid/issues/54) | Export dialog with range selection | in progress | M | ui, export | [#53](https://github.com/jarradbanks/jvid/issues/53), [#39](https://github.com/jarradbanks/jvid/issues/39), [#36](https://github.com/jarradbanks/jvid/issues/36) |
 | [#55](https://github.com/jarradbanks/jvid/issues/55) | Hardware encoding with software fallback | need testing | M | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#56](https://github.com/jarradbanks/jvid/issues/56) | Audio-only export |  | S | export, audio | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#57](https://github.com/jarradbanks/jvid/issues/57) | Loudness normalization (EBU R128) | done | M | audio, export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
