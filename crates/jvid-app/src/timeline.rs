@@ -32,6 +32,7 @@ use crate::keymap::Keymap;
 use crate::media_bin::Caches;
 use crate::transport::Transport;
 
+mod keyframes;
 mod markers;
 pub mod menus;
 
@@ -100,6 +101,8 @@ pub struct Timeline {
     mark_drag: Option<(bool, Time)>,
     /// "Reveal in media bin" asked for this asset; the app takes it.
     pub reveal: Option<AssetId>,
+    /// Keyframe lanes: expanded clips, picked keys and their clipboard.
+    keys: keyframes::Keys,
 }
 
 /// Snap reach in points.
@@ -155,6 +158,7 @@ impl Default for Timeline {
             menu: None,
             mark_drag: None,
             reveal: None,
+            keys: keyframes::Keys::default(),
         }
     }
 }
@@ -315,6 +319,7 @@ impl Timeline {
             "mark_in" | "mark_out" | "clear_in" | "clear_out" | "clear_in_out" | "mark_clip"
             | "mark_selection" => self.pending = self.mark_action(id, project.sequence()),
             _ if self.marker_action(id, project.sequence()) => {}
+            _ if self.key_action(id, project.sequence()) => {}
             "linked_selection" => self.linked_selection = !self.linked_selection,
             "snapping" => self.snapping = !self.snapping,
             "razor_tool" | "selection_tool" => self.razor = id == "razor_tool",
@@ -384,6 +389,7 @@ impl Timeline {
             .collect();
         let ids: Vec<_> = chosen.iter().map(|(_, c)| c.id).collect();
         if matches!(id, "copy" | "cut") && !chosen.is_empty() {
+            self.keys.clipboard.clear();
             self.clipboard = chosen.clone();
             self.copied = true;
         }
@@ -747,7 +753,7 @@ impl Timeline {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
         let tracks = project.sequence().tracks();
-        let content_h: f32 = tracks.iter().map(|t| t.height).sum();
+        let content_h: f32 = tracks.iter().map(|t| t.height + self.keys.extra(t)).sum();
         // Not `hovered()`: clips, the marquee and buttons sit on top of the body.
         if ui.rect_contains_pointer(area)
             && let Some(p) = ui.input(|i| i.pointer.hover_pos())
@@ -825,8 +831,9 @@ impl Timeline {
         let mut held = None;
         let mut shown_clips = Vec::new();
         for (i, track) in tracks.iter().enumerate() {
-            let lane = Rect::from_x_y_ranges(lanes.x_range(), y..=y + track.height);
-            y += track.height;
+            let extra = self.keys.extra(track);
+            let lane = Rect::from_x_y_ranges(lanes.x_range(), y..=y + track.height + extra);
+            y += track.height + extra;
             lane_rects.push((track.id, track.kind, lane));
             let holds = track.clips().iter().any(|c| Some(c.id) == self.holding);
             if (lane.bottom() < lanes.top() || lane.top() > lanes.bottom()) && !holds {
@@ -849,7 +856,8 @@ impl Timeline {
                 let (l, r) = (lanes.left() - 8.0, lanes.right() + 8.0);
                 let x = view.x(clip.start).clamp(l, r)..=view.x(clip.end()).clamp(l, r);
                 // 2px gaps between clips and 2px above and below inside the lane.
-                let r = Rect::from_x_y_ranges(x, lane.y_range()).shrink2(vec2(1.0, 2.0));
+                let rows = lane.top()..=lane.top() + track.height;
+                let r = Rect::from_x_y_ranges(x, rows).shrink2(vec2(1.0, 2.0));
                 let asset = project.asset(clip.asset);
                 let offline = asset.is_some_and(|a| missing.contains(&a.path));
                 // Clips on hidden tracks and disabled clips drop to 40%.
@@ -876,6 +884,7 @@ impl Timeline {
                 {
                     edit = Some(self.razor_cut(seq, view, clip.id, p.x));
                 } else if cr.clicked() {
+                    self.keys.selected.clear();
                     self.select(seq, clip.id, ui.input(|i| i.modifiers));
                 }
                 if cr.secondary_clicked() && !self.selected.contains(&clip.id) {
@@ -884,6 +893,14 @@ impl Timeline {
                 cr.context_menu(|ui| self.clip_menu(ui, seq, keymap, clip.asset));
                 if let Some(e) = self.trim_handles(ui, project, view, clip, r) {
                     edit = Some(e);
+                }
+                self.key_toggle(ui, &painter, clip, r, id);
+                if self.keys.expanded.contains(&clip.id) {
+                    let under =
+                        Rect::from_x_y_ranges(r.x_range(), r.bottom() + 2.0..=lane.bottom());
+                    if let Some(e) = self.key_lanes(ui, &painter, seq, view, clip, under, id) {
+                        edit = Some(e);
+                    }
                 }
                 if cr.is_pointer_button_down_on() {
                     self.holding = Some(clip.id);

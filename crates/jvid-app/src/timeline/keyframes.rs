@@ -1,0 +1,531 @@
+//! Keyframe lanes: a clip with keyframes shows a toggle in its name strip that expands one
+//! lane per animated property under it. Keys click and marquee select, drag (snapping to
+//! frames, the playhead, edges and markers), delete, copy and paste at the playhead, and
+//! open the easing editor on right-click. Edits are `SetClipProps`, as in the inspector.
+
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+use egui::{Align2, Id, Painter, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use jvid_core::history::{Command, GestureKey};
+use jvid_core::keyframe::{Easing, Keyframe};
+use jvid_core::model::{Clip, ClipId, Sequence, Track};
+use jvid_core::time::Time;
+use suite_ui::theme;
+use suite_ui::tokens::color;
+
+use super::{Edit, Timeline, View};
+
+/// Height of one property lane.
+pub const LANE_H: f32 = 18.0;
+/// Diamond half-size.
+const KEY_R: f32 = 5.0;
+/// Undo gesture for easing handle drags, xored with the clip and drag count.
+const EASING_GESTURE: GestureKey = 0x6b66_6561_0000; // "kfea"
+
+#[derive(Default)]
+pub struct Keys {
+    /// Clips showing their lanes.
+    pub expanded: HashSet<ClipId>,
+    /// Selected keys by clip, property and source time.
+    pub selected: BTreeSet<(ClipId, String, Time)>,
+    /// Copied keys with times relative to the earliest.
+    pub clipboard: Vec<(String, Keyframe)>,
+    /// The clip pasted keys go to: the last one a key was picked on.
+    clip: Option<ClipId>,
+    /// Timeline shift of the selected keys while they're dragged.
+    drag: Option<Time>,
+}
+
+/// The properties of `c` that have keyframes, in lane order.
+fn lanes(c: &Clip) -> impl Iterator<Item = (&String, &Vec<Keyframe>)> {
+    c.keyframes.iter().filter(|(_, k)| !k.is_empty())
+}
+
+/// Inserts `k`, replacing any key at the same time.
+fn put(keys: &mut Vec<Keyframe>, k: Keyframe) {
+    match keys.binary_search_by_key(&k.time, |x| x.time) {
+        Ok(i) => keys[i] = k,
+        Err(i) => keys.insert(i, k),
+    }
+}
+
+/// `c`'s props after `f` rewrites its keyframes, as one undo step.
+fn rewrite(c: &Clip, f: impl FnOnce(&mut BTreeMap<String, Vec<Keyframe>>)) -> Command {
+    let mut keys = c.keyframes.clone();
+    f(&mut keys);
+    keys.retain(|_, k| !k.is_empty());
+    Command::SetClipProps(vec![(c.id, c.transform, keys)])
+}
+
+fn picked<'a>(
+    sel: &'a BTreeSet<(ClipId, String, Time)>,
+    c: &'a Clip,
+) -> impl Iterator<Item = (&'a String, Time)> {
+    sel.iter().filter(move |s| s.0 == c.id).map(|s| (&s.1, s.2))
+}
+
+/// Shifts the selected keys of `c` by `delta`; they replace keys they land on.
+fn shift(c: &Clip, sel: &BTreeSet<(ClipId, String, Time)>, delta: Time) -> Command {
+    rewrite(c, |keys| {
+        let moved: Vec<_> = picked(sel, c)
+            .filter_map(|(p, t)| {
+                let v = keys.get_mut(p)?;
+                let i = v.iter().position(|k| k.time == t)?;
+                Some((p.clone(), v.remove(i)))
+            })
+            .collect();
+        for (p, mut k) in moved {
+            k.time = k.time + delta;
+            put(keys.entry(p).or_default(), k);
+        }
+    })
+}
+
+fn delete(c: &Clip, sel: &BTreeSet<(ClipId, String, Time)>) -> Command {
+    rewrite(c, |keys| {
+        for (p, t) in picked(sel, c) {
+            if let Some(v) = keys.get_mut(p) {
+                v.retain(|k| k.time != t);
+            }
+        }
+    })
+}
+
+fn ease(c: &Clip, sel: &BTreeSet<(ClipId, String, Time)>, e: Easing) -> Command {
+    rewrite(c, |keys| {
+        for (p, t) in picked(sel, c) {
+            for k in keys.get_mut(p).into_iter().flatten() {
+                if k.time == t {
+                    k.easing = e;
+                }
+            }
+        }
+    })
+}
+
+/// The selected keys of `c`, timed from the earliest.
+fn copy(c: &Clip, sel: &BTreeSet<(ClipId, String, Time)>) -> Vec<(String, Keyframe)> {
+    let keys: Vec<_> = picked(sel, c)
+        .filter_map(|(p, t)| {
+            let k = c.keyframes.get(p)?.iter().find(|k| k.time == t)?;
+            Some((p.clone(), *k))
+        })
+        .collect();
+    let first = keys.iter().map(|k| k.1.time).min().unwrap_or_default();
+    keys.into_iter()
+        .map(|(p, k)| {
+            (
+                p,
+                Keyframe {
+                    time: k.time - first,
+                    ..k
+                },
+            )
+        })
+        .collect()
+}
+
+/// `copied` onto `c` with the earliest at timeline time `at`.
+fn paste(c: &Clip, copied: &[(String, Keyframe)], at: Time) -> Command {
+    let base = c.source_in + (at - c.start);
+    rewrite(c, |keys| {
+        for (p, k) in copied {
+            let time = k.time + base;
+            put(keys.entry(p.clone()).or_default(), Keyframe { time, ..*k });
+        }
+    })
+}
+
+impl Keys {
+    /// Extra height under `track`'s clips for its tallest expanded clip.
+    pub fn extra(&self, track: &Track) -> f32 {
+        let open = track
+            .clips()
+            .iter()
+            .filter(|c| self.expanded.contains(&c.id));
+        let n = open.map(|c| lanes(c).count()).max().unwrap_or(0);
+        n as f32 * LANE_H
+    }
+}
+
+impl Timeline {
+    /// Delete, copy, cut and paste for keys; false leaves the action to clips.
+    pub(super) fn key_action(&mut self, id: &str, seq: &Sequence) -> bool {
+        let here = self.playhead();
+        let k = &mut self.keys;
+        let clip = k.clip.and_then(|c| seq.clip(c));
+        let Some((_, c)) = clip else { return false };
+        let has = picked(&k.selected, c).next().is_some();
+        match id {
+            "copy" | "cut" | "delete" if has => {
+                if id != "delete" {
+                    k.clipboard = copy(c, &k.selected);
+                    self.clipboard.clear();
+                }
+                if id != "copy" {
+                    self.pending = Some(delete(c, &k.selected));
+                    k.selected.clear();
+                }
+            }
+            "paste" if !k.clipboard.is_empty() => {
+                self.pending = Some(paste(c, &k.clipboard, here));
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// The expand toggle in `clip`'s name strip, when it has keyframes.
+    pub(super) fn key_toggle(&mut self, ui: &Ui, painter: &Painter, clip: &Clip, r: Rect, id: Id) {
+        if lanes(clip).next().is_none() || r.width() < 40.0 {
+            return;
+        }
+        let open = self.keys.expanded.contains(&clip.id);
+        let c = pos2(r.right() - 10.0, r.top() + super::NAME_STRIP / 2.0);
+        let hit = Rect::from_center_size(c, vec2(16.0, 16.0));
+        let resp = ui
+            .interact(hit, id.with(("kf toggle", clip.id)), Sense::click())
+            .on_hover_text(if open {
+                "Hide keyframes"
+            } else {
+                "Show keyframes"
+            });
+        diamond(
+            painter,
+            c,
+            if open { color::AMBER } else { color::INK_2 },
+            open,
+        );
+        if resp.clicked() && !self.keys.expanded.remove(&clip.id) {
+            self.keys.expanded.insert(clip.id);
+        }
+    }
+
+    /// Draws and edits `clip`'s lanes in `area`, the strip under it.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn key_lanes(
+        &mut self,
+        ui: &Ui,
+        painter: &Painter,
+        seq: &Sequence,
+        view: View,
+        clip: &Clip,
+        area: Rect,
+        id: Id,
+    ) -> Option<Edit> {
+        let id = id.with(("kf", clip.id));
+        let painter = painter.with_clip_rect(area.intersect(painter.clip_rect()));
+        painter.rect_filled(area, 0.0, color::RAISED);
+        let bg = ui.interact(area, id, Sense::click_and_drag());
+        let tl = |s: Time| clip.start + (s - clip.source_in);
+        let mods = ui.input(|i| i.modifiers);
+        let mut edit = None;
+        let mut centers = Vec::new();
+        for (row, (name, keys)) in lanes(clip).enumerate() {
+            let y = area.top() + (row as f32 + 0.5) * LANE_H;
+            painter.text(
+                pos2(area.left().max(painter.clip_rect().left()) + 6.0, y),
+                Align2::LEFT_CENTER,
+                name.replace('_', " "),
+                theme::small(),
+                color::INK_3,
+            );
+            let xs: Vec<_> = keys.iter().map(|k| view.x(tl(k.time))).collect();
+            if let (Some(a), Some(b)) = (xs.first(), xs.last()) {
+                painter.line_segment([pos2(*a, y), pos2(*b, y)], Stroke::new(1.0, color::INK_4));
+            }
+            for (k, x) in keys.iter().zip(xs) {
+                let sel = (clip.id, name.clone(), k.time);
+                let on = self.keys.selected.contains(&sel);
+                let x = x + if on {
+                    self.keys.drag.map_or(0.0, |d| view.x(d) - view.x(Time(0)))
+                } else {
+                    0.0
+                };
+                let c = pos2(x, y);
+                centers.push((sel.clone(), c));
+                let r = ui.interact(
+                    Rect::from_center_size(c, vec2(2.0 * KEY_R + 2.0, LANE_H)),
+                    id.with((name, k.time.0)),
+                    Sense::click_and_drag(),
+                );
+                diamond(
+                    &painter,
+                    c,
+                    if on { color::AMBER } else { color::INK_2 },
+                    true,
+                );
+                if r.clicked() || r.drag_started() || r.secondary_clicked() {
+                    self.keys.clip = Some(clip.id);
+                    self.selected.clear();
+                    if mods.shift || mods.command {
+                        if r.clicked() && !self.keys.selected.remove(&sel) {
+                            self.keys.selected.insert(sel.clone());
+                        }
+                    } else if !on {
+                        self.keys.selected = BTreeSet::from([sel.clone()]);
+                    }
+                }
+                if r.dragged()
+                    && let (Some(o), Some(p)) = (
+                        ui.input(|i| i.pointer.press_origin()),
+                        r.interact_pointer_pos(),
+                    )
+                {
+                    // The grabbed key lands on a frame, then snaps to nearby edges.
+                    let rate = self.transport.rate;
+                    let to = tl(k.time) + (view.time(p.x) - view.time(o.x));
+                    let to = rate.time_floor(rate.index_nearest(to));
+                    let to = to + self.snap(seq, &[], &[to]);
+                    let min = picked(&self.keys.selected, clip).map(|s| s.1).min();
+                    let floor = min.map_or(Time(0), |m| Time(0) - m);
+                    self.keys.drag = Some((to - tl(k.time)).max(floor));
+                }
+                if r.drag_stopped()
+                    && let Some(d) = self.keys.drag.take()
+                {
+                    self.snapped = None;
+                    if d != Time(0) {
+                        edit = Some((shift(clip, &self.keys.selected, d), None));
+                        let s = std::mem::take(&mut self.keys.selected);
+                        self.keys.selected = s
+                            .into_iter()
+                            .map(|(c, p, t)| {
+                                if c == clip.id {
+                                    (c, p, t + d)
+                                } else {
+                                    (c, p, t)
+                                }
+                            })
+                            .collect();
+                    }
+                }
+                r.context_menu(|ui| {
+                    let Some((e, dragging)) = crate::easing::editor(ui, k.easing) else {
+                        return;
+                    };
+                    // One undo step per handle drag.
+                    let drags = ui.id().with("kf easing drags");
+                    let n = ui.data_mut(|d| {
+                        let n = d.get_temp_mut_or(drags, (0u64, false));
+                        n.0 += u64::from(dragging && !n.1);
+                        n.1 = dragging;
+                        n.0
+                    });
+                    let key = EASING_GESTURE ^ clip.id.0 ^ (n << 16);
+                    edit = Some((ease(clip, &self.keys.selected, e), dragging.then_some(key)));
+                });
+            }
+        }
+        if bg.clicked() && !mods.shift && !mods.command {
+            self.keys.selected.clear();
+        }
+        if let (Some(a), Some(b)) = (
+            ui.input(|i| i.pointer.press_origin()),
+            bg.interact_pointer_pos(),
+        ) && (bg.dragged() || bg.drag_stopped())
+        {
+            let band = Rect::from_two_pos(a, b);
+            if bg.drag_stopped() {
+                if !mods.shift && !mods.command {
+                    self.keys.selected.clear();
+                }
+                self.keys.clip = Some(clip.id);
+                self.selected.clear();
+                let hit = centers.into_iter().filter(|(_, c)| band.contains(*c));
+                self.keys.selected.extend(hit.map(|h| h.0));
+            } else {
+                painter.rect_filled(band, 0.0, color::BLUE.gamma_multiply(0.15));
+                painter.rect_stroke(
+                    band,
+                    0.0,
+                    Stroke::new(1.0, color::LIGHT_BLUE),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
+        edit
+    }
+}
+
+fn diamond(painter: &Painter, c: egui::Pos2, fill: egui::Color32, solid: bool) {
+    let pts = vec![
+        c + vec2(0.0, -KEY_R),
+        c + vec2(KEY_R, 0.0),
+        c + vec2(0.0, KEY_R),
+        c + vec2(-KEY_R, 0.0),
+    ];
+    if solid {
+        painter.add(Shape::convex_polygon(
+            pts,
+            fill,
+            Stroke::new(1.0, color::FIELD),
+        ));
+    } else {
+        painter.add(Shape::closed_line(pts, Stroke::new(1.0, fill)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use jvid_core::history::History;
+    use jvid_core::keyframe::Value;
+    use jvid_core::time::FLICKS_PER_SECOND as S;
+
+    use super::super::tests::project;
+    use super::*;
+
+    fn times(h: &History, p: &str) -> Vec<(i64, Easing)> {
+        let c = &h.project().sequence().tracks()[0].clips()[1];
+        let k = c.keyframes.get(p).map_or(&[][..], |v| v);
+        k.iter().map(|k| (k.time.0 / (S / 10), k.easing)).collect()
+    }
+
+    #[test]
+    fn keys_move_ease_delete_copy_and_paste_as_undoable_props() {
+        let mut h = History::new(project(4));
+        let c = h.project().sequence().tracks()[0].clips()[1].clone();
+        for (p, t) in [("opacity", 0), ("opacity", 5), ("scale", 5), ("scale", 10)] {
+            h.apply(Command::AddKeyframe {
+                id: c.id,
+                param: p.into(),
+                key: Keyframe {
+                    time: Time(t * S / 10),
+                    value: Value::Scalar(1.0),
+                    easing: Easing::Linear,
+                },
+            })
+            .unwrap();
+        }
+        let c = |h: &History| h.project().sequence().tracks()[0].clips()[1].clone();
+        let mut keys = Keys::default();
+        keys.expanded.insert(c(&h).id);
+        assert_eq!(
+            keys.extra(&h.project().sequence().tracks()[0]),
+            2.0 * LANE_H
+        );
+        let sel = |p: &str, t| (c(&h).id, p.to_owned(), Time(t * S / 10));
+        keys.selected = BTreeSet::from([sel("opacity", 0), sel("scale", 5)]);
+
+        // Moving onto an existing key replaces it.
+        let cmd = shift(&c(&h), &keys.selected, Time(5 * S / 10));
+        h.apply(cmd).unwrap();
+        assert_eq!(times(&h, "opacity"), [(5, Easing::Linear)]);
+        assert_eq!(times(&h, "scale"), [(10, Easing::Linear)]);
+        h.undo();
+        assert_eq!(times(&h, "opacity").len(), 2);
+
+        let cmd = ease(&c(&h), &keys.selected, Easing::Hold);
+        h.apply(cmd).unwrap();
+        assert_eq!(
+            times(&h, "scale"),
+            [(5, Easing::Hold), (10, Easing::Linear)]
+        );
+
+        // Copied relative to the earliest, pasted at the playhead (clip starts at 2s).
+        let copied = copy(&c(&h), &keys.selected);
+        h.apply(paste(&c(&h), &copied, Time(3 * S))).unwrap();
+        assert_eq!(
+            times(&h, "opacity"),
+            [(0, Easing::Hold), (5, Easing::Linear), (10, Easing::Hold)]
+        );
+        assert_eq!(
+            times(&h, "scale"),
+            [(5, Easing::Hold), (10, Easing::Linear), (15, Easing::Hold)]
+        );
+
+        h.apply(delete(&c(&h), &keys.selected)).unwrap();
+        assert_eq!(
+            times(&h, "scale"),
+            [(10, Easing::Linear), (15, Easing::Hold)]
+        );
+    }
+
+    #[test]
+    fn delete_and_paste_actions_go_to_keys_when_some_are_picked() {
+        let mut h = History::new(project(2));
+        let c = h.project().sequence().tracks()[0].clips()[0].clone();
+        h.apply(Command::AddKeyframe {
+            id: c.id,
+            param: "opacity".into(),
+            key: Keyframe {
+                time: Time(0),
+                value: Value::Scalar(1.0),
+                easing: Easing::Linear,
+            },
+        })
+        .unwrap();
+        let mut t = Timeline::default();
+        t.sync(h.project());
+        t.selected.insert(c.id);
+        t.keys.clip = Some(c.id);
+        t.keys.selected.insert((c.id, "opacity".into(), Time(0)));
+        assert!(t.action("copy", h.project()));
+        assert!(t.action("delete", h.project()));
+        h.apply(t.pending.take().unwrap()).unwrap();
+        let clip = |h: &History| h.project().sequence().tracks()[0].clips()[0].clone();
+        assert!(
+            clip(&h).keyframes.is_empty(),
+            "the clip stays, its key goes"
+        );
+        t.seek(Time(S));
+        assert!(t.action("paste", h.project()));
+        h.apply(t.pending.take().unwrap()).unwrap();
+        assert_eq!(clip(&h).keyframes["opacity"][0].time, Time(S));
+    }
+
+    #[test]
+    fn expanded_lanes_drag_a_key_and_snapshot() {
+        use egui::pos2;
+        use egui_kittest::kittest::Queryable;
+        use jvid_core::model::Project;
+        use suite_ui::tokens::size;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut p = History::new(project(1));
+        let id = p.project().sequence().tracks()[0].clips()[0].id;
+        for (param, t) in [("opacity", 0), ("opacity", 1), ("scale", 1)] {
+            p.apply(Command::AddKeyframe {
+                id,
+                param: param.into(),
+                key: Keyframe {
+                    time: Time(t * S),
+                    value: Value::Scalar(1.0),
+                    easing: Easing::Linear,
+                },
+            })
+            .unwrap();
+        }
+        let height = p.project().sequence().tracks()[0].height;
+        let mut h = super::super::tests::harness(p.project().clone());
+        h.state_mut().0.keys.expanded.insert(id);
+        for _ in 0..3 {
+            h.state_mut().0.action("zoom_in", &Project::default());
+        }
+        h.run();
+        h.snapshot("timeline_keyframes");
+        // The opacity lane is the first under the clip; the panel sits 8pt in.
+        let lock = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let y = lock - height / 2.0 + height + 2.0 + LANE_H / 2.0;
+        let view = h.state().0.view(8.0 + size::TRACK_HEADER);
+        let (x, dx) = (view.x(Time(S)), view.x(Time(2 * S)) - view.x(Time(S)));
+        h.hover_at(pos2(x, y));
+        h.run();
+        h.drag_at(pos2(x, y));
+        h.run();
+        for d in [5.0, dx + 1.0] {
+            h.hover_at(pos2(x + d, y));
+            h.run();
+        }
+        h.drop_at(pos2(x + dx + 1.0, y));
+        h.run();
+        let c = h.state().1.project().sequence().tracks()[0].clips()[0].clone();
+        let t: Vec<_> = c.keyframes["opacity"].iter().map(|k| k.time).collect();
+        assert_eq!(t, [Time(0), Time(2 * S)], "lands on the 2s frame");
+        assert_eq!(c.keyframes["scale"][0].time, Time(S), "unpicked keys stay");
+        h.state_mut().1.undo();
+        let c = h.state().1.project().sequence().tracks()[0].clips()[0].clone();
+        assert_eq!(c.keyframes["opacity"][1].time, Time(S));
+    }
+}
