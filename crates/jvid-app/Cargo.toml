@@ -1,0 +1,18 @@
+[package]
+name = "jvid-app"
+description = "The jvid desktop video editor."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+jvid-audio.workspace = true
+jvid-core.workspace = true
+jvid-media.workspace = true
+jvid-render.workspace = true
+suite-ui.workspace = true
+
+[lints]
+workspace = true
