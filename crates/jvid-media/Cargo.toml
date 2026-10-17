@@ -19,3 +19,8 @@ tracing.workspace = true
 [features]
 # Link a GPL FFmpeg (x264/x265); the default expects LGPL. See docs/adr/0001-ffmpeg-binding.md.
 gpl-ffmpeg = []
+# Test media corpus helpers; dev-dependency use only.
+test-support = []
+
+[dev-dependencies]
+jvid-media = { path = ".", features = ["test-support"] }

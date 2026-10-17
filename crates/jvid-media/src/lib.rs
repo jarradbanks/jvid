@@ -2,3 +2,5 @@
 
 pub mod ffmpeg;
 pub mod stills;
+#[cfg(feature = "test-support")]
+pub mod test_media;

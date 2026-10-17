@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Generates the test media corpus from FFmpeg lavfi sources (FFmpeg 4.4 to 8.x CLI).
+# Usage: scripts/gen-test-media [out-dir]   (default: test-media/ at the repo root, gitignored)
+# Tests look for <out-dir>/.complete, written last, so a half-built corpus counts as absent.
+set -euo pipefail
+
+out="${1:-$(cd "$(dirname "$0")/.." && pwd)/test-media}"
+rm -rf "$out"
+mkdir -p "$out"
+cd "$out"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+ff() { ffmpeg -nostdin -hide_banner -loglevel error -y "$@"; }
+x264=(-c:v libx264 -preset ultrafast -pix_fmt yuv420p)
+tone() { echo "sine=frequency=${1:-1000}:sample_rate=48000"; }
+
+# Frame index as 16 white/black 120x64 blocks across the top, bit 0 leftmost.
+# Decoded by jvid_media::test_media::frame_index; keep the two in sync.
+ff -f lavfi -i testsrc2=s=1920x1080:r=30:d=10 \
+  -vf "format=yuv420p,geq=lum='if(lt(Y,64),255*mod(floor(N/pow(2,floor(X/120))),2),p(X,Y))':cb='if(lt(Y,32),128,p(X,Y))':cr='if(lt(Y,32),128,p(X,Y))'" \
+  "${x264[@]}" -crf 18 -g 30 frame-index-1080p30.mp4
+
+# Phone-style VFR: frame gaps alternate 1/30 s and 2/30 s. Encoded to MKV then copied into MP4,
+# since the CLI would resample to CFR when writing MP4 directly.
+ff -f lavfi -i testsrc2=s=1280x720:r=30:d=5 -f lavfi -i "$(tone):d=5" \
+  -vf "setpts='(N+floor(N/2))/30/TB'" "${x264[@]}" -c:a aac -shortest "$tmp/vfr.mkv"
+ff -i "$tmp/vfr.mkv" -c copy vfr-phone.mp4
+
+ff -f lavfi -i testsrc2=s=1920x1080:r=24000/1001:d=5 -f lavfi -i "$(tone):d=5" "${x264[@]}" -c:a aac 23.976fps.mp4
+ff -f lavfi -i testsrc2=s=1920x1080:r=60000/1001:d=5 -f lavfi -i "$(tone):d=5" "${x264[@]}" -c:a aac 59.94fps.mp4
+ff -f lavfi -i testsrc2=s=1920x1080:r=144:d=3 "${x264[@]}" 144fps.mp4
+ff -f lavfi -i testsrc2=s=3840x2160:r=30:d=2 -c:v libx265 -preset ultrafast -pix_fmt yuv420p -tag:v hvc1 \
+  -x265-params log-level=error 4k-hevc.mp4
+ff -f lavfi -i testsrc2=s=1920x1080:r=25:d=2 -f lavfi -i "$(tone):d=2" \
+  -c:v prores_ks -profile:v 2 -pix_fmt yuv422p10le -c:a pcm_s16le prores.mov
+ff -f lavfi -i testsrc2=s=1080x1920:r=30:d=3 -f lavfi -i "$(tone):d=3" "${x264[@]}" -c:a aac 9x16.mp4
+ff -f lavfi -i testsrc2=s=1280x720:r=30:d=3 "${x264[@]}" no-audio.mp4
+
+# Landscape-coded phone clip tagged with a 90 degree display rotation. FFmpeg 7 dropped the rotate
+# tag in favour of -display_rotation (6.1+, counter-clockwise degrees).
+ff -f lavfi -i testsrc2=s=1920x1080:r=30:d=3 -f lavfi -i "$(tone):d=3" "${x264[@]}" -c:a aac "$tmp/rot.mp4"
+ff -display_rotation:v:0 -90 -i "$tmp/rot.mp4" -c copy rotated-phone.mp4 2>/dev/null ||
+  ff -i "$tmp/rot.mp4" -c copy -metadata:s:v:0 rotate=90 rotated-phone.mp4
+
+# 1 kHz tone, peak -20 dBFS (amplitude 0.1).
+ff -f lavfi -i "aevalsrc=0.1*sin(2*PI*1000*t):s=48000:d=5" tone-1khz.wav
+ff -i tone-1khz.wav -c:a libmp3lame -b:a 192k tone-1khz.mp3
+ff -i tone-1khz.wav -c:a aac -b:a 192k tone-1khz.m4a
+
+ff -f lavfi -i testsrc2=s=1920x1080 -frames:v 1 still.png
+ff -f lavfi -i testsrc2=s=1920x1080 -frames:v 1 -q:v 3 still.jpg
+ff -f lavfi -i testsrc2=s=1920x1080 -frames:v 1 -c:v libwebp still.webp
+
+ff -f lavfi -i testsrc2=s=1280x720:r=30:d=5 \
+  -f lavfi -i "$(tone 440):d=5" -f lavfi -i "$(tone 1000):d=5" -f lavfi -i "$(tone 2500):d=5" \
+  -map 0 -map 1 -map 2 -map 3 "${x264[@]}" -c:a aac \
+  -metadata:s:a:0 title=Game -metadata:s:a:1 title=Mic -metadata:s:a:2 "title=Voice chat" three-audio.mkv
+
+# Screen recording: 1px UI lines and 10px text that blur visibly when scaled or over-compressed.
+ff -f lavfi -i color=c=0x1e1e1e:s=2560x1440:r=60:d=3 \
+  -vf "drawgrid=w=64:h=24:t=1:c=0x3c3c3c,drawbox=x=0:y=0:w=2560:h=32:c=0x2d2d2d:t=fill,drawtext=text='File  Edit  View  Sequence  Clip  Effects  Window  Help   00\:00\:%{eif\:t\:d}\:%{eif\:n\:d}':x=8:y=10:fontsize=12:fontcolor=0xd4d4d4,drawtext=text='The quick brown fox jumps over the lazy dog 0123456789 ilI1| oO0':x=80:y=200:fontsize=10:fontcolor=white" \
+  "${x264[@]}" -crf 18 screen-1440p60.mp4
+
+# 2-hour 1440p60 recording: encode 10 s once, then stream-copy it 720 times with the concat demuxer,
+# which is what keeps generation well under 2 minutes.
+ff -f lavfi -i testsrc2=s=2560x1440:r=60:d=10 -f lavfi -i "$(tone):d=10" \
+  "${x264[@]}" -b:v 100k -g 600 -c:a aac -b:a 64k "$tmp/seg.mp4"
+for _ in $(seq 720); do echo "file '$tmp/seg.mp4'"; done >"$tmp/list.txt"
+ff -f concat -safe 0 -i "$tmp/list.txt" -c copy long-2h-1440p60.mp4
+
+touch .complete
+echo "test media written to $out"
