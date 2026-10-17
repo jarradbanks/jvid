@@ -30,11 +30,13 @@ jobs:
       - run: cargo fmt --all --check
       # FFmpeg dev libraries (docs/adr/0001-ffmpeg-binding.md). bindgen's libclang ships on all runners.
       # suite-ui GPU tests render on Mesa lavapipe; required on Linux so they can't pass by skipping.
+      # Arabic and CJK fonts for the text shaping tests, also required on Linux.
       - if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers \
-            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libasound2-dev
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libasound2-dev \
+            fonts-dejavu-core fonts-noto-cjk
       - if: runner.os == 'macOS'
         run: brew install ffmpeg
         env:

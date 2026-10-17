@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Mixer, Output, SAMPLE_RATE, Strip};
-use jvid_core::eval::{audio_in, video_at};
+use jvid_core::eval::{Layer, audio_in, video_at};
 use jvid_core::model::{
     AssetId, ClipId, MediaAsset, Project, ProjectSettings, TrackKind, Transform,
 };
@@ -26,7 +26,7 @@ use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::decode::{DecoderPool, Frame};
 use jvid_render::composite::{self, Compositor};
 use jvid_render::preview::{Preview, Yuv};
-use jvid_render::solid;
+use jvid_render::{solid, text};
 
 use crate::transport::{AudioSource, Transport};
 
@@ -75,6 +75,18 @@ pub enum Pixels {
     Frame(Arc<Frame>),
     /// A solid color layer, straight RGBA.
     Solid([u8; 4]),
+    /// A text layer rasterized at project size, straight RGBA.
+    Text(Arc<Vec<u8>>),
+}
+
+/// The pixels of a solid or text asset's `layer` on a `size` frame; `None` for a file.
+pub fn generated(asset: &MediaAsset, layer: &Layer, size: (u32, u32)) -> Option<Pixels> {
+    if let Some(t) = &asset.text {
+        let t = t.with(&layer.text);
+        return Some(Pixels::Text(text::rasterize(&t, layer.color, size)));
+    }
+    let c = layer.color.or(asset.solid)?;
+    Some(Pixels::Solid(solid::rgba8(c)))
 }
 
 /// Decoded frames up to a byte budget; the least recently used go first.
@@ -443,7 +455,7 @@ impl Playback {
             for layer in video_at(project.sequence(), time) {
                 let key = (layer.asset, layer.source_time);
                 want.insert(key);
-                let Some(asset) = project.asset(layer.asset).filter(|a| a.solid.is_none()) else {
+                let Some(asset) = project.asset(layer.asset).filter(|a| !a.generated()) else {
                     continue;
                 };
                 if self.cache.contains(&key)
@@ -495,7 +507,7 @@ impl Playback {
         let mut want = HashSet::new();
         for layer in video_at(project.sequence(), time) {
             let key = (layer.asset, layer.source_time);
-            let Some(asset) = project.asset(layer.asset).filter(|a| a.solid.is_none()) else {
+            let Some(asset) = project.asset(layer.asset).filter(|a| !a.generated()) else {
                 continue;
             };
             if self.cache.contains(&key) || self.failed.contains_key(&key) {
@@ -530,8 +542,9 @@ impl Playback {
             let Some(asset) = project.asset(layer.asset) else {
                 continue;
             };
-            if let Some(c) = layer.color.or(asset.solid) {
-                layers.push((Pixels::Solid(solid::rgba8(c)), layer.transform));
+            let s = project.settings();
+            if let Some(px) = generated(asset, &layer, (s.width, s.height)) {
+                layers.push((px, layer.transform));
                 continue;
             }
             // Not decoded yet: keep what's on screen. A failed decode leaves the layer out.
@@ -563,6 +576,8 @@ impl Playback {
 pub struct Gpu {
     compositor: Compositor,
     layers: Vec<Preview>,
+    /// Text uploads from the last draw, by raster; holding the `Arc` keeps its address unique.
+    texts: Vec<(Arc<Vec<u8>>, wgpu::Texture)>,
 }
 
 impl Gpu {
@@ -570,6 +585,7 @@ impl Gpu {
         Self {
             compositor: Compositor::new(device),
             layers: Vec::new(),
+            texts: Vec::new(),
         }
     }
 
@@ -587,11 +603,23 @@ impl Gpu {
         }
         // shortcut: a solid texture per layer per frame; cache by color if playback profiles hot.
         let mut solids = Vec::new();
+        let mut texts = Vec::new();
         for ((px, _), preview) in shown.layers.iter().zip(&mut self.layers) {
             let f = match px {
                 Pixels::Frame(f) => f,
                 Pixels::Solid(c) => {
                     solids.push(solid::solid(device, queue, (s.width, s.height), *c));
+                    continue;
+                }
+                Pixels::Text(rgba) => {
+                    // A cached raster is the same Arc, so its texture is reused, not re-uploaded.
+                    let old = self.texts.iter().find(|(r, _)| Arc::ptr_eq(r, rgba));
+                    let tex = old.map_or_else(
+                        || text::texture(device, queue, (s.width, s.height), rgba),
+                        |(_, t)| t.clone(),
+                    );
+                    texts.push((rgba.clone(), tex.clone()));
+                    solids.push(tex);
                     continue;
                 }
             };
@@ -604,6 +632,7 @@ impl Gpu {
             };
             preview.upload(device, queue, &yuv, scale);
         }
+        self.texts = texts;
         let layers: Vec<_> = shown
             .layers
             .iter()
@@ -611,7 +640,7 @@ impl Gpu {
             .scan(solids.iter(), |solids, ((px, t), p)| {
                 let tex = match px {
                     Pixels::Frame(_) => p.image().expect("uploaded above"),
-                    Pixels::Solid(_) => solids.next().expect("made above"),
+                    Pixels::Solid(_) | Pixels::Text(_) => solids.next().expect("made above"),
                 };
                 Some((tex, *t))
             })

@@ -16,9 +16,8 @@ use jvid_media::audio::AudioDecoder;
 use jvid_media::decode::DecoderPool;
 use jvid_media::encode::Encoder;
 use jvid_render::composite::Readback;
-use jvid_render::solid;
 
-use crate::playback::{Audio, ClipAudio, Gpu, Pixels, Shown, sample};
+use crate::playback::{Audio, ClipAudio, Gpu, Pixels, Shown, generated, sample};
 
 /// What to export: `range` is a half-open timeline span, rounded out to whole output frames.
 #[derive(Clone)]
@@ -230,8 +229,9 @@ fn render(
             let Some(asset) = project.asset(layer.asset) else {
                 continue;
             };
-            if let Some(c) = layer.color.or(asset.solid) {
-                layers.push((Pixels::Solid(solid::rgba8(c)), layer.transform));
+            let s = project.settings();
+            if let Some(px) = generated(asset, &layer, (s.width, s.height)) {
+                layers.push((px, layer.transform));
                 continue;
             }
             let f = decoders

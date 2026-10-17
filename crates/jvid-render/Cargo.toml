@@ -14,6 +14,7 @@ workspace = true
 jvid-core.workspace = true
 wgpu.workspace = true
 image.workspace = true
+cosmic-text.workspace = true
 
 [dev-dependencies]
 jvid-media = { workspace = true, features = ["test-support"] }

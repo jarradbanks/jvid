@@ -3,3 +3,4 @@
 pub mod composite;
 pub mod preview;
 pub mod solid;
+pub mod text;

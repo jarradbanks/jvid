@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use crate::keyframe::{self, Keyframe};
 use crate::model::{
     AssetId, Clip, ClipId, Edge, LinkId, Marker, MarkerId, ModelError, NewClip, Placement,
-    ProbeInfo, Project, ProjectSettings, TrackId, TrackKind, TrackSettings, Transform,
+    ProbeInfo, Project, ProjectSettings, Text, TrackId, TrackKind, TrackSettings, Transform,
 };
 use crate::time::Time;
 
@@ -153,6 +153,15 @@ pub enum Command {
         id: AssetId,
         color: [f64; 4],
     },
+    /// Adds a text layer asset to the bin.
+    AddText {
+        name: String,
+        text: Text,
+    },
+    SetText {
+        id: AssetId,
+        text: Text,
+    },
     SetAssetProbe {
         id: AssetId,
         probe: Option<ProbeInfo>,
@@ -244,6 +253,8 @@ impl Command {
             | Self::AddAsset(_)
             | Self::AddSolid { .. }
             | Self::SetSolidColor { .. }
+            | Self::AddText { .. }
+            | Self::SetText { .. }
             | Self::SetAssetProbe { .. }
             | Self::Import(_)
             | Self::RenameAsset { .. }
@@ -418,6 +429,17 @@ impl Command {
                 let a = p.asset_mut(id).expect("just added");
                 (a.name, a.solid) = (Some(name), Some(color));
                 Created::Asset(id)
+            }
+            Self::AddText { name, text } => {
+                let id = p.add_asset(PathBuf::new());
+                let a = p.asset_mut(id).expect("just added");
+                (a.name, a.text) = (Some(name), Some(text));
+                Created::Asset(id)
+            }
+            Self::SetText { id, text } => {
+                let a = p.asset_mut(id).filter(|a| a.text.is_some());
+                a.ok_or(ModelError::UnknownAsset(id))?.text = Some(text);
+                Created::Nothing
             }
             Self::SetSolidColor { id, color } => {
                 let a = p.asset_mut(id).filter(|a| a.solid.is_some());
@@ -1718,5 +1740,44 @@ mod tests {
         .unwrap();
         let tail = h.project().sequence().tracks()[0].clips()[1].id;
         assert_eq!(h.project().sequence().clip(tail).unwrap().1.link, None);
+    }
+
+    #[test]
+    fn text_adds_edits_undoes_and_rejects_files() {
+        let mut h = History::new(Project::default());
+        let [(name, text), ..] = Text::presets();
+        let Created::Asset(id) = h
+            .apply(Command::AddText {
+                name: name.into(),
+                text: text.clone(),
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let edited = Text {
+            content: "مرحبا".into(),
+            ..text.clone()
+        };
+        h.apply(Command::SetText {
+            id,
+            text: edited.clone(),
+        })
+        .unwrap();
+        let a = h.project().asset(id).unwrap();
+        assert!(a.generated());
+        assert_eq!(a.text.as_ref(), Some(&edited));
+        let Created::Asset(file) = h.apply(Command::AddAsset("a.mkv".into())).unwrap() else {
+            panic!()
+        };
+        assert!(
+            h.apply(Command::SetText {
+                id: file,
+                text: edited
+            })
+            .is_err()
+        );
+        assert!(h.undo() && h.undo());
+        assert_eq!(h.project().asset(id).unwrap().text, Some(text));
     }
 }

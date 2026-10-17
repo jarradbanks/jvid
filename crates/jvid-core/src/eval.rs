@@ -20,6 +20,9 @@ pub struct Layer<'a> {
     /// The clip's `color` keyframes at this instant, straight RGBA; a solid asset's color
     /// applies when `None`.
     pub color: Option<[f64; 4]>,
+    /// The clip's keyed text style at this instant, applied over a text asset's with
+    /// [`crate::model::Text::with`].
+    pub text: Vec<(&'static str, crate::keyframe::Value)>,
 }
 
 /// A piece of one clip to mix, clamped to the requested range.
@@ -76,6 +79,7 @@ pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
                     Some(crate::keyframe::Value::Color(c)) => Some(c),
                     _ => None,
                 },
+                text: c.text_keys(t),
             })
         })
         .collect()
@@ -223,5 +227,33 @@ mod tests {
         })
         .unwrap();
         assert_eq!(video_at(&s, Time(5))[0].color, Some([0.5, 0.25, 0.0, 1.0]));
+    }
+
+    #[test]
+    fn text_keyframes_animate_the_style() {
+        use crate::keyframe::{Easing, Keyframe, Value};
+        use crate::model::Text;
+        let mut s = Sequence::default();
+        let v = s.add_track(TrackKind::Video, "V1");
+        let c = s.add_clip(v, clip(0, 10)).unwrap();
+        let key = |time, n| Keyframe {
+            time: Time(time),
+            value: Value::Scalar(n),
+            easing: Easing::Linear,
+        };
+        s.with_clip_mut(c, |c| {
+            c.keyframes
+                .insert("text_size".into(), vec![key(100, 20.0), key(110, 40.0)]);
+            c.keyframes.insert("outline".into(), vec![key(100, 4.0)]);
+        })
+        .unwrap();
+        let t = Text::default().with(&video_at(&s, Time(5))[0].text);
+        assert_eq!((t.size, t.outline), (30.0, 4.0));
+        assert_eq!(t.box_padding, Text::default().box_padding, "unkeyed stays");
+        for name in Text::ANIMATED {
+            let mut u = Text::default();
+            u.set(name, u.get(name).unwrap());
+            assert_eq!(u, Text::default(), "{name} round-trips");
+        }
     }
 }

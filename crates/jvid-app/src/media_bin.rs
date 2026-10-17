@@ -155,7 +155,7 @@ impl MediaBin {
             .show(ui, |ui| match self.tab {
                 0 => self.media(ui, project, importing, missing, &mut out),
                 1 => placeholder(ui, "Effects arrive in a later version"),
-                _ => placeholder(ui, "Text and titles arrive in a later version"),
+                _ => text_presets(ui, &mut out),
             });
         self.tab = tab;
         if let Some(id) = self.confirm_remove {
@@ -743,6 +743,20 @@ fn letterbox(ui: &Ui, rect: Rect, tex: &TextureHandle) {
         .paint_at(ui, r);
 }
 
+/// The Text tab: one button per preset, each adding a text asset to the bin.
+fn text_presets(ui: &mut Ui, out: &mut BinResponse) {
+    ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
+    for (name, text) in jvid_core::model::Text::presets() {
+        let b = Button::secondary(name).width(ui.available_width());
+        if ui.add(b).clicked() {
+            out.command = Some(Command::AddText {
+                name: name.into(),
+                text,
+            });
+        }
+    }
+}
+
 fn placeholder(ui: &mut Ui, text: &str) {
     ui.label(egui::RichText::new(text).color(color::INK_3));
 }
@@ -768,6 +782,7 @@ mod tests {
             in_point: None,
             out_point: None,
             solid: None,
+            text: None,
         }
     }
 

@@ -56,7 +56,7 @@ fn tiny(t: Time) -> Frame {
 fn frame_of(px: &Pixels) -> &Frame {
     match px {
         Pixels::Frame(f) => f,
-        Pixels::Solid(_) => panic!("a solid"),
+        _ => panic!("generated"),
     }
 }
 
@@ -778,6 +778,46 @@ fn two_layers_composite_with_opacity() {
         "{:?}",
         &px[..4]
     );
+}
+
+#[test]
+fn text_layer_draws_over_a_solid() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut h = History::new(Project::default());
+    add_solid(&mut h, [1.0, 0.0, 0.0, 1.0], Time(0));
+    let Ok(Created::Asset(asset)) = h.apply(Command::AddText {
+        name: "Title".into(),
+        text: jvid_core::model::Text::default(),
+    }) else {
+        panic!("text")
+    };
+    let Ok(Created::Track(track)) = h.apply(Command::AddTrack {
+        kind: TrackKind::Video,
+        name: "V2".into(),
+    }) else {
+        panic!("track")
+    };
+    let clip = NewClip {
+        asset,
+        source_in: Time(0),
+        source_out: secs(1),
+        start: Time(0),
+        link: None,
+    };
+    h.apply(Command::AddClip { track, clip }).unwrap();
+    let decode: DecodeFn = Arc::new(|_, _| panic!("generated layers never decode"));
+    let mut pb = Playback::new(decode, silent(), DEFAULT_BUDGET);
+    let shown = pb.park(h.project()).expect("shown");
+    assert!(matches!(shown.layers[0].0, Pixels::Text(_)), "text on top");
+    let tex = Gpu::new(&device)
+        .draw(&device, &queue, h.project().settings(), 1, &shown)
+        .clone();
+    let px = composite::read_back(&device, &queue, &tex);
+    let px: Vec<_> = px.chunks(4).collect();
+    assert_eq!(px[0], [255, 0, 0, 255], "the solid shows around the text");
+    assert!(px.contains(&&[255, 255, 255, 255][..]), "white glyphs show");
 }
 
 /// A merged clip sums a source per stream; a per-stream clip opens only its own.
