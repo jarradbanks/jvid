@@ -116,6 +116,15 @@ impl Output {
         n
     }
 
+    /// Drops everything queued but not yet played; the clock stays where it is.
+    pub fn flush(&mut self) {
+        let mut ring = self.feed.ring.lock().unwrap_or_else(|e| e.into_inner());
+        let n = ring.slots();
+        if let Ok(chunk) = ring.read_chunk(n) {
+            chunk.commit_all();
+        }
+    }
+
     /// Master clock: sample frames played since the output was created.
     pub fn clock(&self) -> u64 {
         self.feed.played.load(Ordering::Acquire)
@@ -326,6 +335,17 @@ mod tests {
         // Underrun pads with silence and does not advance the clock.
         assert_eq!(fake.pull(3), [0.3, 0.4, 0.0, 0.0, 0.0, 0.0]);
         assert_eq!(out.clock(), 2);
+    }
+
+    #[test]
+    fn flush_drops_queued_audio_without_moving_the_clock() {
+        let fake = Fake::with(&["a"]);
+        let mut out = Output::new(Box::new(fake.clone()), None);
+        out.push(&[0.5; 200]);
+        fake.pull(10);
+        out.flush();
+        assert_eq!(fake.pull(10), vec![0.0; 20]);
+        assert_eq!(out.clock(), 10);
     }
 
     #[test]

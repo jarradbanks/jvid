@@ -617,7 +617,8 @@ fn focus_actions_focus_panels_and_missing_panels_are_no_ops() {
     app.run_action("focus_media");
     assert_eq!(focused(&mut app), Some(Tab::Media));
     app.run_action("focus_source");
-    assert_eq!(focused(&mut app), Some(Tab::Media));
+    assert_eq!(focused(&mut app), Some(Tab::Preview));
+    assert_eq!(app.preview_active, 0);
     app.run_action("focus_timeline");
     assert_eq!(focused(&mut app), Some(Tab::Timeline));
 }
@@ -793,4 +794,64 @@ fn new_project_uses_the_chosen_preset() {
     h.get_by_label("New project").click();
     h.run();
     assert!(h.state().match_source && !h.state().on_welcome);
+}
+
+#[test]
+fn source_actions_step_and_mark_the_open_clip_undoably() {
+    use jvid_core::model::{AssetId, ProbeInfo};
+    use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
+    let mut app = App::restore(None);
+    let probe = ProbeInfo {
+        duration: Time(10 * FLICKS_PER_SECOND),
+        frame_rate: Some(Rate::new(25, 1)),
+        ..Default::default()
+    };
+    let import = Command::Import(vec![("/m/a.mkv".into(), probe)]);
+    app.history.apply(import).unwrap();
+    let id = AssetId(1);
+    app.preview.open(app.history.project(), id);
+    app.run_action("focus_source");
+    let marks = |app: &App| {
+        let a = app.history.project().asset(id).unwrap();
+        (a.in_point, a.out_point)
+    };
+    let frame = |n: i64| Rate::new(25, 1).time_floor(n);
+    for a in [
+        "step_forward",
+        "step_forward",
+        "mark_in",
+        "go_to_end",
+        "mark_out",
+    ] {
+        app.run_action(a);
+    }
+    assert_eq!(marks(&app), (Some(frame(2)), Some(frame(250))));
+    // Marking out before the in clears the in.
+    app.run_action("go_to_start");
+    app.run_action("mark_out");
+    assert_eq!(marks(&app), (None, Some(frame(1))));
+    assert!(app.history.undo());
+    assert_eq!(marks(&app), (Some(frame(2)), Some(frame(250))));
+    // Go to in/out land on the marked frames: marking the other side there marks one frame.
+    app.run_action("go_to_start");
+    app.run_action("step_forward");
+    app.run_action("mark_in");
+    app.run_action("go_to_end");
+    app.run_action("step_back");
+    app.run_action("mark_out");
+    assert_eq!(marks(&app), (Some(frame(1)), Some(frame(249))));
+    app.run_action("go_to_in");
+    app.run_action("mark_out");
+    assert_eq!(marks(&app), (Some(frame(1)), Some(frame(2))));
+    app.run_action("go_to_end");
+    app.run_action("mark_out");
+    app.run_action("go_to_out");
+    app.run_action("mark_in");
+    assert_eq!(marks(&app), (Some(frame(249)), Some(frame(250))));
+    app.run_action("clear_in_out");
+    assert_eq!(marks(&app), (None, None));
+    // With another panel focused the keys aren't the Source tab's.
+    app.run_action("focus_timeline");
+    app.run_action("mark_in");
+    assert_eq!(marks(&app), (None, None));
 }

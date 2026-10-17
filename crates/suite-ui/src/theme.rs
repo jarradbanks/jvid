@@ -24,6 +24,12 @@ pub mod icon {
     pub const GRID: &str = "\u{E105}";
     pub const LIST: &str = "\u{E10C}";
     pub const AUDIO: &str = "\u{E560}";
+    pub const PLAY: &str = "\u{E140}";
+    pub const PAUSE: &str = "\u{E132}";
+    pub const SKIP_BACK: &str = "\u{E163}";
+    pub const SKIP_FORWARD: &str = "\u{E164}";
+    pub const REWIND: &str = "\u{E14B}";
+    pub const FAST_FORWARD: &str = "\u{E0C1}";
 }
 
 /// Inter Medium (500), for Body Strong, buttons, tabs and the timecode.

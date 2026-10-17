@@ -17,7 +17,7 @@ use suite_ui::widgets::{Button, State};
 use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
-use crate::preview::Preview;
+use crate::preview::{Preview, SOURCE_ACTIONS};
 use crate::welcome::{self, Recent, Welcome};
 use crate::{project_file, relink};
 
@@ -292,10 +292,31 @@ impl App {
     /// Runs a keymap action. shortcut: only panel focus is real; the rest are stubs until
     /// their features land.
     fn run_action(&mut self, id: &str) {
+        let preview_focused = self
+            .dock
+            .find_active_focused()
+            .is_some_and(|(_, t)| *t == Tab::Preview);
+        if preview_focused
+            && self.preview_active == 0
+            && self.preview.source_asset().is_some()
+            && SOURCE_ACTIONS.contains(&id)
+        {
+            let project = self.history.project();
+            if let Some(c) = self.preview.source_action(id, project)
+                && let Err(e) = self.history.apply(c)
+            {
+                tracing::warn!("source mark failed: {e}");
+            }
+            return;
+        }
         let tab = match id {
             "focus_media" => Tab::Media,
             "focus_timeline" => Tab::Timeline,
             "focus_inspector" => Tab::Inspector,
+            "focus_source" => {
+                self.preview_active = 0;
+                Tab::Preview
+            }
             "focus_program" => {
                 self.preview_active = 1;
                 Tab::Preview
@@ -459,6 +480,7 @@ impl eframe::App for App {
                 relink: None,
                 import_clicked: false,
                 command: None,
+                open: None,
                 preview: &mut self.preview,
             };
             DockArea::new(&mut self.dock)
@@ -471,11 +493,20 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            let (import, command, relink) = (viewer.import_clicked, viewer.command, viewer.relink);
+            let (import, command, relink, open) = (
+                viewer.import_clicked,
+                viewer.command,
+                viewer.relink,
+                viewer.open,
+            );
+            if let Some(id) = open {
+                self.preview.open(self.history.project(), id);
+                self.preview_active = 0;
+            }
             if let Some(c) = command
                 && let Err(e) = self.history.apply(c)
             {
-                tracing::warn!("bin edit failed: {e}");
+                tracing::warn!("edit failed: {e}");
             }
             if import {
                 self.import_dialog();
@@ -577,6 +608,7 @@ struct Viewer<'a> {
     relink: Option<AssetId>,
     import_clicked: bool,
     command: Option<Command>,
+    open: Option<jvid_core::model::AssetId>,
     preview: &'a mut Preview,
 }
 
@@ -598,10 +630,13 @@ impl TabViewer for Viewer<'_> {
                 .bin
                 .show(ui, self.project, focused, self.importing, self.missing);
             self.import_clicked |= r.import;
-            self.command = r.command;
+            // The Source tab may have set one this frame too.
+            self.command = r.command.or(self.command.take());
             self.relink = r.relink;
+            self.open = r.open;
             return;
         }
+        let source_tab = self.preview_views.get(*self.preview_active) == Some(&"Source");
         let title = format!("{tab:?}");
         let panel = match (*tab, self.preview_views) {
             (Tab::Preview, [one]) => Panel::titled(one),
@@ -609,6 +644,14 @@ impl TabViewer for Viewer<'_> {
             _ => Panel::titled(&title),
         };
         let panel = panel.focused(focused);
+        if *tab == Tab::Preview && source_tab {
+            panel.show(ui, |ui| {
+                if let Some(c) = self.preview.show_source(ui, self.project, self.missing) {
+                    self.command = Some(c);
+                }
+            });
+            return;
+        }
         if *tab == Tab::Preview {
             // The newest video (or still) asset, until the timeline and source viewer exist.
             let source = self.project.assets().iter().rev().find_map(|a| {
@@ -616,7 +659,7 @@ impl TabViewer for Viewer<'_> {
                 Some(a.path.as_path())
             });
             let offline = source.is_some_and(|p| self.missing.contains(p));
-            panel.show(ui, |ui| self.preview.show(ui, source, offline));
+            panel.show(ui, |ui| self.preview.show_frame(ui, source, offline));
             return;
         }
         // shortcut: panels are empty shells; their content lands in later issues.

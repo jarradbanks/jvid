@@ -123,6 +123,11 @@ pub struct MediaAsset {
     /// The bin name; `None` shows the file name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Source in/out marks, set in the Source viewer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_point: Option<Time>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_point: Option<Time>,
 }
 
 impl MediaAsset {
@@ -537,6 +542,8 @@ impl Project {
             path: path.into(),
             probe: None,
             name: None,
+            in_point: None,
+            out_point: None,
         });
         id
     }
