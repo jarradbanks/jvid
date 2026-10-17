@@ -9,3 +9,10 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+egui.workspace = true
+
+[dev-dependencies]
+eframe.workspace = true
+egui_kittest.workspace = true

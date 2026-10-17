@@ -20,6 +20,10 @@ Work is tracked as GitHub issues, grouped into milestones. [ROADMAP.md](docs/ROA
 
 4. Add tests for any logic you add. `jvid-core` should be covered by plain unit tests.
 
+### GPU tests
+
+`suite-ui`'s snapshot and layout tests render headless through wgpu on Mesa's lavapipe (software Vulkan, no GPU needed). Install it with `sudo apt install mesa-vulkan-drivers`; the tests then select it themselves, which also avoids the default WSL2 Vulkan driver, which segfaults. Without lavapipe they print one line and skip. Set `JVID_GPU_TESTS=required` to make them run on whatever driver is present instead (CI does this so it can't pass by skipping), or set `VK_ICD_FILENAMES` to pick a driver yourself. Snapshots are recorded with lavapipe; `UPDATE_SNAPSHOTS=1 cargo test -p suite-ui` rewrites them.
+
 ## Ground rules
 
 - **`jvid-core` has no I/O and no UI.** It must not depend on another jvid crate, a UI library or anything that touches files, devices or the GPU. That keeps it testable in isolation and lets both the app and the CLI drive it. Check with `cargo tree -p jvid-core`.
