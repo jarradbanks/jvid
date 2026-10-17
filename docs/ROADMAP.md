@@ -316,7 +316,7 @@ flowchart LR
 | [#55](https://github.com/jarradbanks/jvid/issues/55) | Hardware encoding with software fallback | need testing | M | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#56](https://github.com/jarradbanks/jvid/issues/56) | Audio-only export |  | S | export, audio | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#57](https://github.com/jarradbanks/jvid/issues/57) | Loudness normalization (EBU R128) | done | M | audio, export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
-| [#58](https://github.com/jarradbanks/jvid/issues/58) | Background render queue |  | M | export, ui | [#54](https://github.com/jarradbanks/jvid/issues/54), [#18](https://github.com/jarradbanks/jvid/issues/18) |
+| [#58](https://github.com/jarradbanks/jvid/issues/58) | Background render queue | in progress | M | export, ui | [#54](https://github.com/jarradbanks/jvid/issues/54), [#18](https://github.com/jarradbanks/jvid/issues/18) |
 | [#59](https://github.com/jarradbanks/jvid/issues/59) | Export current frame as PNG | done | S | export | [#30](https://github.com/jarradbanks/jvid/issues/30) |
 | [#60](https://github.com/jarradbanks/jvid/issues/60) | GIF export |  | S | export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#91](https://github.com/jarradbanks/jvid/issues/91) | Lossless fast export |  | L | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52), [#54](https://github.com/jarradbanks/jvid/issues/54) |
@@ -351,7 +351,7 @@ flowchart LR
 
 | Issue | Title | Status | Size | Area | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [#63](https://github.com/jarradbanks/jvid/issues/63) | Text and title layers | in progress | L | render, ui | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44), [#20](https://github.com/jarradbanks/jvid/issues/20) |
+| [#63](https://github.com/jarradbanks/jvid/issues/63) | Text and title layers | done | L | render, ui | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44), [#20](https://github.com/jarradbanks/jvid/issues/20) |
 | [#64](https://github.com/jarradbanks/jvid/issues/64) | Solid color layers | done | S | render | [#45](https://github.com/jarradbanks/jvid/issues/45) |
 | [#65](https://github.com/jarradbanks/jvid/issues/65) | Transitions: crossfade and dip to black/white |  | M | timeline, render | [#43](https://github.com/jarradbanks/jvid/issues/43), [#45](https://github.com/jarradbanks/jvid/issues/45), [#50](https://github.com/jarradbanks/jvid/issues/50) |
 | [#66](https://github.com/jarradbanks/jvid/issues/66) | Color adjustments |  | M | render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
@@ -359,7 +359,7 @@ flowchart LR
 | [#68](https://github.com/jarradbanks/jvid/issues/68) | Clip speed, reverse and freeze frame |  | M | core, timeline | [#29](https://github.com/jarradbanks/jvid/issues/29), [#37](https://github.com/jarradbanks/jvid/issues/37), [#31](https://github.com/jarradbanks/jvid/issues/31) |
 | [#69](https://github.com/jarradbanks/jvid/issues/69) | Proxy generation and switching |  | M | media | [#18](https://github.com/jarradbanks/jvid/issues/18), [#15](https://github.com/jarradbanks/jvid/issues/15) |
 | [#70](https://github.com/jarradbanks/jvid/issues/70) | Hardware video decoding |  | L | media, render | [#15](https://github.com/jarradbanks/jvid/issues/15), [#23](https://github.com/jarradbanks/jvid/issues/23) |
-| [#71](https://github.com/jarradbanks/jvid/issues/71) | Autosave and crash recovery | in progress | M | core | [#9](https://github.com/jarradbanks/jvid/issues/9), [#3](https://github.com/jarradbanks/jvid/issues/3) |
+| [#71](https://github.com/jarradbanks/jvid/issues/71) | Autosave and crash recovery | done | M | core | [#9](https://github.com/jarradbanks/jvid/issues/9), [#3](https://github.com/jarradbanks/jvid/issues/3) |
 | [#72](https://github.com/jarradbanks/jvid/issues/72) | Keyboard shortcut editor | done | M | ui | [#13](https://github.com/jarradbanks/jvid/issues/13) |
 | [#73](https://github.com/jarradbanks/jvid/issues/73) | Themes | done | S | suite-ui | [#11](https://github.com/jarradbanks/jvid/issues/11) |
 | [#74](https://github.com/jarradbanks/jvid/issues/74) | Preview overlays: safe areas and grid | done | S | ui | [#23](https://github.com/jarradbanks/jvid/issues/23) |
