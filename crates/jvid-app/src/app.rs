@@ -84,6 +84,9 @@ pub struct App {
     theme: suite_ui::themes::LiveTheme,
     keymap_editor: crate::keymap_editor::KeymapEditor,
     exports: jvid_jobs::Pool,
+    presets: Vec<jvid_core::preset::Preset>,
+    /// Index into `presets`.
+    preset: usize,
     /// The running export and where its result arrives.
     export: Option<(jvid_jobs::Handle, Receiver<Result<ProbeInfo, ExportError>>)>,
 }
@@ -138,6 +141,8 @@ impl App {
             theme: suite_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
             exports: jvid_jobs::Pool::new(1),
+            presets: crate::export::presets(),
+            preset: 0,
             export: None,
         }
     }
@@ -354,9 +359,9 @@ impl App {
         }
     }
 
-    /// Exports In to Out (or the whole sequence) to a chosen file; while running, shows progress
-    /// and cancels on click.
-    /// shortcut: no settings or range choice; the export dialog (#54) replaces this.
+    /// Exports In to Out (or the whole sequence) with the chosen preset to a chosen file; while
+    /// running, shows progress and cancels on click.
+    /// shortcut: a preset picker but no range choice; the export dialog (#54) replaces this.
     fn export_button(&mut self, ui: &mut Ui) {
         if let Some((h, _)) = &self.export {
             let label = format!("Exporting {:.0}%", h.progress() * 100.0);
@@ -377,6 +382,17 @@ impl App {
         } else {
             State::Disabled
         };
+        let s = self.history.project().settings();
+        let warning = self.presets[self.preset].aspect_warning((s.width, s.height));
+        egui::ComboBox::from_id_salt("export preset")
+            .selected_text(&self.presets[self.preset].name)
+            .show_index(ui, &mut self.preset, self.presets.len(), |i| {
+                self.presets[i].name.clone()
+            });
+        if let Some(w) = &warning {
+            ui.label("⚠").on_hover_text(w);
+        }
+        let preset = self.presets[self.preset].clone();
         let r = ui
             .add(Button::primary("Export").state(state))
             .on_disabled_hover_text("Nothing to export yet");
@@ -385,8 +401,8 @@ impl App {
         };
         let Some(path) = FileDialog::new()
             .set_title("Export")
-            .add_filter("Video", &["mp4", "mov", "mkv"])
-            .set_file_name(format!("{}.mp4", self.name()))
+            .add_filter(&preset.name, &[&preset.extension])
+            .set_file_name(format!("{}.{}", self.name(), preset.extension))
             .save_file()
         else {
             return;
@@ -396,7 +412,11 @@ impl App {
             seq.out_point().unwrap_or(seq.duration()),
         );
         let project = self.history.project().clone();
-        let req = crate::export::Request { path, range };
+        let req = crate::export::Request {
+            path,
+            range,
+            preset,
+        };
         self.export = Some(crate::export::submit(&self.exports, project, req, gpu));
     }
 

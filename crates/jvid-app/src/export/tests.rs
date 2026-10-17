@@ -47,6 +47,11 @@ fn project(dir: &Path) -> Project {
     h.project().clone()
 }
 
+fn preset(name: &str) -> Preset {
+    let all = jvid_core::preset::builtin();
+    all.into_iter().find(|p| p.name == name).expect(name)
+}
+
 fn half(n: i64) -> Time {
     Time(n * FLICKS_PER_SECOND / 2)
 }
@@ -95,6 +100,7 @@ fn export_matches_range_with_audio_in_sync() {
         let req = Request {
             path: path.clone(),
             range: (secs(1), secs(2)),
+            preset: preset("YouTube 1080p"),
         };
         let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{ext}: {e:?}"));
         assert_eq!((info.width, info.height), (Some(1920), Some(1080)), "{ext}");
@@ -145,6 +151,7 @@ fn cancelled_export_leaves_no_file() {
     let req = Request {
         path: path.clone(),
         range: (Time(0), secs(10)),
+        preset: preset("YouTube 1080p"),
     };
     assert_eq!(run_now(&project(&dir), &req, true), Err(Error::Cancelled));
     assert!(!path.exists());
@@ -160,6 +167,7 @@ fn failed_export_leaves_existing_file() {
     let req = Request {
         path: path.clone(),
         range: (secs(1), secs(1)),
+        preset: preset("YouTube 1080p"),
     };
     assert!(matches!(
         run_now(&project(&dir), &req, false),
@@ -167,4 +175,91 @@ fn failed_export_leaves_existing_file() {
     ));
     assert_eq!(std::fs::read(&path).unwrap(), b"keep");
     std::fs::remove_file(&path).unwrap();
+}
+
+/// Every built-in exports 1 s with the streams, size and length it promises.
+#[test]
+fn every_builtin_preset_exports() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let p = project(&dir);
+    for (i, preset) in jvid_core::preset::builtin().into_iter().enumerate() {
+        let path = out(&format!("preset{i}.{}", preset.extension));
+        let size = preset.size.map_or((1920, 1080), |[w, h]| (w, h));
+        let has_video = preset.video.is_some();
+        let name = preset.name.clone();
+        let req = Request {
+            path: path.clone(),
+            range: (secs(1), secs(2)),
+            preset,
+        };
+        let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        if has_video {
+            assert_eq!(
+                (info.width, info.height),
+                (Some(size.0), Some(size.1)),
+                "{name}"
+            );
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+}
+
+/// Screen recording keeps the 1440p source size, and the 10 px text line stays within a couple of
+/// levels of the source, which a scaled or over-compressed export doesn't.
+#[test]
+fn screen_recording_keeps_text_sharp() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let mut h = History::new(Project::default());
+    let settings = jvid_core::model::ProjectSettings {
+        width: 2560,
+        height: 1440,
+        frame_rate: Rate::new(60, 1),
+        ..Default::default()
+    };
+    h.apply(Command::SetSettings(settings)).unwrap();
+    let src = dir.join("screen-1440p60.mp4");
+    add(&mut h, TrackKind::Video, src.clone(), Time(0), secs(3));
+    let path = out("sharp.mp4");
+    let req = Request {
+        path: path.clone(),
+        range: (secs(1), secs(2)),
+        preset: preset("Screen recording (sharp text)"),
+    };
+    run_now(h.project(), &req, false).unwrap();
+    let got = VideoDecoder::open(&path)
+        .unwrap()
+        .frame_at(Time(0))
+        .unwrap();
+    let want = VideoDecoder::open(&src).unwrap().frame_at(secs(1)).unwrap();
+    assert_eq!((got.width, got.height), (2560, 1440));
+    // The text line: rows 195..215, columns 70..600.
+    let (mut sum, mut n) = (0u64, 0u64);
+    for y in 195..215 {
+        for x in 70..600 {
+            let i = y * 2560 + x;
+            sum += got.planes[0][i].abs_diff(want.planes[0][i]) as u64;
+            n += 1;
+        }
+    }
+    let diff = sum as f64 / n as f64;
+    eprintln!("text luma diff {diff}");
+    assert!(diff < 2.0, "mean luma difference over the text {diff}");
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn user_presets_skip_bad_files() {
+    let dir = out("presets");
+    std::fs::create_dir_all(&dir).unwrap();
+    let good = "name = \"Mine\"\nextension = \"wav\"\naudio = \"pcm\"\n";
+    std::fs::write(dir.join("b.toml"), good).unwrap();
+    std::fs::write(dir.join("a.toml"), "name = 3").unwrap();
+    std::fs::write(dir.join("c.txt"), good).unwrap();
+    let names: Vec<_> = user_presets(&dir).into_iter().map(|p| p.name).collect();
+    assert_eq!(names, ["Mine"]);
+    std::fs::remove_dir_all(&dir).unwrap();
 }
