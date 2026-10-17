@@ -441,6 +441,38 @@ fn rename_keeps_the_extension() {
 }
 
 #[test]
+fn rename_commits_on_click_away_and_esc_cancels() {
+    use jvid_core::model::AssetId;
+    let name = |h: &Harness<'_, App>| {
+        let p = h.state().history.project();
+        p.asset(AssetId(3)).unwrap().display_name()
+    };
+    let mut h = bin_harness();
+    h.state_mut().bin.renaming = Some((AssetId(3), "gone".into()));
+    h.run();
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert_eq!(name(&h), "push.mp4");
+    assert!(h.state().bin.renaming.is_none());
+
+    h.state_mut().bin.renaming = Some((AssetId(3), "pushed".into()));
+    h.run();
+    // Far from the bin, in another panel.
+    let away = egui::pos2(h.ctx.content_rect().right() - 20.0, 300.0);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: away,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        });
+        h.run();
+    }
+    assert_eq!(name(&h), "pushed.mp4");
+    assert!(h.state().bin.renaming.is_none());
+}
+
+#[test]
 fn remove_in_use_warns_then_removes_asset_and_clips() {
     let mut h = bin_harness();
     h.state_mut().bin.confirm_remove = Some(jvid_core::model::AssetId(2));

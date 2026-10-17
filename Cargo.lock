@@ -1893,6 +1893,7 @@ dependencies = [
  "egui",
  "egui_dock",
  "egui_kittest",
+ "image",
  "jvid-audio",
  "jvid-core",
  "jvid-jobs",
