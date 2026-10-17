@@ -142,7 +142,7 @@ flowchart LR
 | Issue | Title | Status | Size | Area | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | [#14](https://github.com/jarradbanks/jvid/issues/14) | Media probing | done | M | media | [#4](https://github.com/jarradbanks/jvid/issues/4), [#7](https://github.com/jarradbanks/jvid/issues/7), [#5](https://github.com/jarradbanks/jvid/issues/5) |
-| [#15](https://github.com/jarradbanks/jvid/issues/15) | Video decoder with frame-accurate seeking | in progress | L | media | [#14](https://github.com/jarradbanks/jvid/issues/14) |
+| [#15](https://github.com/jarradbanks/jvid/issues/15) | Video decoder with frame-accurate seeking | done | L | media | [#14](https://github.com/jarradbanks/jvid/issues/14) |
 | [#16](https://github.com/jarradbanks/jvid/issues/16) | Audio decoder and resampling | in progress | M | media, audio | [#14](https://github.com/jarradbanks/jvid/issues/14) |
 | [#17](https://github.com/jarradbanks/jvid/issues/17) | Still image import | done | S | media | [#7](https://github.com/jarradbanks/jvid/issues/7) |
 | [#18](https://github.com/jarradbanks/jvid/issues/18) | Background job system | need testing | M | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
