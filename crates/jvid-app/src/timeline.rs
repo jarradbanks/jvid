@@ -4,6 +4,8 @@
 //! grip, and a menu to add, rename, reorder and remove tracks. Media dropped from the bin
 //! overwrites at the drop point; dragged clips overwrite where they land. Clicks and a
 //! marquee select clips, which copy, cut, paste at the playhead, duplicate and delete.
+//! Clip edges drag to trim (Ctrl ripples), the razor tool and Ctrl+K split, a clicked gap
+//! ripple deletes, and Q/W ripple trim to the playhead.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -15,7 +17,7 @@ use egui::{
 };
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::model::{
-    AssetId, Clip, ClipId, MediaAsset, Project, Sequence, Track, TrackId, TrackKind,
+    AssetId, Clip, ClipId, Edge, MediaAsset, Project, Sequence, Track, TrackId, TrackKind,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_jobs::Priority;
@@ -66,6 +68,21 @@ pub struct Timeline {
     pending: Option<Command>,
     /// Copy or cut ran since the last `show`.
     copied: bool,
+    /// The razor tool (C) is on instead of selection (V).
+    razor: bool,
+    /// The clip edge being dragged.
+    trim: Option<Trim>,
+    /// The clicked gap: its track and a time inside it.
+    gap: Option<(TrackId, Time)>,
+}
+
+/// A clip edge drag: how far, already held to what the media and neighbours allow.
+#[derive(Clone, Copy, Debug)]
+struct Trim {
+    clip: ClipId,
+    edge: Edge,
+    by: Time,
+    ripple: bool,
 }
 
 /// An edit made in the timeline, and the gesture it coalesces under, if any.
@@ -86,6 +103,9 @@ impl Default for Timeline {
             clipboard: Vec::new(),
             pending: None,
             copied: false,
+            razor: false,
+            trim: None,
+            gap: None,
         }
     }
 }
@@ -191,6 +211,14 @@ impl Timeline {
                 self.zoom_by(f, view, x);
             }
             "linked_selection" => self.linked_selection = !self.linked_selection,
+            "razor_tool" | "selection_tool" => self.razor = id == "razor_tool",
+            "add_edit" | "ripple_trim_prev" | "ripple_trim_next" => {
+                self.pending = self.cut_action(id, project.sequence());
+            }
+            "delete" | "ripple_delete" if self.selected.is_empty() && self.gap.is_some() => {
+                let (track, at) = self.gap.take().expect("checked");
+                self.pending = Some(Command::CloseGap { track, at });
+            }
             "copy" | "cut" | "paste" | "duplicate" | "delete" | "ripple_delete" | "link" => {
                 self.pending = self.clip_action(id, project.sequence());
             }
@@ -249,6 +277,159 @@ impl Timeline {
         Some(cmd)
     }
 
+    /// Ctrl+K splits the selected clips under the playhead, or every unlocked track's when
+    /// none are selected. Q/W ripple trim the clips under it to the playhead, Q then moving
+    /// the playhead back to where they now start.
+    fn cut_action(&mut self, id: &str, seq: &Sequence) -> Option<Command> {
+        let at = self.playhead();
+        let unlocked = |t: TrackId| seq.track(t).is_some_and(|t| !t.locked);
+        let under = seq
+            .clips_at(at)
+            .filter(|(t, c)| c.start < at && unlocked(*t));
+        let under: Vec<_> = under.map(|(_, c)| c).collect();
+        let cmd = match id {
+            "add_edit" => {
+                let picked = under.iter().filter(|c| self.selected.contains(&c.id));
+                let ids: Vec<_> = if self.selected.is_empty() {
+                    under.iter().map(|c| c.id).collect()
+                } else {
+                    picked.map(|c| c.id).collect()
+                };
+                (!ids.is_empty()).then_some(Command::Split { ids, at })?
+            }
+            _ if under.is_empty() => return None,
+            "ripple_trim_prev" => {
+                let back = under.iter().map(|c| c.start).min().expect("not empty");
+                let trims = under.iter().map(|c| (c.id, Edge::Head, at - c.start));
+                let cmd = Command::Trim {
+                    trims: trims.collect(),
+                    ripple: true,
+                };
+                self.seek(back);
+                cmd
+            }
+            _ => Command::Trim {
+                trims: under
+                    .iter()
+                    .map(|c| (c.id, Edge::Tail, at - c.end()))
+                    .collect(),
+                ripple: true,
+            },
+        };
+        Some(cmd)
+    }
+
+    /// Edge grips inside a clip in the selection tool; dragging one trims, Ctrl ripples.
+    /// Returns the edit on release.
+    fn trim_handles(
+        &mut self,
+        ui: &Ui,
+        project: &Project,
+        view: View,
+        clip: &Clip,
+        r: Rect,
+    ) -> Option<Edit> {
+        if self.razor {
+            return None;
+        }
+        let w = 6.0f32.min(r.width() / 3.0);
+        let rate = self.transport.rate;
+        for (edge, zone) in [
+            (Edge::Head, r.left()..=r.left() + w),
+            (Edge::Tail, r.right() - w..=r.right()),
+        ] {
+            let zone = Rect::from_x_y_ranges(zone, r.y_range());
+            let key = ("trim", clip.id, edge == Edge::Head);
+            let h = ui.interact(zone, ui.id().with(key), Sense::drag());
+            if h.hovered() || h.dragged() {
+                ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+            }
+            if h.dragged()
+                && let Some(p) = h.interact_pointer_pos()
+            {
+                let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
+                let by = view.time(p.x) - view.time(origin.x);
+                let by = rate.time_floor(rate.index_nearest(by));
+                let ripple = ui.input(|i| i.modifiers.command);
+                let by = project.trim_limit(clip.id, edge, by, ripple);
+                let (clip, ripple) = (clip.id, ripple);
+                self.trim = Some(Trim {
+                    clip,
+                    edge,
+                    by,
+                    ripple,
+                });
+            }
+            if h.drag_stopped()
+                && let Some(t) = self.trim.take()
+                && t.by != Time(0)
+            {
+                let trims = vec![(t.clip, t.edge, t.by)];
+                let ripple = t.ripple;
+                return Some((Command::Trim { trims, ripple }, None));
+            }
+        }
+        None
+    }
+
+    /// Where the trimmed clips would end up, as (track, start, end).
+    fn trim_ghosts(&self, seq: &Sequence) -> Vec<(Option<TrackId>, Time, Time)> {
+        let Some(t) = self.trim else {
+            return Vec::new();
+        };
+        let span = |c: &Clip| match (t.edge, t.ripple) {
+            (Edge::Head, false) => (c.start + t.by, c.end()),
+            (Edge::Head, true) => (c.start, c.end() - t.by),
+            (Edge::Tail, _) => (c.start, c.end() + t.by),
+        };
+        let group = seq.linked(t.clip).into_iter();
+        group
+            .map(|(tr, c)| (Some(tr), span(c).0, span(c).1))
+            .collect()
+    }
+
+    /// The source frame at the edge being trimmed, for the viewer: the video partner's when
+    /// the dragged clip is audio.
+    pub fn trim_frame(&self, project: &Project) -> Option<(AssetId, Time)> {
+        let t = self.trim?;
+        let seq = project.sequence();
+        let group = seq.linked(t.clip);
+        let video = |tr: TrackId| seq.track(tr).is_some_and(|x| x.kind == TrackKind::Video);
+        let c = group.iter().find(|(tr, _)| video(*tr)).or(group.first())?.1;
+        let frame = match t.edge {
+            Edge::Head => c.source_in + t.by,
+            Edge::Tail => c.source_out + t.by - self.transport.rate.time_floor(1),
+        };
+        Some((c.asset, frame))
+    }
+
+    /// A click on empty lane space picks the gap there, if any.
+    fn pick_gap(
+        &mut self,
+        seq: &Sequence,
+        view: View,
+        lanes: &[(TrackId, TrackKind, Rect)],
+        p: Pos2,
+    ) {
+        let lane = lanes.iter().find(|l| l.2.contains(p));
+        let at = view.time(p.x);
+        self.gap = lane
+            .filter(|l| seq.gap_at(l.0, at).is_some())
+            .map(|l| (l.0, at));
+    }
+
+    /// Razor click: splits the clip, and its linked partners under linked selection.
+    fn razor_cut(&self, seq: &Sequence, view: View, clip: ClipId, x: f32) -> Edit {
+        let rate = self.transport.rate;
+        let at = rate.time_floor(rate.index_nearest(view.time(x)));
+        let ids = if self.linked_selection {
+            seq.linked(clip).into_iter().map(|(_, c)| c.id).collect()
+        } else {
+            vec![clip]
+        };
+        (Command::Split { ids, at }, None)
+    }
+
     /// Click selection: the clip (and its partners under linked selection) replaces the
     /// selection, Shift adds it, Ctrl toggles it.
     fn select(&mut self, seq: &Sequence, id: ClipId, mods: egui::Modifiers) {
@@ -259,12 +440,14 @@ impl Timeline {
         };
         if mods.command && self.selected.contains(&id) {
             group.iter().for_each(|c| _ = self.selected.remove(c));
+            self.gap = None;
             return;
         }
         if !mods.command && !mods.shift {
             self.selected.clear();
         }
         self.selected.extend(group);
+        self.gap = None;
     }
 
     fn sync(&mut self, project: &Project) {
@@ -413,8 +596,19 @@ impl Timeline {
                 }
                 shown_clips.push((clip.id, r));
                 let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::click_and_drag());
-                if cr.clicked() {
+                if self.razor && cr.hovered() {
+                    ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+                }
+                if cr.clicked()
+                    && self.razor
+                    && let Some(p) = cr.interact_pointer_pos()
+                {
+                    edit = Some(self.razor_cut(seq, view, clip.id, p.x));
+                } else if cr.clicked() {
                     self.select(seq, clip.id, ui.input(|i| i.modifiers));
+                }
+                if let Some(e) = self.trim_handles(ui, project, view, clip, r) {
+                    edit = Some(e);
                 }
                 if cr.dragged() || cr.drag_stopped() {
                     held = Some((clip, track, cr));
@@ -424,6 +618,19 @@ impl Timeline {
         let mods = ui.input(|i| i.modifiers);
         if marquee.clicked() && !mods.shift && !mods.command {
             self.selected.clear();
+        }
+        if marquee.clicked()
+            && let Some(p) = marquee.interact_pointer_pos()
+        {
+            self.pick_gap(seq, view, &lane_rects, p);
+        }
+        if let Some((t, at)) = self.gap
+            && let Some((a, b)) = seq.gap_at(t, at)
+            && let Some((_, _, lane)) = lane_rects.iter().find(|l| l.0 == t)
+        {
+            let r = Rect::from_x_y_ranges(view.x(a)..=view.x(b), lane.y_range())
+                .shrink2(vec2(1.0, 2.0));
+            clip_painter.rect_filled(r, 0.0, color::BLUE.gamma_multiply(0.2));
         }
         if let (Some(a), Some(b)) = (
             ui.input(|i| i.pointer.press_origin()),
@@ -452,7 +659,8 @@ impl Timeline {
             let r = ui.put(plus, Button::ghost("Track").with_icon(icon::PLUS));
             egui::Popup::menu(&r).show(|ui| add_menu(ui, &mut edit));
         }
-        let ghosts = self.drops(ui, project, view, lanes, &lane_rects, held, &mut edit);
+        let mut ghosts = self.drops(ui, project, view, lanes, &lane_rects, held, &mut edit);
+        ghosts.extend(self.trim_ghosts(seq));
         // Ghosts for tracks a drop will add go in rows below the last lane.
         let mut below = y;
         for (t, from, to) in ghosts {
@@ -1321,6 +1529,113 @@ mod tests {
         assert_eq!(ids(&h).len(), 2);
         assert!(seq(&h).clips_at(Time(8 * S)).count() == 2);
         assert!(t.clip_action("delete", h.project().sequence()).is_none());
+    }
+
+    #[test]
+    fn add_edit_razor_q_w_and_gap() {
+        let mut h = History::new(project(4));
+        let mut t = Timeline::default();
+        let all: Vec<_> = h
+            .project()
+            .sequence()
+            .tracks()
+            .iter()
+            .map(|t| t.id)
+            .collect();
+        let pair = |h: &History, i: usize| -> Vec<ClipId> {
+            let s = h.project().sequence();
+            s.tracks().iter().map(|t| t.clips()[i].id).collect()
+        };
+        for i in 0..2 {
+            let ids = pair(&h, i);
+            h.apply(Command::LinkClips { ids, linked: true }).unwrap();
+        }
+        let spans = |h: &History| -> Vec<Vec<(i64, i64)>> {
+            let s = h.project().sequence();
+            let t = s.tracks().iter();
+            t.map(|t| {
+                t.clips()
+                    .iter()
+                    .map(|c| (c.start.0 / S, c.end().0 / S))
+                    .collect()
+            })
+            .collect()
+        };
+        let run = |t: &mut Timeline, h: &mut History, id, at: i64| {
+            t.sync(h.project());
+            t.seek(Time(at * S));
+            assert!(t.action(id, h.project()));
+            h.apply(t.pending.take().expect("an edit")).unwrap();
+        };
+        let before = h.project().clone();
+
+        // Q at 1s on the linked pair: both lose their first second, the rest follows.
+        run(&mut t, &mut h, "ripple_trim_prev", 1);
+        assert_eq!(spans(&h), vec![vec![(0, 1), (1, 3)]; 2]);
+        assert_eq!(t.playhead(), Time(0));
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        // W at 3s: the second pair loses its last second.
+        run(&mut t, &mut h, "ripple_trim_next", 3);
+        assert_eq!(spans(&h), vec![vec![(0, 2), (2, 3)]; 2]);
+        assert!(h.undo());
+
+        // Ctrl+K with nothing selected cuts every track; with a selection, only it.
+        run(&mut t, &mut h, "add_edit", 1);
+        assert_eq!(spans(&h), vec![vec![(0, 1), (1, 2), (2, 4)]; 2]);
+        assert!(h.undo());
+        t.selected.insert(pair(&h, 0)[0]);
+        run(&mut t, &mut h, "add_edit", 1);
+        assert_eq!(spans(&h)[0].len(), 3);
+        assert_eq!(spans(&h)[1].len(), 2);
+        assert!(h.undo());
+        t.selected.clear();
+
+        // The razor cuts the clip and its partner where it's clicked.
+        let view = t.view(0.0);
+        let (c, _) = t.razor_cut(h.project().sequence(), view, pair(&h, 1)[0], 60.0);
+        h.apply(c).unwrap();
+        assert_eq!(spans(&h), vec![vec![(0, 2), (2, 3), (3, 4)]; 2]);
+        assert!(h.undo());
+
+        // Delete on a picked gap closes it.
+        h.apply(Command::RemoveClips {
+            ids: pair(&h, 0),
+            ripple: false,
+        })
+        .unwrap();
+        t.gap = Some((all[0], Time(S)));
+        run(&mut t, &mut h, "delete", 0);
+        assert_eq!(spans(&h), vec![vec![(0, 2)], vec![(2, 4)]]);
+    }
+
+    #[test]
+    fn dragging_a_clip_edge_trims_in_one_step() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(2));
+        let lane_y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let before = h.state().1.project().clone();
+        // V1's clip ends 2s (40pt) past the 8pt margin and header; its tail grip is inside.
+        let x = 8.0 + size::TRACK_HEADER + 36.0;
+        h.hover_at(pos2(x, lane_y));
+        h.run();
+        h.drag_at(pos2(x, lane_y));
+        h.run();
+        for dx in [10.0, 20.0] {
+            h.hover_at(pos2(x + dx, lane_y));
+            h.run();
+        }
+        assert!(h.state().0.trim_frame(&before).is_some());
+        h.drop_at(pos2(x + 20.0, lane_y));
+        h.run();
+        let s = h.state().1.project().sequence().clone();
+        assert_eq!(s.tracks()[0].clips()[0].end(), Time(3 * S));
+        assert_eq!(s.tracks()[1].clips()[0].end(), Time(2 * S));
+        assert!(h.state_mut().1.undo());
+        assert_eq!(h.state().1.project(), &before);
     }
 
     /// Edits from the timeline go through a real history, as in the app.

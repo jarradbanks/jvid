@@ -753,7 +753,11 @@ impl TabViewer for Viewer<'_> {
                 a.probe.as_ref()?.width?;
                 Some(a.path.as_path())
             });
-            let offline = source.is_some_and(|p| self.missing.contains(p));
+            // While a clip edge is dragged, the frame at the trim point.
+            let trim = self.timeline.trim_frame(self.project);
+            let trim = trim.and_then(|(a, t)| Some((self.project.asset(a)?.path.as_path(), t)));
+            let source = trim.or(source.map(|p| (p, jvid_core::time::Time(0))));
+            let offline = source.is_some_and(|(p, _)| self.missing.contains(p));
             panel.show(ui, |ui| self.preview.show_frame(ui, source, offline));
             return;
         }

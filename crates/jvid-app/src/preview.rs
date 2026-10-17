@@ -324,10 +324,10 @@ impl Preview {
         self.source_action(action, project)
     }
 
-    /// The Program tab: `source`'s first frame.
-    // shortcut: always the first frame until the timeline drives the Program tab.
-    pub fn show_frame(&mut self, ui: &mut Ui, source: Option<&Path>, offline: bool) {
-        self.show(ui, source.map(|p| (p, Time(0))), offline, None);
+    /// The Program tab: `source` at a time.
+    // shortcut: the caller picks the frame until the timeline drives the Program tab.
+    pub fn show_frame(&mut self, ui: &mut Ui, source: Option<(&Path, Time)>, offline: bool) {
+        self.show(ui, source, offline, None);
     }
 
     /// Draws `source` at a time, decoding it first if it changed; an `offline` source shows a
