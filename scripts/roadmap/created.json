@@ -392,6 +392,10 @@
     "in-app-dialogs": {
       "number": 124,
       "id": 5896965885
+    },
+    "edit-ui": {
+      "number": 155,
+      "id": 5900672112
     }
   },
   "links": [
@@ -1026,6 +1030,10 @@
     [
       "zoom-region",
       "easing-ui"
+    ],
+    [
+      "edit-ui",
+      "snapping"
     ]
   ]
 }

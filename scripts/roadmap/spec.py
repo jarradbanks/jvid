@@ -490,6 +490,18 @@ I("snapping", "Snapping", "M2", ["timeline"], "S", ["trim-split"],
   ac=["Dragging a clip near the playhead snaps exactly onto it"],
   labels=["good first issue"])
 
+I("edit-ui", "Edit menu, timeline toolbar and clip context menu", "M2", ["ui", "timeline"], "M", ["snapping"],
+  summary="Every timeline action is reachable with the mouse, not only by shortcut.",
+  scope=[
+      "Edit menu in the app bar: undo, redo, cut, copy, paste, duplicate, delete, ripple delete, split at playhead, link/unlink, select all, each showing its live shortcut from the keymap",
+      "Timeline toolbar: select (V) and razor (C) tools, snapping toggle (S), linked selection toggle, zoom in/out/fit, split at playhead; icons with tooltips naming the shortcut",
+      "Right-click context menu on timeline clips: cut, copy, paste, duplicate, delete, ripple delete, split at playhead, link/unlink, enable/disable clip, reveal in media bin; acts on the selection (right-clicking an unselected clip selects it first)",
+      "Right-click on empty lane space: paste, add track, close gap when on a gap",
+      "Menu items are disabled when their action cannot apply",
+  ],
+  ac=["Every action in keymap ACTIONS that edits the timeline appears in at least one menu or the toolbar",
+      "Context menu actions run the same commands as their shortcuts and undo identically"])
+
 I("in-out", "In/Out points on the timeline", "M2", ["timeline"], "M", ["trim-split", "actions"],
   summary="Premiere-style range marking for playback, editing and export.",
   scope=[
