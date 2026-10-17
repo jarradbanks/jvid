@@ -16,6 +16,7 @@ jvid-media = { path = "crates/jvid-media" }
 jvid-render = { path = "crates/jvid-render" }
 suite-ui = { path = "crates/suite-ui" }
 proptest = "1.5"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
 egui = "0.37.0"
 eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
