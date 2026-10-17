@@ -1,4 +1,4 @@
-//! Source playback: the playhead, J/K/L shuttle, and audio fed to jvid-audio's master clock.
+//! Source and timeline playback: the playhead, J/K/L shuttle, and audio fed to jvid-audio's master clock.
 //!
 //! The playhead is derived from the clock, never from wall time, so the video frame shown is the
 //! one whose audio is playing. Every speed change or seek flushes the output ring and re-anchors
@@ -29,6 +29,8 @@ pub struct Transport {
     next_sample: i64,
     pub duration: Time,
     pub rate: Rate,
+    /// Forward play jumps from the end of this range back to its start.
+    pub loop_range: Option<(Time, Time)>,
 }
 
 impl Transport {
@@ -41,6 +43,7 @@ impl Transport {
             next_sample: 0,
             duration,
             rate,
+            loop_range: None,
         }
     }
 
@@ -115,6 +118,13 @@ impl Transport {
     /// `audio(start, out)` fills `out` with interleaved stereo from source sample frame `start`.
     pub fn tick(&mut self, out: &mut Output, audio: &mut dyn FnMut(i64, &mut [f32])) {
         let clock = out.clock();
+        if let Some((start, end)) = self.loop_range
+            && self.speed > 0
+            && self.position(clock) >= end
+        {
+            out.flush();
+            self.set(self.speed, start, clock);
+        }
         let pos = self.position(clock);
         if (self.speed > 0 && pos >= self.duration) || (self.speed < 0 && pos.0 <= 0) {
             out.flush();
@@ -272,7 +282,7 @@ impl Drop for Feeder {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use jvid_audio::{Backend, Feed};
     use std::any::Any;
@@ -329,6 +339,32 @@ mod tests {
         assert_eq!(t.frame(0), 59, "End shows the last frame");
         t.toggle(0);
         assert_eq!((t.speed(), t.position(0)), (1, Time(0)));
+    }
+
+    /// Forward play wraps from the loop's end to its start, flushing what was queued past it.
+    #[test]
+    fn loop_range_wraps_forward_play() {
+        let fake = Fake::default();
+        let mut out = Output::new(Box::new(fake.clone()), None);
+        let mut t = Transport::new(secs(10), FPS30);
+        t.loop_range = Some((secs(1), secs(2)));
+        t.seek(secs(1), 0);
+        t.toggle(0);
+        let mut wraps = 0;
+        let mut prev = t.position(0);
+        for _ in 0..1_000 {
+            t.tick(&mut out, &mut |_, _| {});
+            fake.pull(480);
+            let pos = t.position(out.clock());
+            assert!(
+                pos >= secs(1) && pos <= secs(2) + Time(FLICKS_PER_SECOND / 20),
+                "{pos:?}"
+            );
+            wraps += (pos < prev) as u32;
+            prev = pos;
+        }
+        assert!(wraps >= 3, "{wraps} wraps");
+        assert_eq!(t.speed(), 1);
     }
 
     /// `AudioSource` matches a direct decode across a first seek, continued reads, a partial
@@ -389,7 +425,7 @@ mod tests {
 
     /// One device; tests call `pull` as its callback.
     #[derive(Clone, Default)]
-    struct Fake(Arc<Mutex<Option<Arc<Feed>>>>);
+    pub(crate) struct Fake(Arc<Mutex<Option<Arc<Feed>>>>);
 
     impl Backend for Fake {
         fn devices(&self) -> Vec<String> {
@@ -406,7 +442,7 @@ mod tests {
     }
 
     impl Fake {
-        fn pull(&self, frames: usize) -> Vec<f32> {
+        pub(crate) fn pull(&self, frames: usize) -> Vec<f32> {
             let mut out = vec![0.0; frames * 2];
             self.0.lock().unwrap().as_ref().unwrap().fill(&mut out, 2);
             out

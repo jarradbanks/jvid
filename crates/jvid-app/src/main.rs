@@ -4,6 +4,7 @@ mod app;
 mod import;
 mod keymap;
 mod media_bin;
+mod playback;
 mod preview;
 mod project_file;
 mod relink;
