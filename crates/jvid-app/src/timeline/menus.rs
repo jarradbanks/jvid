@@ -28,6 +28,14 @@ pub const EDIT: &[&str] = &[
     "ripple_trim_next",
     "link",
     "",
+    "mark_in",
+    "mark_out",
+    "mark_clip",
+    "mark_selection",
+    "clear_in_out",
+    "lift",
+    "extract",
+    "",
     "select_all",
 ];
 
@@ -79,6 +87,11 @@ impl Timeline {
                 can
             }
             "select_all" => seq.tracks().iter().any(|t| !t.clips().is_empty()),
+            "clear_in_out" | "lift" | "extract" => {
+                seq.in_point().is_some() || seq.out_point().is_some()
+            }
+            "mark_clip" => seq.clips_at(self.playhead()).next().is_some(),
+            "mark_selection" => any,
             _ => true,
         }
     }

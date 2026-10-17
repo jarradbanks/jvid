@@ -425,6 +425,8 @@ pub enum ModelError {
     WrongKind(TrackId),
     /// No gap on the track at that time.
     NoGap(TrackId),
+    /// No in/out range is marked.
+    NoRange,
 }
 
 impl std::fmt::Display for ModelError {
@@ -440,6 +442,7 @@ impl std::fmt::Display for ModelError {
             Self::Locked(id) => write!(f, "track {} is locked", id.0),
             Self::WrongKind(id) => write!(f, "track {} is the wrong kind", id.0),
             Self::NoGap(id) => write!(f, "no gap there on track {}", id.0),
+            Self::NoRange => f.write_str("no in/out range is marked"),
         }
     }
 }
@@ -1195,6 +1198,34 @@ impl Sequence {
         }
         let prev = clips.iter().rev().find(|c| c.end() <= at);
         Some((prev.map_or(Time(0), Clip::end), next.start))
+    }
+
+    /// Lift (`;`), or with `ripple` extract (`'`): empties the in/out range on every unlocked
+    /// track, pulling later clips left when rippling, then clears the marks. A missing mark
+    /// stands for the sequence's start or end.
+    pub(crate) fn remove_range(&mut self, ripple: bool) -> Result<(), ModelError> {
+        if self.in_point.is_none() && self.out_point.is_none() {
+            return Err(ModelError::NoRange);
+        }
+        let start = self.in_point.unwrap_or_default();
+        let end = self.out_point.unwrap_or(self.duration());
+        if end <= start {
+            return Err(ModelError::NoRange);
+        }
+        let mut links = BTreeMap::new();
+        for ti in 0..self.tracks.len() {
+            if self.tracks[ti].locked {
+                continue;
+            }
+            self.clear(ti, start, end, &mut links);
+            if ripple {
+                for c in self.tracks[ti].clips.iter_mut().filter(|c| c.start >= end) {
+                    c.start = c.start - (end - start);
+                }
+            }
+        }
+        (self.in_point, self.out_point) = (None, None);
+        Ok(())
     }
 
     /// Ripple deletes the gap containing `at`: later clips on the track move left to close it.

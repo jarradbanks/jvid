@@ -5,7 +5,8 @@
 //! overwrites at the drop point; dragged clips overwrite where they land. Clicks and a
 //! marquee select clips, which copy, cut, paste at the playhead, duplicate and delete.
 //! Clip edges drag to trim (Ctrl ripples), the razor tool and Ctrl+K split, a clicked gap
-//! ripple deletes, and Q/W ripple trim to the playhead.
+//! ripple deletes, and Q/W ripple trim to the playhead. In/out marks shade the ruler and
+//! lanes, drag by their ruler flags, and lift (`;`) or extract (`'`) their range.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -94,6 +95,8 @@ pub struct Timeline {
     snapped: Option<Time>,
     /// An action picked from a menu or the toolbar this frame.
     menu: Option<&'static str>,
+    /// The in (true) or out flag being dragged, and where it is.
+    mark_drag: Option<(bool, Time)>,
     /// "Reveal in media bin" asked for this asset; the app takes it.
     pub reveal: Option<AssetId>,
 }
@@ -149,10 +152,26 @@ impl Default for Timeline {
             snapping: true,
             snapped: None,
             menu: None,
+            mark_drag: None,
             reveal: None,
         }
     }
 }
+
+/// In/out keymap actions the timeline runs when it or the Program tab has focus.
+pub const MARK_ACTIONS: &[&str] = &[
+    "mark_in",
+    "mark_out",
+    "clear_in",
+    "clear_out",
+    "clear_in_out",
+    "go_to_in",
+    "go_to_out",
+    "mark_clip",
+    "mark_selection",
+    "lift",
+    "extract",
+];
 
 /// Maps between time and x on the lanes.
 #[derive(Clone, Copy, Debug)]
@@ -276,6 +295,20 @@ impl Timeline {
                 self.zoom_by(f, view, x);
             }
             "zoom_fit" => self.zoom_fit(project.sequence()),
+            "go_to_in" => t.seek(project.sequence().in_point().unwrap_or_default(), 0),
+            // Out is exclusive: the last marked frame.
+            "go_to_out" => {
+                let end = project.sequence().out_point().unwrap_or(t.duration);
+                t.seek(t.rate.time_floor(t.rate.index_floor(end - Time(1))), 0);
+            }
+            "lift" | "extract" => {
+                let seq = project.sequence();
+                let marked = seq.in_point().is_some() || seq.out_point().is_some();
+                let ripple = id == "extract";
+                self.pending = marked.then_some(Command::RemoveRange { ripple });
+            }
+            "mark_in" | "mark_out" | "clear_in" | "clear_out" | "clear_in_out" | "mark_clip"
+            | "mark_selection" => self.pending = self.mark_action(id, project.sequence()),
             "linked_selection" => self.linked_selection = !self.linked_selection,
             "snapping" => self.snapping = !self.snapping,
             "razor_tool" | "selection_tool" => self.razor = id == "razor_tool",
@@ -297,6 +330,40 @@ impl Timeline {
             _ => return false,
         }
         true
+    }
+
+    /// The new in/out marks for a marking action, if they change. A mark past the other one
+    /// clears it.
+    fn mark_action(&self, id: &str, seq: &Sequence) -> Option<Command> {
+        let r = self.transport.rate;
+        let here = self.playhead();
+        // Out is exclusive, like a clip's end: after the playhead's frame.
+        let after = r.time_floor(r.index_floor(here) + 1);
+        let (i, o) = (seq.in_point(), seq.out_point());
+        let span = |clips: Vec<&Clip>| {
+            let start = clips.iter().map(|c| c.start).min()?;
+            Some((Some(start), clips.iter().map(|c| c.end()).max()))
+        };
+        let (i, o) = match id {
+            "mark_in" => (Some(here), o.filter(|o| *o > here)),
+            "mark_out" => (i.filter(|i| *i < after), Some(after)),
+            "clear_in" => (None, o),
+            "clear_out" => (i, None),
+            "clear_in_out" => (None, None),
+            // The topmost clip under the playhead.
+            "mark_clip" => span(seq.clips_at(here).take(1).map(|(_, c)| c).collect())?,
+            _ => span(
+                seq.tracks()
+                    .iter()
+                    .flat_map(|t| t.clips())
+                    .filter(|c| self.selected.contains(&c.id))
+                    .collect(),
+            )?,
+        };
+        ((i, o) != (seq.in_point(), seq.out_point())).then_some(Command::SetInOut {
+            in_point: i,
+            out_point: o,
+        })
     }
 
     /// The edit for a selection or clipboard action, if it changes anything.
@@ -623,6 +690,45 @@ impl Timeline {
         let id = ui.id().with("timeline");
         let scrub = ui.interact(ruler, id.with("ruler"), Sense::click_and_drag());
         let marquee = ui.interact(lanes, id.with("marquee"), Sense::click_and_drag());
+        let seq = project.sequence();
+        for (is_in, mark) in [(true, seq.in_point()), (false, seq.out_point())] {
+            let Some(mark) = mark else { continue };
+            let x = view.x(mark);
+            let flag = Rect::from_x_y_ranges(x - 5.0..=x + 5.0, ruler.y_range());
+            let h = ui.interact(flag, id.with(("mark", is_in)), Sense::drag());
+            if h.hovered() || h.dragged() {
+                ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+            }
+            if h.dragged()
+                && let Some(p) = h.interact_pointer_pos()
+            {
+                let t = rate.time_floor(rate.index_nearest(view.time(p.x)).max(0));
+                // Held a frame clear of the other mark.
+                let t = match (is_in, seq.in_point(), seq.out_point()) {
+                    (true, _, Some(o)) => t.min(rate.time_floor(rate.index_floor(o) - 1)),
+                    (false, Some(i), _) => t.max(rate.time_floor(rate.index_floor(i) + 1)),
+                    _ => t,
+                };
+                self.mark_drag = Some((is_in, t));
+            }
+            if h.drag_stopped()
+                && let Some((_, t)) = self.mark_drag.take()
+                && t != mark
+            {
+                let (in_point, out_point) = if is_in {
+                    (Some(t), seq.out_point())
+                } else {
+                    (seq.in_point(), Some(t))
+                };
+                edit = edit.or(Some((
+                    Command::SetInOut {
+                        in_point,
+                        out_point,
+                    },
+                    None,
+                )));
+            }
+        }
         let head_x = view.x(self.playhead());
         let grip = Rect::from_x_y_ranges(head_x - 4.0..=head_x + 4.0, lanes.y_range());
         let drag = ui.interact(grip, id.with("playhead"), Sense::drag());
@@ -712,7 +818,6 @@ impl Timeline {
         // The clip being dragged, its track, and its response.
         let mut held = None;
         let mut shown_clips = Vec::new();
-        let seq = project.sequence();
         for (i, track) in tracks.iter().enumerate() {
             let lane = Rect::from_x_y_ranges(lanes.x_range(), y..=y + track.height);
             y += track.height;
@@ -878,6 +983,23 @@ impl Timeline {
                 }
             }
         }
+        // The in/out range, a missing mark standing for the start or end.
+        let (mut mark_in, mut mark_out) = (seq.in_point(), seq.out_point());
+        match self.mark_drag {
+            Some((true, t)) => mark_in = Some(t),
+            Some((false, t)) => mark_out = Some(t),
+            None => {}
+        }
+        let range = (mark_in.is_some() || mark_out.is_some()).then(|| {
+            let (a, b) = (
+                mark_in.unwrap_or_default(),
+                mark_out.unwrap_or(seq.duration()),
+            );
+            Rect::from_x_y_ranges(view.x(a)..=view.x(b), area.y_range())
+        });
+        if let Some(r) = range {
+            clip_painter.rect_filled(r, 0.0, color::LIGHT_BLUE.gamma_multiply(0.08));
+        }
         if let Some(t) = self.snapped {
             let x = view.x(t);
             let r = Rect::from_x_y_ranges(x - 0.5..=x + 0.5, lanes.y_range());
@@ -924,6 +1046,23 @@ impl Timeline {
             0.0,
             color::BORDER,
         );
+        let ruler_painter = painter.with_clip_rect(ruler);
+        if let Some(r) = range {
+            let band = Rect::from_x_y_ranges(r.x_range(), ruler.y_range());
+            ruler_painter.rect_filled(band, 0.0, color::LIGHT_BLUE.gamma_multiply(0.25));
+        }
+        // Flags: a bracket at each set mark, opening toward the range.
+        for (mark, dir) in [(mark_in, 1.0), (mark_out, -1.0)] {
+            if let Some(t) = mark {
+                let x = view.x(t);
+                let stroke = Stroke::new(2.0, color::LIGHT_BLUE);
+                let (top, bottom) = (ruler.top() + 2.0, ruler.bottom() - 1.0);
+                ruler_painter.line_segment([pos2(x, top), pos2(x, bottom)], stroke);
+                for y in [top, bottom] {
+                    ruler_painter.line_segment([pos2(x, y), pos2(x + 5.0 * dir, y)], stroke);
+                }
+            }
+        }
 
         // Corner cell: the playhead's timecode and the zoom slider.
         let playhead = self.playhead();
@@ -1876,7 +2015,60 @@ mod tests {
         assert!(t.action("zoom_in", &p));
         assert!((t.zoom - 30.0).abs() < 1e-9);
         assert!((t.view(0.0).x(t.playhead()) - before).abs() < 0.01);
-        assert!(!t.action("lift", &p));
+        assert!(!t.action("insert", &p));
+    }
+
+    #[test]
+    fn in_out_keys_mark_jump_lift_and_extract() {
+        let mut h = History::new(project(4));
+        let mut t = Timeline::default();
+        let frame = Rate::new(30, 1).time_floor(1);
+        let run = |t: &mut Timeline, h: &mut History, id| {
+            assert!(t.action(id, h.project()));
+            if let Some(c) = t.pending.take() {
+                h.apply(c).unwrap();
+            }
+        };
+        let marks = |h: &History| {
+            let s = h.project().sequence();
+            (s.in_point(), s.out_point())
+        };
+        t.sync(h.project());
+        t.seek(Time(S));
+        run(&mut t, &mut h, "mark_in");
+        t.seek(Time(3 * S));
+        run(&mut t, &mut h, "mark_out");
+        assert_eq!(marks(&h), (Some(Time(S)), Some(Time(3 * S) + frame)));
+        run(&mut t, &mut h, "go_to_in");
+        assert_eq!(t.playhead(), Time(S));
+        run(&mut t, &mut h, "go_to_out");
+        assert_eq!(t.playhead(), Time(3 * S));
+        // An in past the out clears it.
+        t.seek(Time(5 * S));
+        run(&mut t, &mut h, "mark_in");
+        assert_eq!(marks(&h), (Some(Time(5 * S)), None));
+        run(&mut t, &mut h, "clear_in");
+        assert_eq!(marks(&h), (None, None));
+        t.seek(Time(3 * S));
+        run(&mut t, &mut h, "mark_clip");
+        assert_eq!(marks(&h), (Some(Time(2 * S)), Some(Time(4 * S))));
+        run(&mut t, &mut h, "clear_in_out");
+        assert_eq!(marks(&h), (None, None));
+        let first = h.project().sequence().tracks()[0].clips()[0].id;
+        t.selected.insert(first);
+        run(&mut t, &mut h, "mark_selection");
+        assert_eq!(marks(&h), (Some(Time(0)), Some(Time(2 * S))));
+        run(&mut t, &mut h, "lift");
+        let starts = |h: &History| -> Vec<_> {
+            let c = h.project().sequence().tracks()[0].clips().iter();
+            c.map(|c| c.start.0 / S).collect()
+        };
+        assert_eq!(starts(&h), [2]);
+        assert_eq!(marks(&h), (None, None));
+        h.undo();
+        run(&mut t, &mut h, "extract");
+        assert_eq!(starts(&h), [0]);
+        assert_eq!(h.project().sequence().duration(), Time(2 * S));
     }
 
     #[test]

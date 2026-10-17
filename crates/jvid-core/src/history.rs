@@ -136,6 +136,10 @@ pub enum Command {
         in_point: Option<Time>,
         out_point: Option<Time>,
     },
+    /// Lifts the in/out range off every unlocked track, or with `ripple` extracts it.
+    RemoveRange {
+        ripple: bool,
+    },
     SetSettings(ProjectSettings),
     AddAsset(PathBuf),
     /// Adds a solid color asset to the bin.
@@ -232,6 +236,7 @@ impl Command {
             | Self::AddMarker { .. }
             | Self::RemoveMarker(_)
             | Self::SetInOut { .. }
+            | Self::RemoveRange { .. }
             | Self::SetSettings(_)
             | Self::AddAsset(_)
             | Self::AddSolid { .. }
@@ -389,6 +394,10 @@ impl Command {
             } => {
                 s.in_point = in_point;
                 s.out_point = out_point;
+                Created::Nothing
+            }
+            Self::RemoveRange { ripple } => {
+                s.remove_range(ripple)?;
                 Created::Nothing
             }
             Self::SetSettings(settings) => {
@@ -1591,6 +1600,40 @@ mod tests {
             .is_err()
         );
         assert!(h.undo());
+        assert_eq!(h.project(), &before);
+    }
+
+    #[test]
+    fn lift_and_extract_the_in_out_range() {
+        let (mut h, f, _, _) = cut_project();
+        let fr = |n: i64| Time(f.0 * n);
+        let before = h.project().clone();
+        let both = |v: Vec<(i64, i64, i64)>| vec![v.clone(), v];
+        let lift = Command::RemoveRange { ripple: false };
+        assert!(h.apply(lift.clone()).is_err());
+        let marks = Command::SetInOut {
+            in_point: Some(fr(20)),
+            out_point: Some(fr(30)),
+        };
+        h.apply(marks.clone()).unwrap();
+        h.apply(lift).unwrap();
+        assert_eq!(
+            frames(&h, f),
+            both(vec![(5, 10, 25), (30, 35, 50), (60, 60, 70)])
+        );
+        assert_eq!(h.project().sequence().in_point(), None);
+        assert!(h.undo() && h.undo());
+        h.apply(marks).unwrap();
+        h.apply(Command::RemoveRange { ripple: true }).unwrap();
+        assert_eq!(
+            frames(&h, f),
+            both(vec![(5, 10, 25), (20, 35, 50), (50, 60, 70)])
+        );
+        // Split tails stay linked to each other.
+        let s = h.project().sequence();
+        let tail = s.tracks()[0].clips()[1].id;
+        assert_eq!(s.linked(tail).len(), 2);
+        assert!(h.undo() && h.undo());
         assert_eq!(h.project(), &before);
     }
 
