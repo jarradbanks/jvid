@@ -21,11 +21,11 @@ use std::time::{Duration, Instant};
 use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Mixer, Output, SAMPLE_RATE, Strip};
 use jvid_core::eval::{audio_in, video_at};
-use jvid_core::model::{AssetId, ClipId, Project, TrackKind};
+use jvid_core::model::{AssetId, ClipId, Project, TrackKind, Transform};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::decode::{DecoderPool, Frame};
-use jvid_render::composite::{self, Compositor, opacity};
+use jvid_render::composite::{self, Compositor};
 use jvid_render::preview::{Preview, Yuv};
 
 use crate::transport::{AudioSource, Transport};
@@ -59,8 +59,8 @@ type Done = (Key, Duration, Result<Frame, String>);
 pub struct Shown {
     /// Timeline frame index.
     pub index: i64,
-    /// Top layer first, with its opacity.
-    pub layers: Vec<(Arc<Frame>, f32)>,
+    /// Top layer first, with its evaluated transform.
+    pub layers: Vec<(Arc<Frame>, Transform)>,
 }
 
 /// Decoded frames up to a byte budget; the least recently used go first.
@@ -412,7 +412,7 @@ impl Playback {
             // Not decoded yet: keep what's on screen. A failed decode leaves the layer out.
             let key = (layer.asset, layer.source_time);
             if !self.failed.contains_key(&key) {
-                layers.push((self.cache.get(&key)?, opacity(&layer)));
+                layers.push((self.cache.get(&key)?, layer.transform));
             }
         }
         self.shown = Some(index);
@@ -460,7 +460,7 @@ impl Gpu {
             .layers
             .iter()
             .zip(&self.layers)
-            .map(|((_, o), p)| (p.image().expect("uploaded above"), *o))
+            .map(|((_, t), p)| (p.image().expect("uploaded above"), *t))
             .collect();
         let s = project.settings();
         self.compositor.render(
