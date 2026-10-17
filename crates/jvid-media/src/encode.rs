@@ -6,7 +6,9 @@ use std::sync::OnceLock;
 
 use ffmpeg_next::format::{self, Pixel, Sample, sample};
 use ffmpeg_next::software::scaling;
-use ffmpeg_next::{ChannelLayout, Dictionary, Error, Packet, Rational, codec, encoder, frame};
+use ffmpeg_next::{
+    ChannelLayout, Dictionary, Error, Packet, Rational, codec, encoder, filter, frame,
+};
 use jvid_core::preset::{AudioCodec, Preset, VideoCodec};
 use jvid_core::time::Rate;
 
@@ -29,13 +31,12 @@ const HW_H264: &[&str] = &["h264_nvenc", "h264_qsv", "h264_amf", "h264_videotool
 const HW_HEVC: &[&str] = &["hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_videotoolbox"];
 
 /// Software encoder names to try, the pixel format they take, and the hardware encoders.
-/// shortcut: GIF uses a fixed 3-3-2 palette; a generated palette is a follow-up.
 fn video_codec(c: VideoCodec) -> (&'static [&'static str], Pixel, &'static [&'static str]) {
     match c {
         VideoCodec::H264 => (H264_CODECS, Pixel::YUV420P, HW_H264),
         VideoCodec::Hevc => (HEVC_CODECS, Pixel::YUV420P, HW_HEVC),
         VideoCodec::ProRes => (&["prores_ks", "prores"], Pixel::YUV422P10LE, &[]),
-        VideoCodec::Gif => (&["gif"], Pixel::RGB8, &[]),
+        VideoCodec::Gif => (&["gif"], Pixel::PAL8, &[]),
     }
 }
 
@@ -157,8 +158,47 @@ fn audio_codec(c: AudioCodec) -> (&'static str, Sample) {
 
 struct Video {
     stream: Stream<encoder::Video>,
-    scaler: scaling::Context,
+    convert: Convert,
     name: &'static str,
+}
+
+/// How pushed RGBA frames become the encoder's frames.
+enum Convert {
+    Scale(scaling::Context),
+    /// GIF: scales, then palettegen/paletteuse. The palette comes from every frame, so the
+    /// graph holds them all until [`Encoder::finish`].
+    /// shortcut: buffers the whole export in memory (~1.6 GB for 10 s of 1080p at 25 fps); switch
+    /// to a two-pass or per-frame palette if long GIFs matter.
+    Palette(filter::Graph),
+}
+
+/// The GIF filter graph: `src`-sized RGBA in at `tb`, a `size` PAL8 frame out per frame.
+fn palette_graph(src: (u32, u32), size: (u32, u32), tb: Rational) -> Result<filter::Graph, Error> {
+    let mut g = filter::Graph::new();
+    let args = format!(
+        "video_size={}x{}:pix_fmt=rgba:time_base={}/{}:pixel_aspect=1/1",
+        src.0, src.1, tb.0, tb.1
+    );
+    g.add(
+        &filter::find("buffer").ok_or(Error::FilterNotFound)?,
+        "in",
+        &args,
+    )?;
+    g.add(
+        &filter::find("buffersink").ok_or(Error::FilterNotFound)?,
+        "out",
+        "",
+    )?;
+    // A palette from the whole clip plus error-diffusion dithering avoids banding in gradients;
+    // rectangle diff mode only re-dithers what changed, which keeps static areas from crawling.
+    let spec = format!(
+        "scale={}:{}:flags=lanczos,split[a][b];[a]palettegen[p];\
+         [b][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle",
+        size.0, size.1
+    );
+    g.output("in", 0)?.input("out", 0)?.parse(&spec)?;
+    g.validate()?;
+    Ok(g)
 }
 
 struct Stream<E> {
@@ -193,7 +233,7 @@ impl Encoder {
         let mut out = format::output(path)?;
         let global = out.format().flags().contains(format::Flags::GLOBAL_HEADER);
         let rate = preset.frame_rate.unwrap_or(rate);
-        let (width, height) = preset.size.map_or(src, |[w, h]| (w, h));
+        let (width, height) = preset.output_size(src);
         let frame_tb = Rational(rate.den as i32, rate.num as i32);
         let video = match preset.video {
             None => None,
@@ -212,16 +252,27 @@ impl Encoder {
                     enc,
                     time_base: frame_tb,
                 };
-                let flags = if (width, height) == src {
-                    scaling::Flags::POINT
+                let convert = if vc == VideoCodec::Gif {
+                    Convert::Palette(palette_graph(src, (width, height), frame_tb)?)
                 } else {
-                    scaling::Flags::BICUBIC
+                    let flags = if (width, height) == src {
+                        scaling::Flags::POINT
+                    } else {
+                        scaling::Flags::BICUBIC
+                    };
+                    Convert::Scale(scaling::Context::get(
+                        Pixel::RGBA,
+                        src.0,
+                        src.1,
+                        pixel,
+                        width,
+                        height,
+                        flags,
+                    )?)
                 };
-                let scaler =
-                    scaling::Context::get(Pixel::RGBA, src.0, src.1, pixel, width, height, flags)?;
                 Some(Video {
                     stream,
-                    scaler,
+                    convert,
                     name,
                 })
             }
@@ -249,7 +300,11 @@ impl Encoder {
                 })
             }
         };
-        out.write_header()?;
+        let mut opts = Dictionary::new();
+        if preset.video == Some(VideoCodec::Gif) {
+            opts.set("loop", preset.options.get("loop").map_or("0", |l| l));
+        }
+        out.write_header_with(opts)?;
         Ok(Self {
             out,
             video,
@@ -273,7 +328,10 @@ impl Encoder {
     /// Encodes the next frame: tight RGBA rows at the source size given to [`Encoder::create`].
     /// Ignored without a video stream.
     pub fn video(&mut self, rgba: &[u8]) -> Result<(), Error> {
-        let Some(Video { stream, scaler, .. }) = &mut self.video else {
+        let Some(Video {
+            stream, convert, ..
+        }) = &mut self.video
+        else {
             return Ok(());
         };
         let (w, h) = self.src;
@@ -282,12 +340,21 @@ impl Encoder {
         for (row, line) in rgba.chunks_exact(w as usize * 4).enumerate() {
             src.data_mut(0)[row * stride..][..line.len()].copy_from_slice(line);
         }
-        let mut yuv = frame::Video::empty();
-        scaler.run(&src, &mut yuv)?;
-        yuv.set_pts(Some(self.frames));
+        src.set_pts(Some(self.frames));
         self.frames += 1;
-        stream.enc.send_frame(&yuv)?;
-        drain(&mut self.out, stream, |e, p| e.receive_packet(p))
+        match convert {
+            Convert::Scale(scaler) => {
+                let mut yuv = frame::Video::empty();
+                scaler.run(&src, &mut yuv)?;
+                yuv.set_pts(src.pts());
+                stream.enc.send_frame(&yuv)?;
+                drain(&mut self.out, stream, |e, p| e.receive_packet(p))
+            }
+            Convert::Palette(g) => {
+                g.get("in").expect("added").source().add(&src)?;
+                filtered(&mut self.out, stream, g)
+            }
+        }
     }
 
     /// Encodes the next interleaved stereo samples; ignored without an audio stream.
@@ -343,7 +410,14 @@ impl Encoder {
     /// Flushes the encoders and writes the trailer.
     pub fn finish(mut self) -> Result<(), Error> {
         self.flush_audio(true)?;
-        if let Some(Video { stream: v, .. }) = &mut self.video {
+        if let Some(Video {
+            stream: v, convert, ..
+        }) = &mut self.video
+        {
+            if let Convert::Palette(g) = convert {
+                g.get("in").expect("added").source().flush()?;
+                filtered(&mut self.out, v, g)?;
+            }
             v.enc.send_eof()?;
             drain(&mut self.out, v, |e, p| e.receive_packet(p))?;
         }
@@ -366,6 +440,27 @@ fn add(
     s.set_parameters(enc);
     s.set_time_base(time_base);
     Ok(s.index())
+}
+
+/// Encodes every frame the GIF graph has ready.
+fn filtered(
+    out: &mut format::context::Output,
+    s: &mut Stream<encoder::Video>,
+    g: &mut filter::Graph,
+) -> Result<(), Error> {
+    let mut f = frame::Video::empty();
+    loop {
+        match g.get("out").expect("added").sink().frame(&mut f) {
+            Ok(()) => {}
+            Err(Error::Eof) => return Ok(()),
+            Err(Error::Other { errno }) if errno == ffmpeg_next::util::error::EAGAIN => {
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
+        s.enc.send_frame(&f)?;
+        drain(out, s, |e, p| e.receive_packet(p))?;
+    }
 }
 
 /// Writes every packet the encoder has ready.
@@ -478,5 +573,53 @@ mod tests {
         let info = crate::probe::probe(&path).unwrap();
         std::fs::remove_file(&path).unwrap();
         assert!(info.width.is_some());
+    }
+
+    /// The acceptance test from #60: 5 s of a grey ramp (plus a moving box so frames differ)
+    /// through the GIF preset comes out 480p with no visible banding: averaged over 9 px, every
+    /// pixel of the ramp is within 3 levels of the source, where the old 3-3-2 palette missed by ~11.
+    #[test]
+    fn gif_has_no_banding() {
+        crate::ffmpeg::init().unwrap();
+        let path = std::env::temp_dir().join(format!("jvid-gif-{}.gif", std::process::id()));
+        let preset = jvid_core::preset::builtin()
+            .into_iter()
+            .find(|p| p.video == Some(VideoCodec::Gif))
+            .unwrap();
+        let (w, h) = (854usize, 480usize);
+        let mut enc =
+            Encoder::create(&path, (w as u32, h as u32), Rate::new(15, 1), &preset).unwrap();
+        for i in 0..75 {
+            let mut rgba = vec![255u8; w * h * 4];
+            for (n, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                let (x, y) = (n % w, n / w);
+                let g = (x * 255 / (w - 1)) as u8;
+                let boxed = y < 40 && (i * 10..i * 10 + 40).contains(&x);
+                px[..3].fill(if boxed { 255 - g } else { g });
+            }
+            enc.video(&rgba).unwrap();
+        }
+        enc.finish().unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.windows(11).any(|b| b == b"NETSCAPE2.0"), "loops");
+        let info = crate::probe::probe(&path).unwrap();
+        assert_eq!((info.width, info.height), (Some(854), Some(480)));
+        let mut dec = crate::decode::VideoDecoder::open(&path).unwrap();
+        let f = dec.frame_at(jvid_core::time::Time(0)).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let (lo, span) = if f.full_range {
+            (0.0, 255.0)
+        } else {
+            (16.0, 219.0)
+        };
+        let row = &f.planes[0][300 * w..][..w];
+        let worst = (4..w - 4)
+            .map(|x| {
+                let mean = row[x - 4..=x + 4].iter().map(|&v| v as f64).sum::<f64>() / 9.0;
+                let want = lo + (x * 255 / (w - 1)) as f64 * span / 255.0;
+                (mean - want).abs()
+            })
+            .fold(0.0, f64::max);
+        assert!(worst < 3.0, "banding: off by {worst:.1}");
     }
 }

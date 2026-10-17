@@ -226,7 +226,7 @@ fn every_builtin_preset_exports() {
     let p = project(&dir);
     for (i, preset) in jvid_core::preset::builtin().into_iter().enumerate() {
         let path = out(&format!("preset{i}.{}", preset.extension));
-        let size = preset.size.map_or((1920, 1080), |[w, h]| (w, h));
+        let size = preset.output_size((1920, 1080));
         let has_video = preset.video.is_some();
         let name = preset.name.clone();
         let req = Request {

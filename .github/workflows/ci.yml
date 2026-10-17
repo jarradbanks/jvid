@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers \
-            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libasound2-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev libasound2-dev \
             fonts-dejavu-core fonts-noto-cjk
       - if: runner.os == 'macOS'
         run: brew install ffmpeg

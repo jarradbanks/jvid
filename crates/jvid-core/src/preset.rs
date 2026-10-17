@@ -39,6 +39,8 @@ pub struct Preset {
     /// `None` keeps the project rate.
     pub frame_rate: Option<Rate>,
     /// Encoder options (e.g. `crf`, `preset`, `tune`); encoders ignore ones they don't have.
+    /// `width` scales to that width keeping the aspect ratio when `size` is `None`; GIF also
+    /// takes `loop` (0 forever, -1 once, n repeats).
     #[serde(default)]
     pub options: BTreeMap<String, String>,
 }
@@ -46,6 +48,25 @@ pub struct Preset {
 impl Preset {
     pub fn from_toml(s: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(s)
+    }
+
+    /// The output frame size for a `src`-sized project: `size`, else `src` scaled to the
+    /// `width` option (height rounded to even), else `src`.
+    pub fn output_size(&self, (w, h): (u32, u32)) -> (u32, u32) {
+        if let Some([pw, ph]) = self.size {
+            return (pw, ph);
+        }
+        match self
+            .options
+            .get("width")
+            .and_then(|v| v.parse::<u32>().ok())
+        {
+            Some(ow) if ow > 0 && w > 0 => {
+                let oh = (h as u64 * ow as u64 + w as u64) / (w as u64 * 2) * 2;
+                (ow, (oh as u32).max(2))
+            }
+            _ => (w, h),
+        }
     }
 
     /// A warning when the output size has a different aspect ratio than the project's.
@@ -144,7 +165,15 @@ pub fn builtin() -> Vec<Preset> {
             None,
             &[("profile", "3")],
         ),
-        p("GIF", "gif", Some(Gif), None, None, Some(25), &[]),
+        p(
+            "GIF 480p",
+            "gif",
+            Some(Gif),
+            None,
+            None,
+            Some(15),
+            &[("width", "854"), ("loop", "0")],
+        ),
         p("Audio only (WAV)", "wav", None, Some(Pcm), None, None, &[]),
         p(
             "Audio only (WAV 24-bit)",
@@ -178,6 +207,22 @@ mod tests {
         assert_eq!(Preset::from_toml(&toml::to_string(&p).unwrap()).unwrap(), p);
         let a = Preset::from_toml("name = \"A\"\nextension = \"wav\"\naudio = \"pcm\"").unwrap();
         assert_eq!((a.video, a.size), (None, None));
+    }
+
+    #[test]
+    fn width_option_keeps_aspect() {
+        let gif = builtin()
+            .into_iter()
+            .find(|p| p.name.starts_with("GIF"))
+            .unwrap();
+        assert_eq!(gif.output_size((1920, 1080)), (854, 480));
+        assert_eq!(gif.output_size((1000, 1001)), (854, 854));
+        let mut fixed = gif.clone();
+        fixed.size = Some([320, 240]);
+        assert_eq!(fixed.output_size((1920, 1080)), (320, 240));
+        fixed.size = None;
+        fixed.options.clear();
+        assert_eq!(fixed.output_size((640, 360)), (640, 360));
     }
 
     #[test]
