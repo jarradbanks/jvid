@@ -59,58 +59,63 @@ impl KeymapEditor {
                 ui.add_space(space::S8);
                 egui::ScrollArea::vertical()
                     .max_height(400.0)
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        egui::Grid::new("keymap_grid")
-                            .spacing([space::S8, space::S4])
-                            .show(ui, |ui| {
-                                for i in matches(&self.search) {
-                                    let a = &ACTIONS[i];
-                                    ui.label(a.name);
-                                    let label = if self.recording == Some(i) {
-                                        "Press keys… (Esc cancels, Backspace unbinds)".to_owned()
-                                    } else {
-                                        map.bindings[i]
-                                            .as_ref()
-                                            .map_or("—".to_owned(), keymap::format)
-                                    };
-                                    if ui
-                                        .add(
-                                            Button::secondary(&label).on(self.recording == Some(i)),
-                                        )
-                                        .on_hover_text("Click, then press the new shortcut")
-                                        .clicked()
-                                    {
-                                        self.recording = Some(i);
-                                    }
-                                    let clash: Vec<_> = conflicts
-                                        .iter()
-                                        .filter_map(|&(x, y)| match (x == a.id, y == a.id) {
-                                            (true, _) => Some(y),
-                                            (_, true) => Some(x),
-                                            _ => None,
-                                        })
-                                        .filter_map(|id| ACTIONS.iter().find(|b| b.id == id))
-                                        .map(|b| b.name)
-                                        .collect();
-                                    if clash.is_empty() {
-                                        ui.label("");
-                                    } else {
-                                        ui.colored_label(
-                                            ui.visuals().warn_fg_color,
-                                            format!("Also {}", clash.join(", ")),
-                                        );
-                                    }
-                                    if map.bindings[i] != defaults.bindings[i]
-                                        && ui
-                                            .add(Button::ghost("Reset"))
+                        for i in matches(&self.search) {
+                            let a = &ACTIONS[i];
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = space::S8;
+                                ui.label(a.name);
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        // Hidden, not absent, so chips stay aligned across rows.
+                                        if ui
+                                            .add_visible(
+                                                map.bindings[i] != defaults.bindings[i],
+                                                Button::ghost("Reset"),
+                                            )
                                             .on_hover_text(format!("Back to {}", a.default))
                                             .clicked()
-                                    {
-                                        map.bindings[i] = defaults.bindings[i];
-                                    }
-                                    ui.end_row();
-                                }
+                                        {
+                                            map.bindings[i] = defaults.bindings[i];
+                                        }
+                                        let clash: Vec<_> = conflicts
+                                            .iter()
+                                            .filter_map(|&(x, y)| match (x == a.id, y == a.id) {
+                                                (true, _) => Some(y),
+                                                (_, true) => Some(x),
+                                                _ => None,
+                                            })
+                                            .filter_map(|id| ACTIONS.iter().find(|b| b.id == id))
+                                            .map(|b| b.name)
+                                            .collect();
+                                        if !clash.is_empty() {
+                                            ui.colored_label(
+                                                ui.visuals().warn_fg_color,
+                                                format!("Also {}", clash.join(", ")),
+                                            );
+                                        }
+                                        let label = if self.recording == Some(i) {
+                                            "Press keys… (Esc cancels, Backspace unbinds)"
+                                                .to_owned()
+                                        } else {
+                                            map.bindings[i].as_ref().map_or("—".to_owned(), shown)
+                                        };
+                                        if ui
+                                            .add(
+                                                Button::secondary(&label)
+                                                    .on(self.recording == Some(i)),
+                                            )
+                                            .on_hover_text("Click, then press the new shortcut")
+                                            .clicked()
+                                        {
+                                            self.recording = Some(i);
+                                        }
+                                    },
+                                );
                             });
+                        }
                     });
                 if let Some(e) = &self.error {
                     ui.add_space(space::S8);
@@ -202,6 +207,19 @@ fn matches(query: &str) -> Vec<usize> {
         .collect()
 }
 
+/// [`keymap::format`] with punctuation keys as their symbols: "Ctrl+/" not "Ctrl+Slash".
+fn shown(sc: &KeyboardShortcut) -> String {
+    let full = keymap::format(sc);
+    let name = sc.logical_key.name();
+    let key = match sc.logical_key {
+        // egui's arrow glyphs and Unicode minus read worse than the names.
+        Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight => name,
+        Key::Minus => "-",
+        k => k.symbol_or_name(),
+    };
+    format!("{}{key}", &full[..full.len() - name.len()])
+}
+
 fn toml_dialog() -> FileDialog {
     FileDialog::new().add_filter("Keymap", &["toml"])
 }
@@ -244,5 +262,35 @@ mod tests {
         let sc = KeyboardShortcut::new(Modifiers::COMMAND, Key::M);
         assert_eq!(h.state().1.bindings[i], Some(sc));
         assert!(h.state().0.is_open());
+    }
+
+    #[test]
+    fn punctuation_keys_show_as_symbols() {
+        let sc = |m, k| shown(&KeyboardShortcut::new(m, k));
+        assert_eq!(sc(Modifiers::COMMAND, Key::Slash), "Ctrl+/");
+        assert_eq!(sc(Modifiers::NONE, Key::Semicolon), ";");
+        assert_eq!(sc(Modifiers::SHIFT, Key::Comma), "Shift+,");
+        assert_eq!(sc(Modifiers::NONE, Key::Minus), "-");
+        assert_eq!(sc(Modifiers::NONE, Key::ArrowLeft), "Left");
+    }
+
+    #[test]
+    fn list_fills_dialog_width() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut state = (KeymapEditor::default(), Keymap::default());
+        state.0.open();
+        let mut fresh = true;
+        let mut h = Harness::builder().with_size([800.0, 600.0]).build_ui_state(
+            move |ui, (ed, map)| {
+                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    ed.show(ui, map);
+                }
+            },
+            state,
+        );
+        h.run_steps(2);
+        h.snapshot("keymap_editor");
     }
 }
