@@ -81,6 +81,8 @@ pub const ACTIONS: &[Action] = &[
     t("ripple_delete", "Ripple Delete", "Shift+Delete"),
     t("link", "Link/Unlink", "Ctrl+L"),
     t("enable", "Enable/Disable", "Shift+E"),
+    t("reverse", "Reverse", "Ctrl+R"),
+    t("freeze_frame", "Freeze frame at playhead", "Shift+F"),
     t("linked_selection", "Linked Selection", "Ctrl+Shift+L"),
     t("snapping", "Snapping", "S"),
     a("razor_tool", "Razor tool", "C"),

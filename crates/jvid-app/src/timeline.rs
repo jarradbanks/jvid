@@ -343,7 +343,7 @@ impl Timeline {
                 self.pending = Some(Command::CloseGap { track, at });
             }
             "copy" | "cut" | "paste" | "duplicate" | "delete" | "ripple_delete" | "link"
-            | "enable" => {
+            | "enable" | "reverse" | "freeze_frame" => {
                 self.pending = self.clip_action(id, project.sequence());
             }
             _ => return false,
@@ -433,6 +433,24 @@ impl Timeline {
                 enabled: chosen.iter().all(|(_, c)| !c.enabled),
                 ids,
             },
+            // The first chosen clip and its links; its speed stays.
+            "reverse" if !ids.is_empty() => {
+                let c = &chosen[0].1;
+                Command::SetClipSpeed {
+                    id: c.id,
+                    speed: c.speed,
+                    reverse: !c.reverse,
+                    ripple: false,
+                }
+            }
+            // The chosen clip under the playhead, video first.
+            "freeze_frame" => {
+                let at = self.playhead();
+                let video = |t: TrackId| seq.track(t).is_some_and(|t| t.kind == TrackKind::Video);
+                let under = chosen.iter().filter(|(_, c)| c.start <= at && at < c.end());
+                let (_, c) = under.min_by_key(|(t, _)| !video(*t))?;
+                Command::FreezeFrame { id: c.id, at }
+            }
             _ => return None,
         };
         if matches!(cmd, Command::RemoveClips { .. }) {
@@ -601,8 +619,9 @@ impl Timeline {
         let video = |tr: TrackId| seq.track(tr).is_some_and(|x| x.kind == TrackKind::Video);
         let c = group.iter().find(|(tr, _)| video(*tr)).or(group.first())?.1;
         let frame = match t.edge {
-            Edge::Head => c.source_in + t.by,
-            Edge::Tail => c.source_out + t.by - self.transport.rate.time_floor(1),
+            // shortcut: forward clips only; a reversed clip previews the wrong end.
+            Edge::Head => c.source_in + c.source_len(t.by),
+            Edge::Tail => c.source_out + c.source_len(t.by) - self.transport.rate.time_floor(1),
         };
         Some((c.asset, frame))
     }
@@ -1577,7 +1596,7 @@ impl Timeline {
             && content.height() >= 8.0
             && content.width() >= 1.0
         {
-            let source = |x: f32| clip.source_in + (view.time(x) - clip.start);
+            let source = |x: f32| clip.source_at(view.time(x));
             match kind {
                 TrackKind::Video if !still => {
                     self.media
@@ -2035,6 +2054,33 @@ mod tests {
             });
         }
         h.project().clone()
+    }
+
+    #[test]
+    fn reverse_and_freeze_actions_undo() {
+        let mut h = History::new(project(2));
+        let mut t = Timeline::default();
+        t.sync(h.project());
+        let seq = |h: &History| h.project().sequence().clone();
+        let v = seq(&h).tracks()[0].clips()[0].id;
+        assert!(!t.can("reverse", &seq(&h)) && !t.can("freeze_frame", &seq(&h)));
+        t.select(&seq(&h), v, egui::Modifiers::NONE);
+        t.seek(Time(S / 2));
+        assert!(t.can("reverse", &seq(&h)) && t.can("freeze_frame", &seq(&h)));
+        let cmd = t.clip_action("reverse", &seq(&h)).unwrap();
+        h.apply(cmd).unwrap();
+        assert!(seq(&h).clip(v).unwrap().1.reverse);
+        let shown = seq(&h).clip(v).unwrap().1.source_at(Time(S / 2));
+        let cmd = t.clip_action("freeze_frame", &seq(&h)).unwrap();
+        h.apply(cmd).unwrap();
+        let clips = seq(&h).tracks()[0].clips().to_vec();
+        assert_eq!(clips.len(), 2);
+        assert_eq!(clips[1].freeze, Some(shown));
+        h.undo();
+        h.undo();
+        let c = seq(&h).clip(v).unwrap().1.clone();
+        assert!(!c.reverse && c.freeze.is_none());
+        assert_eq!(seq(&h).tracks()[0].clips().len(), 1);
     }
 
     #[test]

@@ -414,6 +414,24 @@ pub struct Clip {
     /// A disabled clip stays on the timeline but evaluation skips it.
     #[serde(default = "enabled", skip_serializing_if = "is_enabled")]
     pub enabled: bool,
+    /// Playback rate, above 0: at 2.0 the source range plays in half the time.
+    #[serde(default = "unit_speed", skip_serializing_if = "is_unit_speed")]
+    pub speed: f64,
+    /// Plays the source range backwards, last frame first.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverse: bool,
+    /// A held source frame shown for the whole clip, silent; the source range then only sets
+    /// the length, at 1:1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub freeze: Option<Time>,
+}
+
+fn unit_speed() -> f64 {
+    1.0
+}
+
+fn is_unit_speed(s: &f64) -> bool {
+    *s == 1.0
 }
 
 fn enabled() -> bool {
@@ -559,14 +577,83 @@ impl Transform {
 }
 
 impl Clip {
+    /// The source rate: 1 for a freeze, which spends its range 1:1.
+    fn rate(&self) -> f64 {
+        if self.freeze.is_some() {
+            1.0
+        } else {
+            self.speed
+        }
+    }
+
+    /// Timeline length of `source` source time. Floors, as [`Clip::source_len`] does, so a
+    /// length converted there and back never grows.
+    pub fn timeline_len(&self, source: Time) -> Time {
+        Time((source.0 as f64 / self.rate()).floor() as i64)
+    }
+
+    /// Source time spent over `timeline` timeline time.
+    pub fn source_len(&self, timeline: Time) -> Time {
+        Time((timeline.0 as f64 * self.rate()).floor() as i64)
+    }
+
+    /// Length on the timeline: the source range at the clip's speed.
     pub fn duration(&self) -> Time {
-        self.source_out - self.source_in
+        self.timeline_len(self.source_out - self.source_in)
+    }
+
+    /// The source time shown at timeline time `t`, held inside the source range.
+    pub fn source_at(&self, t: Time) -> Time {
+        if let Some(f) = self.freeze {
+            return f;
+        }
+        let d = self.source_len(t - self.start);
+        let last = Time(self.source_out.0 - 1).max(self.source_in);
+        if self.reverse {
+            (last - d).clamp(self.source_in, last)
+        } else {
+            (self.source_in + d).clamp(self.source_in, last)
+        }
+    }
+
+    /// Where source time `s` shows on the timeline, the inverse of [`Clip::source_at`]; a
+    /// freeze shows it from the start.
+    pub fn timeline_at(&self, s: Time) -> Time {
+        let d = match (self.freeze, self.reverse) {
+            (Some(_), _) => Time(0),
+            (None, false) => s - self.source_in,
+            (None, true) => Time(self.source_out.0 - 1) - s,
+        };
+        self.start + self.timeline_len(d)
+    }
+
+    /// Keeps the first `len` of the clip on the timeline; its end lands at or before
+    /// `start + len`.
+    pub(crate) fn keep_head(&mut self, len: Time) {
+        let n = self.source_len(len);
+        if self.reverse {
+            self.source_in = self.source_out - n;
+        } else {
+            self.source_out = self.source_in + n;
+        }
+    }
+
+    /// Keeps the last `len` of the clip on the timeline, its end staying where it is.
+    pub(crate) fn keep_tail(&mut self, len: Time) {
+        let end = self.end();
+        let n = self.source_len(len);
+        if self.reverse {
+            self.source_out = self.source_in + n;
+        } else {
+            self.source_in = self.source_out - n;
+        }
+        self.start = end - self.duration();
     }
 
     /// The animated value of `param` at timeline time `t`.
     pub fn value_at(&self, param: &str, t: Time) -> Option<crate::keyframe::Value> {
         let keys = self.keyframes.get(param)?;
-        crate::keyframe::value_at(keys, self.source_in + (t - self.start))
+        crate::keyframe::value_at(keys, self.source_at(t))
     }
 
     /// The keyed [`Text::ANIMATED`] values at timeline time `t`.
@@ -703,6 +790,10 @@ pub enum ModelError {
     NoGap(TrackId),
     /// No in/out range is marked.
     NoRange,
+    /// A speed that isn't a positive, finite rate.
+    BadSpeed,
+    /// The time is outside the clip.
+    OutsideClip(ClipId),
 }
 
 impl std::fmt::Display for ModelError {
@@ -719,6 +810,8 @@ impl std::fmt::Display for ModelError {
             Self::WrongKind(id) => write!(f, "track {} is the wrong kind", id.0),
             Self::NoGap(id) => write!(f, "no gap there on track {}", id.0),
             Self::NoRange => f.write_str("no in/out range is marked"),
+            Self::BadSpeed => f.write_str("speed must be above 0"),
+            Self::OutsideClip(id) => write!(f, "time is outside clip {}", id.0),
         }
     }
 }
@@ -898,6 +991,9 @@ impl Sequence {
                 transform: Transform::default(),
                 stream: Some(0),
                 enabled: true,
+                speed: 1.0,
+                reverse: false,
+                freeze: None,
             },
         );
         Ok(id)
@@ -967,8 +1063,9 @@ impl Sequence {
         if source_out <= source_in {
             return Err(ModelError::EmptyClip);
         }
-        let (track, _) = self.clip(id).ok_or(ModelError::UnknownClip(id))?;
-        self.check_free(track, start, start + (source_out - source_in), Some(id))?;
+        let (track, c) = self.clip(id).ok_or(ModelError::UnknownClip(id))?;
+        let len = c.timeline_len(source_out - source_in);
+        self.check_free(track, start, start + len, Some(id))?;
         let (_, mut c) = self.remove_clip(id)?;
         c.start = start;
         c.source_in = source_in;
@@ -1088,10 +1185,10 @@ impl Sequence {
             .position(|c| c.id == id)
             .expect("caller found it");
         let head = &mut clips[i];
-        let cut = head.source_in + (at - head.start);
         let mut tail = head.clone();
-        head.source_out = cut;
-        (tail.id, tail.source_in, tail.start, tail.link) = (tail_id, cut, at, link);
+        tail.keep_tail(head.end() - at);
+        head.keep_head(at - head.start);
+        (tail.id, tail.link) = (tail_id, link);
         clips.insert(i + 1, tail);
     }
 
@@ -1112,10 +1209,9 @@ impl Sequence {
             if s >= start && e <= end {
                 clips.remove(i);
             } else if s < start {
-                c.source_out = c.source_in + (start - s);
+                c.keep_head(start - s);
             } else {
-                c.source_in = c.source_in + (end - s);
-                c.start = end;
+                c.keep_tail(e - end);
             }
         }
     }
@@ -1474,6 +1570,74 @@ impl Sequence {
         Ok(())
     }
 
+    /// Sets the speed and direction of `id` and its linked clips, each keeping its source
+    /// range so its length follows the speed. Ripple shifts the later clips on their tracks
+    /// by the change in length; without it a longer clip must fit before the next.
+    pub(crate) fn set_speed(
+        &mut self,
+        id: ClipId,
+        speed: f64,
+        reverse: bool,
+        ripple: bool,
+    ) -> Result<(), ModelError> {
+        if !(speed > 0.0 && speed.is_finite()) {
+            return Err(ModelError::BadSpeed);
+        }
+        let (_, c) = self.clip(id).ok_or(ModelError::UnknownClip(id))?;
+        let old = c.duration();
+        let mut s = self.clone();
+        let group: Vec<_> = s
+            .linked(id)
+            .iter()
+            .map(|(t, c)| (*t, c.id, c.end()))
+            .collect();
+        let mut later = Vec::new();
+        let mut grow = Time(0);
+        for (t, cid, end) in group {
+            let ti = s.index(t)?;
+            for c in &mut s.tracks[ti].clips {
+                if c.id == cid {
+                    (c.speed, c.reverse) = (speed, reverse);
+                    if cid == id {
+                        grow = c.duration() - old;
+                    }
+                } else if ripple && c.start >= end {
+                    later.push(c.id);
+                }
+            }
+        }
+        s.shift_synced(later, grow)?;
+        *self = s;
+        Ok(())
+    }
+
+    /// Holds the frame `id` shows at `at` for the rest of the clip, cutting it there first.
+    /// The held part keeps its length and drops its link, as it no longer plays in sync.
+    pub(crate) fn freeze_frame(&mut self, id: ClipId, at: Time) -> Result<(), ModelError> {
+        let (t, c) = self.clip(id).ok_or(ModelError::UnknownClip(id))?;
+        if !(c.start <= at && at < c.end()) {
+            return Err(ModelError::OutsideClip(id));
+        }
+        let frame = c.source_at(at);
+        let cut = c.start < at;
+        let mut s = self.clone();
+        let ti = s.index(t)?;
+        if cut {
+            s.split(ti, id, at, &mut BTreeMap::new());
+        }
+        let clips = &mut s.tracks[ti].clips;
+        let i = clips.iter().position(|c| c.id == id).expect("found above") + cut as usize;
+        let tail = &mut clips[i];
+        let len = tail.duration();
+        tail.freeze = Some(frame);
+        tail.keep_head(len);
+        if cut {
+            tail.link = None;
+        }
+        *self = s;
+        Ok(())
+    }
+
     /// The empty span on `track` containing `at`, from the previous clip's end (or zero) to
     /// the next clip's start. `None` inside a clip or past the last one.
     pub fn gap_at(&self, track: TrackId, at: Time) -> Option<(Time, Time)> {
@@ -1566,9 +1730,21 @@ impl Project {
         let (mut lo, mut hi) = (Time(i64::MIN / 4), Time(i64::MAX / 4));
         for (t, c) in s.linked(id) {
             let clips = s.track(t).expect("listed").clips();
+            // Stills and solids report no duration and extend freely, as does a freeze.
+            let media = self.asset(c.asset).filter(|a| !a.generated());
+            let media = media.and_then(|a| a.probe.as_ref()).map(|p| p.duration);
+            let media = media.filter(|d| *d > Time(0)).map(|d| d - c.source_out);
+            // Source to spare before the first frame shown and after the last.
+            let (before, after) = match (c.freeze, c.reverse) {
+                (Some(_), _) => (None, None),
+                (None, false) => (Some(c.source_in), media),
+                (None, true) => (media, Some(c.source_in)),
+            };
             match edge {
                 Edge::Head => {
-                    lo = lo.max(Time(0) - c.source_in);
+                    if let Some(b) = before {
+                        lo = lo.max(Time(0) - c.timeline_len(b));
+                    }
                     hi = hi.min(c.duration() - min);
                     if !ripple {
                         let prev = clips.iter().map(Clip::end).filter(|&e| e <= c.start);
@@ -1577,11 +1753,8 @@ impl Project {
                 }
                 Edge::Tail => {
                     lo = lo.max(min - c.duration());
-                    // Stills and solids report no duration and extend freely.
-                    let media = self.asset(c.asset).filter(|a| !a.generated());
-                    let media = media.and_then(|a| a.probe.as_ref()).map(|p| p.duration);
-                    if let Some(d) = media.filter(|d| *d > Time(0)) {
-                        hi = hi.min(d - c.source_out);
+                    if let Some(a) = after {
+                        hi = hi.min(c.timeline_len(a));
                     }
                     let next = clips.iter().map(|o| o.start).filter(|&o| o >= c.end());
                     if let (false, Some(n)) = (ripple, next.min()) {
@@ -1619,9 +1792,14 @@ impl Project {
                 for c in &mut s.tracks[ti].clips {
                     if c.id == cid {
                         match edge {
-                            Edge::Head if ripple => c.source_in = c.source_in + by,
-                            Edge::Head => (c.source_in, c.start) = (c.source_in + by, c.start + by),
-                            Edge::Tail => c.source_out = c.source_out + by,
+                            Edge::Head => {
+                                let start = c.start;
+                                c.keep_tail(c.duration() - by);
+                                if ripple {
+                                    c.start = start;
+                                }
+                            }
+                            Edge::Tail => c.keep_head(c.duration() + by),
                         }
                     } else if ripple && c.start >= end {
                         later.push(c.id);
@@ -1928,6 +2106,9 @@ mod tests {
             },
             stream: Some(0),
             enabled: true,
+            speed: 1.0,
+            reverse: false,
+            freeze: None,
         };
         assert_eq!(c.transform_at(Time(0)), c.transform);
         let mut k = |name: &str, keys: Vec<Keyframe>| c.keyframes.insert(name.into(), keys);

@@ -310,6 +310,9 @@ fn transform_crop_and_opacity_static_and_animated() {
             transform: base,
             stream: Some(0),
             enabled: true,
+            speed: 1.0,
+            reverse: false,
+            freeze: None,
         };
         assert_eq!(clip.transform_at(Time(5)), still, "{name} midpoint");
         let first = frame(clip.transform_at(Time(0)));

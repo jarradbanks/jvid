@@ -36,6 +36,11 @@ pub struct AudioSegment {
     pub end: Time,
     /// Asset time matching `start`.
     pub source_start: Time,
+    /// Source time per timeline time; 1 plays as recorded, other rates resample (pitch
+    /// shifts with them).
+    pub speed: f64,
+    /// The source plays backwards from `source_start`.
+    pub reverse: bool,
     /// The clip's audio stream; `None` mixes all of them.
     pub stream: Option<u32>,
     pub volume: f32,
@@ -79,7 +84,7 @@ pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
                 track: tr.id,
                 clip: c.id,
                 asset: c.asset,
-                source_time: c.source_in + (t - c.start),
+                source_time: c.source_at(t),
                 params: &c.params,
                 transform: faded(c, t),
                 color: match c.value_at("color", t) {
@@ -96,20 +101,25 @@ pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
 pub fn audio_in(seq: &Sequence, start: Time, end: Time) -> Vec<AudioSegment> {
     active(seq, TrackKind::Audio, |t| t.muted)
         .flat_map(|tr| {
-            clips_in(tr, start, end).map(move |c| {
-                let s = start.max(c.start);
-                AudioSegment {
-                    track: tr.id,
-                    clip: c.id,
-                    asset: c.asset,
-                    start: s,
-                    end: end.min(c.end()),
-                    source_start: c.source_in + (s - c.start),
-                    stream: c.stream,
-                    volume: tr.volume,
-                    pan: tr.pan,
-                }
-            })
+            // A freeze is silent.
+            clips_in(tr, start, end)
+                .filter(|c| c.freeze.is_none())
+                .map(move |c| {
+                    let s = start.max(c.start);
+                    AudioSegment {
+                        track: tr.id,
+                        clip: c.id,
+                        asset: c.asset,
+                        start: s,
+                        end: end.min(c.end()),
+                        source_start: c.source_at(s),
+                        speed: c.speed,
+                        reverse: c.reverse,
+                        stream: c.stream,
+                        volume: tr.volume,
+                        pan: tr.pan,
+                    }
+                })
         })
         .collect()
 }
@@ -117,7 +127,7 @@ pub fn audio_in(seq: &Sequence, start: Time, end: Time) -> Vec<AudioSegment> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::NewClip;
+    use crate::model::{ModelError, NewClip};
 
     fn clip(start: i64, len: i64) -> NewClip {
         NewClip {
@@ -289,5 +299,101 @@ mod tests {
             u.set(name, u.get(name).unwrap());
             assert_eq!(u, Text::default(), "{name} round-trips");
         }
+    }
+
+    #[test]
+    fn speed_reverse_and_freeze_remap_time() {
+        let mut s = Sequence::default();
+        let v = s.add_track(TrackKind::Video, "V1");
+        let a = s.add_track(TrackKind::Audio, "A1");
+        let c = s.add_clip(v, clip(0, 100)).unwrap();
+        let src = |s: &Sequence, t| video_at(s, Time(t))[0].source_time;
+        let end = |s: &Sequence| s.clip(c).unwrap().1.end();
+
+        s.set_speed(c, 2.0, false, false).unwrap();
+        assert_eq!(end(&s), Time(50), "200% is half as long");
+        assert_eq!(src(&s, 10), Time(120));
+        s.set_speed(c, 0.5, false, false).unwrap();
+        assert_eq!(end(&s), Time(200));
+        assert_eq!(src(&s, 10), Time(105));
+        s.set_speed(c, 1.0, true, false).unwrap();
+        assert_eq!(src(&s, 0), Time(199), "reverse starts on the last instant");
+        assert_eq!(src(&s, 99), Time(100));
+        assert_eq!(s.set_speed(c, 0.0, false, false), Err(ModelError::BadSpeed));
+
+        // Slowing down without ripple can't run over the next clip; with it the next moves.
+        s.set_speed(c, 1.0, false, false).unwrap();
+        let next = s.add_clip(v, clip(100, 10)).unwrap();
+        assert!(matches!(
+            s.set_speed(c, 0.5, false, false),
+            Err(ModelError::Overlap(_))
+        ));
+        s.set_speed(c, 0.5, false, true).unwrap();
+        assert_eq!(s.clip(next).unwrap().1.start, Time(200));
+        s.set_speed(c, 2.0, false, true).unwrap();
+        assert_eq!(s.clip(next).unwrap().1.start, Time(50));
+
+        // A split keeps both halves mapping as the whole did, reversed too.
+        s.set_speed(c, 2.0, true, true).unwrap();
+        assert_eq!(src(&s, 10), Time(179));
+        s.split_at(&[c], Time(20)).unwrap();
+        assert_eq!(src(&s, 10), Time(179));
+        assert_eq!(src(&s, 30), Time(139));
+        let tail = s.clips_at(Time(30)).next().unwrap().1.clone();
+        assert_eq!((tail.start, tail.end()), (Time(20), Time(50)));
+        assert_eq!((tail.source_in, tail.source_out), (Time(100), Time(160)));
+
+        // Freeze holds the frame at the playhead for the rest of the clip and is silent.
+        let f = s.add_clip(a, clip(0, 100)).unwrap();
+        s.set_speed(f, 2.0, false, false).unwrap();
+        s.freeze_frame(f, Time(10)).unwrap();
+        let segs = audio_in(&s, Time(0), Time(100));
+        assert_eq!(segs.len(), 1);
+        assert_eq!((segs[0].end, segs[0].speed), (Time(10), 2.0));
+        let held = s
+            .clips_at(Time(30))
+            .find(|(t, _)| *t == a)
+            .unwrap()
+            .1
+            .clone();
+        assert_eq!(
+            (held.start, held.end()),
+            (Time(10), Time(50)),
+            "keeps its length"
+        );
+        assert_eq!(
+            (held.source_at(Time(10)), held.source_at(Time(49))),
+            (Time(120), Time(120))
+        );
+        assert_eq!(s.freeze_frame(f, Time(60)), Err(ModelError::OutsideClip(f)));
+    }
+
+    #[test]
+    fn trims_at_speed_follow_the_media() {
+        use crate::model::{Edge, Project};
+        use crate::time::FLICKS_PER_SECOND as S;
+        let t = |n: i64| Time(n * S);
+        let mut p = Project::default();
+        let mut s = p.sequence().clone();
+        let v = s.add_track(TrackKind::Video, "V1");
+        let new = NewClip {
+            asset: AssetId(1),
+            source_in: t(100),
+            source_out: t(200),
+            start: t(10),
+            link: None,
+        };
+        let c = s.add_clip(v, new).unwrap();
+        s.set_speed(c, 2.0, false, false).unwrap();
+        p.sequence = s;
+        // 100s of source before source_in is 50s on the timeline at 200%; zero stops it at 10s.
+        assert_eq!(p.trim_limit(c, Edge::Head, t(-80), true), t(-50));
+        assert_eq!(p.trim_limit(c, Edge::Head, t(-80), false), t(-10));
+        p.trim(&[(c, Edge::Head, t(10))], false).unwrap();
+        let k = p.sequence().clip(c).unwrap().1.clone();
+        assert_eq!((k.start, k.end(), k.source_in), (t(20), t(60), t(120)));
+        p.trim(&[(c, Edge::Tail, t(-10))], false).unwrap();
+        let k = p.sequence().clip(c).unwrap().1.clone();
+        assert_eq!((k.end(), k.source_out), (t(50), t(180)));
     }
 }

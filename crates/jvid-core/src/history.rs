@@ -79,6 +79,19 @@ pub enum Command {
         trims: Vec<(ClipId, Edge, Time)>,
         ripple: bool,
     },
+    /// Sets a clip's speed and direction, its linked clips' with it; see
+    /// [`Sequence::set_speed`](crate::model::Sequence).
+    SetClipSpeed {
+        id: ClipId,
+        speed: f64,
+        reverse: bool,
+        ripple: bool,
+    },
+    /// Holds the frame shown at `at` for the rest of the clip.
+    FreezeFrame {
+        id: ClipId,
+        at: Time,
+    },
     /// Cuts the listed clips that cross `at` in two.
     Split {
         ids: Vec<ClipId>,
@@ -213,6 +226,7 @@ impl Command {
             | Self::SetClipLink { id, .. }
             | Self::SetClipAsset { id, .. }
             | Self::SetClipParam { id, .. }
+            | Self::FreezeFrame { id, .. }
             | Self::AddKeyframe { id, .. }
             | Self::RemoveKeyframe { id, .. }
             | Self::MoveKeyframe { id, .. } => clip(*id),
@@ -226,6 +240,7 @@ impl Command {
                 .find_map(|(t, _)| track(*t))
                 .or_else(|| track(*to)),
             Self::SetClipProps(edits) => edits.iter().find_map(|(id, ..)| clip(*id)),
+            Self::SetClipSpeed { id, .. } => s.linked(*id).iter().find_map(|(t, _)| track(*t)),
             Self::Trim { trims, .. } => trims
                 .iter()
                 .flat_map(|(id, ..)| s.linked(*id))
@@ -332,6 +347,19 @@ impl Command {
             }
             Self::Trim { trims, ripple } => {
                 p.trim(&trims, ripple)?;
+                Created::Nothing
+            }
+            Self::SetClipSpeed {
+                id,
+                speed,
+                reverse,
+                ripple,
+            } => {
+                s.set_speed(id, speed, reverse, ripple)?;
+                Created::Nothing
+            }
+            Self::FreezeFrame { id, at } => {
+                s.freeze_frame(id, at)?;
                 Created::Nothing
             }
             Self::Split { ids, at } => {

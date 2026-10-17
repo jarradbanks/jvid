@@ -953,3 +953,44 @@ fn scrub_1080p30_updates_30_per_second() {
     );
     assert!(rate >= 30.0, "{rate:.1} updates/s");
 }
+
+#[test]
+fn speed_resamples_and_reverse_reads_backwards() {
+    // Left channel holds the source frame index.
+    let mut src: ClipAudio = Box::new(|from, out: &mut [f32]| {
+        for (i, f) in out.chunks_mut(2).enumerate() {
+            f[0] = (from + i as i64) as f32;
+        }
+    });
+    let seg = |speed, reverse| AudioSegment {
+        track: jvid_core::model::TrackId(1),
+        clip: ClipId(1),
+        asset: AssetId(1),
+        start: Time(0),
+        end: Time(0),
+        source_start: Time(100 * FLICKS_PER_SAMPLE),
+        stream: None,
+        volume: 1.0,
+        pan: 0.0,
+        speed,
+        reverse,
+    };
+    let left = |s: &AudioSegment, src: &mut ClipAudio| {
+        let mut out = vec![0.0; 8];
+        read(src, s, &mut out, &mut Vec::new());
+        out.iter().step_by(2).copied().collect::<Vec<_>>()
+    };
+    assert_eq!(
+        left(&seg(1.0, false), &mut src),
+        [100.0, 101.0, 102.0, 103.0]
+    );
+    assert_eq!(
+        left(&seg(2.0, false), &mut src),
+        [100.0, 102.0, 104.0, 106.0]
+    );
+    assert_eq!(
+        left(&seg(0.5, false), &mut src),
+        [100.0, 100.5, 101.0, 101.5]
+    );
+    assert_eq!(left(&seg(1.0, true), &mut src), [100.0, 99.0, 98.0, 97.0]);
+}

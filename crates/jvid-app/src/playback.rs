@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Mixer, Output, SAMPLE_RATE, Strip, automate};
-use jvid_core::eval::{Layer, audio_in, video_at};
+use jvid_core::eval::{AudioSegment, Layer, audio_in, video_at};
 use jvid_core::model::{
     AssetId, ClipId, MediaAsset, Project, ProjectSettings, TrackKind, Transform,
 };
@@ -167,6 +167,8 @@ pub(crate) struct Audio {
     /// One source per stream the clip plays; several are summed.
     clips: HashMap<ClipId, Vec<ClipAudio>>,
     scratch: Vec<f32>,
+    /// Source samples for a clip not at 100% speed, before resampling.
+    stretch: Vec<f32>,
     mixer: Mixer,
     /// One buffer per audio track, reused across blocks.
     inputs: Vec<Vec<f32>>,
@@ -178,6 +180,7 @@ impl Audio {
             open,
             clips: HashMap::new(),
             scratch: Vec::new(),
+            stretch: Vec::new(),
             mixer: Mixer::new(0),
             inputs: Vec::new(),
         }
@@ -242,12 +245,12 @@ impl Audio {
                 .or_insert_with(|| open_streams(&mut self.open, asset, s.stream));
             let out = &mut self.inputs[i][span(s.start)..span(s.end)];
             if let [src] = srcs.as_mut_slice() {
-                src(sample(s.source_start), out);
+                read(src, &s, out, &mut self.stretch);
             } else {
                 for src in srcs {
                     self.scratch.clear();
                     self.scratch.resize(out.len(), 0.0);
-                    src(sample(s.source_start), &mut self.scratch);
+                    read(src, &s, &mut self.scratch, &mut self.stretch);
                     out.iter_mut().zip(&self.scratch).for_each(|(o, x)| *o += x);
                 }
             }
@@ -268,6 +271,30 @@ impl Audio {
         }
         let inputs: Vec<&[f32]> = self.inputs.iter().map(Vec::as_slice).collect();
         self.mixer.mix(&inputs, out);
+    }
+}
+
+/// Fills stereo `out` with segment `s` from `src`, resampled linearly when not at 100%
+/// speed, so pitch follows speed, and backwards when reversed.
+fn read(src: &mut ClipAudio, s: &AudioSegment, out: &mut [f32], tmp: &mut Vec<f32>) {
+    let from = sample(s.source_start);
+    if s.speed == 1.0 && !s.reverse {
+        return src(from, out);
+    }
+    let frames = out.len() / 2;
+    let n = (frames as f64 * s.speed).ceil() as usize;
+    // One frame spare to interpolate towards.
+    tmp.clear();
+    tmp.resize((n + 1) * 2, 0.0);
+    src(if s.reverse { from - n as i64 } else { from }, tmp);
+    for i in 0..frames {
+        let x = i as f64 * s.speed;
+        let x = if s.reverse { n as f64 - x } else { x };
+        let (j, f) = (x.floor() as usize, (x.fract()) as f32);
+        for ch in 0..2 {
+            let (a, b) = (tmp[j * 2 + ch], tmp[(j + 1).min(n) * 2 + ch]);
+            out[i * 2 + ch] = a + (b - a) * f;
+        }
     }
 }
 
