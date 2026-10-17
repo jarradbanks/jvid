@@ -516,6 +516,7 @@ impl eframe::App for App {
                 relink: None,
                 import_clicked: false,
                 command: None,
+                gesture: None,
                 open: None,
                 preview: &mut self.preview,
                 timeline: &mut self.timeline,
@@ -530,9 +531,10 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            let (import, command, relink, open) = (
+            let (import, command, gesture, relink, open) = (
                 viewer.import_clicked,
                 viewer.command,
+                viewer.gesture,
                 viewer.relink,
                 viewer.open,
             );
@@ -540,9 +542,12 @@ impl eframe::App for App {
                 self.preview.open(self.history.project(), id);
                 self.preview_active = 0;
             }
-            if let Some(c) = command
-                && let Err(e) = self.history.apply(c)
-            {
+            let applied = match (command, gesture) {
+                (Some(c), Some(k)) => Some(self.history.apply_coalesced(k, c)),
+                (Some(c), None) => Some(self.history.apply(c)),
+                (None, _) => None,
+            };
+            if let Some(Err(e)) = applied {
                 tracing::warn!("edit failed: {e}");
             }
             if import {
@@ -645,6 +650,8 @@ struct Viewer<'a> {
     relink: Option<AssetId>,
     import_clicked: bool,
     command: Option<Command>,
+    /// Set when `command` continues a drag, so the drag is one undo step.
+    gesture: Option<jvid_core::history::GestureKey>,
     open: Option<jvid_core::model::AssetId>,
     preview: &'a mut Preview,
     timeline: &'a mut Timeline,
@@ -701,7 +708,11 @@ impl TabViewer for Viewer<'_> {
             return;
         }
         if *tab == Tab::Timeline {
-            panel.show(ui, |ui| self.timeline.show(ui, self.project, self.missing));
+            panel.show(ui, |ui| {
+                if let Some((c, g)) = self.timeline.show(ui, self.project, self.missing) {
+                    (self.command, self.gesture) = (Some(c), g);
+                }
+            });
             return;
         }
         // shortcut: panels are empty shells; their content lands in later issues.

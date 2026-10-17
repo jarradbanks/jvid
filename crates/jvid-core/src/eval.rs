@@ -112,8 +112,8 @@ mod tests {
     #[test]
     fn video_stack_cut_points_and_source_time() {
         let mut s = Sequence::default();
-        let v2 = s.add_track(TrackKind::Video, "V2");
         let v1 = s.add_track(TrackKind::Video, "V1");
+        let v2 = s.add_track(TrackKind::Video, "V2");
         s.add_track(TrackKind::Audio, "A1");
         let a = s.add_clip(v1, clip(0, 10)).unwrap();
         let b = s.add_clip(v1, clip(10, 10)).unwrap();

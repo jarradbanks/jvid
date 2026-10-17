@@ -15,8 +15,9 @@ for w in Regular Medium SemiBold; do
     --layout-features='kern,liga,calt' --no-hinting --output-file=Inter-$w.ttf
 done
 # chevron-down, chevron-right, search, check, x, plus, ellipsis, circle-alert, undo-2, redo-2,
-# layout-grid, list, audio-waveform, play, pause, skip-back, skip-forward, rewind, fast-forward
-pyftsubset lucide.ttf --unicodes="U+E071,U+E073,U+E155,U+E070,U+E1B2,U+E141,U+E0BA,U+E07B,U+E2A1,U+E2A0,U+E105,U+E10C,U+E560,U+E140,U+E132,U+E163,U+E164,U+E14B,U+E0C1" --output-file=lucide-subset.ttf
+# layout-grid, list, audio-waveform, play, pause, skip-back, skip-forward, rewind, fast-forward,
+# lock, eye, eye-off
+pyftsubset lucide.ttf --unicodes="U+E071,U+E073,U+E155,U+E070,U+E1B2,U+E141,U+E0BA,U+E07B,U+E2A1,U+E2A0,U+E105,U+E10C,U+E560,U+E140,U+E132,U+E163,U+E164,U+E14B,U+E0C1,U+E10F,U+E0BE,U+E0BF" --output-file=lucide-subset.ttf
 ```
 
 To add an icon, look up its code point in lucide-static's `font/info.json`, add it to the last command, and add a constant to `icon` in `src/theme.rs`.
