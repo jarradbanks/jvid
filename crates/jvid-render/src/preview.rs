@@ -212,7 +212,13 @@ impl Preview {
             pass.draw(0..3, 0..1);
         }
         queue.submit([encoder.finish()]);
+        self.show_image(device, image);
+    }
 
+    /// Makes `image` (an [`IMAGE_FORMAT`] texture with an sRGB view format, such as a composited
+    /// frame) the one [`Preview::paint`] draws.
+    pub fn show_image(&mut self, device: &wgpu::Device, image: wgpu::Texture) {
+        let srgb_view = [IMAGE_FORMAT.add_srgb_suffix()];
         let view = image.create_view(&wgpu::TextureViewDescriptor {
             format: Some(if self.srgb {
                 srgb_view[0]

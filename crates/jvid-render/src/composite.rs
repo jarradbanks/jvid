@@ -119,7 +119,9 @@ impl Compositor {
             .as_ref()
             .is_none_or(|t| (t.width(), t.height()) != (w, h))
         {
-            let tex = |usage| {
+            // The sRGB view lets `Preview::show_image` draw the target unchanged.
+            let srgb = [FORMAT.add_srgb_suffix()];
+            let tex = |usage, view_formats| {
                 device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("composite"),
                     size: wgpu::Extent3d {
@@ -132,14 +134,18 @@ impl Compositor {
                     dimension: wgpu::TextureDimension::D2,
                     format: FORMAT,
                     usage,
-                    view_formats: &[],
+                    view_formats,
                 })
             };
-            self.target = Some(tex(wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC));
+            self.target = Some(tex(
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
+                &srgb,
+            ));
             self.backdrop = Some(tex(
-                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST
+                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                &[],
             ));
         }
         let target = self.target.as_ref().unwrap();
