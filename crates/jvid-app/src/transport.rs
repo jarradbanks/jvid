@@ -4,7 +4,7 @@
 //! one whose audio is playing. Every speed change or seek flushes the output ring and re-anchors
 //! at the clock, so audio already queued can't play on or pull the two apart.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel, sync_channel};
 use std::thread::JoinHandle;
 
@@ -169,16 +169,11 @@ const AHEAD: usize = 16;
 const MAX_GAP: i64 = SAMPLE_RATE as i64;
 
 impl AudioSource {
-    /// Silent when the file has no audio or it can't be opened.
+    /// Silent when the file has no audio or it can't be opened. The file is opened on the feeder
+    /// thread, so this does no I/O and is safe to call from the UI thread.
     pub fn open(path: &Path, has_audio: bool) -> Self {
-        let dec = has_audio
-            .then(|| AudioDecoder::open(path, 0))
-            .and_then(|r| {
-                r.map_err(|e| tracing::warn!("source audio of {}: {e}", path.display()))
-                    .ok()
-            });
         Self {
-            feeder: dec.map(Feeder::spawn),
+            feeder: has_audio.then(|| Feeder::spawn(path.to_owned())),
             buf: Vec::new(),
             // Forces a seek on first use.
             at: i64::MAX,
@@ -216,12 +211,17 @@ impl AudioSource {
 }
 
 impl Feeder {
-    fn spawn(mut dec: AudioDecoder) -> Self {
+    fn spawn(path: PathBuf) -> Self {
         let (seek, seeks) = channel::<(u64, i64)>();
         let (tx, chunks) = sync_channel(AHEAD);
         let thread = std::thread::Builder::new()
             .name("source-audio".into())
             .spawn(move || {
+                // On failure the thread exits, the next seek fails, and the source goes silent.
+                let mut dec = match AudioDecoder::open(&path, 0) {
+                    Ok(d) => d,
+                    Err(e) => return tracing::warn!("source audio of {}: {e}", path.display()),
+                };
                 // Idle until the first seek; exits when the source is dropped.
                 let Ok(mut want) = seeks.recv() else { return };
                 loop {

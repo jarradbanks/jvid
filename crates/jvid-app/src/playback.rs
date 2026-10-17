@@ -13,7 +13,7 @@
 #![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
@@ -36,6 +36,8 @@ const AHEAD: i64 = 15;
 const DECODE_THREADS: usize = 4;
 /// Audio clips starting this soon are opened and seeked before they're heard.
 const AUDIO_AHEAD: Time = Time(FLICKS_PER_SECOND);
+/// A failed decode is retried after this long, e.g. once a file being written or relinked is ready.
+const RETRY: Duration = Duration::from_secs(1);
 /// Default frame cache budget: about 170 1080p frames.
 pub const DEFAULT_BUDGET: usize = 512 << 20;
 const FLICKS_PER_SAMPLE: i64 = FLICKS_PER_SECOND / SAMPLE_RATE as i64;
@@ -50,8 +52,8 @@ pub type OpenAudio = Box<dyn FnMut(&Path) -> ClipAudio>;
 
 /// A frame of an asset at a source time.
 type Key = (AssetId, Time);
-/// A finished decode and when it was queued.
-type Done = (Key, Instant, Result<Frame, String>);
+/// A finished decode and how long decoding took.
+type Done = (Key, Duration, Result<Frame, String>);
 
 /// What to draw for one timeline frame.
 pub struct Shown {
@@ -66,8 +68,7 @@ pub struct FrameCache {
     budget: usize,
     bytes: usize,
     uses: u64,
-    /// `None` for a frame that failed to decode, so it isn't retried every UI frame.
-    frames: HashMap<Key, (Option<Arc<Frame>>, u64)>,
+    frames: HashMap<Key, (Arc<Frame>, u64)>,
 }
 
 impl FrameCache {
@@ -89,7 +90,7 @@ impl FrameCache {
     }
 
     /// Marks the frame used.
-    fn get(&mut self, k: &Key) -> Option<Option<Arc<Frame>>> {
+    fn get(&mut self, k: &Key) -> Option<Arc<Frame>> {
         self.uses += 1;
         let (f, used) = self.frames.get_mut(k)?;
         *used = self.uses;
@@ -97,11 +98,11 @@ impl FrameCache {
     }
 
     /// Adds a frame, evicting the least recently used others while over budget.
-    fn insert(&mut self, k: Key, f: Option<Arc<Frame>>) {
+    fn insert(&mut self, k: Key, f: Arc<Frame>) {
         self.uses += 1;
-        self.bytes += f.as_deref().map_or(0, size);
+        self.bytes += size(&f);
         if let Some((old, _)) = self.frames.insert(k, (f, self.uses)) {
-            self.bytes -= old.as_deref().map_or(0, size);
+            self.bytes -= size(&old);
         }
         while self.bytes > self.budget {
             let Some((&oldest, _)) = self
@@ -113,8 +114,14 @@ impl FrameCache {
                 break;
             };
             let (old, _) = self.frames.remove(&oldest).unwrap();
-            self.bytes -= old.as_deref().map_or(0, size);
+            self.bytes -= size(&old);
         }
+    }
+
+    /// Drops every frame of `asset`.
+    fn forget(&mut self, asset: AssetId) {
+        self.frames.retain(|k, _| k.0 != asset);
+        self.bytes = self.frames.values().map(|(f, _)| size(f)).sum();
     }
 }
 
@@ -209,8 +216,14 @@ pub struct Playback {
     jobs: Pool,
     decode: DecodeFn,
     pending: HashMap<Key, Handle>,
-    /// Smoothed time from queueing a decode to having the frame.
+    /// Smoothed time a decode takes.
     latency: Duration,
+    /// Frames that failed to decode and when, so they're left out until [`RETRY`].
+    failed: HashMap<Key, Instant>,
+    /// Asset paths cached frames were decoded from, to notice a relink.
+    paths: HashMap<AssetId, PathBuf>,
+    /// Forward play loops the sequence's in/out range (all of it where a mark is unset).
+    pub looping: bool,
     done_tx: Sender<Done>,
     done: Receiver<Done>,
     /// The frame index last returned by `tick`.
@@ -228,6 +241,9 @@ impl Playback {
             decode,
             pending: HashMap::new(),
             latency: Duration::ZERO,
+            failed: HashMap::new(),
+            paths: HashMap::new(),
+            looping: false,
             done_tx,
             done,
             shown: None,
@@ -271,21 +287,43 @@ impl Playback {
         self.show(project, clock)
     }
 
-    /// Follows edits to the sequence length and the project frame rate.
+    /// Follows edits to the sequence length, in/out marks and frame rate, and drops what was
+    /// decoded or opened from an asset's old path after a relink.
     fn sync(&mut self, project: &Project) {
-        self.transport.duration = project.sequence().duration();
-        self.transport.rate = project.settings().frame_rate;
+        let seq = project.sequence();
+        let t = &mut self.transport;
+        t.duration = seq.duration();
+        t.rate = project.settings().frame_rate;
+        t.loop_range = self.looping.then(|| {
+            let out = seq.out_point().unwrap_or(t.duration);
+            (seq.in_point().unwrap_or(Time(0)), out)
+        });
+        for a in project.assets() {
+            if self.paths.get(&a.id).is_some_and(|p| *p != a.path) {
+                self.cache.forget(a.id);
+                self.failed.retain(|k, _| k.0 != a.id);
+                // Clips are reopened on the new path as they're next heard.
+                self.audio.clips.clear();
+            }
+            self.paths.insert(a.id, a.path.clone());
+        }
     }
 
     /// Takes finished decodes, then queues every layer of the next [`AHEAD`] frames that isn't
     /// cached or queued, nearest first, and cancels queued frames no longer ahead.
     fn decode_ahead(&mut self, project: &Project, clock: u64) {
-        while let Ok((k, queued, r)) = self.done.try_recv() {
+        while let Ok((k, took, r)) = self.done.try_recv() {
             self.pending.remove(&k);
-            self.latency = (self.latency * 3 + queued.elapsed()) / 4;
-            let r = r.map_err(|e| tracing::warn!("playback decode: {e}"));
-            self.cache.insert(k, r.ok().map(Arc::new));
+            self.latency = (self.latency * 3 + took) / 4;
+            match r {
+                Ok(f) => self.cache.insert(k, Arc::new(f)),
+                Err(e) => {
+                    tracing::warn!("playback decode: {e}");
+                    self.failed.insert(k, Instant::now());
+                }
+            }
         }
+        self.failed.retain(|_, at| at.elapsed() < RETRY);
         let t = &self.transport;
         // Parked: just ahead, so pressing play starts on decoded frames.
         let step = match t.speed() {
@@ -300,9 +338,24 @@ impl Playback {
                 (self.latency.as_secs_f64() * FLICKS_PER_SECOND as f64) as i64,
             )),
         };
+        // Forward play past the loop's end continues from its start.
+        let wrap = t.loop_range.filter(|_| step > 0).map(|(start, end)| {
+            let (a, b) = (
+                t.rate.index_floor(start),
+                t.rate.index_floor(end - Time(1)) + 1,
+            );
+            move |k: i64| {
+                if k >= b && b > a {
+                    a + (k - b) % (b - a)
+                } else {
+                    k
+                }
+            }
+        });
         let first = t.frame(clock) + lead * step;
         let mut want = HashSet::new();
         for k in (0..AHEAD).map(|i| first + i * step) {
+            let k = wrap.map_or(k, |w| w(k));
             let time = t.rate.time_floor(k);
             if k < 0 || time >= t.duration {
                 break;
@@ -313,7 +366,10 @@ impl Playback {
                 let Some(asset) = project.asset(layer.asset) else {
                     continue;
                 };
-                if self.cache.contains(&key) || self.pending.contains_key(&key) {
+                if self.cache.contains(&key)
+                    || self.pending.contains_key(&key)
+                    || self.failed.contains_key(&key)
+                {
                     continue;
                 }
                 let (decode, tx, path) = (
@@ -322,10 +378,11 @@ impl Playback {
                     asset.path.clone(),
                 );
                 let job = format!("playback:{}:{}", key.0.0, key.1.0);
-                let queued = Instant::now();
                 let handle = self.jobs.submit(job, Priority::Interactive, move |ctx| {
                     if !ctx.is_cancelled() {
-                        let _ = tx.send((key, queued, decode(&path, key.1)));
+                        let start = Instant::now();
+                        let r = decode(&path, key.1);
+                        let _ = tx.send((key, start.elapsed(), r));
                     }
                 });
                 self.pending.insert(key, handle);
@@ -353,8 +410,9 @@ impl Playback {
                 continue;
             }
             // Not decoded yet: keep what's on screen. A failed decode leaves the layer out.
-            if let Some(f) = self.cache.get(&(layer.asset, layer.source_time))? {
-                layers.push((f, opacity(&layer)));
+            let key = (layer.asset, layer.source_time);
+            if !self.failed.contains_key(&key) {
+                layers.push((self.cache.get(&key)?, opacity(&layer)));
             }
         }
         self.shown = Some(index);
