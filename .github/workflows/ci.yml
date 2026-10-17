@@ -58,10 +58,22 @@ jobs:
           echo 'FFMPEG_DIR=C:\ffmpeg' >> "$GITHUB_ENV"
           echo 'LIBCLANG_PATH=C:\Program Files\LLVM\bin' >> "$GITHUB_ENV"
           echo 'C:\ffmpeg\bin' >> "$GITHUB_PATH"
+      # Test media corpus (scripts/gen-test-media), Linux only to save CI minutes.
+      - if: runner.os == 'Linux'
+        id: media-cache
+        uses: actions/cache@v4
+        with:
+          path: test-media
+          key: test-media-${{ hashFiles('scripts/gen-test-media') }}
+      - if: runner.os == 'Linux' && steps.media-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          time scripts/gen-test-media
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
         env:
           JVID_GPU_TESTS: ${{ runner.os == 'Linux' && 'required' || '' }}
+          JVID_TEST_MEDIA_REQUIRED: ${{ runner.os == 'Linux' && '1' || '' }}
       # jvid-core stays free of UI, media and I/O stacks.
       - name: jvid-core boundary
         shell: bash
