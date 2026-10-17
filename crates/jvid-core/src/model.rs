@@ -193,7 +193,7 @@ impl Track {
     pub const MIN_HEIGHT: f32 = 24.0;
     pub const MAX_HEIGHT: f32 = 120.0;
 
-    fn default_height() -> f32 {
+    pub fn default_height() -> f32 {
         40.0
     }
 
@@ -406,6 +406,10 @@ pub struct Placement {
     pub start: Time,
     pub video: Option<TrackId>,
     pub audio: Option<TrackId>,
+    /// Make a new track for `video` or `audio` when it's `None`, for a file with no track of
+    /// that kind to land on.
+    pub add_video: bool,
+    pub add_audio: bool,
     /// Insert pushes every unlocked track right to make room; overwrite replaces what's there.
     pub insert: bool,
 }
@@ -759,7 +763,13 @@ impl Sequence {
         let len = p.source_out - p.source_in;
         let mut s = self.clone();
         let mut links = BTreeMap::new();
-        let targets = [(p.video, TrackKind::Video), (p.audio, TrackKind::Audio)];
+        let mut add = |t: Option<TrackId>, new, kind| match t {
+            None if new => Some(s.add_track(kind, "")),
+            t => t,
+        };
+        let video = add(p.video, p.add_video, TrackKind::Video);
+        let audio = add(p.audio, p.add_audio, TrackKind::Audio);
+        let targets = [(video, TrackKind::Video), (audio, TrackKind::Audio)];
         let mut tracks = Vec::new();
         for (t, kind) in targets {
             if let Some(t) = t {
@@ -973,7 +983,8 @@ impl Project {
 
     /// Places `asset`'s source in/out (default the whole file) at `start`: on `on` for its
     /// kind, and on the targeted track, else the top unlocked one, for the other kind the
-    /// file has. `None` when the file has no duration or no track to land on.
+    /// file has, adding a track of a kind the sequence lacks. `None` when the file has no
+    /// duration.
     pub fn placement(
         &self,
         asset: AssetId,
@@ -1000,15 +1011,21 @@ impl Project {
             })
             .flatten()
         };
-        let video = pick(TrackKind::Video, probe.width.is_some());
-        let audio = pick(TrackKind::Audio, probe.audio_streams > 0);
-        (video.is_some() || audio.is_some()).then_some(Placement {
+        let (has_video, has_audio) = (probe.width.is_some(), probe.audio_streams > 0);
+        let video = pick(TrackKind::Video, has_video);
+        let audio = pick(TrackKind::Audio, has_audio);
+        let lacks = |kind| !tracks.iter().any(|t| t.kind == kind);
+        let add_video = has_video && lacks(TrackKind::Video);
+        let add_audio = has_audio && lacks(TrackKind::Audio);
+        (video.is_some() || audio.is_some() || add_video || add_audio).then_some(Placement {
             asset,
             source_in,
             source_out,
             start: start.max(Time(0)),
             video,
             audio,
+            add_video,
+            add_audio,
             insert,
         })
     }
@@ -1060,6 +1077,8 @@ mod tests {
             start: Time(start),
             video: Some(v),
             audio: Some(a),
+            add_video: false,
+            add_audio: false,
             insert,
         }
     }
@@ -1257,6 +1276,22 @@ mod tests {
             ..probe
         });
         assert_eq!(p.placement(id, Time(0), false, None).unwrap().video, None);
+    }
+
+    #[test]
+    fn placement_on_an_empty_sequence_adds_tracks() {
+        let mut p = Project::default();
+        let id = p.add_asset("a.mp4");
+        p.asset_mut(id).unwrap().probe = Some(ProbeInfo {
+            duration: Time(100),
+            width: Some(4),
+            audio_streams: 1,
+            ..Default::default()
+        });
+        let pl = p.placement(id, Time(5), false, None).unwrap();
+        assert_eq!(p.sequence.place(pl).unwrap().len(), 2);
+        let kinds: Vec<_> = p.sequence.tracks().iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, [TrackKind::Video, TrackKind::Audio]);
     }
 
     #[test]
