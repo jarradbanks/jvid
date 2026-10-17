@@ -33,6 +33,8 @@ pub struct Settings {
     pub still_duration_secs: u32,
     /// `dark`, `light`, `high-contrast` or the path of a theme `.toml` file.
     pub theme: String,
+    /// Decode H.264/HEVC on the GPU when a device opens; off forces software.
+    pub hardware_decode: bool,
 }
 
 impl Default for Settings {
@@ -45,6 +47,7 @@ impl Default for Settings {
             recent_projects: Vec::new(),
             still_duration_secs: DEFAULT_STILL_SECS,
             theme: "dark".into(),
+            hardware_decode: true,
         }
     }
 }
@@ -80,6 +83,7 @@ impl Settings {
                     STILL_SECS_RANGE.contains(v)
                 }),
                 "theme" => set(&mut out.theme, &key, value, |v: &String| !v.is_empty()),
+                "hardware_decode" => set(&mut out.hardware_decode, &key, value, |_| true),
                 _ => tracing::warn!("settings: ignoring unknown key `{key}`"),
             }
         }
@@ -148,6 +152,7 @@ mod tests {
             recent_projects: vec!["a.jvid".into(), "b/c.jvid".into()],
             still_duration_secs: 3,
             theme: "/home/me/mine.toml".into(),
+            hardware_decode: false,
         };
         assert_eq!(Settings::from_toml(&s.to_toml()).unwrap(), s);
         let d = Settings::default();

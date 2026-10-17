@@ -31,6 +31,7 @@ pub struct VideoDecoder {
     decoder: decoder::Video,
     time_base: Rational,
     rotation: u32,
+    hwaccel: Option<&'static str>,
     /// Last decoded frame at or before the previous target, and the one after it.
     cur: Option<frame::Video>,
     next: Option<frame::Video>,
@@ -45,8 +46,10 @@ impl VideoDecoder {
             .streams()
             .best(media::Type::Video)
             .ok_or(Error::StreamNotFound)?;
-        let ctx = ffmpeg_next::codec::Context::from_parameters(stream.parameters())?;
+        let mut ctx = ffmpeg_next::codec::Context::from_parameters(stream.parameters())?;
+        let hwaccel = crate::hwdec::attach(&mut ctx);
         Ok(Self {
+            hwaccel,
             stream: stream.index(),
             time_base: stream.time_base(),
             rotation: crate::probe::rotation(&stream),
@@ -56,6 +59,11 @@ impl VideoDecoder {
             next: None,
             eof_sent: false,
         })
+    }
+
+    /// The hardware device decoding this file, if any (see [`crate::hwdec`]).
+    pub fn hwaccel(&self) -> Option<&'static str> {
+        self.hwaccel
     }
 
     /// The frame shown at `t`; before the first frame, the first frame.
@@ -90,6 +98,13 @@ impl VideoDecoder {
     fn current(&self) -> Result<Frame, Error> {
         let cur = self.cur.as_ref().ok_or(Error::Eof)?;
         let time = self.to_time(pts(cur));
+        let downloaded;
+        let cur = if crate::hwdec::is_hardware(cur) {
+            downloaded = crate::hwdec::download(cur)?;
+            &downloaded
+        } else {
+            cur
+        };
         let mut frame = upright(&to_i420(cur)?, self.rotation);
         frame.pts = time;
         Ok(frame)

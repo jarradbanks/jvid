@@ -94,6 +94,7 @@ const TOAST_SECS: f64 = 6.0;
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, settings: &jvid_core::settings::Settings) -> Self {
         theme::install(&cc.egui_ctx);
+        jvid_media::hwdec::set_enabled(settings.hardware_decode);
         let mut app = Self::restore(cc.storage);
         let caches = crate::media_bin::Caches::new(settings);
         app.bin = MediaBin::new(caches.clone());

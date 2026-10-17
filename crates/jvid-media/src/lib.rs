@@ -4,6 +4,7 @@ pub mod audio;
 pub mod decode;
 pub mod encode;
 pub mod ffmpeg;
+pub mod hwdec;
 pub mod probe;
 pub mod proxy;
 pub mod stills;
