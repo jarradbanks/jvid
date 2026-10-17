@@ -163,7 +163,7 @@ impl Audio {
 
     /// Opens and seeks clips heard within [`AUDIO_AHEAD`] of `pos`, so they start on time, and
     /// closes the rest.
-    fn prime(&mut self, project: &Project, pos: Time) {
+    pub(crate) fn prime(&mut self, project: &Project, pos: Time) {
         let segs = audio_in(project.sequence(), pos, pos + AUDIO_AHEAD);
         self.clips.retain(|c, _| segs.iter().any(|s| s.clip == *c));
         for s in segs {

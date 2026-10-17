@@ -16,6 +16,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, State};
 
+use crate::export::Error as ExportError;
 use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
@@ -84,7 +85,7 @@ pub struct App {
     keymap_editor: crate::keymap_editor::KeymapEditor,
     exports: jvid_jobs::Pool,
     /// The running export and where its result arrives.
-    export: Option<(jvid_jobs::Handle, Receiver<Result<ProbeInfo, String>>)>,
+    export: Option<(jvid_jobs::Handle, Receiver<Result<ProbeInfo, ExportError>>)>,
 }
 
 const TOAST_SECS: f64 = 6.0;
@@ -405,7 +406,7 @@ impl App {
         match rx.try_recv() {
             Ok(Ok(_)) => self.export = None,
             Ok(Err(e)) => {
-                if e != "cancelled" {
+                if let ExportError::Failed(e) = e {
                     self.toasts
                         .push((format!("Export failed: {e}"), now + TOAST_SECS));
                 }

@@ -9,10 +9,13 @@ use jvid_core::time::Rate;
 
 use crate::audio::SAMPLE_RATE;
 
-/// H.264 first (libx264 only in a GPL FFmpeg, OpenH264 in LGPL ones), then MPEG-4 Part 2,
-/// which every FFmpeg build has.
+/// H.264 first (libx264 only with the `gpl-ffmpeg` feature, per the licensing ADR; OpenH264
+/// otherwise), then MPEG-4 Part 2, which every FFmpeg build has.
 /// shortcut: fixed codecs and quality; presets (#53) and hardware encoders (#55) choose later.
-const VIDEO_CODECS: [&str; 3] = ["libx264", "libopenh264", "mpeg4"];
+#[cfg(feature = "gpl-ffmpeg")]
+const VIDEO_CODECS: &[&str] = &["libx264", "libopenh264", "mpeg4"];
+#[cfg(not(feature = "gpl-ffmpeg"))]
+const VIDEO_CODECS: &[&str] = &["libopenh264", "mpeg4"];
 
 struct Stream<E> {
     enc: E,

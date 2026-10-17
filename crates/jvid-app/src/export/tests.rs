@@ -55,7 +55,7 @@ fn out(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("jvid-export-{}-{name}", std::process::id()))
 }
 
-fn run_now(p: &Project, req: &Request, cancel: bool) -> Result<ProbeInfo, String> {
+fn run_now(p: &Project, req: &Request, cancel: bool) -> Result<ProbeInfo, Error> {
     let (device, queue) = device().expect("checked by caller");
     let pool = Pool::new(1);
     let (tx, rx) = channel();
@@ -146,6 +146,22 @@ fn cancelled_export_leaves_no_file() {
         path: path.clone(),
         range: (Time(0), secs(10)),
     };
-    assert_eq!(run_now(&project(&dir), &req, true), Err("cancelled".into()));
+    assert_eq!(run_now(&project(&dir), &req, true), Err(Error::Cancelled));
     assert!(!path.exists());
+}
+
+#[test]
+fn failed_export_leaves_existing_file() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let path = out("keep.mp4");
+    std::fs::write(&path, b"keep").unwrap();
+    let req = Request {
+        path: path.clone(),
+        range: (secs(1), secs(1)),
+    };
+    assert!(matches!(run_now(&project(&dir), &req, false), Err(Error::Failed(_))));
+    assert_eq!(std::fs::read(&path).unwrap(), b"keep");
+    std::fs::remove_file(&path).unwrap();
 }
