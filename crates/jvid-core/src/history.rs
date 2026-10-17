@@ -3,9 +3,10 @@
 //! Undo steps are project snapshots taken before each step: the project is
 //! plain data with no media in it, so a clone is cheap and revert is exact.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 
+use crate::keyframe::{self, Keyframe};
 use crate::model::{
     AssetId, ClipId, LinkId, MarkerId, ModelError, NewClip, ProbeInfo, Project, ProjectSettings,
     TrackId, TrackKind,
@@ -61,6 +62,25 @@ pub enum Command {
         id: ClipId,
         key: String,
         value: Option<f64>,
+    },
+    /// Adds a keyframe to a clip param, replacing one at the same time.
+    AddKeyframe {
+        id: ClipId,
+        param: String,
+        key: Keyframe,
+    },
+    /// Removes the keyframe at source time `time`.
+    RemoveKeyframe {
+        id: ClipId,
+        param: String,
+        time: Time,
+    },
+    /// Moves a keyframe to source time `to`, replacing one already there.
+    MoveKeyframe {
+        id: ClipId,
+        param: String,
+        from: Time,
+        to: Time,
     },
     AddMarker {
         time: Time,
@@ -155,6 +175,32 @@ impl Command {
                 })?;
                 Created::Nothing
             }
+            Self::AddKeyframe { id, param, key } => {
+                s.with_clip_mut(id, |c| {
+                    keyframe::insert(c.keyframes.entry(param).or_default(), key)
+                })?;
+                Created::Nothing
+            }
+            Self::RemoveKeyframe { id, param, time } => {
+                s.with_clip_mut(id, |c| take_key(c.keyframes, &param, time))?
+                    .ok_or(ModelError::UnknownKeyframe(id, time))?;
+                Created::Nothing
+            }
+            Self::MoveKeyframe {
+                id,
+                param,
+                from,
+                to,
+            } => {
+                s.with_clip_mut(id, |c| {
+                    let mut k = take_key(c.keyframes, &param, from)?;
+                    k.time = to;
+                    keyframe::insert(c.keyframes.entry(param).or_default(), k);
+                    Some(())
+                })?
+                .ok_or(ModelError::UnknownKeyframe(id, from))?;
+                Created::Nothing
+            }
             Self::AddMarker {
                 time,
                 duration,
@@ -183,6 +229,21 @@ impl Command {
             }
         })
     }
+}
+
+/// Removes a keyframe, dropping the param's list once empty so add then
+/// remove leaves the clip as it was.
+fn take_key(
+    keys: &mut BTreeMap<String, Vec<Keyframe>>,
+    param: &str,
+    time: Time,
+) -> Option<Keyframe> {
+    let list = keys.get_mut(param)?;
+    let k = keyframe::remove(list, time)?;
+    if list.is_empty() {
+        keys.remove(param);
+    }
+    Some(k)
 }
 
 /// Coalescing key for a continuous gesture, e.g. one per drag.
@@ -470,6 +531,85 @@ mod tests {
         assert_eq!(h.project().sequence().tracks().len(), 2);
     }
 
+    #[test]
+    fn keyframes_stay_in_place_when_trimmed_and_move_with_clip() {
+        use crate::keyframe::{Easing, Value};
+        let mut h = History::new(Project::default());
+        let t = track(&mut h);
+        let Created::Clip(c) = h.apply(add_clip(t, 100)).unwrap() else {
+            panic!()
+        };
+        let key = |time, v| Command::AddKeyframe {
+            id: c,
+            param: "opacity".into(),
+            key: Keyframe {
+                time: Time(time),
+                value: Value::Scalar(v),
+                easing: Easing::Linear,
+            },
+        };
+        h.apply(key(2, 0.0)).unwrap();
+        h.apply(key(8, 1.0)).unwrap();
+        let clip = |h: &History| h.project().sequence().clip(c).unwrap().1.clone();
+        assert_eq!(
+            clip(&h).value_at("opacity", Time(105)),
+            Some(Value::Scalar(0.5))
+        );
+        // trim 3 off the head: the same media frame keeps the same value
+        h.apply(Command::TrimClip {
+            id: c,
+            start: Time(103),
+            source_in: Time(3),
+            source_out: Time(10),
+        })
+        .unwrap();
+        assert_eq!(clip(&h).keyframes["opacity"][0].time, Time(2));
+        assert_eq!(
+            clip(&h).value_at("opacity", Time(105)),
+            Some(Value::Scalar(0.5))
+        );
+        h.apply(Command::MoveClip {
+            id: c,
+            track: t,
+            start: Time(203),
+        })
+        .unwrap();
+        assert_eq!(
+            clip(&h).value_at("opacity", Time(205)),
+            Some(Value::Scalar(0.5))
+        );
+        h.apply(Command::MoveKeyframe {
+            id: c,
+            param: "opacity".into(),
+            from: Time(8),
+            to: Time(4),
+        })
+        .unwrap();
+        assert_eq!(
+            clip(&h).value_at("opacity", Time(203)),
+            Some(Value::Scalar(0.5))
+        );
+        assert_eq!(
+            h.apply(Command::RemoveKeyframe {
+                id: c,
+                param: "opacity".into(),
+                time: Time(8),
+            }),
+            Err(ModelError::UnknownKeyframe(c, Time(8)))
+        );
+        for time in [2, 4] {
+            h.apply(Command::RemoveKeyframe {
+                id: c,
+                param: "opacity".into(),
+                time: Time(time),
+            })
+            .unwrap();
+        }
+        assert!(clip(&h).keyframes.is_empty());
+        while h.undo() {}
+        assert_eq!(h.project(), &Project::default());
+    }
+
     #[derive(Debug, Clone)]
     enum Op {
         Cmd(Command),
@@ -551,6 +691,30 @@ mod tests {
                     id: ClipId(c),
                     key,
                     value,
+                }
+            }),
+            (id.clone(), "[ab]", t(), 0f64..1.0).prop_map(|(c, param, time, v)| {
+                Command::AddKeyframe {
+                    id: ClipId(c),
+                    param,
+                    key: Keyframe {
+                        time,
+                        value: crate::keyframe::Value::Scalar(v),
+                        easing: crate::keyframe::Easing::Bezier([v, 0.0, 1.0, v]),
+                    },
+                }
+            }),
+            (id.clone(), "[ab]", t()).prop_map(|(c, param, time)| Command::RemoveKeyframe {
+                id: ClipId(c),
+                param,
+                time,
+            }),
+            (id.clone(), "[ab]", t(), t()).prop_map(|(c, param, from, to)| {
+                Command::MoveKeyframe {
+                    id: ClipId(c),
+                    param,
+                    from,
+                    to,
                 }
             }),
             (t(), 0i64..20).prop_map(|(time, d)| Command::AddMarker {
