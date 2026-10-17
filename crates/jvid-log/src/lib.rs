@@ -54,7 +54,10 @@ pub fn init(app: &str, dir: Option<PathBuf>) -> Option<WorkerGuard> {
         .with(file_layer)
         .try_init();
     // No data dir: crash logs still go somewhere findable.
-    install_panic_hook(app, dir.unwrap_or_else(|| std::env::temp_dir().join("jvid")));
+    install_panic_hook(
+        app,
+        dir.unwrap_or_else(|| std::env::temp_dir().join("jvid")),
+    );
     guard
 }
 
