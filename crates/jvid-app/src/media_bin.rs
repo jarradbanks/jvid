@@ -1,10 +1,18 @@
 //! The media bin: Media, Text and Effects tabs; a searchable, sortable grid or list
 //! of the project's assets with rename and remove.
 
-use egui::{Align2, CornerRadius, Key, Rect, Sense, StrokeKind, Ui, UiBuilder, pos2, vec2};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use egui::{
+    Align2, CornerRadius, Key, Rect, Sense, StrokeKind, TextureHandle, Ui, UiBuilder, pos2, vec2,
+};
 use jvid_core::history::Command;
 use jvid_core::model::{AssetId, MediaAsset, Project};
 use jvid_core::time::FLICKS_PER_SECOND;
+use jvid_jobs::Pool;
+use jvid_media::thumbnails::Cache;
 use suite_ui::panel::{Panel, PanelResponse};
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
@@ -28,6 +36,7 @@ pub struct MediaBin {
     pub renaming: Option<(AssetId, String)>,
     /// An in-use asset waiting on the remove warning.
     pub confirm_remove: Option<AssetId>,
+    thumbs: Thumbs,
 }
 
 /// What the bin asked the app to do this frame.
@@ -181,7 +190,7 @@ impl MediaBin {
         );
         let corner = CornerRadius::same(radius::CONTROL);
         let p = ui.painter();
-        thumbnail(ui, thumb, a);
+        self.thumbs.paint(ui, thumb, a);
         if let Some(d) = duration_label(a) {
             let galley = p.layout_no_wrap(d, theme::small(), color::INK);
             let badge = Rect::from_min_size(
@@ -372,18 +381,78 @@ impl MediaBin {
     }
 }
 
-/// The tile's picture. shortcut: a neutral placeholder; #21 paints the cached thumbnail here.
-fn thumbnail(ui: &Ui, rect: Rect, asset: &MediaAsset) {
-    let p = ui.painter();
-    p.rect_filled(rect, CornerRadius::same(radius::CONTROL), color::RAISED);
-    if is_audio(asset) {
-        p.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            icon::AUDIO,
-            theme::icon_font(),
-            color::INK_3,
-        );
+/// Poster thumbnails, made on a job pool and kept on disk by `jvid_media::thumbnails`.
+#[derive(Default)]
+struct Thumbs {
+    /// Started on first paint, so tests and empty bins spawn nothing.
+    cache: Option<(Arc<Cache>, Pool)>,
+    /// Posters finished off-thread, waiting to become textures.
+    done: Arc<Mutex<Vec<(PathBuf, egui::ColorImage)>>>,
+    /// `None` while a poster is in flight or failed; the placeholder shows.
+    textures: HashMap<PathBuf, Option<TextureHandle>>,
+}
+
+impl Thumbs {
+    /// The tile's picture: the cached poster, or a neutral placeholder until it's ready.
+    fn paint(&mut self, ui: &Ui, rect: Rect, asset: &MediaAsset) {
+        let p = ui.painter();
+        p.rect_filled(rect, CornerRadius::same(radius::CONTROL), color::RAISED);
+        if is_audio(asset) {
+            p.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                icon::AUDIO,
+                theme::icon_font(),
+                color::INK_3,
+            );
+            return;
+        }
+        let Some(probe) = &asset.probe else { return };
+        for (path, img) in self.done.lock().unwrap().drain(..) {
+            let tex = ui
+                .ctx()
+                .load_texture(path.display().to_string(), img, Default::default());
+            self.textures.insert(path, Some(tex));
+        }
+        match self.textures.get(&asset.path) {
+            Some(Some(tex)) => {
+                // Letterbox inside the 16:9 tile.
+                let t = tex.size_vec2();
+                let r = Rect::from_center_size(rect.center(), t * (rect.size() / t).min_elem());
+                egui::Image::new(tex)
+                    .corner_radius(radius::CONTROL)
+                    .paint_at(ui, r);
+            }
+            Some(None) => {}
+            None => {
+                self.textures.insert(asset.path.clone(), None);
+                let (cache, jobs) = self.cache.get_or_insert_with(|| {
+                    let s = crate::settings_file::load();
+                    let dir = s
+                        .cache_dir
+                        .or_else(|| {
+                            directories::ProjectDirs::from("", "", "jvid")
+                                .map(|d| d.cache_dir().to_owned())
+                        })
+                        .unwrap_or_else(std::env::temp_dir)
+                        .join("thumbnails");
+                    (
+                        Arc::new(Cache::new(dir, s.cache_max_mb << 20)),
+                        Pool::new(2),
+                    )
+                });
+                let (done, ctx, path) = (self.done.clone(), ui.ctx().clone(), asset.path.clone());
+                cache.submit_poster(jobs, path.clone(), probe.duration, move |r| match r {
+                    Ok(img) => {
+                        let size = [img.width() as usize, img.height() as usize];
+                        let img = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+                        done.lock().unwrap().push((path, img));
+                        ctx.request_repaint();
+                    }
+                    Err(e) => tracing::warn!("thumbnail for {}: {e}", path.display()),
+                });
+            }
+        }
     }
 }
 
