@@ -36,7 +36,9 @@ fn harness(size: [f32; 2], ppp: f32) -> Harness<'static, App> {
 }
 
 fn welcome_harness(size: [f32; 2], ppp: f32) -> Harness<'static, App> {
-    let mut h = builder(size, ppp).wgpu().build_eframe(|cc| App::new(cc));
+    let mut h = builder(size, ppp)
+        .wgpu()
+        .build_eframe(|cc| App::new(cc, &Default::default()));
     h.run();
     h
 }
@@ -720,7 +722,7 @@ fn fake_probe(p: &std::path::Path) -> Result<jvid_core::model::ProbeInfo, String
 
 /// No GPU: state-transition tests run everywhere.
 fn plain_harness() -> Harness<'static, App> {
-    let mut h = builder([1280.0, 720.0], 1.0).build_eframe(|cc| App::new(cc));
+    let mut h = builder([1280.0, 720.0], 1.0).build_eframe(|cc| App::new(cc, &Default::default()));
     h.run();
     h
 }

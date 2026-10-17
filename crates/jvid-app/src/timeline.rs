@@ -10,16 +10,16 @@ use egui::{
 };
 use jvid_core::model::{Clip, MediaAsset, Project, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
-use jvid_jobs::{Pool, Priority};
+use jvid_jobs::Priority;
 use jvid_media::thumbnails;
-use jvid_media::waveforms::{self, Pyramid};
+use jvid_media::waveforms::Pyramid;
 use suite_ui::theme;
-use suite_ui::tokens::{color, radius, size};
+use suite_ui::tokens::{color, radius, size, space};
 
+use crate::media_bin::Caches;
 use crate::transport::Transport;
 
-/// Default lane height (DESIGN.md Track).
-const TRACK: f32 = 40.0;
+const TRACK: f32 = size::TRACK;
 /// Zoom limits in points per second: about four hours across 1000pt, to a frame 40pt wide.
 const MIN_ZOOM: f64 = 0.07;
 const MAX_ZOOM: f64 = 2400.0;
@@ -163,6 +163,12 @@ impl Timeline {
         self.transport.duration = project.sequence().duration() + tail;
     }
 
+    pub fn new(caches: Arc<Caches>) -> Self {
+        let mut t = Self::default();
+        t.media.caches = Some(caches);
+        t
+    }
+
     fn view(&self, left: f32) -> View {
         View {
             left,
@@ -234,7 +240,7 @@ impl Timeline {
                 continue;
             }
             lane_painter.text(
-                pos2(area.left(), lane.center().y),
+                pos2(area.left() + space::INSET, lane.center().y),
                 Align2::LEFT_CENTER,
                 &track.name,
                 theme::body_strong(),
@@ -246,7 +252,9 @@ impl Timeline {
                 color::BORDER,
             );
             for clip in visible(track.clips(), start, end) {
-                let x = view.x(clip.start)..=view.x(clip.end());
+                // Clamped just past the lanes so far off-screen ends don't make huge coordinates.
+                let (l, r) = (lanes.left() - 8.0, lanes.right() + 8.0);
+                let x = view.x(clip.start).clamp(l, r)..=view.x(clip.end()).clamp(l, r);
                 // 2px gaps between clips and 2px above and below inside the lane.
                 let r = Rect::from_x_y_ranges(x, lane.y_range()).shrink2(vec2(1.0, 2.0));
                 let asset = project.asset(clip.asset);
@@ -256,6 +264,7 @@ impl Timeline {
                     &clip_painter,
                     r,
                     lanes,
+                    view,
                     clip,
                     asset,
                     track.kind,
@@ -280,7 +289,7 @@ impl Timeline {
         let last = rate.index_floor(end) + 1;
         let mut f = first;
         while f <= last {
-            let x = view.x(rate.time_floor(f));
+            let x = (view.x(rate.time_floor(f)) * ppp).round() / ppp;
             let is_major = f % major == 0;
             let h = if is_major { 8.0 } else { 4.0 };
             painter.rect_filled(
@@ -308,20 +317,29 @@ impl Timeline {
         // Corner cell: the playhead's timecode and the zoom slider.
         let playhead = self.playhead();
         painter.text(
-            pos2(area.left(), ruler.center().y),
+            pos2(area.left() + space::INSET, ruler.center().y),
             Align2::LEFT_CENTER,
             format_timecode(rate.index_floor(playhead).max(0) as u64, rate),
             theme::body_strong(),
             color::INK,
         );
-        let slider = Rect::from_x_y_ranges(lanes_left - 64.0..=lanes_left - 8.0, ruler.y_range());
-        let mut z = self.zoom;
-        let r = ui.put(
-            slider,
-            egui::Slider::new(&mut z, MIN_ZOOM..=MAX_ZOOM)
-                .logarithmic(true)
-                .show_value(false),
+        let slider = Rect::from_x_y_ranges(
+            lanes_left - 64.0..=lanes_left - space::INSET,
+            ruler.y_range(),
         );
+        let mut z = self.zoom;
+        let r = ui
+            .scope(|ui| {
+                // Its default width would spill past `slider` over the timecode and ruler.
+                ui.spacing_mut().slider_width = slider.width();
+                ui.put(
+                    slider,
+                    egui::Slider::new(&mut z, MIN_ZOOM..=MAX_ZOOM)
+                        .logarithmic(true)
+                        .show_value(false),
+                )
+            })
+            .inner;
         if r.changed() {
             let x = view.x(playhead).clamp(lanes.left(), lanes.right());
             self.zoom_by(z / self.zoom, view, x);
@@ -348,6 +366,7 @@ impl Timeline {
         painter: &egui::Painter,
         r: Rect,
         lanes: Rect,
+        view: View,
         clip: &Clip,
         asset: Option<&MediaAsset>,
         kind: TrackKind,
@@ -371,16 +390,11 @@ impl Timeline {
             && content.height() >= 8.0
             && content.width() >= 1.0
         {
-            let source = |x: f32| {
-                clip.source_in
-                    + Time(
-                        ((x - r.left() + 1.0) as f64 / self.zoom * FLICKS_PER_SECOND as f64) as i64,
-                    )
-            };
+            let source = |x: f32| clip.source_in + (view.time(x) - clip.start);
             match kind {
                 TrackKind::Video if !still => {
                     self.media
-                        .filmstrip(ui, &clipped, content, r.left(), a, &source)
+                        .filmstrip(ui, &clipped, content, view.x(clip.start), a, &source)
                 }
                 TrackKind::Audio => self.media.waveform(ui, &clipped, content, a, &source),
                 TrackKind::Video => {}
@@ -409,8 +423,8 @@ fn playhead_head(painter: &egui::Painter, top_center: Pos2) {
     painter.rect_filled(
         body,
         CornerRadius {
-            nw: 2,
-            ne: 2,
+            nw: radius::SMALL,
+            ne: radius::SMALL,
             sw: 0,
             se: 0,
         },
@@ -427,14 +441,15 @@ fn playhead_head(painter: &egui::Painter, top_center: Pos2) {
     ));
 }
 
-/// Results finished off-thread, per path, waiting for the UI thread.
-type Done<T> = Arc<Mutex<Vec<(PathBuf, T)>>>;
+/// Results finished off-thread, per path, waiting for the UI thread; `None` is a failure.
+type Done<T> = Arc<Mutex<Vec<(PathBuf, Option<T>)>>>;
 
 /// Filmstrips and waveform pyramids per asset, loaded on a job pool the first time a clip
-/// using it is in view. `None` while loading or after a failure.
+/// using it is in view. `None` while loading; a failure is forgotten so the next paint retries.
 #[derive(Default)]
 struct Media {
-    caches: Option<(Arc<thumbnails::Cache>, Arc<waveforms::Cache>, Pool)>,
+    /// `None` in tests, which then load nothing.
+    caches: Option<Arc<Caches>>,
     strip_done: Done<Vec<egui::ColorImage>>,
     strips: HashMap<PathBuf, Option<Vec<TextureHandle>>>,
     peaks_done: Done<Pyramid>,
@@ -442,25 +457,6 @@ struct Media {
 }
 
 impl Media {
-    fn caches(&mut self) -> &(Arc<thumbnails::Cache>, Arc<waveforms::Cache>, Pool) {
-        self.caches.get_or_insert_with(|| {
-            let s = crate::settings_file::load();
-            let dir = s
-                .cache_dir
-                .or_else(|| {
-                    directories::ProjectDirs::from("", "", "jvid").map(|d| d.cache_dir().to_owned())
-                })
-                .unwrap_or_else(std::env::temp_dir)
-                .join("thumbnails");
-            let cap = s.cache_max_mb << 20;
-            (
-                Arc::new(thumbnails::Cache::new(dir.clone(), cap)),
-                Arc::new(waveforms::Cache::new(dir, cap)),
-                Pool::new(2),
-            )
-        })
-    }
-
     /// Thumbnails tiled across `rect`, each the frame at its left edge.
     fn filmstrip(
         &mut self,
@@ -472,6 +468,12 @@ impl Media {
         source: &dyn Fn(f32) -> Time,
     ) {
         for (path, imgs) in self.strip_done.lock().unwrap().drain(..) {
+            // shortcut: a failed decode retries on the next paint with no backoff; add one if
+            // broken files show up as busy job pools.
+            let Some(imgs) = imgs else {
+                self.strips.remove(&path);
+                continue;
+            };
             let texs = imgs
                 .into_iter()
                 .enumerate()
@@ -487,12 +489,13 @@ impl Media {
             Some(Some(t)) if !t.is_empty() => t,
             Some(_) => return,
             None => {
+                let Some(caches) = &self.caches else { return };
                 self.strips.insert(a.path.clone(), None);
                 let (done, ctx) = (self.strip_done.clone(), ui.ctx().clone());
-                let cache = self.caches().0.clone();
+                let cache = caches.thumbs.clone();
                 let (path, duration) = (a.path.clone(), probe.duration);
                 let key = format!("strip:{}", path.display());
-                self.caches().2.submit(key, Priority::Preview, move |c| {
+                caches.jobs.submit(key, Priority::Preview, move |c| {
                     if c.is_cancelled() {
                         return;
                     }
@@ -505,10 +508,13 @@ impl Media {
                                     egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw())
                                 })
                                 .collect();
-                            done.lock().unwrap().push((path, imgs));
+                            done.lock().unwrap().push((path, Some(imgs)));
                             ctx.request_repaint();
                         }
-                        Err(e) => tracing::warn!("filmstrip for {}: {e}", path.display()),
+                        Err(e) => {
+                            tracing::warn!("filmstrip for {}: {e}", path.display());
+                            done.lock().unwrap().push((path, None));
+                        }
                     }
                 });
                 return;
@@ -543,22 +549,30 @@ impl Media {
         source: &dyn Fn(f32) -> Time,
     ) {
         for (path, p) in self.peaks_done.lock().unwrap().drain(..) {
-            self.peaks.insert(path, Some(p));
+            match p {
+                Some(p) => self.peaks.insert(path, Some(p)),
+                None => self.peaks.remove(&path),
+            };
         }
         let pyramid = match self.peaks.get(&a.path) {
             Some(Some(p)) => p,
             Some(None) => return,
             None => {
+                let Some(caches) = &self.caches else { return };
                 self.peaks.insert(a.path.clone(), None);
                 let (done, ctx, path) = (self.peaks_done.clone(), ui.ctx().clone(), a.path.clone());
-                let (_, cache, jobs) = self.caches();
-                cache.submit(jobs, path.clone(), 0, move |r| match r {
-                    Ok(p) => {
-                        done.lock().unwrap().push((path, p));
-                        ctx.request_repaint();
-                    }
-                    Err(e) => tracing::warn!("waveform for {}: {e}", path.display()),
-                });
+                caches
+                    .peaks
+                    .submit(&caches.jobs, path.clone(), 0, move |r| match r {
+                        Ok(p) => {
+                            done.lock().unwrap().push((path, Some(p)));
+                            ctx.request_repaint();
+                        }
+                        Err(e) => {
+                            tracing::warn!("waveform for {}: {e}", path.display());
+                            done.lock().unwrap().push((path, None));
+                        }
+                    });
                 return;
             }
         };
@@ -742,18 +756,30 @@ mod tests {
         results.add(h.try_snapshot("timeline_empty"));
     }
 
-    /// The acceptance budget: layout and tessellation of 500 clips inside one 60fps frame.
+    /// The acceptance budget: layout and tessellation of 500 clips inside one 60fps frame, with
+    /// filmstrips and waveforms already decoded so their paint paths run.
     #[test]
     #[cfg_attr(debug_assertions, ignore = "timing is only meaningful in release")]
     fn five_hundred_clips_fit_a_frame() {
         let p = project(500);
         let ctx = egui::Context::default();
         suite_ui::theme::install(&ctx);
-        // Zoomed out so every clip is in view.
+        // 20pt clips, so a 1920pt-wide panel shows about 175 of them across both tracks.
         let mut t = Timeline {
-            zoom: MIN_ZOOM * 4.0,
+            zoom: 10.0,
             ..Default::default()
         };
+        let path = p.assets()[0].path.clone();
+        let img = egui::ColorImage::filled([160, 90], color::BLUE);
+        let tex = ctx.load_texture("strip", img, Default::default());
+        t.media
+            .strips
+            .insert(path.clone(), Some(vec![tex.clone(); 10]));
+        let finest =
+            (0..750).map(|i| [-(i as f32 * 0.1).sin().abs(), (i as f32 * 0.1).sin().abs()]);
+        t.media
+            .peaks
+            .insert(path, Some(Pyramid::new(finest.collect())));
         let input = || egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1920.0, 400.0))),
             ..Default::default()
@@ -762,16 +788,29 @@ mod tests {
             let out = ctx.run_ui(input(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| t.show(ui, &p, &HashSet::new()));
             });
-            ctx.tessellate(out.shapes, out.pixels_per_point)
+            let lines = out
+                .shapes
+                .iter()
+                .filter(|s| matches!(s.shape, egui::Shape::LineSegment { .. }))
+                .count();
+            let prims = ctx.tessellate(out.shapes, out.pixels_per_point);
+            let tiles = prims
+                .iter()
+                .filter(|c| matches!(&c.primitive, egui::epaint::Primitive::Mesh(m) if m.texture_id == tex.id()))
+                .count();
+            (lines, tiles)
         };
-        frame();
+        let (lines, tiles) = frame();
+        // About 85 audio clips of ~18 waveform columns, and filmstrip tiles on the video ones.
+        assert!(lines > 1000, "{lines} waveform lines");
+        assert!(tiles > 0, "no filmstrip tiles");
         let n = 30;
         let start = std::time::Instant::now();
         for _ in 0..n {
             frame();
         }
         let ms = start.elapsed().as_secs_f64() * 1000.0 / n as f64;
-        println!("timeline layout+paint, 500 clips: {ms:.3} ms/frame");
+        println!("timeline layout+paint, 500 clips ({lines} waveform lines): {ms:.3} ms/frame");
         assert!(ms < 16.6, "{ms:.3} ms/frame");
     }
 }

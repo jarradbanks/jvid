@@ -37,7 +37,7 @@ pub enum Tab {
     Timeline,
 }
 
-pub fn run() -> eframe::Result {
+pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("jvid")
@@ -48,7 +48,11 @@ pub fn run() -> eframe::Result {
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
-    eframe::run_native("jvid", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+    eframe::run_native(
+        "jvid",
+        options,
+        Box::new(move |cc| Ok(Box::new(App::new(cc, &settings)))),
+    )
 }
 
 pub struct App {
@@ -78,9 +82,12 @@ pub struct App {
 const TOAST_SECS: f64 = 6.0;
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, settings: &jvid_core::settings::Settings) -> Self {
         theme::install(&cc.egui_ctx);
         let mut app = Self::restore(cc.storage);
+        let caches = crate::media_bin::Caches::new(settings);
+        app.bin = MediaBin::new(caches.clone());
+        app.timeline = Timeline::new(caches);
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
         app
     }
