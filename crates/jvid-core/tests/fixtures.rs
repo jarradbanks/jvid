@@ -40,3 +40,21 @@ fn fixtures_load_and_round_trip() {
         Ok(Created::Asset(jvid_core::model::AssetId(2)))
     );
 }
+
+#[test]
+fn in_out_is_saved() {
+    let dir = Path::new("/new/proj");
+    let mut h = History::new(load("basic.jvid", dir));
+    let marks = (
+        Some(jvid_core::time::Time(10)),
+        Some(jvid_core::time::Time(90)),
+    );
+    h.apply(Command::SetInOut {
+        in_point: marks.0,
+        out_point: marks.1,
+    })
+    .unwrap();
+    let again = from_json(&to_json(h.project(), dir).unwrap(), dir, |_| true).unwrap();
+    let seq = again.sequence();
+    assert_eq!((seq.in_point(), seq.out_point()), marks);
+}

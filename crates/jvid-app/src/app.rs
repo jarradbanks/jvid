@@ -21,7 +21,7 @@ use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
 use crate::preview::{PROGRAM_ACTIONS, Preview, SOURCE_ACTIONS};
-use crate::timeline::{Timeline, menus};
+use crate::timeline::{MARK_ACTIONS, Timeline, menus};
 use crate::welcome::{self, Recent, Welcome};
 use crate::{project_file, relink};
 
@@ -522,7 +522,9 @@ impl App {
             self.preview.program_action(id);
             return;
         }
-        if (timeline_focused || menu) && self.timeline.action(id, self.history.project()) {
+        let marking = program_focused && MARK_ACTIONS.contains(&id);
+        if (timeline_focused || menu || marking) && self.timeline.action(id, self.history.project())
+        {
             return;
         }
         let tab = match id {
