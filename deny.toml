@@ -42,3 +42,13 @@ allow = ["OFL-1.1", "Ubuntu-font-1.0"]
 [[licenses.exceptions]]
 crate = "option-ext"
 allow = ["MPL-2.0"]
+
+# WTFPL is permissive (no copyleft). The FFmpeg libraries these bind to are
+# dynamically linked, never compiled in (PLAN.md "Licensing", docs/adr/0001).
+[[licenses.exceptions]]
+crate = "ffmpeg-next"
+allow = ["WTFPL"]
+
+[[licenses.exceptions]]
+crate = "ffmpeg-sys-next"
+allow = ["WTFPL"]

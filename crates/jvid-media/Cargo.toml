@@ -13,3 +13,9 @@ workspace = true
 [dependencies]
 image.workspace = true
 jvid-core.workspace = true
+ffmpeg-next.workspace = true
+tracing.workspace = true
+
+[features]
+# Link a GPL FFmpeg (x264/x265); the default expects LGPL. See docs/adr/0001-ffmpeg-binding.md.
+gpl-ffmpeg = []
