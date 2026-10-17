@@ -2,7 +2,8 @@
 //! waveforms, zoom, scroll and a draggable playhead. Only what's in view is drawn. Track
 //! headers on the left hold the lock, hide or mute, and solo toggles, the target, a height
 //! grip, and a menu to add, rename, reorder and remove tracks. Media dropped from the bin
-//! overwrites at the drop point; dragged clips overwrite where they land.
+//! overwrites at the drop point; dragged clips overwrite where they land. Clicks and a
+//! marquee select clips, which copy, cut, paste at the playhead, duplicate and delete.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -13,7 +14,9 @@ use egui::{
     TextureHandle, Ui, pos2, vec2,
 };
 use jvid_core::history::{Command, GestureKey};
-use jvid_core::model::{AssetId, Clip, MediaAsset, Project, Track, TrackId, TrackKind};
+use jvid_core::model::{
+    AssetId, Clip, ClipId, MediaAsset, Project, Sequence, Track, TrackId, TrackKind,
+};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_jobs::Priority;
 use jvid_media::thumbnails;
@@ -54,6 +57,15 @@ pub struct Timeline {
     renaming: Option<(TrackId, String)>,
     /// Where the dragged clip would land; the press origin is gone by the release frame.
     drag_to: Option<(TrackId, Time)>,
+    selected: HashSet<ClipId>,
+    /// Clicking a clip selects its linked partners too.
+    linked_selection: bool,
+    /// Copied clips with the tracks they came from.
+    clipboard: Vec<(TrackId, Clip)>,
+    /// An edit from a keymap action, handed out by the next `show`.
+    pending: Option<Command>,
+    /// Copy or cut ran since the last `show`.
+    copied: bool,
 }
 
 /// An edit made in the timeline, and the gesture it coalesces under, if any.
@@ -69,6 +81,11 @@ impl Default for Timeline {
             media: Media::default(),
             renaming: None,
             drag_to: None,
+            selected: HashSet::new(),
+            linked_selection: true,
+            clipboard: Vec::new(),
+            pending: None,
+            copied: false,
         }
     }
 }
@@ -169,9 +186,81 @@ impl Timeline {
                 let x = view.x(self.playhead());
                 self.zoom_by(f, view, x);
             }
+            "linked_selection" => self.linked_selection = !self.linked_selection,
+            "copy" | "cut" | "paste" | "duplicate" | "delete" | "ripple_delete" | "link" => {
+                self.pending = self.clip_action(id, project.sequence());
+            }
             _ => return false,
         }
         true
+    }
+
+    /// The edit for a selection or clipboard action, if it changes anything.
+    fn clip_action(&mut self, id: &str, seq: &Sequence) -> Option<Command> {
+        let all = seq
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().iter().map(|c| (t.id, c)));
+        let chosen: Vec<_> = all
+            .filter(|(_, c)| self.selected.contains(&c.id))
+            .map(|(t, c)| (t, c.clone()))
+            .collect();
+        let ids: Vec<_> = chosen.iter().map(|(_, c)| c.id).collect();
+        if matches!(id, "copy" | "cut") && !chosen.is_empty() {
+            self.clipboard = chosen.clone();
+            self.copied = true;
+        }
+        let cmd = match id {
+            "paste" if !self.clipboard.is_empty() => Command::Paste {
+                clips: to_targets(seq, &self.clipboard),
+                at: self.playhead(),
+            },
+            "duplicate" if !chosen.is_empty() => Command::Paste {
+                at: chosen
+                    .iter()
+                    .map(|(_, c)| c.end())
+                    .max()
+                    .expect("not empty"),
+                clips: chosen,
+            },
+            "cut" | "delete" | "ripple_delete" if !ids.is_empty() => Command::RemoveClips {
+                ids,
+                ripple: id == "ripple_delete",
+            },
+            // Unlinks when the selection is already one link group.
+            "link" if !ids.is_empty() => {
+                let first = chosen[0].1.link;
+                let one = first.is_some() && chosen.iter().all(|(_, c)| c.link == first);
+                let whole = one && seq.linked(ids[0]).len() == ids.len();
+                Command::LinkClips {
+                    ids,
+                    linked: !whole,
+                }
+            }
+            _ => return None,
+        };
+        if matches!(cmd, Command::RemoveClips { .. }) {
+            self.selected.clear();
+        }
+        Some(cmd)
+    }
+
+    /// Click selection: the clip (and its partners under linked selection) replaces the
+    /// selection, Shift adds it, Ctrl toggles it.
+    fn select(&mut self, seq: &Sequence, id: ClipId, mods: egui::Modifiers) {
+        let group: Vec<_> = if self.linked_selection {
+            seq.linked(id).into_iter().map(|(_, c)| c.id).collect()
+        } else {
+            vec![id]
+        };
+        if mods.command && self.selected.contains(&id) {
+            group.iter().for_each(|c| _ = self.selected.remove(c));
+            return;
+        }
+        if !mods.command && !mods.shift {
+            self.selected.clear();
+        }
+        self.selected.extend(group);
     }
 
     fn sync(&mut self, project: &Project) {
@@ -201,7 +290,13 @@ impl Timeline {
         project: &Project,
         missing: &HashSet<PathBuf>,
     ) -> Option<Edit> {
-        let mut edit = None;
+        let mut edit = self.pending.take().map(|c| (c, None));
+        if std::mem::take(&mut self.copied) {
+            // Ctrl+V only reaches us as a paste event when the system clipboard has text.
+            let n = self.clipboard.len();
+            ui.ctx()
+                .copy_text(format!("{n} jvid clip{}", if n == 1 { "" } else { "s" }));
+        }
         self.sync(project);
         let rate = self.transport.rate;
         let area = ui.max_rect();
@@ -221,6 +316,7 @@ impl Timeline {
         let id = ui.id().with("timeline");
         let scrub = ui.interact(ruler, id.with("ruler"), Sense::click_and_drag());
         let body = ui.interact(lanes.union(headers), id.with("lanes"), Sense::hover());
+        let marquee = ui.interact(lanes, id.with("marquee"), Sense::click_and_drag());
         let head_x = view.x(self.playhead());
         let grip = Rect::from_x_y_ranges(head_x - 4.0..=head_x + 4.0, lanes.y_range());
         let drag = ui.interact(grip, id.with("playhead"), Sense::drag());
@@ -258,11 +354,17 @@ impl Timeline {
         lane_painter.rect_filled(lanes, 0.0, color::FIELD);
         // Empty header space: add tracks.
         ui.interact(headers, id.with("headers"), Sense::click())
-            .context_menu(|ui| add_menu(ui, &mut edit));
+            .context_menu(|ui| {
+                add_menu(ui, &mut edit);
+                ui.separator();
+                ui.checkbox(&mut self.linked_selection, "Linked selection");
+            });
         let mut y = lanes.top() - self.vscroll;
         let mut lane_rects = Vec::new();
         // The clip being dragged, its track, and its response.
         let mut held = None;
+        let mut shown_clips = Vec::new();
+        let seq = project.sequence();
         for (i, track) in tracks.iter().enumerate() {
             let lane = Rect::from_x_y_ranges(lanes.x_range(), y..=y + track.height);
             y += track.height;
@@ -295,10 +397,41 @@ impl Timeline {
                 self.paint_clip(
                     ui, &painter, r, lanes, view, clip, asset, track.kind, offline,
                 );
-                let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::drag());
+                if self.selected.contains(&clip.id) {
+                    let corner = CornerRadius::same(radius::SMALL);
+                    let stroke = Stroke::new(2.0, color::LIGHT_BLUE);
+                    painter.rect_stroke(r, corner, stroke, egui::StrokeKind::Inside);
+                }
+                shown_clips.push((clip.id, r));
+                let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::click_and_drag());
+                if cr.clicked() {
+                    self.select(seq, clip.id, ui.input(|i| i.modifiers));
+                }
                 if cr.dragged() || cr.drag_stopped() {
                     held = Some((clip, track, cr));
                 }
+            }
+        }
+        let mods = ui.input(|i| i.modifiers);
+        if marquee.clicked() && !mods.shift && !mods.command {
+            self.selected.clear();
+        }
+        if let (Some(a), Some(b)) = (
+            ui.input(|i| i.pointer.press_origin()),
+            marquee.interact_pointer_pos(),
+        ) && (marquee.dragged() || marquee.drag_stopped())
+        {
+            let band = Rect::from_two_pos(a, b);
+            if marquee.drag_stopped() {
+                if !mods.shift && !mods.command {
+                    self.selected.clear();
+                }
+                let hit = shown_clips.iter().filter(|(_, r)| r.intersects(band));
+                self.selected.extend(hit.map(|(c, _)| *c));
+            } else {
+                clip_painter.rect_filled(band, 0.0, color::BLUE.gamma_multiply(0.15));
+                let stroke = Stroke::new(1.0, color::LIGHT_BLUE);
+                clip_painter.rect_stroke(band, 0.0, stroke, egui::StrokeKind::Inside);
             }
         }
         let ghosts = self.drops(ui, project, view, &lane_rects, held, &mut edit);
@@ -728,6 +861,27 @@ impl Timeline {
     }
 }
 
+/// Clipboard clips moved onto the target tracks: each kind keeps its track spacing, its top
+/// clip's track becoming that kind's first target. Clips with no track there stay put.
+fn to_targets(seq: &Sequence, clips: &[(TrackId, Clip)]) -> Vec<(TrackId, Clip)> {
+    let tracks = seq.tracks();
+    let place = |kind: TrackKind, t: TrackId| {
+        let of_kind: Vec<_> = tracks.iter().filter(|x| x.kind == kind).collect();
+        let index = |t: TrackId| of_kind.iter().position(|x| x.id == t);
+        let target = of_kind.iter().position(|x| x.target)?;
+        let top = clips.iter().filter_map(|(t, _)| index(*t)).min()?;
+        Some(of_kind.get((index(t)? + target).checked_sub(top)?)?.id)
+    };
+    clips
+        .iter()
+        .map(|(t, c)| {
+            let kind = seq.track(*t).map(|x| x.kind);
+            let to = kind.and_then(|k| place(k, *t)).unwrap_or(*t);
+            (to, c.clone())
+        })
+        .collect()
+}
+
 /// "V1" counts video tracks up from the bottom of the video stack, "A1" audio down from the top.
 fn track_label(tracks: &[Track], index: usize) -> String {
     let t = &tracks[index];
@@ -1087,6 +1241,56 @@ mod tests {
         assert!((t.zoom - 30.0).abs() < 1e-9);
         assert!((t.view(0.0).x(t.playhead()) - before).abs() < 0.01);
         assert!(!t.action("lift", &p));
+    }
+
+    #[test]
+    fn select_link_copy_paste_and_delete() {
+        use egui::Modifiers as M;
+        let mut h = History::new(project(2));
+        let mut t = Timeline::default();
+        let seq = |h: &History| h.project().sequence().clone();
+        let ids = |h: &History| -> Vec<_> {
+            let s = seq(h);
+            s.tracks()
+                .iter()
+                .flat_map(|t| t.clips())
+                .map(|c| c.id)
+                .collect()
+        };
+        let [v, a] = ids(&h)[..] else { panic!() };
+        let run = |t: &mut Timeline, h: &mut History, id| {
+            let cmd = t.clip_action(id, h.project().sequence());
+            h.apply(cmd.expect("an edit")).unwrap();
+        };
+
+        t.select(&seq(&h), v, M::NONE);
+        t.select(&seq(&h), a, M::SHIFT);
+        assert_eq!(t.selected, HashSet::from([v, a]));
+        t.select(&seq(&h), v, M::COMMAND);
+        assert_eq!(t.selected, HashSet::from([a]));
+
+        // Link both; a click then selects the pair, and link again unlinks.
+        t.select(&seq(&h), v, M::SHIFT);
+        run(&mut t, &mut h, "link");
+        t.select(&seq(&h), v, M::NONE);
+        assert_eq!(t.selected, HashSet::from([v, a]));
+
+        // Pasted at the playhead, the copies are linked to each other only.
+        assert!(t.clip_action("copy", h.project().sequence()).is_none());
+        t.sync(h.project());
+        t.seek(Time(10 * S));
+        run(&mut t, &mut h, "paste");
+        let s = seq(&h);
+        let pasted: Vec<_> = s.clips_at(Time(10 * S)).map(|(_, c)| c.clone()).collect();
+        assert_eq!(pasted.len(), 2);
+        assert!(pasted[0].link.is_some() && pasted[0].link == pasted[1].link);
+        assert_ne!(pasted[0].link, s.clip(v).unwrap().1.link);
+
+        // Ripple delete closes the gap the originals leave.
+        run(&mut t, &mut h, "ripple_delete");
+        assert_eq!(ids(&h).len(), 2);
+        assert!(seq(&h).clips_at(Time(8 * S)).count() == 2);
+        assert!(t.clip_action("delete", h.project().sequence()).is_none());
     }
 
     /// Edits from the timeline go through a real history, as in the app.
