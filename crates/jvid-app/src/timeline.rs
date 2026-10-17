@@ -77,6 +77,11 @@ pub struct Timeline {
     razor: bool,
     /// The clip edge being dragged.
     trim: Option<Trim>,
+    /// The clip being moved or trimmed, kept interactive after it scrolls out of view.
+    holding: Option<ClipId>,
+    /// `scroll` and `vscroll` when the pointer went down, so drags track time while the
+    /// view auto-scrolls.
+    press_scroll: (f64, f32),
     /// The clicked gap: its track and a time inside it.
     gap: Option<(TrackId, Time)>,
     /// Lanes width last frame, for actions that fit to it.
@@ -95,6 +100,16 @@ pub struct Timeline {
 
 /// Snap reach in points.
 const SNAP_PX: f64 = 8.0;
+
+/// Points inside a lanes edge where a drag starts auto-scrolling.
+const EDGE_PX: f32 = 24.0;
+
+/// Auto-scroll speed in points per second for a pointer at `p` along `lo..=hi`: zero
+/// away from the edges, growing with depth into (and past) either edge zone.
+fn edge_speed(p: f32, lo: f32, hi: f32) -> f32 {
+    let depth = (p - (hi - EDGE_PX)).max(0.0) - ((lo + EDGE_PX) - p).max(0.0);
+    depth * 20.0
+}
 
 /// A clip edge drag: how far, already held to what the media and neighbours allow.
 #[derive(Clone, Copy, Debug)]
@@ -115,6 +130,8 @@ impl Default for Timeline {
             zoom: 20.0,
             scroll: 0.0,
             vscroll: 0.0,
+            holding: None,
+            press_scroll: (0.0, 0.0),
             media: Media::default(),
             renaming: None,
             drag_to: None,
@@ -403,11 +420,13 @@ impl Timeline {
             if h.hovered() || h.dragged() {
                 ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
             }
+            if h.is_pointer_button_down_on() {
+                self.holding = Some(clip.id);
+            }
             if h.dragged()
                 && let Some(p) = h.interact_pointer_pos()
             {
-                let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
-                let by = view.time(p.x) - view.time(origin.x);
+                let by = view.time(p.x) - self.press_time(ui, view, p);
                 let by = rate.time_floor(rate.index_nearest(by));
                 let at = match edge {
                     Edge::Head => clip.start + by,
@@ -628,6 +647,41 @@ impl Timeline {
                 self.vscroll -= scroll.y;
             }
         }
+        let (pressed, down, dt) =
+            ui.input(|i| (i.pointer.any_pressed(), i.pointer.any_down(), i.stable_dt));
+        if pressed {
+            self.press_scroll = (self.scroll, self.vscroll);
+        }
+        // Drags that began in the lanes, and bin drags over the timeline, scroll at the
+        // edges; ruler and playhead scrubs scroll themselves.
+        let scrubbing = scrub.is_pointer_button_down_on() || drag.dragged();
+        let ours = ui.ctx().dragged_id().is_some()
+            && ui
+                .input(|i| i.pointer.press_origin())
+                .is_some_and(|o| lanes.contains(o));
+        let bin = egui::DragAndDrop::has_payload_of_type::<AssetId>(ui.ctx())
+            && ui.rect_contains_pointer(area);
+        if !scrubbing
+            && (ours || bin)
+            && let Some(p) = ui.input(|i| i.pointer.interact_pos())
+        {
+            let v = edge_speed(p.y, lanes.top(), lanes.bottom()) * dt;
+            let (dx, dy) = (edge_speed(p.x, lanes.left(), lanes.right()) * dt, v);
+            let dy = if content_h > lanes.height() { dy } else { 0.0 };
+            if dx != 0.0 || dy != 0.0 {
+                let was = (self.scroll, self.vscroll);
+                self.scroll += dx as f64 / self.zoom;
+                self.vscroll += dy;
+                self.vscroll = self
+                    .vscroll
+                    .clamp(0.0, (content_h - lanes.height()).max(0.0));
+                self.clamp_scroll();
+                // Only while it moves, so a drag held at a clamped edge can idle.
+                if (self.scroll, self.vscroll) != was {
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
         self.vscroll = self
             .vscroll
             .clamp(0.0, (content_h - lanes.height()).max(0.0));
@@ -657,7 +711,8 @@ impl Timeline {
             let lane = Rect::from_x_y_ranges(lanes.x_range(), y..=y + track.height);
             y += track.height;
             lane_rects.push((track.id, track.kind, lane));
-            if lane.bottom() < lanes.top() || lane.top() > lanes.bottom() {
+            let holds = track.clips().iter().any(|c| Some(c.id) == self.holding);
+            if (lane.bottom() < lanes.top() || lane.top() > lanes.bottom()) && !holds {
                 continue;
             }
             let header = Rect::from_x_y_ranges(headers.x_range(), lane.y_range());
@@ -669,7 +724,10 @@ impl Timeline {
                 0.0,
                 color::BORDER,
             );
-            for clip in visible(track.clips(), start, end) {
+            let shown = visible(track.clips(), start, end);
+            let held_clip = track.clips().iter().find(|c| Some(c.id) == self.holding);
+            let off = held_clip.filter(|c| !shown.iter().any(|v| v.id == c.id));
+            for clip in shown.iter().chain(off) {
                 // Clamped just past the lanes so far off-screen ends don't make huge coordinates.
                 let (l, r) = (lanes.left() - 8.0, lanes.right() + 8.0);
                 let x = view.x(clip.start).clamp(l, r)..=view.x(clip.end()).clamp(l, r);
@@ -710,10 +768,17 @@ impl Timeline {
                 if let Some(e) = self.trim_handles(ui, project, view, clip, r) {
                     edit = Some(e);
                 }
+                if cr.is_pointer_button_down_on() {
+                    self.holding = Some(clip.id);
+                }
                 if cr.dragged() || cr.drag_stopped() {
                     held = Some((clip, track, cr));
                 }
             }
+        }
+        // After the clips, so the release frame still reaches an off-screen held clip.
+        if !down {
+            self.holding = None;
         }
         let mods = ui.input(|i| i.modifiers);
         if marquee.clicked() && !mods.shift && !mods.command {
@@ -744,6 +809,9 @@ impl Timeline {
             marquee.interact_pointer_pos(),
         ) && (marquee.dragged() || marquee.drag_stopped())
         {
+            // The press point moves with the content as the view auto-scrolls.
+            let (ps, pv) = self.press_scroll;
+            let a = a + vec2(((ps - self.scroll) * self.zoom) as f32, pv - self.vscroll);
             let band = Rect::from_two_pos(a, b);
             if marquee.drag_stopped() {
                 if !mods.shift && !mods.command {
@@ -903,6 +971,16 @@ impl Timeline {
         edit
     }
 
+    /// The sequence time under the press origin, as the view stood when it was pressed.
+    fn press_time(&self, ui: &Ui, view: View, p: Pos2) -> Time {
+        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
+        let then = View {
+            scroll: self.press_scroll.0,
+            ..view
+        };
+        then.time(origin.x)
+    }
+
     /// Seconds of sequence the lanes show.
     fn span(&self) -> f64 {
         self.width as f64 / self.zoom
@@ -1046,8 +1124,7 @@ impl Timeline {
             }
             return Vec::new();
         }
-        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
-        let start = snap(clip.start + (view.time(p.x) - view.time(origin.x)));
+        let start = snap(clip.start + (view.time(p.x) - self.press_time(ui, view, p)));
         let seq = project.sequence();
         let group = seq.linked(clip.id);
         let ids: Vec<_> = group.iter().map(|(_, c)| c.id).collect();
@@ -2145,6 +2222,50 @@ mod tests {
                 "snapping {snapping}"
             );
         }
+    }
+
+    #[test]
+    fn edge_speed_grows_into_and_past_either_edge() {
+        assert_eq!(edge_speed(50.0, 0.0, 100.0), 0.0);
+        assert_eq!(edge_speed(24.0, 0.0, 100.0), 0.0);
+        assert_eq!(edge_speed(76.0, 0.0, 100.0), 0.0);
+        assert!(edge_speed(90.0, 0.0, 100.0) > 0.0);
+        assert!(edge_speed(120.0, 0.0, 100.0) > edge_speed(90.0, 0.0, 100.0));
+        assert!(edge_speed(10.0, 0.0, 100.0) < 0.0);
+        assert!(edge_speed(-20.0, 0.0, 100.0) < edge_speed(10.0, 0.0, 100.0));
+    }
+
+    #[test]
+    fn holding_a_clip_at_the_right_edge_scrolls_and_drops_at_the_scrolled_time() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(1));
+        h.state_mut().0.action("snapping", &Project::default());
+        let x = size::TRACK_HEADER + 20.0;
+        let y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        h.hover_at(pos2(x, y));
+        h.run();
+        h.drag_at(pos2(x, y));
+        h.run();
+        let edge = pos2(995.0, y);
+        h.hover_at(edge);
+        h.step();
+        let before = h.state().0.scroll;
+        // The pointer stays put; the view keeps scrolling on its own (up to the clamp).
+        for _ in 0..3 {
+            h.step();
+        }
+        let scrolled = h.state().0.scroll;
+        assert!(scrolled > before, "{before} -> {scrolled}");
+        h.drop_at(edge);
+        h.run();
+        let t = &h.state().0;
+        let want = t.view(size::TRACK_HEADER).time(edge.x) - Time(S);
+        let got = h.state().1.project().sequence().tracks()[0].clips()[0].start;
+        // Within a frame or two of scrolling.
+        assert!((got.0 - want.0).abs() <= S / 2, "{got:?} vs {want:?}");
     }
 
     #[test]
