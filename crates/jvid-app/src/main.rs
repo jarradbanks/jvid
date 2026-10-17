@@ -7,6 +7,7 @@ mod media_bin;
 mod preview;
 mod project_file;
 mod settings_file;
+mod welcome;
 
 fn main() -> eframe::Result {
     let _log = jvid_log::init("jvid-app", jvid_log::log_dir());

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use egui::{Align, Align2, Frame, Layout, Margin, Stroke, Ui, UiBuilder, ViewportCommand, vec2};
 use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
 use jvid_core::history::{Command, History};
-use jvid_core::model::Project;
+use jvid_core::model::{Project, ProjectSettings};
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use serde::{Deserialize, Serialize};
 use suite_ui::panel::Panel;
@@ -18,11 +18,13 @@ use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
 use crate::preview::Preview;
 use crate::project_file;
+use crate::welcome::{self, Recent, Welcome};
 
 #[cfg(test)]
 mod tests;
 
 const DOCK_KEY: &str = "dock";
+const RECENT_KEY: &str = "recent";
 
 /// One dock panel. Persisted by name in the saved layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -61,6 +63,11 @@ pub struct App {
     preview: Preview,
     /// Error toasts and the time each expires.
     toasts: Vec<(String, f64)>,
+    welcome: Welcome,
+    /// The welcome screen shows instead of the editor.
+    on_welcome: bool,
+    /// Match source: the next imported video sets the project's size and frame rate.
+    match_source: bool,
 }
 
 const TOAST_SECS: f64 = 6.0;
@@ -96,6 +103,53 @@ impl App {
             bin: MediaBin::default(),
             preview: Preview::new(None),
             toasts: Vec::new(),
+            welcome: Welcome::new(
+                storage
+                    .and_then(|s| eframe::get_value(s, RECENT_KEY))
+                    .unwrap_or_default(),
+            ),
+            on_welcome: true,
+            match_source: false,
+        }
+    }
+
+    /// Replaces the project with an empty one; `None` settings is Match source.
+    fn new_project(&mut self, settings: Option<ProjectSettings>) {
+        self.history = History::new(Project::default());
+        if let Some(s) = &settings {
+            // Setting up isn't an edit: no undo step, nothing to save yet.
+            let _ = self.history.apply(Command::SetSettings(s.clone()));
+            self.history = History::new(self.history.project().clone());
+        }
+        self.match_source = settings.is_none();
+        self.path = None;
+        self.on_welcome = false;
+    }
+
+    fn open(&mut self, path: PathBuf) {
+        match project_file::load(&path) {
+            Ok(project) => {
+                welcome::remember(&mut self.welcome.recent, Recent::of(&path, &project));
+                self.history = History::new(project);
+                self.path = Some(path);
+                self.match_source = false;
+                self.on_welcome = false;
+            }
+            Err(e) => error_dialog(&format!("Couldn't open {}: {e}", path.display())),
+        }
+    }
+
+    fn welcome_action(&mut self, action: welcome::Action) {
+        match action {
+            welcome::Action::New(settings) => self.new_project(settings),
+            welcome::Action::Open => self.file_action(FileAction::Open),
+            welcome::Action::OpenRecent(path) => self.open(path),
+            welcome::Action::Import => {
+                if let Some(paths) = FileDialog::new().set_title("Import media").pick_files() {
+                    self.new_project(None);
+                    self.import(paths);
+                }
+            }
         }
     }
 
@@ -172,8 +226,8 @@ impl App {
         match action {
             FileAction::New => {
                 if self.confirm_discard() {
-                    self.history = History::new(Project::default());
-                    self.path = None;
+                    self.new_project(Some(ProjectSettings::default()));
+                    self.on_welcome = true;
                 }
             }
             FileAction::Open => {
@@ -183,13 +237,7 @@ impl App {
                 let Some(path) = project_dialog().pick_file() else {
                     return;
                 };
-                match project_file::load(&path) {
-                    Ok(project) => {
-                        self.history = History::new(project);
-                        self.path = Some(path);
-                    }
-                    Err(e) => error_dialog(&format!("Couldn't open {}: {e}", path.display())),
-                }
+                self.open(path);
             }
             FileAction::Save => {
                 self.save(false);
@@ -221,6 +269,10 @@ impl App {
         match project_file::save(self.history.project(), &path) {
             Ok(()) => {
                 self.history.mark_saved();
+                welcome::remember(
+                    &mut self.welcome.recent,
+                    Recent::of(&path, self.history.project()),
+                );
                 self.path = Some(path);
                 true
             }
@@ -275,7 +327,21 @@ impl App {
         let polled = self.importer.poll();
         if let Some(batch) = polled.batch {
             // Import never fails; duplicates are skipped inside the command.
+            let fit = self
+                .match_source
+                .then(|| welcome::match_source(&batch))
+                .flatten();
             let _ = self.history.apply(Command::Import(batch));
+            if let Some((width, height, frame_rate)) = fit {
+                let settings = ProjectSettings {
+                    width,
+                    height,
+                    frame_rate,
+                    ..self.history.project().settings().clone()
+                };
+                let _ = self.history.apply(Command::SetSettings(settings));
+                self.match_source = false;
+            }
         }
         self.toasts
             .extend(polled.errors.into_iter().map(|e| (e, now + TOAST_SECS)));
@@ -324,12 +390,23 @@ impl eframe::App for App {
                 .collect()
         });
         if !dropped.is_empty() {
+            if self.on_welcome {
+                self.new_project(None);
+            }
             self.import(dropped);
         }
         let now = ctx.input(|i| i.time);
         self.poll_import(now);
         if self.importer.is_busy() || !self.toasts.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+
+        if self.on_welcome {
+            if let Some(a) = self.welcome.show(ui) {
+                self.welcome_action(a);
+            }
+            self.show_toasts(&ctx);
+            return;
         }
 
         egui::Panel::top("app_bar")
@@ -394,6 +471,7 @@ impl eframe::App for App {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, DOCK_KEY, &self.dock);
+        eframe::set_value(storage, RECENT_KEY, &self.welcome.recent);
     }
 }
 
