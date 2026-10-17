@@ -69,6 +69,7 @@ pub fn probe(path: &Path) -> Result<ProbeInfo, ProbeError> {
         audio_streams: audio.len() as u32,
         container: input.format().name().to_owned(),
         streams,
+        file_size: std::fs::metadata(path).ok().map(|m| m.len()),
     })
 }
 

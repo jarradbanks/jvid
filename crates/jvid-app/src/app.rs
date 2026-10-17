@@ -1,11 +1,12 @@
 //! The editor window: the app bar, a dock of empty panel shells, and the file actions.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use egui::{Align, Align2, Frame, Layout, Margin, Stroke, Ui, UiBuilder, ViewportCommand, vec2};
 use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
 use jvid_core::history::{Command, History};
-use jvid_core::model::{Project, ProjectSettings};
+use jvid_core::model::{AssetId, Project, ProjectSettings};
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use serde::{Deserialize, Serialize};
 use suite_ui::panel::Panel;
@@ -17,8 +18,8 @@ use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
 use crate::preview::Preview;
-use crate::project_file;
 use crate::welcome::{self, Recent, Welcome};
+use crate::{project_file, relink};
 
 #[cfg(test)]
 mod tests;
@@ -61,6 +62,8 @@ pub struct App {
     importer: Importer,
     bin: MediaBin,
     preview: Preview,
+    /// Asset paths found missing when the project was opened; see [`relink::missing`].
+    missing: HashSet<PathBuf>,
     /// Error toasts and the time each expires.
     toasts: Vec<(String, f64)>,
     welcome: Welcome,
@@ -102,6 +105,7 @@ impl App {
             importer: Importer::media(),
             bin: MediaBin::default(),
             preview: Preview::new(None),
+            missing: HashSet::new(),
             toasts: Vec::new(),
             welcome: Welcome::new(
                 storage
@@ -122,6 +126,7 @@ impl App {
             self.history = History::new(self.history.project().clone());
         }
         self.match_source = settings.is_none();
+        self.missing.clear();
         self.path = None;
         self.on_welcome = false;
     }
@@ -130,6 +135,7 @@ impl App {
         match project_file::load(&path) {
             Ok(project) => {
                 welcome::remember(&mut self.welcome.recent, Recent::of(&path, &project));
+                self.missing = relink::missing(&project);
                 self.history = History::new(project);
                 self.path = Some(path);
                 self.match_source = false;
@@ -348,6 +354,24 @@ impl App {
         self.toasts.retain(|(_, until)| *until > now);
     }
 
+    /// Asks where an offline asset went, then relinks it and the others found beside it.
+    fn relink_dialog(&mut self, id: AssetId) {
+        let Some(asset) = self.history.project().asset(id) else {
+            return;
+        };
+        let dialog = FileDialog::new().set_title(format!("Relink {}", asset.display_name()));
+        let dialog = match asset.path.parent().filter(|d| d.is_dir()) {
+            Some(d) => dialog.set_directory(d),
+            None => dialog,
+        };
+        if let Some(chosen) = dialog.pick_file() {
+            let cmd = relink::plan(self.history.project(), &self.missing, id, chosen);
+            if let Err(e) = self.history.apply(cmd) {
+                tracing::warn!("relink failed: {e}");
+            }
+        }
+    }
+
     /// Before replacing the project: true if it's clean, saved, or the user discards it.
     fn confirm_discard(&mut self) -> bool {
         if !self.history.is_dirty() {
@@ -431,6 +455,8 @@ impl eframe::App for App {
                 project: self.history.project(),
                 importing: self.importer.is_busy(),
                 bin: &mut self.bin,
+                missing: &self.missing,
+                relink: None,
                 import_clicked: false,
                 command: None,
                 preview: &mut self.preview,
@@ -445,7 +471,7 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            let (import, command) = (viewer.import_clicked, viewer.command);
+            let (import, command, relink) = (viewer.import_clicked, viewer.command, viewer.relink);
             if let Some(c) = command
                 && let Err(e) = self.history.apply(c)
             {
@@ -453,6 +479,9 @@ impl eframe::App for App {
             }
             if import {
                 self.import_dialog();
+            }
+            if let Some(id) = relink {
+                self.relink_dialog(id);
             }
         });
 
@@ -544,6 +573,8 @@ struct Viewer<'a> {
     project: &'a Project,
     importing: bool,
     bin: &'a mut MediaBin,
+    missing: &'a HashSet<PathBuf>,
+    relink: Option<AssetId>,
     import_clicked: bool,
     command: Option<Command>,
     preview: &'a mut Preview,
@@ -563,9 +594,12 @@ impl TabViewer for Viewer<'_> {
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
         let focused = self.focused == Some(*tab);
         if *tab == Tab::Media {
-            let r = self.bin.show(ui, self.project, focused, self.importing);
+            let r = self
+                .bin
+                .show(ui, self.project, focused, self.importing, self.missing);
             self.import_clicked |= r.import;
             self.command = r.command;
+            self.relink = r.relink;
             return;
         }
         let title = format!("{tab:?}");
@@ -581,7 +615,8 @@ impl TabViewer for Viewer<'_> {
                 a.probe.as_ref()?.width?;
                 Some(a.path.as_path())
             });
-            panel.show(ui, |ui| self.preview.show(ui, source));
+            let offline = source.is_some_and(|p| self.missing.contains(p));
+            panel.show(ui, |ui| self.preview.show(ui, source, offline));
             return;
         }
         // shortcut: panels are empty shells; their content lands in later issues.
