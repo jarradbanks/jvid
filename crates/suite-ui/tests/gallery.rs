@@ -4,10 +4,15 @@
 #[path = "../examples/gallery.rs"]
 mod gallery;
 
+mod common;
+
 use suite_ui::tokens::radius;
 
 #[test]
 fn gallery_snapshot() {
+    if !common::gpu() {
+        return;
+    }
     let mut state = gallery::Gallery::new();
     let mut harness = egui_kittest::Harness::builder()
         .with_size([1280.0, 860.0])

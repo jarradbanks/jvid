@@ -1,6 +1,8 @@
 //! DESIGN.md Layout > Checks for the panel frame, 32px header and tabs, measured on
-//! rendered pixels at 100% and 150% scale. Headless wgpu: any Vulkan driver works, including
-//! Mesa lavapipe in CI. Under WSL, use lavapipe: `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json WGPU_BACKEND=vulkan`.
+//! rendered pixels at 100% and 150% scale. Headless wgpu on any Vulkan driver;
+//! `common::gpu()` picks Mesa lavapipe when installed (see CONTRIBUTING.md).
+
+mod common;
 
 use egui::Color32;
 use egui_kittest::Harness;
@@ -116,6 +118,9 @@ fn near(a: Color32, b: Color32) -> bool {
 
 #[test]
 fn hairlines_are_one_physical_pixel() {
+    if !common::gpu() {
+        return;
+    }
     for ppp in SCALES {
         for mode in [Mode::Title, Mode::Tabs] {
             for focused in [false, true] {
@@ -143,6 +148,9 @@ fn hairlines_are_one_physical_pixel() {
 
 #[test]
 fn header_holds_still_between_title_and_tabs() {
+    if !common::gpu() {
+        return;
+    }
     for ppp in SCALES {
         let title = Shot::take(ppp, Mode::Title, false);
         let tabs = Shot::take(ppp, Mode::Tabs, false);
@@ -161,6 +169,9 @@ fn header_holds_still_between_title_and_tabs() {
 
 #[test]
 fn title_and_content_start_twelve_in() {
+    if !common::gpu() {
+        return;
+    }
     for ppp in SCALES {
         let s = Shot::take(ppp, Mode::Title, false);
         let inset = s.px(ORIGIN + space::INSET);
@@ -180,6 +191,9 @@ fn title_and_content_start_twelve_in() {
 
 #[test]
 fn tabs_start_four_in_with_centred_labels() {
+    if !common::gpu() {
+        return;
+    }
     for ppp in SCALES {
         let s = Shot::take(ppp, Mode::Tabs, false);
         let y = s.px(ORIGIN + size::HEADER / 2.0);
@@ -203,6 +217,9 @@ fn tabs_start_four_in_with_centred_labels() {
 
 #[test]
 fn snapshots() {
+    if !common::gpu() {
+        return;
+    }
     let mut results = egui_kittest::SnapshotResults::new();
     for ppp in SCALES {
         for (mode, focused) in [(Mode::Title, false), (Mode::Tabs, true)] {
