@@ -144,9 +144,107 @@ pub struct MediaAsset {
     /// Clips override it with a `color` keyframe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solid: Option<[f64; 4]>,
+    /// A generated text layer instead of a file; `path` is empty. Clips override its fill
+    /// with a `color` keyframe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<Text>,
+}
+
+/// Horizontal alignment of text lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Align {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+/// A text/title layer, laid out over the whole frame. Colors are straight RGBA (0..=1);
+/// sizes and offsets are in project pixels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Text {
+    pub content: String,
+    /// A family name; empty picks the default sans-serif.
+    pub family: String,
+    pub size: f32,
+    /// CSS weight, 100..=900.
+    pub weight: u16,
+    pub color: [f64; 4],
+    pub align: Align,
+    /// Center of the text block, normalized 0..=1 across the frame.
+    pub anchor: [f32; 2],
+    /// Outline width; 0 for none.
+    pub outline: f32,
+    pub outline_color: [f64; 4],
+    /// Drop shadow offset; zero for none.
+    pub shadow: [f32; 2],
+    pub shadow_color: [f64; 4],
+    /// Background box padding around the text, drawn when `box_color` is visible.
+    pub box_padding: f32,
+    pub box_color: [f64; 4],
+}
+
+impl Default for Text {
+    fn default() -> Self {
+        Self {
+            content: "Title".into(),
+            family: String::new(),
+            size: 96.0,
+            weight: 700,
+            color: [1.0; 4],
+            align: Align::Center,
+            anchor: [0.5, 0.5],
+            outline: 0.0,
+            outline_color: [0.0, 0.0, 0.0, 1.0],
+            shadow: [0.0, 0.0],
+            shadow_color: [0.0, 0.0, 0.0, 0.6],
+            box_padding: 16.0,
+            box_color: [0.0; 4],
+        }
+    }
+}
+
+impl Text {
+    /// The bin's presets: name and style.
+    pub fn presets() -> [(&'static str, Text); 3] {
+        let d = Text::default();
+        [
+            ("Title", d.clone()),
+            (
+                "Lower third",
+                Text {
+                    content: "Name\nRole".into(),
+                    size: 48.0,
+                    weight: 600,
+                    align: Align::Left,
+                    anchor: [0.25, 0.8],
+                    box_color: [0.0, 0.0, 0.0, 0.7],
+                    ..d.clone()
+                },
+            ),
+            (
+                "Caption",
+                Text {
+                    content: "Caption".into(),
+                    size: 40.0,
+                    weight: 400,
+                    anchor: [0.5, 0.9],
+                    outline: 2.0,
+                    shadow: [2.0, 2.0],
+                    ..d
+                },
+            ),
+        ]
+    }
 }
 
 impl MediaAsset {
+    /// Made by jvid (a solid or text) rather than read from a file.
+    pub fn generated(&self) -> bool {
+        self.solid.is_some() || self.text.is_some()
+    }
+
     pub fn display_name(&self) -> String {
         self.name.clone().unwrap_or_else(|| {
             self.path.file_name().map_or_else(
@@ -1084,6 +1182,7 @@ impl Project {
             in_point: None,
             out_point: None,
             solid: None,
+            text: None,
         });
         id
     }
@@ -1306,7 +1405,7 @@ impl Project {
                 Edge::Tail => {
                     lo = lo.max(min - c.duration());
                     // Stills and solids report no duration and extend freely.
-                    let media = self.asset(c.asset).filter(|a| a.solid.is_none());
+                    let media = self.asset(c.asset).filter(|a| !a.generated());
                     let media = media.and_then(|a| a.probe.as_ref()).map(|p| p.duration);
                     if let Some(d) = media.filter(|d| *d > Time(0)) {
                         hi = hi.min(d - c.source_out);

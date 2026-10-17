@@ -915,7 +915,7 @@ mod program_tests {
         let shown = p.program_shown.as_ref().expect("shown");
         let solid = |px: &Pixels| match px {
             Pixels::Solid(c) => *c,
-            Pixels::Frame(_) => panic!("a frame"),
+            _ => panic!("not a solid"),
         };
         shown.layers.iter().map(|(px, _)| solid(px)).collect()
     }

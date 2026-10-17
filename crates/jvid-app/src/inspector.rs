@@ -101,6 +101,8 @@ const EASING_GESTURE: GestureKey = 0x6561_7365_0000; // "ease"
 
 /// Undo gesture for picker edits to a solid's color, xored with its asset id.
 const SOLID_GESTURE: GestureKey = 0x736f_6c69_6400; // "solid"
+/// Undo gesture for edits to a text asset's style, xored with its asset id.
+const TEXT_GESTURE: GestureKey = 0x7465_7874_0000; // "text"
 
 /// `name`'s value in `x`; scale reads as linked, X for both.
 fn get(x: &Transform, name: &str) -> Value {
@@ -332,7 +334,7 @@ pub fn show(
         .collect();
     clips.sort_by_key(|c| c.id.0);
     let (mut edit, mut seek) = (None, None);
-    if clips.is_empty() && bin_selected.is_none_or(|a| a.solid.is_none()) {
+    if clips.is_empty() && bin_selected.is_none_or(|a| !a.generated()) {
         ui.label(egui::RichText::new("Select a clip to see its properties").color(color::INK_3));
         return (None, None);
     }
@@ -364,15 +366,21 @@ pub fn show(
             edit = Some(e);
         }
     }
+    // Only when every selected clip shows the same asset, so the editors edit them all.
+    let same = clips.iter().all(|c| c.asset == clips[0].asset);
+    let shared = clips
+        .first()
+        .filter(|_| same)
+        .and_then(|c| project.asset(c.asset))
+        .or(bin_selected);
+    if let Some(a) = shared.filter(|a| a.text.is_some())
+        && section(ui, "Text", false).0
+        && let Some(e) = text_props(ui, a)
+    {
+        edit = Some(e);
+    }
     if section(ui, "Color", false).0 {
-        // Only when every selected clip shows the same solid, so the picker edits them all.
-        let same = clips.iter().all(|c| c.asset == clips[0].asset);
-        let solid = clips
-            .first()
-            .filter(|_| same)
-            .and_then(|c| project.asset(c.asset))
-            .or(bin_selected)
-            .filter(|a| a.solid.is_some());
+        let solid = shared.filter(|a| a.solid.is_some());
         if let Some(e) = solid.and_then(|a| solid_color(ui, a)) {
             edit = Some(e);
         }
@@ -643,6 +651,95 @@ fn solid_color(ui: &mut Ui, a: &MediaAsset) -> Option<Edit> {
     changed.then_some((
         Command::SetSolidColor { id: a.id, color },
         Some(SOLID_GESTURE ^ a.id.0),
+    ))
+}
+
+/// A straight 0..=1 RGBA picker; true once changed.
+fn color_field(ui: &mut Ui, label: &str, c: &mut [f64; 4]) -> bool {
+    let mut rgba = jvid_render::solid::rgba8(*c);
+    let changed = ui
+        .horizontal(|ui| {
+            ui.label(label);
+            ui.color_edit_button_srgba_unmultiplied(&mut rgba).changed()
+        })
+        .inner;
+    *c = rgba.map(|v| v as f64 / 255.0);
+    changed
+}
+
+/// The editors for a text asset's style; the edit once anything changes.
+// shortcut: edits the asset, so every clip of it changes; only fill color (clip `color`
+// keyframes) and the transform animate per clip.
+fn text_props(ui: &mut Ui, a: &MediaAsset) -> Option<Edit> {
+    use jvid_core::model::Align;
+    let mut t = a.text.clone()?;
+    let mut changed = ui
+        .add(egui::TextEdit::multiline(&mut t.content).desired_rows(2))
+        .changed();
+    ui.horizontal(|ui| {
+        ui.label("Font");
+        changed |= ui
+            .add(egui::TextEdit::singleline(&mut t.family).hint_text("Sans-serif"))
+            .changed();
+    });
+    ui.horizontal(|ui| {
+        ui.label("Size");
+        changed |= ui
+            .add(egui::DragValue::new(&mut t.size).range(1.0..=1000.0))
+            .changed();
+        ui.label("Weight");
+        changed |= ui
+            .add(
+                egui::DragValue::new(&mut t.weight)
+                    .range(100..=900)
+                    .speed(10),
+            )
+            .changed();
+    });
+    changed |= color_field(ui, "Color", &mut t.color);
+    ui.horizontal(|ui| {
+        for (al, name) in [
+            (Align::Left, "Left"),
+            (Align::Center, "Center"),
+            (Align::Right, "Right"),
+        ] {
+            changed |= ui.selectable_value(&mut t.align, al, name).changed();
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Position");
+        for v in &mut t.anchor {
+            changed |= ui
+                .add(egui::DragValue::new(v).range(0.0..=1.0).speed(0.005))
+                .changed();
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Outline");
+        changed |= ui
+            .add(egui::DragValue::new(&mut t.outline).range(0.0..=32.0))
+            .changed();
+    });
+    changed |= color_field(ui, "Outline color", &mut t.outline_color);
+    ui.horizontal(|ui| {
+        ui.label("Shadow");
+        for v in &mut t.shadow {
+            changed |= ui
+                .add(egui::DragValue::new(v).range(-64.0..=64.0))
+                .changed();
+        }
+    });
+    changed |= color_field(ui, "Shadow color", &mut t.shadow_color);
+    ui.horizontal(|ui| {
+        ui.label("Box padding");
+        changed |= ui
+            .add(egui::DragValue::new(&mut t.box_padding).range(0.0..=200.0))
+            .changed();
+    });
+    changed |= color_field(ui, "Box color", &mut t.box_color);
+    changed.then_some((
+        Command::SetText { id: a.id, text: t },
+        Some(TEXT_GESTURE ^ a.id.0),
     ))
 }
 
