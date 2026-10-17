@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, wgpu};
-use egui::{Align, Align2, Layout, Rect, Ui, UiBuilder, vec2};
+use egui::{Align, Align2, Layout, Pos2, Rect, Stroke, Ui, UiBuilder, pos2, vec2};
 use jvid_audio::{CpalBackend, Output};
 use jvid_core::history::Command;
 use jvid_core::model::{AssetId, Project, ProjectSettings};
@@ -19,7 +19,7 @@ use jvid_media::decode::{DecoderPool, Frame};
 use jvid_render::preview::{self as render, Yuv};
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, Dropdown};
+use suite_ui::widgets::{Button, Checkbox, Dropdown};
 
 use crate::transport::{AudioSource, Transport};
 
@@ -34,6 +34,50 @@ const QUALITIES: [(&str, PreviewQuality); 3] = [
     ("½", PreviewQuality::Half),
     ("¼", PreviewQuality::Quarter),
 ];
+/// Action-safe and title-safe as fractions of the frame (SMPTE ST 2046-1).
+const SAFE: [f32; 2] = [0.93, 0.9];
+/// Aspect guides, width over height.
+const ASPECTS: [(&str, f32); 2] = [("9:16 guide", 9.0 / 16.0), ("1:1 guide", 1.0)];
+
+/// Framing guides drawn over the viewer by egui only, so they never reach a render or export.
+#[derive(Default)]
+struct Overlays {
+    safe: bool,
+    thirds: bool,
+    center: bool,
+    aspects: [bool; 2],
+}
+
+impl Overlays {
+    /// Guide outlines (as rects) and lines over `image`, the frame's on-screen rect.
+    fn shapes(&self, image: Rect) -> (Vec<Rect>, Vec<[Pos2; 2]>) {
+        let (mut rects, mut lines) = (Vec::new(), Vec::new());
+        if self.safe {
+            rects.extend(SAFE.map(|f| Rect::from_center_size(image.center(), image.size() * f)));
+        }
+        for (on, (_, a)) in self.aspects.iter().zip(ASPECTS) {
+            if *on {
+                let w = image.width().min(image.height() * a);
+                let h = image.height().min(image.width() / a);
+                rects.push(Rect::from_center_size(image.center(), vec2(w, h)));
+            }
+        }
+        if self.thirds {
+            for t in [1.0 / 3.0, 2.0 / 3.0] {
+                let x = image.left() + image.width() * t;
+                let y = image.top() + image.height() * t;
+                lines.push([pos2(x, image.top()), pos2(x, image.bottom())]);
+                lines.push([pos2(image.left(), y), pos2(image.right(), y)]);
+            }
+        }
+        if self.center {
+            let (c, r) = (image.center(), image.width().min(image.height()) * 0.03);
+            lines.push([c - vec2(r, 0.0), c + vec2(r, 0.0)]);
+            lines.push([c - vec2(0.0, r), c + vec2(0.0, r)]);
+        }
+        (rects, lines)
+    }
+}
 
 type Decoded = (PathBuf, Time, Result<Frame, String>);
 
@@ -81,6 +125,7 @@ pub struct Preview {
     generation: u64,
     zoom: usize,
     quality: usize,
+    overlays: Overlays,
     player: Option<Player>,
     /// Opened on first play, so tests and idle sessions never touch the audio device.
     output: Option<Output>,
@@ -113,6 +158,7 @@ impl Preview {
             generation: 0,
             zoom: 0,
             quality: 0,
+            overlays: Overlays::default(),
             player: None,
             output: None,
             render_state: render_state.cloned(),
@@ -387,6 +433,16 @@ impl Preview {
             };
             ui.painter()
                 .add(egui_wgpu::Callback::new_paint_callback(viewer, paint));
+            let image = Rect::from_min_size(pos2(image[0], image[1]), vec2(image[2], image[3]));
+            let (rects, lines) = self.overlays.shapes(image);
+            let painter = ui.painter().with_clip_rect(viewer);
+            let stroke = Stroke::new(1.0, color::INK.gamma_multiply(0.6));
+            for r in rects {
+                painter.rect_stroke(r, 0.0, stroke, egui::StrokeKind::Middle);
+            }
+            for l in lines {
+                painter.line_segment(l, stroke);
+            }
         }
 
         let bar = Rect::from_x_y_ranges(rect.x_range(), viewer.bottom()..=rect.bottom());
@@ -461,6 +517,18 @@ impl Preview {
         {
             self.generation += 1;
         }
+        let glyph = egui::RichText::new(icon::GRID).font(theme::icon_font());
+        ui.menu_button(glyph, |ui| {
+            let o = &mut self.overlays;
+            ui.add(Checkbox::new(&mut o.safe, "Safe areas"));
+            ui.add(Checkbox::new(&mut o.thirds, "Rule of thirds"));
+            ui.add(Checkbox::new(&mut o.center, "Center cross"));
+            for (on, (name, _)) in o.aspects.iter_mut().zip(ASPECTS) {
+                ui.add(Checkbox::new(on, name));
+            }
+        })
+        .response
+        .on_hover_text("Guides");
     }
 }
 
@@ -566,5 +634,42 @@ impl Preview {
     /// The decode for the current source has come back, with a frame or an error.
     pub fn settled(&self) -> bool {
         self.frame.is_some() || self.error.is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlay_shapes() {
+        let image = Rect::from_min_size(pos2(0.0, 0.0), vec2(1600.0, 900.0));
+        assert_eq!(Overlays::default().shapes(image), (vec![], vec![]));
+        let o = Overlays {
+            safe: true,
+            thirds: true,
+            center: true,
+            aspects: [true, true],
+        };
+        let (rects, lines) = o.shapes(image);
+        let c = image.center();
+        assert_eq!(rects[0], Rect::from_center_size(c, vec2(1488.0, 837.0)));
+        assert_eq!(rects[1], Rect::from_center_size(c, vec2(1440.0, 810.0)));
+        // 9:16 and 1:1 inside 16:9 are full height.
+        assert_eq!(
+            rects[2],
+            Rect::from_center_size(c, vec2(900.0 * 9.0 / 16.0, 900.0))
+        );
+        assert_eq!(rects[3], Rect::from_center_size(c, vec2(900.0, 900.0)));
+        assert_eq!(lines.len(), 6);
+        assert!((lines[0][0].x - 1600.0 / 3.0).abs() < 0.01);
+        assert_eq!((lines[0][0].y, lines[0][1].y), (0.0, 900.0));
+        // A guide wider than a portrait frame is full width instead.
+        let tall = Rect::from_min_size(pos2(0.0, 0.0), vec2(900.0, 1600.0));
+        let (rects, _) = o.shapes(tall);
+        assert_eq!(
+            rects[3],
+            Rect::from_center_size(tall.center(), vec2(900.0, 900.0))
+        );
     }
 }
