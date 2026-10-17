@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use crate::keyframe::{self, Keyframe};
 use crate::model::{
     AssetId, Clip, ClipId, LinkId, MarkerId, ModelError, NewClip, Placement, ProbeInfo, Project,
-    ProjectSettings, TrackId, TrackKind, TrackSettings,
+    ProjectSettings, TrackId, TrackKind, TrackSettings, Transform,
 };
 use crate::time::Time;
 
@@ -102,6 +102,9 @@ pub enum Command {
         from: Time,
         to: Time,
     },
+    /// Replaces clips' static transforms and keyframes as one step, e.g. an inspector edit
+    /// across a multi-clip selection.
+    SetClipProps(Vec<(ClipId, Transform, BTreeMap<String, Vec<Keyframe>>)>),
     AddMarker {
         time: Time,
         duration: Time,
@@ -187,6 +190,7 @@ impl Command {
             Self::RemoveClips { ids, .. } | Self::LinkClips { ids, .. } => {
                 ids.iter().find_map(|id| clip(*id))
             }
+            Self::SetClipProps(edits) => edits.iter().find_map(|(id, ..)| clip(*id)),
             Self::Paste { clips, .. } => clips.iter().find_map(|(t, _)| track(*t)),
             Self::RemoveAsset(a) => s
                 .tracks()
@@ -310,6 +314,15 @@ impl Command {
                     Some(())
                 })?
                 .ok_or(ModelError::UnknownKeyframe(id, from))?;
+                Created::Nothing
+            }
+            Self::SetClipProps(edits) => {
+                if let Some(id) = edits.iter().find(|(id, ..)| s.clip(*id).is_none()) {
+                    return Err(ModelError::UnknownClip(id.0));
+                }
+                for (id, transform, keys) in edits {
+                    s.with_clip_mut(id, |c| (*c.transform, *c.keyframes) = (transform, keys))?;
+                }
                 Created::Nothing
             }
             Self::AddMarker {
@@ -787,6 +800,37 @@ mod tests {
     }
 
     #[test]
+    fn set_clip_props_is_one_step_and_atomic() {
+        let mut h = History::new(Project::default());
+        let t = track(&mut h);
+        let ids: Vec<ClipId> = [0, 200]
+            .map(|at| match h.apply(add_clip(t, at)).unwrap() {
+                Created::Clip(c) => c,
+                _ => panic!(),
+            })
+            .into();
+        let before = h.project().clone();
+        let x = Transform {
+            opacity: 0.5,
+            ..Transform::default()
+        };
+        let edits = ids.iter().map(|&c| (c, x, BTreeMap::new())).collect();
+        h.apply(Command::SetClipProps(edits)).unwrap();
+        for c in &ids {
+            assert_eq!(h.project().sequence().clip(*c).unwrap().1.transform, x);
+        }
+        h.undo();
+        assert_eq!(h.project(), &before);
+        // an unknown clip leaves the known one untouched
+        let bad = vec![
+            (ids[0], x, BTreeMap::new()),
+            (ClipId(999), x, BTreeMap::new()),
+        ];
+        assert!(h.apply(Command::SetClipProps(bad)).is_err());
+        assert_eq!(h.project(), &before);
+    }
+
+    #[test]
     fn limit_drops_oldest_steps() {
         let mut h = History::with_limit(Project::default(), 2);
         for _ in 0..4 {
@@ -956,6 +1000,7 @@ mod tests {
                 from: Time(2),
                 to: Time(3),
             },
+            Command::SetClipProps(vec![(c, Transform::default(), BTreeMap::new())]),
             Command::RemoveAsset(AssetId(1)),
         ];
         let before = h.project().clone();

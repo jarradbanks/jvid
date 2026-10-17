@@ -154,6 +154,10 @@ impl Timeline {
         self.transport.position(0)
     }
 
+    pub fn selected(&self) -> &HashSet<ClipId> {
+        &self.selected
+    }
+
     pub fn seek(&mut self, t: Time) {
         let r = self.transport.rate;
         self.transport.seek(r.time_floor(r.index_nearest(t)), 0);
