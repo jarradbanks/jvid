@@ -69,6 +69,9 @@ Work while the timeline has focus.
 | Enable/Disable | `Shift+E` |
 | Reverse | `Ctrl+R` |
 | Freeze frame at playhead | `Shift+F` |
+| Add crossfade | `Ctrl+D` |
+| Add dip to black | `Ctrl+Alt+B` |
+| Add dip to white | `Ctrl+Alt+W` |
 | Linked Selection | `Ctrl+Shift+L` |
 | Snapping | `S` |
 | Split at playhead | `Ctrl+K` |

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Mixer, Output, SAMPLE_RATE, Strip, automate};
-use jvid_core::eval::{AudioSegment, Layer, audio_in, video_at};
+use jvid_core::eval::{AudioSegment, Layer, audio_in, gain_at, video_at};
 use jvid_core::model::{
     AssetId, ClipId, MediaAsset, Project, ProjectSettings, TrackKind, Transform,
 };
@@ -167,6 +167,8 @@ pub(crate) struct Audio {
     /// One source per stream the clip plays; several are summed.
     clips: HashMap<ClipId, Vec<ClipAudio>>,
     scratch: Vec<f32>,
+    /// One segment's samples, summed into its track since a transition overlaps two.
+    seg: Vec<f32>,
     /// Source samples for a clip not at 100% speed, before resampling.
     stretch: Vec<f32>,
     mixer: Mixer,
@@ -180,6 +182,7 @@ impl Audio {
             open,
             clips: HashMap::new(),
             scratch: Vec::new(),
+            seg: Vec::new(),
             stretch: Vec::new(),
             mixer: Mixer::new(0),
             inputs: Vec::new(),
@@ -243,7 +246,10 @@ impl Audio {
                 .clips
                 .entry(s.clip)
                 .or_insert_with(|| open_streams(&mut self.open, asset, s.stream));
-            let out = &mut self.inputs[i][span(s.start)..span(s.end)];
+            let range = span(s.start)..span(s.end);
+            let out = &mut self.seg;
+            out.clear();
+            out.resize(range.len(), 0.0);
             if let [src] = srcs.as_mut_slice() {
                 read(src, &s, out, &mut self.stretch);
             } else {
@@ -254,20 +260,24 @@ impl Audio {
                     out.iter_mut().zip(&self.scratch).for_each(|(o, x)| *o += x);
                 }
             }
-            if let Some((_, c)) = seq.clip(s.clip) {
+            if let Some((t, c)) = seq.clip(s.clip)
+                && let Some(track) = seq.track(t)
+            {
                 let first = sample(s.start);
                 let at = |i: usize| {
                     let t = Time((first + i as i64) * FLICKS_PER_SAMPLE);
                     let (v, p) = c.gain_at(t);
-                    ((v * c.fade_at(t)) as f32, p as f32)
+                    ((v * gain_at(track, c, t)) as f32, p as f32)
                 };
-                if c.gain_animated() {
+                if c.gain_animated() || s.crossfade {
                     automate(out, at);
                 } else if c.transform.volume != 1.0 || c.transform.pan != 0.0 {
                     let g = at(0);
                     automate(out, |_| g);
                 }
             }
+            let mixed = &mut self.inputs[i][range];
+            mixed.iter_mut().zip(&*out).for_each(|(m, x)| *m += x);
         }
         let inputs: Vec<&[f32]> = self.inputs.iter().map(Vec::as_slice).collect();
         self.mixer.mix(&inputs, out);

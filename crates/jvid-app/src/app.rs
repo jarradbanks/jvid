@@ -747,6 +747,9 @@ impl eframe::App for App {
                 viewer.relink,
                 viewer.open,
             );
+            if let Some(msg) = self.timeline.notice.take() {
+                self.toasts.push((msg, now + TOAST_SECS));
+            }
             if let Some(id) = self.timeline.reveal.take() {
                 self.bin.selected = Some(id);
                 self.run_action("focus_media", false);

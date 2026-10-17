@@ -970,6 +970,7 @@ fn speed_resamples_and_reverse_reads_backwards() {
         end: Time(0),
         source_start: Time(100 * FLICKS_PER_SAMPLE),
         stream: None,
+        crossfade: false,
         volume: 1.0,
         pan: 0.0,
         speed,
@@ -993,4 +994,49 @@ fn speed_resamples_and_reverse_reads_backwards() {
         [100.0, 100.5, 101.0, 101.5]
     );
     assert_eq!(left(&seg(1.0, true), &mut src), [100.0, 99.0, 98.0, 97.0]);
+}
+
+/// Through a transition both clips on a track are summed at equal power, not one written over
+/// the other.
+#[test]
+fn transition_mixes_both_clips_at_equal_power() {
+    use jvid_core::model::{Transition, TransitionKind};
+    let mut h = History::new(Project::default());
+    let a = add(&mut h, TrackKind::Audio, "/a.wav", secs(1));
+    let (track, c) = h
+        .project()
+        .sequence()
+        .clip(a)
+        .map(|(t, c)| (t, c.clone()))
+        .unwrap();
+    let clip = NewClip {
+        asset: c.asset,
+        source_in: secs(1),
+        source_out: secs(2),
+        start: secs(1),
+        link: None,
+    };
+    h.apply(Command::AddClip { track, clip }).unwrap();
+    let x = Transform {
+        transition: Some(Transition {
+            kind: TransitionKind::Crossfade,
+            duration: secs(1),
+        }),
+        ..c.transform.clone()
+    };
+    h.apply(Command::SetClipProps(vec![(a, x, c.keyframes.clone())]))
+        .unwrap();
+    let mut audio = Audio::new(Box::new(|_, _| {
+        Box::new(|_, out: &mut [f32]| out.fill(1.0))
+    }));
+    let mut out = vec![0.0; 8];
+    let unity = pan_gains(0.0).0;
+    audio.mix(h.project(), 0, &mut out);
+    assert_eq!(out[0], unity, "before the transition");
+    audio.mix(h.project(), SAMPLE_RATE as i64, &mut out);
+    assert!(
+        (out[0] - unity * std::f32::consts::SQRT_2).abs() < 1e-3,
+        "{}",
+        out[0]
+    );
 }

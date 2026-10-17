@@ -51,6 +51,8 @@ The start screen offers **New project** (pick a frame size preset, or **Match so
 
 **Audio.** Drag the square in either top corner of a clip inward to fade it; double-click the handle to switch between linear and equal-power. The line across an audio clip's waveform is its volume: drag it, or Ctrl+click it to add a point. `Shift+S` toggles audio while scrubbing.
 
+**Transitions.** Select a clip and press `Ctrl+D` for a one-second crossfade at its end (or right-click it for a dip to black or white); with nothing selected it goes on the cut nearest the playhead. It needs media past the cut on both sides: if there is none, a message says so; trim the clips to leave some. Drag the amber block on the cut to change its length, or right-click it to change or remove it. Audio crossfades at equal power.
+
 **Undo.** Everything you do on the timeline, in the bin and in the Inspector undoes with `Ctrl+Z` and redoes with `Ctrl+Shift+Z` or `Ctrl+Y`.
 
 ## Keyframes

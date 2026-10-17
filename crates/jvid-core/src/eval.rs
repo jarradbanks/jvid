@@ -3,7 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{AssetId, Clip, ClipId, Sequence, Track, TrackId, TrackKind, Transform};
+use crate::model::{
+    AssetId, Clip, ClipId, Sequence, Track, TrackId, TrackKind, Transform, TransitionKind,
+};
 use crate::time::Time;
 
 /// One visible clip at an instant.
@@ -43,6 +45,8 @@ pub struct AudioSegment {
     pub reverse: bool,
     /// The clip's audio stream; `None` mixes all of them.
     pub stream: Option<u32>,
+    /// The segment plays through a transition, so its gain ([`gain_at`]) changes within it.
+    pub crossfade: bool,
     pub volume: f32,
     pub pan: f32,
 }
@@ -58,43 +62,155 @@ fn active(
     tracks.filter(move |t| !off(t) && (!any_solo || t.solo))
 }
 
-/// Clips on `track` intersecting `[start, end)`; clips are sorted and never overlap.
-fn clips_in(track: &Track, start: Time, end: Time) -> impl Iterator<Item = &Clip> {
+/// The longest a transition reaches past its cut, as [`crate::model::Project::transition_room`]
+/// allows.
+const REACH: Time = Time(60 * crate::time::FLICKS_PER_SECOND);
+
+/// The transition window `[start, end)` at the cut between `out` and the clip after it, `inc`,
+/// if one plays there: both enabled and touching.
+fn window(out: &Clip, inc: &Clip) -> Option<(Time, Time)> {
+    let x = out.transform.transition?;
+    let ok = out.enabled && inc.enabled && inc.start == out.end() && x.duration > Time(0);
+    let start = out.end() - Time(x.duration.0 / 2);
+    ok.then_some((start, start + x.duration))
+}
+
+/// How far through `[start, end)` `t` is, 0..1.
+fn progress((start, end): (Time, Time), t: Time) -> f64 {
+    (t - start).0 as f64 / (end - start).0 as f64
+}
+
+/// A clip with the transition windows at its head and tail.
+type Windowed<'a> = (&'a Clip, Option<(Time, Time)>, Option<(Time, Time)>);
+
+/// The span `c` covers: its own, carried past an edge into its media by a transition there.
+fn span((c, before, after): Windowed) -> (Time, Time) {
+    (
+        before.map_or(c.start, |w| w.0),
+        after.map_or(c.end(), |w| w.1),
+    )
+}
+
+/// Enabled clips on `track` heard or seen within `[start, end)`.
+fn clips_in(track: &Track, start: Time, end: Time) -> impl Iterator<Item = Windowed<'_>> {
     let clips = track.clips();
-    let first = clips.partition_point(|c| c.end() <= start);
-    let clips = if start < end { &clips[first..] } else { &[] };
-    clips
-        .iter()
-        .take_while(move |c| c.start < end)
-        .filter(|c| c.enabled)
+    let first = clips.partition_point(|c| c.end() <= start - REACH);
+    let range = if start < end {
+        first..clips.len()
+    } else {
+        0..0
+    };
+    range
+        .take_while(move |&i| clips[i].start < end + REACH)
+        .filter(|&i| clips[i].enabled)
+        .filter_map(move |i| {
+            let c = &clips[i];
+            let before = i.checked_sub(1).and_then(|j| window(&clips[j], c));
+            let after = clips.get(i + 1).and_then(|n| window(c, n));
+            let (s, e) = span((c, before, after));
+            (s < end && start < e).then_some((c, before, after))
+        })
+}
+
+/// `c`'s source time at `t`, into its handles outside the clip.
+fn source(c: &Clip, t: Time) -> Time {
+    if c.start <= t && t < c.end() {
+        c.source_at(t)
+    } else {
+        c.source_beyond(t)
+    }
+}
+
+/// `c`'s fades at `t`, held at the clip's edge value through its handles.
+fn fade(c: &Clip, t: Time) -> f64 {
+    c.fade_at(t.clamp(c.start, Time(c.end().0 - 1).max(c.start)))
 }
 
 /// `c`'s transform at `t` with its fades on the opacity.
 fn faded(c: &Clip, t: Time) -> Transform {
     let mut x = c.transform_at(t);
-    x.opacity *= c.fade_at(t);
+    x.opacity *= fade(c, t);
     x
 }
 
-/// Visible video layers at `t`, top to bottom.
+fn layer<'a>(tr: TrackId, c: &'a Clip, t: Time) -> Layer<'a> {
+    Layer {
+        track: tr,
+        clip: c.id,
+        asset: c.asset,
+        source_time: source(c, t),
+        params: &c.params,
+        transform: faded(c, t),
+        color: match c.value_at("color", t) {
+            Some(crate::keyframe::Value::Color(c)) => Some(c),
+            _ => None,
+        },
+        text: c.text_keys(t),
+    }
+}
+
+/// Visible video layers at `t`, top to bottom. Through a crossfade the incoming clip fades in
+/// over the outgoing one; a dip covers the outgoing clip with a full-frame solid that then
+/// uncovers the incoming one.
 pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
     active(seq, TrackKind::Video, |t| t.hidden)
         .flat_map(|tr| {
-            clips_in(tr, t, t + Time(1)).map(move |c| Layer {
-                track: tr.id,
-                clip: c.id,
-                asset: c.asset,
-                source_time: c.source_at(t),
-                params: &c.params,
-                transform: faded(c, t),
-                color: match c.value_at("color", t) {
-                    Some(crate::keyframe::Value::Color(c)) => Some(c),
-                    _ => None,
+            let near: Vec<_> = clips_in(tr, t, t + Time(1)).map(|(c, ..)| c).collect();
+            // Overlapping windows around a clip shorter than them show each clip whole.
+            let (out, inc, w) = match near.as_slice() {
+                &[out, inc] if let Some(w) = window(out, inc) => (out, inc, w),
+                _ => return near.into_iter().map(|c| layer(tr.id, c, t)).collect(),
+            };
+            let p = progress(w, t);
+            let kind = out.transform.transition.expect("windowed").kind;
+            let rgb = match kind {
+                TransitionKind::Crossfade => {
+                    let mut top = layer(tr.id, inc, t);
+                    top.transform.opacity *= p;
+                    return vec![top, layer(tr.id, out, t)];
+                }
+                TransitionKind::DipToBlack => 0.0,
+                TransitionKind::DipToWhite => 1.0,
+            };
+            let (under, a) = if p < 0.5 {
+                (out, 2.0 * p)
+            } else {
+                (inc, 2.0 - 2.0 * p)
+            };
+            // shortcut: the dip is the clip's layer drawn as a solid, so a text clip dips as
+            // its text in the dip color; give Layer a solid of its own if that matters.
+            let dip = Layer {
+                transform: Transform {
+                    opacity: a,
+                    ..Transform::default()
                 },
-                text: c.text_keys(t),
-            })
+                color: Some([rgb, rgb, rgb, 1.0]),
+                text: Vec::new(),
+                ..layer(tr.id, under, t)
+            };
+            vec![dip, layer(tr.id, under, t)]
         })
         .collect()
+}
+
+/// `c`'s gain from its fades and its transitions at `t` on `track`, 0..=1; transitions are
+/// equal-power crossfades whatever their kind.
+pub fn gain_at(track: &Track, c: &Clip, t: Time) -> f64 {
+    let clips = track.clips();
+    let i = clips.iter().position(|o| o.id == c.id);
+    let before = i
+        .and_then(|i| i.checked_sub(1))
+        .and_then(|j| window(&clips[j], c));
+    let after = i.and_then(|i| clips.get(i + 1)).and_then(|n| window(c, n));
+    let quarter = std::f64::consts::FRAC_PI_2;
+    let mut g = fade(c, t);
+    if let Some(w) = before.filter(|w| w.0 <= t && t < w.1) {
+        g *= (progress(w, t) * quarter).sin();
+    }
+    if let Some(w) = after.filter(|w| w.0 <= t && t < w.1) {
+        g *= (progress(w, t) * quarter).cos();
+    }
+    g
 }
 
 /// Audible segments within `[start, end)`, in track order then time order.
@@ -103,19 +219,22 @@ pub fn audio_in(seq: &Sequence, start: Time, end: Time) -> Vec<AudioSegment> {
         .flat_map(|tr| {
             // A freeze is silent.
             clips_in(tr, start, end)
-                .filter(|c| c.freeze.is_none())
-                .map(move |c| {
-                    let s = start.max(c.start);
+                .filter(|(c, ..)| c.freeze.is_none())
+                .map(move |w @ (c, before, after)| {
+                    let (cs, ce) = span(w);
+                    let (s, e) = (start.max(cs), end.min(ce));
                     AudioSegment {
                         track: tr.id,
                         clip: c.id,
                         asset: c.asset,
                         start: s,
-                        end: end.min(c.end()),
-                        source_start: c.source_at(s),
+                        end: e,
+                        source_start: source(c, s),
                         speed: c.speed,
                         reverse: c.reverse,
                         stream: c.stream,
+                        crossfade: before.is_some_and(|w| s < w.1)
+                            || after.is_some_and(|w| w.0 < e),
                         volume: tr.volume,
                         pan: tr.pan,
                     }
@@ -395,5 +514,140 @@ mod tests {
         p.trim(&[(c, Edge::Tail, t(-10))], false).unwrap();
         let k = p.sequence().clip(c).unwrap().1.clone();
         assert_eq!((k.end(), k.source_out), (t(50), t(180)));
+    }
+
+    fn transition(s: &mut Sequence, c: ClipId, kind: TransitionKind, d: i64) {
+        use crate::model::Transition;
+        s.with_clip_mut(c, |c| {
+            c.transform.transition = Some(Transition {
+                kind,
+                duration: Time(d),
+            })
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn crossfade_overlaps_the_cut_from_the_handles() {
+        let mut s = Sequence::default();
+        let v = s.add_track(TrackKind::Video, "V1");
+        let a = s.add_clip(v, clip(0, 100)).unwrap();
+        let b = s.add_clip(v, clip(100, 100)).unwrap();
+        transition(&mut s, a, TransitionKind::Crossfade, 20);
+        let at = |t| video_at(&s, Time(t));
+        assert_eq!(ids(&at(89)), [a]);
+        assert_eq!(ids(&at(90)), [b, a], "incoming on top");
+        // b shows 10 before its source_in, a 10 past its source_out.
+        assert_eq!(at(90)[0].source_time, Time(90));
+        assert_eq!(at(105)[1].source_time, Time(205));
+        assert_eq!(at(95)[0].transform.opacity, 0.25);
+        assert_eq!(at(95)[1].transform.opacity, 1.0);
+        assert_eq!(ids(&at(110)), [b]);
+        // Moving b off the cut or disabling it drops the transition.
+        s.with_clip_mut(b, |c| *c.enabled = false).unwrap();
+        let at = |t| ids(&video_at(&s, Time(t)));
+        assert_eq!(at(95), [a]);
+        assert_eq!(at(105), []);
+    }
+
+    #[test]
+    fn dips_cover_the_cut_with_a_solid() {
+        let mut s = Sequence::default();
+        let v = s.add_track(TrackKind::Video, "V1");
+        let a = s.add_clip(v, clip(0, 100)).unwrap();
+        let b = s.add_clip(v, clip(100, 100)).unwrap();
+        transition(&mut s, a, TransitionKind::DipToWhite, 40);
+        let at = |t| video_at(&s, Time(t));
+        let l = at(90);
+        assert_eq!(ids(&l), [a, a]);
+        assert_eq!(l[0].color, Some([1.0; 4]));
+        assert_eq!(l[0].transform.opacity, 0.5);
+        assert_eq!(l[1].color, None);
+        assert_eq!(at(100)[0].transform.opacity, 1.0, "solid at the cut");
+        let l = at(110);
+        assert_eq!(ids(&l), [b, b]);
+        assert_eq!(l[0].transform.opacity, 0.5);
+        transition(&mut s, a, TransitionKind::DipToBlack, 40);
+        assert_eq!(video_at(&s, Time(110))[0].color, Some([0.0, 0.0, 0.0, 1.0]));
+    }
+
+    #[test]
+    fn transitions_follow_speed_and_reverse_into_the_handles() {
+        let mut s = Sequence::default();
+        let v = s.add_track(TrackKind::Video, "V1");
+        let a = s.add_clip(v, clip(0, 200)).unwrap();
+        s.set_speed(a, 2.0, false, false).unwrap();
+        let b = s.add_clip(v, clip(100, 100)).unwrap();
+        s.set_speed(b, 1.0, true, false).unwrap();
+        transition(&mut s, a, TransitionKind::Crossfade, 20);
+        let l = video_at(&s, Time(105));
+        assert_eq!(ids(&l), [b, a]);
+        // a at 200% runs 10 past its end as 20 of source; b reversed shows source after its out.
+        assert_eq!(l[1].source_time, Time(310));
+        assert_eq!(video_at(&s, Time(95))[0].source_time, Time(204));
+        assert_eq!(l[0].source_time, Time(194));
+    }
+
+    #[test]
+    fn audio_crossfades_at_equal_power() {
+        let mut s = Sequence::default();
+        let t = s.add_track(TrackKind::Audio, "A1");
+        let a = s.add_clip(t, clip(0, 100)).unwrap();
+        let b = s.add_clip(t, clip(100, 100)).unwrap();
+        transition(&mut s, a, TransitionKind::DipToBlack, 20);
+        let segs = audio_in(&s, Time(80), Time(120));
+        let got: Vec<_> = segs
+            .iter()
+            .map(|g| (g.clip, g.start, g.end, g.source_start, g.crossfade))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (a, Time(80), Time(110), Time(180), true),
+                (b, Time(90), Time(120), Time(90), true),
+            ]
+        );
+        let tr = &s.tracks()[0];
+        let (ca, cb) = (&tr.clips()[0], &tr.clips()[1]);
+        for x in 90..110 {
+            let (ga, gb) = (gain_at(tr, ca, Time(x)), gain_at(tr, cb, Time(x)));
+            assert!(
+                (ga * ga + gb * gb - 1.0).abs() < 1e-9,
+                "constant power at {x}"
+            );
+        }
+        assert_eq!(gain_at(tr, ca, Time(50)), 1.0);
+        assert_eq!(gain_at(tr, cb, Time(90)), 0.0);
+        assert!(!audio_in(&s, Time(0), Time(50))[0].crossfade);
+    }
+
+    #[test]
+    fn transition_room_needs_handles_and_splits_keep_it_at_the_cut() {
+        use crate::model::Project;
+        let mut p = Project::default();
+        let mut s = p.sequence().clone();
+        let v = s.add_track(TrackKind::Video, "V1");
+        let a = s.add_clip(v, clip(0, 100)).unwrap();
+        let mut from_zero = clip(100, 100);
+        from_zero.source_in = Time(0);
+        let b = s.add_clip(v, from_zero).unwrap();
+        let lone = s.add_clip(v, clip(300, 10)).unwrap();
+        p.sequence = s.clone();
+        assert_eq!(p.transition_room(a), Err(ModelError::NoHandles(a)));
+        assert_eq!(p.transition_room(lone), Err(ModelError::NoHandles(lone)));
+        let sec = crate::time::FLICKS_PER_SECOND;
+        s.set_clip_range(b, Time(100), Time(sec), Time(sec + 100))
+            .unwrap();
+        p.sequence = s.clone();
+        let room = p.transition_room(a).unwrap();
+        assert!(room > Time(0) && room <= Time(2 * sec));
+        let r = p.settings().frame_rate;
+        assert_eq!(r.time_floor(r.index_floor(room)), room, "whole frames");
+
+        transition(&mut s, b, TransitionKind::Crossfade, 4);
+        s.split_at(&[b], Time(150)).unwrap();
+        let clips = s.tracks()[0].clips();
+        assert_eq!(clips[1].transform.transition, None);
+        assert!(clips[2].transform.transition.is_some());
     }
 }

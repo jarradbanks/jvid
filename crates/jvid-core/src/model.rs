@@ -493,6 +493,24 @@ pub struct Transform {
     pub fade_in: Time,
     pub fade_out: Time,
     pub fade_curve: FadeCurve,
+    /// The transition into the next clip on the track, centred on this clip's end; it plays
+    /// only while that clip starts exactly there, from the media handles on both sides.
+    pub transition: Option<Transition>,
+}
+
+/// A transition at a cut, `duration` long and centred on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Transition {
+    pub kind: TransitionKind,
+    pub duration: Time,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitionKind {
+    Crossfade,
+    DipToBlack,
+    DipToWhite,
 }
 
 /// The shape of a clip fade.
@@ -555,6 +573,7 @@ impl Default for Transform {
             fade_in: Time(0),
             fade_out: Time(0),
             fade_curve: FadeCurve::Linear,
+            transition: None,
         }
     }
 }
@@ -607,13 +626,24 @@ impl Clip {
         if let Some(f) = self.freeze {
             return f;
         }
+        let last = Time(self.source_out.0 - 1).max(self.source_in);
+        self.source_beyond(t).clamp(self.source_in, last)
+    }
+
+    /// [`Clip::source_at`] carried on past the clip's edges into the media's handles, as a
+    /// transition shows them; never before the media's start.
+    pub fn source_beyond(&self, t: Time) -> Time {
+        if let Some(f) = self.freeze {
+            return f;
+        }
         let d = self.source_len(t - self.start);
         let last = Time(self.source_out.0 - 1).max(self.source_in);
-        if self.reverse {
-            (last - d).clamp(self.source_in, last)
+        let s = if self.reverse {
+            last - d
         } else {
-            (self.source_in + d).clamp(self.source_in, last)
-        }
+            self.source_in + d
+        };
+        s.max(Time(0))
     }
 
     /// Where source time `s` shows on the timeline, the inverse of [`Clip::source_at`]; a
@@ -794,6 +824,8 @@ pub enum ModelError {
     BadSpeed,
     /// The time is outside the clip.
     OutsideClip(ClipId),
+    /// No media past the cut on one side or both for a transition there.
+    NoHandles(ClipId),
 }
 
 impl std::fmt::Display for ModelError {
@@ -812,6 +844,9 @@ impl std::fmt::Display for ModelError {
             Self::NoRange => f.write_str("no in/out range is marked"),
             Self::BadSpeed => f.write_str("speed must be above 0"),
             Self::OutsideClip(id) => write!(f, "time is outside clip {}", id.0),
+            Self::NoHandles(_) => f.write_str(
+                "no media handles at that cut for a transition: trim the clips so media remains past it on both sides",
+            ),
         }
     }
 }
@@ -1188,6 +1223,8 @@ impl Sequence {
         let mut tail = head.clone();
         tail.keep_tail(head.end() - at);
         head.keep_head(at - head.start);
+        // The cut's transition stays with the tail, which now ends there.
+        head.transform.transition = None;
         (tail.id, tail.link) = (tail_id, link);
         clips.insert(i + 1, tail);
     }
@@ -1764,6 +1801,28 @@ impl Project {
             }
         }
         if lo > hi { Time(0) } else { by.clamp(lo, hi) }
+    }
+
+    /// The longest transition at the cut after `id` (the end it shares with the next clip),
+    /// a whole even number of frames held to the media handles on both sides.
+    pub fn transition_room(&self, id: ClipId) -> Result<Time, ModelError> {
+        let s = &self.sequence;
+        let (t, c) = s.clip(id).ok_or(ModelError::UnknownClip(id))?;
+        let mut next = s.track(t).expect("listed").clips().iter();
+        let next = next
+            .find(|n| n.start == c.end())
+            .ok_or(ModelError::NoHandles(id))?;
+        let far = Time(i64::MAX / 8);
+        let after = self.trim_limit(id, Edge::Tail, far, true);
+        let before = Time(0) - self.trim_limit(next.id, Edge::Head, Time(0) - far, true);
+        let r = self.settings.frame_rate;
+        // Stills and solids have endless handles; a minute either side is plenty.
+        let minute = Time(60 * crate::time::FLICKS_PER_SECOND);
+        let half = r.index_floor(after.min(before).min(minute));
+        if half < 1 {
+            return Err(ModelError::NoHandles(id));
+        }
+        Ok(r.time_floor(2 * half))
     }
 
     /// Moves each clip's edge by its amount, as far as [`trim_limit`](Self::trim_limit)
