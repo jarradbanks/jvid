@@ -34,3 +34,8 @@ unknown-git = "deny"
 [[licenses.exceptions]]
 crate = "epaint_default_fonts"
 allow = ["OFL-1.1", "Ubuntu-font-1.0"]
+
+# MPL-2.0 is file-level copyleft: fine to depend on unmodified (via dirs-sys).
+[[licenses.exceptions]]
+crate = "option-ext"
+allow = ["MPL-2.0"]
