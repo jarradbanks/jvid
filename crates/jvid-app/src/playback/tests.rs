@@ -573,27 +573,12 @@ fn seek_latency_1080p30() {
     );
 }
 
-/// wgpu's native futures are ready when polled, so a busy poll stands in for an executor.
-fn block_on<F: std::future::Future>(f: F) -> F::Output {
-    let mut f = std::pin::pin!(f);
-    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
-    loop {
-        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
-            return v;
-        }
-        std::thread::yield_now();
-    }
-}
-
 /// A software device where `gpu()` allows one (lavapipe on Linux); `None` skips.
 pub(crate) fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
     if !suite_ui::test_support::gpu() {
         return None;
     }
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let adapter = block_on(instance.request_adapter(&Default::default())).expect("adapter");
-    Some(block_on(adapter.request_device(&Default::default())).expect("device"))
+    Some(crate::export::headless_gpu().expect("device"))
 }
 
 /// Acceptance (#90): a 2-hour 1440p60 recording is editable within 2 s of import, and a seek
