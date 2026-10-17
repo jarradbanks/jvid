@@ -231,6 +231,10 @@ fn hairlines_are_one_physical_pixel() {
             assert_eq!(down[1].0 - down[0].0, s.px(size::HEADER) - 1, "{ctx}");
         }
         for row in s.rows() {
+            // The timeline isn't empty: its lanes are Field.
+            if row.iter().any(|(t, _)| *t == Tab::Timeline) {
+                continue;
+            }
             // Across the (empty) content of every panel in the row, gutters included,
             // above the media bin's pinned Import button.
             let y = s.px(row[0].1.bottom() - 56.0);
