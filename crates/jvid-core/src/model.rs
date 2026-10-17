@@ -351,6 +351,8 @@ pub enum ModelError {
     UnknownKeyframe(ClipId, Time),
     /// The edit touches a locked track.
     Locked(TrackId),
+    /// The clip can't go on a track of that kind.
+    WrongKind(TrackId),
 }
 
 impl std::fmt::Display for ModelError {
@@ -364,6 +366,7 @@ impl std::fmt::Display for ModelError {
             Self::UnknownAsset(id) => write!(f, "unknown asset {}", id.0),
             Self::UnknownKeyframe(id, t) => write!(f, "no keyframe at {} on clip {}", t.0, id.0),
             Self::Locked(id) => write!(f, "track {} is locked", id.0),
+            Self::WrongKind(id) => write!(f, "track {} is the wrong kind", id.0),
         }
     }
 }
@@ -388,6 +391,19 @@ pub struct NewClip {
     pub source_out: Time,
     pub start: Time,
     pub link: Option<LinkId>,
+}
+
+/// A source range to put on the timeline at `start`, as linked video and audio clips.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Placement {
+    pub asset: AssetId,
+    pub source_in: Time,
+    pub source_out: Time,
+    pub start: Time,
+    pub video: Option<TrackId>,
+    pub audio: Option<TrackId>,
+    /// Insert pushes every unlocked track right to make room; overwrite replaces what's there.
+    pub insert: bool,
 }
 
 impl Sequence {
@@ -668,6 +684,164 @@ impl Sequence {
     }
 }
 
+impl Sequence {
+    fn index(&self, id: TrackId) -> Result<usize, ModelError> {
+        let i = self.tracks.iter().position(|t| t.id == id);
+        i.ok_or(ModelError::UnknownTrack(id))
+    }
+
+    fn kind_check(&self, id: TrackId, kind: TrackKind) -> Result<usize, ModelError> {
+        let i = self.index(id)?;
+        if self.tracks[i].kind != kind {
+            return Err(ModelError::WrongKind(id));
+        }
+        Ok(i)
+    }
+
+    /// Cuts clip `id` on track `ti` at `at`. The tail gets a new id and, through `links`,
+    /// a new link shared with the other tails of the same edit.
+    fn split(&mut self, ti: usize, id: ClipId, at: Time, links: &mut BTreeMap<LinkId, LinkId>) {
+        let tail_id = ClipId(self.alloc());
+        let link = self.tracks[ti]
+            .clips
+            .iter()
+            .find(|c| c.id == id)
+            .and_then(|c| c.link);
+        let link = link.map(|l| *links.entry(l).or_insert_with(|| LinkId(self.alloc())));
+        let clips = &mut self.tracks[ti].clips;
+        let i = clips
+            .iter()
+            .position(|c| c.id == id)
+            .expect("caller found it");
+        let head = &mut clips[i];
+        let cut = head.source_in + (at - head.start);
+        let mut tail = head.clone();
+        head.source_out = cut;
+        (tail.id, tail.source_in, tail.start, tail.link) = (tail_id, cut, at, link);
+        clips.insert(i + 1, tail);
+    }
+
+    /// Empties `[start, end)` on track `ti`, trimming or splitting clips that cross it.
+    fn clear(&mut self, ti: usize, start: Time, end: Time, links: &mut BTreeMap<LinkId, LinkId>) {
+        let hit = self.tracks[ti]
+            .clips
+            .iter()
+            .filter(|c| c.start < end && start < c.end());
+        let hit: Vec<_> = hit.map(|c| (c.id, c.start, c.end())).collect();
+        for (id, s, e) in hit {
+            if s < start && e > end {
+                self.split(ti, id, end, links);
+            }
+            let clips = &mut self.tracks[ti].clips;
+            let i = clips.iter().position(|c| c.id == id).expect("listed above");
+            let c = &mut clips[i];
+            if s >= start && e <= end {
+                clips.remove(i);
+            } else if s < start {
+                c.source_out = c.source_in + (start - s);
+            } else {
+                c.source_in = c.source_in + (end - s);
+                c.start = end;
+            }
+        }
+    }
+
+    /// Insert or overwrite edit, as Premiere's `,` and `.`: insert splits every unlocked
+    /// track at `start` and pushes the rest right by the clip's length.
+    pub(crate) fn place(&mut self, p: Placement) -> Result<Vec<ClipId>, ModelError> {
+        if p.source_out <= p.source_in {
+            return Err(ModelError::EmptyClip);
+        }
+        let len = p.source_out - p.source_in;
+        let mut s = self.clone();
+        let mut links = BTreeMap::new();
+        let targets = [(p.video, TrackKind::Video), (p.audio, TrackKind::Audio)];
+        let mut tracks = Vec::new();
+        for (t, kind) in targets {
+            if let Some(t) = t {
+                tracks.push((t, s.kind_check(t, kind)?));
+            }
+        }
+        if p.insert {
+            for ti in 0..s.tracks.len() {
+                if s.tracks[ti].locked {
+                    continue;
+                }
+                let crossing = s.tracks[ti].overlap(p.start, p.start, None);
+                if let Some(id) = crossing {
+                    s.split(ti, id, p.start, &mut links);
+                }
+                for c in &mut s.tracks[ti].clips {
+                    if c.start >= p.start {
+                        c.start = c.start + len;
+                    }
+                }
+            }
+        }
+        let link = (tracks.len() > 1).then(|| s.new_link());
+        let mut ids = Vec::new();
+        for (t, ti) in tracks {
+            s.clear(ti, p.start, p.start + len, &mut links);
+            let clip = NewClip {
+                asset: p.asset,
+                source_in: p.source_in,
+                source_out: p.source_out,
+                start: p.start,
+                link,
+            };
+            ids.push(s.add_clip(t, clip)?);
+        }
+        *self = s;
+        Ok(ids)
+    }
+
+    /// The clip and its linked partners.
+    pub fn linked(&self, id: ClipId) -> Vec<(TrackId, &Clip)> {
+        let link = self.clip(id).and_then(|(_, c)| c.link);
+        let all = self
+            .tracks
+            .iter()
+            .flat_map(|t| t.clips.iter().map(|c| (t.id, c)));
+        all.filter(|(_, c)| c.id == id || (link.is_some() && c.link == link))
+            .collect()
+    }
+
+    /// Drags clip `id` to `start` on `track`, its linked clips by the same time on their own
+    /// tracks, overwriting whatever they land on. Nothing moves before zero.
+    pub(crate) fn drag_clip(
+        &mut self,
+        id: ClipId,
+        track: TrackId,
+        start: Time,
+    ) -> Result<(), ModelError> {
+        let (from, c) = self.clip(id).ok_or(ModelError::UnknownClip(id))?;
+        let kind = self.tracks[self.index(from)?].kind;
+        self.kind_check(track, kind)?;
+        let group: Vec<_> = self
+            .linked(id)
+            .iter()
+            .map(|(t, c)| (*t, c.id, c.start))
+            .collect();
+        let earliest = group.iter().map(|g| g.2).min().expect("has the clip");
+        let by = (start - c.start).max(Time(0) - earliest);
+        let mut s = self.clone();
+        let mut moved = Vec::new();
+        for (t, cid, _) in group {
+            let (_, c) = s.remove_clip(cid)?;
+            moved.push((if cid == id { track } else { t }, c));
+        }
+        let mut links = BTreeMap::new();
+        for (t, mut c) in moved {
+            c.start = c.start + by;
+            let ti = s.index(t)?;
+            s.clear(ti, c.start, c.end(), &mut links);
+            insert_sorted(&mut s.tracks[ti].clips, c);
+        }
+        *self = s;
+        Ok(())
+    }
+}
+
 /// The clip fields `Sequence::with_clip_mut` exposes.
 pub(crate) struct ClipProps<'a> {
     pub asset: &'a mut AssetId,
@@ -727,6 +901,48 @@ impl Project {
         clips.filter(|c| c.asset == id).count()
     }
 
+    /// Places `asset`'s source in/out (default the whole file) at `start`: on `on` for its
+    /// kind, and on the targeted track, else the top unlocked one, for the other kind the
+    /// file has. `None` when the file has no duration or no track to land on.
+    pub fn placement(
+        &self,
+        asset: AssetId,
+        start: Time,
+        insert: bool,
+        on: Option<TrackId>,
+    ) -> Option<Placement> {
+        let a = self.asset(asset)?;
+        let probe = a.probe.as_ref()?;
+        let source_in = a.in_point.unwrap_or_default();
+        let source_out = a.out_point.unwrap_or(probe.duration);
+        if source_out <= source_in {
+            return None;
+        }
+        let tracks = self.sequence.tracks();
+        let pick = |kind: TrackKind, has: bool| {
+            let of_kind = || tracks.iter().filter(move |t| t.kind == kind);
+            has.then(|| {
+                of_kind()
+                    .find(|t| Some(t.id) == on)
+                    .or_else(|| of_kind().find(|t| t.target))
+                    .or_else(|| of_kind().find(|t| !t.locked))
+                    .map(|t| t.id)
+            })
+            .flatten()
+        };
+        let video = pick(TrackKind::Video, probe.width.is_some());
+        let audio = pick(TrackKind::Audio, probe.audio_streams > 0);
+        (video.is_some() || audio.is_some()).then_some(Placement {
+            asset,
+            source_in,
+            source_out,
+            start: start.max(Time(0)),
+            video,
+            audio,
+            insert,
+        })
+    }
+
     pub(crate) fn asset_mut(&mut self, id: AssetId) -> Option<&mut MediaAsset> {
         self.assets.iter_mut().find(|a| a.id == id)
     }
@@ -755,6 +971,177 @@ mod tests {
 
     fn ids<'a>(it: impl Iterator<Item = (TrackId, &'a Clip)>) -> Vec<ClipId> {
         it.map(|(_, c)| c.id).collect()
+    }
+
+    /// (start, source_in, source_out) of each clip on the track.
+    fn spans(s: &Sequence, t: TrackId) -> Vec<(i64, i64, i64)> {
+        let clips = s.track(t).unwrap().clips();
+        clips
+            .iter()
+            .map(|c| (c.start.0, c.source_in.0, c.source_out.0))
+            .collect()
+    }
+
+    fn placement(v: TrackId, a: TrackId, start: i64, insert: bool) -> Placement {
+        Placement {
+            asset: AssetId(2),
+            source_in: Time(1000),
+            source_out: Time(1010),
+            start: Time(start),
+            video: Some(v),
+            audio: Some(a),
+            insert,
+        }
+    }
+
+    // Premiere, one clip at 0..30 on V1 and A1, source 1010..1020 placed at 10:
+    // insert gives 0..10 | new 10..20 | tail 20..40; overwrite gives 0..10 | new | 20..30.
+    #[test]
+    fn insert_and_overwrite_match_premiere() {
+        let (mut s, v, a) = seq();
+        let l = s.new_link();
+        for t in [v, a] {
+            s.add_clip(
+                t,
+                NewClip {
+                    link: Some(l),
+                    ..clip(0, 30)
+                },
+            )
+            .unwrap();
+        }
+        let mut ins = s.clone();
+        let new = ins.place(placement(v, a, 10, true)).unwrap();
+        for t in [v, a] {
+            assert_eq!(
+                spans(&ins, t),
+                [(0, 100, 110), (10, 1000, 1010), (20, 110, 130)]
+            );
+        }
+        // The two tails are linked to each other, not to the heads or the new clips.
+        let tails: Vec<_> = [v, a].map(|t| ins.track(t).unwrap().clips()[2].link).into();
+        assert_eq!(tails[0], tails[1]);
+        assert_ne!(tails[0], Some(l));
+        let new_link = ins.clip(new[0]).unwrap().1.link;
+        assert!(new_link.is_some() && new_link == ins.clip(new[1]).unwrap().1.link);
+
+        let mut ow = s.clone();
+        ow.place(placement(v, a, 10, false)).unwrap();
+        for t in [v, a] {
+            assert_eq!(
+                spans(&ow, t),
+                [(0, 100, 110), (10, 1000, 1010), (20, 120, 130)]
+            );
+        }
+        // Overwrite over a whole clip and part of the next.
+        ow.place(Placement {
+            start: Time(5),
+            source_out: Time(1020),
+            ..placement(v, a, 0, false)
+        })
+        .unwrap();
+        assert_eq!(
+            spans(&ow, v),
+            [(0, 100, 105), (5, 1000, 1020), (25, 125, 130)]
+        );
+    }
+
+    #[test]
+    fn insert_skips_locked_tracks_and_checks_kind() {
+        let (mut s, v, a) = seq();
+        let a2 = s.add_track(TrackKind::Audio, "A2");
+        s.add_clip(a2, clip(20, 10)).unwrap();
+        s.track_mut(a2).unwrap().locked = true;
+        s.add_clip(v, clip(20, 10)).unwrap();
+        s.place(Placement {
+            audio: None,
+            ..placement(v, a, 0, true)
+        })
+        .unwrap();
+        assert_eq!(spans(&s, v), [(0, 1000, 1010), (30, 100, 110)]);
+        assert_eq!(spans(&s, a2), [(20, 100, 110)]);
+        let wrong = Placement {
+            video: Some(a),
+            audio: None,
+            ..placement(v, a, 0, false)
+        };
+        let before = s.clone();
+        assert_eq!(s.place(wrong), Err(ModelError::WrongKind(a)));
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn drag_moves_linked_clips_and_overwrites() {
+        let (mut s, v, a) = seq();
+        let v2 = s.add_track(TrackKind::Video, "V2");
+        let l = s.new_link();
+        let cv = s
+            .add_clip(
+                v,
+                NewClip {
+                    link: Some(l),
+                    ..clip(0, 10)
+                },
+            )
+            .unwrap();
+        s.add_clip(
+            a,
+            NewClip {
+                link: Some(l),
+                ..clip(0, 10)
+            },
+        )
+        .unwrap();
+        s.add_clip(v2, clip(15, 10)).unwrap();
+        s.add_clip(a, clip(15, 10)).unwrap();
+        s.drag_clip(cv, v2, Time(10)).unwrap();
+        assert_eq!(spans(&s, v), []);
+        assert_eq!(spans(&s, v2), [(10, 100, 110), (20, 105, 110)]);
+        assert_eq!(spans(&s, a), [(10, 100, 110), (20, 105, 110)]);
+        // Never before zero; video can't land on audio.
+        s.drag_clip(cv, v2, Time(-50)).unwrap();
+        assert_eq!(s.clip(cv).unwrap().1.start, Time(0));
+        assert_eq!(s.drag_clip(cv, a, Time(0)), Err(ModelError::WrongKind(a)));
+    }
+
+    #[test]
+    fn placement_uses_source_marks_and_target_tracks() {
+        let mut p = Project::default();
+        let (v1, v2, a1) = (
+            p.sequence.add_track(TrackKind::Video, "V1"),
+            p.sequence.add_track(TrackKind::Video, "V2"),
+            p.sequence.add_track(TrackKind::Audio, "A1"),
+        );
+        p.sequence.track_mut(v2).unwrap().target = true;
+        let id = p.add_asset("a.mp4");
+        let probe = ProbeInfo {
+            duration: Time(100),
+            width: Some(4),
+            audio_streams: 1,
+            ..Default::default()
+        };
+        p.asset_mut(id).unwrap().probe = Some(probe.clone());
+        let pl = p.placement(id, Time(5), true, None).unwrap();
+        assert_eq!((pl.source_in, pl.source_out), (Time(0), Time(100)));
+        assert_eq!((pl.video, pl.audio), (Some(v2), Some(a1)));
+        // A drop picks the track under the pointer for its kind.
+        assert_eq!(
+            p.placement(id, Time(5), false, Some(v1)).unwrap().video,
+            Some(v1)
+        );
+        let a = p.asset_mut(id).unwrap();
+        (a.in_point, a.out_point) = (Some(Time(10)), Some(Time(20)));
+        let pl = p.placement(id, Time(-5), false, None).unwrap();
+        assert_eq!(
+            (pl.source_in, pl.source_out, pl.start),
+            (Time(10), Time(20), Time(0))
+        );
+        // Audio-only file: no video clip.
+        p.asset_mut(id).unwrap().probe = Some(ProbeInfo {
+            width: None,
+            ..probe
+        });
+        assert_eq!(p.placement(id, Time(0), false, None).unwrap().video, None);
     }
 
     #[test]
