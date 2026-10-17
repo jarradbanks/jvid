@@ -571,6 +571,7 @@ impl Sequence {
             link: &mut c.link,
             params: &mut c.params,
             keyframes: &mut c.keyframes,
+            transform: &mut c.transform,
         }))
     }
 
@@ -927,6 +928,7 @@ pub(crate) struct ClipProps<'a> {
     pub link: &'a mut Option<LinkId>,
     pub params: &'a mut BTreeMap<String, f64>,
     pub keyframes: &'a mut BTreeMap<String, Vec<Keyframe>>,
+    pub transform: &'a mut Transform,
 }
 
 fn insert_sorted(clips: &mut Vec<Clip>, c: Clip) {

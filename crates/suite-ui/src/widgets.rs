@@ -496,6 +496,7 @@ pub struct DragField<'a> {
     decimals: usize,
     width: f32,
     state: State,
+    mixed: bool,
 }
 
 impl<'a> DragField<'a> {
@@ -509,11 +510,18 @@ impl<'a> DragField<'a> {
             decimals: 0,
             width: 80.0,
             state: State::Live,
+            mixed: false,
         }
     }
 
     pub fn prefix(mut self, prefix: &'a str) -> Self {
         self.prefix = Some(prefix);
+        self
+    }
+
+    /// Shows a dash in place of the value, for a selection whose values differ.
+    pub fn mixed(mut self, mixed: bool) -> Self {
+        self.mixed = mixed;
         self
     }
 
@@ -614,7 +622,10 @@ impl Widget for DragField<'_> {
             }
             let disabled = self.state == State::Disabled || !response.enabled();
             let ink = if disabled { color::INK_4 } else { color::INK };
-            let text = format!("{:.*}{}", self.decimals, self.value, self.suffix);
+            let text = match self.mixed {
+                true => "\u{2014}".to_owned(),
+                false => format!("{:.*}{}", self.decimals, self.value, self.suffix),
+            };
             ui.painter().text(
                 pos2(x, rect.center().y),
                 Align2::LEFT_CENTER,

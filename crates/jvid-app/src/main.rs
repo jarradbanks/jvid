@@ -2,6 +2,7 @@
 
 mod app;
 mod import;
+mod inspector;
 mod keymap;
 mod keymap_editor;
 mod media_bin;
