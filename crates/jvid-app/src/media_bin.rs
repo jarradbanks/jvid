@@ -256,6 +256,31 @@ impl MediaBin {
                 ui.label(egui::RichText::new("Importing…").color(color::INK_3));
             }
         });
+        self.drag_preview(ui, project, missing);
+    }
+
+    /// The dragged asset's poster and name, following the pointer above every panel.
+    fn drag_preview(&mut self, ui: &Ui, project: &Project, missing: &HashSet<PathBuf>) {
+        let Some(id) = egui::DragAndDrop::payload::<AssetId>(ui.ctx()) else {
+            return;
+        };
+        let (Some(a), Some(p)) = (project.asset(*id), ui.ctx().pointer_latest_pos()) else {
+            return;
+        };
+        egui::Area::new(egui::Id::new("bin_drag_preview"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(p + vec2(space::S12, space::S12))
+            .interactable(false)
+            .show(ui.ctx(), |ui| {
+                ui.multiply_opacity(0.8);
+                let w = 80.0;
+                let (thumb, _) = ui.allocate_exact_size(vec2(w, w * 9.0 / 16.0), Sense::hover());
+                self.thumbs
+                    .paint(ui, thumb, a, missing.contains(&a.path), None);
+                let name = Rect::from_min_size(thumb.left_bottom(), vec2(w, ROW));
+                ui.allocate_rect(name, Sense::hover());
+                self.name(ui, name, a, color::INK);
+            });
     }
 
     fn tile(

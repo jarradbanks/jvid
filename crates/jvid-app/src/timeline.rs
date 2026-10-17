@@ -23,7 +23,7 @@ use jvid_media::thumbnails;
 use jvid_media::waveforms::Pyramid;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::TextInput;
+use suite_ui::widgets::{Button, TextInput};
 
 use crate::media_bin::Caches;
 use crate::transport::Transport;
@@ -434,11 +434,29 @@ impl Timeline {
                 clip_painter.rect_stroke(band, 0.0, stroke, egui::StrokeKind::Inside);
             }
         }
-        let ghosts = self.drops(ui, project, view, &lane_rects, held, &mut edit);
+        // A visible way to add tracks, under the last header.
+        let plus = Rect::from_min_size(
+            pos2(headers.left() + space::S4, y.max(lanes.top()) + space::S4),
+            vec2(headers.width() - 2.0 * space::S4, size::CONTROL),
+        );
+        if plus.bottom() <= lanes.bottom() {
+            let r = ui.put(plus, Button::ghost("Track").with_icon(icon::PLUS));
+            egui::Popup::menu(&r).show(|ui| add_menu(ui, &mut edit));
+        }
+        let ghosts = self.drops(ui, project, view, lanes, &lane_rects, held, &mut edit);
+        // Ghosts for tracks a drop will add go in rows below the last lane.
+        let mut below = y;
         for (t, from, to) in ghosts {
-            if let Some((_, _, lane)) = lane_rects.iter().find(|l| l.0 == t) {
+            let rows = match t {
+                Some(t) => lane_rects.iter().find(|l| l.0 == t).map(|l| l.2.y_range()),
+                None => {
+                    below += Track::default_height();
+                    Some((below - Track::default_height()..=below).into())
+                }
+            };
+            if let Some(rows) = rows {
                 let x = view.x(from)..=view.x(to);
-                let r = Rect::from_x_y_ranges(x, lane.y_range()).shrink2(vec2(1.0, 2.0));
+                let r = Rect::from_x_y_ranges(x, rows).shrink2(vec2(1.0, 2.0));
                 let corner = CornerRadius::same(radius::SMALL);
                 clip_painter.rect_filled(r, corner, color::BLUE.gamma_multiply(0.3));
                 clip_painter.rect_stroke(
@@ -539,15 +557,17 @@ impl Timeline {
 
     /// Bin drops and clip drags: the ghosts to draw as (track, start, end), and the edit
     /// once the pointer is released.
+    #[allow(clippy::too_many_arguments)]
     fn drops(
         &mut self,
         ui: &Ui,
         project: &Project,
         view: View,
+        area: Rect,
         lanes: &[(TrackId, TrackKind, Rect)],
         held: Option<(&Clip, &Track, egui::Response)>,
         edit: &mut Option<Edit>,
-    ) -> Vec<(TrackId, Time, Time)> {
+    ) -> Vec<(Option<TrackId>, Time, Time)> {
         let rate = self.transport.rate;
         let snap = |t: Time| rate.time_floor(rate.index_nearest(t)).max(Time(0));
         let Some(p) = ui.input(|i| i.pointer.interact_pos()) else {
@@ -558,12 +578,13 @@ impl Timeline {
             hit.filter(|l| kind.is_none_or(|k| k == l.1)).map(|l| l.0)
         };
         if let Some(asset) = egui::DragAndDrop::payload::<AssetId>(ui.ctx())
-            && let Some(on) = lane_at(None)
-            && let Some(pl) = project.placement(*asset, snap(view.time(p.x)), false, Some(on))
+            && area.contains(p)
+            && let Some(pl) = project.placement(*asset, snap(view.time(p.x)), false, lane_at(None))
         {
             let end = pl.start + (pl.source_out - pl.source_in);
-            let ghosts = [pl.video, pl.audio].into_iter().flatten();
-            let ghosts = ghosts.map(|t| (t, pl.start, end)).collect();
+            let ghosts = [(pl.video, pl.add_video), (pl.audio, pl.add_audio)].into_iter();
+            let ghosts = ghosts.filter(|(t, add)| t.is_some() || *add);
+            let ghosts = ghosts.map(|(t, _)| (t, pl.start, end)).collect();
             if ui.input(|i| i.pointer.any_released()) {
                 *edit = Some((Command::Place(pl), None));
             }
@@ -591,7 +612,7 @@ impl Timeline {
         group
             .map(|(t, c)| {
                 (
-                    if c.id == clip.id { to } else { t },
+                    Some(if c.id == clip.id { to } else { t }),
                     c.start + by,
                     c.end() + by,
                 )
@@ -1472,6 +1493,83 @@ mod tests {
         );
         assert!(h.state_mut().1.undo());
         assert_eq!(seq(&h).tracks()[0].clips().len(), 1);
+    }
+
+    /// The bin and the timeline side by side: dragging a tile or row onto a new project's
+    /// empty timeline adds V1 and A1 and places linked clips there, as one undo step.
+    #[test]
+    fn bin_drag_onto_an_empty_timeline_adds_tracks() {
+        use crate::media_bin::MediaBin;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut results = egui_kittest::SnapshotResults::new();
+        for list in [false, true] {
+            let mut p = History::new(Project::default());
+            let probe = project(0).assets()[0].probe.clone().unwrap();
+            let _ = p.apply(Command::Import(vec![(
+                PathBuf::from("/nonexistent/a.mp4"),
+                probe,
+            )]));
+            let p = p.project().clone();
+            let mut fresh = true;
+            let mut bin = MediaBin::default();
+            bin.list = list;
+            let mut h = egui_kittest::Harness::builder()
+                .with_size([1000.0, 300.0])
+                .wgpu()
+                .build_ui_state(
+                    move |ui, (b, t, h): &mut (MediaBin, Timeline, History)| {
+                        if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                            return;
+                        }
+                        let r = ui.max_rect();
+                        ui.painter().rect_filled(r, 0.0, color::PANEL);
+                        let (left, right) = r.split_left_right_at_x(300.0);
+                        let missing = HashSet::new();
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
+                            b.show(ui, h.project(), true, false, &missing)
+                        });
+                        let edit = ui
+                            .scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
+                                t.show(ui, h.project(), &missing)
+                            })
+                            .inner;
+                        if let Some((c, _)) = edit {
+                            h.apply(c).unwrap();
+                        }
+                    },
+                    (bin, Timeline::default(), History::new(p)),
+                );
+            h.run();
+            let from = pos2(80.0, if list { 90.0 } else { 100.0 });
+            let to = pos2(300.0 + size::TRACK_HEADER + 100.0, 150.0);
+            h.hover_at(from);
+            h.run();
+            h.drag_at(from);
+            h.run();
+            for f in [0.1, 0.5, 1.0] {
+                h.hover_at(from + (to - from) * f);
+                h.run();
+            }
+            if !list {
+                results.add(h.try_snapshot("bin_drag_onto_empty_timeline"));
+            }
+            h.drop_at(to);
+            h.run();
+            let s = h.state().2.project().sequence().clone();
+            let kinds: Vec<_> = s.tracks().iter().map(|t| t.kind).collect();
+            assert_eq!(kinds, [TrackKind::Video, TrackKind::Audio], "list: {list}");
+            let clips: Vec<_> = s.tracks().iter().map(|t| t.clips()[0].clone()).collect();
+            assert!(clips[0].link.is_some() && clips[0].link == clips[1].link);
+            assert!(
+                (clips[0].start.0 - 5 * S).abs() <= S,
+                "{:?}",
+                clips[0].start
+            );
+            assert!(h.state_mut().2.undo());
+            assert!(h.state().2.project().sequence().tracks().is_empty());
+        }
     }
 
     /// The acceptance budget: layout and tessellation of 500 clips inside one 60fps frame, with
