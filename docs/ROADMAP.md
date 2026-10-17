@@ -142,11 +142,11 @@ flowchart LR
 | Issue | Title | Status | Size | Area | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | [#14](https://github.com/jarradbanks/jvid/issues/14) | Media probing | done | M | media | [#4](https://github.com/jarradbanks/jvid/issues/4), [#7](https://github.com/jarradbanks/jvid/issues/7), [#5](https://github.com/jarradbanks/jvid/issues/5) |
-| [#15](https://github.com/jarradbanks/jvid/issues/15) | Video decoder with frame-accurate seeking |  | L | media | [#14](https://github.com/jarradbanks/jvid/issues/14) |
-| [#16](https://github.com/jarradbanks/jvid/issues/16) | Audio decoder and resampling |  | M | media, audio | [#14](https://github.com/jarradbanks/jvid/issues/14) |
+| [#15](https://github.com/jarradbanks/jvid/issues/15) | Video decoder with frame-accurate seeking | in progress | L | media | [#14](https://github.com/jarradbanks/jvid/issues/14) |
+| [#16](https://github.com/jarradbanks/jvid/issues/16) | Audio decoder and resampling | in progress | M | media, audio | [#14](https://github.com/jarradbanks/jvid/issues/14) |
 | [#17](https://github.com/jarradbanks/jvid/issues/17) | Still image import | done | S | media | [#7](https://github.com/jarradbanks/jvid/issues/7) |
 | [#18](https://github.com/jarradbanks/jvid/issues/18) | Background job system | need testing | M | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
-| [#19](https://github.com/jarradbanks/jvid/issues/19) | Import media with a file dialog and drag and drop |  | M | ui, media | [#14](https://github.com/jarradbanks/jvid/issues/14), [#17](https://github.com/jarradbanks/jvid/issues/17), [#18](https://github.com/jarradbanks/jvid/issues/18), [#12](https://github.com/jarradbanks/jvid/issues/12) |
+| [#19](https://github.com/jarradbanks/jvid/issues/19) | Import media with a file dialog and drag and drop | done | M | ui, media | [#14](https://github.com/jarradbanks/jvid/issues/14), [#17](https://github.com/jarradbanks/jvid/issues/17), [#18](https://github.com/jarradbanks/jvid/issues/18), [#12](https://github.com/jarradbanks/jvid/issues/12) |
 | [#20](https://github.com/jarradbanks/jvid/issues/20) | Media bin panel |  | M | ui | [#19](https://github.com/jarradbanks/jvid/issues/19) |
 | [#21](https://github.com/jarradbanks/jvid/issues/21) | Thumbnail generation and cache |  | M | media | [#15](https://github.com/jarradbanks/jvid/issues/15), [#18](https://github.com/jarradbanks/jvid/issues/18) |
 | [#22](https://github.com/jarradbanks/jvid/issues/22) | Waveform peak generation and cache |  | M | audio | [#16](https://github.com/jarradbanks/jvid/issues/16), [#18](https://github.com/jarradbanks/jvid/issues/18) |
