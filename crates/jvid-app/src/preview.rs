@@ -165,6 +165,13 @@ impl Preview {
         }
     }
 
+    /// The device and queue for offscreen rendering, such as export; `None` without wgpu.
+    pub fn gpu(&self) -> Option<(egui_wgpu::wgpu::Device, egui_wgpu::wgpu::Queue)> {
+        self.render_state
+            .as_ref()
+            .map(|rs| (rs.device.clone(), rs.queue.clone()))
+    }
+
     /// Writes the shown frame as a PNG, composited at full project size over its background.
     /// shortcut: one layer, the frame the viewer shows; composite `video_at` at the playhead
     /// once the timeline (#33) and playback (#32) land.

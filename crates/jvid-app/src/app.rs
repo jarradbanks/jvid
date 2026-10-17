@@ -2,11 +2,13 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, TryRecvError};
 
 use egui::{Align, Align2, Frame, Layout, Margin, Stroke, Ui, UiBuilder, ViewportCommand, vec2};
 use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
 use jvid_core::history::{Command, History};
-use jvid_core::model::{AssetId, Project, ProjectSettings};
+use jvid_core::model::{AssetId, ProbeInfo, Project, ProjectSettings};
+use jvid_core::time::Time;
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use serde::{Deserialize, Serialize};
 use suite_ui::panel::Panel;
@@ -14,6 +16,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, State};
 
+use crate::export::Error as ExportError;
 use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
@@ -80,6 +83,9 @@ pub struct App {
     settings_dialog: crate::project_settings::SettingsDialog,
     theme: suite_ui::themes::LiveTheme,
     keymap_editor: crate::keymap_editor::KeymapEditor,
+    exports: jvid_jobs::Pool,
+    /// The running export and where its result arrives.
+    export: Option<(jvid_jobs::Handle, Receiver<Result<ProbeInfo, ExportError>>)>,
 }
 
 const TOAST_SECS: f64 = 6.0;
@@ -131,6 +137,8 @@ impl App {
             settings_dialog: Default::default(),
             theme: suite_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
+            exports: jvid_jobs::Pool::new(1),
+            export: None,
         }
     }
 
@@ -233,8 +241,7 @@ impl App {
         let rtl = Layout::right_to_left(Align::Center);
         ui.scope_builder(UiBuilder::new().max_rect(right).layout(rtl), |ui| {
             ui.spacing_mut().item_spacing.x = space::S8;
-            ui.add(Button::primary("Export").state(State::Disabled))
-                .on_disabled_hover_text("Nothing to export yet");
+            self.export_button(ui);
             ui.spacing_mut().item_spacing.x = space::S4;
             let live = |on: bool| if on { State::Live } else { State::Disabled };
             let redo = Button::icon(icon::REDO, "Redo").state(live(self.history.can_redo()));
@@ -344,6 +351,73 @@ impl App {
                 error_dialog(&format!("Couldn't save {}: {e}", path.display()));
                 false
             }
+        }
+    }
+
+    /// Exports In to Out (or the whole sequence) to a chosen file; while running, shows progress
+    /// and cancels on click.
+    /// shortcut: no settings or range choice; the export dialog (#54) replaces this.
+    fn export_button(&mut self, ui: &mut Ui) {
+        if let Some((h, _)) = &self.export {
+            let label = format!("Exporting {:.0}%", h.progress() * 100.0);
+            if ui
+                .add(Button::primary(&label))
+                .on_hover_text("Cancel export")
+                .clicked()
+            {
+                h.cancel();
+            }
+            ui.ctx().request_repaint();
+            return;
+        }
+        let seq = self.history.project().sequence();
+        let gpu = self.preview.gpu();
+        let state = if seq.duration() > Time(0) && gpu.is_some() {
+            State::Live
+        } else {
+            State::Disabled
+        };
+        let r = ui
+            .add(Button::primary("Export").state(state))
+            .on_disabled_hover_text("Nothing to export yet");
+        let (true, Some(gpu)) = (r.clicked(), gpu) else {
+            return;
+        };
+        let Some(path) = FileDialog::new()
+            .set_title("Export")
+            .add_filter("Video", &["mp4", "mov", "mkv"])
+            .set_file_name(format!("{}.mp4", self.name()))
+            .save_file()
+        else {
+            return;
+        };
+        let range = (
+            seq.in_point().unwrap_or(Time(0)),
+            seq.out_point().unwrap_or(seq.duration()),
+        );
+        let project = self.history.project().clone();
+        let req = crate::export::Request { path, range };
+        self.export = Some(crate::export::submit(&self.exports, project, req, gpu));
+    }
+
+    /// Takes a finished export's result; failures become toasts.
+    fn poll_export(&mut self, now: f64) {
+        let Some((_, rx)) = &self.export else { return };
+        match rx.try_recv() {
+            Ok(Ok(_)) => self.export = None,
+            Ok(Err(e)) => {
+                if let ExportError::Failed(e) = e {
+                    self.toasts
+                        .push((format!("Export failed: {e}"), now + TOAST_SECS));
+                }
+                self.export = None;
+            }
+            // A panicked job drops its sender.
+            Err(TryRecvError::Disconnected) => {
+                self.toasts.push(("Export failed".into(), now + TOAST_SECS));
+                self.export = None;
+            }
+            Err(TryRecvError::Empty) => {}
         }
     }
 
@@ -565,6 +639,7 @@ impl eframe::App for App {
         }
         let now = ctx.input(|i| i.time);
         self.poll_import(now);
+        self.poll_export(now);
         if self.importer.is_busy() || !self.toasts.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }

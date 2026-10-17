@@ -138,12 +138,12 @@ fn size(f: &Frame) -> usize {
     f.planes.iter().map(Vec::len).sum()
 }
 
-fn sample(t: Time) -> i64 {
+pub(crate) fn sample(t: Time) -> i64 {
     t.0.div_euclid(FLICKS_PER_SAMPLE)
 }
 
 /// Per-clip audio sources and the track mixer.
-struct Audio {
+pub(crate) struct Audio {
     open: OpenAudio,
     clips: HashMap<ClipId, ClipAudio>,
     mixer: Mixer,
@@ -152,9 +152,18 @@ struct Audio {
 }
 
 impl Audio {
+    pub(crate) fn new(open: OpenAudio) -> Self {
+        Self {
+            open,
+            clips: HashMap::new(),
+            mixer: Mixer::new(0),
+            inputs: Vec::new(),
+        }
+    }
+
     /// Opens and seeks clips heard within [`AUDIO_AHEAD`] of `pos`, so they start on time, and
     /// closes the rest.
-    fn prime(&mut self, project: &Project, pos: Time) {
+    pub(crate) fn prime(&mut self, project: &Project, pos: Time) {
         let segs = audio_in(project.sequence(), pos, pos + AUDIO_AHEAD);
         self.clips.retain(|c, _| segs.iter().any(|s| s.clip == *c));
         for s in segs {
@@ -169,7 +178,7 @@ impl Audio {
     }
 
     /// Fills `out` with the mix from timeline sample frame `start`.
-    fn mix(&mut self, project: &Project, start: i64, out: &mut [f32]) {
+    pub(crate) fn mix(&mut self, project: &Project, start: i64, out: &mut [f32]) {
         let seq = project.sequence();
         let tracks: Vec<_> = seq
             .tracks()
@@ -256,12 +265,7 @@ impl Playback {
             done_tx,
             done,
             shown: None,
-            audio: Audio {
-                open: open_audio,
-                clips: HashMap::new(),
-                mixer: Mixer::new(0),
-                inputs: Vec::new(),
-            },
+            audio: Audio::new(open_audio),
         }
     }
 
@@ -503,4 +507,4 @@ impl Gpu {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

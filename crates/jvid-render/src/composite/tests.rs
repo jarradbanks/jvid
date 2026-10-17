@@ -187,6 +187,31 @@ fn exported_png_matches_read_back_exactly() {
     );
 }
 
+/// Frames rendered into one reused target come back one push late, in order, each its own.
+#[test]
+fn readback_returns_each_frame_one_push_late() {
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping readback test: no software adapter on this platform");
+        return;
+    };
+    let mut comp = Compositor::new(&device);
+    let mut rb = Readback::default();
+    let mut got = Vec::new();
+    for v in [10u8, 20, 30] {
+        let tex = comp.render(&device, &queue, (24, 10), 1, [v, 0, 0, 255], &[]);
+        let prev = rb.push(&device, &queue, tex);
+        assert_eq!(prev.is_some(), v > 10);
+        got.extend(prev);
+    }
+    got.extend(rb.take(&device));
+    assert!(rb.take(&device).is_none());
+    let reds: Vec<_> = got
+        .iter()
+        .map(|f| (f.len(), f[0], f[f.len() - 4]))
+        .collect();
+    assert_eq!(reds, [(960, 10, 10), (960, 20, 20), (960, 30, 30)]);
+}
+
 /// Each property static, then keyframed so its value at the midpoint equals the static one: both
 /// frames must hit the same pixels, and the first keyframe's frame must differ.
 #[test]
