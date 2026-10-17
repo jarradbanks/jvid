@@ -586,7 +586,7 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 }
 
 /// A software device where `gpu()` allows one (lavapipe on Linux); `None` skips.
-fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
+pub(crate) fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
     if !suite_ui::test_support::gpu() {
         return None;
     }

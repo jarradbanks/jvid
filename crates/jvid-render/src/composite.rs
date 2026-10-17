@@ -257,6 +257,53 @@ impl Compositor {
 
 /// Copies an RGBA8 texture back to the CPU as tight rows, blocking until the GPU is done.
 pub fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture) -> Vec<u8> {
+    let (buf, done) = copy_out(device, queue, tex, None);
+    map(device, &buf, done, tex.width())
+}
+
+/// Double-buffered readback for export: [`Readback::push`] queues a copy of one frame and returns
+/// the frame before it, so the GPU renders and copies frame N while the CPU encodes frame N-1.
+#[derive(Default)]
+pub struct Readback {
+    /// Copies in flight, oldest first, with their submission and the frame width.
+    pending: std::collections::VecDeque<(wgpu::Buffer, wgpu::SubmissionIndex, u32)>,
+    /// Buffers already read, for reuse.
+    free: Vec<wgpu::Buffer>,
+}
+
+impl Readback {
+    /// Queues a copy of `tex` (RGBA8); returns the previous frame's pixels, if any.
+    pub fn push(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        tex: &wgpu::Texture,
+    ) -> Option<Vec<u8>> {
+        let (buf, done) = copy_out(device, queue, tex, self.free.pop());
+        self.pending.push_back((buf, done, tex.width()));
+        (self.pending.len() > 1)
+            .then(|| self.take(device))
+            .flatten()
+    }
+
+    /// The oldest queued frame, blocking until it's copied; `None` when nothing is queued.
+    pub fn take(&mut self, device: &wgpu::Device) -> Option<Vec<u8>> {
+        let (buf, done, width) = self.pending.pop_front()?;
+        let rgba = map(device, &buf, done, width);
+        buf.unmap();
+        self.free.push(buf);
+        Some(rgba)
+    }
+}
+
+/// Submits a copy of `tex` into `reuse` when it's the right size, else a new buffer, and starts
+/// mapping it; returns the buffer and the copy's submission.
+fn copy_out(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tex: &wgpu::Texture,
+    reuse: Option<wgpu::Buffer>,
+) -> (wgpu::Buffer, wgpu::SubmissionIndex) {
     assert_eq!(
         tex.format().block_copy_size(None),
         Some(4),
@@ -264,11 +311,14 @@ pub fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture
         tex.format()
     );
     let row = (tex.width() * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-    let buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: (row * tex.height()) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
+    let size = (row * tex.height()) as u64;
+    let buf = reuse.filter(|b| b.size() == size).unwrap_or_else(|| {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        })
     });
     let mut encoder = device.create_command_encoder(&Default::default());
     encoder.copy_texture_to_buffer(
@@ -283,17 +333,28 @@ pub fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture
         },
         tex.size(),
     );
-    queue.submit([encoder.finish()]);
+    let done = queue.submit([encoder.finish()]);
     buf.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
+    (buf, done)
+}
+
+/// Waits for the copy `done` into `buf` (not later work) and returns its rows without padding.
+fn map(
+    device: &wgpu::Device,
+    buf: &wgpu::Buffer,
+    done: wgpu::SubmissionIndex,
+    width: u32,
+) -> Vec<u8> {
     device
         .poll(wgpu::PollType::Wait {
-            submission_index: None,
+            submission_index: Some(done),
             timeout: None,
         })
         .unwrap();
+    let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
     let data = buf.slice(..).get_mapped_range().unwrap();
     data.chunks(row as usize)
-        .flat_map(|r| &r[..tex.width() as usize * 4])
+        .flat_map(|r| &r[..width as usize * 4])
         .copied()
         .collect()
 }

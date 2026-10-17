@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod decode;
+pub mod encode;
 pub mod ffmpeg;
 pub mod probe;
 pub mod stills;
