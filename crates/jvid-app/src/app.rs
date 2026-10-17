@@ -13,6 +13,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, State};
 
+use crate::keymap::{self, Keymap};
 use crate::project_file;
 
 #[cfg(test)]
@@ -51,6 +52,7 @@ pub struct App {
     preview_views: &'static [&'static str],
     preview_active: usize,
     window_title: String,
+    keymap: Keymap,
 }
 
 impl App {
@@ -77,6 +79,7 @@ impl App {
             preview_views: &["Source", "Program"],
             preview_active: 1,
             window_title: String::new(),
+            keymap: keymap::load(),
         }
     }
 
@@ -212,6 +215,27 @@ impl App {
         }
     }
 
+    /// Runs a keymap action. shortcut: only panel focus is real; the rest are stubs until
+    /// their features land.
+    fn run_action(&mut self, id: &str) {
+        let tab = match id {
+            "focus_media" => Tab::Media,
+            "focus_timeline" => Tab::Timeline,
+            "focus_inspector" => Tab::Inspector,
+            "focus_program" => {
+                self.preview_active = 1;
+                Tab::Preview
+            }
+            _ => {
+                tracing::debug!("action {id} has no implementation yet");
+                return;
+            }
+        };
+        if let Some(path) = self.dock.find_tab(&tab) {
+            self.dock.set_focused_node_and_surface(path.node_path());
+        }
+    }
+
     /// Before replacing the project: true if it's clean, saved, or the user discards it.
     fn confirm_discard(&mut self) -> bool {
         if !self.history.is_dirty() {
@@ -235,6 +259,14 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         if ctx.input(|i| i.viewport().close_requested()) && !self.confirm_discard() {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+        }
+
+        let timeline = self
+            .dock
+            .find_active_focused()
+            .is_some_and(|(_, t)| *t == Tab::Timeline);
+        for id in self.keymap.pressed(&ctx, timeline) {
+            self.run_action(id);
         }
 
         egui::Panel::top("app_bar")

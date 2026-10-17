@@ -393,3 +393,15 @@ fn corrupt_dock_layout_falls_back_to_default() {
         assert!(restored.dock.find_tab(&tab).is_some());
     }
 }
+
+#[test]
+fn focus_actions_focus_panels_and_missing_panels_are_no_ops() {
+    let mut app = App::restore(None);
+    let focused = |app: &mut App| app.dock.find_active_focused().map(|(_, t)| *t);
+    app.run_action("focus_media");
+    assert_eq!(focused(&mut app), Some(Tab::Media));
+    app.run_action("focus_source");
+    assert_eq!(focused(&mut app), Some(Tab::Media));
+    app.run_action("focus_timeline");
+    assert_eq!(focused(&mut app), Some(Tab::Timeline));
+}
