@@ -242,7 +242,7 @@ fn transform_crop_and_opacity_static_and_animated() {
     let x = Transform::default();
     let anchor_tl = Transform {
         anchor: [-32.0, -16.0],
-        ..x
+        ..x.clone()
     };
     type Case = (
         &'static str,
@@ -256,34 +256,34 @@ fn transform_crop_and_opacity_static_and_animated() {
     #[rustfmt::skip]
     let cases: [Case; 8] = [
         // Anchor lands at (48, 24): the image covers x 16..80, y 8..40.
-        ("position", Transform { position: [16.0, -8.0], ..x }, x, "position",
+        ("position", Transform { position: [16.0, -8.0], ..x.clone() }, x.clone(), "position",
             Value::Vec2([0.0, 0.0]), Value::Vec2([32.0, -16.0]),
             &[(20, 10, TL), (10, 30, BG), (20, 36, BL), (60, 4, BG)]),
         // Linked half size: x 16..48, y 24..40.
-        ("scale", Transform { scale: [0.5; 2], ..x }, x, "scale",
+        ("scale", Transform { scale: [0.5; 2], ..x.clone() }, x.clone(), "scale",
             Value::Scalar(1.0), Value::Scalar(0.0),
             &[(18, 26, TL), (46, 38, BR), (12, 32, BG), (20, 20, BG)]),
         // Separate X/Y: full width, half height, y 24..40.
-        ("scale-xy", Transform { scale: [1.0, 0.5], ..x }, x, "scale",
+        ("scale-xy", Transform { scale: [1.0, 0.5], ..x.clone() }, x.clone(), "scale",
             Value::Vec2([1.0, 1.0]), Value::Vec2([1.0, 0.0]),
             &[(2, 26, TL), (62, 38, BR), (2, 22, BG), (62, 42, BG)]),
         // 90 degrees clockwise: portrait x 16..48, y 0..64, top-left corner now top-right.
-        ("rotation", Transform { rotation: 90.0, ..x }, x, "rotation",
+        ("rotation", Transform { rotation: 90.0, ..x.clone() }, x.clone(), "rotation",
             Value::Scalar(0.0), Value::Scalar(180.0),
             &[(44, 4, TL), (44, 60, TR), (20, 4, BL), (20, 60, BR), (8, 32, BG)]),
         // The top-left corner sits at the centre: x 32..96, y 32..64.
-        ("anchor", anchor_tl, x, "anchor",
+        ("anchor", anchor_tl.clone(), x.clone(), "anchor",
             Value::Vec2([0.0, 0.0]), Value::Vec2([-64.0, -32.0]),
             &[(34, 34, TL), (30, 34, BG), (34, 30, BG), (34, 62, BL)]),
         // Rotation pivots on the anchor: clockwise about the top-left gives x 0..32, y 32..96.
-        ("anchor-rotation", Transform { rotation: 90.0, ..anchor_tl }, anchor_tl, "rotation",
+        ("anchor-rotation", Transform { rotation: 90.0, ..anchor_tl.clone() }, anchor_tl.clone(), "rotation",
             Value::Scalar(0.0), Value::Scalar(180.0),
             &[(30, 34, TL), (34, 34, BG), (30, 30, BG), (2, 34, BL)]),
         // 16 px off the left; the rest doesn't move: x 16..64.
-        ("crop", Transform { crop: [16.0, 0.0, 0.0, 0.0], ..x }, x, "crop_left",
+        ("crop", Transform { crop: [16.0, 0.0, 0.0, 0.0], ..x.clone() }, x.clone(), "crop_left",
             Value::Scalar(0.0), Value::Scalar(32.0),
             &[(12, 20, BG), (18, 20, TL), (40, 20, TR), (40, 44, BR)]),
-        ("opacity", Transform { opacity: 0.5, ..x }, x, "opacity",
+        ("opacity", Transform { opacity: 0.5, ..x.clone() }, x.clone(), "opacity",
             Value::Scalar(1.0), Value::Scalar(0.0),
             &[(10, 20, HALF_TL), (10, 8, BG)]),
     ];
@@ -499,4 +499,82 @@ fn neutral_grade_is_bit_identical_and_adjustments_apply_in_linear_light() {
         ..Default::default()
     });
     assert!(at(&warm, 128)[0] > 128 && at(&warm, 128)[2] < 127);
+}
+
+/// Trilinear lookup on the CPU, the reference the shader must match.
+fn lut_reference(lut: &crate::lut::Lut, c: [f32; 3]) -> [f32; 3] {
+    let n = lut.size as usize;
+    let p = c.map(|v| v.clamp(0.0, 1.0) * (n - 1) as f32);
+    let lo = p.map(|v| (v.floor() as usize).min(n - 2));
+    let f: [f32; 3] = std::array::from_fn(|i| p[i] - lo[i] as f32);
+    let mut out = [0.0; 3];
+    for corner in 0..8 {
+        let d = [corner & 1, corner >> 1 & 1, corner >> 2];
+        let w: f32 = (0..3)
+            .map(|i| if d[i] == 1 { f[i] } else { 1.0 - f[i] })
+            .product();
+        let node = lut.rgb[(lo[0] + d[0]) + (lo[1] + d[1]) * n + (lo[2] + d[2]) * n * n];
+        (0..3).for_each(|i| out[i] += w * node[i]);
+    }
+    out
+}
+
+#[test]
+fn lut_matches_a_trilinear_reference_and_mixes_by_intensity() {
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping lut test: no software adapter on this platform");
+        return;
+    };
+    // A non-separable 9³ grid, coarse so interpolation between nodes is exercised.
+    let n = 9;
+    let mut text = format!("TITLE \"test\"\nLUT_3D_SIZE {n}\n");
+    for i in 0..n * n * n {
+        let [r, g, b] = [i % n, i / n % n, i / n / n].map(|v| v as f32 / (n - 1) as f32);
+        text += &format!("{} {} {}\n", g * g, (r + b) / 2.0, 1.0 - r * b);
+    }
+    let lut = crate::lut::parse(&text).unwrap();
+    let px = |x: u32, y: u32| {
+        [
+            x as u8,
+            (x as u8).wrapping_mul(7).wrapping_add(60 * y as u8),
+            255 - x as u8,
+            255,
+        ]
+    };
+    let img = image(&device, &queue, (256, 4), px);
+    let mut comp = Compositor::new(&device);
+    comp.add_lut(&device, &queue, "a.cube", &lut);
+    let mut run = |t: Transform| {
+        let tex = comp.render(&device, &queue, (256, 4), 1, [0, 0, 0, 255], &[(&img, t)]);
+        read_back(&device, &queue, tex)
+    };
+    let with = |path: &str, lut_intensity| Transform {
+        lut: Some(path.into()),
+        lut_intensity,
+        ..Default::default()
+    };
+    let want: Vec<u8> = (0..256 * 4).flat_map(|i| px(i % 256, i / 256)).collect();
+    assert_eq!(
+        run(with("missing.cube", 1.0)),
+        want,
+        "an unloaded LUT is skipped"
+    );
+    assert_eq!(run(with("a.cube", 0.0)), want, "zero intensity is skipped");
+    for (k, got) in [
+        (1.0, run(with("a.cube", 1.0))),
+        (0.5, run(with("a.cube", 0.5))),
+    ] {
+        for (i, (got, src)) in got.chunks(4).zip(want.chunks(4)).enumerate() {
+            let c = [0, 1, 2].map(|j| src[j] as f32 / 255.0);
+            let r = lut_reference(&lut, c);
+            for j in 0..3 {
+                let w = ((c[j] + (r[j] - c[j]) * k) * 255.0).round() as i32;
+                assert!(
+                    near(got[j], w),
+                    "px {i} ch {j} at {k}: got {}, want {w}",
+                    got[j]
+                );
+            }
+        }
+    }
 }

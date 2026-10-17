@@ -12,6 +12,7 @@ struct Params {
     opacity: vec4<f32>,
     // Color adjustments (jvid_core::model::Transform::grade): exposure, contrast, saturation,
     // temperature in grade.xyzw, tint in grade2.x; grade2.y is 1 when any is non-neutral.
+    // grade2.z is the LUT's intensity (0 without one) and grade2.w its size.
     grade: vec4<f32>,
     grade2: vec4<f32>,
 }
@@ -19,6 +20,8 @@ struct Params {
 @group(0) @binding(0) var image: texture_2d<f32>;
 @group(0) @binding(1) var image_smp: sampler;
 @group(0) @binding(2) var<uniform> params: Params;
+// The layer's .cube LUT, or a 1x1x1 stand-in when grade2.z is 0.
+@group(0) @binding(4) var lut: texture_3d<f32>;
 
 @vertex
 fn vs_layer(@builtin(vertex_index) i: u32) -> Out {
@@ -34,19 +37,30 @@ fn to_srgb(c: vec3<f32>) -> vec3<f32> {
     return select(1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3<f32>(0.0031308));
 }
 
-// The layer's color adjustments on a straight-alpha sample, in linear light. Skipped when neutral
-// so untouched clips stay bit-identical.
+// The layer's color adjustments on a straight-alpha sample, in linear light, then its LUT with
+// trilinear filtering. Each is skipped when neutral so untouched clips stay bit-identical.
 fn graded(c: vec4<f32>) -> vec4<f32> {
+    var rgb = adjusted(c.rgb);
+    if params.grade2.z > 0.0 {
+        // Texel centres: input 0 and 1 land on the first and last nodes.
+        let n = params.grade2.w;
+        let uvw = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)) * ((n - 1.0) / n) + 0.5 / n;
+        rgb = mix(rgb, textureSampleLevel(lut, image_smp, uvw, 0.0).rgb, params.grade2.z);
+    }
+    return vec4<f32>(rgb, c.a);
+}
+
+fn adjusted(c: vec3<f32>) -> vec3<f32> {
     if params.grade2.y == 0.0 {
         return c;
     }
     let g = params.grade;
-    var l = to_linear(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0))) * exp2(g.x);
+    var l = to_linear(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0))) * exp2(g.x);
     l *= vec3<f32>(1.0 + 0.3 * g.w, 1.0 - 0.3 * params.grade2.x, 1.0 - 0.3 * g.w);
     let luma = dot(l, vec3<f32>(0.2126, 0.7152, 0.0722));
     l = max(mix(vec3<f32>(luma), l, 1.0 + g.z), vec3<f32>(0.0));
     l = 0.18 * pow(l / 0.18, vec3<f32>(1.0 + g.y));
-    return vec4<f32>(to_srgb(clamp(l, vec3<f32>(0.0), vec3<f32>(1.0))), c.a);
+    return to_srgb(clamp(l, vec3<f32>(0.0), vec3<f32>(1.0)));
 }
 
 // Straight-alpha source in, premultiplied out for premultiplied "over" blending.

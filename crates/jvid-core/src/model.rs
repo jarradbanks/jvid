@@ -437,9 +437,9 @@ fn is_first_stream(s: &Option<u32>) -> bool {
 ///
 /// Keyframe names: `position`, `anchor` (`Vec2`), `scale` (`Scalar` for linked, `Vec2` for
 /// separate X/Y), `rotation`, `opacity`, `crop_left`, `crop_top`, `crop_right`, `crop_bottom`,
-/// the color adjustments by field name (`exposure`, `contrast`, ...), and for audio clips
-/// `volume` and `pan`.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// the color adjustments by field name (`exposure`, `contrast`, ..., `lut_intensity`), and for
+/// audio clips `volume` and `pan`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Transform {
     /// Where the anchor lands, as an offset from the frame centre, y down.
@@ -467,6 +467,9 @@ pub struct Transform {
     pub saturation: f64,
     pub temperature: f64,
     pub tint: f64,
+    /// A `.cube` file applied after the adjustments, mixed in by `lut_intensity` (0..=1).
+    pub lut: Option<String>,
+    pub lut_intensity: f64,
     /// Fade lengths from the clip's start and end; they scale opacity and gain, and trims keep
     /// them since they hang off the edges. Longer than the clip clamps to it.
     pub fade_in: Time,
@@ -529,6 +532,8 @@ impl Default for Transform {
             saturation: 0.0,
             temperature: 0.0,
             tint: 0.0,
+            lut: None,
+            lut_intensity: 1.0,
             fade_in: Time(0),
             fade_out: Time(0),
             fade_curve: FadeCurve::Linear,
@@ -575,7 +580,7 @@ impl Clip {
     /// The transform at timeline time `t`, keyframes applied over the static values.
     pub fn transform_at(&self, t: Time) -> Transform {
         use crate::keyframe::Value::{Scalar, Vec2};
-        let mut x = self.transform;
+        let mut x = self.transform.clone();
         let vec2 = |name, v: &mut [f64; 2]| {
             if let Some(Vec2(n)) = self.value_at(name, t) {
                 *v = n;
@@ -609,10 +614,12 @@ impl Clip {
             ("saturation", &mut x.saturation),
             ("temperature", &mut x.temperature),
             ("tint", &mut x.tint),
+            ("lut_intensity", &mut x.lut_intensity),
         ] {
             scalar(name, v);
             *v = v.clamp(-1.0, 1.0);
         }
+        x.lut_intensity = x.lut_intensity.clamp(0.0, 1.0);
         x
     }
 

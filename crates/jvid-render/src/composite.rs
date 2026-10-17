@@ -47,6 +47,9 @@ pub struct Compositor {
     sampler: wgpu::Sampler,
     target: Option<wgpu::Texture>,
     backdrop: Option<wgpu::Texture>,
+    /// Uploaded LUTs by [`Transform::lut`] path, and the stand-in bound for layers without one.
+    luts: std::collections::HashMap<String, wgpu::Texture>,
+    no_lut: wgpu::Texture,
 }
 
 impl Compositor {
@@ -98,7 +101,35 @@ impl Compositor {
             }),
             target: None,
             backdrop: None,
+            luts: Default::default(),
+            no_lut: device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("no lut"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D3,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            }),
         }
+    }
+
+    /// Uploads `lut` for layers whose [`Transform::lut`] is `path`; layers naming a path not
+    /// added draw without a LUT.
+    pub fn add_lut(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        path: &str,
+        lut: &crate::lut::Lut,
+    ) {
+        let tex = crate::lut::texture(device, queue, lut);
+        self.luts.insert(path.to_owned(), tex);
     }
 
     /// Composites `layers` (top first, as `video_at` returns them, each an RGBA image such as
@@ -168,7 +199,10 @@ impl Compositor {
                 let g = t.grade();
                 let on = g.iter().any(|v| *v != 0.0);
                 p.extend(g.map(|v| v as f32));
-                p.extend([f32::from(u8::from(on)), 0.0, 0.0]);
+                let lut = t.lut.as_ref().and_then(|p| self.luts.get(p));
+                let mix = lut.map_or(0.0, |_| t.lut_intensity.clamp(0.0, 1.0) as f32);
+                let lut = lut.unwrap_or(&self.no_lut);
+                p.extend([f32::from(u8::from(on)), mix, lut.width() as f32]);
                 let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("layer"),
                     contents: &p.iter().flat_map(|f| f.to_ne_bytes()).collect::<Vec<_>>(),
@@ -178,6 +212,7 @@ impl Compositor {
                     format: Some(tex.format().remove_srgb_suffix()),
                     ..Default::default()
                 });
+                let lut = lut.create_view(&Default::default());
                 let blended = t.blend != Blend::Normal;
                 let pipeline = if blended { &self.blend } else { &self.pipeline };
                 let mut entries = vec![
@@ -192,6 +227,10 @@ impl Compositor {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: uniform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(&lut),
                     },
                 ];
                 if blended {
