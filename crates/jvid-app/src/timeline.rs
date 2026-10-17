@@ -80,7 +80,14 @@ pub struct Timeline {
     width: f32,
     /// The playhead last frame; a change is what makes the view follow it.
     followed: Time,
+    /// Moves and trims snap to edges, the playhead, markers and in/out (S toggles).
+    snapping: bool,
+    /// Where the current drag snapped, for the indicator line.
+    snapped: Option<Time>,
 }
+
+/// Snap reach in points.
+const SNAP_PX: f64 = 8.0;
 
 /// A clip edge drag: how far, already held to what the media and neighbours allow.
 #[derive(Clone, Copy, Debug)]
@@ -115,6 +122,8 @@ impl Default for Timeline {
             gap: None,
             width: 800.0,
             followed: Time(0),
+            snapping: true,
+            snapped: None,
         }
     }
 }
@@ -137,6 +146,17 @@ impl View {
         let s = (x - self.left) as f64 / self.zoom + self.scroll;
         Time((s * FLICKS_PER_SECOND as f64).round() as i64)
     }
+}
+
+/// The shift that lands the nearest of `edges` on one of `targets`, if any is within
+/// `reach`, with the target it hit.
+fn snap_shift(edges: &[Time], targets: &[Time], reach: Time) -> Option<(Time, Time)> {
+    let pairs = edges
+        .iter()
+        .flat_map(|e| targets.iter().map(move |t| (*t - *e, *t)));
+    pairs
+        .filter(|(d, _)| d.0.abs() <= reach.0)
+        .min_by_key(|(d, _)| d.0.abs())
 }
 
 fn secs(t: Time) -> f64 {
@@ -231,6 +251,7 @@ impl Timeline {
             }
             "zoom_fit" => self.zoom_fit(project.sequence()),
             "linked_selection" => self.linked_selection = !self.linked_selection,
+            "snapping" => self.snapping = !self.snapping,
             "razor_tool" | "selection_tool" => self.razor = id == "razor_tool",
             "add_edit" | "ripple_trim_prev" | "ripple_trim_next" => {
                 self.pending = self.cut_action(id, project.sequence());
@@ -375,6 +396,13 @@ impl Timeline {
                 let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
                 let by = view.time(p.x) - view.time(origin.x);
                 let by = rate.time_floor(rate.index_nearest(by));
+                let at = match edge {
+                    Edge::Head => clip.start + by,
+                    Edge::Tail => clip.end() + by,
+                };
+                let seq = project.sequence();
+                let group: Vec<_> = seq.linked(clip.id).iter().map(|(_, c)| c.id).collect();
+                let by = by + self.snap(seq, &group, &[at]);
                 let ripple = ui.input(|i| i.modifiers.command);
                 let by = project.trim_limit(clip.id, edge, by, ripple);
                 let (clip, ripple) = (clip.id, ripple);
@@ -384,6 +412,9 @@ impl Timeline {
                     by,
                     ripple,
                 });
+            }
+            if h.drag_stopped() {
+                self.snapped = None;
             }
             if h.drag_stopped()
                 && let Some(t) = self.trim.take()
@@ -395,6 +426,29 @@ impl Timeline {
             }
         }
         None
+    }
+
+    /// Shifts `edges` onto the nearest snap target within reach when snapping is on: other
+    /// clips' edges (not `moving`'s), the playhead, markers and in/out. Records the hit.
+    fn snap(&mut self, seq: &Sequence, moving: &[ClipId], edges: &[Time]) -> Time {
+        self.snapped = None;
+        if !self.snapping {
+            return Time(0);
+        }
+        let mut targets = vec![self.playhead()];
+        targets.extend(seq.in_point());
+        targets.extend(seq.out_point());
+        for m in seq.markers() {
+            targets.extend([m.time, m.time + m.duration]);
+        }
+        for t in seq.tracks() {
+            let others = t.clips().iter().filter(|c| !moving.contains(&c.id));
+            targets.extend(others.flat_map(|c| [c.start, c.end()]));
+        }
+        let reach = Time((SNAP_PX / self.zoom * FLICKS_PER_SECOND as f64) as i64);
+        let hit = snap_shift(edges, &targets, reach);
+        self.snapped = hit.map(|h| h.1);
+        hit.map_or(Time(0), |h| h.0)
     }
 
     /// Where the trimmed clips would end up, as (track, start, end).
@@ -687,6 +741,10 @@ impl Timeline {
             let r = ui.put(plus, Button::ghost("Track").with_icon(icon::PLUS));
             egui::Popup::menu(&r).show(|ui| add_menu(ui, &mut edit));
         }
+        let moving = held.as_ref().map(|h| h.0.id).or(self.trim.map(|t| t.clip));
+        let moving: Vec<_> = moving.map_or(Vec::new(), |id| {
+            seq.linked(id).iter().map(|(_, c)| c.id).collect()
+        });
         let mut ghosts = self.drops(ui, project, view, lanes, &lane_rects, held, &mut edit);
         ghosts.extend(self.trim_ghosts(seq));
         // Ghosts for tracks a drop will add go in rows below the last lane.
@@ -710,7 +768,21 @@ impl Timeline {
                     Stroke::new(1.0, color::LIGHT_BLUE),
                     egui::StrokeKind::Inside,
                 );
+                // What the drop overwrites on that track, in red.
+                let track = t.and_then(|t| seq.track(t));
+                let hit = track.into_iter().flat_map(|tr| tr.clips());
+                let hit = hit.filter(|c| !moving.contains(&c.id));
+                for c in hit.filter(|c| c.start < to && c.end() > from) {
+                    let x = view.x(c.start.max(from))..=view.x(c.end().min(to));
+                    let o = Rect::from_x_y_ranges(x, rows).shrink2(vec2(1.0, 2.0));
+                    clip_painter.rect_filled(o, 0.0, color::RED.gamma_multiply(0.45));
+                }
             }
+        }
+        if let Some(t) = self.snapped {
+            let x = view.x(t);
+            let r = Rect::from_x_y_ranges(x - 0.5..=x + 0.5, lanes.y_range());
+            clip_painter.rect_filled(r, 0.0, color::AMBER);
         }
         if tracks.is_empty() {
             painter.text(
@@ -936,6 +1008,7 @@ impl Timeline {
             return Vec::new();
         };
         if r.drag_stopped() {
+            self.snapped = None;
             if let Some((to, start)) = self.drag_to.take()
                 && (start != clip.start || to != from.id)
             {
@@ -946,12 +1019,18 @@ impl Timeline {
         }
         let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
         let start = snap(clip.start + (view.time(p.x) - view.time(origin.x)));
+        let seq = project.sequence();
+        let group = seq.linked(clip.id);
+        let ids: Vec<_> = group.iter().map(|(_, c)| c.id).collect();
+        let edges: Vec<_> = group.iter().flat_map(|(_, c)| [c.start, c.end()]).collect();
+        let edges: Vec<_> = edges.iter().map(|e| *e + start - clip.start).collect();
+        let start = (start + self.snap(seq, &ids, &edges)).max(Time(0));
         let to = lane_at(Some(from.kind)).unwrap_or(from.id);
         self.drag_to = Some((to, start));
         // Linked clips follow on their own tracks; the core clamps the move at zero.
         let by = start - clip.start;
-        let group = project.sequence().linked(clip.id).into_iter();
         group
+            .into_iter()
             .map(|(t, c)| {
                 (
                     Some(if c.id == clip.id { to } else { t }),
@@ -1979,6 +2058,48 @@ mod tests {
             assert!(h.state_mut().1.undo());
         }
         assert_eq!(h.state().1.project(), &project(2));
+    }
+
+    #[test]
+    fn snap_shift_picks_the_nearest_target_in_reach() {
+        let (e, t) = (&[Time(100), Time(200)], &[Time(95), Time(207), Time(500)]);
+        assert_eq!(snap_shift(e, t, Time(10)), Some((Time(-5), Time(95))));
+        assert_eq!(snap_shift(e, t, Time(4)), None);
+    }
+
+    #[test]
+    fn dragging_a_clip_near_the_playhead_snaps_onto_it() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let at = Time(5 * S + S / 3);
+        for (snapping, want) in [(true, at), (false, Time(5 * S))] {
+            let mut h = harness(project(1));
+            h.state_mut().0.seek(at);
+            if !snapping {
+                h.state_mut().0.action("snapping", &Project::default());
+            }
+            let x = size::TRACK_HEADER + 20.0;
+            let y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+            h.hover_at(pos2(x, y));
+            h.run();
+            h.drag_at(pos2(x, y));
+            h.run();
+            // 100pt is 5s; the playhead sits 1/3s (under 8pt) further.
+            for dx in [10.0, 100.0] {
+                h.hover_at(pos2(x + dx, y));
+                h.run();
+            }
+            h.drop_at(pos2(x + 100.0, y));
+            h.run();
+            let seq = h.state().1.project().sequence().clone();
+            assert_eq!(
+                seq.tracks()[0].clips()[0].start,
+                want,
+                "snapping {snapping}"
+            );
+        }
     }
 
     #[test]
