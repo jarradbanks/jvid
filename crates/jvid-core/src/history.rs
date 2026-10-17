@@ -98,6 +98,8 @@ pub enum Command {
         id: AssetId,
         probe: Option<ProbeInfo>,
     },
+    /// Adds probed media as one step, skipping paths already in the project.
+    Import(Vec<(PathBuf, ProbeInfo)>),
 }
 
 /// The id a command created, if any.
@@ -225,6 +227,15 @@ impl Command {
             Self::AddAsset(path) => Created::Asset(p.add_asset(path)),
             Self::SetAssetProbe { id, probe } => {
                 p.asset_mut(id).ok_or(ModelError::UnknownAsset(id))?.probe = probe;
+                Created::Nothing
+            }
+            Self::Import(items) => {
+                for (path, probe) in items {
+                    if p.assets.iter().all(|a| a.path != path) {
+                        let id = p.add_asset(path);
+                        p.asset_mut(id).expect("just added").probe = Some(probe);
+                    }
+                }
                 Created::Nothing
             }
         })
@@ -487,6 +498,30 @@ mod tests {
         assert!(h.undo());
         assert_eq!(h.project(), &Project::default());
         assert!(!h.undo());
+    }
+
+    #[test]
+    fn import_skips_duplicates_and_undoes_in_one_step() {
+        let mut h = History::new(Project::default());
+        h.apply(Command::AddAsset("a.mkv".into())).unwrap();
+        let before = h.project().clone();
+        let item = |p: &str| (PathBuf::from(p), ProbeInfo::default());
+        h.apply(Command::Import(vec![
+            item("a.mkv"),
+            item("b.mkv"),
+            item("b.mkv"),
+        ]))
+        .unwrap();
+        let paths: Vec<_> = h
+            .project()
+            .assets()
+            .iter()
+            .map(|a| a.path.clone())
+            .collect();
+        assert_eq!(paths, [PathBuf::from("a.mkv"), PathBuf::from("b.mkv")]);
+        assert!(h.project().assets()[1].probe.is_some());
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
     }
 
     #[test]

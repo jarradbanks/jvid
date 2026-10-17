@@ -1823,6 +1823,7 @@ dependencies = [
  "egui_kittest",
  "jvid-audio",
  "jvid-core",
+ "jvid-jobs",
  "jvid-log",
  "jvid-media",
  "jvid-render",

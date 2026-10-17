@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use egui::{Align, Align2, Frame, Layout, Margin, Stroke, Ui, UiBuilder, ViewportCommand, vec2};
 use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
-use jvid_core::history::History;
+use jvid_core::history::{Command, History};
 use jvid_core::model::Project;
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, State};
 
+use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::project_file;
 
@@ -53,7 +54,12 @@ pub struct App {
     preview_active: usize,
     window_title: String,
     keymap: Keymap,
+    importer: Importer,
+    /// Error toasts and the time each expires.
+    toasts: Vec<(String, f64)>,
 }
+
+const TOAST_SECS: f64 = 6.0;
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -80,6 +86,8 @@ impl App {
             preview_active: 1,
             window_title: String::new(),
             keymap: keymap::load(),
+            importer: Importer::media(),
+            toasts: Vec::new(),
         }
     }
 
@@ -236,6 +244,36 @@ impl App {
         }
     }
 
+    /// Asks for media files and queues them for import.
+    fn import_dialog(&mut self) {
+        if let Some(paths) = FileDialog::new().set_title("Import media").pick_files() {
+            self.import(paths);
+        }
+    }
+
+    fn import(&mut self, paths: impl IntoIterator<Item = PathBuf>) {
+        let existing: Vec<_> = self
+            .history
+            .project()
+            .assets()
+            .iter()
+            .map(|a| a.path.clone())
+            .collect();
+        self.importer.submit(paths, &existing);
+    }
+
+    /// Applies a finished batch and queues toasts for files that failed.
+    fn poll_import(&mut self, now: f64) {
+        let polled = self.importer.poll();
+        if let Some(batch) = polled.batch {
+            // Import never fails; duplicates are skipped inside the command.
+            let _ = self.history.apply(Command::Import(batch));
+        }
+        self.toasts
+            .extend(polled.errors.into_iter().map(|e| (e, now + TOAST_SECS)));
+        self.toasts.retain(|(_, until)| *until > now);
+    }
+
     /// Before replacing the project: true if it's clean, saved, or the user discards it.
     fn confirm_discard(&mut self) -> bool {
         if !self.history.is_dirty() {
@@ -269,6 +307,23 @@ impl eframe::App for App {
             self.run_action(id);
         }
 
+        let dropped: Vec<_> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect()
+        });
+        if !dropped.is_empty() {
+            self.import(dropped);
+        }
+        let now = ctx.input(|i| i.time);
+        self.poll_import(now);
+        if self.importer.is_busy() || !self.toasts.is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+
         egui::Panel::top("app_bar")
             .exact_size(size::APP_BAR)
             .frame(Frame::NONE.fill(color::GROUND))
@@ -288,6 +343,9 @@ impl eframe::App for App {
                 preview_views: self.preview_views,
                 preview_active: &mut self.preview_active,
                 focused,
+                project: self.history.project(),
+                importing: self.importer.is_busy(),
+                import_clicked: false,
             };
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
@@ -299,7 +357,15 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
+            if viewer.import_clicked {
+                self.import_dialog();
+            }
         });
+
+        if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
+            drop_overlay(&ctx);
+        }
+        self.show_toasts(&ctx);
 
         let dirty = if self.history.is_dirty() { " •" } else { "" };
         let title = format!("{}{dirty} — jvid", self.name());
@@ -380,6 +446,9 @@ struct Viewer<'a> {
     preview_views: &'static [&'static str],
     preview_active: &'a mut usize,
     focused: Option<Tab>,
+    project: &'a Project,
+    importing: bool,
+    import_clicked: bool,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -400,8 +469,16 @@ impl TabViewer for Viewer<'_> {
             (Tab::Preview, views) => Panel::tabbed(views, self.preview_active),
             _ => Panel::titled(&title),
         };
-        // shortcut: panels are empty shells; their content lands in later issues.
-        panel.focused(self.focused == Some(*tab)).show(ui, |_| {});
+        let panel = panel.focused(self.focused == Some(*tab));
+        if *tab != Tab::Media {
+            // shortcut: panels are empty shells; their content lands in later issues.
+            panel.show(ui, |_| {});
+            return;
+        }
+        let r = panel
+            .actions(&[(icon::PLUS, "Import media")])
+            .show(ui, |ui| media_list(ui, self.project, self.importing));
+        self.import_clicked |= r.action == Some(0);
     }
 
     fn clear_background(&self, _tab: &Tab) -> bool {
@@ -410,6 +487,94 @@ impl TabViewer for Viewer<'_> {
 
     fn scroll_bars(&self, _tab: &Tab) -> [bool; 2] {
         [false, false]
+    }
+}
+
+/// shortcut: a plain name list standing in for the bin; #20 replaces it.
+fn media_list(ui: &mut Ui, project: &Project, importing: bool) {
+    let assets = project.assets();
+    let rect = ui.max_rect();
+    ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
+        let n = assets.len();
+        let mut status = format!("{n} item{}", if n == 1 { "" } else { "s" });
+        if importing {
+            status.push_str(" · importing…");
+        }
+        ui.label(egui::RichText::new(status).color(color::INK_3));
+        if assets.is_empty() && !importing {
+            ui.label(
+                egui::RichText::new("Drop media here or click + to import").color(color::INK_2),
+            );
+        }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for a in assets {
+                let name = a
+                    .path
+                    .file_name()
+                    .map_or_else(|| a.path.to_string_lossy(), |n| n.to_string_lossy());
+                ui.label(name);
+            }
+        });
+    });
+}
+
+/// A Light Blue outline over the window while files are dragged over it.
+fn drop_overlay(ctx: &egui::Context) {
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("drop"),
+    ));
+    let rect = ctx.content_rect().shrink(space::GUTTER);
+    let corner = egui::CornerRadius::same(suite_ui::tokens::radius::PANEL);
+    painter.rect_filled(rect, corner, color::BLUE.gamma_multiply(0.08));
+    painter.rect_stroke(
+        rect,
+        corner,
+        Stroke::new(2.0, color::LIGHT_BLUE),
+        egui::StrokeKind::Inside,
+    );
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        "Drop to import",
+        theme::title(),
+        color::INK,
+    );
+}
+
+impl App {
+    /// Error toasts stacked bottom-right, newest at the bottom.
+    fn show_toasts(&mut self, ctx: &egui::Context) {
+        let mut dismiss = None;
+        let mut y = -space::S16;
+        for (i, (msg, _)) in self.toasts.iter().enumerate().rev() {
+            let r = egui::Area::new(egui::Id::new(("toast", i)))
+                .anchor(Align2::RIGHT_BOTTOM, vec2(-space::S16, y))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style())
+                        .fill(color::RAISED)
+                        .inner_margin(Margin::same(space::S12 as i8))
+                        .show(ui, |ui| {
+                            ui.set_max_width(360.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(icon::CIRCLE_ALERT)
+                                        .font(theme::icon_font())
+                                        .color(color::RED),
+                                );
+                                ui.add(egui::Label::new(msg.as_str()).wrap());
+                                if ui.add(Button::icon(icon::X, "Dismiss")).clicked() {
+                                    dismiss = Some(i);
+                                }
+                            });
+                        });
+                });
+            y -= r.response.rect.height() + space::S8;
+        }
+        if let Some(i) = dismiss {
+            self.toasts.remove(i);
+        }
     }
 }
 
