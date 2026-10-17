@@ -204,7 +204,7 @@ flowchart LR
 | [#31](https://github.com/jarradbanks/jvid/issues/31) | Audio mixer: tracks, volume, pan, mute and solo | done | M | audio | [#29](https://github.com/jarradbanks/jvid/issues/29), [#16](https://github.com/jarradbanks/jvid/issues/16) |
 | [#32](https://github.com/jarradbanks/jvid/issues/32) | Timeline playback engine | need testing | L | render, audio | [#30](https://github.com/jarradbanks/jvid/issues/30), [#31](https://github.com/jarradbanks/jvid/issues/31), [#24](https://github.com/jarradbanks/jvid/issues/24) |
 | [#33](https://github.com/jarradbanks/jvid/issues/33) | Timeline panel: ruler, tracks, clips, zoom and playhead | need testing | L | ui, timeline | [#12](https://github.com/jarradbanks/jvid/issues/12), [#7](https://github.com/jarradbanks/jvid/issues/7), [#21](https://github.com/jarradbanks/jvid/issues/21), [#22](https://github.com/jarradbanks/jvid/issues/22) |
-| [#34](https://github.com/jarradbanks/jvid/issues/34) | Track management and headers |  | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8) |
+| [#34](https://github.com/jarradbanks/jvid/issues/34) | Track management and headers | done | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8) |
 | [#35](https://github.com/jarradbanks/jvid/issues/35) | Place clips: drag from bin, insert and overwrite |  | M | timeline | [#34](https://github.com/jarradbanks/jvid/issues/34), [#25](https://github.com/jarradbanks/jvid/issues/25) |
 | [#89](https://github.com/jarradbanks/jvid/issues/89) | Multi-track audio sources |  | M | timeline, media | [#35](https://github.com/jarradbanks/jvid/issues/35), [#16](https://github.com/jarradbanks/jvid/issues/16) |
 | [#36](https://github.com/jarradbanks/jvid/issues/36) | Selection, clipboard and delete |  | M | timeline | [#35](https://github.com/jarradbanks/jvid/issues/35) |
@@ -214,7 +214,7 @@ flowchart LR
 | [#40](https://github.com/jarradbanks/jvid/issues/40) | Markers |  | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8), [#39](https://github.com/jarradbanks/jvid/issues/39) |
 | [#41](https://github.com/jarradbanks/jvid/issues/41) | Scrubbing and audio scrub |  | M | timeline, render | [#32](https://github.com/jarradbanks/jvid/issues/32) |
 | [#90](https://github.com/jarradbanks/jvid/issues/90) | Long and high-frame-rate recordings |  | M | media, timeline | [#32](https://github.com/jarradbanks/jvid/issues/32), [#21](https://github.com/jarradbanks/jvid/issues/21), [#22](https://github.com/jarradbanks/jvid/issues/22) |
-| [#42](https://github.com/jarradbanks/jvid/issues/42) | Performance harness and budgets |  | M | infra | [#32](https://github.com/jarradbanks/jvid/issues/32) |
+| [#42](https://github.com/jarradbanks/jvid/issues/42) | Performance harness and budgets | done | M | infra | [#32](https://github.com/jarradbanks/jvid/issues/32) |
 
 ### [M3 · Animate](https://github.com/jarradbanks/jvid/milestone/4)
 
