@@ -405,6 +405,11 @@ pub struct Marker {
     pub time: Time,
     pub duration: Time,
     pub name: String,
+    /// Index into the app's marker palette.
+    #[serde(default)]
+    pub color: u8,
+    #[serde(default)]
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -727,8 +732,17 @@ impl Sequence {
             time,
             duration,
             name: name.into(),
+            color: 0,
+            note: String::new(),
         });
         id
+    }
+
+    /// Replaces the marker with `m`'s id.
+    pub(crate) fn set_marker(&mut self, m: Marker) -> Option<()> {
+        let id = m.id;
+        *self.markers.iter_mut().find(|o| o.id == id)? = m;
+        Some(())
     }
 
     pub(crate) fn remove_marker(&mut self, id: MarkerId) -> Option<Marker> {

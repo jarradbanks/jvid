@@ -32,6 +32,7 @@ use crate::keymap::Keymap;
 use crate::media_bin::Caches;
 use crate::transport::Transport;
 
+mod markers;
 pub mod menus;
 
 /// The undo gesture a track-height drag coalesces under.
@@ -171,6 +172,10 @@ pub const MARK_ACTIONS: &[&str] = &[
     "mark_selection",
     "lift",
     "extract",
+    "add_marker",
+    "add_range_marker",
+    "next_marker",
+    "prev_marker",
 ];
 
 /// Maps between time and x on the lanes.
@@ -309,6 +314,7 @@ impl Timeline {
             }
             "mark_in" | "mark_out" | "clear_in" | "clear_out" | "clear_in_out" | "mark_clip"
             | "mark_selection" => self.pending = self.mark_action(id, project.sequence()),
+            _ if self.marker_action(id, project.sequence()) => {}
             "linked_selection" => self.linked_selection = !self.linked_selection,
             "snapping" => self.snapping = !self.snapping,
             "razor_tool" | "selection_tool" => self.razor = id == "razor_tool",
@@ -1051,6 +1057,7 @@ impl Timeline {
             let band = Rect::from_x_y_ranges(r.x_range(), ruler.y_range());
             ruler_painter.rect_filled(band, 0.0, color::LIGHT_BLUE.gamma_multiply(0.25));
         }
+        edit = edit.or(self.markers(ui, seq, view, ruler, id));
         // Flags: a bracket at each set mark, opening toward the range.
         for (mark, dir) in [(mark_in, 1.0), (mark_out, -1.0)] {
             if let Some(t) = mark {
