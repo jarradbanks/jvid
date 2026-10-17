@@ -98,8 +98,9 @@ impl App {
         let mut app = Self::restore(cc.storage);
         let caches = crate::media_bin::Caches::new(settings);
         app.bin = MediaBin::new(caches.clone());
-        app.timeline = Timeline::new(caches);
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
+        app.preview.set_proxies(caches.proxies.clone());
+        app.timeline = Timeline::new(caches);
         app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
         if let Some(path) = autosave::untitled() {
             if let Some(project) = offer_restore(&path) {
