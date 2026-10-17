@@ -43,6 +43,7 @@ EXTRA_LABELS = {
 
 PLAN = "https://github.com/jarradbanks/jvid/blob/main/docs/PLAN.md"
 PROTO = "https://github.com/jarradbanks/jvid/blob/main/docs/prototypes"
+DESIGN = "https://github.com/jarradbanks/jvid/blob/main/DESIGN.md"
 
 ISSUES = []
 
@@ -109,11 +110,11 @@ I("test-media", "Generated test media corpus", "M0", ["infra", "media"], "S", ["
       "Variable-frame-rate clip (phone-style), 23.976 and 59.94 fps clips, 4K HEVC, ProRes",
       "Phone clip with rotation metadata, 9:16 clip, a clip with no audio",
       "Audio-only WAV/MP3/AAC with a 1 kHz tone at a known level; PNG/JPG/WebP stills",
-      "CI caches the generated corpus",
       "A 2-hour 1440p60 recording, encoded cheaply (low bitrate, fast preset) so it stays small and quick to generate",
       "A 144 fps clip",
       "An MKV with three audio streams (game, mic, voice chat), each with a distinct tone and a stream title",
       "A 1440p screen-recording-style clip with fine text and UI lines, to catch scaling and encode blur",
+      "CI caches the generated corpus",
   ],
   ac=[
       "`cargo test` can locate the corpus, and a helper decodes the frame index from a frame",
@@ -177,26 +178,35 @@ I("config", "Settings and config files (TOML)", "M0", ["core"], "S", ["workspace
 I("suite-ui-theme", "suite-ui: theme tokens, fonts and base widgets", "M0", ["suite-ui"], "M", ["workspace"],
   summary="The shared look and widgets every suite tool will reuse.",
   scope=[
-      "Color tokens from `docs/prototypes/BRIEF.md` (backgrounds, text, amber accent, clip colors)",
-      "Embedded Inter and JetBrains Mono (OFL) and an icon set with a permissive license",
+      "Color, type, spacing and size tokens from `DESIGN.md` (The Clean Cut)",
+      "Embedded static instances of Archivo, Archivo Expanded and Martian Mono (OFL), and an icon set with a permissive license",
       "egui `Style`/`Visuals` setup",
-      "Widgets: icon button, segmented control, numeric drag field, collapsible section header, toggle, dropdown, timecode label",
+      "Shape helpers: the 45° top-left cut (8px plates, 4px objects) and pointed tags, drawn pixel-snapped",
+      "Panel header and tab widget with the panel number, used by every dock panel",
+      "Widgets: button (primary, secondary, icon, destructive), segmented control, numeric drag field with inline prefix, collapsible section header, checkbox, dropdown, timecode label",
       "A gallery example: `cargo run -p suite-ui --example gallery`",
   ],
-  ac=["The gallery shows every widget in the jvid dark theme"],
-  refs=[f"[Design brief]({PROTO}/BRIEF.md)"])
+  ac=["The gallery shows every widget in default, hover, focus-visible, pressed and disabled states, plus loading and error where they apply",
+      "Ink text on every clip colour reaches 4.5:1",
+      "No widget has a rounded corner or a line wider than 1 physical pixel"],
+  refs=[f"[DESIGN.md]({DESIGN})"])
 
 I("app-shell", "App shell: window, dock layout and top bar", "M0", ["ui"], "M", ["suite-ui-theme", "serialize", "undo"],
   summary="The empty editor frame with all panels in place.",
   scope=[
       "`eframe` with the wgpu backend",
-      "`egui_dock` layout with Media, Preview, Inspector and Timeline panels matching the main editor prototype",
+      "`egui_dock` layout with Media, Preview, Inspector and Timeline panels, arranged as in the main editor prototype and styled per `DESIGN.md`",
+      "Every panel header is the shared 32px header widget from `suite-ui`, on one line across the window",
       "Top bar: wordmark, project name with unsaved marker, undo/redo, Export button",
       "New / Open / Save / Save As wired to the project file format; dock layout persisted",
       "Window title and app icon",
   ],
-  ac=["Cold start to first frame under 1 s on a mid-range laptop", "Undo/redo buttons reflect history state"],
-  refs=[f"[01-editor.png]({PROTO}/01-editor.png)"])
+  ac=["Cold start to first frame under 1 s on a mid-range laptop", "Undo/redo buttons reflect history state",
+      "egui_kittest snapshots at 1280×720 and 1920×1080, 100% and 150% scale: header dividers and label baselines in each row of panels share one y",
+      "Switching a panel between one view and several tabs doesn't move its header or label",
+      "Text and icons start 12px from every panel's left edge"],
+  refs=[f"[DESIGN.md · Layout]({DESIGN}#layout)", f"[01-editor.png]({PROTO}/01-editor.png)",
+        f"[Clean Cut editor mockup]({PROTO}/clean-cut/01-editor.png)"])
 
 I("actions", "Action registry and keymap with Premiere defaults", "M0", ["ui"], "M", ["app-shell", "config"],
   summary="Every command is a named action with a remappable shortcut.",
@@ -204,6 +214,8 @@ I("actions", "Action registry and keymap with Premiere defaults", "M0", ["ui"], 
       "Registry: id, display name, default shortcut, focus context (timeline, preview, text field)",
       "`keymap.toml` overrides with conflict detection",
       "Default keymap following Premiere: Space, J/K/L, I/O, Alt+I/O/X, Shift+I/O, X, /, ;, ', comma, period, Q/W, C, V, Ctrl+K, ←/→, Home/End",
+      "Shift+number focuses panels with Premiere's numbering: 1 Media, 2 Source, 3 Timeline, 4 Program, 5 Inspector, 7 Effects",
+      "Panel headers print the current Shift+number binding, so remapping one updates its label",
       "Cmd instead of Ctrl on macOS",
   ],
   ac=["Remapping an action in `keymap.toml` takes effect on restart", "Shortcuts do not fire while typing in a text field"],
@@ -427,18 +439,6 @@ I("place-clips", "Place clips: drag from bin, insert and overwrite", "M2", ["tim
   ],
   ac=["Insert and overwrite match Premiere's behaviour for the same source in/out and playhead"])
 
-I("select-clipboard", "Selection, clipboard and delete", "M2", ["timeline"], "M", ["place-clips"],
-  summary="Select clips and move them through the clipboard.",
-  scope=[
-      "Click, Shift-click, Ctrl-click and marquee selection",
-      "Copy, cut, paste at playhead on the target track, duplicate",
-      "Delete (leave gap) and Shift+Delete (ripple delete)",
-      "Linked selection toggle; link and unlink",
-  ],
-  ac=["Pasting linked clips keeps them linked"])
-
-I("trim-split", "Trim, split, razor and ripple", "M2", ["timeline"], "L", ["select-clipboard"],
-  summary="The core cutting tools.",
 I("multi-audio", "Multi-track audio sources", "M2", ["timeline", "media"], "M", ["place-clips", "audio-decode"],
   summary="Recordings with several audio streams, such as OBS saving game audio, mic and voice chat separately.",
   scope=[
@@ -452,6 +452,18 @@ I("multi-audio", "Multi-track audio sources", "M2", ["timeline", "media"], "M", 
       "Trimming or moving the video clip moves all its linked audio clips",
   ])
 
+I("select-clipboard", "Selection, clipboard and delete", "M2", ["timeline"], "M", ["place-clips"],
+  summary="Select clips and move them through the clipboard.",
+  scope=[
+      "Click, Shift-click, Ctrl-click and marquee selection",
+      "Copy, cut, paste at playhead on the target track, duplicate",
+      "Delete (leave gap) and Shift+Delete (ripple delete)",
+      "Linked selection toggle; link and unlink",
+  ],
+  ac=["Pasting linked clips keeps them linked"])
+
+I("trim-split", "Trim, split, razor and ripple", "M2", ["timeline"], "L", ["select-clipboard"],
+  summary="The core cutting tools.",
   scope=[
       "Drag clip edges to trim, limited by available media",
       "Ripple trim with a modifier",
@@ -502,18 +514,6 @@ I("scrub", "Scrubbing and audio scrub", "M2", ["timeline", "render"], "M", ["pla
   ],
   ac=["Scrubbing 1080p H.264 shows 30+ updates per second on a mid-range laptop"])
 
-I("perf-harness", "Performance harness and budgets", "M2", ["infra"], "M", ["playback"],
-  summary="Measure the performance targets so regressions are visible.",
-  scope=[
-      "Benchmarks: cold start, idle memory, seek latency, playback fps over corpus timelines",
-      "`criterion` benches for core hot paths (evaluation, keyframes)",
-      "A non-blocking CI job that reports numbers on each PR",
-  ],
-  ac=["Benchmarks for every target in PLAN.md · Performance targets"],
-  refs=[f"[PLAN.md · Performance targets]({PLAN}#performance-targets)"])
-
-# ───────────────────────── M3 · Animate ─────────────────────────
-
 I("long-hfr", "Long and high-frame-rate recordings", "M2", ["media", "timeline"], "M", ["playback", "thumbs", "waveforms"],
   summary="Gameplay recordings can be hours long and recorded at 120 fps or more. Both need to feel as quick as a short clip.",
   scope=[
@@ -526,6 +526,18 @@ I("long-hfr", "Long and high-frame-rate recordings", "M2", ["media", "timeline"]
       "A 2-hour 1440p60 recording is editable within 2 seconds of import, and seeking to any point shows a frame in under 150 ms",
       "A 144 fps clip in a 60 fps project plays in sync and exports at 60 fps with no drift over its full length",
   ])
+
+I("perf-harness", "Performance harness and budgets", "M2", ["infra"], "M", ["playback"],
+  summary="Measure the performance targets so regressions are visible.",
+  scope=[
+      "Benchmarks: cold start, idle memory, seek latency, playback fps over corpus timelines",
+      "`criterion` benches for core hot paths (evaluation, keyframes)",
+      "A non-blocking CI job that reports numbers on each PR",
+  ],
+  ac=["Benchmarks for every target in PLAN.md · Performance targets"],
+  refs=[f"[PLAN.md · Performance targets]({PLAN}#performance-targets)"])
+
+# ───────────────────────── M3 · Animate ─────────────────────────
 
 I("keyframes", "Keyframe model and interpolation", "M3", ["core"], "M", ["model", "undo"],
   summary="Any numeric property can be animated.",
@@ -692,18 +704,6 @@ I("gif", "GIF export", "M4", ["export"], "S", ["encode"],
   scope=["FFmpeg palettegen/paletteuse", "Frame rate, width and loop options"],
   ac=["A 5-second 480p GIF has no visible banding on the test clip"])
 
-I("cli", "jvid render CLI", "M4", ["cli"], "M", ["encode", "presets", "serialize"],
-  summary="Render projects without the UI.",
-  scope=[
-      "`jvid render project.jvid -o out.mp4 [--preset NAME] [--in TC --out TC | --range in-out]`",
-      "Progress on stderr, `--json` progress for automation, meaningful exit codes",
-      "Headless wgpu with a software adapter fallback",
-  ],
-  ac=["The CLI and the app produce identical output for the same project and range"])
-
-I("release", "Packaging and v0.1.0 release", "M4", ["infra"], "L", ["cli", "export-dialog", "hw-encode", "loudness", "lossless-export", "target-size"],
-  summary="Installable builds for all three platforms.",
-  scope=[
 I("lossless-export", "Lossless fast export", "M4", ["export", "media"], "L", ["encode", "export-dialog"],
   summary="When all you did was cut, copy the original video instead of re-encoding it: no quality loss and close to disk speed.",
   scope=[
@@ -726,6 +726,18 @@ I("target-size", "Export to a target file size", "M4", ["export"], "M", ["encode
   ],
   ac=["Outputs land under the target and within about 3% of it, across the test corpus"])
 
+I("cli", "jvid render CLI", "M4", ["cli"], "M", ["encode", "presets", "serialize"],
+  summary="Render projects without the UI.",
+  scope=[
+      "`jvid render project.jvid -o out.mp4 [--preset NAME] [--in TC --out TC | --range in-out]`",
+      "Progress on stderr, `--json` progress for automation, meaningful exit codes",
+      "Headless wgpu with a software adapter fallback",
+  ],
+  ac=["The CLI and the app produce identical output for the same project and range"])
+
+I("release", "Packaging and v0.1.0 release", "M4", ["infra"], "L", ["cli", "export-dialog", "hw-encode", "loudness", "lossless-export", "target-size"],
+  summary="Installable builds for all three platforms.",
+  scope=[
       "Windows zip/MSI with FFmpeg DLLs",
       "macOS `.app`/`.dmg` with bundled dylibs, signing and notarization",
       "Linux AppImage and tarball",
@@ -817,7 +829,7 @@ I("keymap-editor", "Keyboard shortcut editor", "M5", ["ui"], "M", ["actions"],
 
 I("themes", "Themes", "M5", ["suite-ui"], "S", ["suite-ui-theme"],
   summary="Custom color themes.",
-  scope=["Theme files in TOML using the existing tokens", "Built-in dark, light and high-contrast", "Live reload"],
+  scope=["Theme files in TOML using the `DESIGN.md` tokens", "Built-in dark, light and high-contrast", "Live reload"],
   ac=["A theme file change shows up without restarting"])
 
 I("overlays", "Preview overlays: safe areas and grid", "M5", ["ui"], "S", ["preview-gpu"],
@@ -836,18 +848,6 @@ I("user-docs", "User guide and shortcut cheat sheet", "M5", ["docs"], "M", ["exp
   scope=["Getting started, editing basics, keyframes, export", "Keyboard shortcut cheat sheet generated from the action registry", "Building from source"],
   ac=["The cheat sheet always matches the default keymap"])
 
-# ───────────────────────── M6 · Extend (v0.3.0) ─────────────────────────
-
-I("wgsl", "WGSL shader effects", "M6", ["render", "ui"], "L", ["color", "inspector", "keyframes"],
-  summary="Users write effects as a single `.wgsl` file.",
-  scope=[
-      "Effects folder in the config directory; effects listed in the bin's Effects tab",
-      "Header parsing (`@jvid effect`, `@param name type range = default`)",
-      "Validate with `naga` and show readable errors",
-      "Inspector UI generated from params; params are keyframeable; effects stack in order",
-      "Hot reload on file change",
-      "Bundled examples: vignette, chromatic aberration, film grain; an authoring guide",
-  ],
 I("batch-highlights", "Export marked highlights as separate files", "M5", ["export", "timeline"], "M", ["markers", "queue"],
   summary="Mark several highlights while watching a recording, then export each one as its own file in one go.",
   scope=[
@@ -866,6 +866,18 @@ I("zoom-region", "Zoom-to-region for screen recordings", "M5", ["ui", "render"],
   ],
   ac=["A zoom is one undo step and its keyframes show in the clip's keyframe lanes"])
 
+# ───────────────────────── M6 · Extend (v0.3.0) ─────────────────────────
+
+I("wgsl", "WGSL shader effects", "M6", ["render", "ui"], "L", ["color", "inspector", "keyframes"],
+  summary="Users write effects as a single `.wgsl` file.",
+  scope=[
+      "Effects folder in the config directory; effects listed in the bin's Effects tab",
+      "Header parsing (`@jvid effect`, `@param name type range = default`)",
+      "Validate with `naga` and show readable errors",
+      "Inspector UI generated from params; params are keyframeable; effects stack in order",
+      "Hot reload on file change",
+      "Bundled examples: vignette, chromatic aberration, film grain; an authoring guide",
+  ],
   ac=["Dropping a new `.wgsl` file in the folder makes it usable without restarting"],
   refs=[f"[PLAN.md · Customization]({PLAN}#customization-wgsl-shader-effects)"])
 
@@ -890,6 +902,6 @@ for key, title, summary in [
     ("audio-fx", "Audio EQ and compressor", "Basic per-clip and per-track audio effects."),
     ("hdr", "HDR support", "PQ/HLG sources, tone mapping and HDR export."),
     ("graph-editor", "Curve graph editor", "A full graph editor for keyframe curves."),
+    ("silence-detect", "Silence detection to cut dead air", "Find silent stretches in screen recordings and offer to cut or speed them up."),
 ]:
     I(key, title, None, [], None, summary=summary, labels=["later"])
-    ("silence-detect", "Silence detection to cut dead air", "Find silent stretches in screen recordings and offer to cut or speed them up."),

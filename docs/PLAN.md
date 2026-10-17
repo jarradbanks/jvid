@@ -202,11 +202,16 @@ The implementation order, issue for each item, dependencies and critical path ar
 
 ---
 
+## Design
+
+The visual system is in [DESIGN.md](../DESIGN.md): the Clean Cut direction, with locked layout rules that keep every panel header on one line.
+
 ## UI prototypes
 
-Generated with Codex image generation from the shared brief in [`prototypes/BRIEF.md`](prototypes/BRIEF.md):
+Generated with Codex image generation. The first four set the panel layout; their look is superseded by DESIGN.md. Prompts are in [`prototypes/BRIEF.md`](prototypes/BRIEF.md).
 
 1. `prototypes/01-editor.png` — main editor
 2. `prototypes/02-keyframes.png` — keyframe editing
 3. `prototypes/03-export.png` — export dialog
 4. `prototypes/04-welcome.png` — welcome screen
+5. `prototypes/clean-cut/01-editor.png` — main editor in the Clean Cut look
