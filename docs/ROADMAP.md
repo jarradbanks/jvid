@@ -315,7 +315,7 @@ flowchart LR
 | [#54](https://github.com/jarradbanks/jvid/issues/54) | Export dialog with range selection |  | M | ui, export | [#53](https://github.com/jarradbanks/jvid/issues/53), [#39](https://github.com/jarradbanks/jvid/issues/39), [#36](https://github.com/jarradbanks/jvid/issues/36) |
 | [#55](https://github.com/jarradbanks/jvid/issues/55) | Hardware encoding with software fallback | need testing | M | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#56](https://github.com/jarradbanks/jvid/issues/56) | Audio-only export |  | S | export, audio | [#52](https://github.com/jarradbanks/jvid/issues/52) |
-| [#57](https://github.com/jarradbanks/jvid/issues/57) | Loudness normalization (EBU R128) | in progress | M | audio, export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
+| [#57](https://github.com/jarradbanks/jvid/issues/57) | Loudness normalization (EBU R128) | done | M | audio, export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#58](https://github.com/jarradbanks/jvid/issues/58) | Background render queue |  | M | export, ui | [#54](https://github.com/jarradbanks/jvid/issues/54), [#18](https://github.com/jarradbanks/jvid/issues/18) |
 | [#59](https://github.com/jarradbanks/jvid/issues/59) | Export current frame as PNG | done | S | export | [#30](https://github.com/jarradbanks/jvid/issues/30) |
 | [#60](https://github.com/jarradbanks/jvid/issues/60) | GIF export |  | S | export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
