@@ -18,7 +18,7 @@ use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
 use crate::preview::{Preview, SOURCE_ACTIONS};
-use crate::timeline::Timeline;
+use crate::timeline::{Timeline, menus};
 use crate::welcome::{self, Recent, Welcome};
 use crate::{project_file, relink};
 
@@ -185,13 +185,14 @@ impl App {
 
     fn app_bar(&mut self, ui: &mut Ui) {
         let rect = ui.max_rect();
-        ui.painter().text(
+        let logo = ui.painter().text(
             rect.left_center() + vec2(space::GUTTER + space::INSET, 0.0),
             Align2::LEFT_CENTER,
             "jvid",
             theme::title(),
             color::INK,
         );
+        self.edit_menu(ui, logo.right() + space::S12);
 
         let name = self.name();
         let text_w = ui
@@ -238,13 +239,49 @@ impl App {
             let live = |on: bool| if on { State::Live } else { State::Disabled };
             let redo = Button::icon(icon::REDO, "Redo").state(live(self.history.can_redo()));
             if ui.add(redo).clicked() {
-                self.history.redo();
+                self.run_action("redo", true);
             }
             let undo = Button::icon(icon::UNDO, "Undo").state(live(self.history.can_undo()));
             if ui.add(undo).clicked() {
-                self.history.undo();
+                self.run_action("undo", true);
             }
         });
+    }
+
+    /// The Edit menu, its left edge at `left`: each row runs its keymap action.
+    fn edit_menu(&mut self, ui: &mut Ui, left: f32) {
+        let r = ui.max_rect();
+        let text_w = ui
+            .painter()
+            .layout_no_wrap("Edit".into(), theme::body_strong(), color::INK)
+            .size()
+            .x;
+        let w = (2.0 * space::S12 + text_w).ceil();
+        let at = egui::Rect::from_min_size(
+            egui::pos2(left, r.center().y - size::CONTROL / 2.0),
+            vec2(w, size::CONTROL),
+        );
+        let button = ui.put(at, Button::ghost("Edit"));
+        let mut picked = None;
+        egui::Popup::menu(&button).show(|ui| {
+            for &id in menus::EDIT {
+                if id.is_empty() {
+                    ui.separator();
+                    continue;
+                }
+                let can = match id {
+                    "undo" => self.history.can_undo(),
+                    "redo" => self.history.can_redo(),
+                    _ => self.timeline.can(id, self.history.project().sequence()),
+                };
+                if menus::item(ui, &self.keymap, id, None, can) {
+                    picked = Some(id);
+                }
+            }
+        });
+        if let Some(id) = picked {
+            self.run_action(id, true);
+        }
     }
 
     fn file_action(&mut self, action: FileAction) {
@@ -345,13 +382,25 @@ impl App {
         }
     }
 
-    /// Runs a keymap action. shortcut: only panel focus is real; the rest are stubs until
-    /// their features land.
-    fn run_action(&mut self, id: &str) {
-        let preview_focused = self
-            .dock
-            .find_active_focused()
-            .is_some_and(|(_, t)| *t == Tab::Preview);
+    /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
+    /// focus. shortcut: unimplemented actions are stubs until their features land.
+    fn run_action(&mut self, id: &str, menu: bool) {
+        match id {
+            "undo" => {
+                self.history.undo();
+                return;
+            }
+            "redo" | "redo_alt" => {
+                self.history.redo();
+                return;
+            }
+            _ => {}
+        }
+        let preview_focused = !menu
+            && self
+                .dock
+                .find_active_focused()
+                .is_some_and(|(_, t)| *t == Tab::Preview);
         if preview_focused
             && self.preview_active == 0
             && self.preview.source_asset().is_some()
@@ -369,7 +418,7 @@ impl App {
             .dock
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
-        if timeline_focused && self.timeline.action(id, self.history.project()) {
+        if (timeline_focused || menu) && self.timeline.action(id, self.history.project()) {
             return;
         }
         let tab = match id {
@@ -497,7 +546,7 @@ impl eframe::App for App {
             self.keymap.pressed(&ctx, timeline)
         };
         for id in pressed {
-            self.run_action(id);
+            self.run_action(id, false);
         }
 
         let dropped: Vec<_> = ctx.input(|i| {
@@ -558,6 +607,7 @@ impl eframe::App for App {
                 open: None,
                 preview: &mut self.preview,
                 timeline: &mut self.timeline,
+                keymap: &self.keymap,
             };
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
@@ -576,6 +626,10 @@ impl eframe::App for App {
                 viewer.relink,
                 viewer.open,
             );
+            if let Some(id) = self.timeline.reveal.take() {
+                self.bin.selected = Some(id);
+                self.run_action("focus_media", false);
+            }
             if let Some(id) = open {
                 self.preview.open(self.history.project(), id);
                 self.preview_active = 0;
@@ -708,6 +762,7 @@ struct Viewer<'a> {
     open: Option<jvid_core::model::AssetId>,
     preview: &'a mut Preview,
     timeline: &'a mut Timeline,
+    keymap: &'a Keymap,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -772,11 +827,19 @@ impl TabViewer for Viewer<'_> {
             return;
         }
         if *tab == Tab::Timeline {
-            panel.show(ui, |ui| {
-                if let Some((c, g)) = self.timeline.show(ui, self.project, self.missing) {
+            let r = panel.show(ui, |ui| {
+                let edit = self
+                    .timeline
+                    .show(ui, self.project, self.missing, self.keymap);
+                if let Some((c, g)) = edit {
                     (self.command, self.gesture) = (Some(c), g);
                 }
             });
+            let header = r
+                .response
+                .rect
+                .with_max_y(r.response.rect.top() + size::HEADER);
+            self.timeline.toolbar(ui, header, self.project, self.keymap);
             return;
         }
         if *tab == Tab::Inspector {

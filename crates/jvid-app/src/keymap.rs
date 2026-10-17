@@ -63,6 +63,10 @@ pub const ACTIONS: &[Action] = &[
         "Q",
     ),
     t("ripple_trim_next", "Ripple trim next edit to playhead", "W"),
+    a("undo", "Undo", "Ctrl+Z"),
+    a("redo", "Redo", "Ctrl+Shift+Z"),
+    a("redo_alt", "Redo (alternate)", "Ctrl+Y"),
+    t("select_all", "Select All", "Ctrl+A"),
     t("copy", "Copy", "Ctrl+C"),
     t("cut", "Cut", "Ctrl+X"),
     t("paste", "Paste", "Ctrl+V"),
@@ -74,7 +78,7 @@ pub const ACTIONS: &[Action] = &[
     t("snapping", "Snapping", "S"),
     a("razor_tool", "Razor tool", "C"),
     a("selection_tool", "Selection tool", "V"),
-    t("add_edit", "Add edit", "Ctrl+K"),
+    t("add_edit", "Split at playhead", "Ctrl+K"),
     a("step_back", "Step back one frame", "Left"),
     a("step_forward", "Step forward one frame", "Right"),
     a("go_to_start", "Go to start", "Home"),
@@ -168,6 +172,16 @@ impl Keymap {
             .map(|((a, b), _)| (a.id, b.as_ref().map(format).unwrap_or_default()))
             .collect();
         toml::to_string(&overrides).expect("string map serializes")
+    }
+
+    /// The action's name and its shortcut as text, empty when unbound.
+    pub fn label(&self, id: &str) -> (&'static str, String) {
+        let i = ACTIONS
+            .iter()
+            .position(|a| a.id == id)
+            .expect("known action");
+        let sc = self.bindings[i].as_ref().map(format).unwrap_or_default();
+        (ACTIONS[i].name, sc)
     }
 
     /// Pairs of action ids sharing a shortcut where both could fire.

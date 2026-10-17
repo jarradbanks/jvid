@@ -34,6 +34,14 @@ pub mod icon {
     pub const LOCK: &str = "\u{E10F}";
     pub const EYE: &str = "\u{E0BE}";
     pub const EYE_OFF: &str = "\u{E0BF}";
+    pub const POINTER: &str = "\u{E1C3}";
+    pub const SCISSORS: &str = "\u{E152}";
+    pub const MAGNET: &str = "\u{E2B5}";
+    pub const LINK: &str = "\u{E108}";
+    pub const ZOOM_IN: &str = "\u{E1B6}";
+    pub const ZOOM_OUT: &str = "\u{E1B7}";
+    pub const SCAN: &str = "\u{E257}";
+    pub const SPLIT: &str = "\u{E4EE}";
 }
 
 /// Inter Medium (500), for Body Strong, buttons, tabs and the timecode.

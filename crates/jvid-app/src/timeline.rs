@@ -27,8 +27,11 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
 use suite_ui::widgets::{Button, TextInput};
 
+use crate::keymap::Keymap;
 use crate::media_bin::Caches;
 use crate::transport::Transport;
+
+pub mod menus;
 
 /// The undo gesture a track-height drag coalesces under.
 pub const RESIZE_GESTURE: GestureKey = 0x7472_6163_6b68; // "trackh"
@@ -84,6 +87,10 @@ pub struct Timeline {
     snapping: bool,
     /// Where the current drag snapped, for the indicator line.
     snapped: Option<Time>,
+    /// An action picked from a menu or the toolbar this frame.
+    menu: Option<&'static str>,
+    /// "Reveal in media bin" asked for this asset; the app takes it.
+    pub reveal: Option<AssetId>,
 }
 
 /// Snap reach in points.
@@ -124,6 +131,8 @@ impl Default for Timeline {
             followed: Time(0),
             snapping: true,
             snapped: None,
+            menu: None,
+            reveal: None,
         }
     }
 }
@@ -253,6 +262,10 @@ impl Timeline {
             "linked_selection" => self.linked_selection = !self.linked_selection,
             "snapping" => self.snapping = !self.snapping,
             "razor_tool" | "selection_tool" => self.razor = id == "razor_tool",
+            "select_all" => {
+                let clips = project.sequence().tracks().iter().flat_map(|t| t.clips());
+                self.selected = clips.map(|c| c.id).collect();
+            }
             "add_edit" | "ripple_trim_prev" | "ripple_trim_next" => {
                 self.pending = self.cut_action(id, project.sequence());
             }
@@ -555,6 +568,7 @@ impl Timeline {
         ui: &mut Ui,
         project: &Project,
         missing: &HashSet<PathBuf>,
+        keymap: &Keymap,
     ) -> Option<Edit> {
         let mut edit = self.pending.take().map(|c| (c, None));
         if std::mem::take(&mut self.copied) {
@@ -689,6 +703,10 @@ impl Timeline {
                 } else if cr.clicked() {
                     self.select(seq, clip.id, ui.input(|i| i.modifiers));
                 }
+                if cr.secondary_clicked() && !self.selected.contains(&clip.id) {
+                    self.select(seq, clip.id, egui::Modifiers::NONE);
+                }
+                cr.context_menu(|ui| self.clip_menu(ui, seq, keymap, clip.asset));
                 if let Some(e) = self.trim_handles(ui, project, view, clip, r) {
                     edit = Some(e);
                 }
@@ -706,6 +724,13 @@ impl Timeline {
         {
             self.pick_gap(seq, view, &lane_rects, p);
         }
+        if marquee.secondary_clicked()
+            && let Some(p) = marquee.interact_pointer_pos()
+        {
+            self.selected.clear();
+            self.pick_gap(seq, view, &lane_rects, p);
+        }
+        marquee.context_menu(|ui| self.lane_menu(ui, seq, keymap, &mut edit));
         if let Some((t, at)) = self.gap
             && let Some((a, b)) = seq.gap_at(t, at)
             && let Some((_, _, lane)) = lane_rects.iter().find(|l| l.0 == t)
@@ -870,6 +895,10 @@ impl Timeline {
                 color::LIGHT_BLUE,
             );
             playhead_head(&painter, pos2(x + line / 2.0, ruler.top()));
+        }
+        if let Some(id) = self.menu.take() {
+            self.action(id, project);
+            edit = edit.or(self.pending.take().map(|c| (c, None)));
         }
         edit
     }
@@ -1665,7 +1694,7 @@ mod tests {
         }
     }
 
-    fn project(n: usize) -> Project {
+    pub(super) fn project(n: usize) -> Project {
         let mut h = History::new(Project::default());
         let _ = h.apply(Command::Import(vec![(
             PathBuf::from("/nonexistent/a.mp4"),
@@ -1936,7 +1965,7 @@ mod tests {
     }
 
     /// Edits from the timeline go through a real history, as in the app.
-    fn harness(project: Project) -> egui_kittest::Harness<'static, (Timeline, History)> {
+    pub(super) fn harness(project: Project) -> egui_kittest::Harness<'static, (Timeline, History)> {
         let mut fresh = true;
         let mut h = egui_kittest::Harness::builder()
             .with_size([1000.0, 200.0])
@@ -1945,7 +1974,7 @@ mod tests {
                 move |ui, (t, h): &mut (Timeline, History)| {
                     if !suite_ui::test_support::install_theme(ui, &mut fresh) {
                         ui.painter().rect_filled(ui.max_rect(), 0.0, color::PANEL);
-                        let edit = t.show(ui, h.project(), &HashSet::new());
+                        let edit = t.show(ui, h.project(), &HashSet::new(), &Keymap::default());
                         match edit {
                             Some((c, Some(k))) => h.apply_coalesced(k, c).unwrap(),
                             Some((c, None)) => h.apply(c).unwrap(),
@@ -2303,7 +2332,7 @@ mod tests {
                         });
                         let edit = ui
                             .scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
-                                t.show(ui, h.project(), &missing)
+                                t.show(ui, h.project(), &missing, &Keymap::default())
                             })
                             .inner;
                         if let Some((c, _)) = edit {
@@ -2373,7 +2402,8 @@ mod tests {
         };
         let mut frame = || {
             let out = ctx.run_ui(input(), |ui| {
-                egui::CentralPanel::default().show(ui, |ui| t.show(ui, &p, &HashSet::new()));
+                egui::CentralPanel::default()
+                    .show(ui, |ui| t.show(ui, &p, &HashSet::new(), &Keymap::default()));
             });
             let lines = out
                 .shapes
