@@ -200,7 +200,7 @@ flowchart LR
 | Issue | Title | Status | Size | Area | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | [#29](https://github.com/jarradbanks/jvid/issues/29) | Timeline evaluation: time to layer stack | done | M | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
-| [#30](https://github.com/jarradbanks/jvid/issues/30) | GPU compositor: layer stack with opacity | in progress | L | render | [#29](https://github.com/jarradbanks/jvid/issues/29), [#23](https://github.com/jarradbanks/jvid/issues/23) |
+| [#30](https://github.com/jarradbanks/jvid/issues/30) | GPU compositor: layer stack with opacity | done | L | render | [#29](https://github.com/jarradbanks/jvid/issues/29), [#23](https://github.com/jarradbanks/jvid/issues/23) |
 | [#31](https://github.com/jarradbanks/jvid/issues/31) | Audio mixer: tracks, volume, pan, mute and solo | done | M | audio | [#29](https://github.com/jarradbanks/jvid/issues/29), [#16](https://github.com/jarradbanks/jvid/issues/16) |
 | [#32](https://github.com/jarradbanks/jvid/issues/32) | Timeline playback engine |  | L | render, audio | [#30](https://github.com/jarradbanks/jvid/issues/30), [#31](https://github.com/jarradbanks/jvid/issues/31), [#24](https://github.com/jarradbanks/jvid/issues/24) |
 | [#33](https://github.com/jarradbanks/jvid/issues/33) | Timeline panel: ruler, tracks, clips, zoom and playhead |  | L | ui, timeline | [#12](https://github.com/jarradbanks/jvid/issues/12), [#7](https://github.com/jarradbanks/jvid/issues/7), [#21](https://github.com/jarradbanks/jvid/issues/21), [#22](https://github.com/jarradbanks/jvid/issues/22) |
