@@ -161,7 +161,9 @@ fn validate(project: &Project, req: &Request) -> Result<ProbeInfo, Error> {
     let want = rate.time_floor(end) - rate.time_floor(first);
     let frame = rate.time_floor(1);
     if info.width.is_none() || info.audio_streams == 0 {
-        return Err("output is missing its video or audio stream".to_string().into());
+        return Err("output is missing its video or audio stream"
+            .to_string()
+            .into());
     }
     if (info.duration - want).0.abs() > frame.0 {
         let secs = |t: Time| t.0 as f64 / FLICKS_PER_SECOND as f64;

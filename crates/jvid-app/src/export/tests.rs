@@ -96,7 +96,7 @@ fn export_matches_range_with_audio_in_sync() {
             path: path.clone(),
             range: (secs(1), secs(2)),
         };
-        let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{ext}: {e}"));
+        let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{ext}: {e:?}"));
         assert_eq!((info.width, info.height), (Some(1920), Some(1080)), "{ext}");
         let off = (info.duration - secs(1)).0.abs();
         assert!(off <= rate.time_floor(1).0, "{ext}: {:?}", info.duration);
@@ -161,7 +161,10 @@ fn failed_export_leaves_existing_file() {
         path: path.clone(),
         range: (secs(1), secs(1)),
     };
-    assert!(matches!(run_now(&project(&dir), &req, false), Err(Error::Failed(_))));
+    assert!(matches!(
+        run_now(&project(&dir), &req, false),
+        Err(Error::Failed(_))
+    ));
     assert_eq!(std::fs::read(&path).unwrap(), b"keep");
     std::fs::remove_file(&path).unwrap();
 }
