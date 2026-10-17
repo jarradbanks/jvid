@@ -89,7 +89,7 @@ flowchart LR
 | [#4](https://github.com/jarradbanks/jvid/issues/4) | FFmpeg linking and developer setup on all platforms |  | M | infra, media | [#2](https://github.com/jarradbanks/jvid/issues/2) |
 | [#5](https://github.com/jarradbanks/jvid/issues/5) | Generated test media corpus |  | S | infra, media | [#4](https://github.com/jarradbanks/jvid/issues/4) |
 | [#6](https://github.com/jarradbanks/jvid/issues/6) | Rational time and timecode | done | S | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
-| [#7](https://github.com/jarradbanks/jvid/issues/7) | Project data model |  | M | core | [#6](https://github.com/jarradbanks/jvid/issues/6) |
+| [#7](https://github.com/jarradbanks/jvid/issues/7) | Project data model | done | M | core | [#6](https://github.com/jarradbanks/jvid/issues/6) |
 | [#8](https://github.com/jarradbanks/jvid/issues/8) | Command system and undo/redo |  | M | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
 | [#9](https://github.com/jarradbanks/jvid/issues/9) | Project file format (.jvid JSON) |  | S | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
 | [#10](https://github.com/jarradbanks/jvid/issues/10) | Settings and config files (TOML) |  | S | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
