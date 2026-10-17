@@ -386,4 +386,45 @@ mod tests {
         h.run();
         assert!(fired.borrow().is_empty());
     }
+
+    /// docs/shortcuts.md is generated from ACTIONS; `UPDATE_SHORTCUTS=1` rewrites it.
+    #[test]
+    fn cheat_sheet_matches_defaults() {
+        let mut md = String::from(
+            "# Keyboard shortcuts\n\n<!-- Generated from crates/jvid-app/src/keymap.rs. \
+             Run `UPDATE_SHORTCUTS=1 cargo test -p jvid-app cheat_sheet` to update. -->\n\n\
+             The default keymap. Ctrl means Cmd on macOS. Remap any of these from \
+             Keyboard shortcuts… in the project menu.\n",
+        );
+        for (context, heading, note) in [
+            (
+                Context::Global,
+                "Anywhere",
+                "Work in any panel except while typing in a text field.",
+            ),
+            (
+                Context::Timeline,
+                "Timeline",
+                "Work while the timeline has focus.",
+            ),
+        ] {
+            md += &format!("\n## {heading}\n\n{note}\n\n| Action | Shortcut |\n| --- | --- |\n");
+            for a in ACTIONS.iter().filter(|a| a.context == context) {
+                // Code spans don't take backslash escapes, but a table cell still needs `|` escaped.
+                let key = a.default.replace('|', "\\|");
+                md += &format!("| {} | `{key}` |\n", a.name);
+            }
+        }
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/shortcuts.md");
+        if std::env::var_os("UPDATE_SHORTCUTS").is_some() {
+            fs::write(path, &md).unwrap();
+        }
+        let on_disk = fs::read_to_string(path)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
+        assert!(
+            on_disk == md,
+            "docs/shortcuts.md is out of date; run UPDATE_SHORTCUTS=1 cargo test -p jvid-app cheat_sheet"
+        );
+    }
 }

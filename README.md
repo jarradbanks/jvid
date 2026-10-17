@@ -8,6 +8,7 @@ jvid is the first tool in a planned suite of small, high-performance, open sourc
 
 > **Status:** early development. The cargo workspace exists but no features are implemented yet; the screenshot is a generated prototype.
 
+- [User guide](docs/guide.md) and [shortcut cheat sheet](docs/shortcuts.md)
 - [Plan](docs/PLAN.md): feature set, architecture and licensing
 - [Roadmap](docs/ROADMAP.md): implementation order, milestones and issues
 - [UI prototypes](docs/prototypes/): main editor, keyframe editing, export dialog, welcome screen
