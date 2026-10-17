@@ -218,7 +218,7 @@ flowchart LR
 | [#37](https://github.com/jarradbanks/jvid/issues/37) | Trim, split, razor and ripple | done | L | timeline | [#36](https://github.com/jarradbanks/jvid/issues/36) |
 | [#38](https://github.com/jarradbanks/jvid/issues/38) | Snapping | done | S | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37) |
 | [#155](https://github.com/jarradbanks/jvid/issues/155) | Edit menu, timeline toolbar and clip context menu | done | M | ui, timeline | [#38](https://github.com/jarradbanks/jvid/issues/38) |
-| [#157](https://github.com/jarradbanks/jvid/issues/157) | Enable and disable clips | in progress | S | timeline, render | [#155](https://github.com/jarradbanks/jvid/issues/155) |
+| [#157](https://github.com/jarradbanks/jvid/issues/157) | Enable and disable clips | done | S | timeline, render | [#155](https://github.com/jarradbanks/jvid/issues/155) |
 | [#159](https://github.com/jarradbanks/jvid/issues/159) | Program monitor plays the timeline | need testing | M | ui, render | [#32](https://github.com/jarradbanks/jvid/issues/32), [#33](https://github.com/jarradbanks/jvid/issues/33) |
 | [#39](https://github.com/jarradbanks/jvid/issues/39) | In/Out points on the timeline |  | M | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37), [#13](https://github.com/jarradbanks/jvid/issues/13) |
 | [#40](https://github.com/jarradbanks/jvid/issues/40) | Markers |  | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8), [#39](https://github.com/jarradbanks/jvid/issues/39) |
