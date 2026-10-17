@@ -114,6 +114,15 @@ pub enum Command {
     },
     SetSettings(ProjectSettings),
     AddAsset(PathBuf),
+    /// Adds a solid color asset to the bin.
+    AddSolid {
+        name: String,
+        color: [f64; 4],
+    },
+    SetSolidColor {
+        id: AssetId,
+        color: [f64; 4],
+    },
     SetAssetProbe {
         id: AssetId,
         probe: Option<ProbeInfo>,
@@ -193,6 +202,8 @@ impl Command {
             | Self::SetInOut { .. }
             | Self::SetSettings(_)
             | Self::AddAsset(_)
+            | Self::AddSolid { .. }
+            | Self::SetSolidColor { .. }
             | Self::SetAssetProbe { .. }
             | Self::Import(_)
             | Self::RenameAsset { .. }
@@ -323,6 +334,17 @@ impl Command {
                 Created::Nothing
             }
             Self::AddAsset(path) => Created::Asset(p.add_asset(path)),
+            Self::AddSolid { name, color } => {
+                let id = p.add_asset(PathBuf::new());
+                let a = p.asset_mut(id).expect("just added");
+                (a.name, a.solid) = (Some(name), Some(color));
+                Created::Asset(id)
+            }
+            Self::SetSolidColor { id, color } => {
+                let a = p.asset_mut(id).filter(|a| a.solid.is_some());
+                a.ok_or(ModelError::UnknownAsset(id))?.solid = Some(color);
+                Created::Nothing
+            }
             Self::SetAssetProbe { id, probe } => {
                 p.asset_mut(id).ok_or(ModelError::UnknownAsset(id))?.probe = probe;
                 Created::Nothing
@@ -1267,5 +1289,36 @@ mod tests {
             let mut a = History::new(loaded);
             prop_assert_eq!(a.apply(Command::NewLink), h.apply(Command::NewLink));
         }
+    }
+
+    #[test]
+    fn solids_add_recolor_and_reject_files() {
+        let mut h = History::new(Project::default());
+        let Created::Asset(id) = h
+            .apply(Command::AddSolid {
+                name: "Black".into(),
+                color: [0.0, 0.0, 0.0, 1.0],
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let red = [1.0, 0.0, 0.0, 1.0];
+        h.apply(Command::SetSolidColor { id, color: red }).unwrap();
+        let a = h.project().asset(id).unwrap();
+        assert_eq!((a.display_name().as_str(), a.solid), ("Black", Some(red)));
+        let Created::Asset(file) = h.apply(Command::AddAsset("a.mkv".into())).unwrap() else {
+            panic!()
+        };
+        let recolor = Command::SetSolidColor {
+            id: file,
+            color: red,
+        };
+        assert!(h.apply(recolor).is_err());
+        assert!(h.undo() && h.undo());
+        assert_eq!(
+            h.project().asset(id).unwrap().solid,
+            Some([0.0, 0.0, 0.0, 1.0])
+        );
     }
 }

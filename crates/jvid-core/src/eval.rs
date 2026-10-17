@@ -17,6 +17,9 @@ pub struct Layer<'a> {
     pub params: &'a BTreeMap<String, f64>,
     /// The clip's transform evaluated at this instant.
     pub transform: Transform,
+    /// The clip's `color` keyframes at this instant, straight RGBA; a solid asset's color
+    /// applies when `None`.
+    pub color: Option<[f64; 4]>,
 }
 
 /// A piece of one clip to mix, clamped to the requested range.
@@ -64,6 +67,10 @@ pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
                 source_time: c.source_in + (t - c.start),
                 params: &c.params,
                 transform: c.transform_at(t),
+                color: match c.value_at("color", t) {
+                    Some(crate::keyframe::Value::Color(c)) => Some(c),
+                    _ => None,
+                },
             })
         })
         .collect()
@@ -185,5 +192,30 @@ mod tests {
         // solo on a muted track stays silent
         s.track_mut(a1).unwrap().muted = true;
         assert_eq!(only(&s, 8, 12), Vec::<ClipId>::new());
+    }
+
+    #[test]
+    fn color_keyframes_animate_the_layer_color() {
+        use crate::keyframe::{Easing, Keyframe, Value};
+        let mut s = Sequence::default();
+        let v = s.add_track(TrackKind::Video, "V1");
+        let c = s.add_clip(v, clip(0, 10)).unwrap();
+        assert_eq!(video_at(&s, Time(0))[0].color, None);
+        let key = |time, c| Keyframe {
+            time: Time(time),
+            value: Value::Color(c),
+            easing: Easing::Linear,
+        };
+        s.with_clip_mut(c, |c| {
+            c.keyframes.insert(
+                "color".into(),
+                vec![
+                    key(100, [0.0, 0.0, 0.0, 1.0]),
+                    key(110, [1.0, 0.5, 0.0, 1.0]),
+                ],
+            )
+        })
+        .unwrap();
+        assert_eq!(video_at(&s, Time(5))[0].color, Some([0.5, 0.25, 0.0, 1.0]));
     }
 }
