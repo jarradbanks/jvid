@@ -147,15 +147,15 @@ flowchart LR
 | [#17](https://github.com/jarradbanks/jvid/issues/17) | Still image import | done | S | media | [#7](https://github.com/jarradbanks/jvid/issues/7) |
 | [#18](https://github.com/jarradbanks/jvid/issues/18) | Background job system | need testing | M | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#19](https://github.com/jarradbanks/jvid/issues/19) | Import media with a file dialog and drag and drop | done | M | ui, media | [#14](https://github.com/jarradbanks/jvid/issues/14), [#17](https://github.com/jarradbanks/jvid/issues/17), [#18](https://github.com/jarradbanks/jvid/issues/18), [#12](https://github.com/jarradbanks/jvid/issues/12) |
-| [#20](https://github.com/jarradbanks/jvid/issues/20) | Media bin panel | need testing | M | ui | [#19](https://github.com/jarradbanks/jvid/issues/19) |
-| [#21](https://github.com/jarradbanks/jvid/issues/21) | Thumbnail generation and cache | need testing | M | media | [#15](https://github.com/jarradbanks/jvid/issues/15), [#18](https://github.com/jarradbanks/jvid/issues/18) |
+| [#20](https://github.com/jarradbanks/jvid/issues/20) | Media bin panel | done | M | ui | [#19](https://github.com/jarradbanks/jvid/issues/19) |
+| [#21](https://github.com/jarradbanks/jvid/issues/21) | Thumbnail generation and cache | done | M | media | [#15](https://github.com/jarradbanks/jvid/issues/15), [#18](https://github.com/jarradbanks/jvid/issues/18) |
 | [#22](https://github.com/jarradbanks/jvid/issues/22) | Waveform peak generation and cache | done | M | audio | [#16](https://github.com/jarradbanks/jvid/issues/16), [#18](https://github.com/jarradbanks/jvid/issues/18) |
 | [#23](https://github.com/jarradbanks/jvid/issues/23) | GPU frame upload and preview viewport | need testing | M | render | [#15](https://github.com/jarradbanks/jvid/issues/15), [#12](https://github.com/jarradbanks/jvid/issues/12) |
 | [#24](https://github.com/jarradbanks/jvid/issues/24) | Audio output and master clock | done | M | audio | [#16](https://github.com/jarradbanks/jvid/issues/16) |
 | [#25](https://github.com/jarradbanks/jvid/issues/25) | Source viewer: playback, J/K/L and source in/out |  | L | ui | [#23](https://github.com/jarradbanks/jvid/issues/23), [#24](https://github.com/jarradbanks/jvid/issues/24), [#13](https://github.com/jarradbanks/jvid/issues/13), [#20](https://github.com/jarradbanks/jvid/issues/20) |
-| [#26](https://github.com/jarradbanks/jvid/issues/26) | Hover-skim in the media bin |  | S | ui | [#21](https://github.com/jarradbanks/jvid/issues/21), [#20](https://github.com/jarradbanks/jvid/issues/20) |
+| [#26](https://github.com/jarradbanks/jvid/issues/26) | Hover-skim in the media bin | done | S | ui | [#21](https://github.com/jarradbanks/jvid/issues/21), [#20](https://github.com/jarradbanks/jvid/issues/20) |
 | [#27](https://github.com/jarradbanks/jvid/issues/27) | Welcome screen and new-project flow | need testing | M | ui | [#12](https://github.com/jarradbanks/jvid/issues/12), [#10](https://github.com/jarradbanks/jvid/issues/10), [#19](https://github.com/jarradbanks/jvid/issues/19) |
-| [#28](https://github.com/jarradbanks/jvid/issues/28) | Missing media detection and relink |  | S | ui, media | [#19](https://github.com/jarradbanks/jvid/issues/19), [#9](https://github.com/jarradbanks/jvid/issues/9) |
+| [#28](https://github.com/jarradbanks/jvid/issues/28) | Missing media detection and relink | in progress | S | ui, media | [#19](https://github.com/jarradbanks/jvid/issues/19), [#9](https://github.com/jarradbanks/jvid/issues/9) |
 
 ### [M2 · Timeline](https://github.com/jarradbanks/jvid/milestone/3)
 
