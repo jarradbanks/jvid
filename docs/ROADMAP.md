@@ -222,7 +222,7 @@ flowchart LR
 | [#159](https://github.com/jarradbanks/jvid/issues/159) | Program monitor plays the timeline | need testing | M | ui, render | [#32](https://github.com/jarradbanks/jvid/issues/32), [#33](https://github.com/jarradbanks/jvid/issues/33) |
 | [#39](https://github.com/jarradbanks/jvid/issues/39) | In/Out points on the timeline | done | M | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37), [#13](https://github.com/jarradbanks/jvid/issues/13) |
 | [#40](https://github.com/jarradbanks/jvid/issues/40) | Markers | done | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8), [#39](https://github.com/jarradbanks/jvid/issues/39) |
-| [#41](https://github.com/jarradbanks/jvid/issues/41) | Scrubbing and audio scrub | in progress | M | timeline, render | [#32](https://github.com/jarradbanks/jvid/issues/32) |
+| [#41](https://github.com/jarradbanks/jvid/issues/41) | Scrubbing and audio scrub | done | M | timeline, render | [#32](https://github.com/jarradbanks/jvid/issues/32) |
 | [#90](https://github.com/jarradbanks/jvid/issues/90) | Long and high-frame-rate recordings | done | M | media, timeline | [#32](https://github.com/jarradbanks/jvid/issues/32), [#21](https://github.com/jarradbanks/jvid/issues/21), [#22](https://github.com/jarradbanks/jvid/issues/22) |
 | [#42](https://github.com/jarradbanks/jvid/issues/42) | Performance harness and budgets | done | M | infra | [#32](https://github.com/jarradbanks/jvid/issues/32) |
 
@@ -263,7 +263,7 @@ flowchart LR
 | [#45](https://github.com/jarradbanks/jvid/issues/45) | Transform, crop and opacity in the compositor | done | M | render | [#30](https://github.com/jarradbanks/jvid/issues/30), [#43](https://github.com/jarradbanks/jvid/issues/43) |
 | [#46](https://github.com/jarradbanks/jvid/issues/46) | Blend modes | done | S | render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#47](https://github.com/jarradbanks/jvid/issues/47) | On-preview transform handles | done | M | ui, render | [#45](https://github.com/jarradbanks/jvid/issues/45), [#44](https://github.com/jarradbanks/jvid/issues/44) |
-| [#48](https://github.com/jarradbanks/jvid/issues/48) | Keyframe lanes on the timeline |  | L | timeline | [#43](https://github.com/jarradbanks/jvid/issues/43), [#33](https://github.com/jarradbanks/jvid/issues/33), [#44](https://github.com/jarradbanks/jvid/issues/44) |
+| [#48](https://github.com/jarradbanks/jvid/issues/48) | Keyframe lanes on the timeline | in progress | L | timeline | [#43](https://github.com/jarradbanks/jvid/issues/43), [#33](https://github.com/jarradbanks/jvid/issues/33), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#49](https://github.com/jarradbanks/jvid/issues/49) | Easing picker and bezier curve editor | done | M | ui | [#43](https://github.com/jarradbanks/jvid/issues/43), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#50](https://github.com/jarradbanks/jvid/issues/50) | Volume and pan keyframes with rubber band |  | M | audio, timeline | [#43](https://github.com/jarradbanks/jvid/issues/43), [#31](https://github.com/jarradbanks/jvid/issues/31), [#33](https://github.com/jarradbanks/jvid/issues/33) |
 | [#51](https://github.com/jarradbanks/jvid/issues/51) | Clip fade handles |  | S | timeline | [#50](https://github.com/jarradbanks/jvid/issues/50), [#45](https://github.com/jarradbanks/jvid/issues/45) |
@@ -321,7 +321,7 @@ flowchart LR
 | [#60](https://github.com/jarradbanks/jvid/issues/60) | GIF export |  | S | export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#91](https://github.com/jarradbanks/jvid/issues/91) | Lossless fast export |  | L | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52), [#54](https://github.com/jarradbanks/jvid/issues/54) |
 | [#92](https://github.com/jarradbanks/jvid/issues/92) | Export to a target file size |  | M | export | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53) |
-| [#61](https://github.com/jarradbanks/jvid/issues/61) | jvid render CLI |  | M | cli | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53), [#9](https://github.com/jarradbanks/jvid/issues/9) |
+| [#61](https://github.com/jarradbanks/jvid/issues/61) | jvid render CLI | in progress | M | cli | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53), [#9](https://github.com/jarradbanks/jvid/issues/9) |
 | [#62](https://github.com/jarradbanks/jvid/issues/62) | Packaging and v0.1.0 release |  | L | infra | [#61](https://github.com/jarradbanks/jvid/issues/61), [#54](https://github.com/jarradbanks/jvid/issues/54), [#55](https://github.com/jarradbanks/jvid/issues/55), [#57](https://github.com/jarradbanks/jvid/issues/57), [#91](https://github.com/jarradbanks/jvid/issues/91), [#92](https://github.com/jarradbanks/jvid/issues/92) |
 
 ### [M5 · Polish (v0.2.0)](https://github.com/jarradbanks/jvid/milestone/6)
