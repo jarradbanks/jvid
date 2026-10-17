@@ -13,7 +13,7 @@ use jvid_core::model::{AssetId, MediaAsset, Project};
 use jvid_core::time::FLICKS_PER_SECOND;
 use jvid_jobs::Pool;
 use jvid_media::thumbnails::Cache;
-use suite_ui::panel::{Panel, PanelResponse};
+use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
 use suite_ui::widgets::{Button, Dropdown, TextInput};
@@ -32,8 +32,10 @@ pub struct MediaBin {
     /// Index into [`SORTS`].
     pub sort: usize,
     pub selected: Option<AssetId>,
-    /// The asset being renamed and the text typed so far.
+    /// The asset being renamed and its name stem typed so far; the extension stays.
     pub renaming: Option<(AssetId, String)>,
+    /// The asset whose hover remove button holds keyboard focus, so it stays shown.
+    remove_focus: Option<AssetId>,
     /// An in-use asset waiting on the remove warning.
     pub confirm_remove: Option<AssetId>,
     thumbs: Thumbs,
@@ -68,12 +70,25 @@ pub fn duration_label(asset: &MediaAsset) -> Option<String> {
         return None;
     }
     let s = flicks / FLICKS_PER_SECOND;
+    // Sound effects are often under a second; flooring them read as 0:00.
+    if s == 0 {
+        let tenths = (flicks * 10 / FLICKS_PER_SECOND).max(1);
+        return Some(format!("0:00.{tenths}"));
+    }
     let (h, m, s) = (s / 3600, s / 60 % 60, s % 60);
     Some(if h > 0 {
         format!("{h}:{m:02}:{s:02}")
     } else {
         format!("{m}:{s:02}")
     })
+}
+
+/// `name` split before its extension: `("clip", ".mkv")`. Dotfiles have no extension.
+fn split_ext(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(i) if i > 0 => name.split_at(i),
+        _ => (name, ""),
+    }
 }
 
 fn is_audio(asset: &MediaAsset) -> bool {
@@ -94,8 +109,7 @@ impl MediaBin {
         let mut out = BinResponse::default();
         // The new tab shows next frame; the click already repaints.
         let mut tab = self.tab;
-        let PanelResponse { action, .. } = Panel::tabbed(&TABS, &mut tab)
-            .actions(&[(icon::PLUS, "Import media")])
+        Panel::tabbed(&TABS, &mut tab)
             .focused(focused)
             .show(ui, |ui| match self.tab {
                 0 => self.media(ui, project, importing, &mut out),
@@ -103,7 +117,6 @@ impl MediaBin {
                 _ => placeholder(ui, "Text and titles arrive in a later version"),
             });
         self.tab = tab;
-        out.import |= action == Some(0);
         if let Some(id) = self.confirm_remove {
             out.command = out.command.or(self.remove_warning(ui, project, id));
         }
@@ -111,7 +124,14 @@ impl MediaBin {
     }
 
     fn media(&mut self, ui: &mut Ui, project: &Project, importing: bool, out: &mut BinResponse) {
-        let rect = ui.max_rect();
+        let mut rect = ui.max_rect();
+        // Import stays pinned below the list, shown even when the bin is empty.
+        let bar = Rect::from_min_max(pos2(rect.left(), rect.bottom() - size::CONTROL), rect.max);
+        rect.max.y = bar.top() - space::S8;
+        let import = Button::secondary("Import media")
+            .with_icon(icon::PLUS)
+            .width(bar.width());
+        out.import |= ui.put(bar, import).clicked();
         ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
             ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
             let row = egui::Layout::left_to_right(egui::Align::Min);
@@ -138,7 +158,7 @@ impl MediaBin {
             if assets.is_empty() {
                 let msg = match (importing, project.assets().is_empty()) {
                     (true, _) => "Importing…",
-                    (false, true) => "Drop media here or click + to import",
+                    (false, true) => "Drop media here or click Import media",
                     (false, false) => "No media matches the search",
                 };
                 ui.label(egui::RichText::new(msg).color(color::INK_3));
@@ -208,6 +228,21 @@ impl MediaBin {
                 color::INK,
             );
         }
+        let show_remove = self.shows_remove(ui, &r, a);
+        if show_remove {
+            let btn = Rect::from_min_size(
+                pos2(
+                    thumb.right() - size::CONTROL - space::S4,
+                    thumb.top() + space::S4,
+                ),
+                vec2(size::CONTROL, size::CONTROL),
+            );
+            p.rect_filled(
+                btn,
+                CornerRadius::same(radius::CONTROL),
+                color::GROUND.gamma_multiply(0.8),
+            );
+        }
         let selected = self.selected == Some(a.id);
         if selected {
             p.rect_stroke(
@@ -226,6 +261,13 @@ impl MediaBin {
         }
         let name = Rect::from_x_y_ranges(r.rect.x_range(), thumb.bottom()..=r.rect.bottom());
         self.name(ui, name, a, color::INK_2);
+        if show_remove {
+            let btn = pos2(
+                thumb.right() - size::CONTROL - space::S4,
+                thumb.top() + space::S4,
+            );
+            self.remove_button(ui, btn, a, project, out);
+        }
         self.interact(r, a, project, out);
     }
 
@@ -250,10 +292,22 @@ impl MediaBin {
         } else {
             color::CLIP_VIOLET
         };
-        let badge =
-            Rect::from_center_size(pos2(r.rect.left() + 4.0, r.rect.center().y), vec2(8.0, 8.0));
+        // Inset like the search field's text, so the dot clears the panel edge.
+        let badge = Rect::from_min_size(
+            pos2(r.rect.left() + space::S8, r.rect.center().y - 4.0),
+            vec2(8.0, 8.0),
+        );
         p.rect_filled(badge, CornerRadius::same(2), kind);
-        let mut right = r.rect.right() - space::S4;
+        let thumb = Rect::from_min_size(
+            pos2(badge.right() + space::S8, r.rect.top() + 2.0),
+            vec2((ROW - 4.0) * 16.0 / 9.0, ROW - 4.0),
+        );
+        self.thumbs.paint(ui, thumb, a);
+        let show_remove = self.shows_remove(ui, &r, a);
+        let mut right = r.rect.right() - space::S8;
+        if show_remove {
+            right = r.rect.right() - size::CONTROL - space::S4;
+        }
         if let Some(d) = duration_label(a) {
             let g = p.layout_no_wrap(d, theme::body(), color::INK_3);
             right -= g.size().x;
@@ -264,9 +318,48 @@ impl MediaBin {
             );
             right -= space::S8;
         }
-        let name = Rect::from_x_y_ranges(r.rect.left() + space::S16..=right, r.rect.y_range());
+        let name = Rect::from_x_y_ranges(thumb.right() + space::S8..=right, r.rect.y_range());
         self.name(ui, name, a, color::INK);
+        if show_remove {
+            let btn = pos2(r.rect.right() - size::CONTROL, r.rect.top());
+            self.remove_button(ui, btn, a, project, out);
+        }
         self.interact(r, a, project, out);
+    }
+
+    /// Hovering or focusing a tile or row, or its remove button, shows the button.
+    fn shows_remove(&self, ui: &Ui, r: &egui::Response, a: &MediaAsset) -> bool {
+        let renaming = self.renaming.as_ref().is_some_and(|(id, _)| *id == a.id);
+        !renaming
+            && (ui.rect_contains_pointer(r.rect)
+                || r.has_focus()
+                || self.remove_focus == Some(a.id))
+    }
+
+    fn remove_button(
+        &mut self,
+        ui: &mut Ui,
+        min: egui::Pos2,
+        a: &MediaAsset,
+        project: &Project,
+        out: &mut BinResponse,
+    ) {
+        let rect = Rect::from_min_size(min, vec2(size::CONTROL, size::CONTROL));
+        // A stable id keeps keyboard focus on the button across frames.
+        let b = ui
+            .scope_builder(
+                UiBuilder::new().max_rect(rect).id_salt(("remove", a.id)),
+                |ui| ui.add(Button::icon(icon::X, "Remove from project")),
+            )
+            .inner;
+        if b.has_focus() {
+            self.remove_focus = Some(a.id);
+        } else if self.remove_focus == Some(a.id) {
+            self.remove_focus = None;
+        }
+        if b.clicked() {
+            out.command = self.remove(project, a.id);
+        }
     }
 
     /// The asset's name, or the rename field while it is being renamed.
@@ -274,9 +367,23 @@ impl MediaBin {
         if let Some((id, text)) = &mut self.renaming
             && *id == a.id
         {
-            let field = Rect::from_center_size(rect.center(), vec2(rect.width(), size::CONTROL));
-            let r = ui.put(field, TextInput::new(text).width(rect.width()));
+            let name = a.display_name();
+            let ext = split_ext(&name).1;
+            let g = ui
+                .painter()
+                .layout_no_wrap(ext.to_owned(), theme::body(), color::INK_3);
+            let w = (rect.width() - g.size().x - space::S4).max(0.0);
+            let field = Rect::from_min_size(
+                pos2(rect.left(), rect.center().y - size::CONTROL / 2.0),
+                vec2(w, size::CONTROL),
+            );
+            let r = ui.put(field, TextInput::new(text).width(w));
             r.request_focus();
+            let pos = pos2(
+                field.right() + space::S4,
+                rect.center().y - g.size().y / 2.0,
+            );
+            ui.painter().galley(pos, g, color::INK_3);
             return;
         }
         let mut job = egui::text::LayoutJob::single_section(
@@ -300,13 +407,15 @@ impl MediaBin {
             self.selected = Some(a.id);
             self.renaming = self.renaming.take().filter(|(id, _)| *id == a.id);
         }
+        let name = a.display_name();
+        let (stem, ext) = split_ext(&name);
         if r.double_clicked() {
-            self.renaming = Some((a.id, a.display_name()));
+            self.renaming = Some((a.id, stem.to_owned()));
         }
         r.context_menu(|ui| {
             self.selected = Some(a.id);
             if ui.button("Rename").clicked() {
-                self.renaming = Some((a.id, a.display_name()));
+                self.renaming = Some((a.id, stem.to_owned()));
             }
             if ui.button("Remove from project").clicked() {
                 out.command = self.remove(project, a.id);
@@ -321,7 +430,7 @@ impl MediaBin {
             if enter {
                 out.command = Some(Command::RenameAsset {
                     id: *id,
-                    name: Some(text.clone()),
+                    name: Some(format!("{text}{ext}")),
                 });
             }
             if enter || esc {
@@ -552,5 +661,29 @@ mod tests {
         assert_eq!(duration_label(&asset(1, "a", 47)).unwrap(), "0:47");
         assert_eq!(duration_label(&asset(1, "a", 7471)).unwrap(), "2:04:31");
         assert_eq!(duration_label(&asset(1, "a", 0)), None);
+        let mut short = asset(1, "a", 0);
+        short.probe.as_mut().unwrap().duration = Time(FLICKS_PER_SECOND * 4 / 10);
+        assert_eq!(duration_label(&short).unwrap(), "0:00.4");
+    }
+
+    #[test]
+    fn split_ext_keeps_the_extension() {
+        assert_eq!(split_ext("clip.v2.mkv"), ("clip.v2", ".mkv"));
+        assert_eq!(split_ext("noext"), ("noext", ""));
+        assert_eq!(split_ext(".hidden"), (".hidden", ""));
+    }
+
+    /// The reported 0:00 WAV: probe truncated durations and the label floored them.
+    #[test]
+    fn corpus_wav_has_a_duration_label() {
+        let Some(dir) = jvid_media::test_media::corpus() else {
+            return;
+        };
+        jvid_media::ffmpeg::init().unwrap();
+        let probe = jvid_media::probe::probe(&dir.join("tone-1khz.wav")).unwrap();
+        let mut a = asset(1, "tone-1khz.wav", 0);
+        a.probe = Some(probe);
+        assert!(is_audio(&a));
+        assert_eq!(duration_label(&a).unwrap(), "0:05");
     }
 }
