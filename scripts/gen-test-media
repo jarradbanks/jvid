@@ -48,6 +48,11 @@ ff -display_rotation:v:0 -90 -i "$tmp/rot.mp4" -c copy rotated-phone.mp4 2>/dev/
 
 # 1 kHz tone, peak -20 dBFS (amplitude 0.1).
 ff -f lavfi -i "aevalsrc=0.1*sin(2*PI*1000*t):s=48000:d=5" tone-1khz.wav
+ff -f lavfi -i "aevalsrc=0.1*sin(2*PI*1000*t):s=44100:d=5" tone-1khz-44k.wav
+# Surround for downmix: the tone in front-left and centre only, LFE and rears silent.
+s="0.1*sin(2*PI*1000*t)"
+ff -f lavfi -i "aevalsrc=$s|0|$s|0|0|0:c=5.1:s=48000:d=5" tone-5.1.wav
+ff -f lavfi -i "aevalsrc=$s|0|$s|0|0|0|0|0:c=7.1:s=48000:d=5" tone-7.1.wav
 ff -i tone-1khz.wav -c:a libmp3lame -b:a 192k tone-1khz.mp3
 ff -i tone-1khz.wav -c:a aac -b:a 192k tone-1khz.m4a
 
