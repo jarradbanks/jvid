@@ -119,6 +119,7 @@ pub struct Button<'a> {
     loading: bool,
     on: bool,
     state: State,
+    min_width: f32,
 }
 
 impl<'a> Button<'a> {
@@ -131,6 +132,7 @@ impl<'a> Button<'a> {
             loading: false,
             on: false,
             state: State::Live,
+            min_width: 0.0,
         }
     }
 
@@ -178,6 +180,12 @@ impl<'a> Button<'a> {
         self.state = state;
         self
     }
+
+    /// Widens the button to at least `width`, centring its content.
+    pub fn width(mut self, width: f32) -> Self {
+        self.min_width = width;
+        self
+    }
 }
 
 impl Widget for Button<'_> {
@@ -195,9 +203,10 @@ impl Widget for Button<'_> {
         } else {
             size::CONTROL
         };
+        let pad = (self.min_width - width).max(0.0) / 2.0;
         let (rect, response) = allocate(
             ui,
-            vec2(width.ceil(), size::CONTROL),
+            vec2((width + 2.0 * pad).ceil(), size::CONTROL),
             self.state,
             Sense::click(),
         );
@@ -271,7 +280,7 @@ impl Widget for Button<'_> {
             ui.painter().add(border(ui, rect, radius::CONTROL, stroke));
         }
         let mut x = if has_label {
-            rect.left() + space::S12
+            rect.left() + space::S12 + pad
         } else {
             rect.center().x - size::ICON / 2.0
         };

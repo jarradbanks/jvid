@@ -223,8 +223,9 @@ fn hairlines_are_one_physical_pixel() {
             assert_eq!(down[1].0 - down[0].0, s.px(size::HEADER) - 1, "{ctx}");
         }
         for row in s.rows() {
-            // Across the (empty) content of every panel in the row, gutters included.
-            let y = s.px(row[0].1.bottom() - 20.0);
+            // Across the (empty) content of every panel in the row, gutters included,
+            // above the media bin's pinned Import button.
+            let y = s.px(row[0].1.bottom() - 56.0);
             let across = s.runs((0..s.width).map(|x| (x, y)), false);
             assert_eq!(across.len(), 2 * row.len(), "{}: {across:?}", s.ctx);
             assert!(across.iter().all(|r| r.1 == 1), "{}: {across:?}", s.ctx);
@@ -373,6 +374,62 @@ fn bin_snapshots() {
     h.state_mut().bin.confirm_remove = Some(jvid_core::model::AssetId(2));
     h.run();
     results.add(h.try_snapshot("bin_remove_in_use"));
+}
+
+#[test]
+fn hover_remove_button_uses_the_remove_flow() {
+    use jvid_core::model::AssetId;
+    let mut results = egui_kittest::SnapshotResults::new();
+    let mut h = bin_harness();
+    h.hover_at(egui::pos2(90.0, 160.0));
+    h.run();
+    if gpu() {
+        results.add(h.try_snapshot("bin_grid_hover"));
+    }
+    h.state_mut().bin.list = true;
+    // clutch_round_3.mkv, used by two clips: warns.
+    h.hover_at(egui::pos2(100.0, 164.0));
+    h.run();
+    if gpu() {
+        results.add(h.try_snapshot("bin_list_hover"));
+    }
+    h.get_by_label("Remove from project").click();
+    h.run();
+    assert_eq!(h.state().bin.confirm_remove, Some(AssetId(2)));
+    h.get_by_label("Cancel").click();
+    // arena_01.mkv is unused: removed at once.
+    h.hover_at(egui::pos2(100.0, 132.0));
+    h.run();
+    h.get_by_label("Remove from project").click();
+    h.run();
+    assert!(h.state().history.project().asset(AssetId(1)).is_none());
+}
+
+#[test]
+fn rename_keeps_the_extension() {
+    use jvid_core::model::AssetId;
+    let mut h = bin_harness();
+    h.state_mut().bin.renaming = Some((AssetId(3), "pushed".into()));
+    h.run();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    let name = h
+        .state()
+        .history
+        .project()
+        .asset(AssetId(3))
+        .unwrap()
+        .display_name();
+    assert_eq!(name, "pushed.mp4");
+    h.state_mut().history.undo();
+    let name = h
+        .state()
+        .history
+        .project()
+        .asset(AssetId(3))
+        .unwrap()
+        .display_name();
+    assert_eq!(name, "push.mp4");
 }
 
 #[test]

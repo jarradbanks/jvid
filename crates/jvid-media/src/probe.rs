@@ -54,7 +54,8 @@ pub fn probe(path: &Path) -> Result<ProbeInfo, ProbeError> {
     // Stills report no duration.
     let micros = input.duration().max(0);
     Ok(ProbeInfo {
-        duration: Time(micros * (FLICKS_PER_SECOND / 1_000_000)),
+        // 705.6 flicks per microsecond: dividing first truncated every duration by 0.085%.
+        duration: Time((i128::from(micros) * i128::from(FLICKS_PER_SECOND) / 1_000_000) as i64),
         width: video.map(|v| v.width),
         height: video.map(|v| v.height),
         frame_rate: video.and_then(|v| {
@@ -224,6 +225,9 @@ mod tests {
         for (file, codec, size, fps, audio, secs) in cases {
             let info = probe(&dir.join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
             let got = info.duration.0 as f64 / FLICKS_PER_SECOND as f64;
+            if file == "tone-1khz.wav" {
+                assert_eq!(info.duration, Time(5 * FLICKS_PER_SECOND), "{file}");
+            }
             // Concat drifts a few ms per segment, so the 2 h file gets 0.1% slack.
             assert!(
                 (got - secs).abs() < f64::max(0.2, secs / 1000.0),
