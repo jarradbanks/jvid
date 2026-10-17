@@ -448,8 +448,8 @@ fn two_layer_1080p30_plays_in_real_time() {
         });
         let shown: Vec<_> = seen.iter().map(|s| s.index).filter(|i| *i < 300).collect();
         if draw {
-            eprintln!(
-                "10s of two-layer 1080p30 composited on this device: {} of 300 frames shown, \
+            println!(
+                "PERF composite two-layer 1080p30 (report only on lavapipe): {} of 300 frames shown, \
                  {:?} a frame compositing",
                 shown.len() + 1,
                 composite / shown.len().max(1) as u32
@@ -457,9 +457,60 @@ fn two_layer_1080p30_plays_in_real_time() {
         } else {
             // Frame 0 was shown parked.
             assert_eq!(shown, (1..300).collect::<Vec<_>>(), "decode dropped frames");
-            eprintln!("10s of two-layer 1080p30 decoded in real time: all 300 frames shown");
+            println!(
+                "PERF playback two-layer 1080p30: 30 fps, 300/300 frames shown (budget 30 fps)"
+            );
         }
     }
+}
+
+/// Release only. Perf (docs/perf.md): parked seeks to scattered frames of a 1080p30 H.264 file,
+/// timed from the seek until `tick` shows that frame. Under one frame (33ms) scrubs at 30fps.
+#[test]
+fn seek_latency_1080p30() {
+    if cfg!(debug_assertions) {
+        eprintln!("skipping seek latency in a debug build; run with --release");
+        return;
+    }
+    let Some(dir) = jvid_media::test_media::corpus() else {
+        return;
+    };
+    jvid_media::ffmpeg::init().unwrap();
+    let path = dir.join("frame-index-1080p30.mp4");
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, path.to_str().unwrap(), secs(10));
+    let p = h.project();
+    let mut pb = Playback::from_files(DEFAULT_BUDGET);
+    let mut out = Output::new(Box::new(Fake::default()), None);
+    // Picks up the sequence length, so seeks aren't clamped to zero.
+    pb.tick(p, &mut out);
+    let mut times = Vec::new();
+    // Frames far apart and out of order, so each is a real seek rather than decode-ahead.
+    for frame in [150, 17, 280, 93, 211, 4, 260, 120, 45, 199] {
+        pb.transport
+            .seek(p.settings().frame_rate.time_floor(frame), out.clock());
+        let start = Instant::now();
+        loop {
+            if pb
+                .tick(p, &mut out)
+                .is_some_and(|s| s.index == frame && s.layers.len() == 1)
+            {
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "frame {frame} never shown"
+            );
+            std::thread::sleep(Duration::from_micros(200));
+        }
+        times.push(start.elapsed());
+    }
+    times.sort();
+    println!(
+        "PERF seek latency 1080p30 H.264: median {:.1} ms, worst {:.1} ms (budget 33 ms)",
+        times[times.len() / 2].as_secs_f64() * 1e3,
+        times[times.len() - 1].as_secs_f64() * 1e3
+    );
 }
 
 /// wgpu's native futures are ready when polled, so a busy poll stands in for an executor.
