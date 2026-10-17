@@ -79,6 +79,7 @@ pub struct App {
     match_source: bool,
     settings_dialog: crate::project_settings::SettingsDialog,
     theme: suite_ui::themes::LiveTheme,
+    keymap_editor: crate::keymap_editor::KeymapEditor,
 }
 
 const TOAST_SECS: f64 = 6.0;
@@ -129,6 +130,7 @@ impl App {
             match_source: false,
             settings_dialog: Default::default(),
             theme: suite_ui::themes::LiveTheme::new("dark"),
+            keymap_editor: Default::default(),
         }
     }
 
@@ -210,6 +212,7 @@ impl App {
                 (FileAction::Save, "Save"),
                 (FileAction::SaveAs, "Save as…"),
                 (FileAction::Settings, "Project settings…"),
+                (FileAction::Shortcuts, "Keyboard shortcuts…"),
             ] {
                 if ui.button(label).clicked() {
                     action = Some(a);
@@ -268,6 +271,7 @@ impl App {
                 self.save(true);
             }
             FileAction::Settings => self.settings_dialog.open(self.history.project()),
+            FileAction::Shortcuts => self.keymap_editor.open(),
         }
     }
 
@@ -487,7 +491,12 @@ impl eframe::App for App {
             .dock
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
-        for id in self.keymap.pressed(&ctx, timeline) {
+        let pressed = if self.keymap_editor.is_open() {
+            Vec::new()
+        } else {
+            self.keymap.pressed(&ctx, timeline)
+        };
+        for id in pressed {
             self.run_action(id);
         }
 
@@ -585,6 +594,11 @@ impl eframe::App for App {
             if let Some(id) = relink {
                 self.relink_dialog(id);
             }
+            if self.keymap_editor.show(ui, &mut self.keymap)
+                && let Err(e) = keymap::save(&self.keymap)
+            {
+                tracing::warn!("keymap: can't save: {e}");
+            }
             if let Some(c) = self.settings_dialog.show(ui, self.history.project())
                 && let Err(e) = self.history.apply(c)
             {
@@ -618,6 +632,7 @@ enum FileAction {
     Save,
     SaveAs,
     Settings,
+    Shortcuts,
 }
 
 fn project_dialog() -> FileDialog {

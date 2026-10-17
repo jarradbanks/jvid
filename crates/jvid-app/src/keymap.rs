@@ -15,8 +15,6 @@ pub enum Context {
 
 pub struct Action {
     pub id: &'static str,
-    // shortcut: nothing shows names until the shortcut editor (#72); drop the allow then.
-    #[allow(dead_code)]
     pub name: &'static str,
     pub default: &'static str,
     pub context: Context,
@@ -107,7 +105,24 @@ pub fn parse(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(mods, key))
 }
 
+/// Inverse of [`parse`]: "Ctrl+Shift+K".
+pub fn format(sc: &KeyboardShortcut) -> String {
+    let m = sc.modifiers;
+    let mut s = String::new();
+    for (on, name) in [
+        (m.command || m.ctrl || m.mac_cmd, "Ctrl+"),
+        (m.alt, "Alt+"),
+        (m.shift, "Shift+"),
+    ] {
+        if on {
+            s.push_str(name);
+        }
+    }
+    s + sc.logical_key.name()
+}
+
 /// Action index → its shortcut, or `None` when unbound.
+#[derive(Clone, PartialEq, Debug)]
 pub struct Keymap {
     pub bindings: Vec<Option<KeyboardShortcut>>,
 }
@@ -138,6 +153,19 @@ impl Keymap {
             }
         }
         Ok(map)
+    }
+
+    /// The `keymap.toml` that gives this map: only bindings that differ from the defaults.
+    pub fn to_toml(&self) -> String {
+        let defaults = Self::default();
+        let overrides: BTreeMap<&str, String> = ACTIONS
+            .iter()
+            .zip(&self.bindings)
+            .zip(&defaults.bindings)
+            .filter(|((_, b), d)| b != d)
+            .map(|((a, b), _)| (a.id, b.as_ref().map(format).unwrap_or_default()))
+            .collect();
+        toml::to_string(&overrides).expect("string map serializes")
     }
 
     /// Pairs of action ids sharing a shortcut where both could fire.
@@ -216,6 +244,15 @@ pub fn load() -> Keymap {
     path().map_or_else(Keymap::default, |p| load_from(&p))
 }
 
+/// Writes `keymap.toml`.
+pub fn save(map: &Keymap) -> io::Result<()> {
+    let p = path().ok_or_else(|| io::Error::other("no config directory"))?;
+    if let Some(dir) = p.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(p, map.to_toml())
+}
+
 pub fn load_from(path: &Path) -> Keymap {
     let map = match fs::read_to_string(path) {
         Ok(s) => Keymap::from_toml(&s).unwrap_or_else(|e| {
@@ -279,6 +316,17 @@ mod tests {
         );
         assert_eq!(binding(&map, "mark_out"), None);
         assert_eq!(binding(&map, "play_stop"), parse("Space"));
+    }
+
+    #[test]
+    fn format_and_toml_round_trip() {
+        for a in ACTIONS {
+            let sc = parse(a.default).unwrap();
+            assert_eq!(parse(&format(&sc)), Some(sc), "{}", a.default);
+        }
+        assert_eq!(Keymap::default().to_toml(), "");
+        let map = Keymap::from_toml("mark_in = \"Ctrl+Shift+M\"\nmark_out = \"\"").unwrap();
+        assert_eq!(Keymap::from_toml(&map.to_toml()).unwrap(), map);
     }
 
     #[test]
