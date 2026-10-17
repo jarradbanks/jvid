@@ -53,6 +53,13 @@ fn tiny(t: Time) -> Frame {
     }
 }
 
+fn frame_of(px: &Pixels) -> &Frame {
+    match px {
+        Pixels::Frame(f) => f,
+        Pixels::Solid(_) => panic!("a solid"),
+    }
+}
+
 fn silent() -> OpenAudio {
     Box::new(|_| Box::new(|_, _| {}))
 }
@@ -148,7 +155,7 @@ fn video_stays_within_one_frame_of_audio_over_five_minutes() {
             continue;
         }
         let audio_secs = ((heard / gain) as f64 - 1.0) / SAMPLE_RATE as f64;
-        let shown = &last.as_ref().unwrap().layers[0].0;
+        let shown = frame_of(&last.as_ref().unwrap().layers[0].0);
         let video_secs = shown.pts.0 as f64 / FLICKS_PER_SECOND as f64;
         let drift = (video_secs - audio_secs).abs();
         worst = worst.max(drift);
@@ -190,7 +197,7 @@ fn play(pb: &mut Playback, p: &Project, until: u64, mut each: impl FnMut(&Shown)
         }
         let heard = fake.pull(800);
         if let Some(s) = shown {
-            let pts = s.layers.iter().map(|(f, _)| f.pts).collect();
+            let pts = s.layers.iter().map(|(f, _)| frame_of(f).pts).collect();
             seen.push(Seen {
                 index: s.index,
                 pts,
@@ -431,6 +438,7 @@ fn two_layer_1080p30_plays_in_real_time() {
             }
             assert_eq!(s.layers.len(), 2);
             for (f, _) in &s.layers {
+                let f = frame_of(f);
                 let index = jvid_media::test_media::frame_index(&f.planes[0], f.width as usize);
                 assert_eq!(index, s.index as u32);
             }
@@ -466,6 +474,58 @@ fn two_layer_1080p30_plays_in_real_time() {
 
 /// Release only. Perf (docs/perf.md): parked seeks to scattered frames of a 1080p30 H.264 file,
 /// timed from the seek until `tick` shows that frame. Under one frame (33ms) scrubs at 30fps.
+/// Solids draw without decoding: the asset's color, or the clip's `color` keyframes over it.
+#[test]
+fn solids_show_their_color_without_decoding() {
+    use jvid_core::keyframe::{Easing, Keyframe, Value};
+    let mut h = History::new(Project::default());
+    let Ok(Created::Asset(asset)) = h.apply(Command::AddSolid {
+        name: "Red".into(),
+        color: [1.0, 0.0, 0.0, 1.0],
+    }) else {
+        panic!("solid")
+    };
+    let name = "V1".into();
+    let Ok(Created::Track(track)) = h.apply(Command::AddTrack {
+        kind: TrackKind::Video,
+        name,
+    }) else {
+        panic!("track")
+    };
+    let clip = NewClip {
+        asset,
+        source_in: Time(0),
+        source_out: secs(1),
+        start: Time(0),
+        link: None,
+    };
+    let Ok(Created::Clip(id)) = h.apply(Command::AddClip { track, clip }) else {
+        panic!("clip")
+    };
+    let decode: DecodeFn = Arc::new(|_, _| panic!("solids never decode"));
+    let mut pb = Playback::new(decode, silent(), DEFAULT_BUDGET);
+    let mut out = Output::new(Box::new(Fake::default()), None);
+    let mut color = |pb: &mut Playback, p: &Project| {
+        pb.refresh();
+        match pb.tick(p, &mut out).expect("shown").layers[..] {
+            [(Pixels::Solid(c), _)] => c,
+            _ => panic!("one solid layer"),
+        }
+    };
+    assert_eq!(color(&mut pb, h.project()), [255, 0, 0, 255]);
+    h.apply(Command::AddKeyframe {
+        id,
+        param: "color".into(),
+        key: Keyframe {
+            time: Time(0),
+            value: Value::Color([0.0, 0.0, 1.0, 1.0]),
+            easing: Easing::Linear,
+        },
+    })
+    .unwrap();
+    assert_eq!(color(&mut pb, h.project()), [0, 0, 255, 255]);
+}
+
 #[test]
 fn seek_latency_1080p30() {
     if cfg!(debug_assertions) {

@@ -176,10 +176,22 @@ impl MediaBin {
         // Import stays pinned below the list, shown even when the bin is empty.
         let bar = Rect::from_min_max(pos2(rect.left(), rect.bottom() - size::CONTROL), rect.max);
         rect.max.y = bar.top() - space::S8;
+        let solid_w = 88.0;
+        let (bar, solid_bar) = bar.split_left_right_at_x(bar.right() - solid_w - space::S4);
         let import = Button::secondary("Import media")
             .with_icon(icon::PLUS)
             .width(bar.width());
         out.import |= ui.put(bar, import).clicked();
+        let solid = Button::secondary("New solid").width(solid_w);
+        if ui
+            .put(solid_bar.with_min_x(solid_bar.right() - solid_w), solid)
+            .clicked()
+        {
+            out.command = Some(Command::AddSolid {
+                name: "Solid".into(),
+                color: [0.0, 0.0, 0.0, 1.0],
+            });
+        }
         ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
             ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
             let row = egui::Layout::left_to_right(egui::Align::Min);
@@ -730,6 +742,7 @@ mod tests {
             name: None,
             in_point: None,
             out_point: None,
+            solid: None,
         }
     }
 

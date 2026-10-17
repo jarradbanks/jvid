@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 use jvid_core::history::Command;
 use jvid_core::model::{AssetId, Project};
 
-/// Asset paths with no file behind them. Keyed by path, so undoing a relink shows it offline again.
+/// Asset paths with no file behind them; solids have none to miss. Keyed by path, so undoing a
+/// relink shows it offline again.
 pub fn missing(project: &Project) -> HashSet<PathBuf> {
-    let gone = project.assets().iter().filter(|a| !a.path.is_file());
+    let files = project.assets().iter().filter(|a| a.solid.is_none());
+    let gone = files.filter(|a| !a.path.is_file());
     gone.map(|a| a.path.clone()).collect()
 }
 

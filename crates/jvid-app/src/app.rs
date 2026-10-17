@@ -18,7 +18,7 @@ use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
 use crate::preview::{Preview, SOURCE_ACTIONS};
-use crate::timeline::Timeline;
+use crate::timeline::{Edit, Timeline};
 use crate::welcome::{self, Recent, Welcome};
 use crate::{project_file, relink};
 
@@ -750,6 +750,15 @@ impl TabViewer for Viewer<'_> {
             });
             return;
         }
+        if *tab == Tab::Inspector {
+            let solid = self.bin.selected.and_then(|id| self.project.asset(id));
+            panel.show(ui, |ui| {
+                if let Some((c, g)) = solid.and_then(|a| solid_inspector(ui, a)) {
+                    (self.command, self.gesture) = (Some(c), g);
+                }
+            });
+            return;
+        }
         // shortcut: panels are empty shells; their content lands in later issues.
         panel.show(ui, |_| {});
     }
@@ -761,6 +770,27 @@ impl TabViewer for Viewer<'_> {
     fn scroll_bars(&self, _tab: &Tab) -> [bool; 2] {
         [false, false]
     }
+}
+
+/// Undo gesture for picker edits to a solid's color, xored with its asset id.
+const SOLID_GESTURE: jvid_core::history::GestureKey = 0x736f_6c69_6400; // "solid"
+
+/// The color picker for a solid asset selected in the bin; the edit once the color changes.
+// shortcut: edits the asset's color; per-clip `color` keyframes wait on clip selection and the
+// keyframe UI in later issues.
+fn solid_inspector(ui: &mut Ui, a: &jvid_core::model::MediaAsset) -> Option<Edit> {
+    let mut rgba = jvid_render::solid::rgba8(a.solid?);
+    let changed = ui
+        .horizontal(|ui| {
+            ui.label("Color");
+            ui.color_edit_button_srgba_unmultiplied(&mut rgba).changed()
+        })
+        .inner;
+    let color = rgba.map(|v| v as f64 / 255.0);
+    changed.then_some((
+        Command::SetSolidColor { id: a.id, color },
+        Some(SOLID_GESTURE ^ a.id.0),
+    ))
 }
 
 /// A Light Blue outline over the window while files are dragged over it.

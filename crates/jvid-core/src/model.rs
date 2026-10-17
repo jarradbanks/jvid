@@ -128,6 +128,10 @@ pub struct MediaAsset {
     pub in_point: Option<Time>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out_point: Option<Time>,
+    /// A generated solid of this straight RGBA (0..=1) instead of a file; `path` is empty.
+    /// Clips override it with a `color` keyframe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solid: Option<[f64; 4]>,
 }
 
 impl MediaAsset {
@@ -887,6 +891,7 @@ impl Project {
             name: None,
             in_point: None,
             out_point: None,
+            solid: None,
         });
         id
     }
