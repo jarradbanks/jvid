@@ -437,7 +437,8 @@ fn is_first_stream(s: &Option<u32>) -> bool {
 ///
 /// Keyframe names: `position`, `anchor` (`Vec2`), `scale` (`Scalar` for linked, `Vec2` for
 /// separate X/Y), `rotation`, `opacity`, `crop_left`, `crop_top`, `crop_right`, `crop_bottom`,
-/// and for audio clips `volume` and `pan`.
+/// the color adjustments by field name (`exposure`, `contrast`, ...), and for audio clips
+/// `volume` and `pan`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Transform {
@@ -458,6 +459,14 @@ pub struct Transform {
     pub volume: f64,
     /// Audio clip balance, -1.0 (left) to 1.0 (right); centre leaves both sides at unity.
     pub pan: f64,
+    /// Color adjustments, applied in linear light before blending; all 0 leaves pixels untouched.
+    /// Stops, -4..=4.
+    pub exposure: f64,
+    /// -1..=1 each: contrast about mid grey, saturation, blue..orange and green..magenta.
+    pub contrast: f64,
+    pub saturation: f64,
+    pub temperature: f64,
+    pub tint: f64,
 }
 
 /// A layer blend mode, as in the W3C compositing spec; the index is the compositor's shader code.
@@ -500,6 +509,11 @@ impl Default for Transform {
             blend: Blend::Normal,
             volume: 1.0,
             pan: 0.0,
+            exposure: 0.0,
+            contrast: 0.0,
+            saturation: 0.0,
+            temperature: 0.0,
+            tint: 0.0,
         }
     }
 }
@@ -507,6 +521,17 @@ impl Default for Transform {
 impl Transform {
     fn is_default(&self) -> bool {
         *self == Self::default()
+    }
+
+    /// Exposure, contrast, saturation, temperature and tint, the compositor's grade uniform.
+    pub fn grade(&self) -> [f64; 5] {
+        [
+            self.exposure,
+            self.contrast,
+            self.saturation,
+            self.temperature,
+            self.tint,
+        ]
     }
 }
 
@@ -559,6 +584,17 @@ impl Clip {
         x.opacity = x.opacity.clamp(0.0, 1.0);
         scalar("volume", &mut x.volume);
         scalar("pan", &mut x.pan);
+        scalar("exposure", &mut x.exposure);
+        x.exposure = x.exposure.clamp(-4.0, 4.0);
+        for (name, v) in [
+            ("contrast", &mut x.contrast),
+            ("saturation", &mut x.saturation),
+            ("temperature", &mut x.temperature),
+            ("tint", &mut x.tint),
+        ] {
+            scalar(name, v);
+            *v = v.clamp(-1.0, 1.0);
+        }
         x
     }
 
@@ -1864,11 +1900,17 @@ mod tests {
         );
         k("crop_top", vec![key(100, Value::Scalar(4.0))]);
         k("opacity", vec![key(100, Value::Scalar(2.0))]);
+        k(
+            "exposure",
+            vec![key(100, Value::Scalar(0.0)), key(120, Value::Scalar(2.0))],
+        );
+        k("tint", vec![key(100, Value::Scalar(-3.0))]);
         let x = c.transform_at(Time(10));
         assert_eq!(x.scale, [2.0, 2.0]);
         assert_eq!(x.anchor, [5.0, -10.0]);
         assert_eq!(x.crop, [0.0, 4.0, 0.0, 0.0]);
         assert_eq!((x.position, x.rotation, x.opacity), ([5.0, 6.0], 30.0, 1.0));
+        assert_eq!(x.grade(), [1.0, 0.0, 0.0, 0.0, -1.0], "keyed and clamped");
         c.keyframes
             .insert("scale".into(), vec![key(0, Value::Vec2([0.5, 2.0]))]);
         assert_eq!(c.transform_at(Time(10)).scale, [0.5, 2.0]);

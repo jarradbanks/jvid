@@ -1,4 +1,4 @@
-//! The Inspector: transform, opacity, crop and color of the selected clips, with keyframes.
+//! The Inspector: transform, opacity, crop, color adjustments and solid color of the selected clips, with keyframes.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -43,7 +43,7 @@ const fn prop(name: &'static str, label: &'static str, fields: &'static [&'stati
 const XY: &[&str] = &["X", "Y"];
 const ONE: &[&str] = &[""];
 
-const SECTIONS: [(&str, &[Prop]); 4] = [
+const SECTIONS: [(&str, &[Prop]); 5] = [
     (
         "Transform",
         &[
@@ -91,6 +91,21 @@ const SECTIONS: [(&str, &[Prop]); 4] = [
             },
         ],
     ),
+    (
+        "Color",
+        &[
+            Prop {
+                speed: 0.02,
+                decimals: 2,
+                range: (-4.0, 4.0),
+                ..prop("exposure", "Exposure", ONE)
+            },
+            grade("contrast", "Contrast"),
+            grade("saturation", "Saturation"),
+            grade("temperature", "Temperature"),
+            grade("tint", "Tint"),
+        ],
+    ),
     // Audio clips only.
     (
         "Audio",
@@ -113,6 +128,16 @@ const SECTIONS: [(&str, &[Prop]); 4] = [
     ),
 ];
 
+/// A -100..100% color adjustment.
+const fn grade(name: &'static str, label: &'static str) -> Prop {
+    Prop {
+        display: 100.0,
+        decimals: 0,
+        range: (-1.0, 1.0),
+        ..prop(name, label, ONE)
+    }
+}
+
 /// Undo gesture for drags in the inspector, xored with the property, field and drag count.
 const GESTURE: GestureKey = 0x696e_7370_0000; // "insp"
 
@@ -133,6 +158,11 @@ fn get(x: &Transform, name: &str) -> Value {
         "scale" => Value::Scalar(x.scale[0]),
         "rotation" => Value::Scalar(x.rotation),
         "opacity" => Value::Scalar(x.opacity),
+        "exposure" => Value::Scalar(x.exposure),
+        "contrast" => Value::Scalar(x.contrast),
+        "saturation" => Value::Scalar(x.saturation),
+        "temperature" => Value::Scalar(x.temperature),
+        "tint" => Value::Scalar(x.tint),
         "crop_left" => crop(0),
         "crop_top" => crop(1),
         "crop_right" => crop(2),
@@ -153,6 +183,11 @@ fn set(x: &mut Transform, name: &str, v: Value) {
         ("scale", Value::Scalar(v)) => x.scale = [v; 2],
         ("rotation", Value::Scalar(v)) => x.rotation = v,
         ("opacity", Value::Scalar(v)) => x.opacity = v.clamp(0.0, 1.0),
+        ("exposure", Value::Scalar(v)) => x.exposure = v.clamp(-4.0, 4.0),
+        ("contrast", Value::Scalar(v)) => x.contrast = v.clamp(-1.0, 1.0),
+        ("saturation", Value::Scalar(v)) => x.saturation = v.clamp(-1.0, 1.0),
+        ("temperature", Value::Scalar(v)) => x.temperature = v.clamp(-1.0, 1.0),
+        ("tint", Value::Scalar(v)) => x.tint = v.clamp(-1.0, 1.0),
         ("crop_left", Value::Scalar(v)) => x.crop[0] = v,
         ("crop_top", Value::Scalar(v)) => x.crop[1] = v,
         ("crop_right", Value::Scalar(v)) => x.crop[2] = v,

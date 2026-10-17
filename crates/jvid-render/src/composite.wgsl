@@ -10,6 +10,10 @@ struct Params {
     corners: array<vec4<f32>, 4>,
     // x: opacity 0..1, y: blend mode (jvid_core::model::Blend's index).
     opacity: vec4<f32>,
+    // Color adjustments (jvid_core::model::Transform::grade): exposure, contrast, saturation,
+    // temperature in grade.xyzw, tint in grade2.x; grade2.y is 1 when any is non-neutral.
+    grade: vec4<f32>,
+    grade2: vec4<f32>,
 }
 
 @group(0) @binding(0) var image: texture_2d<f32>;
@@ -22,10 +26,33 @@ fn vs_layer(@builtin(vertex_index) i: u32) -> Out {
     return Out(vec4<f32>(c.xy, 0.0, 1.0), c.zw);
 }
 
+fn to_linear(c: vec3<f32>) -> vec3<f32> {
+    return select(pow((c + 0.055) / 1.055, vec3<f32>(2.4)), c / 12.92, c <= vec3<f32>(0.04045));
+}
+
+fn to_srgb(c: vec3<f32>) -> vec3<f32> {
+    return select(1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3<f32>(0.0031308));
+}
+
+// The layer's color adjustments on a straight-alpha sample, in linear light. Skipped when neutral
+// so untouched clips stay bit-identical.
+fn graded(c: vec4<f32>) -> vec4<f32> {
+    if params.grade2.y == 0.0 {
+        return c;
+    }
+    let g = params.grade;
+    var l = to_linear(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0))) * exp2(g.x);
+    l *= vec3<f32>(1.0 + 0.3 * g.w, 1.0 - 0.3 * params.grade2.x, 1.0 - 0.3 * g.w);
+    let luma = dot(l, vec3<f32>(0.2126, 0.7152, 0.0722));
+    l = max(mix(vec3<f32>(luma), l, 1.0 + g.z), vec3<f32>(0.0));
+    l = 0.18 * pow(l / 0.18, vec3<f32>(1.0 + g.y));
+    return vec4<f32>(to_srgb(clamp(l, vec3<f32>(0.0), vec3<f32>(1.0))), c.a);
+}
+
 // Straight-alpha source in, premultiplied out for premultiplied "over" blending.
 @fragment
 fn fs_layer(in: Out) -> @location(0) vec4<f32> {
-    let c = textureSample(image, image_smp, in.uv);
+    let c = graded(textureSample(image, image_smp, in.uv));
     let a = c.a * params.opacity.x;
     return vec4<f32>(c.rgb * a, a);
 }
@@ -49,7 +76,7 @@ fn mix_mode(mode: u32, b: vec3<f32>, s: vec3<f32>) -> vec3<f32> {
 // W3C separable blending then source-over, written over the copied backdrop (no fixed blend).
 @fragment
 fn fs_blend(in: Out) -> @location(0) vec4<f32> {
-    let c = textureSample(image, image_smp, in.uv);
+    let c = graded(textureSample(image, image_smp, in.uv));
     let a = c.a * params.opacity.x;
     let d = textureLoad(backdrop, vec2<i32>(in.pos.xy), 0);
     let b = select(vec3<f32>(0.0), d.rgb / d.a, d.a > 0.0);
