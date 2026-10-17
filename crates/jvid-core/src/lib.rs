@@ -6,6 +6,7 @@
 pub mod eval;
 pub mod file;
 pub mod history;
+pub mod keyframe;
 pub mod model;
 pub mod settings;
 pub mod time;

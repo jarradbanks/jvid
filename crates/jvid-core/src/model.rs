@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::keyframe::Keyframe;
 use crate::time::{Rate, Time};
 
 macro_rules! id {
@@ -115,11 +116,20 @@ pub struct Clip {
     /// Clips sharing a link group move and select together.
     pub link: Option<LinkId>,
     pub params: BTreeMap<String, f64>,
+    /// Animated params by name, sorted by time; see [`crate::keyframe`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub keyframes: BTreeMap<String, Vec<Keyframe>>,
 }
 
 impl Clip {
     pub fn duration(&self) -> Time {
         self.source_out - self.source_in
+    }
+
+    /// The animated value of `param` at timeline time `t`.
+    pub fn value_at(&self, param: &str, t: Time) -> Option<crate::keyframe::Value> {
+        let keys = self.keyframes.get(param)?;
+        crate::keyframe::value_at(keys, self.source_in + (t - self.start))
     }
 
     /// Exclusive end on the timeline.
@@ -147,6 +157,8 @@ pub enum ModelError {
     EmptyClip,
     UnknownMarker(MarkerId),
     UnknownAsset(AssetId),
+    /// No keyframe on the clip's param at that source time.
+    UnknownKeyframe(ClipId, Time),
 }
 
 impl std::fmt::Display for ModelError {
@@ -158,6 +170,7 @@ impl std::fmt::Display for ModelError {
             Self::EmptyClip => f.write_str("clip source out must be after source in"),
             Self::UnknownMarker(id) => write!(f, "unknown marker {}", id.0),
             Self::UnknownAsset(id) => write!(f, "unknown asset {}", id.0),
+            Self::UnknownKeyframe(id, t) => write!(f, "no keyframe at {} on clip {}", t.0, id.0),
         }
     }
 }
@@ -264,6 +277,7 @@ impl Sequence {
                 start: new.start,
                 link: new.link,
                 params: BTreeMap::new(),
+                keyframes: BTreeMap::new(),
             },
         );
         Ok(id)
@@ -290,6 +304,7 @@ impl Sequence {
             asset: &mut c.asset,
             link: &mut c.link,
             params: &mut c.params,
+            keyframes: &mut c.keyframes,
         }))
     }
 
@@ -416,6 +431,7 @@ pub(crate) struct ClipProps<'a> {
     pub asset: &'a mut AssetId,
     pub link: &'a mut Option<LinkId>,
     pub params: &'a mut BTreeMap<String, f64>,
+    pub keyframes: &'a mut BTreeMap<String, Vec<Keyframe>>,
 }
 
 fn insert_sorted(clips: &mut Vec<Clip>, c: Clip) {
