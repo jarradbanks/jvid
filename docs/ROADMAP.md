@@ -83,12 +83,12 @@ flowchart LR
 | Issue | Title | Status | Size | Area | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | [#1](https://github.com/jarradbanks/jvid/issues/1) | Set up the cargo workspace, licenses and README | done | S | infra | — |
-| [#2](https://github.com/jarradbanks/jvid/issues/2) | CI: fmt, clippy and tests on Windows, macOS and Linux |  | S | infra | [#1](https://github.com/jarradbanks/jvid/issues/1) |
+| [#2](https://github.com/jarradbanks/jvid/issues/2) | CI: fmt, clippy and tests on Windows, macOS and Linux | in progress | S | infra | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#3](https://github.com/jarradbanks/jvid/issues/3) | Logging, tracing and crash logs |  | S | infra | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#96](https://github.com/jarradbanks/jvid/issues/96) | Roadmap shows live status | done | S | infra | — |
 | [#4](https://github.com/jarradbanks/jvid/issues/4) | FFmpeg linking and developer setup on all platforms |  | M | infra, media | [#2](https://github.com/jarradbanks/jvid/issues/2) |
 | [#5](https://github.com/jarradbanks/jvid/issues/5) | Generated test media corpus |  | S | infra, media | [#4](https://github.com/jarradbanks/jvid/issues/4) |
-| [#6](https://github.com/jarradbanks/jvid/issues/6) | Rational time and timecode |  | S | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
+| [#6](https://github.com/jarradbanks/jvid/issues/6) | Rational time and timecode | done | S | core | [#1](https://github.com/jarradbanks/jvid/issues/1) |
 | [#7](https://github.com/jarradbanks/jvid/issues/7) | Project data model |  | M | core | [#6](https://github.com/jarradbanks/jvid/issues/6) |
 | [#8](https://github.com/jarradbanks/jvid/issues/8) | Command system and undo/redo |  | M | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
 | [#9](https://github.com/jarradbanks/jvid/issues/9) | Project file format (.jvid JSON) |  | S | core | [#7](https://github.com/jarradbanks/jvid/issues/7) |
