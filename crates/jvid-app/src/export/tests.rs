@@ -142,6 +142,43 @@ fn export_matches_range_with_audio_in_sync() {
     }
 }
 
+/// The dialog's In to Out range exports exactly the marked frames: In at 1 s, Out at 2.5 s.
+#[test]
+fn in_to_out_exports_the_marked_range() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let mut h = History::new(project(&dir));
+    let (in_point, out_point) = (Some(secs(1)), Some(half(5)));
+    h.apply(Command::SetInOut {
+        in_point,
+        out_point,
+    })
+    .unwrap();
+    let seq = h.project().sequence();
+    let range = dialog::span(dialog::Range::InOut, seq, &Default::default()).unwrap();
+    assert_eq!(range, (secs(1), half(5)));
+    let path = out("in-out.mp4");
+    let req = Request {
+        path: path.clone(),
+        range,
+        preset: preset("YouTube 1080p"),
+        loudness: None,
+    };
+    let info = run_now(h.project(), &req, false).unwrap();
+    let frame = Rate::new(30, 1).time_floor(1);
+    assert!(
+        (info.duration - half(3)).0.abs() <= frame.0,
+        "{:?}",
+        info.duration
+    );
+    let mut v = VideoDecoder::open(&path).unwrap();
+    let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
+    let (first, last) = (v.frame_at(Time(0)).unwrap(), v.frame_at(secs(10)).unwrap());
+    assert_eq!((index(&first), index(&last)), (30, 74));
+    std::fs::remove_file(&path).unwrap();
+}
+
 #[test]
 fn cancelled_export_leaves_no_file() {
     let (Some(dir), Some(_)) = (corpus(), device()) else {
