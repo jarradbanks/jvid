@@ -24,6 +24,7 @@ use jvid_core::model::{
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::decode::{DecoderPool, Frame};
+use jvid_media::proxy::Proxies;
 use jvid_render::composite::{self, Compositor};
 use jvid_render::preview::{Preview, Yuv};
 use jvid_render::{solid, text};
@@ -338,12 +339,21 @@ impl Playback {
 
     /// Decodes project media from files.
     pub fn from_files(budget: usize) -> Self {
+        Self::from_proxies(budget, Arc::new(Proxies::new(PathBuf::new())))
+    }
+
+    /// Decodes project media from files, or from their proxies while `proxies` is on.
+    pub fn from_proxies(budget: usize, proxies: Arc<Proxies>) -> Self {
         let pool = Arc::new(DecoderPool::default());
+        let quick_proxies = proxies.clone();
         // Its own pool, so the stand-in thread always finds its file open: opening a long MP4
         // reads an index of every frame, which alone can blow the seek budget.
         let quick = DecoderPool::default();
         let mut pb = Self::new(
-            Arc::new(move |p, t| pool.frame_at(p, t).map_err(|e| e.to_string())),
+            Arc::new(move |p, t| {
+                pool.frame_at(&proxies.resolve(p), t)
+                    .map_err(|e| e.to_string())
+            }),
             Box::new(|p, nth| {
                 let mut src = AudioSource::stream(p, nth);
                 Box::new(move |start, out| src.fill(start, out))
@@ -351,7 +361,9 @@ impl Playback {
             budget,
         );
         pb.quick = Some(Arc::new(move |p, t| {
-            quick.keyframe_at(p, t).map_err(|e| e.to_string())
+            quick
+                .keyframe_at(&quick_proxies.resolve(p), t)
+                .map_err(|e| e.to_string())
         }));
         pb
     }

@@ -16,6 +16,7 @@ use jvid_core::settings::PreviewQuality;
 use jvid_core::time::{Time, format_timecode};
 use jvid_jobs::Priority;
 use jvid_media::decode::{DecoderPool, Frame};
+use jvid_media::proxy::{self, Proxies};
 use jvid_render::preview::{self as render, Yuv};
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
@@ -151,6 +152,13 @@ pub struct Preview {
     program_seq: Option<Sequence>,
     /// For full-size renders outside the paint callback, such as frame export.
     render_state: Option<egui_wgpu::RenderState>,
+    /// Preview decodes these instead of the originals while on; export never does.
+    proxies: Arc<Proxies>,
+    proxy_jobs: jvid_jobs::Pool,
+    /// Sources a proxy was queued for this session.
+    proxied: HashSet<PathBuf>,
+    /// Project sources [`proxy::suggested`] says want a proxy.
+    suggested: usize,
 }
 
 impl Preview {
@@ -190,6 +198,30 @@ impl Preview {
             program_head: Time(0),
             program_seq: None,
             render_state: render_state.cloned(),
+            proxies: Arc::new(Proxies::new(PathBuf::new())),
+            proxy_jobs: jvid_jobs::Pool::new(1),
+            proxied: HashSet::new(),
+            suggested: 0,
+        }
+    }
+
+    /// Stores proxies in `proxies`' directory and switches timeline playback to decode through it.
+    pub fn set_proxies(&mut self, proxies: Arc<Proxies>) {
+        self.program = Playback::from_proxies(playback::DEFAULT_BUDGET, proxies.clone());
+        self.proxies = proxies;
+    }
+
+    /// Counts the sources that want a proxy and, while proxies are on, queues the missing ones.
+    fn proxy_sources(&mut self, project: &Project) {
+        self.suggested = 0;
+        for a in project.assets() {
+            let Some(info) = a.probe.as_ref().filter(|i| proxy::suggested(i)) else {
+                continue;
+            };
+            self.suggested += 1;
+            if self.proxies.enabled() && self.proxied.insert(a.path.clone()) {
+                self.proxies.submit(&self.proxy_jobs, a.path.clone(), info);
+            }
         }
     }
 
@@ -407,6 +439,7 @@ impl Preview {
             self.show(ui, trim, offline, None, None);
             return None;
         }
+        self.proxy_sources(project);
         let dragging = ui.input(|i| i.pointer.primary_down());
         let follow = self.sync_program(project, playhead, dragging);
         if self.program.transport.speed() != 0 {
@@ -508,7 +541,7 @@ impl Preview {
             let (tx, ctx, p) = (self.tx.clone(), ui.ctx().clone(), path.to_path_buf());
             self.pool.submit(
                 &self.jobs,
-                path.to_path_buf(),
+                self.proxies.resolve(path),
                 t,
                 Priority::Interactive,
                 move |r| {
@@ -693,6 +726,22 @@ impl Preview {
             .changed()
         {
             self.generation += 1;
+        }
+        let mut on = self.proxies.enabled();
+        let hint = match self.suggested {
+            0 => "Preview from low-res proxies; export always uses the originals".to_string(),
+            n => format!("{n} 4K or HEVC source(s): proxies suggested for smooth scrubbing"),
+        };
+        if ui
+            .add(Checkbox::new(&mut on, "Proxies"))
+            .on_hover_text(hint)
+            .changed()
+        {
+            self.proxies.set_enabled(on);
+            // Frames decoded from the other files are stale now.
+            self.program.cache = playback::FrameCache::new(playback::DEFAULT_BUDGET);
+            self.program.refresh();
+            self.requested = None;
         }
         let glyph = egui::RichText::new(icon::GRID).font(theme::icon_font());
         ui.menu_button(glyph, |ui| {

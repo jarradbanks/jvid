@@ -5,6 +5,7 @@ pub mod decode;
 pub mod encode;
 pub mod ffmpeg;
 pub mod probe;
+pub mod proxy;
 pub mod stills;
 #[cfg(feature = "test-support")]
 pub mod test_media;

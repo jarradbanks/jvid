@@ -12,6 +12,7 @@ use jvid_core::history::Command;
 use jvid_core::model::{AssetId, MediaAsset, Project};
 use jvid_core::time::FLICKS_PER_SECOND;
 use jvid_jobs::Pool;
+use jvid_media::proxy::Proxies;
 use jvid_media::thumbnails::Cache;
 use jvid_media::waveforms;
 use suite_ui::panel::Panel;
@@ -31,6 +32,7 @@ pub struct Caches {
     /// Shares the thumbnails' directory, so one eviction keeps both under the cap.
     pub peaks: Arc<waveforms::Cache>,
     pub jobs: Pool,
+    pub proxies: Arc<Proxies>,
 }
 
 impl Caches {
@@ -41,13 +43,16 @@ impl Caches {
             .or_else(|| {
                 directories::ProjectDirs::from("", "", "jvid").map(|d| d.cache_dir().to_owned())
             })
-            .unwrap_or_else(std::env::temp_dir)
-            .join("thumbnails");
+            .unwrap_or_else(std::env::temp_dir);
+        // shortcut: proxies aren't under the cache cap; evict them too if disk use complains.
+        let proxies = Arc::new(Proxies::new(dir.join("proxies")));
+        let dir = dir.join("thumbnails");
         let cap = s.cache_max_mb << 20;
         Arc::new(Self {
             thumbs: Arc::new(Cache::new(dir.clone(), cap)),
             peaks: Arc::new(waveforms::Cache::new(dir, cap)),
             jobs: Pool::new(2),
+            proxies,
         })
     }
 }
@@ -916,6 +921,7 @@ mod tests {
                 thumbs: cache,
                 peaks: Arc::new(waveforms::Cache::new(d.join("cache"), u64::MAX)),
                 jobs: Pool::new(1),
+                proxies: Arc::new(Proxies::new(d.join("proxies"))),
             })),
             ..Default::default()
         };
