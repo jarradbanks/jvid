@@ -9,9 +9,6 @@
 //! [`Gpu::draw`]. Drive play, pause, J/K/L, seek and loop through [`Playback::transport`]; after
 //! an edit that changes the picture under a parked playhead, call [`Playback::refresh`].
 
-// The timeline panel (#33) is the first caller.
-#![allow(dead_code)]
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,7 +18,7 @@ use std::time::{Duration, Instant};
 use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Mixer, Output, SAMPLE_RATE, Strip};
 use jvid_core::eval::{audio_in, video_at};
-use jvid_core::model::{AssetId, ClipId, Project, TrackKind, Transform};
+use jvid_core::model::{AssetId, ClipId, Project, ProjectSettings, TrackKind, Transform};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::decode::{DecoderPool, Frame};
@@ -59,6 +56,7 @@ type Done = (Key, Duration, Result<Frame, String>);
 /// What to draw for one timeline frame.
 pub struct Shown {
     /// Timeline frame index.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub index: i64,
     /// Top layer first, with its evaluated transform.
     pub layers: Vec<(Pixels, Transform)>,
@@ -92,6 +90,7 @@ impl FrameCache {
         }
     }
 
+    #[cfg(test)]
     pub fn bytes(&self) -> usize {
         self.bytes
     }
@@ -323,6 +322,14 @@ impl Playback {
         self.show(project, clock)
     }
 
+    /// [`Playback::tick`] while stopped and before an audio output is open: decodes and returns
+    /// the frame at the parked playhead.
+    pub fn park(&mut self, project: &Project) -> Option<Shown> {
+        self.sync(project);
+        self.decode_ahead(project, 0);
+        self.show(project, 0)
+    }
+
     /// Follows edits to the sequence length, in/out marks and frame rate, and drops what was
     /// decoded or opened from an asset's old path after a relink.
     fn sync(&mut self, project: &Project) {
@@ -535,14 +542,13 @@ impl Gpu {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        project: &Project,
+        s: &ProjectSettings,
         scale: u32,
         shown: &Shown,
     ) -> &wgpu::Texture {
         while self.layers.len() < shown.layers.len() {
             self.layers.push(Preview::new(device, composite::FORMAT));
         }
-        let s = project.settings();
         // shortcut: a solid texture per layer per frame; cache by color if playback profiles hot.
         let mut solids = Vec::new();
         for ((px, _), preview) in shown.layers.iter().zip(&mut self.layers) {

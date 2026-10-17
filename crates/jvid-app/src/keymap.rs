@@ -44,6 +44,7 @@ pub const ACTIONS: &[Action] = &[
     a("shuttle_left", "Shuttle left", "J"),
     a("shuttle_stop", "Shuttle stop", "K"),
     a("shuttle_right", "Shuttle right", "L"),
+    a("loop_playback", "Loop playback", "Ctrl+Alt+L"),
     a("mark_in", "Mark In", "I"),
     a("mark_out", "Mark Out", "O"),
     a("clear_in", "Clear In", "Alt+I"),

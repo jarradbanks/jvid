@@ -444,7 +444,7 @@ fn two_layer_1080p30_plays_in_real_time() {
             }
             if draw {
                 let start = Instant::now();
-                gpu.draw(&device, &queue, p, 2, s);
+                gpu.draw(&device, &queue, p.settings(), 2, s);
                 device
                     .poll(wgpu::PollType::Wait {
                         submission_index: None,
@@ -735,4 +735,62 @@ fn high_fps_clip_conforms_to_the_project_rate_without_drift() {
         let want = Time(k * 144 / 60 * FLICKS_PER_SECOND / 144);
         assert_eq!(got, want, "project frame {k}");
     }
+}
+
+/// Adds a solid of `color` and a new video track holding it from `start` for 1s.
+pub(crate) fn add_solid(h: &mut History, color: [f64; 4], start: Time) -> ClipId {
+    let Ok(Created::Asset(asset)) = h.apply(Command::AddSolid {
+        name: "Solid".into(),
+        color,
+    }) else {
+        panic!("solid")
+    };
+    let kind = TrackKind::Video;
+    let Ok(Created::Track(track)) = h.apply(Command::AddTrack {
+        kind,
+        name: "V".into(),
+    }) else {
+        panic!("track")
+    };
+    let clip = NewClip {
+        asset,
+        source_in: Time(0),
+        source_out: secs(1),
+        start,
+        link: None,
+    };
+    let Ok(Created::Clip(c)) = h.apply(Command::AddClip { track, clip }) else {
+        panic!("clip")
+    };
+    c
+}
+
+#[test]
+fn two_layers_composite_with_opacity() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut h = History::new(Project::default());
+    add_solid(&mut h, [1.0, 0.0, 0.0, 1.0], Time(0));
+    let top = add_solid(&mut h, [0.0, 0.0, 1.0, 1.0], Time(0));
+    let half = Transform {
+        opacity: 0.5,
+        ..Transform::default()
+    };
+    h.apply(Command::SetClipProps(vec![(top, half, Default::default())]))
+        .unwrap();
+    let decode: DecodeFn = Arc::new(|_, _| panic!("solids never decode"));
+    let mut pb = Playback::new(decode, silent(), DEFAULT_BUDGET);
+    let shown = pb.park(h.project()).expect("shown");
+    assert_eq!(shown.layers.len(), 2);
+    let tex = Gpu::new(&device)
+        .draw(&device, &queue, h.project().settings(), 4, &shown)
+        .clone();
+    let px = composite::read_back(&device, &queue, &tex);
+    let [r, g, b, a] = px[..4] else { panic!() };
+    assert!(
+        r.abs_diff(128) <= 2 && g == 0 && b.abs_diff(127) <= 2 && a == 255,
+        "{:?}",
+        &px[..4]
+    );
 }

@@ -11,7 +11,7 @@ use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, wgpu};
 use egui::{Align, Align2, Layout, Pos2, Rect, Stroke, Ui, UiBuilder, pos2, vec2};
 use jvid_audio::{CpalBackend, Output};
 use jvid_core::history::Command;
-use jvid_core::model::{AssetId, Project, ProjectSettings};
+use jvid_core::model::{AssetId, Project, ProjectSettings, Sequence};
 use jvid_core::settings::PreviewQuality;
 use jvid_core::time::{Time, format_timecode};
 use jvid_jobs::Priority;
@@ -21,6 +21,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, Checkbox, Dropdown};
 
+use crate::playback::{self, Playback, Shown};
 use crate::transport::{AudioSource, Transport};
 
 const ZOOMS: [(&str, Option<f32>); 4] = [
@@ -100,6 +101,15 @@ pub const SOURCE_ACTIONS: &[&str] = &[
     "go_to_out",
 ];
 
+/// Keymap actions the Program tab and timeline hand to timeline playback.
+pub const PROGRAM_ACTIONS: &[&str] = &[
+    "play_stop",
+    "shuttle_left",
+    "shuttle_stop",
+    "shuttle_right",
+    "loop_playback",
+];
+
 /// The clip open in the Source tab.
 struct Player {
     asset: AssetId,
@@ -129,6 +139,15 @@ pub struct Preview {
     player: Option<Player>,
     /// Opened on first play, so tests and idle sessions never touch the audio device.
     output: Option<Output>,
+    /// The timeline's playback, shown in the Program tab.
+    program: Playback,
+    /// The composited frame last returned, and a count bumped with it.
+    program_shown: Option<Arc<Shown>>,
+    program_gen: u64,
+    /// The timeline playhead last frame; a change is a seek.
+    program_head: Time,
+    /// The sequence last frame; a change redraws a parked playhead.
+    program_seq: Option<Sequence>,
     /// For full-size renders outside the paint callback, such as frame export.
     render_state: Option<egui_wgpu::RenderState>,
 }
@@ -141,6 +160,9 @@ impl Preview {
             let gpu = Gpu {
                 preview,
                 shown: None,
+                program: playback::Gpu::new(&rs.device),
+                program_view: render::Preview::new(&rs.device, rs.target_format),
+                program_drawn: None,
             };
             rs.renderer.write().callback_resources.insert(gpu);
         }
@@ -161,6 +183,11 @@ impl Preview {
             overlays: Overlays::default(),
             player: None,
             output: None,
+            program: Playback::from_files(playback::DEFAULT_BUDGET),
+            program_shown: None,
+            program_gen: 0,
+            program_head: Time(0),
+            program_seq: None,
             render_state: render_state.cloned(),
         }
     }
@@ -292,8 +319,11 @@ impl Preview {
         {
             self.player = None;
         }
+        if self.program.transport.speed() != 0 {
+            self.program_action("shuttle_stop");
+        }
         let Some(p) = &mut self.player else {
-            self.show_frame(ui, None, false);
+            self.show(ui, None, false, None, None);
             ui.painter().text(
                 ui.max_rect().center(),
                 Align2::CENTER_CENTER,
@@ -327,14 +357,98 @@ impl Preview {
         };
         let path = p.path.clone();
         let offline = missing.contains(&path);
-        let action = self.show(ui, Some((&path, row.position)), offline, Some(&row))?;
+        let action = self.show(ui, Some((&path, row.position)), offline, Some(&row), None)?;
         self.source_action(action, project)
     }
 
-    /// The Program tab: `source` at a time.
-    // shortcut: the caller picks the frame until the timeline drives the Program tab.
-    pub fn show_frame(&mut self, ui: &mut Ui, source: Option<(&Path, Time)>, offline: bool) {
-        self.show(ui, source, offline, None);
+    /// Runs a `PROGRAM_ACTIONS` action on timeline playback.
+    pub fn program_action(&mut self, id: &str) {
+        if id == "loop_playback" {
+            self.program.looping = !self.program.looping;
+            return;
+        }
+        let out = self
+            .output
+            .get_or_insert_with(|| Output::new(Box::new(CpalBackend::default()), None));
+        out.flush();
+        let clock = out.clock();
+        let t = &mut self.program.transport;
+        match id {
+            "play_stop" => t.toggle(clock),
+            "shuttle_left" => t.shuttle(-1, clock),
+            "shuttle_right" => t.shuttle(1, clock),
+            _ => t.stop(clock),
+        }
+    }
+
+    /// The Program tab: the timeline composited at `playhead`, or `trim` (the source frame at a
+    /// dragged clip edge) instead. Returns where the playhead moved to while playing.
+    pub fn show_program(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        playhead: Time,
+        trim: Option<(&Path, Time)>,
+        offline: bool,
+    ) -> Option<Time> {
+        if let Some(p) = &mut self.player
+            && p.transport.speed() != 0
+        {
+            p.transport
+                .stop(self.output.as_ref().map_or(0, Output::clock));
+        }
+        // An empty sequence leaves the viewer empty, like a Source tab with nothing open.
+        if trim.is_some() || project.sequence().duration() == Time(0) {
+            self.show(ui, trim, offline, None, None);
+            return None;
+        }
+        let follow = self.sync_program(project, playhead);
+        if self.program.transport.speed() != 0 {
+            ui.ctx().request_repaint();
+        }
+        self.show(ui, None, false, None, Some(project.settings()));
+        follow
+    }
+
+    /// Seeks timeline playback to a moved `playhead` and runs it a frame; see `show_program`.
+    fn sync_program(&mut self, project: &Project, playhead: Time) -> Option<Time> {
+        let pb = &mut self.program;
+        let seq = project.sequence();
+        if self.program_seq.as_ref() != Some(seq) {
+            self.program_seq = Some(seq.clone());
+            pb.refresh();
+        }
+        if playhead != self.program_head {
+            let clock = self.output.as_mut().map_or(0, |o| {
+                o.flush();
+                o.clock()
+            });
+            // Before the first tick has set it, or the seek would clamp to 0.
+            pb.transport.duration = seq.duration();
+            pb.transport.seek(playhead, clock);
+            pb.refresh();
+        }
+        let playing = pb.transport.speed() != 0;
+        let shown = match &mut self.output {
+            Some(out) => {
+                out.poll();
+                pb.tick(project, out)
+            }
+            None => pb.park(project),
+        };
+        if let Some(s) = shown {
+            self.program_shown = Some(Arc::new(s));
+            self.program_gen += 1;
+        }
+        let clock = self.output.as_ref().map_or(0, Output::clock);
+        let t = &pb.transport;
+        // Playing (or just stopped at the end), the timeline follows; parked, it leads.
+        self.program_head = if playing {
+            t.rate.time_floor(t.frame(clock))
+        } else {
+            playhead
+        };
+        playing.then_some(self.program_head)
     }
 
     /// Where the project frame sits in the viewer `ui` draws into, at the current zoom.
@@ -353,13 +467,15 @@ impl Preview {
     }
 
     /// Draws `source` at a time, decoding it first if it changed; an `offline` source shows a
-    /// placeholder instead. Returns a transport button's action id when one was clicked.
+    /// placeholder instead. With `program`, draws the composited timeline frame instead.
+    /// Returns a transport button's action id when one was clicked.
     fn show(
         &mut self,
         ui: &mut Ui,
         source: Option<(&Path, Time)>,
         offline: bool,
         row: Option<&SourceRow>,
+        program: Option<&ProjectSettings>,
     ) -> Option<&'static str> {
         let path = source.map(|(p, _)| p);
         if self.source.as_deref() != path {
@@ -409,7 +525,9 @@ impl Preview {
                 }
             }
         }
-        self.source.as_ref()?;
+        if program.is_none() {
+            self.source.as_ref()?;
+        }
 
         let rect = ui.max_rect();
         let viewer = Rect::from_min_max(rect.min, rect.max - vec2(0.0, size::HEADER));
@@ -438,23 +556,47 @@ impl Preview {
                 color::INK_2,
             );
         }
-        if let Some(f) = &self.frame {
+        let drawn = match (program, &self.program_shown) {
+            (Some(s), Some(_)) => Some([s.width as f32, s.height as f32]),
+            (Some(_), None) => None,
+            (None, _) => self
+                .frame
+                .as_ref()
+                .map(|f| [f.width as f32, f.height as f32]),
+        };
+        if let Some(drawn) = drawn {
             let view = [viewer.left(), viewer.top(), viewer.width(), viewer.height()];
             // 100% is one frame pixel per screen pixel.
             let zoom = ZOOMS[self.zoom].1.map(|z| z / ui.pixels_per_point());
-            let image = render::place([f.width as f32, f.height as f32], view, zoom);
-            let paint = Paint {
-                frame: f.clone(),
-                generation: self.generation,
-                scale: match QUALITIES[self.quality].1 {
-                    PreviewQuality::Full => 1,
-                    PreviewQuality::Half => 2,
-                    PreviewQuality::Quarter => 4,
-                },
-                clip: render::to_clip(image, view),
+            let image = render::place(drawn, view, zoom);
+            let scale = match QUALITIES[self.quality].1 {
+                PreviewQuality::Full => 1,
+                PreviewQuality::Half => 2,
+                PreviewQuality::Quarter => 4,
             };
-            ui.painter()
-                .add(egui_wgpu::Callback::new_paint_callback(viewer, paint));
+            let clip = render::to_clip(image, view);
+            let callback = match (program, &self.program_shown, &self.frame) {
+                (Some(s), Some(shown), _) => egui_wgpu::Callback::new_paint_callback(
+                    viewer,
+                    ProgramPaint {
+                        shown: shown.clone(),
+                        settings: s.clone(),
+                        generation: (self.program_gen, scale),
+                        clip,
+                    },
+                ),
+                (_, _, Some(f)) => egui_wgpu::Callback::new_paint_callback(
+                    viewer,
+                    Paint {
+                        frame: f.clone(),
+                        generation: self.generation,
+                        scale,
+                        clip,
+                    },
+                ),
+                _ => unreachable!("drawn is set"),
+            };
+            ui.painter().add(callback);
             let image = Rect::from_min_size(pos2(image[0], image[1]), vec2(image[2], image[3]));
             let (rects, lines) = self.overlays.shapes(image);
             let painter = ui.painter().with_clip_rect(viewer);
@@ -597,6 +739,53 @@ struct Gpu {
     preview: render::Preview,
     /// The generation of the uploaded image.
     shown: Option<u64>,
+    program: playback::Gpu,
+    program_view: render::Preview,
+    /// The program generation and preview scale last composited.
+    program_drawn: Option<(u64, u32)>,
+}
+
+/// The Program tab's draw. Composites only when the frame or preview scale changed.
+struct ProgramPaint {
+    shown: Arc<Shown>,
+    settings: ProjectSettings,
+    generation: (u64, u32),
+    clip: [f32; 4],
+}
+
+impl CallbackTrait for ProgramPaint {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen: &egui_wgpu::ScreenDescriptor,
+        _encoder: &mut wgpu::CommandEncoder,
+        resources: &mut CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(gpu) = resources.get_mut::<Gpu>() {
+            if gpu.program_drawn != Some(self.generation) {
+                gpu.program_drawn = Some(self.generation);
+                let scale = self.generation.1;
+                let tex = gpu
+                    .program
+                    .draw(device, queue, &self.settings, scale, &self.shown);
+                gpu.program_view.show_image(device, tex.clone());
+            }
+            gpu.program_view.set_dst(queue, self.clip);
+        }
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        pass: &mut wgpu::RenderPass<'static>,
+        resources: &CallbackResources,
+    ) {
+        if let Some(gpu) = resources.get::<Gpu>() {
+            gpu.program_view.paint(pass);
+        }
+    }
 }
 
 /// One frame's draw. Uploads (and converts) only when the frame or preview scale changed.
@@ -649,13 +838,16 @@ impl CallbackTrait for Paint {
 
 #[cfg(test)]
 impl Preview {
-    pub fn has_frame(&self) -> bool {
-        self.frame.is_some()
+    /// The Program tab has a composited frame with at least one layer.
+    pub fn has_program_frame(&self) -> bool {
+        self.program_shown
+            .as_ref()
+            .is_some_and(|s| !s.layers.is_empty())
     }
 
-    /// The decode for the current source has come back, with a frame or an error.
+    /// The decode for the current source or program frame has come back, with a frame or an error.
     pub fn settled(&self) -> bool {
-        self.frame.is_some() || self.error.is_some()
+        self.frame.is_some() || self.error.is_some() || self.program_shown.is_some()
     }
 }
 
@@ -693,5 +885,59 @@ mod tests {
             rects[3],
             Rect::from_center_size(tall.center(), vec2(900.0, 900.0))
         );
+    }
+}
+
+#[cfg(test)]
+mod program_tests {
+    use jvid_core::history::History;
+    use jvid_core::model::Transform;
+    use jvid_core::time::FLICKS_PER_SECOND;
+
+    use super::*;
+    use crate::playback::Pixels;
+    use crate::playback::tests::add_solid;
+
+    fn color(p: &Preview) -> Vec<[u8; 4]> {
+        let shown = p.program_shown.as_ref().expect("shown");
+        let solid = |px: &Pixels| match px {
+            Pixels::Solid(c) => *c,
+            Pixels::Frame(_) => panic!("a frame"),
+        };
+        shown.layers.iter().map(|(px, _)| solid(px)).collect()
+    }
+
+    #[test]
+    fn parked_seeks_and_edits_redraw_without_playing() {
+        let mut h = History::new(Project::default());
+        let red = add_solid(&mut h, [1.0, 0.0, 0.0, 1.0], Time(0));
+        add_solid(&mut h, [0.0, 0.0, 1.0, 1.0], Time(FLICKS_PER_SECOND));
+        let mut p = Preview::new(None);
+        assert_eq!(p.sync_program(h.project(), Time(0)), None);
+        assert_eq!(color(&p), [[255, 0, 0, 255]]);
+        // Moving the playhead while paused shows the frame there and doesn't play.
+        assert_eq!(
+            p.sync_program(h.project(), Time(FLICKS_PER_SECOND * 3 / 2)),
+            None
+        );
+        assert_eq!(color(&p), [[0, 0, 255, 255]]);
+        assert_eq!(p.program.transport.speed(), 0);
+        // An edit under the parked playhead redraws it.
+        let shown = p.program_gen;
+        assert_eq!(p.sync_program(h.project(), Time(0)), None);
+        let half = Transform {
+            opacity: 0.5,
+            ..Transform::default()
+        };
+        h.apply(Command::SetClipProps(vec![(red, half, Default::default())]))
+            .unwrap();
+        let before = p.program_gen;
+        assert!(before > shown);
+        p.sync_program(h.project(), Time(0));
+        assert_eq!(p.program_gen, before + 1);
+        assert_eq!(p.program_shown.as_ref().unwrap().layers[0].1, half);
+        // Nothing changed: nothing new to composite.
+        p.sync_program(h.project(), Time(0));
+        assert_eq!(p.program_gen, before + 1);
     }
 }

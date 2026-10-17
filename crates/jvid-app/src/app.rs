@@ -20,7 +20,7 @@ use crate::export::Error as ExportError;
 use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
-use crate::preview::{Preview, SOURCE_ACTIONS};
+use crate::preview::{PROGRAM_ACTIONS, Preview, SOURCE_ACTIONS};
 use crate::timeline::{Timeline, menus};
 use crate::welcome::{self, Recent, Welcome};
 use crate::{project_file, relink};
@@ -492,6 +492,12 @@ impl App {
             .dock
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
+        let program_focused = preview_focused && self.preview_active == 1;
+        if (timeline_focused || program_focused) && PROGRAM_ACTIONS.contains(&id) {
+            self.preview_active = 1;
+            self.preview.program_action(id);
+            return;
+        }
         if (timeline_focused || menu) && self.timeline.action(id, self.history.project()) {
             return;
         }
@@ -881,19 +887,19 @@ impl TabViewer for Viewer<'_> {
             return;
         }
         if *tab == Tab::Preview {
-            // The newest video (or still) asset, until the timeline and source viewer exist.
-            let source = self.project.assets().iter().rev().find_map(|a| {
-                a.probe.as_ref()?.width?;
-                Some(a.path.as_path())
-            });
             // While a clip edge is dragged, the frame at the trim point.
             let trim = self.timeline.trim_frame(self.project);
             let trim = trim.and_then(|(a, t)| Some((self.project.asset(a)?.path.as_path(), t)));
-            let source = trim.or(source.map(|p| (p, jvid_core::time::Time(0))));
-            let offline = source.is_some_and(|(p, _)| self.missing.contains(p));
+            let offline = trim.is_some_and(|(p, _)| self.missing.contains(p));
             panel.show(ui, |ui| {
                 let frame = self.preview.project_rect(ui, self.project.settings());
-                self.preview.show_frame(ui, source, offline);
+                let head = self.timeline.playhead();
+                let shown = self
+                    .preview
+                    .show_program(ui, self.project, head, trim, offline);
+                if let Some(t) = shown {
+                    self.timeline.seek(t);
+                }
                 let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
                 if let Some((c, g)) = crate::handles::show(ui, self.project, selected, t, frame) {
                     (self.command, self.gesture) = (Some(c), g);
