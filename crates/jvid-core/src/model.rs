@@ -263,6 +263,36 @@ pub struct Transform {
     pub crop: [f64; 4],
     /// 0..=1.
     pub opacity: f64,
+    /// How the clip mixes with the layers below; not animatable.
+    pub blend: Blend,
+}
+
+/// A layer blend mode, as in the W3C compositing spec; the index is the compositor's shader code.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Blend {
+    #[default]
+    Normal,
+    Multiply,
+    Screen,
+    Overlay,
+    Add,
+    Darken,
+    Lighten,
+    Difference,
+}
+
+impl Blend {
+    pub const ALL: [Blend; 8] = [
+        Blend::Normal,
+        Blend::Multiply,
+        Blend::Screen,
+        Blend::Overlay,
+        Blend::Add,
+        Blend::Darken,
+        Blend::Lighten,
+        Blend::Difference,
+    ];
 }
 
 impl Default for Transform {
@@ -274,6 +304,7 @@ impl Default for Transform {
             anchor: [0.0; 2],
             crop: [0.0; 4],
             opacity: 1.0,
+            blend: Blend::Normal,
         }
     }
 }

@@ -1,7 +1,7 @@
 //! The compositor: a layer stack from [`jvid_core::eval::video_at`] blended over the project
 //! background into one project-sized frame, at preview scale for the viewer or full size for export.
 
-use jvid_core::model::Transform;
+use jvid_core::model::{Blend, Transform};
 use wgpu::util::DeviceExt;
 
 use crate::preview::{place, scaled};
@@ -42,8 +42,11 @@ pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// GPU state for compositing; the output texture is kept while the frame size stays the same.
 pub struct Compositor {
     pipeline: wgpu::RenderPipeline,
+    /// For non-normal blend modes: replaces pixels with a mix computed against `backdrop`.
+    blend: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     target: Option<wgpu::Texture>,
+    backdrop: Option<wgpu::Texture>,
 }
 
 impl Compositor {
@@ -52,42 +55,49 @@ impl Compositor {
             label: Some("composite"),
             source: wgpu::ShaderSource::Wgsl(include_str!("composite.wgsl").into()),
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("composite"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_layer"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_layer"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: FORMAT,
-                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = |entry, blend| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("composite"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_layer"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some(entry),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: FORMAT,
+                        blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         Self {
-            pipeline,
+            pipeline: pipeline(
+                "fs_layer",
+                Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            ),
+            blend: pipeline("fs_blend", None),
             sampler: device.create_sampler(&wgpu::SamplerDescriptor {
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             }),
             target: None,
+            backdrop: None,
         }
     }
 
@@ -109,24 +119,35 @@ impl Compositor {
             .as_ref()
             .is_none_or(|t| (t.width(), t.height()) != (w, h))
         {
-            self.target = Some(device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("composite"),
-                size: wgpu::Extent3d {
-                    width: w,
-                    height: h,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            }));
+            let tex = |usage| {
+                device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("composite"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: FORMAT,
+                    usage,
+                    view_formats: &[],
+                })
+            };
+            self.target = Some(tex(wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC));
+            self.backdrop = Some(tex(
+                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST
+            ));
         }
         let target = self.target.as_ref().unwrap();
+        let backdrop = self
+            .backdrop
+            .as_ref()
+            .unwrap()
+            .create_view(&Default::default());
         let frame = [size.0 as f32, size.1 as f32];
         // shortcut: a uniform and bind group per layer per frame; pool them if playback (#32) profiles hot.
         let binds: Vec<_> = layers
@@ -136,7 +157,8 @@ impl Compositor {
             .filter_map(|(tex, t)| {
                 let corners = quad([tex.width() as f32, tex.height() as f32], frame, t)?;
                 let mut p = corners.concat();
-                p.extend([t.opacity.clamp(0.0, 1.0) as f32, 0.0, 0.0, 0.0]);
+                let mode = Blend::ALL.iter().position(|b| *b == t.blend).unwrap_or(0);
+                p.extend([t.opacity.clamp(0.0, 1.0) as f32, mode as f32, 0.0, 0.0]);
                 let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("layer"),
                     contents: &p.iter().flat_map(|f| f.to_ne_bytes()).collect::<Vec<_>>(),
@@ -146,31 +168,51 @@ impl Compositor {
                     format: Some(tex.format().remove_srgb_suffix()),
                     ..Default::default()
                 });
-                Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                let blended = t.blend != Blend::Normal;
+                let pipeline = if blended { &self.blend } else { &self.pipeline };
+                let mut entries = vec![
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform.as_entire_binding(),
+                    },
+                ];
+                if blended {
+                    entries.push(wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&backdrop),
+                    });
+                }
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: None,
-                    layout: &self.pipeline.get_bind_group_layout(0),
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&self.sampler),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: uniform.as_entire_binding(),
-                        },
-                    ],
-                }))
+                    layout: &pipeline.get_bind_group_layout(0),
+                    entries: &entries,
+                });
+                Some((bind, blended))
             })
             .collect();
         let a = background[3] as f64 / 255.0;
         let c = |i: usize| background[i] as f64 / 255.0 * a;
         let mut encoder = device.create_command_encoder(&Default::default());
-        {
-            let view = target.create_view(&Default::default());
+        let view = target.create_view(&Default::default());
+        let clear = wgpu::LoadOp::Clear(wgpu::Color {
+            r: c(0),
+            g: c(1),
+            b: c(2),
+            a,
+        });
+        // A new pass after each backdrop copy; normal layers share one.
+        // shortcut: copies the whole frame per non-normal layer; copy just its bounds if it profiles hot.
+        let mut rest = &binds[..];
+        let (mut load, mut copied) = (clear, false);
+        loop {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("composite"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -178,22 +220,35 @@ impl Compositor {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: c(0),
-                            g: c(1),
-                            b: c(2),
-                            a,
-                        }),
+                        load,
                         store: wgpu::StoreOp::Store,
                     },
                 })],
                 ..Default::default()
             });
-            pass.set_pipeline(&self.pipeline);
-            for bind in &binds {
+            // After a copy, the leading blended layer has its backdrop; before, none may draw.
+            let lead = usize::from(copied);
+            let n = lead + rest[lead..].iter().take_while(|(_, b)| !b).count();
+            for (bind, blended) in &rest[..n] {
+                pass.set_pipeline(if *blended {
+                    &self.blend
+                } else {
+                    &self.pipeline
+                });
                 pass.set_bind_group(0, bind, &[]);
                 pass.draw(0..4, 0..1);
             }
+            drop(pass);
+            rest = &rest[n..];
+            if rest.is_empty() {
+                break;
+            }
+            encoder.copy_texture_to_texture(
+                target.as_image_copy(),
+                self.backdrop.as_ref().unwrap().as_image_copy(),
+                target.size(),
+            );
+            (load, copied) = (wgpu::LoadOp::Load, true);
         }
         queue.submit([encoder.finish()]);
         target

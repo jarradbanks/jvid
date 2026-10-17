@@ -336,3 +336,82 @@ fn quad_corners_follow_rotation_and_crop() {
     assert_eq!(crop([25.0, 0.0, 0.0, 0.0]).unwrap()[0][2], 0.25);
     assert!(crop([50.0, 0.0, 50.0, 0.0]).is_none());
 }
+
+#[test]
+fn blend_modes_match_reference_and_goldens() {
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping blend golden test: no software adapter on this platform");
+        return;
+    };
+    // Base: four stripes over the opaque background. Top: one colour, opaque above,
+    // half alpha below, so both the mode and its alpha mix show.
+    let stripes = [[0, 0, 0], [64, 128, 32], [192, 64, 224], [255, 255, 255]];
+    let base = image(&device, &queue, (64, 32), |x, _| {
+        let [r, g, b] = stripes[x as usize / 16];
+        [r, g, b, 255]
+    });
+    let top = image(&device, &queue, (64, 32), |_, y| {
+        [200, 100, 50, if y < 16 { 255 } else { 128 }]
+    });
+    let reference = |mode: Blend, b: f64, s: f64| match mode {
+        Blend::Normal => s,
+        Blend::Multiply => b * s,
+        Blend::Screen => b + s - b * s,
+        Blend::Overlay if b <= 0.5 => 2.0 * b * s,
+        Blend::Overlay => 1.0 - 2.0 * (1.0 - b) * (1.0 - s),
+        Blend::Add => (b + s).min(1.0),
+        Blend::Darken => b.min(s),
+        Blend::Lighten => b.max(s),
+        Blend::Difference => (b - s).abs(),
+    };
+    let mut comp = Compositor::new(&device);
+    for mode in Blend::ALL {
+        let t = Transform {
+            blend: mode,
+            ..Default::default()
+        };
+        let layers = [(&top, t), (&base, Transform::default())];
+        let tex = comp.render(&device, &queue, (64, 32), 1, [0, 0, 0, 255], &layers);
+        let rgba = read_back(&device, &queue, tex);
+        for (x, y) in [(8, 8), (24, 8), (40, 8), (56, 8), (24, 24), (40, 24)] {
+            let i = (y * 64 + x) as usize * 4;
+            let a = if y < 16 { 1.0 } else { 128.0 / 255.0 };
+            let under = stripes[x as usize / 16];
+            for (c, s) in [200.0, 100.0, 50.0].into_iter().enumerate() {
+                let b = under[c] as f64 / 255.0;
+                let want = a * reference(mode, b, s / 255.0) + (1.0 - a) * b;
+                let want = (want * 255.0).round() as i32;
+                assert!(
+                    (rgba[i + c] as i32 - want).abs() <= TOLERANCE,
+                    "{mode:?} at ({x}, {y}) channel {c}: {}, want {want}",
+                    rgba[i + c]
+                );
+            }
+        }
+        golden(&format!("blend-{mode:?}").to_lowercase(), 64, 32, &rgba);
+    }
+}
+
+#[test]
+fn blend_over_transparent_background_keeps_the_layer() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    // A blended bottom layer over nothing has no backdrop to mix with, so it shows as is.
+    let top = image(&device, &queue, (8, 8), |_, _| [200, 100, 50, 255]);
+    let t = Transform {
+        blend: Blend::Multiply,
+        ..Default::default()
+    };
+    let mut comp = Compositor::new(&device);
+    let tex = comp.render(&device, &queue, (8, 8), 1, [0; 4], &[(&top, t)]);
+    let rgba = read_back(&device, &queue, tex);
+    assert!(
+        rgba[..4]
+            .iter()
+            .zip([200, 100, 50, 255])
+            .all(|(&g, w)| near(g, w)),
+        "{:?}",
+        &rgba[..4]
+    );
+}

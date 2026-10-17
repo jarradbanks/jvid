@@ -5,11 +5,11 @@ use std::collections::{BTreeMap, HashSet};
 use egui::{Color32, Pos2, Sense, Shape, Stroke, Ui, vec2};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
-use jvid_core::model::{Clip, ClipId, MediaAsset, Project, TrackKind, Transform};
+use jvid_core::model::{Blend, Clip, ClipId, MediaAsset, Project, TrackKind, Transform};
 use jvid_core::time::Time;
 use suite_ui::theme::icon;
 use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, DragField, SectionHeader};
+use suite_ui::widgets::{Button, DragField, Dropdown, SectionHeader};
 
 use crate::timeline::Edit;
 
@@ -349,6 +349,11 @@ pub fn show(
                 edit = Some(e);
             }
         }
+        if title == "Opacity"
+            && let Some(e) = blend_row(ui, &clips)
+        {
+            edit = Some(e);
+        }
     }
     if section(ui, "Color", false).0 {
         // Only when every selected clip shows the same solid, so the picker edits them all.
@@ -366,6 +371,43 @@ pub fn show(
         ui.label(egui::RichText::new("Color adjustments arrive in M5").color(color::INK_3));
     }
     (edit, seek)
+}
+
+const BLENDS: [&str; 8] = [
+    "Normal",
+    "Multiply",
+    "Screen",
+    "Overlay",
+    "Add",
+    "Darken",
+    "Lighten",
+    "Difference",
+];
+
+/// Sets every clip's blend mode; one undo step.
+fn set_blend(clips: &[&Clip], blend: Blend) -> Command {
+    rewrite(clips, |_, x, _| x.blend = blend)
+}
+
+/// The blend mode dropdown, showing the first clip's mode when the selection is mixed.
+fn blend_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
+    let first = clips[0].transform.blend;
+    let mut i = Blend::ALL.iter().position(|b| *b == first).unwrap_or(0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = space::S4;
+        ui.allocate_ui_with_layout(
+            vec2(size::INSPECTOR_LABEL, size::CONTROL),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(size::INSPECTOR_LABEL);
+                ui.label(egui::RichText::new("Blend").color(color::INK_2))
+            },
+        );
+        ui.add(Dropdown::new(&mut i, &BLENDS).width(132.0))
+            .changed()
+            .then(|| (set_blend(clips, Blend::ALL[i]), None))
+    })
+    .inner
 }
 
 /// A section head button.
@@ -705,6 +747,17 @@ mod tests {
         apply(&mut clips[..1], |c| toggle_animate(c, "scale", Time(0)));
         apply(&mut clips, |c| toggle_key(c, "scale", Time(0)));
         assert!(clips.iter().all(|c| key_at(c, "scale", Time(0))));
+    }
+
+    #[test]
+    fn blend_sets_every_clip_and_keeps_the_rest() {
+        let mut clips = [clip(1, 0), clip(2, 0)];
+        clips[1].transform.opacity = 0.5;
+        apply(&mut clips, |c| set_blend(c, Blend::Screen));
+        assert!(clips.iter().all(|c| c.transform.blend == Blend::Screen));
+        assert_eq!(clips[1].transform.opacity, 0.5);
+        let names = Blend::ALL.map(|b| format!("{b:?}"));
+        assert_eq!(names, BLENDS, "labels follow Blend::ALL");
     }
 
     #[test]
