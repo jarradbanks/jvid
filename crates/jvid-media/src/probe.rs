@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(v.sample_aspect, Some(Rate::new(1, 1)));
         assert_eq!(v.display_aspect, Some(Rate::new(9, 16)));
         assert_eq!(
-            video(&probe(&dir.join("prores.mov")).unwrap())
+            video(&probe(&dir.join("9x16.mp4")).unwrap())
                 .color_range
                 .as_deref(),
             Some("tv")

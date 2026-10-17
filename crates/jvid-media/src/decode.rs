@@ -105,11 +105,16 @@ impl VideoDecoder {
                 Ok(()) => return Ok(Some(f)),
                 Err(Error::Eof) => return Ok(None),
                 Err(Error::Other { errno }) if errno == ffmpeg_next::util::error::EAGAIN => {}
+                // Like the ffmpeg CLI: drop a corrupt frame and keep going.
+                Err(Error::InvalidData) => tracing::warn!("skipping corrupt frame"),
                 Err(e) => return Err(e),
             }
             let stream = self.stream;
             match self.input.packets().find(|(s, _)| s.index() == stream) {
-                Some((_, packet)) => self.decoder.send_packet(&packet)?,
+                Some((_, packet)) => match self.decoder.send_packet(&packet) {
+                    Err(Error::InvalidData) => tracing::warn!("skipping corrupt packet"),
+                    r => r?,
+                },
                 None if !self.eof_sent => {
                     self.decoder.send_eof()?;
                     self.eof_sent = true;
@@ -218,28 +223,60 @@ fn upright(f: &Frame, rotation: u32) -> Frame {
     }
 }
 
+// shortcut: fixed caps of 2 idle decoders per asset and 8 assets (LRU), so a long timeline doesn't
+// hold every file open; size them from memory profiles once multicam/4K timelines exist.
+const IDLE_PER_ASSET: usize = 2;
+const IDLE_ASSETS: usize = 8;
+
+type Done = Box<dyn FnOnce(Result<Frame, Error>) + Send>;
+/// Job sequence number, handle, and every caller's `done`.
+type Request = (u64, Handle, Vec<Done>);
+
 /// Idle decoders kept per asset, so scrubbing one clip doesn't reopen the file every frame.
 #[derive(Default)]
 pub struct DecoderPool {
-    idle: Mutex<HashMap<PathBuf, Vec<VideoDecoder>>>,
+    /// Least recently used asset first.
+    idle: Mutex<Vec<(PathBuf, Vec<VideoDecoder>)>>,
+    /// Submitted requests by path and time.
+    live: Mutex<HashMap<String, Request>>,
+    seq: std::sync::atomic::AtomicU64,
 }
 
 impl DecoderPool {
     /// Decodes on the calling thread with an idle decoder for `path`, opening one if none is free.
     pub fn frame_at(&self, path: &Path, t: Time) -> Result<Frame, Error> {
-        let idle = self.idle.lock().unwrap().get_mut(path).and_then(Vec::pop);
+        let idle = self
+            .idle
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|(p, _)| p == path)
+            .and_then(|(_, v)| v.pop());
         let mut dec = match idle {
             Some(d) => d,
             None => VideoDecoder::open(path)?,
         };
         let frame = dec.frame_at(t);
-        let mut idle = self.idle.lock().unwrap();
-        idle.entry(path.to_owned()).or_default().push(dec);
+        // After a hard error the decoder may be half-advanced, so it isn't reused.
+        if frame.is_ok() {
+            let mut idle = self.idle.lock().unwrap();
+            let mut entry = match idle.iter().position(|(p, _)| p == path) {
+                Some(i) => idle.remove(i),
+                None => (path.to_owned(), Vec::new()),
+            };
+            if entry.1.len() < IDLE_PER_ASSET {
+                entry.1.push(dec);
+            }
+            idle.push(entry);
+            if idle.len() > IDLE_ASSETS {
+                idle.remove(0);
+            }
+        }
         frame
     }
 
     /// Decodes on `jobs` and hands the result to `done` there. A request matching a live one
-    /// (same path and time) is dropped along with its `done`; the returned handle is the live one's.
+    /// (same path and time) joins it: every caller's `done` gets the result, and all share one handle.
     pub fn submit(
         self: &Arc<Self>,
         jobs: &jvid_jobs::Pool,
@@ -248,13 +285,35 @@ impl DecoderPool {
         priority: Priority,
         done: impl FnOnce(Result<Frame, Error>) + Send + 'static,
     ) -> Handle {
-        let pool = self.clone();
         let key = format!("decode:{}:{}", path.display(), t.0);
-        jobs.submit(key, priority, move |ctx| {
-            if !ctx.is_cancelled() {
-                done(pool.frame_at(&path, t));
+        let mut live = self.live.lock().unwrap();
+        // A cancelled or finished (e.g. panicked) entry is stale; its waiters are dropped.
+        if let Some((_, handle, waiters)) = live.get_mut(&key)
+            && !handle.is_cancelled()
+            && !handle.is_finished()
+        {
+            waiters.push(Box::new(done));
+            return handle.clone();
+        }
+        let seq = self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let (pool, k) = (self.clone(), key.clone());
+        // Unique job key: this table, not the job pool, de-duplicates, so no `done` can be dropped.
+        let handle = jobs.submit(format!("{key}#{seq}"), priority, move |ctx| {
+            let result = (!ctx.is_cancelled()).then(|| pool.frame_at(&path, t));
+            let mut live = pool.live.lock().unwrap();
+            let waiters = match live.get(&k) {
+                Some((s, ..)) if *s == seq => live.remove(&k).unwrap().2,
+                _ => Vec::new(),
+            };
+            drop(live);
+            if let Some(r) = result {
+                for done in waiters {
+                    done(r.clone());
+                }
             }
-        })
+        });
+        live.insert(key, (seq, handle.clone(), vec![Box::new(done)]));
+        handle
     }
 }
 
@@ -297,13 +356,16 @@ mod tests {
         }
     }
 
-    /// Every frame's best-effort pts in flicks, decoded straight through by FFmpeg.
+    /// Every frame's best-effort pts in flicks, from `ffprobe -show_frames` (scripts/gen-test-media).
     fn reference_pts(path: &Path) -> Vec<Time> {
-        let mut dec = VideoDecoder::open(path).unwrap();
-        let mut out = Vec::new();
-        while let Some(f) = dec.decode_one().unwrap() {
-            out.push(dec.to_time(pts(&f)));
-        }
+        let dec = VideoDecoder::open(path).unwrap();
+        let mut name = path.as_os_str().to_owned();
+        name.push(".pts");
+        let mut out: Vec<Time> = std::fs::read_to_string(name)
+            .unwrap()
+            .split_whitespace()
+            .map(|ticks| dec.to_time(ticks.trim_matches(',').parse().unwrap()))
+            .collect();
         out.sort();
         out
     }
@@ -387,6 +449,93 @@ mod tests {
     }
 
     #[test]
+    fn rotated_clip_matches_ffmpeg_autorotate() {
+        let Some(dir) = corpus() else { return };
+        crate::ffmpeg::init().unwrap();
+        let f = VideoDecoder::open(&dir.join("rotated-phone.mp4"))
+            .unwrap()
+            .frame_at(Time(0))
+            .unwrap();
+        // The first frame as the ffmpeg CLI shows it, I420; luma comes first.
+        let want = std::fs::read(dir.join("rotated-phone.first.yuv")).unwrap();
+        let luma = &want[..1080 * 1920];
+        let diff: u64 = (luma.iter().zip(&f.planes[0]))
+            .map(|(a, b)| a.abs_diff(*b) as u64)
+            .sum();
+        assert!(diff / luma.len() as u64 <= 1, "mean luma diff {diff}");
+        // Mirror and other turns of testsrc2 differ far more; check the test can tell.
+        let wrong = upright(&upright(&f, 90), 90);
+        let wdiff: u64 = (luma.iter().zip(&wrong.planes[0]))
+            .map(|(a, b)| a.abs_diff(*b) as u64)
+            .sum();
+        assert!(wdiff / luma.len() as u64 > 10, "mean luma diff {wdiff}");
+    }
+
+    #[test]
+    fn duplicate_submits_all_get_done() {
+        let Some(dir) = corpus() else { return };
+        crate::ffmpeg::init().unwrap();
+        let pool = Arc::new(DecoderPool::default());
+        let jobs = jvid_jobs::Pool::new(1);
+        let (tx, rx) = std::sync::mpsc::channel();
+        for _ in 0..3 {
+            let tx = tx.clone();
+            pool.submit(
+                &jobs,
+                dir.join("no-audio.mp4"),
+                Time(FLICKS_PER_SECOND),
+                Priority::Interactive,
+                move |r| tx.send(r.unwrap().pts).unwrap(),
+            );
+        }
+        drop(tx);
+        assert_eq!(rx.iter().count(), 3);
+    }
+
+    #[test]
+    fn pool_caps_idle_decoders() {
+        let Some(dir) = corpus() else { return };
+        crate::ffmpeg::init().unwrap();
+        let pool = DecoderPool::default();
+        let files = [
+            "no-audio.mp4",
+            "9x16.mp4",
+            "144fps.mp4",
+            "23.976fps.mp4",
+            "59.94fps.mp4",
+        ];
+        for f in files.iter().cycle().take(IDLE_ASSETS + 2) {
+            pool.frame_at(&dir.join(f), Time(0)).unwrap();
+        }
+        // Concurrent requests on one asset open extra decoders; only IDLE_PER_ASSET go back.
+        std::thread::scope(|s| {
+            for _ in 0..3 {
+                s.spawn(|| pool.frame_at(&dir.join("no-audio.mp4"), Time(0)).unwrap());
+            }
+        });
+        let idle = pool.idle.lock().unwrap();
+        assert!(idle.len() <= IDLE_ASSETS);
+        assert!(idle.iter().all(|(_, v)| v.len() <= IDLE_PER_ASSET));
+    }
+
+    #[test]
+    fn corrupt_packets_are_skipped() {
+        let Some(dir) = corpus() else { return };
+        crate::ffmpeg::init().unwrap();
+        // Scribble over the middle of the file: mdat payload, so some packets decode as garbage.
+        let mut bytes = std::fs::read(dir.join("frame-index-1080p30.mp4")).unwrap();
+        let mid = bytes.len() / 2;
+        bytes[mid..mid + 20_000].fill(0xAB);
+        let path = std::env::temp_dir().join(format!("jvid-corrupt-{}.mp4", std::process::id()));
+        std::fs::write(&path, bytes).unwrap();
+        let mut dec = VideoDecoder::open(&path).unwrap();
+        for i in 0..10 {
+            dec.frame_at(Time(i * FLICKS_PER_SECOND)).unwrap();
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn rotated_clip_decodes_upright_off_thread() {
         let Some(dir) = corpus() else { return };
         crate::ffmpeg::init().unwrap();
@@ -413,8 +562,8 @@ mod tests {
             pool.idle
                 .lock()
                 .unwrap()
-                .values()
-                .map(Vec::len)
+                .iter()
+                .map(|(_, v)| v.len())
                 .sum::<usize>()
                 >= 1
         );
