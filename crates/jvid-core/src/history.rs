@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use crate::keyframe::{self, Keyframe};
 use crate::model::{
     AssetId, ClipId, LinkId, MarkerId, ModelError, NewClip, ProbeInfo, Project, ProjectSettings,
-    TrackId, TrackKind,
+    TrackId, TrackKind, TrackSettings,
 };
 use crate::time::Time;
 
@@ -21,16 +21,13 @@ pub enum Command {
         name: String,
     },
     RemoveTrack(TrackId),
-    /// Replaces the track's settings; clips are untouched.
-    SetTrack {
+    /// Replaces the track's settings; clips are untouched. Allowed while locked, so it
+    /// can unlock.
+    SetTrack(TrackSettings),
+    /// Moves a track to `index` among the tracks of its kind (0 = top).
+    MoveTrack {
         id: TrackId,
-        name: String,
-        hidden: bool,
-        locked: bool,
-        muted: bool,
-        solo: bool,
-        volume: f32,
-        pan: f32,
+        index: usize,
     },
     AddClip {
         track: TrackId,
@@ -129,8 +126,50 @@ pub enum Created {
 }
 
 impl Command {
+    /// The first locked track this edit would change. Track settings and order stay
+    /// editable; clips on a locked track, and the track itself, do not.
+    fn locked(&self, p: &Project) -> Option<TrackId> {
+        let s = p.sequence();
+        let track = |id: TrackId| s.track(id).filter(|t| t.locked).map(|t| t.id);
+        let clip = |id: ClipId| s.clip(id).and_then(|(t, _)| track(t));
+        match self {
+            Self::RemoveTrack(id) | Self::AddClip { track: id, .. } => track(*id),
+            Self::MoveClip { id, track: to, .. } => clip(*id).or_else(|| track(*to)),
+            Self::RemoveClip(id)
+            | Self::TrimClip { id, .. }
+            | Self::SetClipLink { id, .. }
+            | Self::SetClipAsset { id, .. }
+            | Self::SetClipParam { id, .. }
+            | Self::AddKeyframe { id, .. }
+            | Self::RemoveKeyframe { id, .. }
+            | Self::MoveKeyframe { id, .. } => clip(*id),
+            Self::RemoveAsset(a) => s
+                .tracks()
+                .iter()
+                .find(|t| t.locked && t.clips().iter().any(|c| c.asset == *a))
+                .map(|t| t.id),
+            Self::AddTrack { .. }
+            | Self::SetTrack(_)
+            | Self::MoveTrack { .. }
+            | Self::NewLink
+            | Self::AddMarker { .. }
+            | Self::RemoveMarker(_)
+            | Self::SetInOut { .. }
+            | Self::SetSettings(_)
+            | Self::AddAsset(_)
+            | Self::SetAssetProbe { .. }
+            | Self::Import(_)
+            | Self::RenameAsset { .. }
+            | Self::RelinkAssets(_)
+            | Self::SetAssetInOut { .. } => None,
+        }
+    }
+
     /// Applies to `p`; on error `p` is unchanged.
     fn apply(self, p: &mut Project) -> Result<Created, ModelError> {
+        if let Some(t) = self.locked(p) {
+            return Err(ModelError::Locked(t));
+        }
         let s = &mut p.sequence;
         Ok(match self {
             Self::AddTrack { kind, name } => Created::Track(s.add_track(kind, name)),
@@ -138,24 +177,12 @@ impl Command {
                 s.remove_track(id)?;
                 Created::Nothing
             }
-            Self::SetTrack {
-                id,
-                name,
-                hidden,
-                locked,
-                muted,
-                solo,
-                volume,
-                pan,
-            } => {
-                let t = s.track_mut(id).ok_or(ModelError::UnknownTrack(id))?;
-                t.name = name;
-                t.hidden = hidden;
-                t.locked = locked;
-                t.muted = muted;
-                t.solo = solo;
-                t.volume = volume;
-                t.pan = pan;
+            Self::SetTrack(settings) => {
+                s.set_track(settings)?;
+                Created::Nothing
+            }
+            Self::MoveTrack { id, index } => {
+                s.move_track(id, index)?;
                 Created::Nothing
             }
             Self::AddClip { track, clip } => Created::Clip(s.add_clip(track, clip)?),
@@ -489,6 +516,7 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Track;
     use proptest::prelude::*;
 
     fn track(h: &mut History) -> TrackId {
@@ -769,6 +797,204 @@ mod tests {
         assert_eq!(h.project(), &Project::default());
     }
 
+    fn set(h: &mut History, t: TrackId, f: impl FnOnce(&mut TrackSettings)) {
+        let mut s = h.project().sequence().track(t).unwrap().settings();
+        f(&mut s);
+        h.apply(Command::SetTrack(s)).unwrap();
+    }
+
+    #[test]
+    fn locked_track_rejects_every_clip_edit() {
+        use crate::keyframe::{Easing, Value};
+        let mut h = History::new(Project::default());
+        h.apply(Command::AddAsset("a.mkv".into())).unwrap();
+        let t = track(&mut h);
+        let free = track(&mut h);
+        let Created::Clip(c) = h.apply(add_clip(t, 0)).unwrap() else {
+            panic!()
+        };
+        let key = Keyframe {
+            time: Time(2),
+            value: Value::Scalar(1.0),
+            easing: Easing::Linear,
+        };
+        h.apply(Command::AddKeyframe {
+            id: c,
+            param: "a".into(),
+            key,
+        })
+        .unwrap();
+        set(&mut h, t, |s| s.locked = true);
+        let Created::Clip(other) = h.apply(add_clip(free, 0)).unwrap() else {
+            panic!()
+        };
+        let edits = [
+            Command::RemoveTrack(t),
+            add_clip(t, 50),
+            Command::RemoveClip(c),
+            Command::MoveClip {
+                id: c,
+                track: free,
+                start: Time(40),
+            },
+            // onto the locked track from a free one
+            Command::MoveClip {
+                id: other,
+                track: t,
+                start: Time(40),
+            },
+            Command::TrimClip {
+                id: c,
+                start: Time(0),
+                source_in: Time(0),
+                source_out: Time(5),
+            },
+            Command::SetClipLink {
+                id: c,
+                link: Some(LinkId(99)),
+            },
+            Command::SetClipAsset {
+                id: c,
+                asset: AssetId(2),
+            },
+            Command::SetClipParam {
+                id: c,
+                key: "a".into(),
+                value: Some(0.5),
+            },
+            Command::AddKeyframe {
+                id: c,
+                param: "b".into(),
+                key,
+            },
+            Command::RemoveKeyframe {
+                id: c,
+                param: "a".into(),
+                time: Time(2),
+            },
+            Command::MoveKeyframe {
+                id: c,
+                param: "a".into(),
+                from: Time(2),
+                to: Time(3),
+            },
+            Command::RemoveAsset(AssetId(1)),
+        ];
+        let before = h.project().clone();
+        for cmd in edits {
+            assert_eq!(h.apply(cmd.clone()), Err(ModelError::Locked(t)), "{cmd:?}");
+            assert_eq!(h.project(), &before, "{cmd:?}");
+        }
+        // Header changes still work, so the track can be unlocked and edited again.
+        h.apply(Command::MoveTrack { id: t, index: 0 }).unwrap();
+        set(&mut h, t, |s| s.locked = false);
+        h.apply(Command::RemoveClip(c)).unwrap();
+    }
+
+    #[test]
+    fn every_track_change_undoes_and_redoes() {
+        let mut h = History::new(Project::default());
+        let v1 = track(&mut h);
+        let changes: [&dyn Fn(&mut History); 9] = [
+            &|h| {
+                h.apply(Command::AddTrack {
+                    kind: TrackKind::Audio,
+                    name: "A1".into(),
+                })
+                .unwrap();
+            },
+            &|h| set(h, v1, |s| s.name = "Main".into()),
+            &|h| set(h, v1, |s| s.hidden = true),
+            &|h| set(h, v1, |s| s.locked = true),
+            &|h| set(h, v1, |s| s.muted = true),
+            &|h| set(h, v1, |s| s.solo = true),
+            &|h| set(h, v1, |s| s.height = 80.0),
+            &|h| set(h, v1, |s| s.target = true),
+            &|h| {
+                track(h);
+                h.apply(Command::MoveTrack { id: v1, index: 0 }).unwrap();
+            },
+        ];
+        for change in changes {
+            let before = h.project().clone();
+            change(&mut h);
+            let after = h.project().clone();
+            assert_ne!(before, after);
+            while h.project() != &before {
+                assert!(h.undo());
+            }
+            while h.redo() {}
+            assert_eq!(h.project(), &after);
+        }
+        set(&mut h, v1, |s| s.locked = false);
+        let before = h.project().clone();
+        h.apply(Command::RemoveTrack(v1)).unwrap();
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+    }
+
+    #[test]
+    fn track_order_target_and_height_rules() {
+        let mut h = History::new(Project::default());
+        let a1 = match h.apply(Command::AddTrack {
+            kind: TrackKind::Audio,
+            name: "A1".into(),
+        }) {
+            Ok(Created::Track(t)) => t,
+            r => panic!("{r:?}"),
+        };
+        let v1 = track(&mut h);
+        let v2 = track(&mut h);
+        let order = |h: &History| -> Vec<_> {
+            h.project()
+                .sequence()
+                .tracks()
+                .iter()
+                .map(|t| t.id)
+                .collect()
+        };
+        // New video goes on top, audio stays below.
+        assert_eq!(order(&h), [v2, v1, a1]);
+        // Reordering stays within the kind's group, clamped at its ends.
+        h.apply(Command::MoveTrack { id: v2, index: 9 }).unwrap();
+        assert_eq!(order(&h), [v1, v2, a1]);
+        h.apply(Command::MoveTrack { id: a1, index: 0 }).unwrap();
+        assert_eq!(order(&h), [v1, v2, a1]);
+        // One target per kind.
+        set(&mut h, v1, |s| s.target = true);
+        set(&mut h, a1, |s| s.target = true);
+        set(&mut h, v2, |s| s.target = true);
+        let targets: Vec<_> = h
+            .project()
+            .sequence()
+            .tracks()
+            .iter()
+            .filter(|t| t.target)
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(targets, [v2, a1]);
+        set(&mut h, v1, |s| s.height = 500.0);
+        let t = |h: &History, id| h.project().sequence().track(id).unwrap().clone();
+        assert_eq!(t(&h, v1).height, Track::MAX_HEIGHT);
+
+        // Every track setting survives save/load, and older files get the defaults.
+        set(&mut h, v1, |s| {
+            (s.hidden, s.locked, s.muted, s.solo) = (true, true, true, true);
+            s.height = 64.0;
+        });
+        let dir = std::path::Path::new("/p");
+        let json = crate::file::to_json(h.project(), dir).unwrap();
+        let loaded = crate::file::from_json(&json, dir, |_| true).unwrap();
+        assert_eq!(&loaded, h.project());
+        let old = json
+            .replace("\"height\": 64.0,", "")
+            .replace("\"target\": true,", "");
+        assert_ne!(old, json);
+        let loaded = crate::file::from_json(&old, dir, |_| true).unwrap();
+        let v = loaded.sequence().track(v1).unwrap();
+        assert_eq!((v.height, v.locked), (40.0, true));
+    }
+
     #[derive(Debug, Clone)]
     enum Op {
         Cmd(Command),
@@ -795,15 +1021,23 @@ mod tests {
                 name,
             }),
             id.clone().prop_map(|i| Command::RemoveTrack(TrackId(i))),
-            (id.clone(), any::<[bool; 4]>(), 0f32..2.0).prop_map(|(i, f, v)| Command::SetTrack {
+            (id.clone(), any::<[bool; 5]>(), 0f32..2.0).prop_map(|(i, f, v)| {
+                Command::SetTrack(TrackSettings {
+                    id: TrackId(i),
+                    name: "t".into(),
+                    hidden: f[0],
+                    locked: f[1],
+                    muted: f[2],
+                    solo: f[3],
+                    volume: v,
+                    pan: -v / 2.0,
+                    height: v * 80.0,
+                    target: f[4],
+                })
+            }),
+            (id.clone(), 0usize..4).prop_map(|(i, index)| Command::MoveTrack {
                 id: TrackId(i),
-                name: "t".into(),
-                hidden: f[0],
-                locked: f[1],
-                muted: f[2],
-                solo: f[3],
-                volume: v,
-                pan: -v / 2.0,
+                index,
             }),
             (
                 id.clone(),

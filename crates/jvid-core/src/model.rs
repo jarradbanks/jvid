@@ -160,11 +160,54 @@ pub struct Track {
     pub volume: f32,
     /// -1.0 (left) to 1.0 (right).
     pub pan: f32,
+    /// Lane height in points, [`Track::MIN_HEIGHT`] to [`Track::MAX_HEIGHT`].
+    #[serde(default = "Track::default_height")]
+    pub height: f32,
+    /// Insert and overwrite land here; at most one track of each kind.
+    #[serde(default)]
+    pub target: bool,
     /// Sorted by `start`, never overlapping. Mutate through `Sequence`.
     clips: Vec<Clip>,
 }
 
+/// A track's settings: everything but its kind and clips.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackSettings {
+    pub id: TrackId,
+    pub name: String,
+    pub hidden: bool,
+    pub locked: bool,
+    pub muted: bool,
+    pub solo: bool,
+    pub volume: f32,
+    pub pan: f32,
+    pub height: f32,
+    pub target: bool,
+}
+
 impl Track {
+    pub const MIN_HEIGHT: f32 = 24.0;
+    pub const MAX_HEIGHT: f32 = 120.0;
+
+    fn default_height() -> f32 {
+        40.0
+    }
+
+    pub fn settings(&self) -> TrackSettings {
+        TrackSettings {
+            id: self.id,
+            name: self.name.clone(),
+            hidden: self.hidden,
+            locked: self.locked,
+            muted: self.muted,
+            solo: self.solo,
+            volume: self.volume,
+            pan: self.pan,
+            height: self.height,
+            target: self.target,
+        }
+    }
+
     pub fn clips(&self) -> &[Clip] {
         &self.clips
     }
@@ -306,6 +349,8 @@ pub enum ModelError {
     UnknownAsset(AssetId),
     /// No keyframe on the clip's param at that source time.
     UnknownKeyframe(ClipId, Time),
+    /// The edit touches a locked track.
+    Locked(TrackId),
 }
 
 impl std::fmt::Display for ModelError {
@@ -318,6 +363,7 @@ impl std::fmt::Display for ModelError {
             Self::UnknownMarker(id) => write!(f, "unknown marker {}", id.0),
             Self::UnknownAsset(id) => write!(f, "unknown asset {}", id.0),
             Self::UnknownKeyframe(id, t) => write!(f, "no keyframe at {} on clip {}", t.0, id.0),
+            Self::Locked(id) => write!(f, "track {} is locked", id.0),
         }
     }
 }
@@ -375,21 +421,69 @@ impl Sequence {
         self.tracks.iter_mut().find(|t| t.id == id)
     }
 
+    /// A new video track goes on top of the stack, a new audio track at the bottom.
     pub(crate) fn add_track(&mut self, kind: TrackKind, name: impl Into<String>) -> TrackId {
         let id = TrackId(self.alloc());
-        self.tracks.push(Track {
-            id,
-            kind,
-            name: name.into(),
-            hidden: false,
-            locked: false,
-            muted: false,
-            solo: false,
-            volume: 1.0,
-            pan: 0.0,
-            clips: Vec::new(),
-        });
+        let at = match kind {
+            TrackKind::Video => 0,
+            TrackKind::Audio => self.tracks.len(),
+        };
+        self.tracks.insert(
+            at,
+            Track {
+                id,
+                kind,
+                name: name.into(),
+                hidden: false,
+                locked: false,
+                muted: false,
+                solo: false,
+                volume: 1.0,
+                pan: 0.0,
+                height: Track::default_height(),
+                target: false,
+                clips: Vec::new(),
+            },
+        );
         id
+    }
+
+    /// Replaces a track's settings, keeping one target per kind.
+    pub(crate) fn set_track(&mut self, s: TrackSettings) -> Result<(), ModelError> {
+        let t = self.track_mut(s.id).ok_or(ModelError::UnknownTrack(s.id))?;
+        let kind = t.kind;
+        t.name = s.name;
+        t.hidden = s.hidden;
+        t.locked = s.locked;
+        t.muted = s.muted;
+        t.solo = s.solo;
+        t.volume = s.volume;
+        t.pan = s.pan;
+        t.height = s.height.clamp(Track::MIN_HEIGHT, Track::MAX_HEIGHT);
+        t.target = s.target;
+        if s.target {
+            for o in self
+                .tracks
+                .iter_mut()
+                .filter(|o| o.kind == kind && o.id != s.id)
+            {
+                o.target = false;
+            }
+        }
+        Ok(())
+    }
+
+    /// Moves a track to `index` among the tracks of its kind (0 = top).
+    pub(crate) fn move_track(&mut self, id: TrackId, index: usize) -> Result<(), ModelError> {
+        let t = self.remove_track(id)?;
+        let first = self.tracks.iter().position(|o| o.kind == t.kind);
+        let count = self.tracks.iter().filter(|o| o.kind == t.kind).count();
+        let first = first.unwrap_or(match t.kind {
+            TrackKind::Video => 0,
+            TrackKind::Audio => self.tracks.len(),
+        });
+        self.tracks.insert(first + index.min(count), t);
+        Ok(())
     }
 
     /// Removes the track and its clips.

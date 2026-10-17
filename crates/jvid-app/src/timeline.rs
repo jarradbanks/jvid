@@ -1,25 +1,33 @@
 //! The timeline panel: a timecode ruler, one lane per track, clips with filmstrips and
-//! waveforms, zoom, scroll and a draggable playhead. Only what's in view is drawn.
+//! waveforms, zoom, scroll and a draggable playhead. Only what's in view is drawn. Track
+//! headers on the left hold the lock, hide or mute, and solo toggles, the target, a height
+//! grip, and a menu to add, rename, reorder and remove tracks.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use egui::{
-    Align2, CornerRadius, CursorIcon, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, pos2, vec2,
+    Align2, Color32, CornerRadius, CursorIcon, FontId, Key, Pos2, Rect, Sense, Stroke,
+    TextureHandle, Ui, pos2, vec2,
 };
-use jvid_core::model::{Clip, MediaAsset, Project, TrackKind};
+use jvid_core::history::{Command, GestureKey};
+use jvid_core::model::{Clip, MediaAsset, Project, Track, TrackId, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_jobs::Priority;
 use jvid_media::thumbnails;
 use jvid_media::waveforms::Pyramid;
-use suite_ui::theme;
+use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
+use suite_ui::widgets::TextInput;
 
 use crate::media_bin::Caches;
 use crate::transport::Transport;
 
-const TRACK: f32 = size::TRACK;
+/// The undo gesture a track-height drag coalesces under.
+pub const RESIZE_GESTURE: GestureKey = 0x7472_6163_6b68; // "trackh"
+/// Track heights snap to this step.
+const HEIGHT_STEP: f32 = 4.0;
 /// Zoom limits in points per second: about four hours across 1000pt, to a frame 40pt wide.
 const MIN_ZOOM: f64 = 0.07;
 const MAX_ZOOM: f64 = 2400.0;
@@ -41,7 +49,12 @@ pub struct Timeline {
     /// Points the lanes are scrolled up.
     vscroll: f32,
     media: Media,
+    /// The track being renamed and the name typed so far.
+    renaming: Option<(TrackId, String)>,
 }
+
+/// An edit made in the timeline, and the gesture it coalesces under, if any.
+pub type Edit = (Command, Option<GestureKey>);
 
 impl Default for Timeline {
     fn default() -> Self {
@@ -51,6 +64,7 @@ impl Default for Timeline {
             scroll: 0.0,
             vscroll: 0.0,
             media: Media::default(),
+            renaming: None,
         }
     }
 }
@@ -177,7 +191,13 @@ impl Timeline {
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, project: &Project, missing: &HashSet<PathBuf>) {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        missing: &HashSet<PathBuf>,
+    ) -> Option<Edit> {
+        let mut edit = None;
         self.sync(project);
         let rate = self.transport.rate;
         let area = ui.max_rect();
@@ -209,7 +229,7 @@ impl Timeline {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
         let tracks = project.sequence().tracks();
-        let content_h = tracks.len() as f32 * TRACK;
+        let content_h: f32 = tracks.iter().map(|t| t.height).sum();
         if (body.hovered() || scrub.hovered())
             && let Some(p) = ui.input(|i| i.pointer.hover_pos())
         {
@@ -232,20 +252,20 @@ impl Timeline {
         let lane_painter = painter.with_clip_rect(lanes.union(headers).intersect(area));
         let clip_painter = painter.with_clip_rect(lanes.intersect(area));
         lane_painter.rect_filled(lanes, 0.0, color::FIELD);
-        let top = lanes.top() - self.vscroll;
+        // Empty header space: add tracks.
+        ui.interact(headers, id.with("headers"), Sense::click())
+            .context_menu(|ui| add_menu(ui, &mut edit));
+        let mut y = lanes.top() - self.vscroll;
         for (i, track) in tracks.iter().enumerate() {
-            let y = top + i as f32 * TRACK;
-            let lane = Rect::from_x_y_ranges(lanes.x_range(), y..=y + TRACK);
+            let lane = Rect::from_x_y_ranges(lanes.x_range(), y..=y + track.height);
+            y += track.height;
             if lane.bottom() < lanes.top() || lane.top() > lanes.bottom() {
                 continue;
             }
-            lane_painter.text(
-                pos2(area.left() + space::INSET, lane.center().y),
-                Align2::LEFT_CENTER,
-                &track.name,
-                theme::body_strong(),
-                color::INK,
-            );
+            let header = Rect::from_x_y_ranges(headers.x_range(), lane.y_range());
+            if let Some(e) = self.header(ui, &lane_painter, header, headers, project, i) {
+                edit = Some(e);
+            }
             lane_painter.rect_filled(
                 Rect::from_x_y_ranges(area.x_range(), lane.bottom() - line..=lane.bottom()),
                 0.0,
@@ -259,16 +279,13 @@ impl Timeline {
                 let r = Rect::from_x_y_ranges(x, lane.y_range()).shrink2(vec2(1.0, 2.0));
                 let asset = project.asset(clip.asset);
                 let offline = asset.is_some_and(|a| missing.contains(&a.path));
+                // Clips on hidden tracks drop to 40%.
+                let mut painter = clip_painter.clone();
+                if track.hidden {
+                    painter.multiply_opacity(0.4);
+                }
                 self.paint_clip(
-                    ui,
-                    &clip_painter,
-                    r,
-                    lanes,
-                    view,
-                    clip,
-                    asset,
-                    track.kind,
-                    offline,
+                    ui, &painter, r, lanes, view, clip, asset, track.kind, offline,
                 );
             }
         }
@@ -357,6 +374,212 @@ impl Timeline {
             );
             playhead_head(&painter, pos2(x + line / 2.0, ruler.top()));
         }
+        edit
+    }
+
+    /// One track's header: ID, name or rename field, toggles, menu and height grip.
+    fn header(
+        &mut self,
+        ui: &mut Ui,
+        painter: &egui::Painter,
+        rect: Rect,
+        column: Rect,
+        project: &Project,
+        index: usize,
+    ) -> Option<Edit> {
+        let tracks = project.sequence().tracks();
+        let track = &tracks[index];
+        let id = ui.id().with(("track_header", track.id));
+        let mut edit = None;
+        let set = |f: &dyn Fn(&mut jvid_core::model::TrackSettings)| {
+            let mut s = track.settings();
+            f(&mut s);
+            Some((Command::SetTrack(s), None))
+        };
+        // Clipped to the column so a part-scrolled header can't cover the ruler.
+        let shown = rect.intersect(column);
+        let body = ui.interact(shown, id, Sense::click());
+        if body.hovered() {
+            painter.rect_filled(rect, 0.0, color::RAISED.gamma_multiply(0.5));
+        }
+
+        // The ID; clicking it makes this the target for insert and overwrite.
+        let label = track_label(tracks, index);
+        let mid = rect.top() + rect.height().min(size::CONTROL + 8.0) / 2.0;
+        let id_rect = Rect::from_center_size(
+            pos2(rect.left() + space::INSET + 10.0, mid),
+            vec2(28.0, size::SMALL_CONTROL),
+        );
+        let target = ui.interact(id_rect.intersect(column), id.with("target"), Sense::click());
+        if track.target {
+            painter.rect_filled(
+                Rect::from_x_y_ranges(rect.left()..=rect.left() + 2.0, rect.y_range()),
+                0.0,
+                color::LIGHT_BLUE,
+            );
+        }
+        let ink = if track.target {
+            color::LIGHT_BLUE
+        } else {
+            color::INK
+        };
+        painter.text(
+            id_rect.center(),
+            Align2::CENTER_CENTER,
+            &label,
+            theme::body_strong(),
+            ink,
+        );
+        target.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, track.target, "Target")
+        });
+        if target.clicked() {
+            edit = set(&|s| s.target = !s.target);
+        }
+        let target = target.on_hover_text(if track.target {
+            "Target for insert and overwrite"
+        } else {
+            "Make target for insert and overwrite"
+        });
+        if target.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+
+        // Toggles, right-aligned: lock, hide or mute, solo.
+        let (hide_glyph, hide_on, hide_font, hide_tip) = match track.kind {
+            TrackKind::Video if track.hidden => (icon::EYE_OFF, true, theme::icon_font(), "Show"),
+            TrackKind::Video => (icon::EYE, false, theme::icon_font(), "Hide"),
+            TrackKind::Audio => ("M", track.muted, theme::body_strong(), "Mute"),
+        };
+        let toggles = [
+            (icon::LOCK, track.locked, theme::icon_font(), "Lock", false),
+            (hide_glyph, hide_on, hide_font, hide_tip, false),
+            ("S", track.solo, theme::body_strong(), "Solo", true),
+        ];
+        let step = size::SMALL_CONTROL + space::S4;
+        let mut x = rect.right() - space::S8 - toggles.len() as f32 * step + space::S4;
+        let name_right = x - space::S4;
+        for (n, (glyph, on, font, tip, solo)) in toggles.into_iter().enumerate() {
+            let r = Rect::from_min_size(
+                pos2(x, mid - size::SMALL_CONTROL / 2.0),
+                vec2(size::SMALL_CONTROL, size::SMALL_CONTROL),
+            );
+            x += step;
+            if toggle(
+                ui,
+                painter,
+                r,
+                column,
+                id.with(n),
+                glyph,
+                font,
+                on,
+                solo,
+                tip,
+            ) {
+                edit = match n {
+                    0 => set(&|s| s.locked = !s.locked),
+                    1 if track.kind == TrackKind::Video => set(&|s| s.hidden = !s.hidden),
+                    1 => set(&|s| s.muted = !s.muted),
+                    _ => set(&|s| s.solo = !s.solo),
+                };
+            }
+        }
+
+        // Name, or the rename field.
+        let name_rect =
+            Rect::from_x_y_ranges(id_rect.right() + space::S4..=name_right, id_rect.y_range());
+        if let Some((rid, text)) = &mut self.renaming
+            && *rid == track.id
+        {
+            let field =
+                Rect::from_center_size(name_rect.center(), vec2(name_rect.width(), size::CONTROL));
+            ui.put(field, TextInput::new(text).width(field.width()))
+                .request_focus();
+            let (enter, esc) = ui.input(|i| {
+                // Clicking away commits, like Enter.
+                let away = i.pointer.any_pressed()
+                    && i.pointer.press_origin().is_some_and(|p| !field.contains(p));
+                (
+                    i.key_pressed(Key::Enter) || away,
+                    i.key_pressed(Key::Escape),
+                )
+            });
+            if enter {
+                let name = text.trim().to_owned();
+                edit = set(&|s| s.name = name.clone());
+            }
+            if enter || esc {
+                self.renaming = None;
+            }
+        } else if !track.name.is_empty() && track.name != label {
+            let mut job = egui::text::LayoutJob::single_section(
+                track.name.clone(),
+                egui::TextFormat::simple(theme::body(), color::INK_2),
+            );
+            job.wrap = egui::text::TextWrapping::truncate_at_width(name_rect.width().max(0.0));
+            let g = painter.layout_job(job);
+            let pos = pos2(name_rect.left(), mid - g.size().y / 2.0);
+            painter.galley(pos, g, color::INK_2);
+        }
+        if body.double_clicked() {
+            self.renaming = Some((track.id, track.name.clone()));
+        }
+
+        // Menu: rename, reorder, remove, add.
+        let same_kind: Vec<_> = tracks.iter().filter(|t| t.kind == track.kind).collect();
+        let pos = same_kind.iter().position(|t| t.id == track.id).unwrap_or(0);
+        body.context_menu(|ui| {
+            if ui.button("Rename").clicked() {
+                self.renaming = Some((track.id, track.name.clone()));
+            }
+            let mv = |index| {
+                Some((
+                    Command::MoveTrack {
+                        id: track.id,
+                        index,
+                    },
+                    None,
+                ))
+            };
+            if ui
+                .add_enabled(pos > 0, egui::Button::new("Move up"))
+                .clicked()
+            {
+                edit = mv(pos - 1);
+            }
+            let last = pos + 1 >= same_kind.len();
+            if ui
+                .add_enabled(!last, egui::Button::new("Move down"))
+                .clicked()
+            {
+                edit = mv(pos + 1);
+            }
+            let remove = egui::Button::new("Remove track");
+            if ui.add_enabled(!track.locked, remove).clicked() {
+                edit = Some((Command::RemoveTrack(track.id), None));
+            }
+            ui.separator();
+            add_menu(ui, &mut edit);
+        });
+
+        // Height grip along the bottom edge.
+        let grip = Rect::from_x_y_ranges(rect.x_range(), rect.bottom() - 3.0..=rect.bottom() + 2.0);
+        let g = ui.interact(grip.intersect(column), id.with("height"), Sense::drag());
+        if g.hovered() || g.dragged() {
+            ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
+        }
+        if g.dragged()
+            && let Some(p) = g.interact_pointer_pos()
+        {
+            let h = snap_height(p.y - rect.top());
+            if h != track.height {
+                let mut s = track.settings();
+                s.height = h;
+                edit = Some((Command::SetTrack(s), Some(RESIZE_GESTURE)));
+            }
+        }
+        edit
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -414,6 +637,64 @@ impl Timeline {
             color::INK,
         );
     }
+}
+
+/// "V1" counts video tracks up from the bottom of the video stack, "A1" audio down from the top.
+fn track_label(tracks: &[Track], index: usize) -> String {
+    let t = &tracks[index];
+    let same = |o: &&Track| o.kind == t.kind;
+    match t.kind {
+        TrackKind::Video => format!("V{}", tracks[index..].iter().filter(same).count()),
+        TrackKind::Audio => format!("A{}", tracks[..=index].iter().filter(same).count()),
+    }
+}
+
+/// A dragged height, snapped and clamped to the allowed range.
+fn snap_height(h: f32) -> f32 {
+    ((h / HEIGHT_STEP).round() * HEIGHT_STEP).clamp(Track::MIN_HEIGHT, Track::MAX_HEIGHT)
+}
+
+fn add_menu(ui: &mut Ui, edit: &mut Option<Edit>) {
+    for (kind, label) in [
+        (TrackKind::Video, "Add video track"),
+        (TrackKind::Audio, "Add audio track"),
+    ] {
+        if ui.button(label).clicked() {
+            let name = String::new();
+            *edit = Some((Command::AddTrack { kind, name }, None));
+        }
+    }
+}
+
+/// A 20px ghost toggle: Ink on Raised when on, or Amber for solo.
+#[allow(clippy::too_many_arguments)]
+fn toggle(
+    ui: &Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    column: Rect,
+    id: egui::Id,
+    glyph: &str,
+    font: FontId,
+    on: bool,
+    solo: bool,
+    name: &str,
+) -> bool {
+    let r = ui.interact(rect.intersect(column), id, Sense::click());
+    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, on, name));
+    let (fill, ink) = match (on, solo) {
+        (true, true) => (color::AMBER, color::GROUND),
+        (true, false) => (color::RAISED, color::INK),
+        _ if r.hovered() => (color::BORDER, color::INK_2),
+        _ => (Color32::TRANSPARENT, color::INK_3),
+    };
+    painter.rect_filled(rect, CornerRadius::same(radius::SMALL), fill);
+    painter.text(rect.center(), Align2::CENTER_CENTER, glyph, font, ink);
+    if r.has_focus() {
+        painter.add(suite_ui::widgets::focus_ring(rect, radius::SMALL));
+    }
+    let r = r.on_hover_text(name);
+    r.clicked()
 }
 
 /// The 10×12 head: rounded top, pointed bottom, centred on `top_center`.
@@ -719,19 +1000,25 @@ mod tests {
         assert!(!t.action("lift", &p));
     }
 
-    fn harness(project: Project) -> egui_kittest::Harness<'static, (Timeline, Project)> {
+    /// Edits from the timeline go through a real history, as in the app.
+    fn harness(project: Project) -> egui_kittest::Harness<'static, (Timeline, History)> {
         let mut fresh = true;
         let mut h = egui_kittest::Harness::builder()
             .with_size([1000.0, 200.0])
             .wgpu()
             .build_ui_state(
-                move |ui, (t, p): &mut (Timeline, Project)| {
+                move |ui, (t, h): &mut (Timeline, History)| {
                     if !suite_ui::test_support::install_theme(ui, &mut fresh) {
                         ui.painter().rect_filled(ui.max_rect(), 0.0, color::PANEL);
-                        t.show(ui, p, &HashSet::new());
+                        let edit = t.show(ui, h.project(), &HashSet::new());
+                        match edit {
+                            Some((c, Some(k))) => h.apply_coalesced(k, c).unwrap(),
+                            Some((c, None)) => h.apply(c).unwrap(),
+                            None => jvid_core::history::Created::Nothing,
+                        };
                     }
                 },
-                (Timeline::default(), project),
+                (Timeline::default(), History::new(project)),
             );
         h.run();
         h
@@ -754,6 +1041,88 @@ mod tests {
         let mut h = harness(Project::default());
         h.run();
         results.add(h.try_snapshot("timeline_empty"));
+        let mut h = harness(header_states());
+        h.run();
+        results.add(h.try_snapshot("timeline_headers"));
+    }
+
+    /// Two video tracks and an audio one, with every header state on somewhere.
+    fn header_states() -> Project {
+        let mut h = History::new(project(6));
+        let _ = h.apply(Command::AddTrack {
+            kind: TrackKind::Video,
+            name: "Titles".into(),
+        });
+        let t: Vec<_> = h.project().sequence().tracks().to_vec();
+        let mut set = |t: &Track, f: &dyn Fn(&mut jvid_core::model::TrackSettings)| {
+            let mut s = t.settings();
+            f(&mut s);
+            h.apply(Command::SetTrack(s)).unwrap();
+        };
+        set(&t[0], &|s| (s.locked, s.hidden) = (true, true));
+        set(&t[1], &|s| (s.target, s.height) = (true, 56.0));
+        set(&t[2], &|s| (s.muted, s.solo) = (true, true));
+        h.project().clone()
+    }
+
+    #[test]
+    fn labels_count_video_up_and_audio_down() {
+        let p = header_states();
+        let t = p.sequence().tracks();
+        let labels: Vec<_> = (0..t.len()).map(|i| track_label(t, i)).collect();
+        assert_eq!(labels, ["V2", "V1", "A1"]);
+        assert_eq!(snap_height(41.0), 40.0);
+        assert_eq!(snap_height(43.0), 44.0);
+        assert_eq!(snap_height(5.0), Track::MIN_HEIGHT);
+        assert_eq!(snap_height(999.0), Track::MAX_HEIGHT);
+    }
+
+    #[test]
+    fn header_toggles_and_height_drag_are_undoable() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(2));
+        let track = |h: &egui_kittest::Harness<'_, (Timeline, History)>, i: usize| {
+            h.state().1.project().sequence().tracks()[i].clone()
+        };
+        // V1 then A1: lock, hide/mute, solo each.
+        h.get_all_by_label("Lock").next().unwrap().click();
+        h.run();
+        h.get_by_label("Mute").click();
+        h.run();
+        h.get_all_by_label("Solo").nth(1).unwrap().click();
+        h.run();
+        h.get_by_label("Hide").click();
+        h.run();
+        h.get_all_by_label("Target").next().unwrap().click();
+        h.run();
+        let (v, a) = (track(&h, 0), track(&h, 1));
+        assert!(v.locked && v.hidden && v.target && !v.solo);
+        assert!(a.muted && a.solo && !a.locked);
+
+        // Dragging V1's bottom edge down 20pt: one undo step, snapped.
+        // The toggles sit centred in the header's top 32pt.
+        let lock = h.get_all_by_label("Lock").next().unwrap().rect();
+        let (x, edge) = (40.0, lock.center().y - 16.0 + 40.0);
+        h.hover_at(pos2(x, edge));
+        h.run();
+        h.drag_at(pos2(x, edge));
+        h.run();
+        for dy in [5.0, 10.0, 21.0] {
+            h.hover_at(pos2(x, edge + dy));
+            h.run();
+        }
+        h.drop_at(pos2(x, edge + 21.0));
+        h.run();
+        assert_eq!(track(&h, 0).height, 60.0);
+        assert!(h.state_mut().1.undo());
+        assert_eq!(track(&h, 0).height, 40.0);
+        for _ in 0..5 {
+            assert!(h.state_mut().1.undo());
+        }
+        assert_eq!(h.state().1.project(), &project(2));
     }
 
     /// The acceptance budget: layout and tessellation of 500 clips inside one 60fps frame, with

@@ -30,6 +30,9 @@ pub mod icon {
     pub const SKIP_FORWARD: &str = "\u{E164}";
     pub const REWIND: &str = "\u{E14B}";
     pub const FAST_FORWARD: &str = "\u{E0C1}";
+    pub const LOCK: &str = "\u{E10F}";
+    pub const EYE: &str = "\u{E0BE}";
+    pub const EYE_OFF: &str = "\u{E0BF}";
 }
 
 /// Inter Medium (500), for Body Strong, buttons, tabs and the timecode.
