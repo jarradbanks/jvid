@@ -153,6 +153,30 @@ fn layer_stack_fits_and_blends_over_background() {
 }
 
 #[test]
+fn exported_png_matches_read_back_exactly() {
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping PNG export test: no software adapter on this platform");
+        return;
+    };
+    let base = image(&device, &queue, (48, 20), |x| [x as u8 * 5, 40, 200, 255]);
+    let red = image(&device, &queue, (16, 16), |_| [255, 0, 0, 255]);
+    let layers = [(&red, 0.4), (&base, 1.0)];
+    let (size, bg) = ((40, 30), [10, 20, 30, 255]);
+    let mut comp = Compositor::new(&device);
+    let tex = comp.render(&device, &queue, size, 1, bg, &layers);
+    let want = read_back(&device, &queue, tex);
+    let path = std::env::temp_dir().join(format!("jvid-export-{}.png", std::process::id()));
+    export_png(&device, &queue, size, bg, &layers, &path).unwrap();
+    let got = image::open(&path).unwrap().into_rgba8();
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(got.dimensions(), size);
+    assert!(
+        *got.as_raw() == want,
+        "PNG differs from the composited frame"
+    );
+}
+
+#[test]
 fn opacity_defaults_to_one_and_clamps() {
     let of = |o: Option<f64>| {
         let params: BTreeMap<_, _> = o.map(|o| ("opacity".to_string(), o)).into_iter().collect();

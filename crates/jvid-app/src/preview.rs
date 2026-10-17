@@ -11,7 +11,7 @@ use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, wgpu};
 use egui::{Align, Align2, Layout, Rect, Ui, UiBuilder, vec2};
 use jvid_audio::{CpalBackend, Output};
 use jvid_core::history::Command;
-use jvid_core::model::{AssetId, Project};
+use jvid_core::model::{AssetId, Project, ProjectSettings};
 use jvid_core::settings::PreviewQuality;
 use jvid_core::time::{Time, format_timecode};
 use jvid_jobs::Priority;
@@ -84,6 +84,8 @@ pub struct Preview {
     player: Option<Player>,
     /// Opened on first play, so tests and idle sessions never touch the audio device.
     output: Option<Output>,
+    /// For full-size renders outside the paint callback, such as frame export.
+    render_state: Option<egui_wgpu::RenderState>,
 }
 
 impl Preview {
@@ -113,7 +115,36 @@ impl Preview {
             quality: 0,
             player: None,
             output: None,
+            render_state: render_state.cloned(),
         }
+    }
+
+    /// Writes the shown frame as a PNG, composited at full project size over its background.
+    /// shortcut: one layer, the frame the viewer shows; composite `video_at` at the playhead
+    /// once the timeline (#33) and playback (#32) land.
+    pub fn export_frame(&self, settings: &ProjectSettings, path: &Path) -> Result<(), String> {
+        let (Some(rs), Some(f)) = (&self.render_state, &self.frame) else {
+            return Err("there's no frame to export".into());
+        };
+        let mut rgb = render::Preview::new(&rs.device, rs.target_format);
+        let yuv = Yuv {
+            width: f.width,
+            height: f.height,
+            planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
+            bt709: f.bt709,
+            full_range: f.full_range,
+        };
+        rgb.upload(&rs.device, &rs.queue, &yuv, 1);
+        let image = rgb.image().expect("uploaded");
+        jvid_render::composite::export_png(
+            &rs.device,
+            &rs.queue,
+            (settings.width, settings.height),
+            settings.background,
+            &[(image, 1.0)],
+            path,
+        )
+        .map_err(|e| e.to_string())
     }
 
     /// Opens an asset in the Source tab, parked at its start.

@@ -226,5 +226,28 @@ pub fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture
         .collect()
 }
 
+/// Composites one frame at full `size` (as [`Compositor::render`] at scale 1) and writes the
+/// [`read_back`] pixels to `path` as an RGBA PNG, byte for byte.
+pub fn export_png(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    size: (u32, u32),
+    background: [u8; 4],
+    layers: &[(&wgpu::Texture, f32)],
+    path: &std::path::Path,
+) -> image::ImageResult<()> {
+    let mut comp = Compositor::new(device);
+    let tex = comp.render(device, queue, size, 1, background, layers);
+    let rgba = read_back(device, queue, tex);
+    image::save_buffer_with_format(
+        path,
+        &rgba,
+        size.0,
+        size.1,
+        image::ExtendedColorType::Rgba8,
+        image::ImageFormat::Png,
+    )
+}
+
 #[cfg(test)]
 pub(crate) mod tests;

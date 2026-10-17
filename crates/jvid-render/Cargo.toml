@@ -13,8 +13,8 @@ workspace = true
 [dependencies]
 jvid-core.workspace = true
 wgpu.workspace = true
+image.workspace = true
 
 [dev-dependencies]
-image.workspace = true
 jvid-media = { workspace = true, features = ["test-support"] }
 suite-ui = { workspace = true, features = ["test-support"] }
