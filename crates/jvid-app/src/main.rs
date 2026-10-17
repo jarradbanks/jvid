@@ -8,6 +8,7 @@ mod preview;
 mod project_file;
 mod relink;
 mod settings_file;
+mod transport;
 mod welcome;
 
 fn main() -> eframe::Result {

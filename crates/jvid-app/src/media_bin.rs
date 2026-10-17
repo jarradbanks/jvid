@@ -50,6 +50,8 @@ pub struct BinResponse {
     pub command: Option<Command>,
     /// The offline asset the user asked to relink.
     pub relink: Option<AssetId>,
+    /// Double-clicked: open in the Source tab.
+    pub open: Option<AssetId>,
 }
 
 /// The assets matching `query` (case-insensitive, by name) in `sort` order.
@@ -444,7 +446,7 @@ impl MediaBin {
         let name = a.display_name();
         let (stem, ext) = split_ext(&name);
         if r.double_clicked() {
-            self.renaming = Some((a.id, stem.to_owned()));
+            out.open = Some(a.id);
         }
         r.context_menu(|ui| {
             self.selected = Some(a.id);
@@ -703,6 +705,8 @@ mod tests {
                 ..Default::default()
             }),
             name: None,
+            in_point: None,
+            out_point: None,
         }
     }
 

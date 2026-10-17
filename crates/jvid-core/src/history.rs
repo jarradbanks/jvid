@@ -109,6 +109,12 @@ pub enum Command {
     RemoveAsset(AssetId),
     /// Points assets at new paths as one step, e.g. after their media moved.
     RelinkAssets(Vec<(AssetId, PathBuf)>),
+    /// Sets the asset's source in/out marks.
+    SetAssetInOut {
+        id: AssetId,
+        in_point: Option<Time>,
+        out_point: Option<Time>,
+    },
 }
 
 /// The id a command created, if any.
@@ -250,6 +256,15 @@ impl Command {
             Self::RenameAsset { id, name } => {
                 let name = name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty());
                 p.asset_mut(id).ok_or(ModelError::UnknownAsset(id))?.name = name;
+                Created::Nothing
+            }
+            Self::SetAssetInOut {
+                id,
+                in_point,
+                out_point,
+            } => {
+                let a = p.asset_mut(id).ok_or(ModelError::UnknownAsset(id))?;
+                (a.in_point, a.out_point) = (in_point, out_point);
                 Created::Nothing
             }
             Self::RemoveAsset(id) => {
@@ -611,6 +626,29 @@ mod tests {
     }
 
     #[test]
+    fn asset_in_out_undoes_and_survives_save_load() {
+        let mut h = History::new(Project::default());
+        h.apply(Command::AddAsset("/m/a.mkv".into())).unwrap();
+        let a = AssetId(1);
+        h.apply(Command::SetAssetInOut {
+            id: a,
+            in_point: Some(Time(10)),
+            out_point: Some(Time(90)),
+        })
+        .unwrap();
+        let dir = std::path::Path::new("/m");
+        let json = crate::file::to_json(h.project(), dir).unwrap();
+        let loaded = crate::file::from_json(&json, dir, |_| true).unwrap();
+        let asset = loaded.asset(a).unwrap();
+        assert_eq!(
+            (asset.in_point, asset.out_point),
+            (Some(Time(10)), Some(Time(90)))
+        );
+        assert!(h.undo());
+        assert_eq!(h.project().asset(a).unwrap().in_point, None);
+    }
+
+    #[test]
     fn failed_command_and_rollback_change_nothing() {
         let mut h = History::new(Project::default());
         assert_eq!(
@@ -867,6 +905,16 @@ mod tests {
             id.clone().prop_map(|a| Command::RemoveAsset(AssetId(a))),
             (id.clone(), "[a-z]{1,4}")
                 .prop_map(|(a, s)| Command::RelinkAssets(vec![(AssetId(a), s.into())])),
+            (
+                id.clone(),
+                proptest::option::of(t()),
+                proptest::option::of(t())
+            )
+                .prop_map(|(a, in_point, out_point)| Command::SetAssetInOut {
+                    id: AssetId(a),
+                    in_point,
+                    out_point,
+                }),
             (id, any::<bool>()).prop_map(|(a, some)| Command::SetAssetProbe {
                 id: AssetId(a),
                 probe: some.then(ProbeInfo::default),
