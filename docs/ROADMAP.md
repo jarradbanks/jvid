@@ -294,7 +294,7 @@ flowchart LR
 | [#202](https://github.com/jarradbanks/jvid/issues/202) | Text and solid clips: source view, live edit, fit-to-text bounds | done | M | ui, render | [#48](https://github.com/jarradbanks/jvid/issues/48) |
 | [#203](https://github.com/jarradbanks/jvid/issues/203) | Title Case pass on all UI labels | need testing | S | ui, suite-ui | [#202](https://github.com/jarradbanks/jvid/issues/202), [#200](https://github.com/jarradbanks/jvid/issues/200) |
 | [#209](https://github.com/jarradbanks/jvid/issues/209) | Transform handles drawn over the transport bar | need testing | S | ui | [#202](https://github.com/jarradbanks/jvid/issues/202) |
-| [#211](https://github.com/jarradbanks/jvid/issues/211) | On-canvas text editing in the Program monitor |  | M | ui, render | [#209](https://github.com/jarradbanks/jvid/issues/209), [#203](https://github.com/jarradbanks/jvid/issues/203) |
+| [#211](https://github.com/jarradbanks/jvid/issues/211) | On-canvas text editing in the Program monitor | need testing | M | ui, render | [#209](https://github.com/jarradbanks/jvid/issues/209), [#203](https://github.com/jarradbanks/jvid/issues/203) |
 | [#212](https://github.com/jarradbanks/jvid/issues/212) | Font picker with inline search | need testing | S | ui | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 
 ### [M4 · Export & v0.1.0](https://github.com/jarradbanks/jvid/milestone/5)
@@ -353,7 +353,7 @@ flowchart LR
 | [#91](https://github.com/jarradbanks/jvid/issues/91) | Lossless fast export | need testing | L | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52), [#54](https://github.com/jarradbanks/jvid/issues/54) |
 | [#92](https://github.com/jarradbanks/jvid/issues/92) | Export to a target file size | done | M | export | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53) |
 | [#61](https://github.com/jarradbanks/jvid/issues/61) | jvid render CLI | done | M | cli | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53), [#9](https://github.com/jarradbanks/jvid/issues/9) |
-| [#124](https://github.com/jarradbanks/jvid/issues/124) | In-app confirm dialogs |  | M | ui, suite-ui | [#203](https://github.com/jarradbanks/jvid/issues/203) |
+| [#124](https://github.com/jarradbanks/jvid/issues/124) | In-app confirm dialogs | in progress | M | ui, suite-ui | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 | [#62](https://github.com/jarradbanks/jvid/issues/62) | Packaging and v0.1.0 release |  | L | infra | [#61](https://github.com/jarradbanks/jvid/issues/61), [#54](https://github.com/jarradbanks/jvid/issues/54), [#55](https://github.com/jarradbanks/jvid/issues/55), [#57](https://github.com/jarradbanks/jvid/issues/57), [#91](https://github.com/jarradbanks/jvid/issues/91), [#92](https://github.com/jarradbanks/jvid/issues/92), [#203](https://github.com/jarradbanks/jvid/issues/203), [#209](https://github.com/jarradbanks/jvid/issues/209), [#211](https://github.com/jarradbanks/jvid/issues/211), [#212](https://github.com/jarradbanks/jvid/issues/212), [#124](https://github.com/jarradbanks/jvid/issues/124), [#204](https://github.com/jarradbanks/jvid/issues/204), [#207](https://github.com/jarradbanks/jvid/issues/207), [#208](https://github.com/jarradbanks/jvid/issues/208) |
 
 ### [M5 · Polish (v0.2.0)](https://github.com/jarradbanks/jvid/milestone/6)
@@ -402,7 +402,7 @@ flowchart LR
 | [#76](https://github.com/jarradbanks/jvid/issues/76) | User guide and shortcut cheat sheet | done | M | docs | [#54](https://github.com/jarradbanks/jvid/issues/54) |
 | [#93](https://github.com/jarradbanks/jvid/issues/93) | Export marked highlights as separate files |  | M | export, timeline | [#40](https://github.com/jarradbanks/jvid/issues/40), [#58](https://github.com/jarradbanks/jvid/issues/58) |
 | [#94](https://github.com/jarradbanks/jvid/issues/94) | Zoom-to-region for screen recordings | done | M | ui, render | [#47](https://github.com/jarradbanks/jvid/issues/47), [#43](https://github.com/jarradbanks/jvid/issues/43), [#49](https://github.com/jarradbanks/jvid/issues/49) |
-| [#207](https://github.com/jarradbanks/jvid/issues/207) | Render queue in the Export button menu | in progress | S | ui, export | [#203](https://github.com/jarradbanks/jvid/issues/203) |
+| [#207](https://github.com/jarradbanks/jvid/issues/207) | Render queue in the Export button menu | need testing | S | ui, export | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 | [#208](https://github.com/jarradbanks/jvid/issues/208) | Timeline arrow-key navigation with modifiers | need testing | S | ui, timeline | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 | [#210](https://github.com/jarradbanks/jvid/issues/210) | Localisation (i18n) support |  | M | ui, suite-ui | [#124](https://github.com/jarradbanks/jvid/issues/124), [#203](https://github.com/jarradbanks/jvid/issues/203) |
 
@@ -421,7 +421,7 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | [#77](https://github.com/jarradbanks/jvid/issues/77) | WGSL shader effects | done | L | render, ui | [#66](https://github.com/jarradbanks/jvid/issues/66), [#44](https://github.com/jarradbanks/jvid/issues/44), [#43](https://github.com/jarradbanks/jvid/issues/43) |
 | [#78](https://github.com/jarradbanks/jvid/issues/78) | SRT subtitles: import, burn-in and sidecar | need testing | M | export, render | [#63](https://github.com/jarradbanks/jvid/issues/63), [#52](https://github.com/jarradbanks/jvid/issues/52) |
-| [#204](https://github.com/jarradbanks/jvid/issues/204) | Effects pane: browse and apply effects |  | M | ui | [#203](https://github.com/jarradbanks/jvid/issues/203) |
+| [#204](https://github.com/jarradbanks/jvid/issues/204) | Effects pane: browse and apply effects | need testing | M | ui | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 
 ## Later
 
