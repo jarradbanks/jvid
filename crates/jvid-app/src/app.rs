@@ -970,12 +970,14 @@ impl eframe::App for App {
                 tracing::warn!("keymap: can't save: {e}");
             }
             let selected = self.timeline.selected();
-            if let Some((req, _)) = self
+            if let Some((reqs, _)) = self
                 .export_dialog
                 .show(ui, self.history.project(), selected)
                 && let Some(gpu) = self.preview.gpu()
             {
-                self.queue_export(req, gpu, now);
+                for req in reqs {
+                    self.queue_export(req, gpu.clone(), now);
+                }
             }
             if let Some(c) = self.settings_dialog.show(ui, self.history.project())
                 && let Err(e) = self.history.apply(c)
