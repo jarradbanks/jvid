@@ -287,6 +287,34 @@ impl Timeline {
         }
     }
 
+    /// Where a playhead navigation key goes from here, if anywhere.
+    fn nav_target(&self, id: &str, seq: &Sequence) -> Option<Time> {
+        let (here, r) = (self.playhead(), self.transport.rate);
+        let edits = seq
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips())
+            .flat_map(|c| [c.start, c.end()]);
+        // The selected clip under the playhead, else the topmost one.
+        let clip = || {
+            let mut under = seq.clips_at(here).map(|(_, c)| c);
+            let first = seq.clips_at(here).next().map(|(_, c)| c);
+            under.find(|c| self.selected.contains(&c.id)).or(first)
+        };
+        match id {
+            "step_back_second" => Some((here - Time(FLICKS_PER_SECOND)).max(Time(0))),
+            "step_forward_second" => {
+                Some((here + Time(FLICKS_PER_SECOND)).min(self.transport.duration))
+            }
+            "prev_edit" | "prev_edit_alt" => edits.filter(|t| *t < here).max(),
+            "next_edit" | "next_edit_alt" => edits.filter(|t| *t > here).min(),
+            "clip_start" => clip().map(|c| c.start),
+            // End is exclusive: the clip's last frame, so the playhead stays on it.
+            "clip_end" => clip().map(|c| r.time_floor(r.index_floor(c.end() - Time(1)))),
+            _ => None,
+        }
+    }
+
     /// Multiplies the zoom, keeping the time under `anchor` (an x on `view`) still.
     fn zoom_by(&mut self, factor: f64, view: View, anchor: f32) {
         let t = secs(view.time(anchor));
@@ -302,7 +330,20 @@ impl Timeline {
             "step_back" => t.step(-1, 0),
             "step_forward" => t.step(1, 0),
             "go_to_start" => t.seek(Time(0), 0),
-            "go_to_end" => t.seek(t.duration, 0),
+            // The sequence end, not the scrollable tail past it.
+            "go_to_end" => t.seek(project.sequence().duration(), 0),
+            "step_back_second"
+            | "step_forward_second"
+            | "prev_edit"
+            | "next_edit"
+            | "prev_edit_alt"
+            | "next_edit_alt"
+            | "clip_start"
+            | "clip_end" => {
+                if let Some(to) = self.nav_target(id, project.sequence()) {
+                    self.seek(to);
+                }
+            }
             "zoom_in" | "zoom_out" => {
                 let f = if id == "zoom_in" {
                     ZOOM_STEP
@@ -2127,6 +2168,84 @@ mod tests {
         assert!((t.zoom - 30.0).abs() < 1e-9);
         assert!((t.view(0.0).x(t.playhead()) - before).abs() < 0.01);
         assert!(!t.action("insert", &p));
+    }
+
+    #[test]
+    fn arrow_keys_move_the_playhead() {
+        use egui::{Key, Modifiers};
+        use egui_kittest::Harness;
+        // V1: [0,2) [2,4) [4,6); A1: [0,2) [2,4) [7,9).
+        let mut h = History::new(project(5));
+        let a1 = h.project().sequence().tracks()[1].id;
+        let asset = h.project().assets()[0].id;
+        h.apply(Command::AddClip {
+            track: a1,
+            clip: NewClip {
+                asset,
+                source_in: Time(0),
+                source_out: Time(2 * S),
+                start: Time(7 * S),
+                link: None,
+            },
+        })
+        .unwrap();
+        let p = h.project().clone();
+        let frame = Rate::new(30, 1).time_floor(1);
+        let run = |map: Keymap, t: Timeline, keys: &[(Modifiers, Key, Time)]| {
+            let mut h = Harness::new_ui_state(
+                |ui, t: &mut Timeline| {
+                    for id in map.pressed(ui.ctx(), true) {
+                        assert!(t.action(id, &p), "{id}");
+                    }
+                },
+                t,
+            );
+            for &(m, k, want) in keys {
+                h.key_press_modifiers(m, k);
+                h.run();
+                assert_eq!(h.state().playhead(), want, "{m:?}+{k:?}");
+            }
+            h.into_state()
+        };
+        let (none, shift, ctrl) = (Modifiers::NONE, Modifiers::SHIFT, Modifiers::COMMAND);
+        let mut t = Timeline::default();
+        t.sync(&p);
+        t.seek(Time(3 * S));
+        let t = run(
+            Keymap::default(),
+            t,
+            &[
+                (none, Key::ArrowRight, Time(3 * S) + frame),
+                (none, Key::ArrowLeft, Time(3 * S)),
+                (shift, Key::ArrowRight, Time(4 * S)),
+                (shift, Key::ArrowLeft, Time(3 * S)),
+                (ctrl, Key::ArrowRight, Time(4 * S)),
+                (ctrl, Key::ArrowRight, Time(6 * S)),
+                // An edit on another track.
+                (ctrl, Key::ArrowRight, Time(7 * S)),
+                (ctrl, Key::ArrowLeft, Time(6 * S)),
+                (none, Key::ArrowDown, Time(7 * S)),
+                (none, Key::ArrowUp, Time(6 * S)),
+                (none, Key::ArrowLeft, Time(6 * S) - frame),
+                (ctrl | shift, Key::ArrowLeft, Time(4 * S)),
+                (ctrl | shift, Key::ArrowRight, Time(6 * S) - frame),
+                (none, Key::Home, Time(0)),
+                (shift, Key::ArrowLeft, Time(0)),
+                (none, Key::End, Time(9 * S)),
+                (shift, Key::ArrowRight, Time(10 * S)),
+            ],
+        );
+        // Rebound in keymap.toml, the old key does nothing.
+        let map = Keymap::from_toml("next_edit = \"N\"").unwrap();
+        run(
+            map,
+            t,
+            &[
+                (ctrl, Key::ArrowRight, Time(10 * S)),
+                (none, Key::Home, Time(0)),
+                (none, Key::N, Time(2 * S)),
+            ],
+        );
     }
 
     #[test]

@@ -237,6 +237,7 @@ mod tests {
         assert!(found.contains(&"mark_in") && found.contains(&"mark_clip"));
         assert!(!found.contains(&"lift"));
         assert_eq!(matches("").len(), ACTIONS.len());
+        assert_eq!(matches("edit point").len(), 4);
     }
 
     #[test]
