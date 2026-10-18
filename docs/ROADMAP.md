@@ -295,7 +295,7 @@ flowchart LR
 | [#203](https://github.com/jarradbanks/jvid/issues/203) | Title Case pass on all UI labels | need testing | S | ui, suite-ui | [#202](https://github.com/jarradbanks/jvid/issues/202), [#200](https://github.com/jarradbanks/jvid/issues/200) |
 | [#209](https://github.com/jarradbanks/jvid/issues/209) | Transform handles drawn over the transport bar | need testing | S | ui | [#202](https://github.com/jarradbanks/jvid/issues/202) |
 | [#211](https://github.com/jarradbanks/jvid/issues/211) | On-canvas text editing in the Program monitor |  | M | ui, render | [#209](https://github.com/jarradbanks/jvid/issues/209), [#203](https://github.com/jarradbanks/jvid/issues/203) |
-| [#212](https://github.com/jarradbanks/jvid/issues/212) | Font picker with inline search | in progress | S | ui | [#203](https://github.com/jarradbanks/jvid/issues/203) |
+| [#212](https://github.com/jarradbanks/jvid/issues/212) | Font picker with inline search | need testing | S | ui | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 
 ### [M4 · Export & v0.1.0](https://github.com/jarradbanks/jvid/milestone/5)
 
@@ -402,7 +402,7 @@ flowchart LR
 | [#76](https://github.com/jarradbanks/jvid/issues/76) | User guide and shortcut cheat sheet | done | M | docs | [#54](https://github.com/jarradbanks/jvid/issues/54) |
 | [#93](https://github.com/jarradbanks/jvid/issues/93) | Export marked highlights as separate files |  | M | export, timeline | [#40](https://github.com/jarradbanks/jvid/issues/40), [#58](https://github.com/jarradbanks/jvid/issues/58) |
 | [#94](https://github.com/jarradbanks/jvid/issues/94) | Zoom-to-region for screen recordings | done | M | ui, render | [#47](https://github.com/jarradbanks/jvid/issues/47), [#43](https://github.com/jarradbanks/jvid/issues/43), [#49](https://github.com/jarradbanks/jvid/issues/49) |
-| [#207](https://github.com/jarradbanks/jvid/issues/207) | Render queue in the Export button menu |  | S | ui, export | [#203](https://github.com/jarradbanks/jvid/issues/203) |
+| [#207](https://github.com/jarradbanks/jvid/issues/207) | Render queue in the Export button menu | in progress | S | ui, export | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 | [#208](https://github.com/jarradbanks/jvid/issues/208) | Timeline arrow-key navigation with modifiers | need testing | S | ui, timeline | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 | [#210](https://github.com/jarradbanks/jvid/issues/210) | Localisation (i18n) support |  | M | ui, suite-ui | [#124](https://github.com/jarradbanks/jvid/issues/124), [#203](https://github.com/jarradbanks/jvid/issues/203) |
 
