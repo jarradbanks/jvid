@@ -292,8 +292,8 @@ flowchart LR
 | [#51](https://github.com/jarradbanks/jvid/issues/51) | Clip fade handles | done | S | timeline | [#50](https://github.com/jarradbanks/jvid/issues/50), [#45](https://github.com/jarradbanks/jvid/issues/45) |
 | [#200](https://github.com/jarradbanks/jvid/issues/200) | Inspector gutter and keyframe lane discoverability | need testing | S | ui, timeline | [#48](https://github.com/jarradbanks/jvid/issues/48) |
 | [#202](https://github.com/jarradbanks/jvid/issues/202) | Text and solid clips: source view, live edit, fit-to-text bounds | done | M | ui, render | [#48](https://github.com/jarradbanks/jvid/issues/48) |
-| [#203](https://github.com/jarradbanks/jvid/issues/203) | Title Case pass on all UI labels |  | S | ui, suite-ui | [#202](https://github.com/jarradbanks/jvid/issues/202), [#200](https://github.com/jarradbanks/jvid/issues/200) |
-| [#209](https://github.com/jarradbanks/jvid/issues/209) | Transform handles drawn over the transport bar |  | S | ui | [#202](https://github.com/jarradbanks/jvid/issues/202) |
+| [#203](https://github.com/jarradbanks/jvid/issues/203) | Title Case pass on all UI labels | in progress | S | ui, suite-ui | [#202](https://github.com/jarradbanks/jvid/issues/202), [#200](https://github.com/jarradbanks/jvid/issues/200) |
+| [#209](https://github.com/jarradbanks/jvid/issues/209) | Transform handles drawn over the transport bar | need testing | S | ui | [#202](https://github.com/jarradbanks/jvid/issues/202) |
 | [#211](https://github.com/jarradbanks/jvid/issues/211) | On-canvas text editing in the Program monitor |  | M | ui, render | [#209](https://github.com/jarradbanks/jvid/issues/209), [#203](https://github.com/jarradbanks/jvid/issues/203) |
 | [#212](https://github.com/jarradbanks/jvid/issues/212) | Font picker with inline search |  | S | ui | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 
@@ -420,7 +420,7 @@ flowchart LR
 | Issue | Title | Status | Size | Area | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | [#77](https://github.com/jarradbanks/jvid/issues/77) | WGSL shader effects | done | L | render, ui | [#66](https://github.com/jarradbanks/jvid/issues/66), [#44](https://github.com/jarradbanks/jvid/issues/44), [#43](https://github.com/jarradbanks/jvid/issues/43) |
-| [#78](https://github.com/jarradbanks/jvid/issues/78) | SRT subtitles: import, burn-in and sidecar |  | M | export, render | [#63](https://github.com/jarradbanks/jvid/issues/63), [#52](https://github.com/jarradbanks/jvid/issues/52) |
+| [#78](https://github.com/jarradbanks/jvid/issues/78) | SRT subtitles: import, burn-in and sidecar | in progress | M | export, render | [#63](https://github.com/jarradbanks/jvid/issues/63), [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#204](https://github.com/jarradbanks/jvid/issues/204) | Effects pane: browse and apply effects |  | M | ui | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 
 ## Later
