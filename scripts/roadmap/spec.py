@@ -1014,3 +1014,14 @@ I("text-solid-fixes", "Text and solid clips: source view, live edit, fit-to-text
       "Typing in the Inspector text field updates the Program monitor on each keystroke while paused",
       "Selecting a text clip draws handles around the text only; double-click on the text starts editing",
       "kittests cover live update and fit-to-text bounds"])
+
+I("title-case", "Title Case pass on all UI labels", "M3", ["ui", "suite-ui"], "S", ["text-solid-fixes", "kf-discover"],
+  summary="Owner preference: every UI label, button, menu item, tab, section header and property name uses Title Case.",
+  scope=[
+      "Sweep every user-visible string in jvid-app and suite-ui to Title Case: buttons ('Add Effect'), menus, tabs, section headers, property labels, tooltips' titles, dialog titles",
+      "Effect parameter names from WGSL headers are displayed in Title Case (amount -> Amount) without changing the stored parameter ids",
+      "Update DESIGN.md's copy rules to say Title Case, and update kittest snapshots",
+      "Leave sentence-style text (descriptions, error messages, help paragraphs) as sentences",
+  ],
+  ac=["No lowercase-first labels remain in the editor, inspector, menus or dialogs",
+      "Bundled effects show 'Amount', 'Strength', 'Softness', 'Grain'; existing .jvid projects still load"])
