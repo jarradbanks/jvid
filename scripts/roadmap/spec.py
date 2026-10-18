@@ -1081,3 +1081,15 @@ I("in-app-dialogs", "In-app confirm dialogs", "M4", ["ui", "suite-ui"], "M", ["t
   ac=["No rfd::MessageDialog remains (grep)",
       "Closing with unsaved changes shows the in-app modal; each button does the right thing (kittest)",
       "Modal is keyboard-operable: Enter = default, Esc = Cancel"])
+
+I("i18n", "Localisation (i18n) support", "M5", ["ui", "suite-ui"], "M", ["in-app-dialogs", "title-case"],
+  summary="Move every user-visible string into translation files so jvid can ship in multiple languages.",
+  scope=[
+      "Pick a small, well-maintained Rust i18n approach (e.g. fluent / rust-i18n); new dependency: ask the orchestrator before adding",
+      "Extract all user-visible strings in jvid-app and suite-ui into an English source file; no hard-coded labels remain",
+      "Language picker in Settings (default: system locale, fallback English); switching applies without restart if cheap, otherwise on restart",
+      "Fonts cover the shipped languages' glyphs (note CJK font size cost before adding)",
+      "Ship English plus one second language as proof (e.g. machine-reviewed Spanish), with a docs/translating.md guide",
+  ],
+  ac=["Switching to the second language translates menus, inspector, dialogs and the export dialog",
+      "A test fails if a new UI string bypasses the translation layer (e.g. key-coverage test)"])
