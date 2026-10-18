@@ -452,6 +452,10 @@
     "i18n": {
       "number": 210,
       "id": 5905183823
+    },
+    "canvas-text-edit": {
+      "number": 211,
+      "id": 5905285008
     }
   },
   "links": [
@@ -1161,6 +1165,14 @@
     ],
     [
       "i18n",
+      "title-case"
+    ],
+    [
+      "canvas-text-edit",
+      "gizmo-clip"
+    ],
+    [
+      "canvas-text-edit",
       "title-case"
     ]
   ]

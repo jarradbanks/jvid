@@ -1093,3 +1093,14 @@ I("i18n", "Localisation (i18n) support", "M5", ["ui", "suite-ui"], "M", ["in-app
   ],
   ac=["Switching to the second language translates menus, inspector, dialogs and the export dialog",
       "A test fails if a new UI string bypasses the translation layer (e.g. key-coverage test)"])
+
+I("canvas-text-edit", "On-canvas text editing in the Program monitor", "M3", ["ui", "render"], "M", ["gizmo-clip", "title-case"],
+  summary="Double-clicking a text clip in the Program monitor edits its text in place, on the canvas.",
+  scope=[
+      "Double-click a text clip in the Program view enters edit mode: a caret appears in the rendered text at the click position, respecting the clip's transform (position, scale, rotation)",
+      "Typing, Backspace/Delete, arrows, Home/End, Shift-selection, Ctrl+A, copy/paste and Enter (newline) work; the frame redraws live with the real text renderer",
+      "Esc or clicking outside commits; the whole edit session is one undo step (SetClipProps); transform handles hide while editing",
+      "Playback shortcuts (Space, J/K/L, arrows) are suppressed while editing",
+  ],
+  ac=["Double-click 'Title' on a rotated text clip, type, see it update live, Esc commits, Ctrl+Z restores the old text in one step (kittest)",
+      "Space types a space while editing instead of starting playback"])
