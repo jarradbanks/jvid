@@ -30,6 +30,8 @@ fn rejects_bad_arguments() {
         "render p.jvid q.jvid -o x",
         "render p.jvid -o x --range 1",
         "render p.jvid -o x --loudness loud",
+        "render p.jvid -o x --target-size 0",
+        "render p.jvid -o x --target-size 2.5",
     ] {
         assert!(args(bad).is_err(), "{bad}");
     }
@@ -60,4 +62,16 @@ fn request_uses_timecodes_or_the_app_defaults() {
     assert!(request(&project, &backwards, presets.clone()).is_err());
     let garbage = args("render p.jvid -o o.mp4 --in 1:2").unwrap();
     assert!(request(&project, &garbage, presets).is_err());
+}
+
+#[test]
+fn target_size_goes_into_the_preset_in_bytes() {
+    let project = Project::default();
+    let presets = jvid_core::preset::builtin();
+    let a = args("render p.jvid -o o.mp4 --target-size 25").unwrap();
+    let r = request(&project, &a, presets.clone()).unwrap();
+    assert_eq!(
+        r.preset.options.get("target_size").map(String::as_str),
+        Some("25000000")
+    );
 }

@@ -134,8 +134,11 @@ fn open_video(
     if software {
         opts.set("preset", "veryfast");
     }
-    for (k, v) in rate_control(name, options.get("crf"), (width, height)) {
-        opts.set(k, &v);
+    // An explicit `b` (target-size export) is average bit rate mode, so no constant quality.
+    if !options.contains_key("b") {
+        for (k, v) in rate_control(name, options.get("crf"), (width, height)) {
+            opts.set(k, &v);
+        }
     }
     // x264's preset and tune values aren't valid for hardware encoders and would fail the open;
     // other encoders ignore options they don't have.

@@ -1,7 +1,7 @@
 //! Headless render: turns a `.jvid` project into a video file without opening a window.
 //!
 //! `jvid render project.jvid -o out.mp4 [--preset NAME] [--in TC --out TC | --range IN-OUT]
-//! [--loudness LUFS] [--json]`. Exports through the app's own export path, so the same project,
+//! [--loudness LUFS] [--target-size MB] [--json]`. Exports through the app's own export path, so the same project,
 //! range and preset give the same file.
 
 use std::path::PathBuf;
@@ -10,11 +10,11 @@ use std::time::Duration;
 
 use jvid_app::export::{self, Error, Request};
 use jvid_core::model::Project;
-use jvid_core::preset::Preset;
+use jvid_core::preset::{Preset, VideoCodec};
 use jvid_core::time::{Time, parse_timecode};
 
 const USAGE: &str = "usage: jvid render PROJECT.jvid -o OUT [--preset NAME] \
-[--in TC --out TC | --range IN-OUT] [--loudness LUFS] [--json]";
+[--in TC --out TC | --range IN-OUT] [--loudness LUFS] [--target-size MB] [--json]";
 
 /// Exit codes: 0 done, 1 export failed, 2 bad arguments, 3 project unreadable, 4 no GPU.
 fn main() -> ExitCode {
@@ -80,6 +80,8 @@ struct Args {
     preset: Option<String>,
     range: (Option<String>, Option<String>),
     loudness: Option<f64>,
+    /// Megabytes, 10^6 bytes each.
+    target_size: Option<u64>,
     json: bool,
 }
 
@@ -107,6 +109,11 @@ fn parse(args: &[String]) -> Result<Args, String> {
                 let v = value()?;
                 a.loudness = Some(v.parse().map_err(|_| format!("bad loudness {v}"))?);
             }
+            "--target-size" => {
+                let v = value()?;
+                let mb = v.parse().ok().filter(|&mb| mb > 0);
+                a.target_size = Some(mb.ok_or(format!("bad target size {v}, want whole MB"))?);
+            }
             "--json" => a.json = true,
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
             s if project.is_none() => project = Some(s.to_string()),
@@ -120,11 +127,23 @@ fn parse(args: &[String]) -> Result<Args, String> {
 
 /// The export request, with the app's defaults: the first preset and the sequence's in/out points.
 fn request(project: &Project, args: &Args, presets: Vec<Preset>) -> Result<Request, String> {
-    let preset = match &args.preset {
+    let mut preset = match &args.preset {
         Some(n) => presets.into_iter().find(|p| &p.name == n),
         None => presets.into_iter().next(),
     }
     .ok_or_else(|| format!("no preset {:?}", args.preset.as_deref().unwrap_or_default()))?;
+    if let Some(mb) = args.target_size {
+        if !matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc)) {
+            return Err(format!(
+                "--target-size needs an H.264 or HEVC preset, not {:?}",
+                preset.name
+            ));
+        }
+        let bytes = mb * 1_000_000;
+        preset
+            .options
+            .insert("target_size".into(), bytes.to_string());
+    }
     let seq = project.sequence();
     let rate = project.settings().frame_rate;
     let tc = |s: &Option<String>, default: Time| match s {
