@@ -1540,7 +1540,15 @@ impl Project {
         merge: bool,
     ) -> Option<Placement> {
         let a = self.asset(asset)?;
-        let probe = a.probe.as_ref()?;
+        // Text and solids have no file to probe: a video-only source of the default still length.
+        let generated = a.generated().then(|| ProbeInfo {
+            duration: Time(
+                crate::time::FLICKS_PER_SECOND * i64::from(crate::settings::DEFAULT_STILL_SECS),
+            ),
+            width: Some(1),
+            ..ProbeInfo::default()
+        });
+        let probe = a.probe.as_ref().or(generated.as_ref())?;
         let source_in = a.in_point.unwrap_or_default();
         let source_out = a.out_point.unwrap_or(probe.duration);
         if source_out <= source_in {
@@ -2379,6 +2387,19 @@ mod tests {
     fn time_arithmetic() {
         assert_eq!(Time(5) + Time(3), Time(8));
         assert_eq!(Time(5) - Time(8), Time(-3));
+    }
+
+    #[test]
+    fn text_places_as_video_only_with_the_still_length() {
+        let mut p = Project::default();
+        let v1 = p.sequence.add_track(TrackKind::Video, "V1");
+        p.sequence.add_track(TrackKind::Audio, "A1");
+        let id = p.add_asset("");
+        p.asset_mut(id).unwrap().text = Some(Text::default());
+        let pl = p.placement(id, Time(0), false, None, false).unwrap();
+        assert_eq!((pl.video, pl.audio), (Some(v1), None));
+        let secs = i64::from(crate::settings::DEFAULT_STILL_SECS);
+        assert_eq!(pl.source_out, Time(secs * crate::time::FLICKS_PER_SECOND));
     }
 
     #[test]

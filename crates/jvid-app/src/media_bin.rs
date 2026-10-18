@@ -73,6 +73,11 @@ pub struct MediaBin {
     remove_focus: Option<AssetId>,
     /// An in-use asset waiting on the remove warning.
     pub confirm_remove: Option<AssetId>,
+    /// A Text preset was clicked (false) or dragged (true) when the project had this many
+    /// assets; the next one added is its asset.
+    new_text: Option<(usize, bool)>,
+    /// Scroll the Media tab to this asset next time it draws.
+    reveal: Option<AssetId>,
     thumbs: Thumbs,
 }
 
@@ -153,6 +158,18 @@ impl MediaBin {
         missing: &HashSet<PathBuf>,
     ) -> BinResponse {
         let mut out = BinResponse::default();
+        if let Some((n, dragged)) = self.new_text
+            && let Some(a) = project.assets().get(n)
+        {
+            self.new_text = None;
+            self.selected = Some(a.id);
+            if dragged {
+                // Hand the drag over to the new asset so the timeline places it on drop.
+                egui::DragAndDrop::set_payload(ui.ctx(), a.id);
+            } else {
+                (self.tab, self.reveal, self.query) = (0, Some(a.id), String::new());
+            }
+        }
         // The new tab shows next frame; the click already repaints.
         let mut tab = self.tab;
         Panel::tabbed(&TABS, &mut tab)
@@ -161,7 +178,11 @@ impl MediaBin {
             .show(ui, |ui| match self.tab {
                 0 => self.media(ui, project, importing, missing, &mut out),
                 1 => effects_tab(ui),
-                _ => text_presets(ui, &mut out),
+                _ => {
+                    if let Some(dragged) = text_presets(ui, &mut out) {
+                        self.new_text = Some((project.assets().len(), dragged));
+                    }
+                }
             });
         self.tab = tab;
         if let Some(id) = self.confirm_remove {
@@ -518,6 +539,10 @@ impl MediaBin {
             r.clone()
                 .on_hover_text(format!("Media offline: {}", a.path.display()));
         }
+        if self.reveal == Some(a.id) {
+            r.scroll_to_me(None);
+            self.reveal = None;
+        }
         if r.clicked() {
             self.selected = Some(a.id);
             self.renaming = self.renaming.take().filter(|(id, _)| *id == a.id);
@@ -749,18 +774,24 @@ fn letterbox(ui: &Ui, rect: Rect, tex: &TextureHandle) {
         .paint_at(ui, r);
 }
 
-/// The Text tab: one button per preset, each adding a text asset to the bin.
-fn text_presets(ui: &mut Ui, out: &mut BinResponse) {
+/// The Text tab: one button per preset, each adding a text asset to the bin when clicked
+/// or dragged out. Returns whether the press was a drag, when one was.
+fn text_presets(ui: &mut Ui, out: &mut BinResponse) -> Option<bool> {
     ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
+    let mut added = None;
     for (name, text) in jvid_core::model::Text::presets() {
         let b = Button::secondary(name).width(ui.available_width());
-        if ui.add(b).clicked() {
+        let r = ui.add(b).interact(Sense::click_and_drag());
+        let dragged = r.drag_started();
+        if dragged || r.clicked() {
             out.command = Some(Command::AddText {
                 name: name.into(),
                 text,
             });
+            added = Some(dragged);
         }
     }
+    added
 }
 
 /// The Effects tab: the effects folder's files, each with its name or why it doesn't load.
