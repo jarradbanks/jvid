@@ -282,6 +282,11 @@ impl Preview {
         });
     }
 
+    #[cfg(test)]
+    pub fn playing(&self) -> bool {
+        self.program.transport.speed() != 0
+    }
+
     pub fn source_asset(&self) -> Option<AssetId> {
         self.player.as_ref().map(|p| p.asset)
     }

@@ -1075,6 +1075,12 @@ impl TabViewer for Viewer<'_> {
                     self.timeline.seek(t);
                 }
                 let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
+                if crate::handles::editing(ui.ctx()) {
+                    if let Some((c, g)) = crate::handles::edit_text(ui, self.project, t, frame) {
+                        (self.command, self.gesture) = (Some(c), g);
+                    }
+                    return;
+                }
                 if let Some((c, g)) = crate::handles::show(ui, self.project, selected, t, frame) {
                     (self.command, self.gesture) = (Some(c), g);
                 }
@@ -1082,9 +1088,11 @@ impl TabViewer for Viewer<'_> {
                 if let Some(c) = crate::zoom::show(ui, self.project, selected, t, frame) {
                     (self.command, self.gesture) = (Some(c), None);
                 }
-                if let Some(id) = crate::handles::double_clicked_text(ui, self.project, t, frame) {
+                if let Some((id, at)) =
+                    crate::handles::double_clicked_text(ui, self.project, t, frame)
+                {
                     self.timeline.select_clip(self.project.sequence(), id);
-                    crate::inspector::focus_text(ui.ctx());
+                    crate::handles::start_editing(ui.ctx(), self.project, id, at);
                 }
             });
             return;

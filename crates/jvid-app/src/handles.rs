@@ -123,11 +123,16 @@ fn bounds(
     Some([at(x0, y0), at(x1, y0), at(x0, y1), at(x1, y1)])
 }
 
-/// The top text clip with glyphs (or its box) near a double-click at playhead `t`, inside
+/// The top text clip with glyphs (or its box) near a double-click, and where it was, at playhead `t`, inside
 /// `frame`, the project's on-screen rect.
 // shortcut: maps the click through the layer's uncropped quad; a cropped text layer hits
 // slightly off. Invert the crop if it matters.
-pub fn double_clicked_text(ui: &Ui, project: &Project, t: Time, frame: Rect) -> Option<ClipId> {
+pub fn double_clicked_text(
+    ui: &Ui,
+    project: &Project,
+    t: Time,
+    frame: Rect,
+) -> Option<(ClipId, Pos2)> {
     let primary = egui::PointerButton::Primary;
     let pos = ui.input(|i| {
         let p = i.pointer.interact_pos();
@@ -156,7 +161,169 @@ pub fn double_clicked_text(ui: &Ui, project: &Project, t: Time, frame: Rect) -> 
         let near = (y - r..=y + r).flat_map(|y| (x - r..=x + r).map(move |x| (x, y)));
         near.filter(|(x, y)| (0..w).contains(x) && (0..h).contains(y))
             .any(|(x, y)| img[((y * w + x) * 4 + 3) as usize] > 0)
-            .then_some(l.clip)
+            .then_some((l.clip, pos))
+    })
+}
+
+/// Undo gesture for on-canvas text edits, xored with the asset and the session count.
+const TYPING: GestureKey = 0x7479_7065_0000; // "type"
+
+/// An on-canvas text edit: the clip, its text as typed, and the session count.
+#[derive(Clone)]
+struct Typing {
+    clip: ClipId,
+    content: String,
+    session: u64,
+}
+
+fn typing_id() -> egui::Id {
+    egui::Id::new("canvas text")
+}
+
+/// Whether a text clip is being edited on the canvas; transform handles hide meanwhile.
+pub fn editing(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<Typing>(typing_id()).is_some())
+}
+
+/// Starts editing `clip`'s text on the canvas next frame, the caret at screen point `at`.
+pub fn start_editing(ctx: &egui::Context, project: &Project, clip: ClipId, at: Pos2) {
+    let Some((_, c)) = project.sequence().clip(clip) else {
+        return;
+    };
+    let Some(text) = project.asset(c.asset).and_then(|a| a.text.as_ref()) else {
+        return;
+    };
+    let session = ctx.data(|d| d.get_temp::<u64>(typing_id().with("sessions")).unwrap_or(0)) + 1;
+    ctx.data_mut(|d| {
+        d.insert_temp(typing_id().with("sessions"), session);
+        d.insert_temp(typing_id().with("at"), at);
+        d.insert_temp(
+            typing_id(),
+            Typing {
+                clip,
+                content: text.content.clone(),
+                session,
+            },
+        );
+    });
+}
+
+/// The on-canvas text editor at playhead `t`, inside `frame`, the project's on-screen rect: a
+/// hidden text field takes the keys (so the keymap stands down) and a caret is drawn into the
+/// rendered text. Esc or a click elsewhere ends it; each session is one undo step.
+// shortcut: mouse drag-selection and Up/Down follow the hidden field's own layout, not the
+// rendered one; map them through `text::hit` too if they feel off.
+pub fn edit_text(ui: &mut Ui, project: &Project, t: Time, frame: Rect) -> Option<Edit> {
+    let id = typing_id();
+    let mut typing: Typing = ui.data(|d| d.get_temp(id))?;
+    let seq = project.sequence();
+    let layer = jvid_core::eval::video_at(seq, t)
+        .into_iter()
+        .find(|l| l.clip == typing.clip);
+    let found = layer.as_ref().and_then(|l| {
+        let a = project.asset(l.asset)?;
+        let (_, c) = seq.clip(l.clip)?;
+        Some((
+            a,
+            a.text.as_ref()?,
+            corners(project, c, &l.transform, frame)?,
+        ))
+    });
+    let (Some(l), Some((asset, base, [tl, tr, bl, br]))) = (&layer, found) else {
+        ui.data_mut(|d| d.remove::<Typing>(id));
+        return None;
+    };
+    let st = project.settings();
+    let size = (st.width, st.height);
+    let (w, h) = (st.width as f32, st.height as f32);
+    let at = |[x, y]: [f32; 2]| tl + (tr - tl) * (x / w) + (bl - tl) * (y / h);
+    // Where screen point `p` sits in frame pixels: the inverse of `at`.
+    let back = |p: Pos2| {
+        let (u, v, d) = (tr - tl, bl - tl, p - tl);
+        let det = u.x * v.y - u.y * v.x;
+        let a = (d.x * v.y - d.y * v.x) / det;
+        let b = (u.x * d.y - u.y * d.x) / det;
+        [a * w, b * h]
+    };
+    let shown = |content: &str| Text {
+        content: content.to_owned(),
+        ..base.with(&l.text)
+    };
+
+    let field = id.with("field");
+    let viewer = crate::preview::viewer_rect(ui);
+    let area = Rect::from_points(&[tl, tr, bl, br]).intersect(viewer);
+    let first = ui.data_mut(|d| d.remove_temp::<Pos2>(id.with("at")));
+    let pressed = ui.input(|i| {
+        let p = i.pointer.interact_pos();
+        p.filter(|_| i.pointer.primary_pressed())
+    });
+    let click = first.or(pressed.filter(|p| area.contains(*p)));
+    // Over the text, so a click there keeps focus; carets come from the rendered layout.
+    let out = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+            ui.set_opacity(0.0);
+            egui::TextEdit::multiline(&mut typing.content)
+                .id(field)
+                .frame(egui::Frame::NONE)
+                .desired_width(area.width())
+                .show(ui)
+        })
+        .inner;
+    if first.is_some() {
+        ui.memory_mut(|m| m.request_focus(field));
+    }
+    if let Some(p) = click {
+        let i = text::hit(&shown(&typing.content), size, back(p));
+        let mut state = out.state.clone();
+        let one = egui::text::CCursorRange::one(egui::text::CCursor::new(i));
+        state.cursor.set_char_range(Some(one));
+        state.store(ui.ctx(), field);
+        ui.memory_mut(|m| m.request_focus(field));
+    }
+    let focused = ui.memory(|m| m.has_focus(field));
+    if !focused && first.is_none() && click.is_none() {
+        ui.data_mut(|d| d.remove::<Typing>(id));
+        return None;
+    }
+    ui.data_mut(|d| d.insert_temp(id, typing.clone()));
+
+    let shown = shown(&typing.content);
+    let carets = text::carets(&shown, size);
+    let range = egui::TextEdit::load_state(ui.ctx(), field).and_then(|s| s.cursor.char_range());
+    let (a, b) = range.map_or((0, 0), |r| (r.primary.index.0, r.secondary.index.0));
+    let p = ui.painter().with_clip_rect(viewer);
+    let (lo, hi) = (
+        a.min(b).min(carets.len() - 1),
+        a.max(b).min(carets.len() - 1),
+    );
+    for i in lo..hi {
+        let ([x0, top, bottom], [x1, ..]) = (carets[i], carets[i + 1]);
+        // A wrap or newline jumps lines; that char's highlight is skipped.
+        if x1 > x0 && carets[i + 1][1] == top {
+            let q = vec![
+                at([x0, top]),
+                at([x1, top]),
+                at([x1, bottom]),
+                at([x0, bottom]),
+            ];
+            let fill = color::AMBER.gamma_multiply(0.35);
+            p.add(egui::Shape::convex_polygon(q, fill, Stroke::NONE));
+        }
+    }
+    let [x, top, bottom] = carets[a.min(carets.len() - 1)];
+    p.line_segment(
+        [at([x, top]), at([x, bottom])],
+        Stroke::new(2.0, color::AMBER),
+    );
+
+    (typing.content != base.content).then(|| {
+        let text = Text {
+            content: typing.content.clone(),
+            ..base.clone()
+        };
+        let cmd = jvid_core::history::Command::SetText { id: asset.id, text };
+        (cmd, Some(TYPING ^ asset.id.0 ^ (typing.session << 24)))
     })
 }
 
@@ -546,7 +713,7 @@ pub(crate) mod tests {
             .build_ui_state(
                 |ui, (p, hit): &mut (Project, Option<ClipId>)| {
                     let frame = Rect::from_min_size(Pos2::ZERO, vec2(960.0, 540.0));
-                    *hit = hit.or(double_clicked_text(ui, p, Time(0), frame));
+                    *hit = hit.or(double_clicked_text(ui, p, Time(0), frame).map(|(c, _)| c));
                 },
                 (h.project().clone(), None),
             );
@@ -575,6 +742,73 @@ pub(crate) mod tests {
         (0..20).for_each(|_| harness.step());
         click(&mut harness, pos2(480.0, 270.0));
         assert_eq!(harness.state().1, Some(id));
+    }
+
+    /// Double-clicks `p` within one step.
+    fn double_click<S>(harness: &mut egui_kittest::Harness<'_, S>, p: Pos2) {
+        harness.hover_at(p);
+        harness.step();
+        for pressed in [true, false, true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            });
+        }
+        harness.run();
+    }
+
+    #[test]
+    fn typing_on_a_rotated_title_is_live_and_one_undo_step() {
+        use jvid_core::history::{Command, History};
+        let (mut h, id) = title();
+        let c = h.project().sequence().tracks()[0].clips()[0].clone();
+        let x = Transform {
+            rotation: 30.0,
+            ..c.transform.clone()
+        };
+        h.apply(Command::SetClipProps(vec![(id, x, c.keyframes.clone())]))
+            .unwrap();
+        let content = |h: &History| {
+            let a = h.project().assets().iter().find(|a| a.text.is_some());
+            a.and_then(|a| a.text.clone()).unwrap().content
+        };
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([960.0, 540.0])
+            .with_step_dt(0.05)
+            .build_ui_state(
+                |ui, h: &mut History| {
+                    let frame = Rect::from_min_size(Pos2::ZERO, vec2(960.0, 540.0));
+                    let edit = if editing(ui.ctx()) {
+                        edit_text(ui, h.project(), Time(0), frame)
+                    } else {
+                        if let Some((c, at)) = double_clicked_text(ui, h.project(), Time(0), frame)
+                        {
+                            start_editing(ui.ctx(), h.project(), c, at);
+                        }
+                        None
+                    };
+                    if let Some((cmd, Some(k))) = edit {
+                        h.apply_coalesced(k, cmd).unwrap();
+                    }
+                },
+                h,
+            );
+        harness.run();
+        double_click(&mut harness, pos2(480.0, 270.0));
+        assert!(editing(&harness.ctx), "a double-click starts editing");
+        harness.key_press(egui::Key::End);
+        for s in [" ", "2"] {
+            harness.event(egui::Event::Text(s.into()));
+            harness.run();
+        }
+        assert_eq!(content(harness.state()), "Title 2", "the text updates live");
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        assert!(!editing(&harness.ctx), "Esc commits");
+        assert!(harness.state_mut().undo());
+        assert_eq!(content(harness.state()), "Title", "one undo restores it");
     }
 
     #[test]

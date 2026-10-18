@@ -73,8 +73,8 @@ fn remember<T>(list: &mut Vec<(Key, T)>, k: Key, v: T) {
     list.push((k, v));
 }
 
-/// Glyph coverage of `text` laid out on a `size` frame: one byte per pixel.
-fn coverage(f: &mut Fonts, text: &Text, size: (u32, u32)) -> Vec<u8> {
+/// `text` shaped for a `size` frame, the wrap width, and the offset from buffer to frame pixels.
+fn layout(f: &mut Fonts, text: &Text, size: (u32, u32)) -> (Buffer, f32, [i32; 2]) {
     let (w, h) = size;
     let metrics = Metrics::new(text.size.max(1.0), text.size.max(1.0) * 1.2);
     let mut buf = Buffer::new(&mut f.system, metrics);
@@ -116,6 +116,13 @@ fn coverage(f: &mut Fonts, text: &Text, size: (u32, u32)) -> Vec<u8> {
     };
     let dx = (text.anchor[0] * w as f32 - block_w / 2.0 - left).round() as i32;
     let dy = (text.anchor[1] * h as f32 - block_h / 2.0).round() as i32;
+    (buf, wrap, [dx, dy])
+}
+
+/// Glyph coverage of `text` laid out on a `size` frame: one byte per pixel.
+fn coverage(f: &mut Fonts, text: &Text, size: (u32, u32)) -> Vec<u8> {
+    let (w, h) = size;
+    let (buf, _, [dx, dy]) = layout(f, text, size);
     let mut out = vec![0u8; (w * h) as usize];
     let Fonts { system, swash, .. } = f;
     buf.draw(
@@ -293,6 +300,59 @@ pub fn drawn_bounds(text: &Text, size: (u32, u32)) -> Option<[u32; 4]> {
         .then(|| [rx.start, ry.start, rx.end, ry.end].map(|v| v as u32))
 }
 
+/// Byte offsets where each line (paragraph) of `s` starts.
+fn line_starts(s: &str) -> Vec<usize> {
+    std::iter::once(0)
+        .chain(s.match_indices('\n').map(|(i, _)| i + 1))
+        .collect()
+}
+
+/// Where a caret before each char of `text.content`, and after the last, sits on a `size`
+/// frame: `[x, top, bottom]` in frame pixels, one more than there are chars.
+// shortcut: left-to-right only; a caret in right-to-left text sits mirrored.
+pub fn carets(text: &Text, size: (u32, u32)) -> Vec<[f32; 3]> {
+    let s = &text.content;
+    let starts = line_starts(s);
+    let mut f = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let (buf, wrap, [dx, dy]) = layout(&mut f, text, size);
+    let empty = match text.align {
+        Align::Left => 0.0,
+        Align::Center => wrap / 2.0,
+        Align::Right => wrap,
+    };
+    let runs: Vec<_> = buf.layout_runs().collect();
+    let bytes = s.char_indices().map(|(i, _)| i).chain([s.len()]);
+    bytes
+        .map(|byte| {
+            let line = starts.partition_point(|&b| b <= byte) - 1;
+            let index = byte - starts[line];
+            let mut out = [empty, 0.0, text.size];
+            for run in runs.iter().filter(|r| r.line_i == line) {
+                let end = run.glyphs.last().map_or(empty, |g| g.x + g.w);
+                out = [end, run.line_top, run.line_top + run.line_height];
+                // The first glyph ending past the caret starts at it; none means a later run.
+                if let Some(g) = run.glyphs.iter().find(|g| g.end > index) {
+                    out[0] = g.x;
+                    break;
+                }
+            }
+            [out[0] + dx as f32, out[1] + dy as f32, out[2] + dy as f32]
+        })
+        .collect()
+}
+
+/// The char of `text.content` nearest frame pixel `[x, y]` on a `size` frame, as a caret index.
+pub fn hit(text: &Text, size: (u32, u32), [x, y]: [f32; 2]) -> usize {
+    let mut f = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let (buf, _, [dx, dy]) = layout(&mut f, text, size);
+    let Some(c) = buf.hit(x - dx as f32, y - dy as f32) else {
+        return 0;
+    };
+    let s = &text.content;
+    let byte = line_starts(s).get(c.line).map_or(s.len(), |b| b + c.index);
+    s[..byte.min(s.len())].chars().count()
+}
+
 /// A texture of [`rasterize`]'s image, in [`crate::composite::FORMAT`].
 pub fn texture(
     device: &wgpu::Device,
@@ -437,6 +497,30 @@ mod tests {
             let (x, y) = (k as u32 % size.0, k as u32 / size.0);
             let inside = (x0..x1).contains(&x) && (y0..y1).contains(&y);
             assert_eq!(px[3] > 0, inside, "at {x},{y}");
+        }
+    }
+
+    #[test]
+    fn carets_step_right_and_down_and_hits_find_them() {
+        let size = (640, 360);
+        let text = Text {
+            content: "Hi there\nab".into(),
+            size: 40.0,
+            ..Text::default()
+        };
+        if drawn_bounds(&text, size).is_none() {
+            no_font("Latin");
+            return;
+        }
+        let c = carets(&text, size);
+        assert_eq!(c.len(), 12);
+        let xs: Vec<f32> = c[..=8].iter().map(|c| c[0]).collect();
+        assert!(xs.windows(2).all(|w| w[0] < w[1]), "{xs:?}");
+        let [_, top, bottom] = c[9];
+        assert!(top >= c[0][2] - 1.0 && bottom > top, "line two sits below");
+        for i in [0, 3, 9, 11] {
+            let [x, top, bottom] = c[i];
+            assert_eq!(hit(&text, size, [x + 1.0, (top + bottom) / 2.0]), i);
         }
     }
 
