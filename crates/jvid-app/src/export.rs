@@ -146,15 +146,125 @@ pub fn run(
     let enc = Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
         .map_err(|e| format!("couldn't create {}: {e}", req.path.display()))?;
     let partial = Partial(&req.path);
-    let limiter = match req.loudness.filter(|_| req.preset.audio.is_some()) {
-        Some(target) => measure(project, req, ctx)?
-            .map(|lufs| Limiter::new(10f64.powf((target - lufs) / 20.0) as f32, CEILING)),
+    let gain = match req.loudness.filter(|_| req.preset.audio.is_some()) {
+        Some(target) => measure(project, req, ctx)?.map(|lufs| 10f64.powf((target - lufs) / 20.0)),
         None => None,
     };
-    render(project, req, enc, limiter, device, queue, ctx)?;
+    let limiter = || gain.map(|g| Limiter::new(g as f32, CEILING));
+    match sized(project, req)? {
+        None => render(project, req, enc, limiter(), device, queue, ctx)?,
+        Some((target, audio, mut bits)) => {
+            drop(enc);
+            // Encoders only roughly hit an average bit rate, so each pass rescales the video rate
+            // by how far the last file missed, until one lands in the window.
+            // shortcut: progress restarts each pass; weight it by pass if users notice.
+            let want = target as f64 * (1.0 - OVERHEAD) - audio;
+            // The fullest pass under the target so far, moved aside so later passes can't lose it.
+            let best = PathBuf::from(format!("{}.best", req.path.display()));
+            let _best = Partial(&best);
+            let (mut under, mut over) = (None::<(u64, f64)>, None::<(u64, f64)>);
+            for pass in 1..=PASSES {
+                let mut preset = req.preset.clone();
+                preset.options.remove("target_size");
+                preset.options.remove("crf");
+                preset.options.insert("b".into(), bits.to_string());
+                let req = Request {
+                    preset,
+                    ..req.clone()
+                };
+                let enc =
+                    Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
+                        .map_err(|e| format!("couldn't create {}: {e}", req.path.display()))?;
+                render(project, &req, enc, limiter(), device, queue, ctx)?;
+                let size = std::fs::metadata(&req.path)
+                    .map_err(|e| e.to_string())?
+                    .len() as f64;
+                tracing::info!(pass, bits, size, target, "target-size pass");
+                if size > target as f64 {
+                    over = Some((bits, size - audio));
+                } else {
+                    if size >= MIN_FILL * target as f64 {
+                        break;
+                    }
+                    // No bigger for more bits: the encoder is at its best quality, as simple
+                    // content can't use the whole rate.
+                    if under.is_some_and(|(b, v)| b < bits && size - audio < v * 1.01) {
+                        break;
+                    }
+                    under = Some((bits, size - audio));
+                    std::fs::rename(&req.path, &best).map_err(|e| e.to_string())?;
+                }
+                if pass == PASSES {
+                    if under.is_none() {
+                        return Err(
+                            format!("couldn't get under the target size: {size} bytes").into()
+                        );
+                    }
+                    std::fs::rename(&best, &req.path).map_err(|e| e.to_string())?;
+                    break;
+                }
+                bits = next_bits(under, over, want);
+            }
+        }
+    }
     let info = validate(project, req)?;
     std::mem::forget(partial);
     Ok(info)
+}
+
+/// Share of a target size kept back for container headers and indexes, which run well under 1%
+/// for MP4, MOV and MKV, plus encoder overshoot.
+const OVERHEAD: f64 = 0.015;
+
+/// The video bit rate that fits `secs` of `p` into `target` bytes, or `None` when the audio
+/// alone would fill it.
+pub fn target_bitrate(p: &Preset, target: u64, secs: f64) -> Option<u64> {
+    let audio = p.audio.map_or(0.0, dialog::audio_bitrate);
+    let video = target as f64 * 8.0 * (1.0 - OVERHEAD) / secs - audio;
+    (video >= 1000.0).then_some(video as u64)
+}
+
+/// The next pass's video bit rate from the closest passes (bit rate, video bytes) that came in
+/// `under` and `over` the target, aiming at `want` video bytes: between the two along their line
+/// once both exist, else in proportion from the one there is, stepping at most 2x.
+fn next_bits(under: Option<(u64, f64)>, over: Option<(u64, f64)>, want: f64) -> u64 {
+    let next = match (under, over) {
+        (Some((lb, lv)), Some((hb, hv))) => {
+            let (lb, hb) = (lb as f64, hb as f64);
+            let t = ((want - lv) / (hv - lv).max(1.0)).clamp(0.1, 0.9);
+            lb + t * (hb - lb)
+        }
+        (Some((b, v)), None) | (None, Some((b, v))) => {
+            let b = b as f64;
+            (b * want / v.max(1.0)).clamp(b / 2.0, b * 2.0)
+        }
+        (None, None) => unreachable!("called after a pass"),
+    };
+    next.max(1000.0) as u64
+}
+
+/// Encodes a target-size export gets before giving up.
+const PASSES: u32 = 5;
+/// A target-size export should fill at least this share of the target.
+const MIN_FILL: f64 = 0.97;
+
+/// With a `target_size` option: the target in bytes, the audio's bytes and the first pass's
+/// video bit rate. `None` without the option.
+fn sized(project: &Project, req: &Request) -> Result<Option<(u64, f64, u64)>, Error> {
+    let p = &req.preset;
+    let Some(target) = p.options.get("target_size") else {
+        return Ok(None);
+    };
+    let target = target
+        .parse::<u64>()
+        .map_err(|_| format!("bad target size {target}"))?;
+    let rate = rate(project, req);
+    let (first, end) = frames(project, req);
+    let secs = (rate.time_floor(end) - rate.time_floor(first)).0 as f64 / FLICKS_PER_SECOND as f64;
+    let bits = target_bitrate(p, target, secs)
+        .ok_or_else(|| "the target size is too small even for the audio".to_string())?;
+    let audio = p.audio.map_or(0.0, dialog::audio_bitrate) * secs / 8.0;
+    Ok(Some((target, audio, bits)))
 }
 
 /// The output frame rate.

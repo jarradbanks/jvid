@@ -29,6 +29,8 @@ pub struct ExportDialog {
     preset: usize,
     /// Loudness target in LUFS; `None` leaves the mix alone.
     loudness: Option<f64>,
+    /// Target file size in MB (10^6 bytes); `None` encodes at the preset's quality.
+    target: Option<u64>,
     /// Output file; kept between opens so the next export lands in the same folder.
     path: PathBuf,
     /// `Some` while the dialog is open.
@@ -41,6 +43,7 @@ impl Default for ExportDialog {
             presets: super::presets(),
             preset: 0,
             loudness: Some(-14.0),
+            target: None,
             path: PathBuf::new(),
             range: None,
         }
@@ -168,13 +171,39 @@ impl ExportDialog {
                         });
                         ui.end_row();
 
+                        ui.label("Target size");
+                        let sizable =
+                            matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
+                        ui.horizontal(|ui| {
+                            ui.add_enabled_ui(sizable, |ui| target_picker(ui, &mut self.target))
+                                .response
+                                .on_disabled_hover_text("Only H.264 and HEVC presets");
+                            let secs = (b - a).0 as f64 / FLICKS_PER_SECOND as f64;
+                            let warning = match self.target.filter(|_| sizable && secs > 0.0) {
+                                Some(mb) => match super::target_bitrate(preset, mb * MB, secs) {
+                                    Some(bits) => {
+                                        too_small(preset, (s.width, s.height), rate, bits)
+                                    }
+                                    None => Some("Too small even for the audio".into()),
+                                },
+                                None => None,
+                            };
+                            if let Some(w) = warning {
+                                ui.label("⚠").on_hover_text(w);
+                            }
+                        });
+                        ui.end_row();
+
                         ui.label("Estimated size");
-                        ui.label(format_size(estimate(
-                            preset,
-                            (s.width, s.height),
-                            rate,
-                            b - a,
-                        )));
+                        match self.target.filter(|_| sizable) {
+                            Some(mb) => ui.label(format!("under {mb} MB")),
+                            None => ui.label(format_size(estimate(
+                                preset,
+                                (s.width, s.height),
+                                rate,
+                                b - a,
+                            ))),
+                        };
                         ui.end_row();
                     });
                 ui.add_space(space::S16);
@@ -190,10 +219,18 @@ impl ExportDialog {
                     if (export || queue)
                         && let Some(range) = span
                     {
+                        let mut preset = self.presets[self.preset].clone();
+                        if let Some(mb) = self.target
+                            && matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc))
+                        {
+                            preset
+                                .options
+                                .insert("target_size".into(), (mb * MB).to_string());
+                        }
                         let req = Request {
                             path: path.clone(),
                             range,
-                            preset: self.presets[self.preset].clone(),
+                            preset,
                             loudness: self.loudness,
                         };
                         request = Some((req, export));
@@ -229,6 +266,58 @@ fn loudness_picker(ui: &mut Ui, loudness: &mut Option<f64>) {
                 *loudness = Some(custom);
             }
         });
+}
+
+const MB: u64 = 1_000_000;
+
+fn target_picker(ui: &mut Ui, target: &mut Option<u64>) {
+    let label = |t: Option<u64>| t.map_or("Off".into(), |t| format!("{t} MB"));
+    egui::ComboBox::from_id_salt("export target size")
+        .selected_text(label(*target))
+        .show_ui(ui, |ui| {
+            for t in [None, Some(10), Some(25), Some(50), Some(100), Some(500)] {
+                ui.selectable_value(target, t, label(t));
+            }
+            let mut custom = target.unwrap_or(25);
+            let drag = egui::DragValue::new(&mut custom)
+                .range(1..=100_000)
+                .prefix("Custom ")
+                .suffix(" MB");
+            if ui.add(drag).changed() {
+                *target = Some(custom);
+            }
+        });
+}
+
+/// Bits per pixel per frame below which H.264/HEVC turns to mush.
+const MIN_BPP: f64 = 0.03;
+
+/// A warning, with a smaller width that would hold up, when `bits` per second is too few for
+/// `p`'s output size; `None` when it's enough.
+pub fn too_small(p: &Preset, src: (u32, u32), rate: Rate, bits: u64) -> Option<String> {
+    let (w, h) = p.output_size(src);
+    let r = p.frame_rate.unwrap_or(rate);
+    let per_frame = bits as f64 * r.den as f64 / r.num as f64;
+    if per_frame / (w as f64 * h as f64) >= MIN_BPP {
+        return None;
+    }
+    // Same aspect ratio, so pixels scale with width squared.
+    let fits = [1920, 1280, 854, 640, 426].into_iter().find(|&nw| {
+        nw < w && per_frame / (w as f64 * h as f64) * (w as f64 / nw as f64).powi(2) >= MIN_BPP
+    });
+    Some(match fits {
+        Some(nw) => format!("Too small for {w}×{h}; try a {nw}-wide preset"),
+        None => format!("Too small for {w}×{h} at any common size; shorten the range"),
+    })
+}
+
+/// The bit rate the encoder gives audio `a`, in bits per second.
+pub fn audio_bitrate(a: AudioCodec) -> f64 {
+    match a {
+        AudioCodec::Aac | AudioCodec::Mp3 => 192_000.0,
+        AudioCodec::Pcm => 1_536_000.0,
+        AudioCodec::Pcm24 => 2_304_000.0,
+    }
 }
 
 /// The half-open timeline span `range` covers, or `None` when it covers nothing.
@@ -291,11 +380,7 @@ pub fn estimate(p: &Preset, (w, h): (u32, u32), rate: Rate, len: Time) -> u64 {
         };
         w as f64 * h as f64 * r.num as f64 / r.den as f64 * bpp
     });
-    let audio = p.audio.map_or(0.0, |a| match a {
-        AudioCodec::Aac | AudioCodec::Mp3 => 192_000.0,
-        AudioCodec::Pcm => 1_536_000.0,
-        AudioCodec::Pcm24 => 2_304_000.0,
-    });
+    let audio = p.audio.map_or(0.0, audio_bitrate);
     ((video + audio) * secs / 8.0) as u64
 }
 
@@ -387,5 +472,21 @@ mod tests {
         );
         assert_eq!(format_size(0), "≈ 0 KB");
         assert_eq!(format_size(3 << 20), "≈ 3 MB");
+    }
+
+    #[test]
+    fn small_targets_suggest_a_narrower_size() {
+        let p = &jvid_core::preset::builtin()[0];
+        let r = Rate::new(30, 1);
+        // The preset is 1080p60.
+        assert_eq!(too_small(p, (1920, 1080), r, 8_000_000), None);
+        // 0.02 bpp at 1080p60; 1280×720 has 2.25x fewer pixels, so 0.045 bpp.
+        let w = too_small(p, (1920, 1080), r, 2_488_320).unwrap();
+        assert!(w.contains("1280"), "{w}");
+        assert!(
+            too_small(p, (1920, 1080), r, 10_000)
+                .unwrap()
+                .contains("any")
+        );
     }
 }

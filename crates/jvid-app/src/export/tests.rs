@@ -446,3 +446,63 @@ fn queue_reports_cancelled_waiting_job() {
     assert_eq!(q.poll(), vec![("a.mp4".into(), Err(Error::Cancelled))]);
     assert_eq!((q.running(), q.pending()), (None, 0));
 }
+
+/// Target-size exports land under the target and within 3% of it, across corpus sources of
+/// different content and sizes, for H.264 in MP4, MKV and MOV. The near-static screen recording
+/// needs less than the target at the encoder's best quality, so it only has to land under.
+#[test]
+fn target_size_lands_within_three_percent() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    for (src, ext, target, fill) in [
+        ("frame-index-1080p30.mp4", "mp4", 2_500_000, 0.97),
+        ("frame-index-1080p30.mp4", "mkv", 4_000_000, 0.97),
+        ("9x16.mp4", "mp4", 2_000_000, 0.97),
+        ("vfr-phone.mp4", "mov", 1_500_000, 0.97),
+        ("screen-1440p60.mp4", "mp4", 1_000_000, 0.0),
+    ] {
+        let mut h = History::new(Project::default());
+        add(&mut h, TrackKind::Video, dir.join(src), Time(0), secs(2));
+        add(
+            &mut h,
+            TrackKind::Audio,
+            dir.join("tone-1khz.wav"),
+            Time(0),
+            secs(2),
+        );
+        let mut preset = preset("YouTube 1080p");
+        preset.extension = ext.into();
+        preset
+            .options
+            .insert("target_size".into(), target.to_string());
+        let path = out(&format!("target.{ext}"));
+        let req = Request {
+            path: path.clone(),
+            range: (Time(0), secs(2)),
+            preset,
+            loudness: None,
+        };
+        run_now(h.project(), &req, false).unwrap_or_else(|e| panic!("{src}: {e:?}"));
+        let size = std::fs::metadata(&path).unwrap().len();
+        let off = size as f64 / target as f64;
+        assert!(
+            (fill..=1.0).contains(&off),
+            "{src} {ext}: {size} of {target}"
+        );
+        assert!(!PathBuf::from(format!("{}.best", path.display())).exists());
+        std::fs::remove_file(&path).unwrap();
+    }
+}
+
+#[test]
+fn next_bits_closes_in_on_the_target() {
+    // One pass: in proportion to the miss, at most 2x.
+    assert_eq!(next_bits(None, Some((1_000_000, 200.0)), 100.0), 500_000);
+    assert_eq!(next_bits(Some((1_000_000, 10.0)), None, 100.0), 2_000_000);
+    // Both sides: along their line, here 1 byte per 10 kb/s.
+    let (lo, hi) = (Some((1_000_000, 100.0)), Some((2_000_000, 200.0)));
+    assert_eq!(next_bits(lo, hi, 150.0), 1_500_000);
+    // Never right at either end, which a flat stretch would otherwise give.
+    assert_eq!(next_bits(lo, hi, 100.0), 1_100_000);
+}
