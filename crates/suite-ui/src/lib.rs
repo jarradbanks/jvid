@@ -3,6 +3,7 @@
 //! Call [`theme::install`] once at startup, then build panels with [`panel`] and
 //! controls from [`widgets`]. Every colour, size and radius comes from [`tokens`].
 
+pub mod dialog;
 pub mod panel;
 #[cfg(feature = "test-support")]
 pub mod test_support;

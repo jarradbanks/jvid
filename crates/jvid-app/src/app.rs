@@ -8,12 +8,13 @@ use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
 use jvid_core::history::{Command, History};
 use jvid_core::model::{AssetId, Project, ProjectSettings};
 use jvid_core::time::Time;
-use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
+use suite_ui::dialog::Dialog;
 use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, State};
+use suite_ui::widgets::{Button, ButtonKind, State};
 
 use crate::export::{Error as ExportError, Request};
 use crate::import::Importer;
@@ -87,6 +88,32 @@ pub struct App {
     export_dialog: crate::export::dialog::ExportDialog,
     autosave: crate::autosave::Autosave,
     queue: crate::export::queue::Queue,
+    /// Dialogs waiting to be answered, the first one showing.
+    prompts: Vec<Prompt>,
+    /// The user chose to quit; the next close request goes through.
+    closing: bool,
+}
+
+/// A question or error shown in an in-app [`Dialog`].
+#[derive(Debug, PartialEq)]
+enum Prompt {
+    /// Unsaved changes: Save, Don't Save or Cancel, then `Then`.
+    Discard(Then),
+    /// Restore the autosave `auto`, newer than `path` (`None`: the untitled project).
+    Restore {
+        path: Option<PathBuf>,
+        auto: PathBuf,
+    },
+    Error(String),
+}
+
+/// What runs once unsaved changes are saved or discarded.
+#[derive(Debug, PartialEq)]
+enum Then {
+    New,
+    Open,
+    Recent(PathBuf),
+    Close,
 }
 
 const TOAST_SECS: f64 = 6.0;
@@ -102,14 +129,8 @@ impl App {
         app.preview.set_proxies(caches.proxies.clone());
         app.timeline = Timeline::new(caches);
         app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
-        if let Some(path) = autosave::untitled() {
-            if let Some(project) = offer_restore(&path) {
-                app.new_project(Some(project.settings().clone()));
-                app.history = History::new(project);
-                app.history.mark_unsaved();
-            } else {
-                autosave::clear(&path);
-            }
+        if let Some(auto) = autosave::untitled().as_deref().and_then(autosave::newer) {
+            app.prompts.push(Prompt::Restore { path: None, auto });
         }
         app
     }
@@ -158,6 +179,8 @@ impl App {
             export_dialog: Default::default(),
             autosave: Default::default(),
             queue: Default::default(),
+            prompts: Vec::new(),
+            closing: false,
         }
     }
 
@@ -178,19 +201,18 @@ impl App {
     fn open(&mut self, path: PathBuf) {
         match project_file::load(&path) {
             Ok(project) => {
-                let restored = offer_restore(&path);
-                let dirty = restored.is_some();
                 welcome::remember(&mut self.welcome.recent, Recent::of(&path, &project));
                 self.missing = relink::missing(&project);
-                self.history = History::new(restored.unwrap_or(project));
-                if dirty {
-                    self.history.mark_unsaved();
+                self.history = History::new(project);
+                if let Some(auto) = autosave::newer(&path) {
+                    let path = Some(path.clone());
+                    self.prompts.push(Prompt::Restore { path, auto });
                 }
                 self.path = Some(path);
                 self.match_source = false;
                 self.on_welcome = false;
             }
-            Err(e) => error_dialog(&format!("Couldn't open {}: {e}", path.display())),
+            Err(e) => self.error(format!("Couldn't open {}: {e}", path.display())),
         }
     }
 
@@ -314,10 +336,8 @@ impl App {
                 }
             }
         });
-        if let Some(path) = recent
-            && self.confirm_discard()
-        {
-            self.open(path);
+        if let Some(path) = recent {
+            self.discard_then(Then::Recent(path));
         }
         match picked {
             Some("quit") => ui.ctx().send_viewport_cmd(ViewportCommand::Close),
@@ -354,21 +374,8 @@ impl App {
 
     fn file_action(&mut self, action: FileAction) {
         match action {
-            FileAction::New => {
-                if self.confirm_discard() {
-                    self.new_project(Some(ProjectSettings::default()));
-                    self.on_welcome = true;
-                }
-            }
-            FileAction::Open => {
-                if !self.confirm_discard() {
-                    return;
-                }
-                let Some(path) = project_dialog().pick_file() else {
-                    return;
-                };
-                self.open(path);
-            }
+            FileAction::New => self.discard_then(Then::New),
+            FileAction::Open => self.discard_then(Then::Open),
             FileAction::Save => {
                 self.save(false);
             }
@@ -414,7 +421,7 @@ impl App {
                 true
             }
             Err(e) => {
-                error_dialog(&format!("Couldn't save {}: {e}", path.display()));
+                self.error(format!("Couldn't save {}: {e}", path.display()));
                 false
             }
         }
@@ -484,7 +491,7 @@ impl App {
     }
 
     /// Saves the shown frame as a PNG at full project resolution.
-    fn export_frame(&self) {
+    fn export_frame(&mut self) {
         let Some(path) = FileDialog::new()
             .set_title("Export Frame")
             .add_filter("PNG image", &["png"])
@@ -497,7 +504,7 @@ impl App {
             .preview
             .export_frame(self.history.project().settings(), &path)
         {
-            error_dialog(&format!("Couldn't export {}: {e}", path.display()));
+            self.error(format!("Couldn't export {}: {e}", path.display()));
         }
     }
 
@@ -695,25 +702,110 @@ impl App {
         self.path.clone().or_else(autosave::untitled)
     }
 
-    /// Before replacing the project: true if it's clean, saved, or the user discards it.
-    fn confirm_discard(&mut self) -> bool {
-        if !self.history.is_dirty() {
-            return true;
+    /// Runs `then` now if the project is clean, else once the user saves or discards it.
+    fn discard_then(&mut self, then: Then) {
+        if self.history.is_dirty() {
+            self.prompts.push(Prompt::Discard(then));
+        } else {
+            self.proceed(then);
         }
-        let answer = MessageDialog::new()
-            .set_title("jvid")
-            .set_description(format!("Save changes to {}?", self.name()))
-            .set_buttons(MessageButtons::YesNoCancel)
-            .show();
-        match answer {
-            MessageDialogResult::Yes => self.save(false),
-            MessageDialogResult::No => {
+    }
+
+    fn proceed(&mut self, then: Then) {
+        match then {
+            Then::New => {
+                self.new_project(Some(ProjectSettings::default()));
+                self.on_welcome = true;
+            }
+            Then::Open => {
+                if let Some(path) = project_dialog().pick_file() {
+                    self.open(path);
+                }
+            }
+            Then::Recent(path) => self.open(path),
+            Then::Close => self.closing = true,
+        }
+    }
+
+    fn error(&mut self, message: String) {
+        self.prompts.push(Prompt::Error(message));
+    }
+
+    /// Shows the first waiting prompt and acts on its answer.
+    fn show_prompt(&mut self, ctx: &egui::Context) {
+        let Some(prompt) = self.prompts.first() else {
+            return;
+        };
+        let name = self.name();
+        let (title, body, buttons, cancel): (_, _, &[_], _) = match prompt {
+            Prompt::Discard(_) => (
+                "Unsaved Changes",
+                format!("Save changes to {name} before continuing?"),
+                &[
+                    ("Save", ButtonKind::Primary),
+                    ("Cancel", ButtonKind::Secondary),
+                    ("Don't Save", ButtonKind::Destructive),
+                ],
+                1,
+            ),
+            Prompt::Restore { path, .. } => (
+                "Restore Autosave",
+                format!(
+                    "{} has an autosave newer than its last save, probably from a crash. Restore it?",
+                    path.as_deref()
+                        .and_then(Path::file_stem)
+                        .map_or("Untitled".into(), |s| s.to_string_lossy())
+                ),
+                &[
+                    ("Restore", ButtonKind::Primary),
+                    ("Discard", ButtonKind::Destructive),
+                ],
+                1,
+            ),
+            Prompt::Error(message) => ("Error", message.clone(), &[("OK", ButtonKind::Primary)], 0),
+        };
+        let dialog = Dialog {
+            title,
+            body: &body,
+            buttons,
+            cancel,
+        };
+        if let Some(answer) = dialog.show(ctx) {
+            let prompt = self.prompts.remove(0);
+            self.answer(prompt, answer);
+        }
+    }
+
+    /// Acts on button `answer` of `prompt`, numbered as in [`Self::show_prompt`].
+    fn answer(&mut self, prompt: Prompt, answer: usize) {
+        match (prompt, answer) {
+            (Prompt::Discard(then), 0) => {
+                if self.save(false) {
+                    self.proceed(then);
+                }
+            }
+            (Prompt::Discard(then), 2) => {
                 if let Some(p) = self.autosave_target() {
                     autosave::clear(&p);
                 }
-                true
+                self.proceed(then);
             }
-            _ => false,
+            (Prompt::Restore { path, auto }, 0) => match project_file::load(&auto) {
+                Ok(project) => {
+                    if path.is_none() {
+                        self.new_project(Some(project.settings().clone()));
+                    }
+                    self.history = History::new(project);
+                    self.history.mark_unsaved();
+                }
+                Err(e) => self.error(format!("Couldn't restore {}: {e}", auto.display())),
+            },
+            (Prompt::Restore { path: None, .. }, _) => {
+                if let Some(p) = autosave::untitled() {
+                    autosave::clear(&p);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -725,15 +817,24 @@ impl eframe::App for App {
             let until = ctx.input(|i| i.time) + TOAST_SECS;
             self.toasts.push((e, until));
         }
-        if ctx.input(|i| i.viewport().close_requested()) && !self.confirm_discard() {
+        if ctx.input(|i| i.viewport().close_requested()) && !self.closing && self.history.is_dirty()
+        {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+            if !self.prompts.contains(&Prompt::Discard(Then::Close)) {
+                self.prompts.push(Prompt::Discard(Then::Close));
+            }
+        }
+        let was_closing = self.closing;
+        self.show_prompt(&ctx);
+        if self.closing && !was_closing {
+            ctx.send_viewport_cmd(ViewportCommand::Close);
         }
 
         let timeline = self
             .dock
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
-        let pressed = if self.keymap_editor.is_open() {
+        let pressed = if self.keymap_editor.is_open() || !self.prompts.is_empty() {
             Vec::new()
         } else {
             self.keymap.pressed(&ctx, timeline)
@@ -924,33 +1025,6 @@ fn menu_button(ui: &mut Ui, name: &str, left: f32) -> egui::Response {
 
 fn project_dialog() -> FileDialog {
     FileDialog::new().add_filter("jvid project", &["jvid"])
-}
-
-/// Asks to restore `path`'s autosave if it is newer than `path`; the restored project, if loaded.
-fn offer_restore(path: &Path) -> Option<Project> {
-    let auto = autosave::newer(path)?;
-    let answer = MessageDialog::new()
-        .set_title("jvid")
-        .set_description(format!(
-            "{} has an autosave newer than its last save, probably from a crash. Restore it?",
-            path.file_stem().unwrap_or_default().to_string_lossy()
-        ))
-        .set_buttons(MessageButtons::YesNo)
-        .show();
-    if answer != MessageDialogResult::Yes {
-        return None;
-    }
-    project_file::load(&auto)
-        .inspect_err(|e| error_dialog(&format!("Couldn't restore {}: {e}", auto.display())))
-        .ok()
-}
-
-fn error_dialog(message: &str) {
-    MessageDialog::new()
-        .set_level(MessageLevel::Error)
-        .set_title("jvid")
-        .set_description(message)
-        .show();
 }
 
 /// Premiere's arrangement: media, preview and inspector over a full-width timeline.
