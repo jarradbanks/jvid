@@ -228,7 +228,7 @@ flowchart LR
 | [#159](https://github.com/jarradbanks/jvid/issues/159) | Program monitor plays the timeline | need testing | M | ui, render | [#32](https://github.com/jarradbanks/jvid/issues/32), [#33](https://github.com/jarradbanks/jvid/issues/33) |
 | [#191](https://github.com/jarradbanks/jvid/issues/191) | Program monitor transport bar | done | S | ui | [#159](https://github.com/jarradbanks/jvid/issues/159) |
 | [#196](https://github.com/jarradbanks/jvid/issues/196) | UI polish from first user test | done | S | ui | [#159](https://github.com/jarradbanks/jvid/issues/159) |
-| [#197](https://github.com/jarradbanks/jvid/issues/197) | Text presets: feedback and drag to timeline | in progress | S | ui, timeline | [#159](https://github.com/jarradbanks/jvid/issues/159) |
+| [#197](https://github.com/jarradbanks/jvid/issues/197) | Text presets: feedback and drag to timeline | done | S | ui, timeline | [#159](https://github.com/jarradbanks/jvid/issues/159) |
 | [#39](https://github.com/jarradbanks/jvid/issues/39) | In/Out points on the timeline | done | M | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37), [#13](https://github.com/jarradbanks/jvid/issues/13) |
 | [#40](https://github.com/jarradbanks/jvid/issues/40) | Markers | done | M | timeline | [#33](https://github.com/jarradbanks/jvid/issues/33), [#8](https://github.com/jarradbanks/jvid/issues/8), [#39](https://github.com/jarradbanks/jvid/issues/39) |
 | [#41](https://github.com/jarradbanks/jvid/issues/41) | Scrubbing and audio scrub | done | M | timeline, render | [#32](https://github.com/jarradbanks/jvid/issues/32) |
