@@ -1,11 +1,13 @@
-//! The Inspector: transform, opacity, crop, color adjustments and solid color of the selected clips, with keyframes.
+//! The Inspector: transform, opacity, crop, color adjustments, effects and solid color of the selected clips, with keyframes.
 
 use std::collections::{BTreeMap, HashSet};
 
 use egui::{Color32, Pos2, Sense, Shape, Stroke, Ui, vec2};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
-use jvid_core::model::{Blend, Clip, ClipId, MediaAsset, Project, Text, TrackKind, Transform};
+use jvid_core::model::{
+    Blend, Clip, ClipId, Effect, MediaAsset, Project, Text, TrackKind, Transform,
+};
 use jvid_core::time::Time;
 use suite_ui::theme::icon;
 use suite_ui::tokens::{color, size, space};
@@ -14,9 +16,9 @@ use suite_ui::widgets::{Button, DragField, Dropdown, SectionHeader};
 use crate::timeline::Edit;
 
 /// One animatable property: its keyframe name and how its fields show.
-struct Prop {
-    name: &'static str,
-    label: &'static str,
+struct Prop<'a> {
+    name: &'a str,
+    label: &'a str,
     fields: &'static [&'static str],
     /// Shown value per stored value, e.g. 100 for a percentage.
     display: f64,
@@ -25,9 +27,11 @@ struct Prop {
     suffix: &'static str,
     /// Bounds of the stored value.
     range: (f64, f64),
+    /// What reset sets; `None` for [`Transform::default`]'s value.
+    default: Option<f64>,
 }
 
-const fn prop(name: &'static str, label: &'static str, fields: &'static [&'static str]) -> Prop {
+const fn prop<'a>(name: &'a str, label: &'a str, fields: &'static [&'static str]) -> Prop<'a> {
     Prop {
         name,
         label,
@@ -37,13 +41,14 @@ const fn prop(name: &'static str, label: &'static str, fields: &'static [&'stati
         decimals: 1,
         suffix: "",
         range: (f64::NEG_INFINITY, f64::INFINITY),
+        default: None,
     }
 }
 
 const XY: &[&str] = &["X", "Y"];
 const ONE: &[&str] = &[""];
 
-const SECTIONS: [(&str, &[Prop]); 5] = [
+const SECTIONS: [(&str, &[Prop<'static>]); 5] = [
     (
         "Transform",
         &[
@@ -136,7 +141,7 @@ const SECTIONS: [(&str, &[Prop]); 5] = [
 ];
 
 /// A -100..100% color adjustment.
-const fn grade(name: &'static str, label: &'static str) -> Prop {
+const fn grade(name: &'static str, label: &'static str) -> Prop<'static> {
     Prop {
         display: 100.0,
         decimals: 0,
@@ -156,8 +161,18 @@ const SOLID_GESTURE: GestureKey = 0x736f_6c69_6400; // "solid"
 /// Undo gesture for edits to a text asset's style, xored with its asset id.
 const TEXT_GESTURE: GestureKey = 0x7465_7874_0000; // "text"
 
+/// The effect index and parameter of an effect keyframe name (see [`Effect::key`]).
+fn fx_param(name: &str) -> Option<(usize, &str)> {
+    let (i, p) = name.strip_prefix("fx")?.split_once('.')?;
+    Some((i.parse().ok()?, p))
+}
+
 /// `name`'s value in `x`; scale reads as linked, X for both.
 fn get(x: &Transform, name: &str) -> Value {
+    if let Some((i, p)) = fx_param(name) {
+        let v = x.effects.get(i).and_then(|e| e.params.get(p));
+        return Value::Scalar(v.copied().unwrap_or(0.0));
+    }
     let crop = |i: usize| Value::Scalar(x.crop[i]);
     match name {
         "position" => Value::Vec2(x.position),
@@ -181,6 +196,12 @@ fn get(x: &Transform, name: &str) -> Value {
 }
 
 fn set(x: &mut Transform, name: &str, v: Value) {
+    if let (Some((i, p)), Value::Scalar(v)) = (fx_param(name), v) {
+        if let Some(e) = x.effects.get_mut(i) {
+            e.params.insert(p.to_owned(), v);
+        }
+        return;
+    }
     match (name, v) {
         ("position", Value::Vec2(v)) => x.position = v,
         ("anchor", Value::Vec2(v)) => x.anchor = v,
@@ -445,6 +466,12 @@ pub fn show(
             edit = Some(e);
         }
     }
+    if !clips.is_empty()
+        && section(ui, "Effects", false).0
+        && let Some(e) = effects_rows(ui, &clips, t, &mut index, &mut seek)
+    {
+        edit = Some(e);
+    }
     if let Some(c) = clips.first().or(audio.first())
         && section(ui, "Speed", false).0
         && let Some(e) = speed_row(ui, c)
@@ -548,6 +575,133 @@ fn lut_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
         edit
     })
     .inner
+}
+
+/// Rebuilds every clip's effect stack from old indices `f` gives, renumbering the effects'
+/// keyframes to match and dropping those of effects left out.
+fn restack(clips: &[&Clip], f: impl Fn(&mut Vec<usize>)) -> Command {
+    rewrite(clips, |_, x, keys| {
+        let mut order: Vec<usize> = (0..x.effects.len()).collect();
+        f(&mut order);
+        let old = std::mem::take(&mut x.effects);
+        x.effects = order.iter().filter_map(|&j| old.get(j).cloned()).collect();
+        *keys = std::mem::take(keys)
+            .into_iter()
+            .filter_map(|(k, v)| match fx_param(&k) {
+                Some((j, p)) => order
+                    .iter()
+                    .position(|&o| o == j)
+                    .map(|n| (Effect::key(n, p), v)),
+                None => Some((k, v)),
+            })
+            .collect();
+    })
+}
+
+/// The effect stack, shown when every clip has the same one: each effect's parameters as
+/// keyframeable rows with move and remove buttons, then a picker adding one to the end.
+fn effects_rows(
+    ui: &mut Ui,
+    clips: &[&Clip],
+    t: Time,
+    index: &mut u64,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
+    let stack = |c: &Clip| {
+        c.transform
+            .effects
+            .iter()
+            .map(|e| e.shader.clone())
+            .collect::<Vec<_>>()
+    };
+    let effects = &clips[0].transform.effects;
+    if clips.iter().any(|c| stack(c) != stack(clips[0])) {
+        ui.label(
+            egui::RichText::new("The selected clips have different effects").color(color::INK_3),
+        );
+        return None;
+    }
+    let lib: Vec<(String, crate::effects::Entry)> = crate::effects::with(|l| {
+        l.entries()
+            .map(|(k, e)| (k.to_owned(), e.clone()))
+            .collect()
+    });
+    let mut edit = None;
+    for (i, e) in effects.iter().enumerate() {
+        let entry = lib.iter().find(|(k, _)| *k == e.shader).map(|(_, e)| e);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = space::S4;
+            let (title, problem) = match entry {
+                Some(Ok(s)) => (s.name.clone(), None),
+                Some(Err(err)) => (e.shader.clone(), Some(err.clone())),
+                None => (
+                    e.shader.clone(),
+                    Some(format!("{}.wgsl is not in the effects folder", e.shader)),
+                ),
+            };
+            let label = ui.label(egui::RichText::new(&title).color(color::INK).strong());
+            if let Some(p) = problem {
+                label.on_hover_text(&p);
+                ui.label(egui::RichText::new("passthrough").color(color::RED));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let n = effects.len();
+                if ui.add(Button::ghost("Remove")).clicked() {
+                    edit = Some((
+                        restack(clips, |o| {
+                            o.remove(i);
+                        }),
+                        None,
+                    ));
+                }
+                if i + 1 < n && ui.add(Button::ghost("Down")).clicked() {
+                    edit = Some((restack(clips, |o| o.swap(i, i + 1)), None));
+                }
+                if i > 0 && ui.add(Button::ghost("Up")).clicked() {
+                    edit = Some((restack(clips, |o| o.swap(i - 1, i)), None));
+                }
+            });
+        });
+        let Some(Ok(shader)) = entry else { continue };
+        for q in &shader.params {
+            *index += 1;
+            let name = Effect::key(i, &q.name);
+            let p = Prop {
+                speed: (q.max - q.min) / 200.0,
+                decimals: 2,
+                range: (q.min, q.max),
+                default: Some(q.default),
+                ..prop(&name, &q.name, ONE)
+            };
+            if let Some(e) = row(ui, clips, &p, t, *index, seek) {
+                edit = Some(e);
+            }
+        }
+    }
+    let usable: Vec<(&str, &jvid_render::effect::Shader)> = lib
+        .iter()
+        .filter_map(|(k, e)| Some((k.as_str(), e.as_deref().ok()?)))
+        .collect();
+    let mut names = vec!["Add effect"];
+    names.extend(usable.iter().map(|(_, s)| s.name.as_str()));
+    let mut pick = 0;
+    if ui
+        .add(Dropdown::new(&mut pick, &names).width(ui.available_width()))
+        .changed()
+        && pick > 0
+    {
+        let (stem, shader) = usable[pick - 1];
+        let fx = Effect {
+            shader: stem.to_owned(),
+            params: shader
+                .params
+                .iter()
+                .map(|q| (q.name.clone(), q.default))
+                .collect(),
+        };
+        edit = Some((rewrite(clips, |_, x, _| x.effects.push(fx.clone())), None));
+    }
+    edit
 }
 
 /// Undo gesture for speed drags, xored with the clip id.
@@ -691,7 +845,14 @@ fn row(
                 edit = Some((toggle_animate(clips, p.name, t), None));
             }
             if ui.add(Button::icon(icon::UNDO, "Reset")).clicked() {
-                edit = Some((reset(clips, &[p.name]), None));
+                let cmd = match p.default {
+                    Some(d) => rewrite(clips, |_, x, keys| {
+                        keys.remove(p.name);
+                        set(x, p.name, Value::Scalar(d));
+                    }),
+                    None => reset(clips, &[p.name]),
+                };
+                edit = Some((cmd, None));
             }
             if !anim {
                 return;
@@ -1051,6 +1212,39 @@ mod tests {
 
     fn refs(clips: &[Clip]) -> Vec<&Clip> {
         clips.iter().collect()
+    }
+
+    #[test]
+    fn effect_params_keyframe_and_follow_their_effect_when_restacked() {
+        let fx = |shader: &str| Effect {
+            shader: shader.into(),
+            params: [("amount".to_owned(), 0.5)].into(),
+        };
+        let mut clips = [clip(1, 0)];
+        clips[0].transform.effects = vec![fx("a"), fx("b")];
+        let b = Effect::key(1, "amount");
+        apply(&mut clips, |c| toggle_animate(c, &b, Time(0)));
+        apply(&mut clips, |c| set_field(c, &b, 0, |_| 1.0, Time(100)));
+        // Halfway between the keys, give or take the clamp to the clip's last frame.
+        let mid = |c: &Clip, i: usize| c.transform_at(Time(50)).effects[i].params["amount"];
+        assert!((mid(&clips[0], 1) - 0.75).abs() < 0.01);
+        assert_eq!(
+            clips[0].transform_at(Time(50)).effects[0].params["amount"],
+            0.5
+        );
+
+        // Moved to the top, its keys move with it; removing the other drops nothing of it.
+        apply(&mut clips, |c| restack(c, |o| o.swap(0, 1)));
+        assert_eq!(clips[0].transform.effects[0].shader, "b");
+        assert!(clips[0].keyframes.contains_key("fx0.amount"));
+        assert!((mid(&clips[0], 0) - 0.75).abs() < 0.01);
+        apply(&mut clips, |c| {
+            restack(c, |o| {
+                o.remove(0);
+            })
+        });
+        assert_eq!(clips[0].transform.effects, [fx("a")]);
+        assert!(clips[0].keyframes.is_empty());
     }
 
     #[test]

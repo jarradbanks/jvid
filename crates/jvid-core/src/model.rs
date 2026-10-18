@@ -455,8 +455,8 @@ fn is_first_stream(s: &Option<u32>) -> bool {
 ///
 /// Keyframe names: `position`, `anchor` (`Vec2`), `scale` (`Scalar` for linked, `Vec2` for
 /// separate X/Y), `rotation`, `opacity`, `crop_left`, `crop_top`, `crop_right`, `crop_bottom`,
-/// the color adjustments by field name (`exposure`, `contrast`, ..., `lut_intensity`), and for
-/// audio clips `volume` and `pan`.
+/// the color adjustments by field name (`exposure`, `contrast`, ..., `lut_intensity`), effect
+/// parameters as `fx{index}.{param}` (see [`Effect::key`]), and for audio clips `volume` and `pan`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Transform {
@@ -496,6 +496,22 @@ pub struct Transform {
     /// The transition into the next clip on the track, centred on this clip's end; it plays
     /// only while that clip starts exactly there, from the media handles on both sides.
     pub transition: Option<Transition>,
+    /// WGSL effects run on the clip's image in order, before its color adjustments.
+    pub effects: Vec<Effect>,
+}
+
+/// A user WGSL effect on a clip: the effect file's stem and its parameter values by name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Effect {
+    pub shader: String,
+    pub params: BTreeMap<String, f64>,
+}
+
+impl Effect {
+    /// The keyframe name of parameter `param` of the clip's `index`th effect.
+    pub fn key(index: usize, param: &str) -> String {
+        format!("fx{index}.{param}")
+    }
 }
 
 /// A transition at a cut, `duration` long and centred on it.
@@ -574,6 +590,7 @@ impl Default for Transform {
             fade_out: Time(0),
             fade_curve: FadeCurve::Linear,
             transition: None,
+            effects: Vec::new(),
         }
     }
 }
@@ -737,6 +754,13 @@ impl Clip {
             *v = v.clamp(-1.0, 1.0);
         }
         x.lut_intensity = x.lut_intensity.clamp(0.0, 1.0);
+        for (i, e) in x.effects.iter_mut().enumerate() {
+            for (name, v) in &mut e.params {
+                if let Some(Scalar(n)) = self.value_at(&Effect::key(i, name), t) {
+                    *v = n;
+                }
+            }
+        }
         x
     }
 

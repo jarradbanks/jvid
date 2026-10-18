@@ -323,7 +323,11 @@ fn render(
     let decoders = DecoderPool::default();
     let mut audio = Audio::new(Box::new(blocking));
     // Audio-only presets never touch the GPU.
-    let mut gpu = enc.has_video().then(|| Gpu::new(device));
+    let mut gpu = enc.has_video().then(|| {
+        let mut g = Gpu::new(device);
+        g.pin_effects = true;
+        g
+    });
     let mut readback = Readback::default();
     let (mut mix, mut limited) = (Vec::new(), Vec::new());
     for (k, time, a, b) in spans(project, req) {

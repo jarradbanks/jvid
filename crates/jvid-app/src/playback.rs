@@ -61,7 +61,6 @@ type Done = (Key, Duration, Result<Frame, String>);
 /// What to draw for one timeline frame.
 pub struct Shown {
     /// Timeline frame index.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub index: i64,
     /// Top layer first, with its evaluated transform.
     pub layers: Vec<(Pixels, Transform)>,
@@ -644,6 +643,14 @@ pub struct Gpu {
     /// `.cube` paths already read into the compositor, or that failed to.
     /// shortcut: read once per session; a file edited on disk shows after a restart.
     luts: HashSet<String>,
+    /// The [`crate::effects::Library::generation`] last loaded into the compositor (`None`
+    /// before the first load), and the effect stems set there.
+    effects: (Option<u64>, HashSet<String>),
+    /// Keep the effects first loaded, ignoring later edits; export sets it so a file changed or
+    /// deleted mid-export doesn't change the output partway.
+    pub pin_effects: bool,
+    /// Effects named by a layer but not loaded, already warned about.
+    missing: HashSet<String>,
 }
 
 impl Gpu {
@@ -653,6 +660,9 @@ impl Gpu {
             layers: Vec::new(),
             texts: Vec::new(),
             luts: HashSet::new(),
+            effects: Default::default(),
+            pin_effects: false,
+            missing: HashSet::new(),
         }
     }
 
@@ -711,6 +721,40 @@ impl Gpu {
                 }
             }
         }
+        let mut failed = Vec::new();
+        crate::effects::with(|lib| {
+            if self.effects.0 == Some(lib.generation)
+                || (self.pin_effects && self.effects.0.is_some())
+            {
+                return;
+            }
+            let old = std::mem::take(&mut self.effects.1);
+            for stem in &old {
+                let _ = self.compositor.set_effect(device, stem, None);
+            }
+            for (stem, entry) in lib.entries() {
+                let Ok(shader) = entry else { continue };
+                match self.compositor.set_effect(device, stem, Some(shader)) {
+                    Ok(()) => {
+                        self.effects.1.insert(stem.to_owned());
+                    }
+                    Err(e) => failed.push((stem.to_owned(), e)),
+                }
+            }
+            self.effects.0 = Some(lib.generation);
+        });
+        for (stem, e) in failed {
+            tracing::warn!("effect {stem}: {e}");
+            crate::effects::fail(&stem, e);
+        }
+        for (_, t) in &shown.layers {
+            for e in &t.effects {
+                if !self.effects.1.contains(&e.shader) && self.missing.insert(e.shader.clone()) {
+                    tracing::warn!("effect {}: not loaded, drawing without it", e.shader);
+                }
+            }
+        }
+        self.compositor.frame = shown.index.max(0) as u32;
         let layers: Vec<_> = shown
             .layers
             .iter()

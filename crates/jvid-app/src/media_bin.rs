@@ -159,7 +159,7 @@ impl MediaBin {
             .focused(focused)
             .show(ui, |ui| match self.tab {
                 0 => self.media(ui, project, importing, missing, &mut out),
-                1 => placeholder(ui, "Effects arrive in a later version"),
+                1 => effects_tab(ui),
                 _ => text_presets(ui, &mut out),
             });
         self.tab = tab;
@@ -762,8 +762,39 @@ fn text_presets(ui: &mut Ui, out: &mut BinResponse) {
     }
 }
 
-fn placeholder(ui: &mut Ui, text: &str) {
-    ui.label(egui::RichText::new(text).color(color::INK_3));
+/// The Effects tab: the effects folder's files, each with its name or why it doesn't load.
+/// Effects are added to clips from the Inspector.
+fn effects_tab(ui: &mut Ui) {
+    ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
+    if let Some(dir) = crate::effects::dir()
+        && ui.add(Button::secondary("Open effects folder")).clicked()
+    {
+        // `reveal` opens a file's folder; any child of the folder works.
+        crate::export::queue::reveal(&dir.join("effect.wgsl"));
+    }
+    let empty = crate::effects::with(|lib| {
+        for (stem, entry) in lib.entries() {
+            match entry {
+                Ok(s) => {
+                    ui.label(egui::RichText::new(&s.name).color(color::INK))
+                        .on_hover_text(format!("{stem}.wgsl"));
+                }
+                Err(e) => {
+                    ui.label(egui::RichText::new(format!("{stem}.wgsl")).color(color::RED));
+                    ui.label(
+                        egui::RichText::new(e)
+                            .monospace()
+                            .small()
+                            .color(color::INK_3),
+                    );
+                }
+            }
+        }
+        lib.entries().next().is_none()
+    });
+    if empty {
+        ui.label(egui::RichText::new("Drop .wgsl files in the effects folder").color(color::INK_3));
+    }
 }
 
 #[cfg(test)]
