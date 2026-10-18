@@ -50,6 +50,7 @@ fn cli_matches_app_export() {
         preset: preset.clone(),
         loudness: None,
         lossless: None,
+        sidecar: false,
     };
     let pool = jvid_jobs::Pool::new(1);
     let gpu = export::headless_gpu().unwrap();

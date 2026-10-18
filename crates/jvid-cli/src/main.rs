@@ -170,6 +170,7 @@ fn request(project: &Project, args: &Args, presets: Vec<Preset>) -> Result<Reque
         preset,
         loudness: args.loudness,
         lossless: args.lossless,
+        sidecar: false,
     })
 }
 

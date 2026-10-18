@@ -539,6 +539,7 @@ impl App {
             "save" => return self.file_action(FileAction::Save),
             "save_as" => return self.file_action(FileAction::SaveAs),
             "import" => return self.import_dialog(),
+            "import_subtitles" => return self.import_subtitles(),
             "export" => {
                 if self.can_export() {
                     let seq = self.history.project().sequence();
@@ -609,6 +610,29 @@ impl App {
     fn import_dialog(&mut self) {
         if let Some(paths) = FileDialog::new().set_title("Import").pick_files() {
             self.import(paths);
+        }
+    }
+
+    /// Asks for an `.srt` and adds it as a subtitle track in the Caption style.
+    fn import_subtitles(&mut self) {
+        let Some(path) = FileDialog::new()
+            .set_title("Import Subtitles")
+            .add_filter("SubRip", &["srt"])
+            .pick_file()
+        else {
+            return;
+        };
+        let cues = match std::fs::read(&path) {
+            Ok(b) => jvid_core::srt::parse(&String::from_utf8_lossy(&b)),
+            Err(e) => return tracing::warn!("couldn't read {}: {e}", path.display()),
+        };
+        let [.., (_, style)] = jvid_core::model::Text::presets();
+        let name = "Subtitles".to_string();
+        if let Err(e) = self
+            .history
+            .apply(Command::ImportSubtitles { name, cues, style })
+        {
+            tracing::warn!("subtitle import failed: {e}");
         }
     }
 

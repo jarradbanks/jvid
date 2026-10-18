@@ -29,6 +29,8 @@ pub struct Request {
     pub loudness: Option<f64>,
     /// Copy the sources instead of rendering; the preset and loudness are then unused.
     pub lossless: Option<Lossless>,
+    /// Write subtitle tracks to an `.srt` beside the file instead of burning them in.
+    pub sidecar: bool,
 }
 
 /// Normalized exports' true-peak ceiling, in dBTP.
@@ -133,6 +135,23 @@ impl Drop for Partial<'_> {
 /// Exports and validates; on failure, cancellation or panic after the file was created, the
 /// partial file is removed. A failure before that leaves whatever was at `req.path` alone.
 pub fn run(
+    project: &Project,
+    req: &Request,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    ctx: &Ctx,
+) -> Result<ProbeInfo, Error> {
+    if !req.sidecar {
+        return encode(project, req, device, queue, ctx);
+    }
+    let info = encode(&project.without_subtitles(), req, device, queue, ctx)?;
+    let srt = jvid_core::srt::write(&project.subtitle_cues(), req.range);
+    let path = req.path.with_extension("srt");
+    std::fs::write(&path, srt).map_err(|e| format!("couldn't write {}: {e}", path.display()))?;
+    Ok(info)
+}
+
+fn encode(
     project: &Project,
     req: &Request,
     device: &wgpu::Device,

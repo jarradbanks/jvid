@@ -104,6 +104,7 @@ fn export_matches_range_with_audio_in_sync() {
             preset: preset("YouTube 1080p"),
             loudness: None,
             lossless: None,
+            sidecar: false,
         };
         let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{ext}: {e:?}"));
         assert_eq!((info.width, info.height), (Some(1920), Some(1080)), "{ext}");
@@ -167,6 +168,7 @@ fn in_to_out_exports_the_marked_range() {
         preset: preset("YouTube 1080p"),
         loudness: None,
         lossless: None,
+        sidecar: false,
     };
     let info = run_now(h.project(), &req, false).unwrap();
     let frame = Rate::new(30, 1).time_floor(1);
@@ -195,6 +197,7 @@ fn cancelled_export_leaves_no_file() {
         preset: preset("YouTube 1080p"),
         loudness: None,
         lossless: None,
+        sidecar: false,
     };
     assert_eq!(run_now(&project(&dir), &req, true), Err(Error::Cancelled));
     assert!(!path.exists());
@@ -213,6 +216,7 @@ fn failed_export_leaves_existing_file() {
         preset: preset("YouTube 1080p"),
         loudness: None,
         lossless: None,
+        sidecar: false,
     };
     assert!(matches!(
         run_now(&project(&dir), &req, false),
@@ -240,6 +244,7 @@ fn every_builtin_preset_exports() {
             preset,
             loudness: None,
             lossless: None,
+            sidecar: false,
         };
         let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
         if has_video {
@@ -277,6 +282,7 @@ fn screen_recording_keeps_text_sharp() {
         preset: preset("Screen recording (sharp text)"),
         loudness: None,
         lossless: None,
+        sidecar: false,
     };
     run_now(h.project(), &req, false).unwrap();
     let got = VideoDecoder::open(&path)
@@ -315,6 +321,7 @@ fn export_hits_loudness_target() {
             preset: p,
             loudness: Some(target),
             lossless: None,
+            sidecar: false,
         };
         run_now(&project(&dir), &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
         let mut a = AudioDecoder::open(&path, 0).unwrap();
@@ -349,6 +356,7 @@ fn audio_only_wav_is_the_mix() {
             preset: preset(name),
             loudness: None,
             lossless: None,
+            sidecar: false,
         };
         let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
         assert_eq!((info.width, info.audio_streams), (None, 1), "{name}");
@@ -411,6 +419,7 @@ fn editing_after_queueing_doesnt_change_the_export() {
         preset: preset("YouTube 1080p"),
         loudness: None,
         lossless: None,
+        sidecar: false,
     };
     let mut q = queue::Queue::default();
     assert!(q.push(
@@ -493,6 +502,7 @@ fn target_size_lands_within_three_percent() {
             preset,
             loudness: None,
             lossless: None,
+            sidecar: false,
         };
         run_now(h.project(), &req, false).unwrap_or_else(|e| panic!("{src}: {e:?}"));
         let size = std::fs::metadata(&path).unwrap().len();
@@ -540,6 +550,7 @@ fn lossless_copies_the_marked_cut() {
         preset: preset("YouTube 1080p"),
         loudness: None,
         lossless: Some(Lossless::Copy),
+        sidecar: false,
     };
     let err = run_now(h.project(), &req, false).unwrap_err();
     assert!(format!("{err:?}").contains(".mp4"), "{err:?}");

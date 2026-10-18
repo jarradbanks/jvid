@@ -35,6 +35,8 @@ pub struct ExportDialog {
     lossless: Option<Lossless>,
     /// Target file size in MB (10^6 bytes); `None` encodes at the preset's quality.
     target: Option<u64>,
+    /// Subtitle tracks go to an `.srt` sidecar instead of being burnt in.
+    sidecar: bool,
     /// Output file; kept between opens so the next export lands in the same folder.
     path: PathBuf,
     /// `Some` while the dialog is open.
@@ -49,6 +51,7 @@ impl Default for ExportDialog {
             loudness: Some(-14.0),
             lossless: None,
             target: None,
+            sidecar: false,
             path: PathBuf::new(),
             range: None,
         }
@@ -126,6 +129,15 @@ impl ExportDialog {
                         let enabled = preset.audio.is_some();
                         ui.add_enabled_ui(enabled, |ui| loudness_picker(ui, &mut self.loudness));
                         ui.end_row();
+
+                        if seq.tracks().iter().any(|t| t.subtitles) {
+                            ui.label("Subtitles");
+                            ui.horizontal(|ui| {
+                                ui.radio_value(&mut self.sidecar, false, "Burn In");
+                                ui.radio_value(&mut self.sidecar, true, "Sidecar .srt");
+                            });
+                            ui.end_row();
+                        }
 
                         ui.label("Range");
                         ui.horizontal(|ui| {
@@ -250,6 +262,7 @@ impl ExportDialog {
                             lossless: self
                                 .lossless
                                 .filter(|_| lossless::check(project, range).is_ok()),
+                            sidecar: self.sidecar,
                         };
                         request = Some((req, export));
                         ui.close();
