@@ -985,3 +985,67 @@ fn menu_actions_reach_the_timeline_from_any_panel_and_undo_is_an_action() {
         1
     );
 }
+
+#[test]
+fn inspector_scrolls_to_its_last_field_in_a_small_window() {
+    use jvid_core::time::Time;
+    if !gpu() {
+        return;
+    }
+    let mut h = harness([1024.0, 560.0], 1.0);
+    let clip = crate::playback::tests::add_solid(&mut h.state_mut().history, [1.0; 4], Time(0));
+    let app = h.state_mut();
+    app.timeline
+        .select_clip(app.history.project().sequence(), clip);
+    h.run();
+    let panel = Shot::take(&mut h, "inspector".into()).panel(Tab::Inspector);
+    let last = h.get_by_label("LUT mix");
+    assert!(last.rect().top() > panel.bottom(), "fits without scrolling");
+    last.scroll_to_me();
+    h.run();
+    let r = h.get_by_label("LUT mix").rect();
+    assert!(panel.contains_rect(r), "{r:?} not inside {panel:?}");
+}
+
+#[test]
+fn file_menu_saves_exports_and_shows_keymap_shortcuts() {
+    let mut h = plain_harness();
+    h.state_mut().on_welcome = false;
+    let path = std::env::temp_dir().join(format!("jvid-file-menu-{}.jvid", std::process::id()));
+    h.state_mut().path = Some(path.clone());
+    h.run();
+    h.get_by_label("File").click();
+    h.run();
+    assert!(h.query_by_label("Open Recent ⏵").is_some());
+    for id in [
+        "new_project",
+        "open_project",
+        "save",
+        "save_as",
+        "import",
+        "export",
+        "quit",
+    ] {
+        let (name, shortcut) = h.state().keymap.label(id);
+        assert!(!shortcut.is_empty(), "{id} unbound");
+        let row = format!("{name} {shortcut}");
+        assert!(h.query_by_label(&row).is_some(), "no {row:?} row");
+    }
+    h.get_by_label("Save Ctrl+S").click();
+    h.run();
+    assert!(path.exists());
+    std::fs::remove_file(&path).unwrap();
+
+    if !gpu() {
+        return;
+    }
+    let mut h = harness([1280.0, 720.0], 1.0);
+    let time = jvid_core::time::Time(0);
+    crate::playback::tests::add_solid(&mut h.state_mut().history, [1.0; 4], time);
+    h.run();
+    h.get_by_label("File").click();
+    h.run();
+    h.get_by_label("Export Media Ctrl+M").click();
+    h.run();
+    assert!(h.query_by_label("Add to Queue").is_some());
+}

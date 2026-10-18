@@ -11,6 +11,21 @@ use suite_ui::widgets::{Button, State};
 use super::{Edit, Timeline, add_menu};
 use crate::keymap::Keymap;
 
+/// The app bar's File menu; "" is a separator and "recent" the Open Recent submenu.
+pub const FILE: &[&str] = &[
+    "new_project",
+    "open_project",
+    "recent",
+    "",
+    "save",
+    "save_as",
+    "",
+    "import",
+    "export",
+    "",
+    "quit",
+];
+
 /// The app bar's Edit menu; "" is a separator.
 pub const EDIT: &[&str] = &[
     "undo",
@@ -149,13 +164,21 @@ impl Timeline {
         add_menu(ui, edit);
     }
 
-    /// Tool, snapping, linking, split and zoom buttons right-aligned in the panel `header`.
-    pub fn toolbar(&mut self, ui: &mut Ui, header: Rect, project: &Project, keymap: &Keymap) {
-        let mut right = header.right() - space::S8;
-        for &(id, glyph) in TOOLBAR.iter().rev() {
+    /// Tool, snapping, linking, split and zoom buttons left-aligned in the panel `header`,
+    /// starting at `left` (just past the title).
+    pub fn toolbar(
+        &mut self,
+        ui: &mut Ui,
+        header: Rect,
+        left: f32,
+        project: &Project,
+        keymap: &Keymap,
+    ) {
+        let mut left = left;
+        for &(id, glyph) in TOOLBAR {
             let y = header.center().y - size::CONTROL / 2.0;
-            let r = Rect::from_min_size(pos2(right - size::CONTROL, y), Vec2::splat(size::CONTROL));
-            right = r.left() - space::S4;
+            let r = Rect::from_min_size(pos2(left, y), Vec2::splat(size::CONTROL));
+            left = r.right() + space::S4;
             let on = match id {
                 "selection_tool" => !self.razor,
                 "razor_tool" => self.razor,

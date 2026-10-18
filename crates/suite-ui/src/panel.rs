@@ -35,6 +35,7 @@ pub struct Panel<'a> {
     header: Header<'a>,
     actions: &'a [(&'static str, &'a str)],
     focused: bool,
+    wide: bool,
 }
 
 impl<'a> Panel<'a> {
@@ -51,12 +52,19 @@ impl<'a> Panel<'a> {
             header,
             actions: &[],
             focused: false,
+            wide: false,
         }
     }
 
     /// Icon buttons at the header's right: a glyph from [`icon`] and its accessible name.
     pub fn actions(mut self, actions: &'a [(&'static str, &'a str)]) -> Self {
         self.actions = actions;
+        self
+    }
+
+    /// Tabs share the whole header instead of stopping at 160px each.
+    pub fn wide(mut self, wide: bool) -> Self {
+        self.wide = wide;
         self
     }
 
@@ -126,6 +134,11 @@ impl<'a> Panel<'a> {
                     header,
                     labels,
                     active,
+                    if self.wide {
+                        f32::INFINITY
+                    } else {
+                        size::TAB_MAX
+                    },
                 );
             }
         }
@@ -152,7 +165,7 @@ impl<'a> Panel<'a> {
     }
 }
 
-/// Lays out tab pills between `x` bounds: equal widths up to 160px, 4px apart.
+/// Lays out tab pills between `x` bounds: equal widths up to `max`, 4px apart.
 /// Tabs that would shrink below 64px move into a chevron menu at the end.
 fn tabs(
     ui: &mut Ui,
@@ -160,6 +173,7 @@ fn tabs(
     header: Rect,
     labels: &[&str],
     active: &mut usize,
+    max: f32,
 ) {
     let (left, right) = (*x.start(), *x.end());
     let avail = (right - left).max(0.0);
@@ -181,7 +195,7 @@ fn tabs(
         overflow = true;
     }
     let extra = if overflow { size::CONTROL + gap } else { 0.0 };
-    let width = fit(shown, extra).min(size::TAB_MAX).floor();
+    let width = fit(shown, extra).min(max).floor();
     let ppp = ui.pixels_per_point();
     let mut x = left;
     for (i, label) in labels.iter().take(shown).enumerate() {
