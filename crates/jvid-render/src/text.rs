@@ -47,6 +47,24 @@ pub fn warm() {
     drop(fonts().lock());
 }
 
+/// The font families the renderer can draw, sorted and deduplicated; loads the fonts on first
+/// call, like [`warm`].
+pub fn families() -> &'static [String] {
+    static LIST: OnceLock<Vec<String>> = OnceLock::new();
+    LIST.get_or_init(|| {
+        let f = fonts().lock().unwrap_or_else(|e| e.into_inner());
+        let mut v: Vec<String> = f
+            .system
+            .db()
+            .faces()
+            .filter_map(|face| face.families.first().map(|(n, _)| n.clone()))
+            .collect();
+        v.sort_by_key(|n| n.to_lowercase());
+        v.dedup();
+        v
+    })
+}
+
 /// Pushes `v` under `k`, keeping the newest 8.
 fn remember<T>(list: &mut Vec<(Key, T)>, k: Key, v: T) {
     if list.len() >= 8 {
@@ -317,6 +335,19 @@ mod tests {
         let ids: Vec<u16> = run.glyphs.iter().map(|g| g.glyph_id).collect();
         // Glyph 0 is .notdef: the font fell back to a tofu box.
         (!ids.contains(&0)).then_some((run.rtl, ids))
+    }
+
+    #[test]
+    fn every_listed_family_resolves_to_a_face() {
+        let names = families();
+        let f = fonts().lock().unwrap();
+        for name in names {
+            let q = cosmic_text::fontdb::Query {
+                families: &[cosmic_text::fontdb::Family::Name(name)],
+                ..Default::default()
+            };
+            assert!(f.system.db().query(&q).is_some(), "{name}");
+        }
     }
 
     /// Skips a shaping test, except on Linux CI, which installs the fonts.
