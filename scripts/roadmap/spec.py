@@ -1039,3 +1039,26 @@ I("effects-pane", "Effects pane: browse and apply effects", "M6", ["ui"], "M", [
   ac=["Dragging Vignette onto a clip adds it in the Inspector",
       "A broken user shader shows its error in the pane",
       "Bottom bar matches the Media tab layout"])
+
+I("render-queue-menu", "Render queue in the Export button menu", "M5", ["ui", "export"], "S", ["title-case"],
+  summary="Replace the floating Render Queue window with a menu under the top-right Export button.",
+  scope=[
+      "Remove the floating, collapsible Render Queue window",
+      "While jobs exist, the top-right Export button shows progress (e.g. 'Exporting 35%') and gets a dropdown arrow; clicking the arrow opens a menu listing queued/running/finished jobs: name, progress bar, status, and per-row Cancel (right-aligned, danger/red style) or Reveal for finished jobs",
+      "Menu footer: 'Cancel All' (danger style, confirm when more than one running) and 'Clear Finished'; 'New Export...' opens the export dialog",
+      "Finished/failed jobs keep the existing completion notification",
+  ],
+  ac=["No floating render queue window remains",
+      "Two queued exports: the Export menu lists both; Cancel on one leaves the other; Cancel All stops both",
+      "Cancel buttons are right-aligned and use the danger colour"])
+
+I("timeline-arrow-nav", "Timeline arrow-key navigation with modifiers", "M5", ["ui", "timeline"], "S", ["title-case"],
+  summary="Arrow keys move the playhead with modifier steps, configurable in the keymap.",
+  scope=[
+      "Keep Left/Right = one frame; Shift+Left/Right = one second (or 10 frames, pick and note)",
+      "Ctrl+Left/Right (Cmd on macOS) = previous/next edit point on any track (clip start or end); Ctrl+Shift+Left/Right = start/end of the clip under the playhead on the selected or topmost track",
+      "Up/Down = previous/next edit point (Premiere default) if not already bound; Home/End = sequence start/end",
+      "All bindings are keymap actions, editable in the keymap editor and listed in docs/shortcuts.md; no conflicts with existing bindings",
+  ],
+  ac=["Each binding moves the playhead to the expected frame (kittest per binding)",
+      "Bindings appear in the keymap editor and can be rebound"])

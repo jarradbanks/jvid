@@ -436,6 +436,14 @@
     "effects-pane": {
       "number": 204,
       "id": 5904958985
+    },
+    "render-queue-menu": {
+      "number": 207,
+      "id": 5905124022
+    },
+    "timeline-arrow-nav": {
+      "number": 208,
+      "id": 5905124343
     }
   },
   "links": [
@@ -1121,6 +1129,14 @@
     ],
     [
       "effects-pane",
+      "title-case"
+    ],
+    [
+      "render-queue-menu",
+      "title-case"
+    ],
+    [
+      "timeline-arrow-nav",
       "title-case"
     ]
   ]
