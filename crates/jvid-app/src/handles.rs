@@ -6,8 +6,9 @@ use std::collections::HashSet;
 
 use egui::{Pos2, Rect, Sense, Stroke, Ui, Vec2, vec2};
 use jvid_core::history::GestureKey;
-use jvid_core::model::{Clip, ClipId, Project, TrackKind, Transform};
+use jvid_core::model::{Clip, ClipId, Project, Text, TrackKind, Transform};
 use jvid_core::time::Time;
+use jvid_render::text;
 use suite_ui::tokens::color;
 
 use crate::timeline::Edit;
@@ -101,6 +102,27 @@ fn corners(project: &Project, c: &Clip, x: &Transform, frame: Rect) -> Option<[P
     }))
 }
 
+/// [`corners`] of the box around `c`'s drawn pixels: a title's text (`text`, as keyed at the
+/// playhead) rather than its whole frame.
+fn bounds(
+    project: &Project,
+    c: &Clip,
+    x: &Transform,
+    text: Option<&Text>,
+    frame: Rect,
+) -> Option<[Pos2; 4]> {
+    let q @ [tl, tr, bl, _] = corners(project, c, x, frame)?;
+    let st = project.settings();
+    let Some([x0, y0, x1, y1]) = text.and_then(|t| text::drawn_bounds(t, (st.width, st.height)))
+    else {
+        return Some(q);
+    };
+    let (w, h) = (st.width as f32, st.height as f32);
+    // The quad is a parallelogram, so image coordinates map linearly onto it.
+    let at = |px: u32, py: u32| tl + (tr - tl) * (px as f32 / w) + (bl - tl) * (py as f32 / h);
+    Some([at(x0, y0), at(x1, y0), at(x0, y1), at(x1, y1)])
+}
+
 /// The top text clip with glyphs (or its box) near a double-click at playhead `t`, inside
 /// `frame`, the project's on-screen rect.
 // shortcut: maps the click through the layer's uncropped quad; a cropped text layer hits
@@ -159,7 +181,16 @@ pub fn show(
         .map(|(_, c)| c)
         .min_by_key(|c| c.id.0)?;
     let x = c.transform_at(t);
-    let [tl, tr, bl, br] = corners(project, c, &x, frame)?;
+    let text = project
+        .asset(c.asset)
+        .and_then(|a| a.text.as_ref())
+        .map(|text| {
+            let layer = jvid_core::eval::video_at(seq, t)
+                .into_iter()
+                .find(|l| l.clip == c.id);
+            layer.map_or_else(|| text.clone(), |l| text.with(&l.text))
+        });
+    let [tl, tr, bl, br] = bounds(project, c, &x, text.as_ref(), frame)?;
     let s = frame.width() / project.settings().width as f32;
     let anchor = frame.center() + vec2(x.position[0] as f32, x.position[1] as f32) * s;
     let up = (tl - bl).normalized();
@@ -425,13 +456,13 @@ pub(crate) mod tests {
         assert_eq!(keys(&harness), before);
     }
 
-    #[test]
-    fn double_click_finds_the_text_under_it() {
+    /// A title clip filling 0..1s of a default project, with a box so its hit and bounds
+    /// don't depend on the installed fonts.
+    fn title() -> (jvid_core::history::History, ClipId) {
         use jvid_core::history::{Command, Created, History};
-        use jvid_core::model::{NewClip, Text};
+        use jvid_core::model::NewClip;
         use jvid_core::time::FLICKS_PER_SECOND as S;
         let mut h = History::new(Project::default());
-        // A box makes the hit independent of the installed fonts.
         let text = Text {
             box_color: [0.0, 0.0, 0.0, 1.0],
             ..Text::default()
@@ -457,6 +488,58 @@ pub(crate) mod tests {
         };
         h.apply(Command::AddClip { track, clip }).unwrap();
         let id = h.project().sequence().tracks()[0].clips()[0].id;
+        (h, id)
+    }
+
+    #[test]
+    fn a_titles_handles_fit_its_text() {
+        use jvid_core::history::History;
+        let (h, id) = title();
+        let frame = Rect::from_min_size(Pos2::ZERO, vec2(960.0, 540.0));
+        let p = h.project();
+        let (_, c) = p.sequence().clip(id).unwrap();
+        let text = p.asset(c.asset).unwrap().text.clone();
+        let b = bounds(p, c, &c.transform, text.as_ref(), frame).unwrap();
+        let r = Rect::from_points(&b);
+        if r == frame {
+            return; // No font, nothing drawn.
+        }
+        assert!(
+            r.contains(frame.center()) && frame.contains_rect(r),
+            "{r:?}"
+        );
+        assert!(r.width() < frame.width() / 2.0, "{r:?}");
+        // A drag in the empty corner no longer moves the title.
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([960.0, 540.0])
+            .build_ui_state(
+                move |ui, h: &mut History| {
+                    let edit = show(ui, h.project(), &HashSet::from([id]), Time(0), frame);
+                    if let Some((c, _)) = edit {
+                        h.apply(c).unwrap();
+                    }
+                },
+                h,
+            );
+        let mut drag = |from: Pos2| {
+            harness.hover_at(from);
+            harness.run();
+            harness.drag_at(from);
+            harness.run();
+            harness.hover_at(from + vec2(40.0, 0.0));
+            harness.run();
+            harness.drop_at(from + vec2(40.0, 0.0));
+            harness.run();
+            let p = harness.state().project();
+            p.sequence().tracks()[0].clips()[0].transform.position
+        };
+        assert_eq!(drag(pos2(60.0, 60.0)), [0.0, 0.0]);
+        assert_ne!(drag(frame.center()), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn double_click_finds_the_text_under_it() {
+        let (h, id) = title();
         let mut harness = egui_kittest::Harness::builder()
             .with_size([960.0, 540.0])
             .with_step_dt(0.05)
