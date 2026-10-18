@@ -533,6 +533,28 @@ I("program-transport", "Program monitor transport bar", "M2", ["ui"], "S", ["pro
   ac=["Program tab shows play/pause and step buttons that play and step the timeline",
       "Program tab timecode tracks the timeline playhead while playing and scrubbing"])
 
+I("ui-polish-1", "UI polish from first user test", "M2", ["ui"], "S", ["program-monitor"],
+  summary="Fixes from the owner's first hands-on test of the editor shell.",
+  scope=[
+      "Inspector panel scrolls vertically (ScrollArea) when its sections overflow",
+      "Timeline toolbar actions (select, razor, snap, link, zoom...) are left-aligned in the timeline header",
+      "Media / Effects / Text tabs in the bin share the full panel width",
+      "Add a File menu left of Edit: New, Open, Open Recent, Save, Save As, Import Media, Export..., Quit, using existing actions and keymap shortcuts",
+  ],
+  ac=["Inspector with all sections expanded scrolls to its last field in a small window",
+      "File > Export opens the export dialog; File > Save saves; shortcuts shown match the keymap",
+      "Snapshot tests updated for the toolbar and bin tabs"])
+
+I("text-to-timeline", "Text presets: feedback and drag to timeline", "M2", ["ui", "timeline"], "S", ["program-monitor"],
+  summary="Text presets from the Text tab are visibly created and can be placed on the timeline like media.",
+  scope=[
+      "Clicking a Text preset gives clear feedback (switch to/select and scroll to the new asset, or place it at the playhead on the top free video track: pick one, note it under Decisions)",
+      "Text assets drag from the bin onto the timeline exactly like media and solids (insert/overwrite, snapping), with a default duration",
+      "Text presets themselves can be dragged straight from the Text tab onto the timeline",
+  ],
+  ac=["Dragging a Title preset onto V2 creates a text clip that renders in the Program monitor",
+      "Clicking a preset shows a visible result without hunting through the Media tab"])
+
 I("in-out", "In/Out points on the timeline", "M2", ["timeline"], "M", ["trim-split", "actions"],
   summary="Premiere-style range marking for playback, editing and export.",
   scope=[
