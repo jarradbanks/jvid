@@ -68,7 +68,7 @@ fn request_uses_timecodes_or_the_app_defaults() {
 fn target_size_goes_into_the_preset_in_bytes() {
     let project = Project::default();
     let presets = jvid_core::preset::builtin();
-    let a = args("render p.jvid -o o.mp4 --target-size 25").unwrap();
+    let a = args("render p.jvid -o o.mp4 --range 00:00:00:00-00:00:01:00 --target-size 25").unwrap();
     let r = request(&project, &a, presets.clone()).unwrap();
     assert_eq!(
         r.preset.options.get("target_size").map(String::as_str),
