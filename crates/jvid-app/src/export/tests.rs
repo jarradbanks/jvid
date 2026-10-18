@@ -7,6 +7,7 @@ use jvid_media::decode::VideoDecoder;
 use jvid_media::test_media::{corpus, frame_index};
 
 use super::*;
+use crate::export::Lossless;
 use crate::playback::tests::device;
 
 fn secs(s: i64) -> Time {
@@ -102,6 +103,7 @@ fn export_matches_range_with_audio_in_sync() {
             range: (secs(1), secs(2)),
             preset: preset("YouTube 1080p"),
             loudness: None,
+            lossless: None,
         };
         let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{ext}: {e:?}"));
         assert_eq!((info.width, info.height), (Some(1920), Some(1080)), "{ext}");
@@ -164,6 +166,7 @@ fn in_to_out_exports_the_marked_range() {
         range,
         preset: preset("YouTube 1080p"),
         loudness: None,
+        lossless: None,
     };
     let info = run_now(h.project(), &req, false).unwrap();
     let frame = Rate::new(30, 1).time_floor(1);
@@ -191,6 +194,7 @@ fn cancelled_export_leaves_no_file() {
         range: (Time(0), secs(10)),
         preset: preset("YouTube 1080p"),
         loudness: None,
+        lossless: None,
     };
     assert_eq!(run_now(&project(&dir), &req, true), Err(Error::Cancelled));
     assert!(!path.exists());
@@ -208,6 +212,7 @@ fn failed_export_leaves_existing_file() {
         range: (secs(1), secs(1)),
         preset: preset("YouTube 1080p"),
         loudness: None,
+        lossless: None,
     };
     assert!(matches!(
         run_now(&project(&dir), &req, false),
@@ -234,6 +239,7 @@ fn every_builtin_preset_exports() {
             range: (secs(1), secs(2)),
             preset,
             loudness: None,
+            lossless: None,
         };
         let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
         if has_video {
@@ -270,6 +276,7 @@ fn screen_recording_keeps_text_sharp() {
         range: (secs(1), secs(2)),
         preset: preset("Screen recording (sharp text)"),
         loudness: None,
+        lossless: None,
     };
     run_now(h.project(), &req, false).unwrap();
     let got = VideoDecoder::open(&path)
@@ -307,6 +314,7 @@ fn export_hits_loudness_target() {
             range: (Time(0), secs(8)),
             preset: p,
             loudness: Some(target),
+            lossless: None,
         };
         run_now(&project(&dir), &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
         let mut a = AudioDecoder::open(&path, 0).unwrap();
@@ -340,6 +348,7 @@ fn audio_only_wav_is_the_mix() {
             range: (secs(1), secs(3)),
             preset: preset(name),
             loudness: None,
+            lossless: None,
         };
         let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
         assert_eq!((info.width, info.audio_streams), (None, 1), "{name}");
@@ -401,6 +410,7 @@ fn editing_after_queueing_doesnt_change_the_export() {
         range: (secs(1), secs(2)),
         preset: preset("YouTube 1080p"),
         loudness: None,
+        lossless: None,
     };
     let mut q = queue::Queue::default();
     assert!(q.push(
@@ -482,6 +492,7 @@ fn target_size_lands_within_three_percent() {
             range: (Time(0), secs(2)),
             preset,
             loudness: None,
+            lossless: None,
         };
         run_now(h.project(), &req, false).unwrap_or_else(|e| panic!("{src}: {e:?}"));
         let size = std::fs::metadata(&path).unwrap().len();
@@ -505,4 +516,35 @@ fn next_bits_closes_in_on_the_target() {
     assert_eq!(next_bits(lo, hi, 150.0), 1_500_000);
     // Never right at either end, which a flat stretch would otherwise give.
     assert_eq!(next_bits(lo, hi, 100.0), 1_100_000);
+}
+
+#[test]
+fn lossless_copies_the_marked_cut() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let src = dir.join("frame-index-1080p30.mp4");
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, src.clone(), Time(0), secs(10));
+    let id = h.project().assets()[0].id;
+    let probe = Some(jvid_media::probe::probe(&src).unwrap());
+    h.apply(Command::SetAssetProbe { id, probe }).unwrap();
+    let path = out("lossless.mov");
+    // Keyframes every second, so the cut snaps to 1-4 s.
+    let mut req = Request {
+        path: path.clone(),
+        range: (
+            secs(1) + Time(FLICKS_PER_SECOND / 3),
+            secs(4) - Time(FLICKS_PER_SECOND / 3),
+        ),
+        preset: preset("YouTube 1080p"),
+        loudness: None,
+        lossless: Some(Lossless::Copy),
+    };
+    let err = run_now(h.project(), &req, false).unwrap_err();
+    assert!(format!("{err:?}").contains(".mp4"), "{err:?}");
+    req.path = path.with_extension("mp4");
+    let info = run_now(h.project(), &req, false).unwrap();
+    std::fs::remove_file(&req.path).unwrap();
+    assert_eq!(info.duration, secs(3));
 }

@@ -112,6 +112,10 @@ pub struct VideoInfo {
     pub color_transfer: Option<String>,
     /// `tv` (limited) or `pc` (full).
     pub color_range: Option<String>,
+    /// Hash of the profile, pixel format and codec extradata (SPS/PPS); lossless export only
+    /// joins files whose hashes match. 0 in projects probed before it existed.
+    #[serde(default)]
+    pub params: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

@@ -16,6 +16,9 @@ fn parses_render_options() {
         (Some("00:00:01:00".into()), Some("00:00:02:00".into()))
     );
     assert!(a.json);
+    assert_eq!(a.lossless, None);
+    let a = args("render p.jvid -o out.mp4 --smart").unwrap();
+    assert_eq!(a.lossless, Some(Lossless::Smart));
 }
 
 #[test]

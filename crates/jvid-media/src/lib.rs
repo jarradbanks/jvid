@@ -7,6 +7,7 @@ pub mod ffmpeg;
 pub mod hwdec;
 pub mod probe;
 pub mod proxy;
+pub mod remux;
 pub mod stills;
 #[cfg(feature = "test-support")]
 pub mod test_media;

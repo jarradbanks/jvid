@@ -1,20 +1,21 @@
 //! Headless render: turns a `.jvid` project into a video file without opening a window.
 //!
 //! `jvid render project.jvid -o out.mp4 [--preset NAME] [--in TC --out TC | --range IN-OUT]
-//! [--loudness LUFS] [--target-size MB] [--json]`. Exports through the app's own export path, so the same project,
+//! [--loudness LUFS] [--target-size MB] [--lossless | --smart] [--json]`. Exports through the app's own export path, so the same project,
 //! range and preset give the same file.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use jvid_app::export::{self, Error, Request};
+use jvid_app::export::{self, Error, Lossless, Request};
 use jvid_core::model::Project;
 use jvid_core::preset::{Preset, VideoCodec};
 use jvid_core::time::{Time, parse_timecode};
 
 const USAGE: &str = "usage: jvid render PROJECT.jvid -o OUT [--preset NAME] \
-[--in TC --out TC | --range IN-OUT] [--loudness LUFS] [--target-size MB] [--json]";
+[--in TC --out TC | --range IN-OUT] [--loudness LUFS] [--target-size MB] \
+[--lossless | --smart] [--json]";
 
 /// Exit codes: 0 done, 1 export failed, 2 bad arguments, 3 project unreadable, 4 no GPU.
 fn main() -> ExitCode {
@@ -82,6 +83,8 @@ struct Args {
     loudness: Option<f64>,
     /// Megabytes, 10^6 bytes each.
     target_size: Option<u64>,
+    /// `--lossless` copies the sources; `--smart` also re-encodes cut edges for exact frames.
+    lossless: Option<Lossless>,
     json: bool,
 }
 
@@ -114,6 +117,8 @@ fn parse(args: &[String]) -> Result<Args, String> {
                 let mb = v.parse().ok().filter(|&mb| mb > 0);
                 a.target_size = Some(mb.ok_or(format!("bad target size {v}, want whole MB"))?);
             }
+            "--lossless" => a.lossless = Some(Lossless::Copy),
+            "--smart" => a.lossless = Some(Lossless::Smart),
             "--json" => a.json = true,
             s if s.starts_with('-') => return Err(format!("unknown option {s}")),
             s if project.is_none() => project = Some(s.to_string()),
@@ -164,6 +169,7 @@ fn request(project: &Project, args: &Args, presets: Vec<Preset>) -> Result<Reque
         range,
         preset,
         loudness: args.loudness,
+        lossless: args.lossless,
     })
 }
 
