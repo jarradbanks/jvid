@@ -34,7 +34,7 @@ eframe = { version = "0.36.0", default-features = false, features = ["default_fo
 egui_kittest = { version = "0.36.0", features = ["wgpu", "snapshot"] }
 
 [workspace.lints.rust]
-unsafe_code = "warn"
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 dbg_macro = "warn"
