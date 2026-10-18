@@ -635,7 +635,7 @@ impl Preview {
         }
 
         let rect = ui.max_rect();
-        let viewer = Rect::from_min_max(rect.min, rect.max - vec2(0.0, size::HEADER));
+        let viewer = viewer_rect(ui);
         ui.painter().rect_filled(viewer, 0.0, color::VIEWER);
         if offline {
             ui.painter().text(
@@ -841,6 +841,12 @@ impl Preview {
         .response
         .on_hover_text("Guides");
     }
+}
+
+/// The video area of a viewer `ui`: its rect above the transport row.
+pub fn viewer_rect(ui: &Ui) -> Rect {
+    let rect = ui.max_rect();
+    Rect::from_min_max(rect.min, rect.max - vec2(0.0, size::HEADER))
 }
 
 /// What the Source and Program tabs' transport row shows.

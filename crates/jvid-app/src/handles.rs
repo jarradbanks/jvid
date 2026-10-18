@@ -133,7 +133,7 @@ pub fn double_clicked_text(ui: &Ui, project: &Project, t: Time, frame: Rect) -> 
         let p = i.pointer.interact_pos();
         p.filter(|_| i.pointer.button_double_clicked(primary))
     });
-    let pos = pos.filter(|p| frame.contains(*p) && ui.max_rect().contains(*p))?;
+    let pos = pos.filter(|p| frame.contains(*p) && crate::preview::viewer_rect(ui).contains(*p))?;
     let st = project.settings();
     let (w, h) = (st.width as i64, st.height as i64);
     let seq = project.sequence();
@@ -222,13 +222,13 @@ pub fn show(
         Grab::Rotate,
         Rect::from_center_size(rot, Vec2::splat(HANDLE * 1.5)),
     ));
+    // Off the viewer, nothing draws or takes clicks; Fit zoom brings off-frame handles back.
+    let clip = frame
+        .expand(STEM + HANDLE)
+        .intersect(crate::preview::viewer_rect(ui));
     let mut edit = None;
     for (i, (grab, r)) in grabs.into_iter().enumerate() {
-        let resp = ui.interact(
-            r.intersect(frame.expand(STEM + HANDLE)),
-            id.with(i),
-            Sense::drag(),
-        );
+        let resp = ui.interact(r.intersect(clip), id.with(i), Sense::drag());
         let icon = match grab {
             Grab::Move => egui::CursorIcon::Move,
             Grab::Scale => egui::CursorIcon::ResizeNwSe,
@@ -276,7 +276,7 @@ pub fn show(
         }
     }
 
-    let p = ui.painter().with_clip_rect(frame.expand(STEM + HANDLE));
+    let p = ui.painter().with_clip_rect(clip);
     let stroke = Stroke::new(1.0, color::AMBER);
     p.add(egui::Shape::closed_line(vec![tl, tr, br, bl], stroke));
     p.line_segment([top, rot], stroke);
@@ -575,5 +575,59 @@ pub(crate) mod tests {
         (0..20).for_each(|_| harness.step());
         click(&mut harness, pos2(480.0, 270.0));
         assert_eq!(harness.state().1, Some(id));
+    }
+
+    #[test]
+    fn an_oversized_clip_leaves_the_transport_row_clickable() {
+        use jvid_core::history::{Command, History};
+        use suite_ui::tokens::size;
+        let (mut h, id) = history();
+        let c = h.project().sequence().tracks()[0].clips()[0].clone();
+        let x = Transform {
+            scale: [1.5, 1.5],
+            ..c.transform.clone()
+        };
+        h.apply(Command::SetClipProps(vec![(id, x, c.keyframes.clone())]))
+            .unwrap();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([960.0, 540.0])
+            .build_ui_state(
+                move |ui, (h, clicks): &mut (History, u32)| {
+                    let row = Rect::from_min_max(
+                        pos2(0.0, ui.max_rect().bottom() - size::HEADER),
+                        ui.max_rect().max,
+                    );
+                    // A stand-in for the play button, drawn first as the transport row is.
+                    if ui.put(row, egui::Button::new("Play")).clicked() {
+                        *clicks += 1;
+                    }
+                    let frame = Rect::from_min_size(Pos2::ZERO, vec2(960.0, 540.0 - size::HEADER));
+                    if let Some((c, _)) =
+                        show(ui, h.project(), &HashSet::from([id]), Time(0), frame)
+                    {
+                        h.apply(c).unwrap();
+                    }
+                },
+                (h, 0),
+            );
+        harness.run();
+        // Under the box body, which a 150% clip stretches over the transport row.
+        let p = pos2(480.0, 540.0 - size::HEADER / 2.0);
+        harness.hover_at(p);
+        harness.run();
+        harness.event(egui::Event::PointerButton {
+            pos: p,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        });
+        harness.event(egui::Event::PointerButton {
+            pos: p,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        });
+        harness.run();
+        assert_eq!(harness.state().1, 1);
     }
 }
