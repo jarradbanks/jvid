@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use egui::Ui;
-use jvid_core::model::{ClipId, Project, Sequence};
+use jvid_core::model::{ClipId, Marker, MarkerId, Project, Sequence};
 use jvid_core::preset::{AudioCodec, Preset, VideoCodec};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_media::remux::{Cut, SMART_ENCODER};
@@ -22,7 +22,12 @@ pub enum Range {
     Entire,
     InOut,
     Selected,
+    /// Each chosen ranged marker as its own file.
+    Highlights,
 }
+
+/// The default highlight file name, before the extension.
+pub const TEMPLATE: &str = "{project}-{marker}-{index}";
 
 /// Choices that persist between exports.
 pub struct ExportDialog {
@@ -41,6 +46,12 @@ pub struct ExportDialog {
     path: PathBuf,
     /// `Some` while the dialog is open.
     range: Option<Range>,
+    /// Project name for the highlight template.
+    name: String,
+    /// Ranged markers left out of a highlights export.
+    skipped: HashSet<MarkerId>,
+    /// Highlight file name: `{project}`, `{marker}` and `{index}` are filled in.
+    template: String,
 }
 
 impl Default for ExportDialog {
@@ -54,6 +65,9 @@ impl Default for ExportDialog {
             sidecar: false,
             path: PathBuf::new(),
             range: None,
+            name: String::new(),
+            skipped: HashSet::new(),
+            template: TEMPLATE.into(),
         }
     }
 }
@@ -74,16 +88,17 @@ impl ExportDialog {
         };
         self.path = dir.join(format!("{name}.{ext}"));
         self.range = Some(range);
+        self.name = name.into();
     }
 
     /// Shows the dialog while open; returns the request when the user clicks Export or Add to
-    /// Queue, with `true` for Export.
+    /// Queue, with `true` for Export; Highlights gives one request per chosen marker.
     pub fn show(
         &mut self,
         ui: &mut Ui,
         project: &Project,
         selected: &HashSet<ClipId>,
-    ) -> Option<(Request, bool)> {
+    ) -> Option<(Vec<Request>, bool)> {
         let range = self.range.as_mut()?;
         let path = &mut self.path;
         let seq = project.sequence();
@@ -151,8 +166,35 @@ impl ExportDialog {
                                 ui.radio_value(range, Range::Selected, "Selected Clips")
                                     .on_disabled_hover_text("Select clips on the timeline first")
                             });
+                            ui.add_enabled_ui(highlights(seq).next().is_some(), |ui| {
+                                ui.radio_value(range, Range::Highlights, "Highlights")
+                                    .on_disabled_hover_text("Add ranged markers first")
+                            });
                         });
                         ui.end_row();
+
+                        if *range == Range::Highlights {
+                            ui.label("Highlights");
+                            ui.vertical(|ui| {
+                                for m in highlights(seq) {
+                                    let mut on = !self.skipped.contains(&m.id);
+                                    if ui.checkbox(&mut on, &m.name).changed() {
+                                        if on {
+                                            self.skipped.remove(&m.id);
+                                        } else {
+                                            self.skipped.insert(m.id);
+                                        }
+                                    }
+                                }
+                            });
+                            ui.end_row();
+                            ui.label("File Names");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.template).desired_width(260.0),
+                            )
+                            .on_hover_text("{project}, {marker} and {index} are filled in");
+                            ui.end_row();
+                        }
 
                         let span = span(*range, seq, selected);
                         let rate = s.frame_rate;
@@ -237,7 +279,11 @@ impl ExportDialog {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = space::S8;
                     let span = span(*range, seq, selected).filter(|(a, b)| b > a);
-                    let ok = span.is_some() && path.file_name().is_some();
+                    let chosen = chosen(seq, &self.skipped);
+                    let kind = *range;
+                    let ok = span.is_some()
+                        && path.file_name().is_some()
+                        && (kind != Range::Highlights || !chosen.is_empty());
                     let state = if ok { State::Live } else { State::Disabled };
                     let export = ui.add(Button::primary("Export").state(state)).clicked();
                     let queue = ui
@@ -254,17 +300,34 @@ impl ExportDialog {
                                 .options
                                 .insert("target_size".into(), (mb * MB).to_string());
                         }
-                        let req = Request {
-                            path: path.clone(),
+                        let req = |path: PathBuf, range| Request {
+                            path,
                             range,
-                            preset,
+                            preset: preset.clone(),
                             loudness: self.loudness,
                             lossless: self
                                 .lossless
                                 .filter(|_| lossless::check(project, range).is_ok()),
                             sidecar: self.sidecar,
                         };
-                        request = Some((req, export));
+                        let reqs = if kind == Range::Highlights {
+                            let ext = path.extension().unwrap_or_default().to_string_lossy();
+                            let dir = path.parent().unwrap_or(std::path::Path::new(""));
+                            chosen
+                                .iter()
+                                .enumerate()
+                                .map(|(i, m)| {
+                                    let name = file_name(&self.template, &self.name, m, i + 1);
+                                    req(
+                                        dir.join(format!("{name}.{ext}")),
+                                        (m.time, m.time + m.duration),
+                                    )
+                                })
+                                .collect()
+                        } else {
+                            vec![req(path.clone(), range)]
+                        };
+                        request = Some((reqs, export));
                         ui.close();
                     }
                     if ui.add(Button::secondary("Cancel")).clicked() {
@@ -380,6 +443,43 @@ pub fn audio_bitrate(a: AudioCodec) -> f64 {
     }
 }
 
+/// Ranged markers in timeline order.
+pub fn highlights(seq: &Sequence) -> impl Iterator<Item = &Marker> {
+    let mut all: Vec<_> = seq
+        .markers()
+        .iter()
+        .filter(|m| m.duration > Time(0))
+        .collect();
+    all.sort_by_key(|m| m.time);
+    all.into_iter()
+}
+
+/// The highlights to export: every ranged marker not in `skipped`.
+pub fn chosen<'a>(seq: &'a Sequence, skipped: &HashSet<MarkerId>) -> Vec<&'a Marker> {
+    highlights(seq)
+        .filter(|m| !skipped.contains(&m.id))
+        .collect()
+}
+
+/// Fills `template` for the `index`th (1-based) highlight; path separators and characters
+/// Windows forbids become `-`.
+pub fn file_name(template: &str, project: &str, marker: &Marker, index: usize) -> String {
+    let name = template
+        .replace("{project}", project)
+        .replace("{marker}", &marker.name)
+        .replace("{index}", &format!("{index:02}"));
+    let clean = |c: char| match c {
+        '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+        c if c.is_control() => '-',
+        c => c,
+    };
+    name.chars()
+        .map(clean)
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
 /// The half-open timeline span `range` covers, or `None` when it covers nothing.
 pub fn span(range: Range, seq: &Sequence, selected: &HashSet<ClipId>) -> Option<(Time, Time)> {
     match range {
@@ -394,6 +494,13 @@ pub fn span(range: Range, seq: &Sequence, selected: &HashSet<ClipId>) -> Option<
             Some((
                 clips.iter().map(|c| c.start).min()?,
                 clips.iter().map(|c| c.end()).max()?,
+            ))
+        }
+        Range::Highlights => {
+            let all: Vec<_> = highlights(seq).collect();
+            Some((
+                all.first()?.time,
+                all.iter().map(|m| m.time + m.duration).max()?,
             ))
         }
     }
@@ -505,6 +612,34 @@ mod tests {
         assert_eq!(span(Range::Selected, seq, &none), None);
         let sel = HashSet::from([second]);
         assert_eq!(span(Range::Selected, seq, &sel), Some((secs(6), secs(10))));
+    }
+
+    #[test]
+    fn highlights_skip_points_and_unchosen_and_fill_names() {
+        let (mut h, _) = marked();
+        for (t, d, name) in [(5, 1, "b"), (1, 0, "point"), (2, 2, "a/b")] {
+            let (time, duration) = (secs(t), secs(d));
+            let name = name.into();
+            h.apply(Command::AddMarker {
+                time,
+                duration,
+                name,
+            })
+            .unwrap();
+        }
+        let seq = h.project().sequence();
+        let names: Vec<_> = highlights(seq).map(|m| &*m.name).collect();
+        assert_eq!(names, ["a/b", "b"]);
+        assert_eq!(
+            span(Range::Highlights, seq, &HashSet::new()),
+            Some((secs(2), secs(6)))
+        );
+        let skip = HashSet::from([highlights(seq).next().unwrap().id]);
+        let left = chosen(seq, &skip);
+        assert_eq!(left.len(), 1);
+        assert_eq!(file_name(TEMPLATE, "Trip", left[0], 3), "Trip-b-03");
+        let first = highlights(seq).next().unwrap();
+        assert_eq!(file_name("{marker}: {index}", "p", first, 1), "a-b- 01");
     }
 
     #[test]

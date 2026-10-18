@@ -185,6 +185,49 @@ fn in_to_out_exports_the_marked_range() {
 }
 
 #[test]
+fn ten_highlights_export_as_ten_trimmed_files() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let mut h = History::new(project(&dir));
+    // Half-second highlights every 0.9 s from 0.5 s: frames 15+27i to 29+27i.
+    for i in 0..10 {
+        let time = Time(half(1).0 + i * 9 * FLICKS_PER_SECOND / 10);
+        let (duration, name) = (half(1), format!("h{i}"));
+        h.apply(Command::AddMarker {
+            time,
+            duration,
+            name,
+        })
+        .unwrap();
+    }
+    let seq = h.project().sequence();
+    let chosen = dialog::chosen(seq, &Default::default());
+    assert_eq!(chosen.len(), 10);
+    let frame = Rate::new(30, 1).time_floor(1);
+    let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
+    for (i, m) in chosen.iter().enumerate() {
+        let name = dialog::file_name(dialog::TEMPLATE, "hl", m, i + 1);
+        let path = out(&format!("{name}.mp4"));
+        let req = Request {
+            path: path.clone(),
+            range: (m.time, m.time + m.duration),
+            preset: preset("YouTube 1080p"),
+            loudness: None,
+            lossless: None,
+            sidecar: false,
+        };
+        let info = run_now(h.project(), &req, false).unwrap();
+        assert!((info.duration - half(1)).0.abs() <= frame.0, "{name}");
+        let mut v = VideoDecoder::open(&path).unwrap();
+        let (first, last) = (v.frame_at(Time(0)).unwrap(), v.frame_at(secs(10)).unwrap());
+        let start = 15 + 27 * i as u32;
+        assert_eq!((index(&first), index(&last)), (start, start + 14), "{name}");
+        std::fs::remove_file(&path).unwrap();
+    }
+}
+
+#[test]
 fn cancelled_export_leaves_no_file() {
     let (Some(dir), Some(_)) = (corpus(), device()) else {
         return eprintln!("skipping export test: needs the corpus and a software adapter");
