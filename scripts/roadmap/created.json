@@ -1182,6 +1182,38 @@
     [
       "font-picker",
       "title-case"
+    ],
+    [
+      "release",
+      "title-case"
+    ],
+    [
+      "release",
+      "gizmo-clip"
+    ],
+    [
+      "release",
+      "canvas-text-edit"
+    ],
+    [
+      "release",
+      "font-picker"
+    ],
+    [
+      "release",
+      "in-app-dialogs"
+    ],
+    [
+      "release",
+      "effects-pane"
+    ],
+    [
+      "release",
+      "render-queue-menu"
+    ],
+    [
+      "release",
+      "timeline-arrow-nav"
     ]
   ]
 }

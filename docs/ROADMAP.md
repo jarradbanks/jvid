@@ -22,9 +22,9 @@ The order jvid gets built in. Every item is a GitHub issue with scope, acceptanc
 
 ## Critical path
 
-The longest chain of dependent issues, about **67 person-days**. Everything else can happen alongside it.
+The longest chain of dependent issues, about **68 person-days**. Everything else can happen alongside it.
 
-[#1](https://github.com/jarradbanks/jvid/issues/1) Set up the cargo workspace, licenses and README → [#2](https://github.com/jarradbanks/jvid/issues/2) CI: fmt, clippy and tests on Windows, macOS and Linux → [#4](https://github.com/jarradbanks/jvid/issues/4) FFmpeg linking and developer setup on all platforms → [#5](https://github.com/jarradbanks/jvid/issues/5) Generated test media corpus → [#14](https://github.com/jarradbanks/jvid/issues/14) Media probing → [#15](https://github.com/jarradbanks/jvid/issues/15) Video decoder with frame-accurate seeking → [#21](https://github.com/jarradbanks/jvid/issues/21) Thumbnail generation and cache → [#33](https://github.com/jarradbanks/jvid/issues/33) Timeline panel: ruler, tracks, clips, zoom and playhead → [#34](https://github.com/jarradbanks/jvid/issues/34) Track management and headers → [#35](https://github.com/jarradbanks/jvid/issues/35) Place clips: drag from bin, insert and overwrite → [#36](https://github.com/jarradbanks/jvid/issues/36) Selection, clipboard and delete → [#37](https://github.com/jarradbanks/jvid/issues/37) Trim, split, razor and ripple → [#39](https://github.com/jarradbanks/jvid/issues/39) In/Out points on the timeline → [#54](https://github.com/jarradbanks/jvid/issues/54) Export dialog with range selection → [#91](https://github.com/jarradbanks/jvid/issues/91) Lossless fast export → [#62](https://github.com/jarradbanks/jvid/issues/62) Packaging and v0.1.0 release
+[#1](https://github.com/jarradbanks/jvid/issues/1) Set up the cargo workspace, licenses and README → [#2](https://github.com/jarradbanks/jvid/issues/2) CI: fmt, clippy and tests on Windows, macOS and Linux → [#4](https://github.com/jarradbanks/jvid/issues/4) FFmpeg linking and developer setup on all platforms → [#5](https://github.com/jarradbanks/jvid/issues/5) Generated test media corpus → [#14](https://github.com/jarradbanks/jvid/issues/14) Media probing → [#15](https://github.com/jarradbanks/jvid/issues/15) Video decoder with frame-accurate seeking → [#21](https://github.com/jarradbanks/jvid/issues/21) Thumbnail generation and cache → [#33](https://github.com/jarradbanks/jvid/issues/33) Timeline panel: ruler, tracks, clips, zoom and playhead → [#34](https://github.com/jarradbanks/jvid/issues/34) Track management and headers → [#35](https://github.com/jarradbanks/jvid/issues/35) Place clips: drag from bin, insert and overwrite → [#36](https://github.com/jarradbanks/jvid/issues/36) Selection, clipboard and delete → [#44](https://github.com/jarradbanks/jvid/issues/44) Inspector panel → [#48](https://github.com/jarradbanks/jvid/issues/48) Keyframe lanes on the timeline → [#202](https://github.com/jarradbanks/jvid/issues/202) Text and solid clips: source view, live edit, fit-to-text bounds → [#209](https://github.com/jarradbanks/jvid/issues/209) Transform handles drawn over the transport bar → [#211](https://github.com/jarradbanks/jvid/issues/211) On-canvas text editing in the Program monitor → [#62](https://github.com/jarradbanks/jvid/issues/62) Packaging and v0.1.0 release
 
 ## Parallel tracks
 
@@ -315,8 +315,8 @@ flowchart LR
   lossless_export["#35;91 Lossless fast export"]
   target_size["#35;92 Export to a target file size"]
   cli["#35;61 jvid render CLI"]
-  release["#35;62 Packaging and v0.1.0 release"]
   in_app_dialogs["#35;124 In-app confirm dialogs"]
+  release["#35;62 Packaging and v0.1.0 release"]
   encode --> presets
   presets --> export_dialog
   encode --> hw_encode
@@ -336,6 +336,7 @@ flowchart LR
   loudness --> release
   lossless_export --> release
   target_size --> release
+  in_app_dialogs --> release
 ```
 
 | Issue | Title | Status | Size | Area | Depends on |
@@ -352,8 +353,8 @@ flowchart LR
 | [#91](https://github.com/jarradbanks/jvid/issues/91) | Lossless fast export | need testing | L | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52), [#54](https://github.com/jarradbanks/jvid/issues/54) |
 | [#92](https://github.com/jarradbanks/jvid/issues/92) | Export to a target file size | done | M | export | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53) |
 | [#61](https://github.com/jarradbanks/jvid/issues/61) | jvid render CLI | done | M | cli | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53), [#9](https://github.com/jarradbanks/jvid/issues/9) |
-| [#62](https://github.com/jarradbanks/jvid/issues/62) | Packaging and v0.1.0 release |  | L | infra | [#61](https://github.com/jarradbanks/jvid/issues/61), [#54](https://github.com/jarradbanks/jvid/issues/54), [#55](https://github.com/jarradbanks/jvid/issues/55), [#57](https://github.com/jarradbanks/jvid/issues/57), [#91](https://github.com/jarradbanks/jvid/issues/91), [#92](https://github.com/jarradbanks/jvid/issues/92) |
 | [#124](https://github.com/jarradbanks/jvid/issues/124) | In-app confirm dialogs |  | M | ui, suite-ui | [#203](https://github.com/jarradbanks/jvid/issues/203) |
+| [#62](https://github.com/jarradbanks/jvid/issues/62) | Packaging and v0.1.0 release |  | L | infra | [#61](https://github.com/jarradbanks/jvid/issues/61), [#54](https://github.com/jarradbanks/jvid/issues/54), [#55](https://github.com/jarradbanks/jvid/issues/55), [#57](https://github.com/jarradbanks/jvid/issues/57), [#91](https://github.com/jarradbanks/jvid/issues/91), [#92](https://github.com/jarradbanks/jvid/issues/92), [#203](https://github.com/jarradbanks/jvid/issues/203), [#209](https://github.com/jarradbanks/jvid/issues/209), [#211](https://github.com/jarradbanks/jvid/issues/211), [#212](https://github.com/jarradbanks/jvid/issues/212), [#124](https://github.com/jarradbanks/jvid/issues/124), [#204](https://github.com/jarradbanks/jvid/issues/204), [#207](https://github.com/jarradbanks/jvid/issues/207), [#208](https://github.com/jarradbanks/jvid/issues/208) |
 
 ### [M5 · Polish (v0.2.0)](https://github.com/jarradbanks/jvid/milestone/6)
 

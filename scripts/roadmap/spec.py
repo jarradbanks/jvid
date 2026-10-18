@@ -818,20 +818,6 @@ I("cli", "jvid render CLI", "M4", ["cli"], "M", ["encode", "presets", "serialize
   ],
   ac=["The CLI and the app produce identical output for the same project and range"])
 
-I("release", "Packaging and v0.1.0 release", "M4", ["infra"], "L", ["cli", "export-dialog", "hw-encode", "loudness", "lossless-export", "target-size"],
-  summary="Installable builds for all three platforms.",
-  scope=[
-      "Windows zip/MSI with FFmpeg DLLs",
-      "macOS `.app`/`.dmg` with bundled dylibs, signing and notarization",
-      "Linux AppImage and tarball",
-      "Bundle the GPL FFmpeg build with its license texts and a source offer",
-      "Release workflow on tag; smoke-test every artifact",
-  ],
-  ac=["Fresh machines on all three OSes can install, edit and export without installing anything else"],
-  refs=[f"[PLAN.md · Licensing]({PLAN}#licensing)"])
-
-# ───────────────────────── M5 · Polish (v0.2.0) ─────────────────────────
-
 I("text", "Text and title layers", "M5", ["render", "ui"], "L", ["transform", "inspector", "bin"],
   summary="Titles, captions and lower thirds.",
   scope=[
@@ -1115,3 +1101,17 @@ I("font-picker", "Font picker with inline search", "M3", ["ui"], "S", ["title-ca
   ],
   ac=["Typing 'ari' narrows to Arial-matching families; Enter applies it (kittest)",
       "Only fonts the renderer can actually draw are listed"])
+
+I("release", "Packaging and v0.1.0 release", "M4", ["infra"], "L", ["cli", "export-dialog", "hw-encode", "loudness", "lossless-export", "target-size", "title-case", "gizmo-clip", "canvas-text-edit", "font-picker", "in-app-dialogs", "effects-pane", "render-queue-menu", "timeline-arrow-nav"],
+  summary="Installable builds for all three platforms.",
+  scope=[
+      "Windows zip/MSI with FFmpeg DLLs",
+      "macOS `.app`/`.dmg` with bundled dylibs, signing and notarization",
+      "Linux AppImage and tarball",
+      "Bundle the GPL FFmpeg build with its license texts and a source offer",
+      "Release workflow on tag; smoke-test every artifact",
+  ],
+  ac=["Fresh machines on all three OSes can install, edit and export without installing anything else"],
+  refs=[f"[PLAN.md · Licensing]({PLAN}#licensing)"])
+
+# ───────────────────────── M5 · Polish (v0.2.0) ─────────────────────────
