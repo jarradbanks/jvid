@@ -432,6 +432,10 @@
     "title-case": {
       "number": 203,
       "id": 5904939539
+    },
+    "effects-pane": {
+      "number": 204,
+      "id": 5904958985
     }
   },
   "links": [
@@ -1114,6 +1118,10 @@
     [
       "title-case",
       "kf-discover"
+    ],
+    [
+      "effects-pane",
+      "title-case"
     ]
   ]
 }

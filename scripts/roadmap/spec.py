@@ -1022,6 +1022,20 @@ I("title-case", "Title Case pass on all UI labels", "M3", ["ui", "suite-ui"], "S
       "Effect parameter names from WGSL headers are displayed in Title Case (amount -> Amount) without changing the stored parameter ids",
       "Update DESIGN.md's copy rules to say Title Case, and update kittest snapshots",
       "Leave sentence-style text (descriptions, error messages, help paragraphs) as sentences",
+      "Shorten verbose button labels: 'Import media' -> 'Import', 'New solid'/'Add solid' -> 'Add Solid'",
   ],
   ac=["No lowercase-first labels remain in the editor, inspector, menus or dialogs",
       "Bundled effects show 'Amount', 'Strength', 'Softness', 'Grain'; existing .jvid projects still load"])
+
+I("effects-pane", "Effects pane: browse and apply effects", "M6", ["ui"], "M", ["title-case"],
+  summary="The Effects tab is a bare name list; make it a browser that says what each effect does and how to use it.",
+  scope=[
+      "Effect entries as cards/rows like the Media tab: name, one-line description (from the WGSL header), status (bundled / user / compile error with message)",
+      "Drag an effect onto a timeline clip, or click 'Apply' / double-click to add it to the selected clip(s); empty-state hint explains this",
+      "'Open Effects Folder' and 'New Effect' (copies a template .wgsl) move to a bottom bar like the Media tab's Import / Add Solid",
+      "Per-effect context menu: Reveal File, Duplicate, Delete (user effects only, with confirm), Disable (hidden from Add Effect)",
+      "Search box like the Media tab",
+  ],
+  ac=["Dragging Vignette onto a clip adds it in the Inspector",
+      "A broken user shader shows its error in the pane",
+      "Bottom bar matches the Media tab layout"])
