@@ -444,6 +444,10 @@
     "timeline-arrow-nav": {
       "number": 208,
       "id": 5905124343
+    },
+    "gizmo-clip": {
+      "number": 209,
+      "id": 5905131683
     }
   },
   "links": [
@@ -1138,6 +1142,10 @@
     [
       "timeline-arrow-nav",
       "title-case"
+    ],
+    [
+      "gizmo-clip",
+      "text-solid-fixes"
     ]
   ]
 }

@@ -1062,3 +1062,12 @@ I("timeline-arrow-nav", "Timeline arrow-key navigation with modifiers", "M5", ["
   ],
   ac=["Each binding moves the playhead to the expected frame (kittest per binding)",
       "Bindings appear in the keymap editor and can be rebound"])
+
+I("gizmo-clip", "Transform handles drawn over the transport bar", "M3", ["ui"], "S", ["text-solid-fixes"],
+  summary="When a clip is scaled past the frame, its transform box and handles draw over the monitor's transport bar.",
+  scope=[
+      "Clip the transform gizmo painter and its hit areas to the video viewport rect, so nothing draws over or steals clicks from the transport bar, tabs or other panels",
+      "Off-frame handles stay reachable: when the box extends past the viewport, draw an edge indicator or allow zooming out (Fit already exists); note the choice",
+  ],
+  ac=["Scale a clip to 150%: no handle or outline draws over the transport bar, and the play button stays clickable",
+      "kittest: play button click works with an oversized transformed clip selected"])
