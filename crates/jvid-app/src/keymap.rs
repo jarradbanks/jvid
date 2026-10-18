@@ -40,6 +40,13 @@ const fn t(id: &'static str, name: &'static str, default: &'static str) -> Actio
 
 /// Every action. "Ctrl" means Cmd on macOS.
 pub const ACTIONS: &[Action] = &[
+    a("new_project", "New Project", "Ctrl+Alt+N"),
+    a("open_project", "Open Project", "Ctrl+O"),
+    a("save", "Save", "Ctrl+S"),
+    a("save_as", "Save As", "Ctrl+Shift+S"),
+    a("import", "Import Media", "Ctrl+I"),
+    a("export", "Export Media", "Ctrl+M"),
+    a("quit", "Quit", "Ctrl+Q"),
     a("play_stop", "Play/Stop", "Space"),
     a("shuttle_left", "Shuttle left", "J"),
     a("shuttle_stop", "Shuttle stop", "K"),

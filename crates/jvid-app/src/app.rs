@@ -224,7 +224,8 @@ impl App {
             theme::title(),
             color::INK,
         );
-        self.edit_menu(ui, logo.right() + space::S12);
+        let file = self.file_menu(ui, logo.right() + space::S12);
+        self.edit_menu(ui, file + space::S4);
 
         let name = self.name();
         let text_w = ui
@@ -279,20 +280,56 @@ impl App {
         });
     }
 
+    /// The File menu, its left edge at `left`: each row runs its keymap action.
+    /// Returns its right edge.
+    fn file_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
+        let button = menu_button(ui, "File", left);
+        let mut picked = None;
+        let mut recent = None;
+        egui::Popup::menu(&button).show(|ui| {
+            for &id in menus::FILE {
+                match id {
+                    "" => {
+                        ui.separator();
+                    }
+                    "recent" => {
+                        ui.add_enabled_ui(!self.welcome.recent.is_empty(), |ui| {
+                            ui.menu_button("Open Recent", |ui| {
+                                for r in &self.welcome.recent {
+                                    let name = r.path.file_stem().unwrap_or_default();
+                                    let b = ui.button(name.to_string_lossy());
+                                    if b.on_hover_text(r.path.display().to_string()).clicked() {
+                                        recent = Some(r.path.clone());
+                                    }
+                                }
+                            });
+                        });
+                    }
+                    _ => {
+                        let can = id != "export" || self.can_export();
+                        if menus::item(ui, &self.keymap, id, None, can) {
+                            picked = Some(id);
+                        }
+                    }
+                }
+            }
+        });
+        if let Some(path) = recent
+            && self.confirm_discard()
+        {
+            self.open(path);
+        }
+        match picked {
+            Some("quit") => ui.ctx().send_viewport_cmd(ViewportCommand::Close),
+            Some(id) => self.run_action(id, true),
+            None => {}
+        }
+        button.rect.right()
+    }
+
     /// The Edit menu, its left edge at `left`: each row runs its keymap action.
     fn edit_menu(&mut self, ui: &mut Ui, left: f32) {
-        let r = ui.max_rect();
-        let text_w = ui
-            .painter()
-            .layout_no_wrap("Edit".into(), theme::body_strong(), color::INK)
-            .size()
-            .x;
-        let w = (2.0 * space::S12 + text_w).ceil();
-        let at = egui::Rect::from_min_size(
-            egui::pos2(left, r.center().y - size::CONTROL / 2.0),
-            vec2(w, size::CONTROL),
-        );
-        let button = ui.put(at, Button::ghost("Edit"));
+        let button = menu_button(ui, "Edit", left);
         let mut picked = None;
         egui::Popup::menu(&button).show(|ui| {
             for &id in menus::EDIT {
@@ -392,8 +429,7 @@ impl App {
                 self.queue.open = true;
             }
         }
-        let seq = self.history.project().sequence();
-        let state = if seq.duration() > Time(0) && self.preview.gpu().is_some() {
+        let state = if self.can_export() {
             State::Live
         } else {
             State::Disabled
@@ -403,8 +439,12 @@ impl App {
             .on_disabled_hover_text("Nothing to export yet")
             .clicked()
         {
-            self.export_dialog.open(seq, &self.name());
+            self.run_action("export", true);
         }
+    }
+
+    fn can_export(&self) -> bool {
+        self.history.project().sequence().duration() > Time(0) && self.preview.gpu().is_some()
     }
 
     /// Queues `req` on a snapshot of the project, so later edits don't change the file.
@@ -492,6 +532,18 @@ impl App {
             }
             "redo" | "redo_alt" => {
                 self.history.redo();
+                return;
+            }
+            "new_project" => return self.file_action(FileAction::New),
+            "open_project" => return self.file_action(FileAction::Open),
+            "save" => return self.file_action(FileAction::Save),
+            "save_as" => return self.file_action(FileAction::SaveAs),
+            "import" => return self.import_dialog(),
+            "export" => {
+                if self.can_export() {
+                    let seq = self.history.project().sequence();
+                    self.export_dialog.open(seq, &self.name());
+                }
                 return;
             }
             _ => {}
@@ -663,7 +715,11 @@ impl eframe::App for App {
             self.keymap.pressed(&ctx, timeline)
         };
         for id in pressed {
-            self.run_action(id, false);
+            if id == "quit" {
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+            } else {
+                self.run_action(id, false);
+            }
         }
 
         let dropped: Vec<_> = ctx.input(|i| {
@@ -824,6 +880,22 @@ enum FileAction {
     SaveAs,
     Settings,
     Shortcuts,
+}
+
+/// A ghost app-bar menu button labelled `name`, its left edge at `left`.
+fn menu_button(ui: &mut Ui, name: &str, left: f32) -> egui::Response {
+    let r = ui.max_rect();
+    let text_w = ui
+        .painter()
+        .layout_no_wrap(name.into(), theme::body_strong(), color::INK)
+        .size()
+        .x;
+    let w = (2.0 * space::S12 + text_w).ceil();
+    let at = egui::Rect::from_min_size(
+        egui::pos2(left, r.center().y - size::CONTROL / 2.0),
+        vec2(w, size::CONTROL),
+    );
+    ui.put(at, Button::ghost(name))
 }
 
 fn project_dialog() -> FileDialog {
@@ -1000,14 +1072,26 @@ impl TabViewer for Viewer<'_> {
                 .response
                 .rect
                 .with_max_y(r.response.rect.top() + size::HEADER);
-            self.timeline.toolbar(ui, header, self.project, self.keymap);
+            let title_w = ui
+                .painter()
+                .layout_no_wrap(title.clone(), theme::body_strong(), color::INK)
+                .size()
+                .x;
+            let left = header.left() + space::INSET + title_w + space::S12;
+            let (project, keymap) = (self.project, self.keymap);
+            self.timeline.toolbar(ui, header, left, project, keymap);
             return;
         }
         if *tab == Tab::Inspector {
             let solid = self.bin.selected.and_then(|id| self.project.asset(id));
             panel.show(ui, |ui| {
                 let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
-                let (edit, seek) = crate::inspector::show(ui, self.project, selected, solid, t);
+                let (edit, seek) = egui::ScrollArea::vertical()
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        crate::inspector::show(ui, self.project, selected, solid, t)
+                    })
+                    .inner;
                 if let Some((c, g)) = edit {
                     (self.command, self.gesture) = (Some(c), g);
                 }

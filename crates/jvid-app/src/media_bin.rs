@@ -156,6 +156,7 @@ impl MediaBin {
         // The new tab shows next frame; the click already repaints.
         let mut tab = self.tab;
         Panel::tabbed(&TABS, &mut tab)
+            .wide(true)
             .focused(focused)
             .show(ui, |ui| match self.tab {
                 0 => self.media(ui, project, importing, missing, &mut out),

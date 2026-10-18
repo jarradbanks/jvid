@@ -10,6 +10,13 @@ Work in any panel except while typing in a text field.
 
 | Action | Shortcut |
 | --- | --- |
+| New Project | `Ctrl+Alt+N` |
+| Open Project | `Ctrl+O` |
+| Save | `Ctrl+S` |
+| Save As | `Ctrl+Shift+S` |
+| Import Media | `Ctrl+I` |
+| Export Media | `Ctrl+M` |
+| Quit | `Ctrl+Q` |
 | Play/Stop | `Space` |
 | Shuttle left | `J` |
 | Shuttle stop | `K` |
