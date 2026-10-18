@@ -32,7 +32,14 @@ pub fn check(project: &Project, (start, end): (Time, Time)) -> Result<Vec<Cut>, 
             .iter()
             .filter(|t| !t.hidden || t.kind == TrackKind::Audio)
     };
-    let in_range = |c: &&Clip| c.enabled && c.start < end && start < c.end();
+    // A clip just before the range counts when its transition, centred on its end, reaches in.
+    let in_range = |c: &&Clip| {
+        let tail = c
+            .transform
+            .transition
+            .map_or(Time(0), |t| Time(t.duration.0 / 2));
+        c.enabled && c.start < end && start < c.end() + tail
+    };
     let mut video: Vec<&Clip> = Vec::new();
     let mut audio: Vec<&Clip> = Vec::new();
     let mut video_tracks = 0;
@@ -70,14 +77,21 @@ pub fn check(project: &Project, (start, end): (Time, Time)) -> Result<Vec<Cut>, 
             ));
         }
     }
-    // Copied video carries all its audio, so each video clip needs its own audio, as placed.
+    // Copied video carries all its audio, so each video clip needs its own audio, as placed:
+    // one clip per stream, or one playing them all mixed when there's just one.
     for c in &video {
-        let partners = audio.iter().filter(|a| same_range(a, c)).count();
+        let mut got: Vec<_> = audio
+            .iter()
+            .filter(|a| same_range(a, c))
+            .map(|a| a.stream)
+            .collect();
+        got.sort();
         let streams = project
             .asset(c.asset)
             .and_then(|a| a.probe.as_ref())
             .map_or(0, |p| p.audio_streams);
-        if (partners == 0) != (streams == 0) {
+        let each: Vec<_> = (0..streams).map(Some).collect();
+        if got != each && !(streams == 1 && got == [None]) {
             why.push(format!("{} has its audio removed or changed", name(c)));
         }
     }
@@ -139,7 +153,9 @@ fn format(p: &ProbeInfo) -> String {
         .streams
         .iter()
         .map(|s| match s {
-            StreamInfo::Video(v) => format!("{} {}x{}", v.codec, v.width, v.height),
+            StreamInfo::Video(v) => {
+                format!("{} {}x{} {:x}", v.codec, v.width, v.height, v.params)
+            }
             StreamInfo::Audio(a) => format!("{} {} {}", a.codec, a.sample_rate, a.channels),
             StreamInfo::Other { codec } => codec.clone(),
         })
@@ -168,7 +184,6 @@ pub(super) fn run(
         .into());
     }
     jvid_media::ffmpeg::init().map_err(|e| e.to_string())?;
-    let partial = Partial(&req.path);
     let mut progress = |f| {
         ctx.set_progress(f);
         !ctx.is_cancelled()
@@ -177,6 +192,8 @@ pub(super) fn run(
         Err(_) if ctx.is_cancelled() => return Err(Error::Cancelled),
         r => r?,
     }
+    // remux removes its own output on failure; from here a bad file is ours to remove.
+    let partial = Partial(&req.path);
     ctx.set_progress(1.0);
     let info = jvid_media::probe::probe(&req.path).map_err(|e| format!("output: {e}"))?;
     std::mem::forget(partial);
@@ -282,5 +299,33 @@ mod tests {
         );
         // Outside the changed clip the range still copies.
         assert!(check(h.project(), (secs(4), secs(8))).is_ok());
+    }
+
+    #[test]
+    fn every_audio_stream_needs_its_clip() {
+        let mut h = cuts("h264");
+        let id = h.project().sequence().tracks()[0].clips()[0].asset;
+        let mut two = probe("h264");
+        two.audio_streams = 2;
+        let probe = Some(two);
+        h.apply(Command::SetAssetProbe { id, probe }).unwrap();
+        let why = check(h.project(), (secs(0), secs(4))).unwrap_err();
+        assert_eq!(why, ["a.mp4 has its audio removed or changed"]);
+    }
+
+    #[test]
+    fn a_transition_reaching_into_the_range_blocks_it() {
+        let mut h = cuts("h264");
+        let clip = h.project().sequence().tracks()[0].clips()[0].clone();
+        let mut transform = clip.transform.clone();
+        transform.transition = Some(jvid_core::model::Transition {
+            kind: jvid_core::model::TransitionKind::Crossfade,
+            duration: secs(2),
+        });
+        let edits = vec![(clip.id, transform, Default::default())];
+        h.apply(Command::SetClipProps(edits)).unwrap();
+        let why = check(h.project(), (Time(secs(9).0 / 2), secs(8))).unwrap_err();
+        assert!(why[0].starts_with("a.mp4 has transforms"), "{why:?}");
+        assert!(check(h.project(), (secs(5), secs(8))).is_ok());
     }
 }

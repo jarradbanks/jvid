@@ -121,6 +121,7 @@ fn stream_info(stream: Stream) -> Result<StreamInfo, ProbeError> {
         color_primaries: name(v.color_primaries().name()),
         color_transfer: name(v.color_transfer_characteristic().name()),
         color_range: name(v.color_range().name()),
+        params: crate::remux::params_hash(&stream.parameters()),
     }))
 }
 

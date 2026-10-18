@@ -20,6 +20,11 @@ tone() { echo "sine=frequency=${1:-1000}:sample_rate=48000"; }
 ff -f lavfi -i testsrc2=s=1920x1080:r=30:d=10 \
   -vf "format=yuv420p,geq=lum='if(lt(Y,64),255*mod(floor(N/pow(2,floor(X/120))),2),p(X,Y))':cb='if(lt(Y,32),128,p(X,Y))':cr='if(lt(Y,32),128,p(X,Y))'" \
   "${x264[@]}" -crf 18 -g 30 frame-index-1080p30.mp4
+# Same size and rate as frame-index but Baseline profile, so a different SPS: not joinable by copy.
+ff -f lavfi -i testsrc2=s=1920x1080:r=30:d=2 "${x264[@]}" -profile:v baseline baseline-1080p30.mp4
+# Open GOPs: B-frames after each keyframe in decode order that show before it.
+ff -f lavfi -i testsrc2=s=1920x1080:r=30:d=4 -c:v libx264 -preset veryfast -pix_fmt yuv420p -bf 3 \
+  -x264-params open-gop=1:keyint=30:min-keyint=30:scenecut=0 open-gop.mp4
 
 # Phone-style VFR: frame gaps alternate 1/30 s and 2/30 s. Encoded to MKV then copied into MP4,
 # since the CLI would resample to CFR when writing MP4 directly. trim, not -shortest: FFmpeg 4.4
