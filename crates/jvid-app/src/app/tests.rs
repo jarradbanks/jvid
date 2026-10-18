@@ -1049,3 +1049,62 @@ fn file_menu_saves_exports_and_shows_keymap_shortcuts() {
     h.run();
     assert!(h.query_by_label("Add to Queue").is_some());
 }
+
+#[test]
+fn dragging_a_title_preset_onto_v2_places_a_text_clip() {
+    if !gpu() {
+        return;
+    }
+    use jvid_core::model::TrackKind;
+    let mut h = harness([1280.0, 720.0], 1.0);
+    for name in ["V1", "V2"] {
+        let kind = TrackKind::Video;
+        let name = name.into();
+        h.state_mut()
+            .history
+            .apply(Command::AddTrack { kind, name })
+            .unwrap();
+    }
+    h.state_mut().bin.tab = 2;
+    h.run();
+    let from = h.get_by_label("Title").rect().center();
+    // Video tracks stack upward, so V2's header (its Lock toggle) is the top one.
+    let locks = h.get_all_by_label("Lock").map(|n| n.rect());
+    let v2 = locks.min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
+    let to = egui::pos2(v2.right() + 300.0, v2.center().y);
+    h.hover_at(from);
+    h.drag_at(from);
+    h.run();
+    for i in 1..=10 {
+        h.hover_at(from + (to - from) * (i as f32 / 10.0));
+        h.run();
+    }
+    h.drop_at(to);
+    h.run();
+    h.run();
+    let p = h.state().history.project();
+    let v2 = p
+        .sequence()
+        .tracks()
+        .iter()
+        .find(|t| t.name == "V2")
+        .unwrap();
+    let clip = v2.clips().first().expect("a clip on V2");
+    assert!(p.asset(clip.asset).unwrap().text.is_some());
+}
+
+#[test]
+fn clicking_a_preset_shows_its_asset_in_the_media_tab() {
+    if !gpu() {
+        return;
+    }
+    let mut h = harness([1280.0, 720.0], 1.0);
+    h.state_mut().bin.tab = 2;
+    h.run();
+    h.get_by_label("Title").click();
+    h.run();
+    h.run();
+    let id = h.state().history.project().assets().last().map(|a| a.id);
+    assert!(id.is_some());
+    assert_eq!((h.state().bin.tab, h.state().bin.selected), (0, id));
+}
