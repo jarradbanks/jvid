@@ -1018,6 +1018,118 @@ pub fn focus_text(ctx: &egui::Context) {
     ctx.data_mut(|d| d.insert_temp(content_id().with("focus"), true));
 }
 
+/// The families in `list` containing `query`, ignoring case.
+fn font_matches<'a>(list: &'a [String], query: &str) -> Vec<&'a str> {
+    let q = query.to_lowercase();
+    list.iter()
+        .filter(|f| f.to_lowercase().contains(&q))
+        .map(String::as_str)
+        .collect()
+}
+
+/// An open font search: the query, the highlighted match, the family before it opened, and
+/// last frame's area, so a click outside cancels.
+#[derive(Clone)]
+struct FontSearch {
+    query: String,
+    at: usize,
+    before: String,
+    area: egui::Rect,
+}
+
+/// The Font field: shows `family` (or "(missing)" when `list` lacks it); clicked, a search
+/// over `list` that previews the hovered or highlighted family in `family`. Enter or a click
+/// keeps it, Esc or a click away restores the one before. True once `family` changed.
+fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
+    use egui::Key;
+    let id = egui::Id::new("inspector font");
+    let Some(mut st) = ui.data(|d| d.get_temp::<FontSearch>(id)) else {
+        let missing = !family.is_empty() && !list.contains(family);
+        let shown = match family.as_str() {
+            "" => "Sans-serif".to_owned(),
+            f if missing => format!("{f} (missing)"),
+            f => f.to_owned(),
+        };
+        let r = ui.button(shown);
+        let r = if missing {
+            r.on_hover_text("Not installed here; drawn in the default sans-serif")
+        } else {
+            r
+        };
+        if r.clicked() {
+            let st = FontSearch {
+                query: String::new(),
+                at: 0,
+                before: family.clone(),
+                area: egui::Rect::NOTHING,
+            };
+            ui.data_mut(|d| d.insert_temp(id, st));
+        }
+        return false;
+    };
+    let matches = font_matches(list, &st.query);
+    let (down, up, enter, esc, away) = ui.input_mut(|i| {
+        let away = i.pointer.any_pressed()
+            && i.pointer
+                .press_origin()
+                .is_some_and(|p| !st.area.contains(p));
+        (
+            i.consume_key(egui::Modifiers::NONE, Key::ArrowDown),
+            i.consume_key(egui::Modifiers::NONE, Key::ArrowUp),
+            i.key_pressed(Key::Enter),
+            i.key_pressed(Key::Escape),
+            away,
+        )
+    });
+    if down {
+        st.at += 1;
+    }
+    if up {
+        st.at = st.at.saturating_sub(1);
+    }
+    st.at = st.at.min(matches.len().saturating_sub(1));
+    let mut pick = matches.get(st.at).copied();
+    let mut clicked = false;
+    let inner = ui.vertical(|ui| {
+        let q = ui.add(egui::TextEdit::singleline(&mut st.query).hint_text("Search Fonts"));
+        q.request_focus();
+        if q.changed() {
+            st.at = 0;
+        }
+        egui::ScrollArea::vertical()
+            .max_height(200.0)
+            .show(ui, |ui| {
+                for (i, f) in matches.iter().enumerate() {
+                    let r = ui.selectable_label(i == st.at, *f);
+                    if down || up {
+                        if i == st.at {
+                            r.scroll_to_me(None);
+                        }
+                    } else if r.hovered() {
+                        pick = Some(*f);
+                    }
+                    if r.clicked() {
+                        (pick, clicked) = (Some(*f), true);
+                    }
+                }
+            });
+    });
+    st.area = inner.response.rect;
+    let next = if esc || (away && !clicked) {
+        st.before.clone()
+    } else {
+        pick.map_or(st.before.clone(), str::to_owned)
+    };
+    if enter || esc || away || clicked {
+        ui.data_mut(|d| d.remove::<FontSearch>(id));
+    } else {
+        ui.data_mut(|d| d.insert_temp(id, st));
+    }
+    let changed = *family != next;
+    *family = next;
+    changed
+}
+
 /// A text style row's animate toggle, when clips are selected; sets `toggle` once clicked.
 fn animate(ui: &mut Ui, clips: &[&Clip], name: &'static str, toggle: &mut Option<&'static str>) {
     let on = clips.iter().any(|c| animated(c, name));
@@ -1078,9 +1190,7 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
     let mut changed = content.changed();
     ui.horizontal(|ui| {
         ui.label("Font");
-        changed |= ui
-            .add(egui::TextEdit::singleline(&mut s.family).hint_text("Sans-serif"))
-            .changed();
+        changed |= font_field(ui, &mut s.family, jvid_render::text::families());
     });
     ui.horizontal(|ui| {
         ui.label("Size");
@@ -1548,5 +1658,68 @@ mod tests {
         assert_eq!(rotation(&h), 10.0);
         assert!(h.state_mut().undo());
         assert_eq!(rotation(&h), 0.0);
+    }
+
+    #[test]
+    fn font_matches_ignore_case() {
+        let list = ["Arial", "Arial Black", "Courier New", "Mariana"].map(String::from);
+        assert_eq!(
+            font_matches(&list, "ARI"),
+            ["Arial", "Arial Black", "Mariana"]
+        );
+        assert_eq!(font_matches(&list, "").len(), 4);
+    }
+
+    fn font_harness(family: &str) -> egui_kittest::Harness<'static, String> {
+        let list = ["Arial", "Arial Black", "Courier New"].map(String::from);
+        let mut h = egui_kittest::Harness::builder().build_ui_state(
+            move |ui, f: &mut String| {
+                font_field(ui, f, &list);
+            },
+            family.to_owned(),
+        );
+        h.run();
+        h
+    }
+
+    #[test]
+    fn typing_narrows_fonts_and_enter_applies() {
+        use egui::Key;
+        use egui_kittest::kittest::Queryable;
+        let mut h = font_harness("Courier New");
+        h.get_by_label("Courier New").click();
+        h.run();
+        h.get_by_role(egui::accesskit::Role::TextInput)
+            .type_text("ari");
+        h.run();
+        assert!(h.query_by_label("Courier New").is_none());
+        assert!(h.query_by_label("Arial Black").is_some());
+        h.key_press(Key::ArrowDown);
+        h.key_press(Key::Enter);
+        h.run();
+        assert_eq!(h.state(), "Arial Black");
+        assert!(h.query_by_label("Arial").is_none(), "closed");
+    }
+
+    #[test]
+    fn escape_restores_the_previewed_font() {
+        use egui::Key;
+        use egui_kittest::kittest::Queryable;
+        let mut h = font_harness("Courier New");
+        h.get_by_label("Courier New").click();
+        h.run();
+        h.key_press(Key::ArrowDown);
+        h.run();
+        assert_eq!(h.state(), "Arial Black", "arrowing previews");
+        h.key_press(Key::Escape);
+        h.run();
+        assert_eq!(h.state(), "Courier New");
+    }
+
+    #[test]
+    fn a_missing_font_says_so() {
+        use egui_kittest::kittest::Queryable;
+        let h = font_harness("Helvetica");
+        assert!(h.query_by_label("Helvetica (missing)").is_some());
     }
 }
