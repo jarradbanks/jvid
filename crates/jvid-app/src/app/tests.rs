@@ -1161,7 +1161,7 @@ fn title_harness() -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Po
 }
 
 #[test]
-fn double_clicking_a_title_in_program_focuses_its_text() {
+fn double_clicking_a_title_in_program_edits_it_and_space_types() {
     if !gpu() {
         return;
     }
@@ -1178,6 +1178,25 @@ fn double_clicking_a_title_in_program_focuses_its_text() {
         });
     }
     h.run();
-    let focused = h.ctx.memory(|m| m.focused());
-    assert_eq!(focused, Some(egui::Id::new("inspector text content")));
+    assert!(crate::handles::editing(&h.ctx));
+    h.key_press(egui::Key::End);
+    // Winit sends Space as a key and as text.
+    h.key_press(egui::Key::Space);
+    h.event(egui::Event::Text(" ".into()));
+    h.run();
+    let text = |h: &Harness<'_, App>| {
+        let p = h.state().history.project();
+        let a = p.assets().iter().find_map(|a| a.text.clone());
+        a.unwrap().content
+    };
+    assert_eq!(text(&h), "Title ");
+    assert!(
+        !h.state().preview.playing(),
+        "Space typed instead of playing"
+    );
+    h.key_press(egui::Key::Escape);
+    h.run();
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run();
+    assert_eq!(text(&h), "Title", "Ctrl+Z undoes the edit");
 }

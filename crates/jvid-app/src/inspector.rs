@@ -1013,11 +1013,6 @@ fn content_id() -> egui::Id {
     egui::Id::new("inspector text content")
 }
 
-/// Asks the Inspector to focus its text content field next frame.
-pub fn focus_text(ctx: &egui::Context) {
-    ctx.data_mut(|d| d.insert_temp(content_id().with("focus"), true));
-}
-
 /// The families in `list` containing `query`, ignoring case.
 fn font_matches<'a>(list: &'a [String], query: &str) -> Vec<&'a str> {
     let q = query.to_lowercase();
@@ -1183,10 +1178,6 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
             .id(content_id())
             .desired_rows(2),
     );
-    if ui.data_mut(|d| d.remove_temp::<bool>(content_id().with("focus")).is_some()) {
-        content.request_focus();
-        content.scroll_to_me(None);
-    }
     let mut changed = content.changed();
     ui.horizontal(|ui| {
         ui.label("Font");
