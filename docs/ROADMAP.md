@@ -283,7 +283,7 @@ flowchart LR
 | [#49](https://github.com/jarradbanks/jvid/issues/49) | Easing picker and bezier curve editor | done | M | ui | [#43](https://github.com/jarradbanks/jvid/issues/43), [#44](https://github.com/jarradbanks/jvid/issues/44) |
 | [#50](https://github.com/jarradbanks/jvid/issues/50) | Volume and pan keyframes with rubber band | done | M | audio, timeline | [#43](https://github.com/jarradbanks/jvid/issues/43), [#31](https://github.com/jarradbanks/jvid/issues/31), [#33](https://github.com/jarradbanks/jvid/issues/33) |
 | [#51](https://github.com/jarradbanks/jvid/issues/51) | Clip fade handles | done | S | timeline | [#50](https://github.com/jarradbanks/jvid/issues/50), [#45](https://github.com/jarradbanks/jvid/issues/45) |
-| [#200](https://github.com/jarradbanks/jvid/issues/200) | Inspector gutter and keyframe lane discoverability |  | S | ui, timeline | [#48](https://github.com/jarradbanks/jvid/issues/48) |
+| [#200](https://github.com/jarradbanks/jvid/issues/200) | Inspector gutter and keyframe lane discoverability | need testing | S | ui, timeline | [#48](https://github.com/jarradbanks/jvid/issues/48) |
 | [#202](https://github.com/jarradbanks/jvid/issues/202) | Text and solid clips: source view, live edit, fit-to-text bounds |  | M | ui, render | [#48](https://github.com/jarradbanks/jvid/issues/48) |
 | [#203](https://github.com/jarradbanks/jvid/issues/203) | Title Case pass on all UI labels |  | S | ui, suite-ui | [#202](https://github.com/jarradbanks/jvid/issues/202), [#200](https://github.com/jarradbanks/jvid/issues/200) |
 
