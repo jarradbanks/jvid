@@ -218,9 +218,9 @@ impl Timeline {
         let resp = ui
             .interact(hit, id.with(("kf toggle", clip.id)), Sense::click())
             .on_hover_text(if open {
-                "Hide keyframes"
+                "Hide Keyframes"
             } else {
-                "Show keyframes"
+                "Show Keyframes"
             });
         diamond(
             painter,

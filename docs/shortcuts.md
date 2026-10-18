@@ -14,15 +14,15 @@ Work in any panel except while typing in a text field.
 | Open Project | `Ctrl+O` |
 | Save | `Ctrl+S` |
 | Save As | `Ctrl+Shift+S` |
-| Import Media | `Ctrl+I` |
+| Import | `Ctrl+I` |
 | Export Media | `Ctrl+M` |
 | Quit | `Ctrl+Q` |
 | Play/Stop | `Space` |
-| Shuttle left | `J` |
-| Shuttle stop | `K` |
-| Shuttle right | `L` |
-| Loop playback | `Ctrl+Alt+L` |
-| Audio scrubbing | `Shift+S` |
+| Shuttle Left | `J` |
+| Shuttle Stop | `K` |
+| Shuttle Right | `L` |
+| Loop Playback | `Ctrl+Alt+L` |
+| Audio Scrubbing | `Shift+S` |
 | Mark In | `I` |
 | Mark Out | `O` |
 | Clear In | `Alt+I` |
@@ -41,12 +41,12 @@ Work in any panel except while typing in a text field.
 | Undo | `Ctrl+Z` |
 | Redo | `Ctrl+Shift+Z` |
 | Redo (alternate) | `Ctrl+Y` |
-| Razor tool | `C` |
-| Selection tool | `V` |
-| Step back one frame | `Left` |
-| Step forward one frame | `Right` |
-| Go to start | `Home` |
-| Go to end | `End` |
+| Razor Tool | `C` |
+| Selection Tool | `V` |
+| Step Back One Frame | `Left` |
+| Step Forward One Frame | `Right` |
+| Go to Start | `Home` |
+| Go to End | `End` |
 | Focus Media | `Shift+1` |
 | Focus Source | `Shift+2` |
 | Focus Timeline | `Shift+3` |
@@ -63,8 +63,8 @@ Work while the timeline has focus.
 | --- | --- |
 | Lift | `;` |
 | Extract | `'` |
-| Ripple trim previous edit to playhead | `Q` |
-| Ripple trim next edit to playhead | `W` |
+| Ripple Trim Previous Edit to Playhead | `Q` |
+| Ripple Trim Next Edit to Playhead | `W` |
 | Select All | `Ctrl+A` |
 | Copy | `Ctrl+C` |
 | Cut | `Ctrl+X` |
@@ -75,13 +75,13 @@ Work while the timeline has focus.
 | Link/Unlink | `Ctrl+L` |
 | Enable/Disable | `Shift+E` |
 | Reverse | `Ctrl+R` |
-| Freeze frame at playhead | `Shift+F` |
-| Add crossfade | `Ctrl+D` |
-| Add dip to black | `Ctrl+Alt+B` |
-| Add dip to white | `Ctrl+Alt+W` |
+| Freeze Frame at Playhead | `Shift+F` |
+| Add Crossfade | `Ctrl+D` |
+| Add Dip to Black | `Ctrl+Alt+B` |
+| Add Dip to White | `Ctrl+Alt+W` |
 | Linked Selection | `Ctrl+Shift+L` |
 | Snapping | `S` |
-| Split at playhead | `Ctrl+K` |
-| Zoom in | `=` |
-| Zoom out | `-` |
-| Zoom to fit | `\` |
+| Split at Playhead | `Ctrl+K` |
+| Zoom In | `=` |
+| Zoom Out | `-` |
+| Zoom to Fit | `\` |

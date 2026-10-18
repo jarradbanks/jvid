@@ -205,11 +205,11 @@ impl MediaBin {
         rect.max.y = bar.top() - space::S8;
         let solid_w = 88.0;
         let (bar, solid_bar) = bar.split_left_right_at_x(bar.right() - solid_w - space::S4);
-        let import = Button::secondary("Import media")
+        let import = Button::secondary("Import")
             .with_icon(icon::PLUS)
             .width(bar.width());
         out.import |= ui.put(bar, import).clicked();
-        let solid = Button::secondary("New solid").width(solid_w);
+        let solid = Button::secondary("Add Solid").width(solid_w);
         if ui
             .put(solid_bar.with_min_x(solid_bar.right() - solid_w), solid)
             .clicked()
@@ -228,13 +228,13 @@ impl MediaBin {
                 ui.add(TextInput::search(&mut self.query).width(search_w.max(48.0)));
                 ui.add(Dropdown::new(&mut self.sort, &SORTS).width(sort_w));
                 if ui
-                    .add(Button::icon(icon::GRID, "Grid view").on(!self.list))
+                    .add(Button::icon(icon::GRID, "Grid View").on(!self.list))
                     .clicked()
                 {
                     self.list = false;
                 }
                 if ui
-                    .add(Button::icon(icon::LIST, "List view").on(self.list))
+                    .add(Button::icon(icon::LIST, "List View").on(self.list))
                     .clicked()
                 {
                     self.list = true;
@@ -245,7 +245,7 @@ impl MediaBin {
             if assets.is_empty() {
                 let msg = match (importing, project.assets().is_empty()) {
                     (true, _) => "Importing…",
-                    (false, true) => "Drop media here or click Import media",
+                    (false, true) => "Drop media here or click Import",
                     (false, false) => "No media matches the search",
                 };
                 ui.label(egui::RichText::new(msg).color(color::INK_3));
@@ -383,7 +383,7 @@ impl MediaBin {
             p.text(
                 thumb.center() + vec2(0.0, space::S12),
                 Align2::CENTER_TOP,
-                "Media offline",
+                "Media Offline",
                 theme::small(),
                 color::INK_2,
             );
@@ -479,7 +479,7 @@ impl MediaBin {
         let b = ui
             .scope_builder(
                 UiBuilder::new().max_rect(rect).id_salt(("remove", a.id)),
-                |ui| ui.add(Button::icon(icon::X, "Remove from project")),
+                |ui| ui.add(Button::icon(icon::X, "Remove from Project")),
             )
             .inner;
         if b.has_focus() {
@@ -537,7 +537,7 @@ impl MediaBin {
     ) {
         if offline {
             r.clone()
-                .on_hover_text(format!("Media offline: {}", a.path.display()));
+                .on_hover_text(format!("Media Offline: {}", a.path.display()));
         }
         if self.reveal == Some(a.id) {
             r.scroll_to_me(None);
@@ -562,7 +562,7 @@ impl MediaBin {
             if ui.button("Rename").clicked() {
                 self.renaming = Some((a.id, stem.to_owned()));
             }
-            if ui.button("Remove from project").clicked() {
+            if ui.button("Remove from Project").clicked() {
                 out.command = self.remove(project, a.id);
             }
         });
@@ -799,7 +799,7 @@ fn text_presets(ui: &mut Ui, out: &mut BinResponse) -> Option<bool> {
 fn effects_tab(ui: &mut Ui) {
     ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
     if let Some(dir) = crate::effects::dir()
-        && ui.add(Button::secondary("Open effects folder")).clicked()
+        && ui.add(Button::secondary("Open Effects Folder")).clicked()
     {
         // `reveal` opens a file's folder; any child of the folder works.
         crate::export::queue::reveal(&dir.join("effect.wgsl"));

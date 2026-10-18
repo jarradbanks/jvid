@@ -426,14 +426,14 @@ fn hover_remove_button_uses_the_remove_flow() {
     if gpu() {
         results.add(h.try_snapshot("bin_list_hover"));
     }
-    h.get_by_label("Remove from project").click();
+    h.get_by_label("Remove from Project").click();
     h.run();
     assert_eq!(h.state().bin.confirm_remove, Some(AssetId(2)));
     h.get_by_label("Cancel").click();
     // arena_01.mkv is unused: removed at once.
     h.hover_at(egui::pos2(100.0, 132.0));
     h.run();
-    h.get_by_label("Remove from project").click();
+    h.get_by_label("Remove from Project").click();
     h.run();
     assert!(h.state().history.project().asset(AssetId(1)).is_none());
 }
@@ -705,12 +705,12 @@ fn program_transport_plays_and_seeks_the_timeline() {
     h.get_by_label("Stop (Space)").click();
     h.run();
     assert!(!h.state().preview.program_playing());
-    h.get_by_label("Go to end (End)").click();
+    h.get_by_label("Go to End (End)").click();
     h.run();
     // The last frame of the one-second solid, at the default 30 fps.
     let last = Time(FLICKS_PER_SECOND * 29 / 30);
     assert_eq!(h.state().timeline.playhead(), last);
-    h.get_by_label("Go to start (Home)").click();
+    h.get_by_label("Go to Start (Home)").click();
     h.run();
     assert_eq!(h.state().timeline.playhead(), Time(0));
 }
@@ -830,11 +830,11 @@ fn dropping_media_on_welcome_matches_the_first_clip() {
 #[test]
 fn new_project_uses_the_chosen_preset() {
     let mut h = plain_harness();
-    assert_eq!(h.state().welcome.preset, 0, "Match source is the default");
+    assert_eq!(h.state().welcome.preset, 0, "Match Source is the default");
     h.get_by_label("16:9 · 4K").click();
     h.get_by_label("60 fps").click();
     h.run();
-    h.get_by_label("New project").click();
+    h.get_by_label("New Project").click();
     h.run();
     let app = h.state();
     assert!(!app.on_welcome && !app.match_source && !app.history.is_dirty());
@@ -843,7 +843,7 @@ fn new_project_uses_the_chosen_preset() {
 
     // Match source keeps the default settings until media arrives.
     let mut h = plain_harness();
-    h.get_by_label("New project").click();
+    h.get_by_label("New Project").click();
     h.run();
     assert!(h.state().match_source && !h.state().on_welcome);
 }
@@ -999,11 +999,11 @@ fn inspector_scrolls_to_its_last_field_in_a_small_window() {
         .select_clip(app.history.project().sequence(), clip);
     h.run();
     let panel = Shot::take(&mut h, "inspector".into()).panel(Tab::Inspector);
-    let last = h.get_by_label("LUT mix");
+    let last = h.get_by_label("LUT Mix");
     assert!(last.rect().top() > panel.bottom(), "fits without scrolling");
     last.scroll_to_me();
     h.run();
-    let r = h.get_by_label("LUT mix").rect();
+    let r = h.get_by_label("LUT Mix").rect();
     assert!(panel.contains_rect(r), "{r:?} not inside {panel:?}");
 }
 

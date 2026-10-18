@@ -102,7 +102,7 @@ pub struct Timeline {
     menu: Option<&'static str>,
     /// The in (true) or out flag being dragged, and where it is.
     mark_drag: Option<(bool, Time)>,
-    /// "Reveal in media bin" asked for this asset; the app takes it.
+    /// "Reveal in Media Bin" asked for this asset; the app takes it.
     pub reveal: Option<AssetId>,
     /// A message for the app to show, such as why a transition couldn't be added.
     pub notice: Option<String>,
@@ -861,7 +861,7 @@ impl Timeline {
             .context_menu(|ui| {
                 add_menu(ui, &mut edit);
                 ui.separator();
-                ui.checkbox(&mut self.linked_selection, "Linked selection");
+                ui.checkbox(&mut self.linked_selection, "Linked Selection");
             });
         let mut y = lanes.top() - self.vscroll;
         let mut lane_rects = Vec::new();
@@ -1432,9 +1432,9 @@ impl Timeline {
             edit = set(&|s| s.target = !s.target);
         }
         let target = target.on_hover_text(if track.target {
-            "Target for insert and overwrite"
+            "Target for Insert and Overwrite"
         } else {
-            "Make target for insert and overwrite"
+            "Make Target for Insert and Overwrite"
         });
         if target.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
@@ -1538,19 +1538,19 @@ impl Timeline {
                 ))
             };
             if ui
-                .add_enabled(pos > 0, egui::Button::new("Move up"))
+                .add_enabled(pos > 0, egui::Button::new("Move Up"))
                 .clicked()
             {
                 edit = mv(pos - 1);
             }
             let last = pos + 1 >= same_kind.len();
             if ui
-                .add_enabled(!last, egui::Button::new("Move down"))
+                .add_enabled(!last, egui::Button::new("Move Down"))
                 .clicked()
             {
                 edit = mv(pos + 1);
             }
-            let remove = egui::Button::new("Remove track");
+            let remove = egui::Button::new("Remove Track");
             if ui.add_enabled(!track.locked, remove).clicked() {
                 edit = Some((Command::RemoveTrack(track.id), None));
             }
@@ -1623,13 +1623,13 @@ impl Timeline {
             }
         }
         let keyed = clip.keyframes.values().any(|k| !k.is_empty());
-        let mut name = asset.map_or("Missing asset".into(), MediaAsset::display_name);
+        let mut name = asset.map_or("Missing Asset".into(), MediaAsset::display_name);
         // A multi-stream file's audio clips say which stream they play.
         if let Some(p) = asset.and_then(|a| a.probe.as_ref())
             && kind == TrackKind::Audio
             && p.audio_streams > 1
         {
-            let stream = clip.stream.map_or("All audio".into(), |n| p.audio_name(n));
+            let stream = clip.stream.map_or("All Audio".into(), |n| p.audio_name(n));
             name = format!("{name} · {stream}");
         }
         let name = if offline {
@@ -1738,8 +1738,8 @@ fn snap_height(h: f32) -> f32 {
 
 fn add_menu(ui: &mut Ui, edit: &mut Option<Edit>) {
     for (kind, label) in [
-        (TrackKind::Video, "Add video track"),
-        (TrackKind::Audio, "Add audio track"),
+        (TrackKind::Video, "Add Video Track"),
+        (TrackKind::Audio, "Add Audio Track"),
     ] {
         if ui.button(label).clicked() {
             let name = String::new();

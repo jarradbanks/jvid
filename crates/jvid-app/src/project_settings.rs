@@ -53,7 +53,7 @@ impl SettingsDialog {
             )
             .show(ui.ctx(), |ui| {
                 ui.set_width(360.0);
-                ui.label(egui::RichText::new("Project settings").font(theme::headline()));
+                ui.label(egui::RichText::new("Project Settings").font(theme::headline()));
                 ui.add_space(space::S8);
                 egui::Grid::new("project_settings_grid")
                     .spacing([space::S8, space::S8])
@@ -93,7 +93,7 @@ impl SettingsDialog {
                         ui.label(aspect(draft.width, draft.height));
                         ui.end_row();
 
-                        ui.label("Frame rate");
+                        ui.label("Frame Rate");
                         let mut rate = RATES
                             .iter()
                             .position(|(_, r)| *r == draft.frame_rate)

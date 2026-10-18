@@ -200,7 +200,7 @@ impl App {
             welcome::Action::Open => self.file_action(FileAction::Open),
             welcome::Action::OpenRecent(path) => self.open(path),
             welcome::Action::Import => {
-                if let Some(paths) = FileDialog::new().set_title("Import media").pick_files() {
+                if let Some(paths) = FileDialog::new().set_title("Import").pick_files() {
                     self.new_project(None);
                     self.import(paths);
                 }
@@ -241,12 +241,12 @@ impl App {
         let mut action = None;
         egui::Popup::menu(&r).show(|ui| {
             for (a, label) in [
-                (FileAction::New, "New project"),
+                (FileAction::New, "New Project"),
                 (FileAction::Open, "Open…"),
                 (FileAction::Save, "Save"),
-                (FileAction::SaveAs, "Save as…"),
-                (FileAction::Settings, "Project settings…"),
-                (FileAction::Shortcuts, "Keyboard shortcuts…"),
+                (FileAction::SaveAs, "Save As…"),
+                (FileAction::Settings, "Project Settings…"),
+                (FileAction::Shortcuts, "Keyboard Shortcuts…"),
             ] {
                 if ui.button(label).clicked() {
                     action = Some(a);
@@ -472,9 +472,9 @@ impl App {
         for (path, r) in self.queue.poll() {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             match r {
-                Ok(()) => crate::export::queue::notify("Export finished", &name),
+                Ok(()) => crate::export::queue::notify("Export Finished", &name),
                 Err(ExportError::Failed(e)) => {
-                    crate::export::queue::notify("Export failed", &format!("{name}: {e}"));
+                    crate::export::queue::notify("Export Failed", &format!("{name}: {e}"));
                     self.toasts
                         .push((format!("Export failed: {e}"), now + TOAST_SECS));
                 }
@@ -486,7 +486,7 @@ impl App {
     /// Saves the shown frame as a PNG at full project resolution.
     fn export_frame(&self) {
         let Some(path) = FileDialog::new()
-            .set_title("Export frame")
+            .set_title("Export Frame")
             .add_filter("PNG image", &["png"])
             .set_file_name("frame.png")
             .save_file()
@@ -607,7 +607,7 @@ impl App {
 
     /// Asks for media files and queues them for import.
     fn import_dialog(&mut self) {
-        if let Some(paths) = FileDialog::new().set_title("Import media").pick_files() {
+        if let Some(paths) = FileDialog::new().set_title("Import").pick_files() {
             self.import(paths);
         }
     }
@@ -1132,7 +1132,7 @@ fn drop_overlay(ctx: &egui::Context) {
     painter.text(
         rect.center(),
         Align2::CENTER_CENTER,
-        "Drop to import",
+        "Drop to Import",
         theme::title(),
         color::INK,
     );

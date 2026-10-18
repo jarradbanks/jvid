@@ -95,7 +95,7 @@ pub fn gallery(ui: &mut egui::Ui, g: &mut Gallery) {
                     });
                 });
                 ui.allocate_ui(egui::vec2(360.0, ui.available_height()), |ui| {
-                    Panel::titled("Type and colour").show(ui, type_and_colour);
+                    Panel::titled("Type and Colour").show(ui, type_and_colour);
                 });
             });
         });
@@ -110,7 +110,7 @@ fn states(ui: &mut egui::Ui, g: &mut Gallery) {
             for (name, _) in STATES {
                 ui.label(egui::RichText::new(name).color(color::INK_3));
             }
-            ui.label(egui::RichText::new("Loading / error").color(color::INK_3));
+            ui.label(egui::RichText::new("Loading / Error").color(color::INK_3));
             ui.end_row();
 
             for kind in [

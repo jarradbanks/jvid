@@ -20,7 +20,7 @@ use suite_ui::widgets::{Button, Segmented, State};
 
 /// Label and size; `None` is Match source.
 pub const PRESETS: [(&str, Option<(u32, u32)>); 6] = [
-    ("Match source", None),
+    ("Match Source", None),
     ("16:9 · 1080p", Some((1920, 1080))),
     ("16:9 · 1440p", Some((2560, 1440))),
     ("16:9 · 4K", Some((3840, 2160))),
@@ -206,15 +206,16 @@ impl Welcome {
 
         ui.add_space(space::S8);
         ui.horizontal(|ui| {
-            ui.add_space((W - 2.0 * 120.0 - space::S8) / 2.0);
+            // Each fills half the preset grid, edges aligned to it.
+            let half = (W - space::S8) / 2.0;
             if ui
-                .add_sized([120.0, 28.0], Button::primary("New project"))
+                .add(Button::primary("New Project").width(half).height(40.0))
                 .clicked()
             {
                 action = Some(Action::New(self.settings()));
             }
             if ui
-                .add_sized([120.0, 28.0], Button::secondary("Open project…"))
+                .add(Button::secondary("Open Project…").width(half).height(40.0))
                 .clicked()
             {
                 action = Some(Action::Open);
@@ -242,7 +243,7 @@ impl Welcome {
                 State::Live
             };
             ui.add(Segmented::new(&mut self.fps, &FPS).state(state))
-                .on_disabled_hover_text("Match source takes the frame rate from the first clip");
+                .on_disabled_hover_text("Match Source takes the frame rate from the first clip");
         });
         ui.add_space(space::S8);
 
@@ -251,6 +252,7 @@ impl Welcome {
         dashed_rect(
             ui,
             zone,
+            radius::DIALOG as f32,
             if hovered {
                 color::LIGHT_BLUE
             } else {
@@ -272,8 +274,8 @@ impl Welcome {
             theme::body(),
             color::INK_2,
         );
-        let r = r.on_hover_text("Starts a Match source project and imports everything");
-        r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Import media"));
+        let r = r.on_hover_text("Starts a Match Source project and imports everything");
+        r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Import"));
         if r.clicked() {
             action = Some(Action::Import);
         }
@@ -402,6 +404,7 @@ fn preset_card(
             dashed_rect(
                 ui,
                 Rect::from_center_size(centre, vec2(36.0, 24.0)),
+                2.0,
                 color::INK_2,
             );
         }
@@ -420,14 +423,26 @@ fn preset_card(
     r
 }
 
-fn dashed_rect(ui: &Ui, r: Rect, c: egui::Color32) {
-    let pts = [
-        r.left_top(),
-        r.right_top(),
-        r.right_bottom(),
-        r.left_bottom(),
-        r.left_top(),
+/// A dashed outline of `r` whose corners follow `rad`.
+fn dashed_rect(ui: &Ui, r: Rect, rad: f32, c: egui::Color32) {
+    use std::f32::consts::FRAC_PI_2;
+    let rad = rad.min(r.width() / 2.0).min(r.height() / 2.0);
+    let corners = [
+        (r.right_top() + vec2(-rad, rad), -FRAC_PI_2),
+        (r.right_bottom() + vec2(-rad, -rad), 0.0),
+        (r.left_bottom() + vec2(rad, -rad), FRAC_PI_2),
+        (r.left_top() + vec2(rad, rad), 2.0 * FRAC_PI_2),
     ];
+    let mut pts: Vec<_> = corners
+        .iter()
+        .flat_map(|&(o, a0)| {
+            (0..=8).map(move |k| {
+                let a = a0 + FRAC_PI_2 * k as f32 / 8.0;
+                o + rad * vec2(a.cos(), a.sin())
+            })
+        })
+        .collect();
+    pts.push(pts[0]);
     ui.painter().extend(egui::Shape::dashed_line(
         &pts,
         Stroke::new(1.0, c),

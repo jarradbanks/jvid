@@ -130,13 +130,13 @@ impl ExportDialog {
                         ui.label("Range");
                         ui.horizontal(|ui| {
                             let marked = seq.in_point().is_some() || seq.out_point().is_some();
-                            ui.radio_value(range, Range::Entire, "Entire timeline");
+                            ui.radio_value(range, Range::Entire, "Entire Timeline");
                             ui.add_enabled_ui(marked, |ui| {
                                 ui.radio_value(range, Range::InOut, "In to Out")
                                     .on_disabled_hover_text("Set In or Out on the timeline first")
                             });
                             ui.add_enabled_ui(!selected.is_empty(), |ui| {
-                                ui.radio_value(range, Range::Selected, "Selected clips")
+                                ui.radio_value(range, Range::Selected, "Selected Clips")
                                     .on_disabled_hover_text("Select clips on the timeline first")
                             });
                         });
@@ -186,7 +186,7 @@ impl ExportDialog {
                         });
                         ui.end_row();
 
-                        ui.label("Target size");
+                        ui.label("Target Size");
                         let sizable =
                             matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
                         ui.horizontal(|ui| {
@@ -209,7 +209,7 @@ impl ExportDialog {
                         });
                         ui.end_row();
 
-                        ui.label("Estimated size");
+                        ui.label("Estimated Size");
                         match self.target.filter(|_| sizable) {
                             Some(mb) => ui.label(format!("under {mb} MB")),
                             None => ui.label(format_size(estimate(
@@ -300,7 +300,7 @@ fn lossless_picker(
                 ui.radio_value(mode, Some(Lossless::Copy), "Copy")
                     .on_hover_text("No re-encode; cuts snap to the nearest keyframe");
                 ui.add_enabled_ui(SMART_ENCODER.is_some(), |ui| {
-                    ui.radio_value(mode, Some(Lossless::Smart), "Smart render")
+                    ui.radio_value(mode, Some(Lossless::Smart), "Smart Render")
                         .on_hover_text(
                             "Re-encodes only the frames around each cut, so cuts are exact",
                         )
@@ -404,10 +404,10 @@ fn video_summary(p: &Preset, w: u32, h: u32, rate: Rate) -> String {
 
 fn audio_name(a: AudioCodec) -> &'static str {
     match a {
-        AudioCodec::Aac => "AAC stereo",
-        AudioCodec::Mp3 => "MP3 stereo",
-        AudioCodec::Pcm => "PCM 16-bit stereo",
-        AudioCodec::Pcm24 => "PCM 24-bit stereo",
+        AudioCodec::Aac => "AAC Stereo",
+        AudioCodec::Mp3 => "MP3 Stereo",
+        AudioCodec::Pcm => "PCM 16-bit Stereo",
+        AudioCodec::Pcm24 => "PCM 24-bit Stereo",
     }
 }
 
