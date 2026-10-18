@@ -7,12 +7,14 @@ use egui::Ui;
 use jvid_core::model::{ClipId, Project, Sequence};
 use jvid_core::preset::{AudioCodec, Preset, VideoCodec};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
+use jvid_media::remux::{Cut, SMART_ENCODER};
 use rfd::FileDialog;
 use suite_ui::theme;
 use suite_ui::tokens::{radius, space};
 use suite_ui::widgets::{Button, Dropdown, State};
 
 use super::Request;
+use super::lossless::{self, Lossless};
 
 /// Which part of the timeline to export.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -29,6 +31,8 @@ pub struct ExportDialog {
     preset: usize,
     /// Loudness target in LUFS; `None` leaves the mix alone.
     loudness: Option<f64>,
+    /// Copy instead of render, when the range allows it.
+    lossless: Option<Lossless>,
     /// Target file size in MB (10^6 bytes); `None` encodes at the preset's quality.
     target: Option<u64>,
     /// Output file; kept between opens so the next export lands in the same folder.
@@ -43,6 +47,7 @@ impl Default for ExportDialog {
             presets: super::presets(),
             preset: 0,
             loudness: Some(-14.0),
+            lossless: None,
             target: None,
             path: PathBuf::new(),
             range: None,
@@ -147,6 +152,16 @@ impl ExportDialog {
                             ui.end_row();
                         }
 
+                        ui.label("Lossless");
+                        let copyable = lossless::check(project, (a, b));
+                        lossless_picker(ui, &mut self.lossless, &copyable);
+                        ui.end_row();
+                        if let (Some(_), Ok(cuts)) = (self.lossless, &copyable)
+                            && let Some(ext) = cuts[0].path.extension()
+                        {
+                            path.set_extension(ext);
+                        }
+
                         ui.label("Output");
                         ui.horizontal(|ui| {
                             let mut text = path.display().to_string();
@@ -232,6 +247,9 @@ impl ExportDialog {
                             range,
                             preset,
                             loudness: self.loudness,
+                            lossless: self
+                                .lossless
+                                .filter(|_| lossless::check(project, range).is_ok()),
                         };
                         request = Some((req, export));
                         ui.close();
@@ -266,6 +284,35 @@ fn loudness_picker(ui: &mut Ui, loudness: &mut Option<f64>) {
                 *loudness = Some(custom);
             }
         });
+}
+
+/// Off, copy or smart render when the range copies; else why it can't, the first reason shown
+/// and all of them on hover.
+fn lossless_picker(
+    ui: &mut Ui,
+    mode: &mut Option<Lossless>,
+    copyable: &Result<Vec<Cut>, Vec<String>>,
+) {
+    match copyable {
+        Ok(_) => {
+            ui.horizontal(|ui| {
+                ui.radio_value(mode, None, "Off");
+                ui.radio_value(mode, Some(Lossless::Copy), "Copy")
+                    .on_hover_text("No re-encode; cuts snap to the nearest keyframe");
+                ui.add_enabled_ui(SMART_ENCODER.is_some(), |ui| {
+                    ui.radio_value(mode, Some(Lossless::Smart), "Smart render")
+                        .on_hover_text(
+                            "Re-encodes only the frames around each cut, so cuts are exact",
+                        )
+                        .on_disabled_hover_text("Needs a GPL FFmpeg build with x264")
+                });
+            });
+        }
+        Err(why) => {
+            ui.label(format!("Unavailable: {}", why[0]))
+                .on_hover_text(why.join("\n"));
+        }
+    }
 }
 
 const MB: u64 = 1_000_000;

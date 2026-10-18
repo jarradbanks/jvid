@@ -27,6 +27,8 @@ pub struct Request {
     pub preset: Preset,
     /// Integrated loudness target in LUFS; `None` exports the mix as is.
     pub loudness: Option<f64>,
+    /// Copy the sources instead of rendering; the preset and loudness are then unused.
+    pub lossless: Option<Lossless>,
 }
 
 /// Normalized exports' true-peak ceiling, in dBTP.
@@ -137,6 +139,9 @@ pub fn run(
     queue: &wgpu::Queue,
     ctx: &Ctx,
 ) -> Result<ProbeInfo, Error> {
+    if let Some(mode) = req.lossless {
+        return lossless::run(project, req, mode, ctx);
+    }
     let s = project.settings();
     let (first, end) = frames(project, req);
     if end <= first {
@@ -467,7 +472,10 @@ fn blocking(path: &Path, nth: usize) -> ClipAudio {
 }
 
 pub mod dialog;
+pub mod lossless;
 pub mod queue;
+
+pub use lossless::Lossless;
 
 #[cfg(test)]
 mod tests;

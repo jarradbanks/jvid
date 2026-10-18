@@ -96,7 +96,7 @@ jobs:
           {
             cargo test --release -p jvid-app --bin jvid-app -- perf_cold_start --nocapture
             cargo test --release -p jvid-app --bin jvid-app -- seek_latency scrub_1080p30 long_recording five_hundred_clips --nocapture
-            cargo test --release -p jvid-media -p jvid-audio -- one_hour_query sixteen_tracks --nocapture
+            cargo test --release -p jvid-media -p jvid-audio -- one_hour_query sixteen_tracks lossless_minute --nocapture
             cargo bench -p jvid-core --bench core -- --quick
           } 2>&1 | tee -a perf.log || status=1
           { echo '### Perf (budgets: docs/perf.md)'; echo '```'

@@ -111,7 +111,7 @@ fn rate_control(
 }
 
 /// Opens encoder `name` taking `pixel` frames, with the preset's options mapped onto it.
-fn open_video(
+pub(crate) fn open_video(
     name: &str,
     pixel: Pixel,
     (width, height): (u32, u32),
