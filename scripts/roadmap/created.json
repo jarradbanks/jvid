@@ -1146,6 +1146,10 @@
     [
       "gizmo-clip",
       "text-solid-fixes"
+    ],
+    [
+      "in-app-dialogs",
+      "title-case"
     ]
   ]
 }

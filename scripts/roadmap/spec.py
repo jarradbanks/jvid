@@ -986,7 +986,6 @@ for key, title, summary in [
     ("hdr", "HDR support", "PQ/HLG sources, tone mapping and HDR export."),
     ("graph-editor", "Curve graph editor", "A full graph editor for keyframe curves."),
     ("silence-detect", "Silence detection to cut dead air", "Find silent stretches in screen recordings and offer to cut or speed them up."),
-    ("in-app-dialogs", "In-app confirm dialogs", "Replace native rfd message boxes (unsaved changes on exit, errors) with suite-ui modals that match DESIGN.md."),
 ]:
     I(key, title, None, [], None, summary=summary, labels=["later"])
 
@@ -1071,3 +1070,14 @@ I("gizmo-clip", "Transform handles drawn over the transport bar", "M3", ["ui"], 
   ],
   ac=["Scale a clip to 150%: no handle or outline draws over the transport bar, and the play button stays clickable",
       "kittest: play button click works with an oversized transformed clip selected"])
+
+I("in-app-dialogs", "In-app confirm dialogs", "M4", ["ui", "suite-ui"], "M", ["title-case"],
+  summary="Replace native rfd message boxes with suite-ui modals that match DESIGN.md.",
+  scope=[
+      "A suite-ui modal (dimmed backdrop, title, body, right-aligned buttons, danger style for destructive actions, Enter/Esc keyboard handling, focus trap)",
+      "Replace every rfd::MessageDialog use: unsaved changes on close/new/open (Save / Don't Save / Cancel), errors, overwrite prompts, delete confirmations, render Cancel All",
+      "Native file pickers (rfd::FileDialog) stay native",
+  ],
+  ac=["No rfd::MessageDialog remains (grep)",
+      "Closing with unsaved changes shows the in-app modal; each button does the right thing (kittest)",
+      "Modal is keyboard-operable: Enter = default, Esc = Cancel"])
