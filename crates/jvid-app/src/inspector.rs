@@ -695,8 +695,10 @@ fn effects_rows(
             }
         }
     }
+    let disabled = crate::effects::with(|l| l.disabled.clone());
     let usable: Vec<(&str, &jvid_render::effect::Shader)> = lib
         .iter()
+        .filter(|(k, _)| !disabled.contains(k))
         .filter_map(|(k, e)| Some((k.as_str(), e.as_deref().ok()?)))
         .collect();
     let mut names = vec!["Add Effect"];
@@ -708,17 +710,36 @@ fn effects_rows(
         && pick > 0
     {
         let (stem, shader) = usable[pick - 1];
-        let fx = Effect {
-            shader: stem.to_owned(),
-            params: shader
-                .params
-                .iter()
-                .map(|q| (q.name.clone(), q.default))
-                .collect(),
-        };
-        edit = Some((rewrite(clips, |_, x, _| x.effects.push(fx.clone())), None));
+        edit = Some((push_effect(clips, stem, shader), None));
     }
     edit
+}
+
+fn push_effect(clips: &[&Clip], stem: &str, shader: &jvid_render::effect::Shader) -> Command {
+    let fx = Effect {
+        shader: stem.to_owned(),
+        params: shader
+            .params
+            .iter()
+            .map(|q| (q.name.clone(), q.default))
+            .collect(),
+    };
+    rewrite(clips, |_, x, _| x.effects.push(fx.clone()))
+}
+
+/// Adds effect `stem` from the effects folder to the end of each of the video clips in `ids`;
+/// `None` when there are none or the effect doesn't load.
+pub fn add_effect(project: &Project, ids: &HashSet<ClipId>, stem: &str) -> Option<Command> {
+    let seq = project.sequence();
+    let mut clips: Vec<&Clip> = ids
+        .iter()
+        .filter_map(|id| seq.clip(*id))
+        .filter(|(t, _)| seq.track(*t).is_some_and(|t| t.kind == TrackKind::Video))
+        .map(|(_, c)| c)
+        .collect();
+    clips.sort_by_key(|c| c.id.0);
+    let shader = crate::effects::with(|l| l.get(stem).and_then(|e| e.clone().ok()))?;
+    (!clips.is_empty()).then(|| push_effect(&clips, stem, &shader))
 }
 
 /// Undo gesture for speed drags, xored with the clip id.

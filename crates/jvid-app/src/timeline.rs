@@ -1362,6 +1362,20 @@ impl Timeline {
             let hit = lanes.iter().find(|l| l.2.contains(p));
             hit.filter(|l| kind.is_none_or(|k| k == l.1)).map(|l| l.0)
         };
+        if let Some(fx) = egui::DragAndDrop::payload::<crate::effects::Drag>(ui.ctx()) {
+            let t = view.time(p.x);
+            let clip = lane_at(Some(TrackKind::Video))
+                .and_then(|id| project.sequence().track(id))
+                .and_then(|tr| tr.clips().iter().find(|c| c.start <= t && t < c.end()));
+            if area.contains(p)
+                && ui.input(|i| i.pointer.any_released())
+                && let Some(c) = clip
+                && let Some(cmd) = crate::inspector::add_effect(project, &[c.id].into(), &fx.0)
+            {
+                *edit = Some((cmd, None));
+            }
+            return Vec::new();
+        }
         if let Some(asset) = egui::DragAndDrop::payload::<AssetId>(ui.ctx())
             && area.contains(p)
             // Alt merges a multi-stream file's audio into one clip.
@@ -2674,6 +2688,33 @@ mod tests {
                 "snapping {snapping}"
             );
         }
+    }
+
+    #[test]
+    fn dropping_an_effect_on_a_clip_adds_it() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join(format!("jvid-fx-drop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        crate::effects::scan_for_test(&tmp);
+        let mut h = harness(project(4));
+        let lane_y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let at = pos2(8.0 + size::TRACK_HEADER + 36.0, lane_y);
+        h.hover_at(at);
+        h.run();
+        egui::DragAndDrop::set_payload(&h.ctx, crate::effects::Drag("vignette".into()));
+        h.drag_at(at);
+        h.run();
+        h.drop_at(at);
+        h.run();
+        let s = h.state().1.project().sequence().clone();
+        let fx = &s.tracks()[0].clips()[0].transform.effects;
+        assert_eq!(fx.len(), 1);
+        assert_eq!(fx[0].shader, "vignette");
+        assert!(fx[0].params.contains_key("strength"));
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 
     #[test]

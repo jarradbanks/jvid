@@ -1040,6 +1040,11 @@ impl TabViewer for Viewer<'_> {
             self.import_clicked |= r.import;
             // The Source tab may have set one this frame too.
             self.command = r.command.or(self.command.take());
+            if let Some(stem) = r.apply_effect {
+                let selected = self.timeline.selected();
+                let add = crate::inspector::add_effect(self.project, selected, &stem);
+                self.command = add.or(self.command.take());
+            }
             self.relink = r.relink;
             self.open = r.open;
             return;

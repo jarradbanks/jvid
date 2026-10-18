@@ -1,7 +1,7 @@
 //! The effects folder: user `.wgsl` effects in the config directory, re-read while the app runs
 //! so a new or edited file is usable without a restart.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -26,6 +26,10 @@ type Stamp = (Option<std::time::SystemTime>, u64);
 pub struct Library {
     /// By file stem: the file's (modified time, length) when last read and what it parsed to.
     files: BTreeMap<String, (Stamp, Entry)>,
+    /// By file stem: the first plain comment line of the file, saying what the effect does.
+    descriptions: BTreeMap<String, String>,
+    /// Stems hidden from the Inspector's Add Effect, kept in the folder's `disabled.txt`.
+    pub disabled: BTreeSet<String>,
     /// Bumped whenever an entry is added, changed or removed.
     pub generation: u64,
 }
@@ -59,13 +63,19 @@ impl Library {
         let before = self.files.len();
         self.files.retain(|stem, _| seen.contains_key(stem));
         let mut changed = self.files.len() != before;
+        let disabled = std::fs::read_to_string(dir.join(DISABLED)).unwrap_or_default();
+        let disabled: BTreeSet<String> = disabled.lines().map(str::to_owned).collect();
+        if disabled != self.disabled {
+            (self.disabled, changed) = (disabled, true);
+        }
         for (stem, (path, stamp)) in seen {
             if self.files.get(&stem).is_some_and(|(old, _)| *old == stamp) {
                 continue;
             }
-            let parsed = std::fs::read_to_string(&path)
-                .map_err(|e| e.to_string())
-                .and_then(|src| effect::parse(&src).map(Arc::new));
+            let src = std::fs::read_to_string(&path).map_err(|e| e.to_string());
+            let desc = src.as_deref().map(description).unwrap_or_default();
+            self.descriptions.insert(stem.clone(), desc);
+            let parsed = src.and_then(|src| effect::parse(&src).map(Arc::new));
             if let Err(e) = &parsed {
                 tracing::warn!("effect {stem}: {e}");
             }
@@ -83,6 +93,36 @@ impl Library {
         }
     }
 
+    pub fn get(&self, stem: &str) -> Option<&Entry> {
+        self.files.get(stem).map(|(_, e)| e)
+    }
+
+    pub fn description(&self, stem: &str) -> &str {
+        self.descriptions.get(stem).map_or("", String::as_str)
+    }
+
+    /// The effects whose name, file or description contains `query` (case-insensitive).
+    pub fn rows(&self, query: &str) -> Vec<Row> {
+        let q = query.trim().to_lowercase();
+        self.entries()
+            .map(|(stem, e)| Row {
+                stem: stem.to_owned(),
+                name: e
+                    .as_ref()
+                    .map_or_else(|_| format!("{stem}.wgsl"), |s| s.name.clone()),
+                description: self.description(stem).to_owned(),
+                bundled: bundled(stem),
+                disabled: self.disabled.contains(stem),
+                error: e.as_ref().err().cloned(),
+            })
+            .filter(|r| {
+                [&r.name, &r.stem, &r.description]
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(&q))
+            })
+            .collect()
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = (&str, &Entry)> {
         self.files.iter().map(|(k, (_, e))| (k.as_str(), e))
     }
@@ -92,6 +132,8 @@ impl Library {
 static LIBRARY: Mutex<(Library, Option<Instant>)> = Mutex::new((
     Library {
         files: BTreeMap::new(),
+        descriptions: BTreeMap::new(),
+        disabled: BTreeSet::new(),
         generation: 0,
     },
     None,
@@ -108,6 +150,106 @@ pub fn with<R>(f: impl FnOnce(&Library) -> R) -> R {
         }
     }
     f(lib)
+}
+
+/// An Effects tab row.
+#[derive(Debug, PartialEq)]
+pub struct Row {
+    pub stem: String,
+    /// The effect's display name, or its file name when it doesn't load.
+    pub name: String,
+    pub description: String,
+    pub bundled: bool,
+    pub disabled: bool,
+    /// Why the file doesn't load, when it doesn't.
+    pub error: Option<String>,
+}
+
+const DISABLED: &str = "disabled.txt";
+
+/// What a timeline drop of an Effects tab row carries: the effect's file stem.
+#[derive(Clone)]
+pub struct Drag(pub String);
+
+/// The first `//` line that isn't a `@jvid`/`@param` directive, without the slashes.
+pub fn description(src: &str) -> String {
+    let lines = src.lines().filter_map(|l| l.trim().strip_prefix("//"));
+    let mut lines = lines
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('@'));
+    lines.next().unwrap_or_default().to_owned()
+}
+
+/// Whether `stem` is one of the examples shipped with the app (recreated with the folder).
+pub fn bundled(stem: &str) -> bool {
+    effect::BUNDLED
+        .iter()
+        .any(|(f, _)| f.strip_suffix(".wgsl") == Some(stem))
+}
+
+/// What New Effect writes: a working effect with one parameter to start from.
+const TEMPLATE: &str = r#"// @jvid effect "New Effect"
+// @param amount float 0.0..1.0 = 0.0
+
+// Blends towards the inverted image; the first comment line shows in the Effects tab.
+fn effect(uv: vec2<f32>) -> vec4<f32> {
+    let c = textureSample(src, smp, uv);
+    return vec4<f32>(mix(c.rgb, 1.0 - c.rgb, fx.amount), c.a);
+}
+"#;
+
+/// `dir/<base>.wgsl`, or `<base> 2.wgsl` and so on if that's taken.
+fn free_path(dir: &Path, base: &str) -> PathBuf {
+    (1..)
+        .map(|n| match n {
+            1 => dir.join(format!("{base}.wgsl")),
+            n => dir.join(format!("{base} {n}.wgsl")),
+        })
+        .find(|p| !p.exists())
+        .expect("some name is free")
+}
+
+/// Writes the template as a new file in `dir`, returning its path.
+pub fn create(dir: &Path) -> std::io::Result<PathBuf> {
+    let path = free_path(dir, "new_effect");
+    std::fs::write(&path, TEMPLATE).map(|()| path)
+}
+
+/// Copies `stem`'s file to a free name beside it.
+pub fn duplicate(dir: &Path, stem: &str) -> std::io::Result<PathBuf> {
+    let path = free_path(dir, &format!("{stem} copy"));
+    std::fs::copy(dir.join(format!("{stem}.wgsl")), &path).map(|_| path)
+}
+
+/// Deletes a user effect's file; bundled examples can only be disabled.
+pub fn delete(dir: &Path, stem: &str) -> std::io::Result<()> {
+    if bundled(stem) {
+        return Err(std::io::Error::other("bundled effects can't be deleted"));
+    }
+    std::fs::remove_file(dir.join(format!("{stem}.wgsl")))
+}
+
+/// Hides `stem` from Add Effect, or shows it again.
+pub fn set_disabled(dir: &Path, stem: &str, off: bool) -> std::io::Result<()> {
+    let text = std::fs::read_to_string(dir.join(DISABLED)).unwrap_or_default();
+    let mut set: BTreeSet<&str> = text.lines().collect();
+    if off {
+        set.insert(stem);
+    } else {
+        set.remove(stem);
+    }
+    let out: String = set.iter().map(|s| format!("{s}\n")).collect();
+    std::fs::write(dir.join(DISABLED), out)
+}
+
+/// Loads `dir` into the app-wide library, as tests have no effects folder.
+#[cfg(test)]
+pub fn scan_for_test(dir: &Path) {
+    LIBRARY
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .0
+        .scan(dir);
 }
 
 /// [`Library::fail`] on the app-wide library, so the Inspector and Effects tab show the error.
@@ -158,6 +300,60 @@ mod tests {
         std::fs::remove_file(tmp.join("mine.wgsl")).unwrap();
         lib.scan(&tmp);
         assert!(mine(&lib).is_none());
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn describes_creates_duplicates_disables_and_deletes() {
+        let tmp = std::env::temp_dir().join(format!("jvid-effects-ops-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mut lib = Library::default();
+        lib.scan(&tmp);
+        assert!(
+            lib.description("vignette")
+                .starts_with("Darkens towards the corners")
+        );
+        let rows = lib.rows("CORNERS");
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].name.as_str(), rows[0].bundled), ("Vignette", true));
+        assert_eq!(lib.rows("").len(), 3);
+        assert!(bundled("vignette") && !bundled("new_effect"));
+
+        // A broken user shader: listed by file name with the compiler's message.
+        std::fs::write(
+            tmp.join("broken.wgsl"),
+            "// @jvid effect \"Broken\"\nfn nope(\n",
+        )
+        .unwrap();
+        lib.scan(&tmp);
+        let broken = lib.rows("broken").pop().unwrap();
+        assert_eq!(broken.name, "broken.wgsl");
+        assert!(!broken.bundled && broken.error.is_some_and(|e| !e.is_empty()));
+        std::fs::remove_file(tmp.join("broken.wgsl")).unwrap();
+
+        let made = create(&tmp).unwrap();
+        assert_eq!(made, tmp.join("new_effect.wgsl"));
+        assert_eq!(create(&tmp).unwrap(), tmp.join("new_effect 2.wgsl"));
+        duplicate(&tmp, "vignette").unwrap();
+        lib.scan(&tmp);
+        assert!(
+            lib.get("new_effect").unwrap().is_ok(),
+            "the template parses"
+        );
+        assert!(lib.description("new_effect").starts_with("Blends towards"));
+        assert!(lib.get("vignette copy").unwrap().is_ok());
+
+        set_disabled(&tmp, "film_grain", true).unwrap();
+        lib.scan(&tmp);
+        assert!(lib.disabled.contains("film_grain"));
+        set_disabled(&tmp, "film_grain", false).unwrap();
+        lib.scan(&tmp);
+        assert!(lib.disabled.is_empty());
+
+        assert!(delete(&tmp, "vignette").is_err());
+        delete(&tmp, "vignette copy").unwrap();
+        lib.scan(&tmp);
+        assert!(lib.get("vignette copy").is_none() && lib.get("vignette").is_some());
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 }
