@@ -1104,3 +1104,14 @@ I("canvas-text-edit", "On-canvas text editing in the Program monitor", "M3", ["u
   ],
   ac=["Double-click 'Title' on a rotated text clip, type, see it update live, Esc commits, Ctrl+Z restores the old text in one step (kittest)",
       "Space types a space while editing instead of starting playback"])
+
+I("font-picker", "Font picker with inline search", "M3", ["ui"], "S", ["title-case"],
+  summary="The text clip Font field is a free text input; make it a searchable font select.",
+  scope=[
+      "Replace the Font text input with a combo: shows the current family (rendered in that font if cheap), opens a list of installed + bundled font families from the font database the text renderer already uses",
+      "Typing filters the list inline (case-insensitive substring); arrow keys + Enter select; Esc cancels",
+      "Hovering/arrowing previews the font on the canvas; Enter/click commits one undo step",
+      "A missing font (project from another machine) shows as 'Arial (missing)' with fallback noted",
+  ],
+  ac=["Typing 'ari' narrows to Arial-matching families; Enter applies it (kittest)",
+      "Only fonts the renderer can actually draw are listed"])

@@ -456,6 +456,10 @@
     "canvas-text-edit": {
       "number": 211,
       "id": 5905285008
+    },
+    "font-picker": {
+      "number": 212,
+      "id": 5905306293
     }
   },
   "links": [
@@ -1173,6 +1177,10 @@
     ],
     [
       "canvas-text-edit",
+      "title-case"
+    ],
+    [
+      "font-picker",
       "title-case"
     ]
   ]
