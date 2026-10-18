@@ -78,6 +78,12 @@ pub struct MediaBin {
     new_text: Option<(usize, bool)>,
     /// Scroll the Media tab to this asset next time it draws.
     reveal: Option<AssetId>,
+    /// The Effects tab's search text.
+    pub fx_query: String,
+    /// The effect last clicked in the Effects tab, by file stem.
+    pub fx_selected: Option<String>,
+    /// The user effect showing the inline delete confirm.
+    pub fx_confirm_delete: Option<String>,
     thumbs: Thumbs,
 }
 
@@ -90,6 +96,17 @@ pub struct BinResponse {
     pub relink: Option<AssetId>,
     /// Double-clicked: open in the Source tab.
     pub open: Option<AssetId>,
+    /// Add this effect (by file stem) to the selected clips.
+    pub apply_effect: Option<String>,
+}
+
+/// A bottom bar like the Media tab's: a wide button, then a `side_w` one at the right.
+/// Returns the bar's rects and the rect left above it.
+fn bottom_bar(rect: Rect, side_w: f32) -> (Rect, Rect, Rect) {
+    let bar = Rect::from_min_max(pos2(rect.left(), rect.bottom() - size::CONTROL), rect.max);
+    let above = rect.with_max_y(bar.top() - space::S8);
+    let (wide, side) = bar.split_left_right_at_x(bar.right() - side_w - space::S4);
+    (wide, side.with_min_x(side.right() - side_w), above)
 }
 
 /// The assets matching `query` (case-insensitive, by name) in `sort` order.
@@ -177,7 +194,7 @@ impl MediaBin {
             .focused(focused)
             .show(ui, |ui| match self.tab {
                 0 => self.media(ui, project, importing, missing, &mut out),
-                1 => effects_tab(ui),
+                1 => self.effects_tab(ui, &mut out),
                 _ => {
                     if let Some(dragged) = text_presets(ui, &mut out) {
                         self.new_text = Some((project.assets().len(), dragged));
@@ -199,21 +216,15 @@ impl MediaBin {
         missing: &HashSet<PathBuf>,
         out: &mut BinResponse,
     ) {
-        let mut rect = ui.max_rect();
         // Import stays pinned below the list, shown even when the bin is empty.
-        let bar = Rect::from_min_max(pos2(rect.left(), rect.bottom() - size::CONTROL), rect.max);
-        rect.max.y = bar.top() - space::S8;
         let solid_w = 88.0;
-        let (bar, solid_bar) = bar.split_left_right_at_x(bar.right() - solid_w - space::S4);
+        let (bar, solid_bar, rect) = bottom_bar(ui.max_rect(), solid_w);
         let import = Button::secondary("Import")
             .with_icon(icon::PLUS)
             .width(bar.width());
         out.import |= ui.put(bar, import).clicked();
         let solid = Button::secondary("Add Solid").width(solid_w);
-        if ui
-            .put(solid_bar.with_min_x(solid_bar.right() - solid_w), solid)
-            .clicked()
-        {
+        if ui.put(solid_bar, solid).clicked() {
             out.command = Some(Command::AddSolid {
                 name: "Solid".into(),
                 color: [0.0, 0.0, 0.0, 1.0],
@@ -794,38 +805,192 @@ fn text_presets(ui: &mut Ui, out: &mut BinResponse) -> Option<bool> {
     added
 }
 
-/// The Effects tab: the effects folder's files, each with its name or why it doesn't load.
-/// Effects are added to clips from the Inspector.
-fn effects_tab(ui: &mut Ui) {
-    ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
-    if let Some(dir) = crate::effects::dir()
-        && ui.add(Button::secondary("Open Effects Folder")).clicked()
-    {
-        // `reveal` opens a file's folder; any child of the folder works.
-        crate::export::queue::reveal(&dir.join("effect.wgsl"));
-    }
-    let empty = crate::effects::with(|lib| {
-        for (stem, entry) in lib.entries() {
-            match entry {
-                Ok(s) => {
-                    ui.label(egui::RichText::new(&s.name).color(color::INK))
-                        .on_hover_text(format!("{stem}.wgsl"));
-                }
-                Err(e) => {
-                    ui.label(egui::RichText::new(format!("{stem}.wgsl")).color(color::RED));
-                    ui.label(
-                        egui::RichText::new(e)
-                            .monospace()
-                            .small()
-                            .color(color::INK_3),
-                    );
-                }
+/// What an Effects tab row says about how to use it.
+const FX_HINT: &str = "Drag onto a clip, or double-click to add to the selected clips";
+
+impl MediaBin {
+    /// The Effects tab: the effects folder's files with what each does or why it doesn't
+    /// load, applied by dragging onto a clip or to the selected clips by double-click or Apply.
+    fn effects_tab(&mut self, ui: &mut Ui, out: &mut BinResponse) {
+        let dir = crate::effects::dir();
+        let reveal_w = 136.0;
+        let (bar, reveal_bar, rect) = bottom_bar(ui.max_rect(), reveal_w);
+        let new = Button::secondary("New Effect")
+            .with_icon(icon::PLUS)
+            .width(bar.width());
+        if ui.put(bar, new).clicked()
+            && let Some(dir) = &dir
+        {
+            match crate::effects::create(dir) {
+                Ok(path) => crate::export::queue::reveal(&path),
+                Err(e) => tracing::warn!("effects: can't create a new effect: {e}"),
             }
         }
-        lib.entries().next().is_none()
-    });
-    if empty {
-        ui.label(egui::RichText::new("Drop .wgsl files in the effects folder").color(color::INK_3));
+        let open = Button::secondary("Open Effects Folder").width(reveal_w);
+        if ui.put(reveal_bar, open).clicked()
+            && let Some(dir) = &dir
+        {
+            // `reveal` opens a file's folder; any child of the folder works.
+            crate::export::queue::reveal(&dir.join("effect.wgsl"));
+        }
+        let rows = crate::effects::with(|lib| lib.rows(&self.fx_query));
+        let empty_folder =
+            rows.is_empty() && crate::effects::with(|l| l.entries().next().is_none());
+        ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
+            ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
+            ui.add(TextInput::search(&mut self.fx_query).width(rect.width()));
+            if rows.is_empty() {
+                let hint = if empty_folder {
+                    "Drop .wgsl files in the effects folder or click New Effect, then drag one onto a clip"
+                } else {
+                    "No effects match the search"
+                };
+                ui.label(egui::RichText::new(hint).color(color::INK_3));
+                return;
+            }
+            egui::ScrollArea::vertical()
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = space::S4;
+                    for row in &rows {
+                        self.effect_row(ui, row, dir.as_deref(), out);
+                    }
+                    ui.label(egui::RichText::new(FX_HINT).small().color(color::INK_3));
+                });
+        });
+    }
+
+    fn effect_row(
+        &mut self,
+        ui: &mut Ui,
+        row: &crate::effects::Row,
+        dir: Option<&std::path::Path>,
+        out: &mut BinResponse,
+    ) {
+        let w = ui.available_width();
+        let (rect, r) = ui.allocate_exact_size(vec2(w, 2.0 * ROW), Sense::click_and_drag());
+        let selected = self.fx_selected.as_deref() == Some(row.stem.as_str());
+        let p = ui.painter();
+        if selected || r.hovered() {
+            let fill = if selected {
+                color::BLUE.gamma_multiply(0.2)
+            } else {
+                color::RAISED
+            };
+            p.rect_filled(rect, radius::SMALL, fill);
+        }
+        let inset = rect.shrink2(vec2(space::S8, space::S4));
+        let ink = if row.disabled {
+            color::INK_3
+        } else {
+            color::INK
+        };
+        p.text(
+            inset.left_top(),
+            Align2::LEFT_TOP,
+            &row.name,
+            theme::body_strong(),
+            ink,
+        );
+        let (status, status_ink) = match (&row.error, row.disabled, row.bundled) {
+            (Some(_), _, _) => ("Error", color::RED),
+            (None, true, _) => ("Disabled", color::INK_3),
+            (None, false, true) => ("Bundled", color::INK_3),
+            (None, false, false) => ("User", color::INK_3),
+        };
+        p.text(
+            inset.right_top(),
+            Align2::RIGHT_TOP,
+            status,
+            theme::body(),
+            status_ink,
+        );
+        let confirming = self.fx_confirm_delete.as_deref() == Some(row.stem.as_str());
+        let second = row.error.as_deref().unwrap_or(&row.description);
+        let line = if confirming {
+            format!("Delete {}.wgsl?", row.stem)
+        } else {
+            second.lines().next().unwrap_or_default().to_owned()
+        };
+        let line_ink = if row.error.is_some() || confirming {
+            color::RED
+        } else {
+            color::INK_3
+        };
+        let second_rect = inset.with_min_y(inset.top() + ROW - space::S4);
+        let painter = p.with_clip_rect(second_rect.intersect(p.clip_rect()));
+        painter.text(
+            second_rect.left_top(),
+            Align2::LEFT_TOP,
+            line,
+            theme::body(),
+            line_ink,
+        );
+        let usable = row.error.is_none();
+        let r = match &row.error {
+            Some(e) => r.on_hover_text(e),
+            None => r.on_hover_text(format!("{}\n{FX_HINT}", row.description)),
+        };
+        if r.clicked() {
+            self.fx_selected = Some(row.stem.clone());
+        }
+        if usable {
+            if r.double_clicked() {
+                out.apply_effect = Some(row.stem.clone());
+            }
+            // The timeline adds it to the clip it's dropped on.
+            r.dnd_set_drag_payload(crate::effects::Drag(row.stem.clone()));
+        }
+        // Buttons on the second line, right-aligned, over the row.
+        let mut right = second_rect.right();
+        let mut button = |ui: &mut Ui, b: Button, w: f32| {
+            let at = Rect::from_min_max(
+                pos2(right - w, second_rect.top() - space::S4),
+                pos2(right, rect.bottom() - space::S4),
+            );
+            right -= w + space::S4;
+            ui.put(at, b.width(w)).clicked()
+        };
+        if confirming {
+            if button(ui, Button::destructive("Delete"), 64.0)
+                && let Some(dir) = dir
+                && let Err(e) = crate::effects::delete(dir, &row.stem)
+            {
+                tracing::warn!("effects: can't delete {}: {e}", row.stem);
+            }
+            if button(ui, Button::ghost("Cancel"), 64.0)
+                || confirming && ui.input(|i| i.key_pressed(Key::Escape))
+            {
+                self.fx_confirm_delete = None;
+            }
+        } else if usable && (selected || r.hovered()) && button(ui, Button::ghost("Apply"), 56.0) {
+            out.apply_effect = Some(row.stem.clone());
+        }
+        let Some(dir) = dir else { return };
+        let path = dir.join(format!("{}.wgsl", row.stem));
+        r.context_menu(|ui| {
+            self.fx_selected = Some(row.stem.clone());
+            if usable && ui.button("Apply to Selected Clips").clicked() {
+                out.apply_effect = Some(row.stem.clone());
+            }
+            if ui.button("Reveal File").clicked() {
+                crate::export::queue::reveal(&path);
+            }
+            if ui.button("Duplicate").clicked()
+                && let Err(e) = crate::effects::duplicate(dir, &row.stem)
+            {
+                tracing::warn!("effects: can't duplicate {}: {e}", row.stem);
+            }
+            let toggle = if row.disabled { "Enable" } else { "Disable" };
+            if ui.button(toggle).clicked()
+                && let Err(e) = crate::effects::set_disabled(dir, &row.stem, !row.disabled)
+            {
+                tracing::warn!("effects: can't change {}: {e}", row.stem);
+            }
+            if !row.bundled && ui.button("Delete").clicked() {
+                self.fx_confirm_delete = Some(row.stem.clone());
+            }
+        });
     }
 }
 
@@ -928,6 +1093,18 @@ mod tests {
         let mut short = asset(1, "a", 0);
         short.probe.as_mut().unwrap().duration = Time(FLICKS_PER_SECOND * 4 / 10);
         assert_eq!(duration_label(&short).unwrap(), "0:00.4");
+    }
+
+    #[test]
+    fn effects_bar_matches_the_media_bar() {
+        let panel = Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 400.0));
+        let (import, solid, above) = bottom_bar(panel, 88.0);
+        let (new, reveal, fx_above) = bottom_bar(panel, 136.0);
+        assert_eq!(above, fx_above);
+        assert_eq!((import.min, solid.max), (new.min, reveal.max));
+        assert_eq!(import.height(), size::CONTROL);
+        assert_eq!(new.height(), reveal.height());
+        assert_eq!(reveal.left() - new.right(), solid.left() - import.right());
     }
 
     #[test]
