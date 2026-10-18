@@ -46,6 +46,14 @@ Work in any panel except while typing in a text field.
 | Selection Tool | `V` |
 | Step Back One Frame | `Left` |
 | Step Forward One Frame | `Right` |
+| Step Back One Second | `Shift+Left` |
+| Step Forward One Second | `Shift+Right` |
+| Go to Previous Edit Point | `Ctrl+Left` |
+| Go to Next Edit Point | `Ctrl+Right` |
+| Go to Previous Edit Point (Alternate) | `Up` |
+| Go to Next Edit Point (Alternate) | `Down` |
+| Go to Clip Start | `Ctrl+Shift+Left` |
+| Go to Clip End | `Ctrl+Shift+Right` |
 | Go to Start | `Home` |
 | Go to End | `End` |
 | Focus Media | `Shift+1` |
