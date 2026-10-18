@@ -1108,3 +1108,76 @@ fn clicking_a_preset_shows_its_asset_in_the_media_tab() {
     assert!(id.is_some());
     assert_eq!((h.state().bin.tab, h.state().bin.selected), (0, id));
 }
+
+/// A selected title in a 1280x720 app, its clip id and the Program frame's center.
+fn title_harness() -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
+    use jvid_core::history::Created;
+    use jvid_core::model::{NewClip, Text, TrackKind};
+    use jvid_core::time::{FLICKS_PER_SECOND, Time};
+    // Steps short enough for two clicks to make a double-click.
+    let mut h = builder([1280.0, 720.0], 1.0)
+        .with_step_dt(0.05)
+        .wgpu()
+        .build_eframe(|cc| App::new(cc, &Default::default()));
+    h.state_mut().on_welcome = false;
+    h.run();
+    let history = &mut h.state_mut().history;
+    // A box makes the hit independent of the installed fonts.
+    let text = Text {
+        box_color: [0.0, 0.0, 0.0, 1.0],
+        ..Text::default()
+    };
+    let Ok(Created::Asset(asset)) = history.apply(Command::AddText {
+        name: "Title".into(),
+        text,
+    }) else {
+        panic!("text")
+    };
+    let Ok(Created::Track(track)) = history.apply(Command::AddTrack {
+        kind: TrackKind::Video,
+        name: "V1".into(),
+    }) else {
+        panic!("track")
+    };
+    let clip = NewClip {
+        asset,
+        source_in: Time(0),
+        source_out: Time(FLICKS_PER_SECOND),
+        start: Time(0),
+        link: None,
+    };
+    let Ok(Created::Clip(id)) = history.apply(Command::AddClip { track, clip }) else {
+        panic!("clip")
+    };
+    h.run();
+    let app = h.state_mut();
+    app.timeline
+        .select_clip(app.history.project().sequence(), id);
+    h.run();
+    let shot = Shot::take(&mut h, "title".into());
+    let r = shot.panel(Tab::Preview);
+    let center = egui::pos2(r.center().x, r.center().y - size::HEADER / 2.0);
+    (h, id, center)
+}
+
+#[test]
+fn double_clicking_a_title_in_program_focuses_its_text() {
+    if !gpu() {
+        return;
+    }
+    let (mut h, _, at) = title_harness();
+    h.hover_at(at);
+    h.step();
+    // Both clicks in one step, inside the double-click window.
+    for pressed in [true, false, true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        });
+    }
+    h.run();
+    let focused = h.ctx.memory(|m| m.focused());
+    assert_eq!(focused, Some(egui::Id::new("inspector text content")));
+}

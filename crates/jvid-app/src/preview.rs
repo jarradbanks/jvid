@@ -11,18 +11,19 @@ use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, wgpu};
 use egui::{Align, Align2, Layout, Pos2, Rect, Stroke, Ui, UiBuilder, pos2, vec2};
 use jvid_audio::{CpalBackend, Output};
 use jvid_core::history::Command;
-use jvid_core::model::{AssetId, Project, ProjectSettings, Sequence};
+use jvid_core::model::{AssetId, MediaAsset, Project, ProjectSettings, Sequence};
 use jvid_core::settings::PreviewQuality;
 use jvid_core::time::{Time, format_timecode};
 use jvid_jobs::Priority;
 use jvid_media::decode::{DecoderPool, Frame};
 use jvid_media::proxy::{self, Proxies};
 use jvid_render::preview::{self as render, Yuv};
+use jvid_render::{solid, text};
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, Checkbox, Dropdown};
 
-use crate::playback::{self, Playback, Shown};
+use crate::playback::{self, Pixels, Playback, Shown};
 use crate::transport::{AudioSource, Transport};
 
 const ZOOMS: [(&str, Option<f32>); 4] = [
@@ -145,11 +146,14 @@ pub struct Preview {
     program: Playback,
     /// The composited frame last returned, and a count bumped with it.
     program_shown: Option<Arc<Shown>>,
+    /// A solid or title open in the Source tab, drawn like a one-layer timeline frame.
+    source_shown: Option<(MediaAsset, Arc<Shown>)>,
     program_gen: u64,
     /// The timeline playhead last frame; a change is a seek.
     program_head: Time,
-    /// The sequence last frame; a change redraws a parked playhead.
-    program_seq: Option<Sequence>,
+    /// The sequence and assets last frame; a change (a clip or a title's text) redraws a
+    /// parked playhead.
+    program_seq: Option<(Sequence, Vec<MediaAsset>)>,
     /// For full-size renders outside the paint callback, such as frame export.
     render_state: Option<egui_wgpu::RenderState>,
     /// Preview decodes these instead of the originals while on; export never does.
@@ -194,6 +198,7 @@ impl Preview {
             output: None,
             program: Playback::from_files(playback::DEFAULT_BUDGET),
             program_shown: None,
+            source_shown: None,
             program_gen: 0,
             program_head: Time(0),
             program_seq: None,
@@ -388,9 +393,31 @@ impl Preview {
             duration: t.duration,
             position: t.rate.time_floor(frame),
         };
-        let path = p.path.clone();
-        let offline = missing.contains(&path);
-        let action = self.show(ui, Some((&path, row.position)), offline, Some(&row), None)?;
+        let action = match asset.filter(|a| a.generated()) {
+            Some(a) => {
+                if self.source_shown.as_ref().is_none_or(|(was, _)| was != a) {
+                    let s = project.settings();
+                    let px = match &a.text {
+                        Some(t) => Pixels::Text(text::rasterize(t, None, (s.width, s.height))),
+                        None => Pixels::Solid(solid::rgba8(a.solid.unwrap_or_default())),
+                    };
+                    let shown = Shown {
+                        index: 0,
+                        layers: vec![(px, Default::default())],
+                        exact: true,
+                    };
+                    self.source_shown = Some((a.clone(), Arc::new(shown)));
+                    self.generation += 1;
+                }
+                let program = Some((project.settings(), true));
+                self.show(ui, None, false, Some(&row), program)?
+            }
+            None => {
+                let path = p.path.clone();
+                let offline = missing.contains(&path);
+                self.show(ui, Some((&path, row.position)), offline, Some(&row), None)?
+            }
+        };
         self.source_action(action, project)
     }
 
@@ -461,7 +488,13 @@ impl Preview {
         let end = t
             .rate
             .time_floor(t.rate.index_floor(Time(t.duration.0 - 1)).max(0));
-        match self.show(ui, None, false, Some(&row), Some(project.settings())) {
+        match self.show(
+            ui,
+            None,
+            false,
+            Some(&row),
+            Some((project.settings(), false)),
+        ) {
             Some("go_to_start") => Some(Time(0)),
             Some("go_to_end") => Some(end),
             Some(id) => {
@@ -478,8 +511,9 @@ impl Preview {
     fn sync_program(&mut self, project: &Project, playhead: Time, dragging: bool) -> Option<Time> {
         let pb = &mut self.program;
         let seq = project.sequence();
-        if self.program_seq.as_ref() != Some(seq) {
-            self.program_seq = Some(seq.clone());
+        let now = (seq, project.assets());
+        if self.program_seq.as_ref().map(|(s, a)| (s, a.as_slice())) != Some(now) {
+            self.program_seq = Some((seq.clone(), project.assets().to_vec()));
             pb.refresh();
         }
         if playhead != self.program_head {
@@ -537,7 +571,8 @@ impl Preview {
     }
 
     /// Draws `source` at a time, decoding it first if it changed; an `offline` source shows a
-    /// placeholder instead. With `program`, draws the composited timeline frame instead.
+    /// placeholder instead. With `program`, draws the composited timeline frame instead, or
+    /// with its flag set, the generated asset open in the Source tab.
     /// Returns a transport button's action id when one was clicked.
     fn show(
         &mut self,
@@ -545,7 +580,7 @@ impl Preview {
         source: Option<(&Path, Time)>,
         offline: bool,
         row: Option<&SourceRow>,
-        program: Option<&ProjectSettings>,
+        program: Option<(&ProjectSettings, bool)>,
     ) -> Option<&'static str> {
         let path = source.map(|(p, _)| p);
         if self.source.as_deref() != path {
@@ -626,7 +661,16 @@ impl Preview {
                 color::INK_2,
             );
         }
-        let drawn = match (program, &self.program_shown) {
+        let source = matches!(program, Some((_, true)));
+        let shown = match program {
+            Some((_, true)) => self
+                .source_shown
+                .as_ref()
+                .map(|(_, s)| (s, self.generation)),
+            _ => self.program_shown.as_ref().map(|s| (s, self.program_gen)),
+        };
+        let program = program.map(|(s, _)| s);
+        let drawn = match (program, shown) {
             (Some(s), Some(_)) => Some([s.width as f32, s.height as f32]),
             (Some(_), None) => None,
             (None, _) => self
@@ -645,13 +689,14 @@ impl Preview {
                 PreviewQuality::Quarter => 4,
             };
             let clip = render::to_clip(image, view);
-            let callback = match (program, &self.program_shown, &self.frame) {
-                (Some(s), Some(shown), _) => egui_wgpu::Callback::new_paint_callback(
+            let callback = match (program, shown, &self.frame) {
+                (Some(s), Some((shown, g)), _) => egui_wgpu::Callback::new_paint_callback(
                     viewer,
                     ProgramPaint {
                         shown: shown.clone(),
                         settings: s.clone(),
-                        generation: (self.program_gen, scale),
+                        // Source and program counters overlap; the source flag keeps them apart.
+                        generation: (g, scale, source),
                         clip,
                     },
                 ),
@@ -844,14 +889,14 @@ struct Gpu {
     program: playback::Gpu,
     program_view: render::Preview,
     /// The program generation and preview scale last composited.
-    program_drawn: Option<(u64, u32)>,
+    program_drawn: Option<(u64, u32, bool)>,
 }
 
 /// The Program tab's draw. Composites only when the frame or preview scale changed.
 struct ProgramPaint {
     shown: Arc<Shown>,
     settings: ProjectSettings,
-    generation: (u64, u32),
+    generation: (u64, u32, bool),
     clip: [f32; 4],
 }
 
@@ -1049,5 +1094,76 @@ mod program_tests {
         // Nothing changed: nothing new to composite.
         p.sync_program(h.project(), Time(0), false);
         assert_eq!(p.program_gen, before + 1);
+    }
+
+    #[test]
+    fn editing_a_titles_text_redraws_a_parked_playhead() {
+        use jvid_core::history::Created;
+        use jvid_core::model::{NewClip, Text, TrackKind};
+        let mut h = History::new(Project::default());
+        let Ok(Created::Asset(id)) = h.apply(Command::AddText {
+            name: "Title".into(),
+            text: Text::default(),
+        }) else {
+            panic!("text")
+        };
+        let Ok(Created::Track(track)) = h.apply(Command::AddTrack {
+            kind: TrackKind::Video,
+            name: "V1".into(),
+        }) else {
+            panic!("track")
+        };
+        let clip = NewClip {
+            asset: id,
+            source_in: Time(0),
+            source_out: Time(FLICKS_PER_SECOND),
+            start: Time(0),
+            link: None,
+        };
+        h.apply(Command::AddClip { track, clip }).unwrap();
+        let mut p = Preview::new(None);
+        p.sync_program(h.project(), Time(0), false);
+        let before = p.program_gen;
+        let text = Text {
+            content: "Edited".into(),
+            ..Text::default()
+        };
+        h.apply(Command::SetText { id, text }).unwrap();
+        p.sync_program(h.project(), Time(0), false);
+        assert_eq!(p.program_gen, before + 1, "a text edit recomposites");
+    }
+
+    #[test]
+    fn a_title_opens_in_the_source_tab_without_decoding() {
+        use jvid_core::history::Created;
+        use jvid_core::model::Text;
+        let mut h = History::new(Project::default());
+        let Ok(Created::Asset(id)) = h.apply(Command::AddText {
+            name: "Title".into(),
+            text: Text::default(),
+        }) else {
+            panic!("text")
+        };
+        let mut p = Preview::new(None);
+        p.open(h.project(), id);
+        let project = h.project().clone();
+        let mut fresh = true;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([640.0, 360.0])
+            .build_ui_state(
+                move |ui, p: &mut Preview| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    p.show_source(ui, &project, &HashSet::new());
+                },
+                p,
+            );
+        harness.run();
+        let p = harness.state();
+        assert_eq!((&p.error, p.pending), (&None, false), "nothing decoded");
+        let (asset, shown) = p.source_shown.as_ref().expect("drawn");
+        assert_eq!(asset.id, id);
+        assert!(matches!(shown.layers[..], [(Pixels::Text(_), _)]));
     }
 }

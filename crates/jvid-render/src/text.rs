@@ -2,6 +2,7 @@
 //! size of the frame, so the compositor's fit fills the frame and transforms, crop and
 //! opacity apply as to any clip.
 
+use std::ops::Range;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Weight};
@@ -200,12 +201,9 @@ pub fn rasterize(text: &Text, fill: Option<[f64; 4]>, size: (u32, u32)) -> Arc<V
         remember(&mut f.recent, key, img.clone());
         return img;
     };
-    // Only the pixels the box, shadow and glyphs can reach.
     let [sx, sy] = text.shadow.map(|v| v.round() as i64);
-    let p = text.box_padding.max(0.0) as i64;
-    let p = if text.box_color[3] > 0.0 { p } else { 0 };
-    let rx = (x0.min(x0 + sx) - p).max(0)..(x1.max(x1 + sx) + p).min(w);
-    let ry = (y0.min(y0 + sy) - p).max(0)..(y1.max(y1 + sy) + p).min(h);
+    let p = padding(text);
+    let (rx, ry) = reach(text, [x0, y0, x1, y1], (w, h));
     let at = |m: &[u8], x: i64, y: i64| {
         if (0..w).contains(&x) && (0..h).contains(&y) {
             m[(y * w + x) as usize] as f32 / 255.0
@@ -247,6 +245,34 @@ pub fn rasterize(text: &Text, fill: Option<[f64; 4]>, size: (u32, u32)) -> Arc<V
     let img = Arc::new(img);
     remember(&mut f.recent, key, img.clone());
     img
+}
+
+/// The box padding drawn around the glyphs, 0 without a box.
+fn padding(text: &Text) -> i64 {
+    if text.box_color[3] > 0.0 {
+        text.box_padding.max(0.0) as i64
+    } else {
+        0
+    }
+}
+
+/// The pixels the box, shadow and glyphs within `[x0, y0, x1, y1)` can reach on a `w`x`h` frame.
+fn reach(text: &Text, [x0, y0, x1, y1]: [i64; 4], (w, h): (i64, i64)) -> (Range<i64>, Range<i64>) {
+    let [sx, sy] = text.shadow.map(|v| v.round() as i64);
+    let p = padding(text);
+    let rx = (x0.min(x0 + sx) - p).max(0)..(x1.max(x1 + sx) + p).min(w);
+    let ry = (y0.min(y0 + sy) - p).max(0)..(y1.max(y1 + sy) + p).min(h);
+    (rx, ry)
+}
+
+/// The pixel rect `[x0, y0, x1, y1)` [`rasterize`] draws `text` into on a `size` frame;
+/// `None` when nothing shows.
+pub fn drawn_bounds(text: &Text, size: (u32, u32)) -> Option<[u32; 4]> {
+    let mut f = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let b = masks(&mut f, text, size).bounds?.map(i64::from);
+    let (rx, ry) = reach(text, b, (size.0 as i64, size.1 as i64));
+    (!rx.is_empty() && !ry.is_empty())
+        .then(|| [rx.start, ry.start, rx.end, ry.end].map(|v| v as u32))
 }
 
 /// A texture of [`rasterize`]'s image, in [`crate::composite::FORMAT`].
@@ -355,6 +381,32 @@ mod tests {
             &img,
             &rasterize(&text, Some([1.0, 0.0, 0.0, 1.0]), size)
         ));
+    }
+
+    #[test]
+    fn bounds_cover_exactly_the_drawn_pixels() {
+        let size = (320, 180);
+        let text = Text {
+            content: "Hi".into(),
+            size: 40.0,
+            box_color: [0.0, 0.0, 1.0, 1.0],
+            box_padding: 4.0,
+            ..Text::default()
+        };
+        let Some([x0, y0, x1, y1]) = drawn_bounds(&text, size) else {
+            no_font("Latin");
+            return;
+        };
+        assert!(
+            x1 - x0 < size.0 / 2 && y1 - y0 < size.1 / 2,
+            "smaller than the frame"
+        );
+        let img = rasterize(&text, None, size);
+        for (k, px) in img.chunks(4).enumerate() {
+            let (x, y) = (k as u32 % size.0, k as u32 / size.0);
+            let inside = (x0..x1).contains(&x) && (y0..y1).contains(&y);
+            assert_eq!(px[3] > 0, inside, "at {x},{y}");
+        }
     }
 
     #[test]
