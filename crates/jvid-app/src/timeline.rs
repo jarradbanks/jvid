@@ -945,7 +945,7 @@ impl Timeline {
                 if let Some(e) = self.transition_block(ui, &painter, project, view, clip, r) {
                     edit = Some(e);
                 }
-                self.key_toggle(ui, &painter, clip, r, id);
+                self.key_toggle(ui, &painter, view, clip, r, id);
                 if self.keys.expanded.contains(&clip.id) {
                     let under =
                         Rect::from_x_y_ranges(r.x_range(), r.bottom() + 2.0..=lane.bottom());
@@ -1622,6 +1622,7 @@ impl Timeline {
                 TrackKind::Video => {}
             }
         }
+        let keyed = clip.keyframes.values().any(|k| !k.is_empty());
         let mut name = asset.map_or("Missing asset".into(), MediaAsset::display_name);
         // A multi-stream file's audio clips say which stream they play.
         if let Some(p) = asset.and_then(|a| a.probe.as_ref())
@@ -1637,7 +1638,11 @@ impl Timeline {
             name
         };
         clipped.text(
-            pos2(shown.left().max(r.left()) + 6.0, r.top() + NAME_STRIP / 2.0),
+            // Past the keyframe toggle when there is one.
+            pos2(
+                shown.left().max(r.left()) + if keyed { 24.0 } else { 6.0 },
+                r.top() + NAME_STRIP / 2.0,
+            ),
             Align2::LEFT_CENTER,
             name,
             theme::body_strong(),

@@ -26,6 +26,8 @@ const EASING_GESTURE: GestureKey = 0x6b66_6561_0000; // "kfea"
 pub struct Keys {
     /// Clips showing their lanes.
     pub expanded: HashSet<ClipId>,
+    /// Selected keyed clips already expanded once, so the toggle can collapse them again.
+    auto: HashSet<ClipId>,
     /// Selected keys by clip, property and source time.
     pub selected: BTreeSet<(ClipId, String, Time)>,
     /// Copied keys with times relative to the earliest.
@@ -181,13 +183,37 @@ impl Timeline {
         true
     }
 
-    /// The expand toggle in `clip`'s name strip, when it has keyframes.
-    pub(super) fn key_toggle(&mut self, ui: &Ui, painter: &Painter, clip: &Clip, r: Rect, id: Id) {
-        if lanes(clip).next().is_none() || r.width() < 40.0 {
+    /// The expand toggle in `clip`'s name strip, when it has keyframes, pinned to the strip's
+    /// visible left edge. Selecting a keyed clip, or keying a selected one, expands it once;
+    /// collapsed, its key times show as ticks on the body.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn key_toggle(
+        &mut self,
+        ui: &Ui,
+        painter: &Painter,
+        view: View,
+        clip: &Clip,
+        r: Rect,
+        id: Id,
+    ) {
+        let keyed = lanes(clip).next().is_some();
+        if keyed && self.selected.contains(&clip.id) {
+            if self.keys.auto.insert(clip.id) {
+                self.keys.expanded.insert(clip.id);
+            }
+        } else {
+            self.keys.auto.remove(&clip.id);
+        }
+        if !keyed || r.width() < 24.0 {
             return;
         }
         let open = self.keys.expanded.contains(&clip.id);
-        let c = pos2(r.right() - 10.0, r.top() + super::NAME_STRIP / 2.0);
+        let x = r
+            .left()
+            .max(painter.clip_rect().left())
+            .min(r.right() - 20.0)
+            + 10.0;
+        let c = pos2(x, r.top() + super::NAME_STRIP / 2.0);
         let hit = Rect::from_center_size(c, vec2(16.0, 16.0));
         let resp = ui
             .interact(hit, id.with(("kf toggle", clip.id)), Sense::click())
@@ -204,6 +230,24 @@ impl Timeline {
         );
         if resp.clicked() && !self.keys.expanded.remove(&clip.id) {
             self.keys.expanded.insert(clip.id);
+        }
+        if !open {
+            let painter = painter.with_clip_rect(r.intersect(painter.clip_rect()));
+            let y = r.bottom() - 4.0;
+            let times: BTreeSet<Time> = lanes(clip)
+                .flat_map(|(_, k)| k.iter().map(|k| k.time))
+                .collect();
+            for t in times {
+                let x = view.x(clip.timeline_at(t));
+                let pts = [
+                    vec2(0.0, -3.0),
+                    vec2(3.0, 0.0),
+                    vec2(0.0, 3.0),
+                    vec2(-3.0, 0.0),
+                ];
+                let pts = pts.map(|d| pos2(x, y) + d).to_vec();
+                painter.add(Shape::convex_polygon(pts, color::INK, Stroke::NONE));
+            }
         }
     }
 
@@ -562,6 +606,50 @@ mod tests {
         })
         .unwrap();
         (h, id)
+    }
+
+    #[test]
+    fn selecting_a_keyed_clip_expands_it_and_the_toggle_stays_on_screen() {
+        use egui::pos2;
+        use egui_kittest::kittest::Queryable;
+        use jvid_core::model::Project;
+        use suite_ui::tokens::size;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let (p, id) = keyed(1);
+        let height = p.project().sequence().tracks()[0].height;
+        let mut h = super::super::tests::harness(p.project().clone());
+        let left = 8.0 + size::TRACK_HEADER;
+        // Long enough to run past the right edge.
+        while {
+            let v = h.state().0.view(left);
+            v.x(Time(2 * S)) - v.x(Time(0)) < 2000.0
+        } {
+            h.state_mut().0.action("zoom_in", &Project::default());
+        }
+        h.run();
+        assert!(!h.state().0.keys.expanded.contains(&id));
+        h.state_mut().0.selected.insert(id);
+        h.run();
+        assert!(h.state().0.keys.expanded.contains(&id), "selecting expands");
+
+        // The toggle sits at the clip's visible left edge, not its far-off right end.
+        let lock = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let y = lock - height / 2.0 + super::super::NAME_STRIP / 2.0;
+        let x = h.state().0.view(left).x(Time(0)).max(left) + 10.0;
+        assert!(x < 1000.0);
+        h.hover_at(pos2(x, y));
+        h.run();
+        h.drag_at(pos2(x, y));
+        h.run();
+        h.drop_at(pos2(x, y));
+        h.run();
+        h.run();
+        assert!(
+            !h.state().0.keys.expanded.contains(&id),
+            "toggle collapses, and it sticks"
+        );
     }
 
     #[test]

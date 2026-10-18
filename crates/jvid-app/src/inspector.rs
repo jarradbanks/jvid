@@ -413,6 +413,9 @@ pub fn show(
     bin_selected: Option<&MediaAsset>,
     t: Time,
 ) -> (Option<Edit>, Option<Time>) {
+    // A gutter keeps the row buttons clear of the scroll bar.
+    let gutter = ui.spacing().scroll.allocated_width() + space::S4;
+    ui.set_max_width(ui.available_width() - gutter);
     let seq = project.sequence();
     // Audio clips have no picture to transform, only the Audio section.
     let of = |kind| {
@@ -782,7 +785,7 @@ fn section(ui: &mut Ui, title: &str, buttons: bool) -> (bool, Option<Head>) {
 }
 
 /// The width of a keyframe toggle's hit area.
-const KEY_HIT: f32 = 20.0;
+const KEY_HIT: f32 = 24.0;
 
 fn row(
     ui: &mut Ui,
@@ -1465,6 +1468,24 @@ mod tests {
             );
         harness.run();
         harness
+    }
+
+    #[test]
+    fn row_buttons_leave_a_gutter_for_the_scroll_bar() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let h = harness();
+        let bar = h.ctx.global_style().spacing.scroll.allocated_width();
+        for b in h.get_all_by_label_contains("Keyframe all") {
+            assert!(
+                b.rect().right() <= 340.0 - bar - space::S4 + 0.5,
+                "{:?}",
+                b.rect()
+            );
+            assert!(b.rect().width() >= KEY_HIT);
+        }
     }
 
     #[test]
