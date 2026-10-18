@@ -420,22 +420,36 @@ impl App {
         }
     }
 
-    /// Opens the export dialog; while exports run, a progress button beside it opens the queue.
+    /// Opens the export dialog; while jobs exist it shows progress and a chevron opens the queue
+    /// menu.
     fn export_button(&mut self, ui: &mut Ui) {
-        if let Some(p) = self.queue.running() {
-            let label = format!("Exporting {:.0}%", p * 100.0);
-            let tip = format!("{} in the render queue", self.queue.pending());
-            if ui.add(Button::primary(&label)).on_hover_text(tip).clicked() {
-                self.queue.open = true;
+        if !self.queue.is_empty() {
+            let r = ui
+                .add(Button::icon(icon::CHEVRON_DOWN, "Render Queue"))
+                .on_hover_text(format!("{} in the render queue", self.queue.pending()));
+            let mut new = false;
+            egui::Popup::menu(&r)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| new = self.queue.menu(ui));
+            if new && self.can_export() {
+                egui::Popup::close_all(ui.ctx());
+                self.run_action("export", true);
             }
         }
+        if self.queue.pending() > 0 {
+            ui.ctx().request_repaint();
+        }
+        let label = match self.queue.running() {
+            Some(p) => format!("Exporting {:.0}%", p * 100.0),
+            None => "Export".into(),
+        };
         let state = if self.can_export() {
             State::Live
         } else {
             State::Disabled
         };
         if ui
-            .add(Button::primary("Export").state(state))
+            .add(Button::primary(&label).state(state))
             .on_disabled_hover_text("Nothing to export yet")
             .clicked()
         {
@@ -448,13 +462,7 @@ impl App {
     }
 
     /// Queues `req` on a snapshot of the project, so later edits don't change the file.
-    fn queue_export(
-        &mut self,
-        req: Request,
-        gpu: (wgpu::Device, wgpu::Queue),
-        show: bool,
-        now: f64,
-    ) {
+    fn queue_export(&mut self, req: Request, gpu: (wgpu::Device, wgpu::Queue), now: f64) {
         if self.queue.writing(&req.path) {
             let msg = format!("{} is already being exported", req.path.display());
             self.toasts.push((msg, now + TOAST_SECS));
@@ -464,7 +472,6 @@ impl App {
         let path = req.path.clone();
         let job = crate::export::submit(&self.exports, project, req, gpu);
         self.queue.push(path, job);
-        self.queue.open |= show;
     }
 
     /// Takes finished exports' results: each posts a notification, failures also a toast.
@@ -862,14 +869,13 @@ impl eframe::App for App {
                 tracing::warn!("keymap: can't save: {e}");
             }
             let selected = self.timeline.selected();
-            if let Some((req, export)) =
-                self.export_dialog
-                    .show(ui, self.history.project(), selected)
+            if let Some((req, _)) = self
+                .export_dialog
+                .show(ui, self.history.project(), selected)
                 && let Some(gpu) = self.preview.gpu()
             {
-                self.queue_export(req, gpu, export, now);
+                self.queue_export(req, gpu, now);
             }
-            self.queue.show(ui.ctx());
             if let Some(c) = self.settings_dialog.show(ui, self.history.project())
                 && let Err(e) = self.history.apply(c)
             {

@@ -4,11 +4,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
-use egui::Ui;
+use egui::{Align, Layout, Ui};
 use jvid_core::model::ProbeInfo;
 use jvid_jobs::Handle;
 use suite_ui::tokens::space;
-use suite_ui::widgets::Button;
+use suite_ui::widgets::{Button, State};
 
 use super::Error;
 
@@ -23,8 +23,8 @@ struct Job {
 #[derive(Default)]
 pub struct Queue {
     jobs: Vec<Job>,
-    /// The queue window is shown.
-    pub open: bool,
+    /// Cancel All was clicked with more than one job live and waits for a confirm.
+    confirm_all: bool,
 }
 
 impl Queue {
@@ -81,61 +81,96 @@ impl Queue {
         self.jobs.iter().filter(|j| j.result.is_none()).count()
     }
 
-    pub fn show(&mut self, ctx: &egui::Context) {
-        let mut open = self.open;
-        egui::Window::new("Render Queue")
-            .open(&mut open)
-            .default_width(420.0)
-            .show(ctx, |ui| self.list(ui));
-        self.open = open;
-        if self.pending() > 0 {
-            ctx.request_repaint();
+    /// Cancels job `i` if it isn't over yet.
+    pub fn cancel(&self, i: usize) {
+        if let Some(j) = self.jobs.get(i).filter(|j| j.result.is_none()) {
+            j.handle.cancel();
         }
     }
 
-    fn list(&mut self, ui: &mut Ui) {
-        if self.jobs.is_empty() {
-            ui.label("Nothing queued. Use Add to Queue in the export dialog.");
-            return;
-        }
-        let mut remove = None;
+    pub fn cancel_all(&mut self) {
+        self.jobs.iter().for_each(|j| j.handle.cancel());
+        self.confirm_all = false;
+    }
+
+    /// Drops jobs that are over.
+    pub fn clear_finished(&mut self) {
+        self.jobs.retain(|j| j.result.is_none());
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.jobs.is_empty()
+    }
+
+    /// The Export button's dropdown: one row per job, then the footer. Returns true when
+    /// New Export… is clicked.
+    pub fn menu(&mut self, ui: &mut Ui) -> bool {
+        // A fixed width so the menu doesn't jump as rows change.
+        ui.set_width(380.0);
         for (i, j) in self.jobs.iter().enumerate() {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = space::S8;
                 let name = j.path.file_name().unwrap_or_default().to_string_lossy();
-                ui.label(name).on_hover_text(j.path.display().to_string());
-                match &j.result {
+                ui.add(egui::Label::new(name).truncate())
+                    .on_hover_text(j.path.display().to_string());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| match &j.result {
                     None => {
+                        if ui.add(Button::destructive("Cancel")).clicked() {
+                            self.cancel(i);
+                        }
                         let p = j.handle.progress();
                         let text = if p > 0.0 {
                             format!("{:.0}%", p * 100.0)
                         } else {
                             "Waiting".into()
                         };
-                        ui.add(egui::ProgressBar::new(p).desired_width(140.0).text(text));
-                        if ui.add(Button::secondary("Cancel")).clicked() {
-                            j.handle.cancel();
-                        }
+                        ui.add(egui::ProgressBar::new(p).desired_width(120.0).text(text));
                     }
                     Some(r) => {
+                        if r.is_ok() && ui.add(Button::secondary("Reveal")).clicked() {
+                            reveal(&j.path);
+                        }
                         match r {
                             Ok(()) => ui.label("Done"),
                             Err(Error::Cancelled) => ui.label("Cancelled"),
                             Err(Error::Failed(e)) => ui.label("Failed").on_hover_text(e),
                         };
-                        if r.is_ok() && ui.add(Button::secondary("Show in Folder")).clicked() {
-                            reveal(&j.path);
-                        }
-                        if ui.add(Button::ghost("Remove")).clicked() {
-                            remove = Some(i);
-                        }
                     }
-                }
+                });
             });
         }
-        if let Some(i) = remove {
-            self.jobs.remove(i);
+        if !self.jobs.is_empty() {
+            ui.separator();
         }
+        let live = |on: bool| if on { State::Live } else { State::Disabled };
+        let mut new = false;
+        ui.horizontal(|ui| {
+            if self.confirm_all {
+                ui.label(format!("Cancel {} Exports?", self.pending()));
+                if ui.add(Button::destructive("Cancel All")).clicked() {
+                    self.cancel_all();
+                }
+                if ui.add(Button::ghost("Keep Exporting")).clicked() {
+                    self.confirm_all = false;
+                }
+                return;
+            }
+            new = ui.add(Button::secondary("New Export…")).clicked();
+            let cancel_all = Button::destructive("Cancel All").state(live(self.pending() > 0));
+            if ui.add(cancel_all).clicked() {
+                if self.pending() > 1 {
+                    self.confirm_all = true;
+                } else {
+                    self.cancel_all();
+                }
+            }
+            let clear =
+                Button::ghost("Clear Finished").state(live(self.jobs.len() > self.pending()));
+            if ui.add(clear).clicked() {
+                self.clear_finished();
+            }
+        });
+        new
     }
 }
 

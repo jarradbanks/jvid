@@ -559,3 +559,69 @@ fn lossless_copies_the_marked_cut() {
     std::fs::remove_file(&req.path).unwrap();
     assert_eq!(info.duration, secs(3));
 }
+
+/// Two queued exports both show in the Export menu, each with a right-aligned Cancel; Cancel on
+/// one leaves the other, and Cancel All (confirmed, as two are live) stops both.
+#[test]
+fn export_menu_cancels_one_or_all() {
+    use egui_kittest::kittest::Queryable;
+    let pool = Pool::new(1);
+    let (go, wait) = channel::<()>();
+    pool.submit("busy", Priority::Interactive, move |_| {
+        let _ = wait.recv();
+    });
+    let mut q = queue::Queue::default();
+    let mut handles = Vec::new();
+    for name in ["a.mp4", "b.mp4"] {
+        let (tx, rx) = channel::<Result<ProbeInfo, Error>>();
+        let h = pool.submit(name, Priority::Interactive, move |_| drop(tx));
+        handles.push(h.clone());
+        assert!(q.push(name.into(), (h, rx)));
+    }
+    let mut fresh = true;
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size([480.0, 200.0])
+        .build_ui_state(
+            move |ui, q: &mut queue::Queue| {
+                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    q.menu(ui);
+                }
+            },
+            q,
+        );
+    harness.run_steps(2);
+    harness.get_by_label("a.mp4");
+    harness.get_by_label("b.mp4");
+    let rights: Vec<f32> = harness
+        .get_all_by_label("Cancel")
+        .map(|n| n.rect().max.x)
+        .collect();
+    assert_eq!(rights.len(), 2);
+    let all = harness.get_by_label("Cancel All").rect();
+    assert!(
+        rights[0] == rights[1] && rights[0] > all.max.x,
+        "{rights:?}"
+    );
+
+    harness.get_all_by_label("Cancel").next().unwrap().click();
+    harness.run();
+    assert!(handles[0].is_cancelled() && !handles[1].is_cancelled());
+
+    // Both still count as live until the pool skips them, so Cancel All asks first.
+    harness.get_by_label("Cancel All").click();
+    harness.run();
+    assert!(!handles[1].is_cancelled());
+    harness.get_by_label("Cancel 2 Exports?");
+    harness.get_by_label("Cancel All").click();
+    harness.run();
+    assert!(handles.iter().all(|h| h.is_cancelled()));
+
+    go.send(()).unwrap();
+    while !handles.iter().all(|h| h.is_finished()) {
+        std::thread::yield_now();
+    }
+    let q = harness.state_mut();
+    assert_eq!(q.poll().len(), 2);
+    q.clear_finished();
+    assert!(q.is_empty());
+}

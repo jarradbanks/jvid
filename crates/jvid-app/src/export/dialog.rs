@@ -77,7 +77,7 @@ impl ExportDialog {
     }
 
     /// Shows the dialog while open; returns the request when the user clicks Export or Add to
-    /// Queue, with `true` for Export, which also shows the queue.
+    /// Queue, with `true` for Export.
     pub fn show(
         &mut self,
         ui: &mut Ui,
