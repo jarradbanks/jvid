@@ -1200,3 +1200,67 @@ fn double_clicking_a_title_in_program_edits_it_and_space_types() {
     h.run();
     assert_eq!(text(&h), "Title", "Ctrl+Z undoes the edit");
 }
+
+/// An edited project at a temp path, with a close request queued.
+fn closing_harness(name: &str) -> (Harness<'static, App>, PathBuf) {
+    let mut h = harness([1280.0, 720.0], 1.0);
+    let path = std::env::temp_dir().join(format!("jvid-{name}-{}.jvid", std::process::id()));
+    let app = h.state_mut();
+    app.path = Some(path.clone());
+    app.history
+        .apply(Command::SetSettings(ProjectSettings {
+            width: 640,
+            ..Default::default()
+        }))
+        .unwrap();
+    h.input_mut()
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .events
+        .push(egui::ViewportEvent::Close);
+    h.run();
+    h.get_by_label("Unsaved Changes");
+    assert!(!h.state().closing);
+    (h, path)
+}
+
+#[test]
+fn close_with_unsaved_changes_asks_first() {
+    if !gpu() {
+        return;
+    }
+    let (mut h, _) = closing_harness("cancel");
+    h.get_by_label("Cancel").click();
+    h.run();
+    assert!(h.state().prompts.is_empty() && !h.state().closing);
+    assert!(h.state().history.is_dirty());
+
+    let (mut h, path) = closing_harness("dont-save");
+    h.get_by_label("Don't Save").click();
+    h.run();
+    assert!(h.state().closing && !path.exists());
+
+    let (mut h, path) = closing_harness("save");
+    h.get_by_label("Save").click();
+    h.run();
+    assert!(h.state().closing && path.exists() && !h.state().history.is_dirty());
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn dialog_keys_enter_saves_esc_cancels() {
+    if !gpu() {
+        return;
+    }
+    let (mut h, _) = closing_harness("esc");
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert!(h.state().prompts.is_empty() && !h.state().closing);
+
+    let (mut h, path) = closing_harness("enter");
+    h.key_press(egui::Key::Enter);
+    h.run();
+    assert!(h.state().closing && path.exists());
+    let _ = std::fs::remove_file(path);
+}
