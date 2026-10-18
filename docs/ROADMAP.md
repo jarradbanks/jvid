@@ -226,7 +226,7 @@ flowchart LR
 | [#155](https://github.com/jarradbanks/jvid/issues/155) | Edit menu, timeline toolbar and clip context menu | done | M | ui, timeline | [#38](https://github.com/jarradbanks/jvid/issues/38) |
 | [#157](https://github.com/jarradbanks/jvid/issues/157) | Enable and disable clips | done | S | timeline, render | [#155](https://github.com/jarradbanks/jvid/issues/155) |
 | [#159](https://github.com/jarradbanks/jvid/issues/159) | Program monitor plays the timeline | need testing | M | ui, render | [#32](https://github.com/jarradbanks/jvid/issues/32), [#33](https://github.com/jarradbanks/jvid/issues/33) |
-| [#191](https://github.com/jarradbanks/jvid/issues/191) | Program monitor transport bar | in progress | S | ui | [#159](https://github.com/jarradbanks/jvid/issues/159) |
+| [#191](https://github.com/jarradbanks/jvid/issues/191) | Program monitor transport bar | done | S | ui | [#159](https://github.com/jarradbanks/jvid/issues/159) |
 | [#196](https://github.com/jarradbanks/jvid/issues/196) | UI polish from first user test |  | S | ui | [#159](https://github.com/jarradbanks/jvid/issues/159) |
 | [#197](https://github.com/jarradbanks/jvid/issues/197) | Text presets: feedback and drag to timeline |  | S | ui, timeline | [#159](https://github.com/jarradbanks/jvid/issues/159) |
 | [#39](https://github.com/jarradbanks/jvid/issues/39) | In/Out points on the timeline | done | M | timeline | [#37](https://github.com/jarradbanks/jvid/issues/37), [#13](https://github.com/jarradbanks/jvid/issues/13) |
@@ -329,7 +329,7 @@ flowchart LR
 | [#59](https://github.com/jarradbanks/jvid/issues/59) | Export current frame as PNG | done | S | export | [#30](https://github.com/jarradbanks/jvid/issues/30) |
 | [#60](https://github.com/jarradbanks/jvid/issues/60) | GIF export | done | S | export | [#52](https://github.com/jarradbanks/jvid/issues/52) |
 | [#91](https://github.com/jarradbanks/jvid/issues/91) | Lossless fast export |  | L | export, media | [#52](https://github.com/jarradbanks/jvid/issues/52), [#54](https://github.com/jarradbanks/jvid/issues/54) |
-| [#92](https://github.com/jarradbanks/jvid/issues/92) | Export to a target file size | in progress | M | export | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53) |
+| [#92](https://github.com/jarradbanks/jvid/issues/92) | Export to a target file size | done | M | export | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53) |
 | [#61](https://github.com/jarradbanks/jvid/issues/61) | jvid render CLI | done | M | cli | [#52](https://github.com/jarradbanks/jvid/issues/52), [#53](https://github.com/jarradbanks/jvid/issues/53), [#9](https://github.com/jarradbanks/jvid/issues/9) |
 | [#62](https://github.com/jarradbanks/jvid/issues/62) | Packaging and v0.1.0 release |  | L | infra | [#61](https://github.com/jarradbanks/jvid/issues/61), [#54](https://github.com/jarradbanks/jvid/issues/54), [#55](https://github.com/jarradbanks/jvid/issues/55), [#57](https://github.com/jarradbanks/jvid/issues/57), [#91](https://github.com/jarradbanks/jvid/issues/91), [#92](https://github.com/jarradbanks/jvid/issues/92) |
 
