@@ -1001,3 +1001,16 @@ I("kf-discover", "Inspector gutter and keyframe lane discoverability", "M3", ["u
   ac=["The keyframe diamond in the Inspector does not touch the scrollbar and is clickable at its edge",
       "Adding a keyframe in the Inspector to a long clip shows its lane in the timeline without scrolling",
       "kittests cover the auto-expand and the toggle visible when the clip extends past the right edge"])
+
+I("text-solid-fixes", "Text and solid clips: source view, live edit, fit-to-text bounds", "M3", ["ui", "render"], "M", ["keyframe-lanes"],
+  summary="Fixes from the owner's third hands-on test of text and solid clips.",
+  scope=[
+      "Double-clicking a solid or text asset in the bin opens it in the Source tab without 'Can't show this frame: invalid argument' (render the generated frame instead of decoding a file)",
+      "Editing text properties in the Inspector redraws the Program frame immediately while paused (today it only updates after play or a seek): invalidate the composited/text raster cache on SetClipProps",
+      "Text clip transform box and hit area fit the rendered text bounds, not the full frame",
+      "Double-click on text in the Program preview enters in-place text edit (existing double_clicked_text in handles.rs/app.rs: make it actually trigger, e.g. the full-frame transform handles currently swallow it)",
+  ],
+  ac=["Double-click a Title in the bin: the Source tab shows it, no error",
+      "Typing in the Inspector text field updates the Program monitor on each keystroke while paused",
+      "Selecting a text clip draws handles around the text only; double-click on the text starts editing",
+      "kittests cover live update and fit-to-text bounds"])
