@@ -19,18 +19,21 @@ pub fn dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("", "", "jvid").map(|d| d.config_dir().join("effects"))
 }
 
+type Stamp = (Option<std::time::SystemTime>, u64);
+
 /// The folder's effects as last read.
 #[derive(Default)]
 pub struct Library {
-    /// By file stem: the source last read and what it parsed to.
-    files: BTreeMap<String, (String, Entry)>,
+    /// By file stem: the file's (modified time, length) when last read and what it parsed to.
+    files: BTreeMap<String, (Stamp, Entry)>,
     /// Bumped whenever an entry is added, changed or removed.
     pub generation: u64,
 }
 
 impl Library {
-    /// Re-reads `dir`, creating it with the bundled examples if it doesn't exist; only files
-    /// whose text changed are re-parsed.
+    /// Re-reads `dir`, creating it with the bundled examples if it doesn't exist (so deleting
+    /// the whole folder brings the examples back); only files whose modified time or length
+    /// changed are read and re-parsed.
     /// shortcut: polls the folder instead of watching it, as no file-watch crate is in the stack.
     pub fn scan(&mut self, dir: &Path) {
         if !dir.exists() {
@@ -48,25 +51,36 @@ impl Library {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "wgsl")
                 && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-                && let Ok(src) = std::fs::read_to_string(&path)
+                && let Ok(meta) = entry.metadata()
             {
-                seen.insert(stem.to_owned(), src);
+                seen.insert(stem.to_owned(), (path, (meta.modified().ok(), meta.len())));
             }
         }
         let before = self.files.len();
         self.files.retain(|stem, _| seen.contains_key(stem));
         let mut changed = self.files.len() != before;
-        for (stem, src) in seen {
-            if self.files.get(&stem).is_none_or(|(old, _)| *old != src) {
-                let parsed = effect::parse(&src).map(Arc::new);
-                if let Err(e) = &parsed {
-                    tracing::warn!("effect {stem}: {e}");
-                }
-                self.files.insert(stem, (src, parsed));
-                changed = true;
+        for (stem, (path, stamp)) in seen {
+            if self.files.get(&stem).is_some_and(|(old, _)| *old == stamp) {
+                continue;
             }
+            let parsed = std::fs::read_to_string(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|src| effect::parse(&src).map(Arc::new));
+            if let Err(e) = &parsed {
+                tracing::warn!("effect {stem}: {e}");
+            }
+            self.files.insert(stem, (stamp, parsed));
+            changed = true;
         }
         self.generation += u64::from(changed);
+    }
+
+    /// Marks `stem` as failing with `error` (e.g. the GPU rejected it) until its file changes.
+    fn fail(&mut self, stem: &str, error: String) {
+        if let Some((_, entry)) = self.files.get_mut(stem) {
+            *entry = Err(error);
+            self.generation += 1;
+        }
     }
 
     pub fn entries(&self) -> impl Iterator<Item = (&str, &Entry)> {
@@ -96,6 +110,15 @@ pub fn with<R>(f: impl FnOnce(&Library) -> R) -> R {
     f(lib)
 }
 
+/// [`Library::fail`] on the app-wide library, so the Inspector and Effects tab show the error.
+pub fn fail(stem: &str, error: String) {
+    LIBRARY
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .0
+        .fail(stem, error);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +135,10 @@ mod tests {
         let g = lib.generation;
         lib.scan(&tmp);
         assert_eq!(lib.generation, g, "unchanged files don't bump it");
+        lib.fail("vignette", "GPU said no".into());
+        assert!(lib.entries().any(|(k, e)| k == "vignette" && e.is_err()));
+        assert!(lib.generation > g);
+        let g = lib.generation;
 
         // Dropped in while running: usable on the next scan.
         let src = effect::BUNDLED[0].1.replace("\"Vignette\"", "\"Mine\"");

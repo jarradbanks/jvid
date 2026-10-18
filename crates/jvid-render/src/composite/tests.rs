@@ -633,3 +633,41 @@ fn effect(uv: vec2<f32>) -> vec4<f32> {
         [200, 100, 50]
     ));
 }
+
+#[test]
+fn effect_ignoring_fx_renders_and_extra_bindings_are_rejected() {
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping effect test: no software adapter on this platform");
+        return;
+    };
+    let src = image(&device, &queue, (8, 8), |_, _| [200, 100, 50, 255]);
+    // No `fx` use, so an auto-derived layout would leave out binding 2.
+    let parse = |decl: &str, ret: &str| {
+        crate::effect::parse(&format!(
+            "// @jvid effect \"X\"\n{decl}\nfn effect(uv: vec2<f32>) -> vec4<f32> {{ return {ret}; }}"
+        ))
+        .unwrap()
+    };
+    let mut comp = Compositor::new(&device);
+    comp.set_effect(
+        &device,
+        "swap",
+        Some(&parse("", "textureSample(src, smp, uv).bgra")),
+    )
+    .unwrap();
+    let extra = parse(
+        "@group(0) @binding(3) var<uniform> mine: vec4<f32>;",
+        "mine",
+    );
+    assert!(comp.set_effect(&device, "extra", Some(&extra)).is_err());
+    let t = Transform {
+        effects: vec![Effect {
+            shader: "swap".into(),
+            params: Default::default(),
+        }],
+        ..Default::default()
+    };
+    let tex = comp.render(&device, &queue, (8, 8), 1, [0, 0, 0, 255], &[(&src, t)]);
+    let px = read_back(&device, &queue, tex);
+    assert!(near(px[0], 50) && near(px[2], 200), "{:?}", &px[..4]);
+}

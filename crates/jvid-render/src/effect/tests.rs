@@ -52,3 +52,18 @@ fn wgsl_errors_are_readable_with_user_line_numbers() {
     let e = parse("// @jvid effect \"X\"\n").unwrap_err();
     assert!(e.contains("effect"), "{e}");
 }
+
+#[test]
+fn loops_are_rejected_with_their_line() {
+    for l in [
+        "loop { }",
+        "for (var i = 0; i < 9; i++) { }",
+        "if true { while true { } }",
+    ] {
+        let src = format!(
+            "// @jvid effect \"X\"\nfn effect(uv: vec2<f32>) -> vec4<f32> {{\n    {l}\n    return vec4<f32>(0.0);\n}}\n"
+        );
+        let e = parse(&src).unwrap_err();
+        assert!(e.starts_with("line 3:") && e.contains("loops"), "{l}: {e}");
+    }
+}

@@ -53,6 +53,10 @@ pub struct Compositor {
     /// Effect pipelines by [`Effect::shader`], with their parameters in uniform order; layers
     /// naming an effect not set skip it.
     effects: std::collections::HashMap<String, (wgpu::RenderPipeline, Vec<crate::effect::Param>)>,
+    /// `src`, `smp`, `fx` at group 0: fixed, so a shader binding anything else fails in `set_effect`.
+    effect_layout: wgpu::BindGroupLayout,
+    /// Per layer index: a ping-pong texture pair and one uniform per effect, reused across frames.
+    fx_pool: Vec<(Option<[wgpu::Texture; 2]>, Vec<wgpu::Buffer>)>,
     /// The timeline frame number effects see as `fx.frame`.
     pub frame: u32,
 }
@@ -122,6 +126,38 @@ impl Compositor {
                 view_formats: &[],
             }),
             effects: Default::default(),
+            effect_layout: device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("effect"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            }),
+            fx_pool: Vec::new(),
             frame: 0,
         }
     }
@@ -139,13 +175,18 @@ impl Compositor {
             return Ok(());
         };
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(key),
+            bind_group_layouts: &[Some(&self.effect_layout)],
+            ..Default::default()
+        });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(key),
             source: wgpu::ShaderSource::Wgsl(shader.module.as_str().into()),
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(key),
-            layout: None,
+            layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &module,
                 entry_point: Some("jvid_vs"),
@@ -181,28 +222,49 @@ impl Compositor {
         }
     }
 
-    /// `tex` with `effects` applied in order, or `None` when none of them is set.
-    /// shortcut: a new texture and uniform per effect per frame; pool them if playback profiles hot.
+    /// `tex` with `effects` applied in order into `encoder`, or `None` when none of them is set.
+    /// `slot` (the layer index) picks the pooled textures and uniforms, so layers don't share them.
     fn apply_effects(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        slot: usize,
         tex: &wgpu::Texture,
         effects: &[Effect],
     ) -> Option<wgpu::Texture> {
-        if effects.is_empty() {
-            return None;
+        if self.fx_pool.len() <= slot {
+            self.fx_pool.resize_with(slot + 1, Default::default);
         }
-        let mut out: Option<wgpu::Texture> = None;
-        let mut encoder = device.create_command_encoder(&Default::default());
+        let (pair, uniforms) = &mut self.fx_pool[slot];
+        if pair.as_ref().is_none_or(|p| p[0].size() != tex.size()) {
+            *pair = Some([0, 1].map(|_| {
+                device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("effect"),
+                    size: tex.size(),
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+            }));
+        }
+        let pair = pair.as_ref().unwrap();
+        let mut out: Option<&wgpu::Texture> = None;
+        // `i` counts applied effects, so it never skips past `uniforms.len()`.
+        let mut i = 0;
         for e in effects {
             let Some((pipeline, params)) = self.effects.get(&e.shader) else {
                 continue;
             };
-            let input = out.as_ref().unwrap_or(tex);
+            let input = out.unwrap_or(tex);
             let mut p = vec![
                 input.width() as f32,
                 input.height() as f32,
+                // Exact up to 2^24 frames (over 6 days at 30 fps).
                 self.frame as f32,
             ];
             p.extend(params.iter().map(|q| {
@@ -210,18 +272,30 @@ impl Compositor {
                 v.clamp(q.min, q.max) as f32
             }));
             p.resize(p.len().next_multiple_of(4), 0.0);
-            let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("effect"),
-                contents: &p.iter().flat_map(|f| f.to_ne_bytes()).collect::<Vec<_>>(),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
+            let bytes: Vec<u8> = p.iter().flat_map(|f| f.to_ne_bytes()).collect();
+            if uniforms
+                .get(i)
+                .is_none_or(|u| u.size() != bytes.len() as u64)
+            {
+                let u = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("effect"),
+                    size: bytes.len() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                match uniforms.get_mut(i) {
+                    Some(old) => *old = u,
+                    None => uniforms.push(u),
+                }
+            }
+            queue.write_buffer(&uniforms[i], 0, &bytes);
             let view = input.create_view(&wgpu::TextureViewDescriptor {
                 format: Some(input.format().remove_srgb_suffix()),
                 ..Default::default()
             });
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
-                layout: &pipeline.get_bind_group_layout(0),
+                layout: &self.effect_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -233,21 +307,12 @@ impl Compositor {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: uniform.as_entire_binding(),
+                        resource: uniforms[i].as_entire_binding(),
                     },
                 ],
             });
-            let next = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("effect"),
-                size: input.size(),
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
+            // Ping-pong: write whichever of the pair isn't the input.
+            let next = &pair[usize::from(out.is_some_and(|o| *o == pair[0]))];
             let target = next.create_view(&Default::default());
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("effect"),
@@ -267,9 +332,9 @@ impl Compositor {
             pass.draw(0..4, 0..1);
             drop(pass);
             out = Some(next);
+            i += 1;
         }
-        queue.submit([encoder.finish()]);
-        out
+        out.cloned()
     }
 
     /// Uploads `lut` for layers whose [`Transform::lut`] is `path`; layers naming a path not
@@ -298,6 +363,14 @@ impl Compositor {
         layers: &[(&wgpu::Texture, Transform)],
     ) -> &wgpu::Texture {
         let (w, h) = scaled(size.0, size.1, scale);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let effected: Vec<_> = layers
+            .iter()
+            .enumerate()
+            .map(|(i, (tex, t))| {
+                self.apply_effects(device, queue, &mut encoder, i, tex, &t.effects)
+            })
+            .collect();
         if self
             .target
             .as_ref()
@@ -339,10 +412,6 @@ impl Compositor {
             .unwrap()
             .create_view(&Default::default());
         let frame = [size.0 as f32, size.1 as f32];
-        let effected: Vec<_> = layers
-            .iter()
-            .map(|(tex, t)| self.apply_effects(device, queue, tex, &t.effects))
-            .collect();
         // shortcut: a uniform and bind group per layer per frame; pool them if playback (#32) profiles hot.
         let binds: Vec<_> = layers
             .iter()
@@ -408,7 +477,6 @@ impl Compositor {
             .collect();
         let a = background[3] as f64 / 255.0;
         let c = |i: usize| background[i] as f64 / 255.0 * a;
-        let mut encoder = device.create_command_encoder(&Default::default());
         let view = target.create_view(&Default::default());
         let clear = wgpu::LoadOp::Clear(wgpu::Color {
             r: c(0),

@@ -4,7 +4,9 @@ An effect is one `.wgsl` file in the effects folder (`effects/` in jvid's config
 the bin's Effects tab has a button that opens it). jvid creates the folder with three examples
 the first time it runs: vignette, chromatic aberration and film grain. Read those next to this.
 
-New and edited files are picked up within a second while jvid runs; no restart.
+New and edited files are picked up within a second while jvid runs; no restart. Deleting the
+whole folder brings the three examples back on the next check. An export uses the effects as they
+were when it started; edits made during it show in the next one.
 
 ## The file
 
@@ -27,7 +29,9 @@ fn effect(uv: vec2<f32>) -> vec4<f32> {
 - `fn effect(uv: vec2<f32>) -> vec4<f32>` returns the colour at `uv` (0,0 top left to 1,1
   bottom right) as straight (not premultiplied) RGBA in 0..1.
 
-The file can declare its own helper functions and constants. It can read:
+The file can declare its own helper functions and constants, but not its own bindings
+(`@group`/`@binding`): only the ones below exist, and a file that uses another fails to load. It
+can read:
 
 | Name | What |
 | --- | --- |
@@ -47,3 +51,10 @@ order they're stacked in the Inspector. They show in the viewer and in exports.
 A file that doesn't parse or validate (with naga, the compiler wgpu uses) is listed in red in
 the Effects tab with the compiler's message; line numbers are your file's. Clips using it draw as
 if the effect weren't there ("passthrough" in the Inspector) until the file is fixed.
+
+## No loops
+
+`loop`, `for` and `while` are rejected (`line N: loops aren't allowed in effects`). A shader runs
+once per pixel per frame, and one long or endless loop stalls the whole GPU until the driver
+resets it, which can take the app (and on some systems the desktop) down with it. Write a fixed
+number of samples out by hand instead, as chromatic aberration does.

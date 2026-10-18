@@ -88,6 +88,16 @@ pub fn parse(src: &str) -> Result<Shader, String> {
         .collect();
     let module = format!("{src}\n{}", PRELUDE.replace("/*params*/", &fields));
     let parsed = naga::front::wgsl::parse_str(&module).map_err(|e| e.emit_to_string(&module))?;
+    let bodies = parsed.functions.iter().map(|(_, f)| &f.body);
+    for body in bodies.chain(parsed.entry_points.iter().map(|e| &e.function.body)) {
+        if let Some(span) = find_loop(body) {
+            return Err(format!(
+                "line {}: loops aren't allowed in effects; a long one hangs the GPU. \
+                 Unroll it into a fixed number of samples",
+                span.location(&module).line_number
+            ));
+        }
+    }
     naga::valid::Validator::new(Default::default(), Default::default())
         .validate(&parsed)
         .map_err(|e| e.emit_to_string(&module))?;
@@ -95,6 +105,18 @@ pub fn parse(src: &str) -> Result<Shader, String> {
         name,
         params,
         module,
+    })
+}
+
+/// The first `loop`/`for`/`while` in `block` or its nested blocks.
+fn find_loop(block: &naga::Block) -> Option<naga::Span> {
+    use naga::Statement as S;
+    block.span_iter().find_map(|(st, span)| match st {
+        S::Loop { .. } => Some(*span),
+        S::Block(b) => find_loop(b),
+        S::If { accept, reject, .. } => find_loop(accept).or_else(|| find_loop(reject)),
+        S::Switch { cases, .. } => cases.iter().find_map(|c| find_loop(&c.body)),
+        _ => None,
     })
 }
 
