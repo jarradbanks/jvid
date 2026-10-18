@@ -690,6 +690,32 @@ fn program_draws_the_timeline_through_the_gpu() {
 }
 
 #[test]
+fn program_transport_plays_and_seeks_the_timeline() {
+    use jvid_core::time::{FLICKS_PER_SECOND, Time};
+    if !gpu() {
+        return;
+    }
+    let mut h = harness([1280.0, 720.0], 1.0);
+    crate::playback::tests::add_solid(&mut h.state_mut().history, [1.0; 4], Time(0));
+    h.run();
+    h.get_by_label("Play (Space)").click();
+    h.step();
+    h.step();
+    assert!(h.state().preview.program_playing());
+    h.get_by_label("Stop (Space)").click();
+    h.run();
+    assert!(!h.state().preview.program_playing());
+    h.get_by_label("Go to end (End)").click();
+    h.run();
+    // The last frame of the one-second solid, at the default 30 fps.
+    let last = Time(FLICKS_PER_SECOND * 29 / 30);
+    assert_eq!(h.state().timeline.playhead(), last);
+    h.get_by_label("Go to start (Home)").click();
+    h.run();
+    assert_eq!(h.state().timeline.playhead(), Time(0));
+}
+
+#[test]
 fn welcome_snapshots() {
     if !gpu() {
         return;

@@ -419,7 +419,8 @@ impl Preview {
     }
 
     /// The Program tab: the timeline composited at `playhead`, or `trim` (the source frame at a
-    /// dragged clip edge) instead. Returns where the playhead moved to while playing.
+    /// dragged clip edge) instead, with the transport row. Returns where the playhead moved to
+    /// while playing or from a transport button.
     pub fn show_program(
         &mut self,
         ui: &mut Ui,
@@ -445,8 +446,31 @@ impl Preview {
         if self.program.transport.speed() != 0 {
             ui.ctx().request_repaint();
         }
-        self.show(ui, None, false, None, Some(project.settings()));
-        follow
+        let t = &self.program.transport;
+        let frame = t.frame(self.clock());
+        let row = SourceRow {
+            frame,
+            end: t.rate.index_floor(t.duration),
+            rate: t.rate,
+            playing: t.speed() != 0,
+            in_point: None,
+            out_point: None,
+            duration: t.duration,
+            position: t.rate.time_floor(frame),
+        };
+        let end = t
+            .rate
+            .time_floor(t.rate.index_floor(Time(t.duration.0 - 1)).max(0));
+        match self.show(ui, None, false, Some(&row), Some(project.settings())) {
+            Some("go_to_start") => Some(Time(0)),
+            Some("go_to_end") => Some(end),
+            Some(id) => {
+                self.program_action(id);
+                ui.ctx().request_repaint();
+                follow
+            }
+            None => follow,
+        }
     }
 
     /// Seeks timeline playback to a moved `playhead` and runs it a frame; see `show_program`.
@@ -660,14 +684,41 @@ impl Preview {
         if let Some(r) = row {
             r.marks(ui, viewer);
             let inner = bar.shrink2(vec2(space::INSET, 0.0));
-            ui.painter().text(
+            let timecode = ui.painter().text(
                 inner.left_center(),
                 Align2::LEFT_CENTER,
                 format_timecode(r.frame as u64, r.rate),
                 theme::timecode(),
                 color::INK,
             );
-            let buttons = Rect::from_center_size(bar.center(), vec2(5.0 * 28.0, bar.height()));
+            let width = 5.0 * 28.0;
+            // The dropdowns first, so the buttons can stay clear of them in a narrow panel.
+            let rtl = Layout::right_to_left(Align::Center);
+            let right = ui.scope_builder(UiBuilder::new().max_rect(inner).layout(rtl), |ui| {
+                ui.spacing_mut().item_spacing.x = space::S8;
+                self.dropdowns(ui);
+                let text = egui::RichText::new(format_timecode(r.end as u64, r.rate))
+                    .font(theme::body())
+                    .color(color::INK_2);
+                let galley = ui.painter().layout_no_wrap(
+                    text.text().to_string(),
+                    theme::body(),
+                    color::INK_2,
+                );
+                let room = ui.available_width() - timecode.width() - width - 4.0 * space::S8;
+                if galley.size().x <= room {
+                    ui.add(egui::Label::new(text).selectable(false))
+                        .on_hover_text("Duration");
+                }
+                ui.min_rect().left()
+            });
+            let x = bar
+                .center()
+                .x
+                .min(right.inner - space::S8 - width / 2.0)
+                .max(timecode.right() + space::S8 + width / 2.0);
+            let buttons =
+                Rect::from_center_size(pos2(x, bar.center().y), vec2(width, bar.height()));
             ui.scope_builder(UiBuilder::new().max_rect(buttons), |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = space::S4;
@@ -692,17 +743,6 @@ impl Preview {
                         }
                     }
                 });
-            });
-            let rtl = Layout::right_to_left(Align::Center);
-            ui.scope_builder(UiBuilder::new().max_rect(inner).layout(rtl), |ui| {
-                ui.spacing_mut().item_spacing.x = space::S8;
-                self.dropdowns(ui);
-                ui.label(
-                    egui::RichText::new(format_timecode(r.end as u64, r.rate))
-                        .font(theme::body())
-                        .color(color::INK_2),
-                )
-                .on_hover_text("Duration");
             });
         } else {
             ui.scope_builder(UiBuilder::new().max_rect(bar), |ui| {
@@ -758,7 +798,7 @@ impl Preview {
     }
 }
 
-/// What the Source tab's transport row shows.
+/// What the Source and Program tabs' transport row shows.
 struct SourceRow {
     frame: i64,
     /// Duration in frames.
@@ -900,6 +940,10 @@ impl CallbackTrait for Paint {
 
 #[cfg(test)]
 impl Preview {
+    pub fn program_playing(&self) -> bool {
+        self.program.transport.speed() != 0
+    }
+
     /// The Program tab has a composited frame with at least one layer.
     pub fn has_program_frame(&self) -> bool {
         self.program_shown
