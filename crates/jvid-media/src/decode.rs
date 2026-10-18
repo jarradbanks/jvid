@@ -26,6 +26,7 @@ pub struct Frame {
 
 /// One open file. Not shared: take one from a [`DecoderPool`] per request.
 pub struct VideoDecoder {
+    path: PathBuf,
     input: format::context::Input,
     stream: usize,
     decoder: decoder::Video,
@@ -41,19 +42,44 @@ pub struct VideoDecoder {
 impl VideoDecoder {
     /// Opens the best video stream of `path`. Call `ffmpeg::init` first.
     pub fn open(path: &Path) -> Result<Self, Error> {
+        Self::open_with(path, true)
+    }
+
+    /// Like [`Self::open`]; with `hw`, tries a hardware device and falls back to software if the
+    /// decoder won't open with it.
+    fn open_with(path: &Path, hw: bool) -> Result<Self, Error> {
         let input = format::input(path)?;
         let stream = input
             .streams()
             .best(media::Type::Video)
             .ok_or(Error::StreamNotFound)?;
         let mut ctx = ffmpeg_next::codec::Context::from_parameters(stream.parameters())?;
-        let hwaccel = crate::hwdec::attach(&mut ctx);
+        let hwaccel = if hw {
+            crate::hwdec::attach(&mut ctx)
+        } else {
+            None
+        };
+        let decoder = ctx.decoder().video();
+        #[cfg(test)]
+        let decoder = match hwaccel {
+            Some(crate::hwdec::FAKE) if fake_fail(crate::hwdec::FAIL_OPEN) => Err(Error::Bug),
+            _ => decoder,
+        };
+        let decoder = match decoder {
+            Err(e) if hwaccel.is_some() => {
+                tracing::warn!(error = %e, "hw decoder failed to open; using software");
+                return Self::open_with(path, false);
+            }
+            d => d?,
+        };
+        tracing::info!(path = %path.display(), hwaccel = hwaccel.unwrap_or("software"), "video decoder opened");
         Ok(Self {
+            path: path.to_owned(),
             hwaccel,
             stream: stream.index(),
             time_base: stream.time_base(),
             rotation: crate::probe::rotation(&stream),
-            decoder: ctx.decoder().video()?,
+            decoder,
             input,
             cur: None,
             next: None,
@@ -68,6 +94,10 @@ impl VideoDecoder {
 
     /// The frame shown at `t`; before the first frame, the first frame.
     pub fn frame_at(&mut self, t: Time) -> Result<Frame, Error> {
+        self.or_software(|d| d.frame_at_once(t))
+    }
+
+    fn frame_at_once(&mut self, t: Time) -> Result<Frame, Error> {
         let target = self.to_ticks(t);
         // Decoding forward up to a second beats a seek, which restarts at a keyframe.
         let near = self.to_ticks(Time(FLICKS_PER_SECOND));
@@ -90,15 +120,38 @@ impl VideoDecoder {
     /// The keyframe at or before `t`: one seek and one decode, so a stand-in shows at once while
     /// [`Self::frame_at`] decodes the rest of a long GOP.
     pub fn keyframe_at(&mut self, t: Time) -> Result<Frame, Error> {
-        self.seek(self.to_ticks(t))?;
-        self.cur = self.next.take();
-        self.current()
+        self.or_software(|d| {
+            d.seek(d.to_ticks(t))?;
+            d.cur = d.next.take();
+            d.current()
+        })
+    }
+
+    /// Runs `f`; if hardware decoding fails mid-stream, reopens in software and runs it again,
+    /// which re-seeks to the same target.
+    fn or_software(
+        &mut self,
+        f: impl Fn(&mut Self) -> Result<Frame, Error>,
+    ) -> Result<Frame, Error> {
+        match f(self) {
+            Err(e) if self.hwaccel.is_some() && e != Error::Eof => {
+                tracing::warn!(error = %e, path = %self.path.display(), "hw decode failed; using software");
+                *self = Self::open_with(&self.path, false)?;
+                f(self)
+            }
+            r => r,
+        }
     }
 
     fn current(&self) -> Result<Frame, Error> {
         let cur = self.cur.as_ref().ok_or(Error::Eof)?;
         let time = self.to_time(pts(cur));
         let downloaded;
+        #[cfg(test)]
+        if self.hwaccel == Some(crate::hwdec::FAKE) && fake_fail(crate::hwdec::FAIL_DOWNLOAD) {
+            // A software frame makes `download` take its error path.
+            return crate::hwdec::download(cur).map(|_| unreachable!());
+        }
         let cur = if crate::hwdec::is_hardware(cur) {
             downloaded = crate::hwdec::download(cur)?;
             &downloaded
@@ -131,6 +184,10 @@ impl VideoDecoder {
     }
 
     fn decode_one(&mut self) -> Result<Option<frame::Video>, Error> {
+        #[cfg(test)]
+        if self.hwaccel == Some(crate::hwdec::FAKE) && fake_fail(crate::hwdec::FAIL_DECODE) {
+            return Err(Error::Bug);
+        }
         let mut f = frame::Video::empty();
         loop {
             match self.decoder.receive_frame(&mut f) {
@@ -171,6 +228,11 @@ impl VideoDecoder {
         let (num, den) = (self.time_base.0 as i128, self.time_base.1 as i128);
         (ticks as i128 * num * 1_000_000).div_euclid(den).max(0) as i64
     }
+}
+
+#[cfg(test)]
+fn fake_fail(stage: u8) -> bool {
+    crate::hwdec::FAKE_FAIL.load(std::sync::atomic::Ordering::Relaxed) == stage
 }
 
 /// FFmpeg's best-effort timestamp, the same one `ffprobe -show_frames` reports.
