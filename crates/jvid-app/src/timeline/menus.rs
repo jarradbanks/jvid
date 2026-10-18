@@ -143,7 +143,7 @@ impl Timeline {
     ) {
         self.items(ui, seq, keymap, CLIP);
         ui.separator();
-        if ui.button("Reveal in media bin").clicked() {
+        if ui.button("Reveal in Media Bin").clicked() {
             self.reveal = Some(asset);
         }
     }
@@ -157,7 +157,7 @@ impl Timeline {
         edit: &mut Option<Edit>,
     ) {
         self.items(ui, seq, keymap, &["paste"]);
-        if self.gap.is_some() && item(ui, keymap, "ripple_delete", Some("Close gap"), true) {
+        if self.gap.is_some() && item(ui, keymap, "ripple_delete", Some("Close Gap"), true) {
             self.menu = Some("ripple_delete");
         }
         ui.separator();

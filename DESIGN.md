@@ -85,7 +85,7 @@ Sizes are egui points; the scale steps by about 1.17.
 - **Timecode** (Medium 500, 16px): the current time under the preview.
 
 ### Named Rules
-**The Sentence Case Rule.** Labels, tabs, section heads and buttons are in sentence case. Nothing in the UI is set in capitals or letter-spaced; user content such as title clips keeps whatever case the user typed.
+**The Title Case Rule.** Labels, buttons, menu items, tabs, section heads, property names and dialog titles are in Title Case ("Add Effect", "Go to Start"), with short articles, conjunctions and prepositions lowercase. Sentences such as descriptions, error messages and help text stay in sentence case. Nothing in the UI is set in all capitals or letter-spaced; user content such as title clips keeps whatever case the user typed.
 
 **The Numbers Hold Still Rule.** Every number uses tabular figures, so timecodes, dragged values and meter readouts never shift width under the cursor.
 

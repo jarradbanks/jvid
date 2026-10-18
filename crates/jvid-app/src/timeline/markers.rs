@@ -128,7 +128,7 @@ impl Timeline {
                 if changed {
                     edit = Some((Command::SetMarker(e), Some(gesture)));
                 }
-                if ui.button("Delete marker").clicked() {
+                if ui.button("Delete Marker").clicked() {
                     edit = Some((Command::RemoveMarker(m.id), None));
                     ui.close();
                 }

@@ -44,15 +44,15 @@ pub const ACTIONS: &[Action] = &[
     a("open_project", "Open Project", "Ctrl+O"),
     a("save", "Save", "Ctrl+S"),
     a("save_as", "Save As", "Ctrl+Shift+S"),
-    a("import", "Import Media", "Ctrl+I"),
+    a("import", "Import", "Ctrl+I"),
     a("export", "Export Media", "Ctrl+M"),
     a("quit", "Quit", "Ctrl+Q"),
     a("play_stop", "Play/Stop", "Space"),
-    a("shuttle_left", "Shuttle left", "J"),
-    a("shuttle_stop", "Shuttle stop", "K"),
-    a("shuttle_right", "Shuttle right", "L"),
-    a("loop_playback", "Loop playback", "Ctrl+Alt+L"),
-    a("audio_scrub", "Audio scrubbing", "Shift+S"),
+    a("shuttle_left", "Shuttle Left", "J"),
+    a("shuttle_stop", "Shuttle Stop", "K"),
+    a("shuttle_right", "Shuttle Right", "L"),
+    a("loop_playback", "Loop Playback", "Ctrl+Alt+L"),
+    a("audio_scrub", "Audio Scrubbing", "Shift+S"),
     a("mark_in", "Mark In", "I"),
     a("mark_out", "Mark Out", "O"),
     a("clear_in", "Clear In", "Alt+I"),
@@ -72,10 +72,10 @@ pub const ACTIONS: &[Action] = &[
     a("overwrite", "Overwrite", "."),
     t(
         "ripple_trim_prev",
-        "Ripple trim previous edit to playhead",
+        "Ripple Trim Previous Edit to Playhead",
         "Q",
     ),
-    t("ripple_trim_next", "Ripple trim next edit to playhead", "W"),
+    t("ripple_trim_next", "Ripple Trim Next Edit to Playhead", "W"),
     a("undo", "Undo", "Ctrl+Z"),
     a("redo", "Redo", "Ctrl+Shift+Z"),
     a("redo_alt", "Redo (alternate)", "Ctrl+Y"),
@@ -89,22 +89,22 @@ pub const ACTIONS: &[Action] = &[
     t("link", "Link/Unlink", "Ctrl+L"),
     t("enable", "Enable/Disable", "Shift+E"),
     t("reverse", "Reverse", "Ctrl+R"),
-    t("freeze_frame", "Freeze frame at playhead", "Shift+F"),
-    t("crossfade", "Add crossfade", "Ctrl+D"),
-    t("dip_to_black", "Add dip to black", "Ctrl+Alt+B"),
-    t("dip_to_white", "Add dip to white", "Ctrl+Alt+W"),
+    t("freeze_frame", "Freeze Frame at Playhead", "Shift+F"),
+    t("crossfade", "Add Crossfade", "Ctrl+D"),
+    t("dip_to_black", "Add Dip to Black", "Ctrl+Alt+B"),
+    t("dip_to_white", "Add Dip to White", "Ctrl+Alt+W"),
     t("linked_selection", "Linked Selection", "Ctrl+Shift+L"),
     t("snapping", "Snapping", "S"),
-    a("razor_tool", "Razor tool", "C"),
-    a("selection_tool", "Selection tool", "V"),
-    t("add_edit", "Split at playhead", "Ctrl+K"),
-    a("step_back", "Step back one frame", "Left"),
-    a("step_forward", "Step forward one frame", "Right"),
-    a("go_to_start", "Go to start", "Home"),
-    a("go_to_end", "Go to end", "End"),
-    t("zoom_in", "Zoom in", "="),
-    t("zoom_out", "Zoom out", "-"),
-    t("zoom_fit", "Zoom to fit", "\\"),
+    a("razor_tool", "Razor Tool", "C"),
+    a("selection_tool", "Selection Tool", "V"),
+    t("add_edit", "Split at Playhead", "Ctrl+K"),
+    a("step_back", "Step Back One Frame", "Left"),
+    a("step_forward", "Step Forward One Frame", "Right"),
+    a("go_to_start", "Go to Start", "Home"),
+    a("go_to_end", "Go to End", "End"),
+    t("zoom_in", "Zoom In", "="),
+    t("zoom_out", "Zoom Out", "-"),
+    t("zoom_fit", "Zoom to Fit", "\\"),
     a("focus_media", "Focus Media", "Shift+1"),
     a("focus_source", "Focus Source", "Shift+2"),
     a("focus_timeline", "Focus Timeline", "Shift+3"),
@@ -312,6 +312,20 @@ pub fn load_from(path: &Path) -> Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn action_names_are_title_case() {
+        const SMALL: [&str; 7] = ["a", "and", "at", "from", "in", "of", "to"];
+        for a in ACTIONS {
+            for w in a.name.split([' ', '/']).skip(1) {
+                assert!(
+                    SMALL.contains(&w) || !w.starts_with(|c: char| c.is_lowercase()),
+                    "{:?} isn't Title Case",
+                    a.name
+                );
+            }
+        }
+    }
 
     fn binding(map: &Keymap, id: &str) -> Option<KeyboardShortcut> {
         map.bindings[ACTIONS.iter().position(|a| a.id == id).unwrap()]

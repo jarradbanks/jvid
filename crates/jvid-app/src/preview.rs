@@ -773,11 +773,11 @@ impl Preview {
                         (icon::PLAY, "Play (Space)")
                     };
                     for (glyph, name, id) in [
-                        (icon::SKIP_BACK, "Go to start (Home)", "go_to_start"),
-                        (icon::REWIND, "Shuttle left (J)", "shuttle_left"),
+                        (icon::SKIP_BACK, "Go to Start (Home)", "go_to_start"),
+                        (icon::REWIND, "Shuttle Left (J)", "shuttle_left"),
                         (play.0, play.1, "play_stop"),
-                        (icon::FAST_FORWARD, "Shuttle right (L)", "shuttle_right"),
-                        (icon::SKIP_FORWARD, "Go to end (End)", "go_to_end"),
+                        (icon::FAST_FORWARD, "Shuttle Right (L)", "shuttle_right"),
+                        (icon::SKIP_FORWARD, "Go to End (End)", "go_to_end"),
                     ] {
                         if ui
                             .add(Button::icon(glyph, name))
@@ -807,7 +807,7 @@ impl Preview {
         let qualities = QUALITIES.map(|q| q.0);
         if ui
             .add(Dropdown::new(&mut self.quality, &qualities).width(72.0))
-            .on_hover_text("Preview resolution")
+            .on_hover_text("Preview Resolution")
             .changed()
         {
             self.generation += 1;
@@ -831,9 +831,9 @@ impl Preview {
         let glyph = egui::RichText::new(icon::GRID).font(theme::icon_font());
         ui.menu_button(glyph, |ui| {
             let o = &mut self.overlays;
-            ui.add(Checkbox::new(&mut o.safe, "Safe areas"));
-            ui.add(Checkbox::new(&mut o.thirds, "Rule of thirds"));
-            ui.add(Checkbox::new(&mut o.center, "Center cross"));
+            ui.add(Checkbox::new(&mut o.safe, "Safe Areas"));
+            ui.add(Checkbox::new(&mut o.thirds, "Rule of Thirds"));
+            ui.add(Checkbox::new(&mut o.center, "Center Cross"));
             for (on, (name, _)) in o.aspects.iter_mut().zip(ASPECTS) {
                 ui.add(Checkbox::new(on, name));
             }

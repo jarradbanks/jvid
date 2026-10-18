@@ -166,7 +166,7 @@ impl Timeline {
                 }
             }
             ui.separator();
-            if ui.button("Remove transition").clicked() {
+            if ui.button("Remove Transition").clicked() {
                 edit = set(project, clip.id, None).ok().map(|c| (c, None));
                 ui.close();
             }
@@ -178,8 +178,8 @@ impl Timeline {
 fn name(kind: TransitionKind) -> &'static str {
     match kind {
         TransitionKind::Crossfade => "Crossfade",
-        TransitionKind::DipToBlack => "Dip to black",
-        TransitionKind::DipToWhite => "Dip to white",
+        TransitionKind::DipToBlack => "Dip to Black",
+        TransitionKind::DipToWhite => "Dip to White",
     }
 }
 

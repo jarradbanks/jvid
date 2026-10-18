@@ -31,6 +31,19 @@ struct Prop<'a> {
     default: Option<f64>,
 }
 
+/// A WGSL param id as a label: `grain_size` -> `Grain Size`.
+fn title_case(id: &str) -> String {
+    id.split('_')
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            c.next()
+                .map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 const fn prop<'a>(name: &'a str, label: &'a str, fields: &'static [&'static str]) -> Prop<'a> {
     Prop {
         name,
@@ -114,7 +127,7 @@ const SECTIONS: [(&str, &[Prop<'static>]); 5] = [
                 decimals: 0,
                 suffix: "%",
                 range: (0.0, 1.0),
-                ..prop("lut_intensity", "LUT mix", ONE)
+                ..prop("lut_intensity", "LUT Mix", ONE)
             },
         ],
     ),
@@ -669,12 +682,13 @@ fn effects_rows(
         for q in &shader.params {
             *index += 1;
             let name = Effect::key(i, &q.name);
+            let label = title_case(&q.name);
             let p = Prop {
                 speed: (q.max - q.min) / 200.0,
                 decimals: 2,
                 range: (q.min, q.max),
                 default: Some(q.default),
-                ..prop(&name, &q.name, ONE)
+                ..prop(&name, &label, ONE)
             };
             if let Some(e) = row(ui, clips, &p, t, *index, seek) {
                 edit = Some(e);
@@ -685,7 +699,7 @@ fn effects_rows(
         .iter()
         .filter_map(|(k, e)| Some((k.as_str(), e.as_deref().ok()?)))
         .collect();
-    let mut names = vec!["Add effect"];
+    let mut names = vec!["Add Effect"];
     names.extend(usable.iter().map(|(_, s)| s.name.as_str()));
     let mut pick = 0;
     if ui
@@ -768,7 +782,7 @@ fn section(ui: &mut Ui, title: &str, buttons: bool) -> (bool, Option<Head>) {
             &mut ui,
             Glyph::Diamond,
             false,
-            &format!("Keyframe all {title}"),
+            &format!("Keyframe All {title}"),
         )
         .clicked()
         {
@@ -860,11 +874,11 @@ fn row(
             if !anim {
                 return;
             }
-            if glyph(ui, Glyph::Right, false, "Next keyframe").clicked() {
+            if glyph(ui, Glyph::Right, false, "Next Keyframe").clicked() {
                 *seek = neighbour(clips, p.name, t, 1);
             }
             let here = clips.iter().all(|c| key_at(c, p.name, t));
-            let diamond = glyph(ui, Glyph::Diamond, here, "Keyframe at playhead");
+            let diamond = glyph(ui, Glyph::Diamond, here, "Keyframe at Playhead");
             if diamond.clicked() {
                 edit = Some((toggle_key(clips, p.name, t), None));
             }
@@ -877,7 +891,7 @@ fn row(
                         }
                     });
             }
-            if glyph(ui, Glyph::Left, false, "Previous keyframe").clicked() {
+            if glyph(ui, Glyph::Left, false, "Previous Keyframe").clicked() {
                 *seek = neighbour(clips, p.name, t, -1);
             }
         });
@@ -1110,7 +1124,7 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
         animate(ui, clips, "outline", &mut toggle);
     });
     let outline = (clips, "outline_color", &mut toggle);
-    changed |= color_field(ui, "Outline color", &mut s.outline_color, outline);
+    changed |= color_field(ui, "Outline Color", &mut s.outline_color, outline);
     ui.horizontal(|ui| {
         ui.label("Shadow");
         for v in &mut s.shadow {
@@ -1121,9 +1135,9 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
         animate(ui, clips, "shadow", &mut toggle);
     });
     let shadow = (clips, "shadow_color", &mut toggle);
-    changed |= color_field(ui, "Shadow color", &mut s.shadow_color, shadow);
+    changed |= color_field(ui, "Shadow Color", &mut s.shadow_color, shadow);
     ui.horizontal(|ui| {
-        ui.label("Box padding");
+        ui.label("Box Padding");
         changed |= ui
             .add(egui::DragValue::new(&mut s.box_padding).range(0.0..=200.0))
             .changed();
@@ -1131,7 +1145,7 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
     });
     changed |= color_field(
         ui,
-        "Box color",
+        "Box Color",
         &mut s.box_color,
         (clips, "box_color", &mut toggle),
     );
@@ -1215,6 +1229,23 @@ mod tests {
 
     fn refs(clips: &[Clip]) -> Vec<&Clip> {
         clips.iter().collect()
+    }
+
+    #[test]
+    fn effect_param_labels_are_title_case() {
+        assert_eq!(title_case("amount"), "Amount");
+        assert_eq!(title_case("grain_size"), "Grain Size");
+        let shown: Vec<String> = jvid_render::effect::BUNDLED
+            .iter()
+            .flat_map(|(_, src)| jvid_render::effect::parse(src).unwrap().params)
+            .map(|p| title_case(&p.name))
+            .collect();
+        for want in ["Amount", "Strength", "Softness", "Grain"] {
+            assert!(
+                shown.iter().any(|s| s == want),
+                "{want} missing from {shown:?}"
+            );
+        }
     }
 
     #[test]
@@ -1478,7 +1509,7 @@ mod tests {
         }
         let h = harness();
         let bar = h.ctx.global_style().spacing.scroll.allocated_width();
-        for b in h.get_all_by_label_contains("Keyframe all") {
+        for b in h.get_all_by_label_contains("Keyframe All") {
             assert!(
                 b.rect().right() <= 340.0 - bar - space::S4 + 0.5,
                 "{:?}",

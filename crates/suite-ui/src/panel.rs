@@ -243,7 +243,7 @@ fn tabs(
                 pos2(x, header.center().y - size::CONTROL / 2.0),
                 Vec2::splat(size::CONTROL),
             ),
-            Button::icon(icon::CHEVRON_DOWN, "More tabs"),
+            Button::icon(icon::CHEVRON_DOWN, "More Tabs"),
         );
         egui::Popup::menu(&r).show(|ui| {
             for (i, label) in labels.iter().enumerate().skip(shown) {

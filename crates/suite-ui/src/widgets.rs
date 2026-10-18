@@ -120,6 +120,7 @@ pub struct Button<'a> {
     on: bool,
     state: State,
     min_width: f32,
+    min_height: f32,
 }
 
 impl<'a> Button<'a> {
@@ -133,6 +134,7 @@ impl<'a> Button<'a> {
             on: false,
             state: State::Live,
             min_width: 0.0,
+            min_height: 0.0,
         }
     }
 
@@ -186,6 +188,12 @@ impl<'a> Button<'a> {
         self.min_width = width;
         self
     }
+
+    /// Makes the button at least `height` tall, for a large call to action.
+    pub fn height(mut self, height: f32) -> Self {
+        self.min_height = height;
+        self
+    }
 }
 
 impl Widget for Button<'_> {
@@ -206,7 +214,10 @@ impl Widget for Button<'_> {
         let pad = (self.min_width - width).max(0.0) / 2.0;
         let (rect, response) = allocate(
             ui,
-            vec2((width + 2.0 * pad).ceil(), size::CONTROL),
+            vec2(
+                (width + 2.0 * pad).ceil(),
+                size::CONTROL.max(self.min_height),
+            ),
             self.state,
             Sense::click(),
         );

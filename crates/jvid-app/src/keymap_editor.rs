@@ -53,7 +53,7 @@ impl KeymapEditor {
             )
             .show(ui.ctx(), |ui| {
                 ui.set_width(560.0);
-                ui.label(egui::RichText::new("Keyboard shortcuts").font(theme::headline()));
+                ui.label(egui::RichText::new("Keyboard Shortcuts").font(theme::headline()));
                 ui.add_space(space::S8);
                 ui.add(TextInput::search(&mut self.search).width(560.0));
                 ui.add_space(space::S8);
@@ -141,7 +141,7 @@ impl KeymapEditor {
                     {
                         self.error = Some(format!("Couldn't export: {e}"));
                     }
-                    if ui.add(Button::secondary("Reset all")).clicked() {
+                    if ui.add(Button::secondary("Reset All")).clicked() {
                         *map = Keymap::default();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
