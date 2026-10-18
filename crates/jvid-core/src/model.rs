@@ -339,6 +339,9 @@ pub struct Track {
     /// Insert and overwrite land here; at most one track of each kind.
     #[serde(default)]
     pub target: bool,
+    /// Holds imported subtitles: its text clips are the cues an `.srt` sidecar writes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub subtitles: bool,
     /// Sorted by `start`, never overlapping. Mutate through `Sequence`.
     clips: Vec<Clip>,
 }
@@ -974,6 +977,7 @@ impl Sequence {
                 pan: 0.0,
                 height: Track::default_height(),
                 target: false,
+                subtitles: false,
                 clips: Vec::new(),
             },
         );
@@ -1588,6 +1592,34 @@ impl Project {
             add_audio,
             insert,
         })
+    }
+
+    /// The enabled text clips on subtitle tracks as cues, sorted by start.
+    pub fn subtitle_cues(&self) -> Vec<crate::srt::Cue> {
+        let tracks = self.sequence.tracks.iter().filter(|t| t.subtitles);
+        let mut cues: Vec<_> = tracks
+            .flat_map(|t| &t.clips)
+            .filter(|c| c.enabled)
+            .filter_map(|c| {
+                let text = self.asset(c.asset)?.text.as_ref()?;
+                Some(crate::srt::Cue {
+                    start: c.start,
+                    end: c.end(),
+                    text: text.content.clone(),
+                })
+            })
+            .collect();
+        cues.sort_by_key(|c| c.start);
+        cues
+    }
+
+    /// A copy with subtitle tracks hidden, for exporting them as a sidecar instead of burnt in.
+    pub fn without_subtitles(&self) -> Project {
+        let mut p = self.clone();
+        for t in p.sequence.tracks.iter_mut().filter(|t| t.subtitles) {
+            t.hidden = true;
+        }
+        p
     }
 
     pub(crate) fn asset_mut(&mut self, id: AssetId) -> Option<&mut MediaAsset> {

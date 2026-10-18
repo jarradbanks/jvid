@@ -21,6 +21,7 @@ pub const FILE: &[&str] = &[
     "save_as",
     "",
     "import",
+    "import_subtitles",
     "export",
     "",
     "quit",

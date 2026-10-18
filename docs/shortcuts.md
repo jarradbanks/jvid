@@ -15,6 +15,7 @@ Work in any panel except while typing in a text field.
 | Save | `Ctrl+S` |
 | Save As | `Ctrl+Shift+S` |
 | Import | `Ctrl+I` |
+| Import Subtitles | `Ctrl+Shift+I` |
 | Export Media | `Ctrl+M` |
 | Quit | `Ctrl+Q` |
 | Play/Stop | `Space` |

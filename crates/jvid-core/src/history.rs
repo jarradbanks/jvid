@@ -175,6 +175,13 @@ pub enum Command {
         id: AssetId,
         text: Text,
     },
+    /// Adds a subtitle track named `name` with a text clip in `style` per cue; a cue that
+    /// overlaps the one before starts where it ends.
+    ImportSubtitles {
+        name: String,
+        cues: Vec<crate::srt::Cue>,
+        style: Text,
+    },
     SetAssetProbe {
         id: AssetId,
         probe: Option<ProbeInfo>,
@@ -270,6 +277,7 @@ impl Command {
             | Self::SetSolidColor { .. }
             | Self::AddText { .. }
             | Self::SetText { .. }
+            | Self::ImportSubtitles { .. }
             | Self::SetAssetProbe { .. }
             | Self::Import(_)
             | Self::RenameAsset { .. }
@@ -463,6 +471,34 @@ impl Command {
                 let a = p.asset_mut(id).expect("just added");
                 (a.name, a.text) = (Some(name), Some(text));
                 Created::Asset(id)
+            }
+            Self::ImportSubtitles { name, cues, style } => {
+                let track = s.add_track(TrackKind::Video, name);
+                s.track_mut(track).expect("just added").subtitles = true;
+                let mut end = Time(0);
+                for cue in cues {
+                    let start = cue.start.max(end);
+                    if cue.end <= start {
+                        continue;
+                    }
+                    end = cue.end;
+                    let text = Text {
+                        content: cue.text,
+                        ..style.clone()
+                    };
+                    let asset = p.add_asset(PathBuf::new());
+                    let a = p.asset_mut(asset).expect("just added");
+                    (a.name, a.text) = (Some(text.content.replace('\n', " ")), Some(text));
+                    let clip = NewClip {
+                        asset,
+                        source_in: Time(0),
+                        source_out: end - start,
+                        start,
+                        link: None,
+                    };
+                    p.sequence.add_clip(track, clip)?;
+                }
+                Created::Track(track)
             }
             Self::SetText { id, text } => {
                 let a = p.asset_mut(id).filter(|a| a.text.is_some());
@@ -1820,5 +1856,52 @@ mod tests {
         );
         assert!(h.undo() && h.undo());
         assert_eq!(h.project().asset(id).unwrap().text, Some(text));
+    }
+
+    #[test]
+    fn imported_subtitles_make_a_sidecar_lined_up_with_in_to_out() {
+        use crate::srt;
+        let src = "1\n00:00:01,000 --> 00:00:03,000\nOne\n\n\
+                   2\n00:00:02,000 --> 00:00:04,000\nOverlaps\n\n\
+                   3\n00:00:10,000 --> 00:00:12,000\nTwo\nlines\n";
+        let mut h = History::new(Project::default());
+        let Ok(Created::Track(track)) = h.apply(Command::ImportSubtitles {
+            name: "Subtitles".into(),
+            cues: srt::parse(src),
+            style: Text::default(),
+        }) else {
+            panic!("import")
+        };
+        let p = h.project();
+        assert!(p.sequence().track(track).unwrap().subtitles);
+        assert_eq!(p.sequence().track(track).unwrap().clips().len(), 3);
+        let s = |n: i64| Time(n * crate::time::FLICKS_PER_SECOND);
+        h.apply(Command::SetInOut {
+            in_point: Some(s(2)),
+            out_point: Some(s(11)),
+        })
+        .unwrap();
+        let p = h.project();
+        let range = (
+            p.sequence().in_point().unwrap(),
+            p.sequence().out_point().unwrap(),
+        );
+        assert_eq!(
+            srt::write(&p.subtitle_cues(), range),
+            "1\n00:00:00,000 --> 00:00:01,000\nOne\n\n\
+             2\n00:00:01,000 --> 00:00:02,000\nOverlaps\n\n\
+             3\n00:00:08,000 --> 00:00:09,000\nTwo\nlines\n\n"
+        );
+        assert!(
+            p.without_subtitles()
+                .sequence()
+                .track(track)
+                .unwrap()
+                .hidden
+        );
+        assert!(
+            h.undo() && h.undo() && h.project().assets().is_empty(),
+            "one undo step each"
+        );
     }
 }

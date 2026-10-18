@@ -10,4 +10,5 @@ pub mod keyframe;
 pub mod model;
 pub mod preset;
 pub mod settings;
+pub mod srt;
 pub mod time;
