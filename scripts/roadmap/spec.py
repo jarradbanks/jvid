@@ -555,18 +555,6 @@ I("text-to-timeline", "Text presets: feedback and drag to timeline", "M2", ["ui"
   ac=["Dragging a Title preset onto V2 creates a text clip that renders in the Program monitor",
       "Clicking a preset shows a visible result without hunting through the Media tab"])
 
-I("kf-discover", "Inspector gutter and keyframe lane discoverability", "M3", ["ui", "timeline"], "S", ["keyframe-lanes"],
-  summary="Fixes from the owner's second hands-on test: cramped inspector buttons and hidden keyframe lane toggle.",
-  scope=[
-      "Inspector: leave a gutter between the vertical scrollbar and the row buttons (prev/add/next key, reset) so the keyframe diamond is easy to hit; buttons get a comfortable hit size",
-      "Keyframe lane toggle: today it sits at the clip's right end of the name strip, offscreen for long clips. Keep it visible: pin it to the visible left edge of the clip name strip (clamped to the viewport)",
-      "Selecting a clip that has keyframes, or adding a keyframe in the inspector, expands its lanes automatically (toggle still collapses)",
-      "Clips with keyframes show small diamond ticks on the clip body at key times even when collapsed",
-  ],
-  ac=["The keyframe diamond in the Inspector does not touch the scrollbar and is clickable at its edge",
-      "Adding a keyframe in the Inspector to a long clip shows its lane in the timeline without scrolling",
-      "kittests cover the auto-expand and the toggle visible when the clip extends past the right edge"])
-
 I("in-out", "In/Out points on the timeline", "M2", ["timeline"], "M", ["trim-split", "actions"],
   summary="Premiere-style range marking for playback, editing and export.",
   scope=[
@@ -1001,3 +989,15 @@ for key, title, summary in [
     ("in-app-dialogs", "In-app confirm dialogs", "Replace native rfd message boxes (unsaved changes on exit, errors) with suite-ui modals that match DESIGN.md."),
 ]:
     I(key, title, None, [], None, summary=summary, labels=["later"])
+
+I("kf-discover", "Inspector gutter and keyframe lane discoverability", "M3", ["ui", "timeline"], "S", ["keyframe-lanes"],
+  summary="Fixes from the owner's second hands-on test: cramped inspector buttons and hidden keyframe lane toggle.",
+  scope=[
+      "Inspector: leave a gutter between the vertical scrollbar and the row buttons (prev/add/next key, reset) so the keyframe diamond is easy to hit; buttons get a comfortable hit size",
+      "Keyframe lane toggle: today it sits at the clip's right end of the name strip, offscreen for long clips. Keep it visible: pin it to the visible left edge of the clip name strip (clamped to the viewport)",
+      "Selecting a clip that has keyframes, or adding a keyframe in the inspector, expands its lanes automatically (toggle still collapses)",
+      "Clips with keyframes show small diamond ticks on the clip body at key times even when collapsed",
+  ],
+  ac=["The keyframe diamond in the Inspector does not touch the scrollbar and is clickable at its edge",
+      "Adding a keyframe in the Inspector to a long clip shows its lane in the timeline without scrolling",
+      "kittests cover the auto-expand and the toggle visible when the clip extends past the right edge"])
