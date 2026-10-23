@@ -669,9 +669,11 @@ fn program_draws_the_timeline_through_the_gpu() {
         link: None,
     };
     history.apply(Command::AddClip { track, clip }).unwrap();
+    // The decode, filmstrip and thumbnail workers repaint as their results land, so `run` can't
+    // settle while they're busy (it panicked on loaded CI): step until they've all finished.
     for _ in 0..500 {
-        h.run();
-        if h.state().preview.has_program_frame() {
+        h.step();
+        if h.state().preview.has_program_frame() && h.try_run().is_ok() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
