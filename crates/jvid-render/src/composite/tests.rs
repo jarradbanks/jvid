@@ -720,6 +720,7 @@ fn chroma_key_shows_the_lower_track_and_suppresses_spill() {
                     ("spill_suppression".to_owned(), spill),
                 ]
                 .into(),
+                enabled: true,
             }],
             ..Default::default()
         };
