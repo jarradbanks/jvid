@@ -761,3 +761,86 @@ fn chroma_key_shows_the_lower_track_and_suppresses_spill() {
     assert!(cast(run(120.0, 0.5)[2]) <= 21, "half spill");
     assert!(same(full[1], [220, 170, 140]), "no cast, no change");
 }
+
+#[test]
+fn a_feathered_ellipse_mask_fades_the_clip_out_across_its_outline() {
+    use jvid_core::model::{Mask, MaskShape};
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping mask test: no software adapter on this platform");
+        return;
+    };
+    // A 4:1 frame filled by an opaque red clip, masked to an ellipse 64 wide and 16 tall at
+    // the centre with an 8 px feather, over a transparent background: alpha is coverage.
+    let red = image(&device, &queue, (32, 8), |_, _| [255, 0, 0, 255]);
+    let ellipse = Mask {
+        feather: 8.0,
+        ..Mask::new(MaskShape::Ellipse, vec![[0.0, 0.0], [64.0, 16.0]])
+    };
+    let masked = |invert| Transform {
+        masks: vec![Mask {
+            invert,
+            ..ellipse.clone()
+        }],
+        ..Default::default()
+    };
+    let mut comp = Compositor::new(&device);
+    for scale in [1, 2] {
+        let layers = [(&red, masked(false))];
+        let tex = comp.render(&device, &queue, (128, 32), scale, [0; 4], &layers);
+        let w = tex.width();
+        let rgba = read_back(&device, &queue, tex);
+        let alpha = |x: u32, y: u32| rgba[((y / scale * w + x / scale) * 4 + 3) as usize];
+        // Along the middle row from the centre out: opaque, a soft edge about the outline at
+        // x = 96, then nothing.
+        let row: Vec<u8> = (64..128)
+            .step_by(scale as usize)
+            .map(|x| alpha(x, 16))
+            .collect();
+        assert!(row.windows(2).all(|p| p[1] <= p[0]), "falls off: {row:?}");
+        assert_eq!(alpha(64, 16), 255, "inside");
+        assert_eq!(alpha(90, 16), 255, "inside the feather");
+        assert!(
+            (64..192).contains(&alpha(96, 16)),
+            "soft at the outline: {row:?}"
+        );
+        assert_eq!(alpha(102, 16), 0, "outside the feather");
+        assert_eq!((alpha(2, 16), alpha(64, 0)), (0, 0), "outside");
+        // Shown pixels keep their color, premultiplied by coverage.
+        let i = ((16 / scale * w + 96 / scale) * 4) as usize;
+        assert!(near(rgba[i], rgba[i + 3] as i32) && rgba[i + 1] == 0);
+        // Inverted, the ellipse is the hole.
+        let layers = [(&red, masked(true))];
+        let tex = comp.render(&device, &queue, (128, 32), scale, [0; 4], &layers);
+        let rgba = read_back(&device, &queue, tex);
+        let alpha = |x: u32, y: u32| rgba[((y / scale * w + x / scale) * 4 + 3) as usize];
+        assert_eq!((alpha(64, 16), alpha(2, 16)), (0, 255), "inverted");
+    }
+}
+
+#[test]
+fn a_path_subtracts_from_a_rectangle() {
+    use jvid_core::model::{Mask, MaskMode, MaskShape};
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping mask test: no software adapter on this platform");
+        return;
+    };
+    let red = image(&device, &queue, (32, 8), |_, _| [255, 0, 0, 255]);
+    // The left half, less a straight-sided square inside it at x 16..48, y 8..24.
+    let rect = Mask::new(MaskShape::Rectangle, vec![[-32.0, 0.0], [64.0, 32.0]]);
+    let square = [[-48.0, -8.0], [-16.0, -8.0], [-16.0, 8.0], [-48.0, 8.0]];
+    let path = square.iter().flat_map(|v| [*v, [0.0; 2], [0.0; 2]]);
+    let hole = Mask {
+        mode: MaskMode::Subtract,
+        ..Mask::new(MaskShape::Bezier, path.collect())
+    };
+    let x = Transform {
+        masks: vec![rect, hole],
+        ..Default::default()
+    };
+    let mut comp = Compositor::new(&device);
+    let tex = comp.render(&device, &queue, (128, 32), 1, [0; 4], &[(&red, x)]);
+    let rgba = read_back(&device, &queue, tex);
+    let alpha = |x: usize, y: usize| rgba[(y * 128 + x) * 4 + 3];
+    let got = [alpha(8, 16), alpha(32, 2), alpha(32, 16), alpha(100, 16)];
+    assert_eq!(got, [255, 255, 0, 0]);
+}

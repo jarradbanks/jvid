@@ -86,12 +86,7 @@ fn dragged(
 fn corners(project: &Project, c: &Clip, x: &Transform, frame: Rect) -> Option<[Pos2; 4]> {
     let st = project.settings();
     let size = [st.width as f32, st.height as f32];
-    let probe = project.asset(c.asset).and_then(|a| a.probe.as_ref());
-    // A solid has no probe and fills the frame.
-    let image = match probe.and_then(|p| Some([p.width? as f32, p.height? as f32])) {
-        Some(i) => i,
-        None => size,
-    };
+    let image = crate::masks::upright(project, c).unwrap_or(size);
     let q = jvid_render::composite::quad(image, size, x)?;
     Some(q.map(|[cx, cy, ..]| {
         frame.min

@@ -468,7 +468,8 @@ fn is_first_stream(s: &Option<u32>) -> bool {
 /// Keyframe names: `position`, `anchor` (`Vec2`), `scale` (`Scalar` for linked, `Vec2` for
 /// separate X/Y), `rotation`, `opacity`, `crop_left`, `crop_top`, `crop_right`, `crop_bottom`,
 /// the color adjustments by field name (`exposure`, `contrast`, ..., `lut_intensity`), effect
-/// parameters as `fx{index}.{param}` (see [`Effect::key`]), and for audio clips `volume` and `pan`.
+/// parameters as `fx{index}.{param}` (see [`Effect::key`]), mask shapes and feather as
+/// `mask{index}.{param}` (see [`Mask::key`]), and for audio clips `volume` and `pan`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Transform {
@@ -512,6 +513,8 @@ pub struct Transform {
     pub transition: Option<Transition>,
     /// WGSL effects run on the clip's image in order, before its color adjustments.
     pub effects: Vec<Effect>,
+    /// Shapes cut out of the clip's image, combined in order, before its effects.
+    pub masks: Vec<Mask>,
 }
 
 /// A clip's or track's audio effects, in processing order. The defaults change nothing.
@@ -607,6 +610,69 @@ impl Effect {
     }
 }
 
+/// A shape that keeps (or, inverted, cuts out) part of a clip's image. Points are in the fitted
+/// image's pixels as offsets from its centre, y down, as [`Transform::anchor`] is, so a mask
+/// moves with its clip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Mask {
+    pub shape: MaskShape,
+    /// A rectangle or ellipse: its centre, then its width and height. A bezier: each vertex
+    /// then its in and out handles, relative to it; the path closes back to the first vertex.
+    pub points: Vec<[f64; 2]>,
+    /// Width of the soft edge, centred on the outline, in the same pixels.
+    pub feather: f64,
+    /// 0..=1.
+    pub opacity: f64,
+    pub invert: bool,
+    pub mode: MaskMode,
+    /// A bypassed mask keeps its shape and keyframes but doesn't render.
+    #[serde(default = "enabled", skip_serializing_if = "is_enabled")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskShape {
+    Rectangle,
+    Ellipse,
+    Bezier,
+}
+
+/// How a mask combines with the masks above it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskMode {
+    #[default]
+    Add,
+    Subtract,
+}
+
+impl Mask {
+    /// A hard-edged, opaque mask.
+    pub fn new(shape: MaskShape, points: Vec<[f64; 2]>) -> Self {
+        Self {
+            shape,
+            points,
+            feather: 0.0,
+            opacity: 1.0,
+            invert: false,
+            mode: MaskMode::Add,
+            enabled: true,
+        }
+    }
+
+    /// The keyframe name of `param` (`feather`, `opacity`, or `p{n}` for point n) of the
+    /// clip's `index`th mask.
+    pub fn key(index: usize, param: &str) -> String {
+        format!("mask{index}.{param}")
+    }
+
+    /// The keyframe name of point `n` of the clip's `index`th mask.
+    pub fn point(index: usize, n: usize) -> String {
+        format!("mask{index}.p{n}")
+    }
+}
+
 /// A transition at a cut, `duration` long and centred on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transition {
@@ -685,6 +751,7 @@ impl Default for Transform {
             fade_curve: FadeCurve::Linear,
             transition: None,
             effects: Vec::new(),
+            masks: Vec::new(),
         }
     }
 }
@@ -854,6 +921,20 @@ impl Clip {
                     *v = n;
                 }
             }
+        }
+        for (i, m) in x.masks.iter_mut().enumerate() {
+            for (n, p) in m.points.iter_mut().enumerate() {
+                if let Some(Vec2(v)) = self.value_at(&Mask::point(i, n), t) {
+                    *p = v;
+                }
+            }
+            for (name, v) in [("feather", &mut m.feather), ("opacity", &mut m.opacity)] {
+                if let Some(Scalar(n)) = self.value_at(&Mask::key(i, name), t) {
+                    *v = n;
+                }
+            }
+            m.feather = m.feather.max(0.0);
+            m.opacity = m.opacity.clamp(0.0, 1.0);
         }
         x
     }
@@ -2425,6 +2506,45 @@ mod tests {
         st.fx.compressor.ratio = 4.0;
         s.set_track(st.clone()).unwrap();
         assert_eq!(s.track(a).unwrap().fx, st.fx);
+    }
+
+    #[test]
+    fn keyed_mask_points_interpolate_and_masks_round_trip() {
+        use crate::keyframe::{Easing, Value};
+        let mut c: Clip = serde_json::from_str(
+            r#"{"id":1,"asset":1,"source_in":100,"source_out":200,"start":0,"link":null,"params":{}}"#,
+        )
+        .unwrap();
+        assert!(
+            c.transform.masks.is_empty(),
+            "older clips load without masks"
+        );
+        let rect = Mask::new(MaskShape::Rectangle, vec![[0.0, 0.0], [100.0, 50.0]]);
+        c.transform.masks.push(rect);
+        let key = |t, value| Keyframe {
+            time: Time(t),
+            value,
+            easing: Easing::Linear,
+        };
+        // Source 100..120 is timeline 0..20; the size doubles across it.
+        c.keyframes.insert(
+            Mask::point(0, 1),
+            vec![
+                key(100, Value::Vec2([100.0, 50.0])),
+                key(120, Value::Vec2([200.0, 100.0])),
+            ],
+        );
+        c.keyframes.insert(
+            Mask::key(0, "feather"),
+            vec![key(100, Value::Scalar(-5.0)), key(120, Value::Scalar(15.0))],
+        );
+        let at = |t| c.transform_at(Time(t)).masks[0].clone();
+        assert_eq!(at(0).points, [[0.0, 0.0], [100.0, 50.0]]);
+        assert_eq!(at(10).points, [[0.0, 0.0], [150.0, 75.0]]);
+        assert_eq!(at(20).points[1], [200.0, 100.0]);
+        assert_eq!((at(0).feather, at(10).feather), (0.0, 5.0), "clamped at 0");
+        let json = serde_json::to_string(&c).unwrap();
+        assert_eq!(serde_json::from_str::<Clip>(&json).unwrap(), c);
     }
 
     #[test]

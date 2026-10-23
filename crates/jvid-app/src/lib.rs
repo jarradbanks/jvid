@@ -11,6 +11,7 @@ mod import;
 mod inspector;
 mod keymap;
 mod keymap_editor;
+mod masks;
 mod media_bin;
 mod playback;
 pub mod preferences;
