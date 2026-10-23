@@ -688,7 +688,7 @@ impl Preview {
     }
 
     /// Runs `f` on the thumbnail renderer; `None` without wgpu.
-    fn with_thumbs<R>(
+    pub fn with_thumbs<R>(
         &self,
         f: impl FnOnce(&mut Thumbs, &wgpu::Device, &wgpu::Queue) -> R,
     ) -> Option<R> {

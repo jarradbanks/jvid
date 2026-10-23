@@ -847,7 +847,7 @@ fn effects_rows(
         let found = lib.iter().find(|(k, ..)| *k == e.shader);
         let (entry, shipped) = (found.map(|(_, e, _)| e), found.is_some_and(|f| f.2));
         let (title, problem) = match entry {
-            Some(Ok(s)) => (crate::effects::name(&e.shader, shipped, s).to_owned(), None),
+            Some(Ok(s)) => (crate::effects::name(&e.shader, shipped, s), None),
             Some(Err(err)) => (e.shader.clone(), Some(err.clone())),
             None => (
                 e.shader.clone(),
@@ -1073,11 +1073,12 @@ fn add_menu(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
             if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 pick = rows.first().map(|r| r.stem.clone());
             }
+            crate::effects::want_thumbs(ui.ctx());
             egui::ScrollArea::vertical()
                 .max_height(320.0)
                 .show(ui, |ui| {
                     for row in &rows {
-                        if menu_entry(ui, &row.name, &row.description).clicked() {
+                        if menu_entry(ui, row).clicked() {
                             pick = Some(row.stem.clone());
                         }
                     }
@@ -1092,31 +1093,34 @@ fn add_menu(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
     Some((push_effect(clips, &stem, &shader), None))
 }
 
-/// An Add Effect menu row: the name in Ink over its description in Ink 3, with the menu
-/// rows' hover fill.
-fn menu_entry(ui: &mut Ui, name: &str, about: &str) -> egui::Response {
+/// An Add Effect menu row: the effect's thumbnail, then its name in Ink over one line of its
+/// description, with the menu rows' hover fill.
+fn menu_entry(ui: &mut Ui, row: &crate::effects::Row) -> egui::Response {
+    const THUMB: Vec2 = vec2(48.0, 27.0);
     let w = ui.available_width();
-    let mut job = egui::text::LayoutJob::default();
-    let format = |color| egui::TextFormat::simple(theme::body(), color);
-    job.append(name, 0.0, format(color::INK));
-    if !about.is_empty() {
-        job.append(&format!("\n{about}"), 0.0, format(color::INK_3));
-    }
-    job.wrap.max_width = w - 2.0 * space::S8;
-    job.wrap.max_rows = 3;
-    let galley = ui.fonts_mut(|f| f.layout_job(job));
-    let h = galley.size().y + 2.0 * space::S4;
-    let (rect, r) = ui.allocate_exact_size(vec2(w, h.max(size::CONTROL)), Sense::click());
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    let (rect, r) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &row.name));
     if r.hovered() || r.has_focus() {
         let corner = suite_ui::tokens::radius::CONTROL;
         ui.painter().rect_filled(rect, corner, color::BORDER);
     }
-    let at = pos2(
-        rect.left() + space::S8,
-        rect.center().y - galley.size().y / 2.0,
+    let thumb = Rect::from_min_size(
+        pos2(rect.left() + space::S4, rect.center().y - THUMB.y / 2.0),
+        THUMB,
     );
-    ui.painter().galley(at, galley, color::INK);
+    crate::effects::paint_thumb(ui, thumb, row);
+    let left = thumb.right() + space::S8;
+    let width = rect.right() - space::S8 - left;
+    let name = ui
+        .painter()
+        .layout(row.name.clone(), theme::body(), color::INK, width);
+    let about = crate::effects::about(row, width, 1, color::INK_3);
+    let about = ui.fonts_mut(|f| f.layout_job(about));
+    let top = rect.center().y - (name.size().y + about.size().y) / 2.0;
+    ui.painter()
+        .galley(pos2(left, top), name.clone(), color::INK);
+    let at = pos2(left, top + name.size().y);
+    ui.painter().galley(at, about, color::INK_3);
     r
 }
 
@@ -1136,6 +1140,13 @@ fn push_effect(clips: &[&Clip], stem: &str, shader: &jvid_render::effect::Shader
 /// Adds effect `stem` from the effects folder to the end of each of the video clips in `ids`;
 /// `None` when there are none or the effect doesn't load.
 pub fn add_effect(project: &Project, ids: &HashSet<ClipId>, stem: &str) -> Option<Command> {
+    let clips = video_clips(project, ids);
+    let shader = crate::effects::with(|l| l.get(stem).and_then(|e| e.clone().ok()))?;
+    (!clips.is_empty()).then(|| push_effect(&clips, stem, &shader))
+}
+
+/// The video clips among `ids`, which effects go on, in id order.
+pub fn video_clips<'a>(project: &'a Project, ids: &HashSet<ClipId>) -> Vec<&'a Clip> {
     let seq = project.sequence();
     let mut clips: Vec<&Clip> = ids
         .iter()
@@ -1144,8 +1155,7 @@ pub fn add_effect(project: &Project, ids: &HashSet<ClipId>, stem: &str) -> Optio
         .map(|(_, c)| c)
         .collect();
     clips.sort_by_key(|c| c.id.0);
-    let shader = crate::effects::with(|l| l.get(stem).and_then(|e| e.clone().ok()))?;
-    (!clips.is_empty()).then(|| push_effect(&clips, stem, &shader))
+    clips
 }
 
 /// Undo gesture for speed drags, xored with the clip id.
@@ -2610,18 +2620,18 @@ mod tests {
         h.get_by_label("Add Effect").click();
         h.run();
         assert!(
-            h.query_by_role_and_label(Role::Button, "Chromatic aberration")
+            h.query_by_role_and_label(Role::Button, "Chromatic Aberration")
                 .is_some()
         );
         h.snapshot("inspector_fx_add");
-        // Only Film grain's description mentions midtones.
+        // Only Film Grain's description mentions midtones.
         h.get_by_role(Role::TextInput).type_text("midtones");
         h.run();
         assert!(
-            h.query_by_role_and_label(Role::Button, "Chromatic aberration")
+            h.query_by_role_and_label(Role::Button, "Chromatic Aberration")
                 .is_none()
         );
-        h.get_by_role_and_label(Role::Button, "Film grain").click();
+        h.get_by_role_and_label(Role::Button, "Film Grain").click();
         h.run();
         assert_eq!(stack(&h), on(&["vignette", "film_grain", "film_grain"]));
     }
