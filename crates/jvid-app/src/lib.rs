@@ -18,6 +18,7 @@ mod preview;
 pub mod project_file;
 mod project_settings;
 mod relink;
+mod scopes;
 pub mod settings_file;
 mod timeline;
 mod transport;

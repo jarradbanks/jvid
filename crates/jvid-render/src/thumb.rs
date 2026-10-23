@@ -42,16 +42,7 @@ impl Thumbs {
 
     /// Copies `src` (a composited frame of any size) into the frame, fitted whole over black.
     pub fn set_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, src: &wgpu::Texture) {
-        // One bilinear tap skips pixels past 2x, so halve first: each halving averages 2x2.
-        let mut src = src.clone();
-        while src.width() > 2 * SIZE.0 {
-            let size = (src.width(), src.height());
-            let layer = [(&src, Transform::default())];
-            src = self
-                .compositor
-                .render(device, queue, size, 2, BLACK, &layer)
-                .clone();
-        }
+        let src = halved(&mut self.compositor, device, queue, src, SIZE.0);
         let layer = [(&src, Transform::default())];
         draw(&mut self.compositor, device, queue, &layer, &self.frame);
         self.generation += 1;
@@ -131,6 +122,26 @@ impl Thumbs {
         draw(&mut self.compositor, device, queue, &layers, &out);
         out
     }
+}
+
+/// `src` halved until it's at most twice `width` wide, so a bilinear draw down to `width`
+/// skips no pixels: each halving averages 2x2.
+pub(crate) fn halved(
+    compositor: &mut Compositor,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    src: &wgpu::Texture,
+    width: u32,
+) -> wgpu::Texture {
+    let mut src = src.clone();
+    while src.width() > 2 * width {
+        let size = (src.width(), src.height());
+        let layer = [(&src, Transform::default())];
+        src = compositor
+            .render(device, queue, size, 2, BLACK, &layer)
+            .clone();
+    }
+    src
 }
 
 /// A thumbnail-sized texture to draw into, show and read back.

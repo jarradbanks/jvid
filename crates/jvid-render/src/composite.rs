@@ -534,7 +534,7 @@ impl Compositor {
 
 /// Copies an RGBA8 texture back to the CPU as tight rows, blocking until the GPU is done.
 pub fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture) -> Vec<u8> {
-    let (buf, done) = copy_out(device, queue, tex, None);
+    let (buf, done) = copy_out(device, queue, tex, None, || {});
     map(device, &buf, done, tex.width())
 }
 
@@ -556,7 +556,7 @@ impl Readback {
         queue: &wgpu::Queue,
         tex: &wgpu::Texture,
     ) -> Option<Vec<u8>> {
-        let (buf, done) = copy_out(device, queue, tex, self.free.pop());
+        let (buf, done) = copy_out(device, queue, tex, self.free.pop(), || {});
         self.pending.push_back((buf, done, tex.width()));
         (self.pending.len() > 1)
             .then(|| self.take(device))
@@ -574,12 +574,13 @@ impl Readback {
 }
 
 /// Submits a copy of `tex` into `reuse` when it's the right size, else a new buffer, and starts
-/// mapping it; returns the buffer and the copy's submission.
-fn copy_out(
+/// mapping it, calling `mapped` once it has; returns the buffer and the copy's submission.
+pub(crate) fn copy_out(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     tex: &wgpu::Texture,
     reuse: Option<wgpu::Buffer>,
+    mapped: impl FnOnce() + Send + 'static,
 ) -> (wgpu::Buffer, wgpu::SubmissionIndex) {
     assert_eq!(
         tex.format().block_copy_size(None),
@@ -611,7 +612,10 @@ fn copy_out(
         tex.size(),
     );
     let done = queue.submit([encoder.finish()]);
-    buf.slice(..).map_async(wgpu::MapMode::Read, |r| r.unwrap());
+    buf.slice(..).map_async(wgpu::MapMode::Read, |r| {
+        r.unwrap();
+        mapped();
+    });
     (buf, done)
 }
 
@@ -628,6 +632,11 @@ fn map(
             timeout: None,
         })
         .unwrap();
+    unpad(buf, width)
+}
+
+/// The rows of mapped `buf`, a copy of a `width`-wide RGBA8 texture, without padding.
+pub(crate) fn unpad(buf: &wgpu::Buffer, width: u32) -> Vec<u8> {
     let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
     let data = buf.slice(..).get_mapped_range().unwrap();
     data.chunks(row as usize)

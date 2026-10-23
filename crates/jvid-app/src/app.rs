@@ -1169,6 +1169,8 @@ impl TabViewer for Viewer<'_> {
         let focused = self.focused == Some(*tab);
         if *tab == Tab::Media {
             self.bin.text_thumbs(self.preview, self.project);
+            // The Scopes tab, fourth in the bin.
+            self.preview.scopes_open(self.bin.tab == 3);
             let r = self
                 .bin
                 .show(ui, self.project, focused, self.importing, self.missing);

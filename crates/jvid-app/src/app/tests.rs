@@ -1359,3 +1359,21 @@ fn dialog_keys_enter_saves_esc_cancels() {
     assert!(h.state().closing && path.exists());
     let _ = std::fs::remove_file(path);
 }
+
+/// The Scopes tab over a red solid at the playhead: one dot on the red target, red's luma
+/// line across the waveform, and spikes at 255 in red and 0 in green and blue.
+#[test]
+fn scopes_snapshot() {
+    if !gpu() {
+        return;
+    }
+    let mut h = harness([1280.0, 720.0], 1.0);
+    let history = &mut h.state_mut().history;
+    crate::playback::tests::add_solid(history, [1.0, 0.0, 0.0, 1.0], jvid_core::time::Time(0));
+    h.state_mut().bin.tab = 3;
+    for _ in 0..6 {
+        h.step();
+        h.render().unwrap();
+    }
+    h.snapshot("bin_scopes");
+}
