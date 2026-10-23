@@ -36,6 +36,7 @@ use crate::media_bin::Caches;
 use crate::transport::Transport;
 
 mod fades;
+mod graph;
 mod keyframes;
 mod markers;
 pub mod menus;
@@ -362,7 +363,10 @@ impl Timeline {
                 let x = view.x(self.playhead());
                 self.zoom_by(f, view, x);
             }
-            "zoom_fit" => self.zoom_fit(project.sequence()),
+            "zoom_fit" => match &mut self.keys.graph {
+                Some(g) => g.fit = true,
+                None => self.zoom_fit(project.sequence()),
+            },
             "go_to_in" => t.seek(project.sequence().in_point().unwrap_or_default(), 0),
             // Out is exclusive: the last marked frame.
             "go_to_out" => {
@@ -775,6 +779,9 @@ impl Timeline {
             ui.ctx().copy_text(trn!("timeline.copied", n));
         }
         self.sync(project);
+        if self.keys.graph.is_some() {
+            return edit.or(self.graph(ui, ui.max_rect(), project.sequence()));
+        }
         let rate = self.transport.rate;
         let area = ui.max_rect();
         let ppp = ui.pixels_per_point();
