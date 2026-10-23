@@ -1322,6 +1322,10 @@ impl TabViewer for Viewer<'_> {
                 if let Some(c) = crate::zoom::show(ui, self.project, selected, t, frame) {
                     (self.command, self.gesture) = (Some(c), None);
                 }
+                // After the zoom, so Alt on a mask handle breaks its tangents instead.
+                if let Some((c, g)) = crate::masks::show(ui, self.project, selected, t, frame) {
+                    (self.command, self.gesture) = (Some(c), g);
+                }
                 if let Some((id, at)) =
                     crate::handles::double_clicked_text(ui, self.project, t, frame)
                 {

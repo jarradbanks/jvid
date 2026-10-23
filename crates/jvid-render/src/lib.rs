@@ -3,6 +3,7 @@
 pub mod composite;
 pub mod effect;
 pub mod lut;
+pub mod mask;
 pub mod preview;
 pub mod scope;
 pub mod solid;

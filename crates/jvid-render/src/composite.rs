@@ -57,6 +57,7 @@ pub struct Compositor {
     effect_layout: wgpu::BindGroupLayout,
     /// Per layer index: a ping-pong texture pair and one uniform per effect, reused across frames.
     fx_pool: Vec<(Option<[wgpu::Texture; 2]>, Vec<wgpu::Buffer>)>,
+    masks: crate::mask::Masker,
     /// The timeline frame number effects see as `fx.frame`.
     pub frame: u32,
 }
@@ -158,6 +159,7 @@ impl Compositor {
                 ],
             }),
             fx_pool: Vec::new(),
+            masks: crate::mask::Masker::new(device),
             frame: 0,
         }
     }
@@ -369,7 +371,13 @@ impl Compositor {
             .iter()
             .enumerate()
             .map(|(i, (tex, t))| {
-                self.apply_effects(device, queue, &mut encoder, i, tex, &t.effects)
+                let sizes = ([size.0 as f32, size.1 as f32], [w as f32, h as f32]);
+                let masked = self
+                    .masks
+                    .apply(device, queue, &mut encoder, i, tex, &t.masks, sizes);
+                let tex = masked.as_ref().unwrap_or(tex);
+                let fx = self.apply_effects(device, queue, &mut encoder, i, tex, &t.effects);
+                fx.or(masked)
             })
             .collect();
         if self

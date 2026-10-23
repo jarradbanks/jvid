@@ -1,4 +1,4 @@
-//! The Inspector: transform, opacity, crop, color adjustments, effects and solid color of the selected clips, with keyframes.
+//! The Inspector: transform, opacity, crop, masks, color adjustments, effects and solid color of the selected clips, with keyframes.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -6,7 +6,8 @@ use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
 use jvid_core::model::{
-    AudioFx, Blend, Clip, ClipId, Effect, MediaAsset, Project, Text, TrackKind, Transform,
+    AudioFx, Blend, Clip, ClipId, Effect, Mask, MaskMode, MaskShape, MediaAsset, Project, Text,
+    TrackKind, Transform,
 };
 use jvid_core::time::Time;
 use suite_ui::theme::{self, icon};
@@ -38,6 +39,8 @@ struct Prop<'a> {
     slider: Option<(f64, f64)>,
     /// What reset sets; `None` for [`Transform::default`]'s value.
     default: Option<f64>,
+    /// Whether the row has reset; a mask's shape has no default to go back to.
+    resets: bool,
 }
 
 impl Prop<'_> {
@@ -90,6 +93,7 @@ const fn prop<'a>(name: &'a str, fields: &'static [Label]) -> Prop<'a> {
         suffix: "",
         range: (f64::NEG_INFINITY, f64::INFINITY),
         default: None,
+        resets: true,
     }
 }
 
@@ -210,11 +214,29 @@ pub(crate) fn fx_param(name: &str) -> Option<(usize, &str)> {
     Some((i.parse().ok()?, p))
 }
 
+/// The mask index and parameter of a mask keyframe name (see [`Mask::key`]).
+fn mask_param(name: &str) -> Option<(usize, &str)> {
+    let (i, p) = name.strip_prefix("mask")?.split_once('.')?;
+    Some((i.parse().ok()?, p))
+}
+
 /// `name`'s value in `x`; scale reads as linked, X for both.
 fn get(x: &Transform, name: &str) -> Value {
     if let Some((i, p)) = fx_param(name) {
         let v = x.effects.get(i).and_then(|e| e.params.get(p));
         return Value::Scalar(v.copied().unwrap_or(0.0));
+    }
+    if let Some((i, p)) = mask_param(name) {
+        let m = x.masks.get(i);
+        return match p {
+            "feather" => Value::Scalar(m.map_or(0.0, |m| m.feather)),
+            "opacity" => Value::Scalar(m.map_or(1.0, |m| m.opacity)),
+            p => {
+                let n = p.strip_prefix('p').and_then(|n| n.parse::<usize>().ok());
+                let v = m.zip(n).and_then(|(m, n)| m.points.get(n));
+                Value::Vec2(v.copied().unwrap_or_default())
+            }
+        };
     }
     let crop = |i: usize| Value::Scalar(x.crop[i]);
     match name {
@@ -242,6 +264,23 @@ fn set(x: &mut Transform, name: &str, v: Value) {
     if let (Some((i, p)), Value::Scalar(v)) = (fx_param(name), v) {
         if let Some(e) = x.effects.get_mut(i) {
             e.params.insert(p.to_owned(), v);
+        }
+        return;
+    }
+    if let Some((i, p)) = mask_param(name) {
+        let Some(m) = x.masks.get_mut(i) else {
+            return;
+        };
+        match (p, v) {
+            ("feather", Value::Scalar(v)) => m.feather = v.max(0.0),
+            ("opacity", Value::Scalar(v)) => m.opacity = v.clamp(0.0, 1.0),
+            (p, Value::Vec2(v)) => {
+                let n = p.strip_prefix('p').and_then(|n| n.parse::<usize>().ok());
+                if let Some(pt) = n.and_then(|n| m.points.get_mut(n)) {
+                    *pt = v;
+                }
+            }
+            _ => {}
         }
         return;
     }
@@ -484,6 +523,8 @@ pub struct Selection<'a> {
     /// Only when every selected video clip shows it, so its editors edit them all.
     shared: Option<&'a MediaAsset>,
     same: bool,
+    /// Each video clip's image size fitted to the frame, which a new mask's size follows.
+    fitted: Vec<[f64; 2]>,
 }
 
 impl<'a> Selection<'a> {
@@ -512,11 +553,16 @@ impl<'a> Selection<'a> {
             .filter(|_| same)
             .and_then(|c| project.asset(c.asset))
             .or(bin_selected.filter(|a| a.generated()));
+        let fitted = clips
+            .iter()
+            .map(|c| crate::masks::fitted(project, c))
+            .collect();
         Self {
             clips,
             audio,
             shared,
             same,
+            fitted,
         }
     }
 
@@ -609,6 +655,11 @@ pub fn show(
         if clips.is_empty() || pane != here {
             index += props.len() as u64;
             continue;
+        }
+        if id == "color"
+            && let Some(e) = masks_rows(ui, clips, &sel.fitted, t, &mut index, &mut seek)
+        {
+            edit = Some(e);
         }
         // LUT Mix waits for a LUT.
         let lut = clips.iter().any(|c| c.transform.lut.is_some());
@@ -1178,6 +1229,286 @@ pub fn video_clips<'a>(project: &'a Project, ids: &HashSet<ClipId>) -> Vec<&'a C
 }
 
 /// Undo gesture for speed drags, xored with the clip id.
+/// A mask shape's name.
+fn shape_name(s: MaskShape) -> &'static str {
+    match s {
+        MaskShape::Rectangle => tr!("inspector.mask_rectangle"),
+        MaskShape::Ellipse => tr!("inspector.mask_ellipse"),
+        MaskShape::Bezier => tr!("inspector.mask_bezier"),
+    }
+}
+
+/// Rebuilds every clip's masks from old indices `f` gives, renumbering their keyframes to
+/// match and dropping those of masks left out, as [`restack`] does for effects.
+fn restack_masks(clips: &[&Clip], f: impl Fn(&mut Vec<usize>)) -> Command {
+    rewrite(clips, |_, x, keys| {
+        let mut order: Vec<usize> = (0..x.masks.len()).collect();
+        f(&mut order);
+        let old = std::mem::take(&mut x.masks);
+        x.masks = order.iter().filter_map(|&j| old.get(j).cloned()).collect();
+        *keys = std::mem::take(keys)
+            .into_iter()
+            .filter_map(|(k, v)| match mask_param(&k) {
+                Some((j, p)) => order
+                    .iter()
+                    .position(|&o| o == j)
+                    .map(|n| (Mask::key(n, p), v)),
+                None => Some((k, v)),
+            })
+            .collect();
+    })
+}
+
+/// Mask `i` of every clip after `f`; one undo step.
+fn edit_mask(clips: &[&Clip], i: usize, f: impl Fn(&mut Mask)) -> Command {
+    rewrite(clips, |_, x, _| {
+        if let Some(m) = x.masks.get_mut(i) {
+            f(m);
+        }
+    })
+}
+
+/// Sets mask `i`'s feather, opacity, invert and mode back to a new mask's, dropping keys.
+fn reset_mask(clips: &[&Clip], i: usize) -> Command {
+    rewrite(clips, |_, x, keys| {
+        keys.remove(&Mask::key(i, "feather"));
+        keys.remove(&Mask::key(i, "opacity"));
+        if let Some(m) = x.masks.get_mut(i) {
+            *m = Mask {
+                enabled: m.enabled,
+                ..Mask::new(m.shape, std::mem::take(&mut m.points))
+            };
+        }
+    })
+}
+
+/// A rectangle or ellipse of `shape` on every clip, centred and half its fitted image's size.
+fn push_mask(clips: &[&Clip], fitted: &[[f64; 2]], shape: MaskShape) -> Command {
+    let mut size = fitted.iter();
+    rewrite(clips, |_, x, _| {
+        let [w, h] = size.next().copied().unwrap_or([100.0; 2]);
+        let points = vec![[0.0, 0.0], [w / 2.0, h / 2.0]];
+        x.masks.push(Mask::new(shape, points));
+    })
+}
+
+/// The Masks section: a block per mask when every clip has the same shapes, its header as
+/// an effect block's, then Add Mask. A bezier is drawn on the Program view, so adding one
+/// starts drawing there on the first clip, seeking into it.
+fn masks_rows(
+    ui: &mut Ui,
+    clips: &[&Clip],
+    fitted: &[[f64; 2]],
+    t: Time,
+    index: &mut u64,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
+    if !section(ui, "masks", None).0 {
+        return None;
+    }
+    let shapes = |c: &Clip| {
+        c.transform
+            .masks
+            .iter()
+            .map(|m| m.shape)
+            .collect::<Vec<_>>()
+    };
+    if clips.iter().any(|c| shapes(c) != shapes(clips[0])) {
+        ui.label(egui::RichText::new(tr!("inspector.mixed_masks")).color(color::INK_3));
+        return None;
+    }
+    let masks = &clips[0].transform.masks;
+    let n = masks.len();
+    let mut edit = None;
+    for (i, m) in masks.iter().enumerate() {
+        if i > 0 {
+            let y = ui.cursor().top() - ui.spacing().item_spacing.y / 2.0;
+            let line = egui::Stroke::new(1.0 / ui.pixels_per_point(), color::BORDER);
+            ui.painter().hline(ui.max_rect().x_range(), y, line);
+        }
+        let names = [0, 1, 2, 3].map(|j| match j {
+            0 | 1 => Mask::point(i, j),
+            2 => Mask::key(i, "feather"),
+            _ => Mask::key(i, "opacity"),
+        });
+        let xy = |name, label| Prop {
+            label: Some(label),
+            resets: false,
+            ..prop(name, XY)
+        };
+        let shape = [
+            xy(&names[0], caption("position")),
+            Prop {
+                range: (0.0, f64::INFINITY),
+                ..xy(&names[1], tr!("inspector.mask_size"))
+            },
+        ];
+        let props = [
+            Prop {
+                label: Some(tr!("inspector.feather")),
+                range: (0.0, f64::INFINITY),
+                slider: Some((0.0, 200.0)),
+                default: Some(0.0),
+                ..prop(&names[2], ONE)
+            },
+            Prop {
+                label: Some(caption("opacity")),
+                display: 100.0,
+                decimals: 0,
+                suffix: "%",
+                range: (0.0, 1.0),
+                default: Some(1.0),
+                ..prop(&names[3], ONE)
+            },
+        ];
+        let changed = props.iter().any(|p| differs(clips, p, t))
+            || clips.iter().any(|c| {
+                let m = &c.transform.masks[i];
+                m.invert || m.mode != MaskMode::Add
+            });
+        let title = tr!(
+            "inspector.mask_title",
+            shape = shape_name(m.shape),
+            n = i + 1
+        );
+        let id = ui.id().with(("inspector mask", i));
+        let mut open = ui.data_mut(|d| *d.get_temp_mut_or(id, true));
+        let head = FxHead {
+            title: &title,
+            problem: None,
+            on: m.enabled,
+            changed,
+        };
+        let on = !m.enabled;
+        let cmd = match fx_head(ui, head, &mut open, i, n) {
+            Some(FxAction::Bypass) => Some(edit_mask(clips, i, |m| m.enabled = on)),
+            Some(FxAction::Move(to)) => Some(restack_masks(clips, |o| move_to(o, i, to))),
+            Some(FxAction::Reset) => Some(reset_mask(clips, i)),
+            Some(FxAction::Remove) => Some(restack_masks(clips, |o| {
+                o.remove(i);
+            })),
+            None => None,
+        };
+        if let Some(cmd) = cmd {
+            edit = Some((cmd, None));
+        }
+        ui.data_mut(|d| d.insert_temp(id, open));
+        let first = *index;
+        *index += 6;
+        if !open {
+            continue;
+        }
+        ui.add_enabled_ui(m.enabled, |ui| {
+            let shape = match m.shape {
+                MaskShape::Bezier => &[][..],
+                _ => &shape[..],
+            };
+            if m.shape == MaskShape::Bezier
+                && let Some(e) = path_row(ui, clips, i, t, first + 1, seek)
+            {
+                edit = Some(e);
+            }
+            for (k, p) in (first + 1..).zip(shape.iter().chain(&props)) {
+                if let Some(e) = row(ui, clips, p, t, k, seek) {
+                    edit = Some(e);
+                }
+            }
+            let modes = [MaskMode::Add, MaskMode::Subtract];
+            let mut k = usize::from(m.mode == MaskMode::Subtract);
+            let labels = [tr!("inspector.mask_add"), tr!("inspector.mask_subtract")];
+            let tools = Tools::default();
+            let (changed, _) = prop_row(ui, tr!("inspector.mask_mode"), tools, |ui| {
+                let w = ui.available_width();
+                ui.add(Dropdown::new(&mut k, &labels).width(w)).changed()
+            });
+            if changed {
+                edit = Some((edit_mask(clips, i, |m| m.mode = modes[k]), None));
+            }
+            let mut invert = m.invert;
+            let (changed, _) = prop_row(ui, "", Tools::default(), |ui| {
+                ui.add(Checkbox::new(&mut invert, tr!("inspector.invert")))
+                    .changed()
+            });
+            if changed {
+                edit = Some((edit_mask(clips, i, |m| m.invert = invert), None));
+            }
+        });
+    }
+    if let Some(e) = add_mask_menu(ui, clips, fitted, t, seek) {
+        edit = Some(e);
+    }
+    edit
+}
+
+/// A bezier mask's Path row: its point count, and keyframe tools that key every point
+/// together, so the shape animates as one.
+fn path_row(
+    ui: &mut Ui,
+    clips: &[&Clip],
+    i: usize,
+    t: Time,
+    index: u64,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
+    let n = clips[0].transform.masks[i].points.len();
+    let names: Vec<String> = (0..n).map(|j| Mask::point(i, j)).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let label = tr!("inspector.mask_path");
+    let anim = any_animated(clips, &names);
+    let key = match anim {
+        false => tr!("inspector.animate", name = label),
+        true => tr!("inspector.key_here").to_owned(),
+    };
+    let keyed = match () {
+        _ if !anim => Keyed::Static,
+        _ if all_keyed(clips, &names, t) => Keyed::Here,
+        _ => Keyed::Animated,
+    };
+    let tools = Tools {
+        reset: None,
+        nav: anim,
+        key: Some((keyed, &key)),
+    };
+    let points = tr!("inspector.mask_points", n = n / 3);
+    let (_, c) = prop_row(ui, label, tools, |ui| {
+        ui.label(egui::RichText::new(points).color(color::INK_3))
+    });
+    key_clicks(clips, &names, c, t, index, seek)
+}
+
+/// Add Mask: a button opening the shapes; a rectangle or ellipse goes on every clip, a bezier
+/// starts drawing on the Program view.
+fn add_mask_menu(
+    ui: &mut Ui,
+    clips: &[&Clip],
+    fitted: &[[f64; 2]],
+    t: Time,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
+    let w = ui.available_width();
+    let add = Button::secondary(tr!("inspector.add_mask")).with_icon(icon::PLUS);
+    let r = ui.add(add.width(w));
+    let mut pick = None;
+    egui::Popup::menu(&r).width(w).show(|ui| {
+        for s in [MaskShape::Rectangle, MaskShape::Ellipse, MaskShape::Bezier] {
+            if ui.add(egui::Button::new(shape_name(s))).clicked() {
+                pick = Some(s);
+            }
+        }
+    });
+    match pick? {
+        MaskShape::Bezier => {
+            let c = clips[0];
+            crate::masks::draw(ui.ctx(), c.id);
+            if !(c.start <= t && t < c.end()) {
+                *seek = Some(c.start);
+            }
+            None
+        }
+        s => Some((push_mask(clips, fitted, s), None)),
+    }
+}
+
 const SPEED_GESTURE: GestureKey = 0x7370_6565_6400; // "speed"
 
 /// Speed percentage, reverse and ripple for the first selected clip and its links.
@@ -1584,7 +1915,7 @@ fn row(
         _ => tr!("inspector.key_here").to_owned(),
     };
     let tools = Tools {
-        reset: differs(clips, p, t).then_some(reset),
+        reset: (p.resets && differs(clips, p, t)).then_some(reset),
         nav: anim,
         key: Some((keyed, &key)),
     };
@@ -1649,17 +1980,37 @@ fn row(
     if c.reset {
         edit = Some((reset_prop(clips, p), None));
     }
+    key_clicks(clips, &names, c, t, index, seek).or(edit)
+}
+
+/// What a row's keyframe tools did to `names`: the arrows seek to the next key either side,
+/// the diamond animates or keys them, and right-clicking it edits their easing.
+fn key_clicks(
+    clips: &[&Clip],
+    names: &[&str],
+    c: Clicks,
+    t: Time,
+    index: u64,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
+    let anim = any_animated(clips, names);
+    let keyed = match () {
+        _ if !anim => Keyed::Static,
+        _ if all_keyed(clips, names, t) => Keyed::Here,
+        _ => Keyed::Animated,
+    };
+    let mut edit = None;
     if c.previous {
-        *seek = neighbour(clips, &names, t, -1);
+        *seek = neighbour(clips, names, t, -1);
     }
     if c.next {
-        *seek = neighbour(clips, &names, t, 1);
+        *seek = neighbour(clips, names, t, 1);
     }
     let diamond = c.key.expect("rows have a diamond");
     if diamond.clicked() {
         let cmd = match anim {
-            false => toggle_animate(clips, &names, t),
-            true => toggle_key(clips, &names, t),
+            false => toggle_animate(clips, names, t),
+            true => toggle_key(clips, names, t),
         };
         edit = Some((cmd, None));
     }
@@ -1668,7 +2019,7 @@ fn row(
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| {
                 if keyed == Keyed::Here
-                    && let Some(e) = easing_menu(ui, clips, &names, t, index)
+                    && let Some(e) = easing_menu(ui, clips, names, t, index)
                 {
                     edit = Some(e);
                 }
@@ -1676,7 +2027,7 @@ fn row(
                     .add(Button::ghost(tr!("inspector.stop_animating")))
                     .clicked()
                 {
-                    edit = Some((toggle_animate(clips, &names, t), None));
+                    edit = Some((toggle_animate(clips, names, t), None));
                     ui.close();
                 }
             });
@@ -2156,6 +2507,42 @@ mod tests {
     }
 
     #[test]
+    fn mask_keys_follow_their_mask_and_reset_keeps_the_shape() {
+        let rect = Mask::new(MaskShape::Rectangle, vec![[0.0; 2], [100.0, 50.0]]);
+        let ellipse = Mask::new(MaskShape::Ellipse, vec![[5.0, 5.0], [20.0, 20.0]]);
+        let mut clips = [clip(1, 0)];
+        clips[0].transform.masks = vec![rect.clone(), ellipse.clone()];
+        let feather = Mask::key(1, "feather");
+        apply(&mut clips, |c| {
+            toggle_animate(c, &[feather.as_str()], Time(0))
+        });
+        apply(&mut clips, |c| {
+            set_field(c, &feather, 0, |_| 10.0, Time(100))
+        });
+        let mid = |c: &Clip| c.transform_at(Time(50)).masks[0].feather;
+        apply(&mut clips, |c| restack_masks(c, |o| o.swap(0, 1)));
+        assert_eq!(clips[0].transform.masks[0].shape, MaskShape::Ellipse);
+        assert!(clips[0].keyframes.contains_key("mask0.feather"));
+        assert!((mid(&clips[0]) - 5.0).abs() < 0.1, "{}", mid(&clips[0]));
+        // Reset goes back to a hard, opaque mask of the same shape, without keys.
+        apply(&mut clips, |c| {
+            edit_mask(c, 0, |m| {
+                m.invert = true;
+                m.opacity = 0.5;
+            })
+        });
+        apply(&mut clips, |c| reset_mask(c, 0));
+        assert_eq!(clips[0].transform.masks[0], ellipse);
+        assert!(clips[0].keyframes.is_empty());
+        apply(&mut clips, |c| {
+            restack_masks(c, |o| {
+                o.remove(0);
+            })
+        });
+        assert_eq!(clips[0].transform.masks, [rect]);
+    }
+
+    #[test]
     fn bypass_keeps_settings_and_keys_and_blocks_move_into_gaps() {
         let fx = |shader: &str| Effect {
             shader: shader.into(),
@@ -2446,6 +2833,7 @@ mod tests {
                 audio,
                 shared,
                 same: true,
+                fitted: vec![],
             }
             .panes()
         };
@@ -2491,6 +2879,7 @@ mod tests {
                 audio: vec![],
                 shared: None,
                 same: true,
+                fitted: vec![],
             }
             .label(Pane::Effects)
         };
@@ -2880,6 +3269,43 @@ mod tests {
         h.run();
         assert_eq!(stack(&h), on(&["vignette"]));
         assert_eq!(above(&h), before);
+    }
+
+    #[test]
+    fn masks_add_edit_and_remove_in_one_step_each() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness();
+        h.set_size(vec2(340.0, 1000.0));
+        h.run();
+        let masks = |h: &egui_kittest::Harness<'_, History>| {
+            let c = &h.state().project().sequence().tracks()[0].clips()[0];
+            c.transform.masks.clone()
+        };
+        h.get_by_label("Add Mask").click();
+        h.run();
+        h.get_by_role_and_label(Role::Button, "Ellipse").click();
+        h.run();
+        // Half the 1920x1080 clip, centred.
+        let ellipse = Mask::new(MaskShape::Ellipse, vec![[0.0; 2], [960.0, 540.0]]);
+        assert_eq!(masks(&h), std::slice::from_ref(&ellipse));
+        h.get_by_label("Invert").click();
+        h.run();
+        assert!(masks(&h)[0].invert);
+        h.snapshot("inspector_masks");
+        assert!(h.state_mut().undo());
+        assert_eq!(masks(&h), [ellipse]);
+        h.get_by_label("More").click();
+        h.run();
+        h.get_by_role_and_label(Role::Button, "Remove").click();
+        h.run();
+        assert!(masks(&h).is_empty());
+        assert!(h.state_mut().undo());
+        assert!(h.state_mut().undo());
+        assert!(masks(&h).is_empty(), "adding was one step too");
     }
 
     #[test]
