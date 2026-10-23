@@ -16,7 +16,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::wgpu;
-use jvid_audio::{Mixer, Output, SAMPLE_RATE, Strip, automate};
+use jvid_audio::{Fx, Mixer, Output, SAMPLE_RATE, Strip, automate};
 use jvid_core::eval::{AudioSegment, Layer, audio_in, gain_at, video_at};
 use jvid_core::model::{
     AssetId, ClipId, MediaAsset, Project, ProjectSettings, TrackKind, Transform,
@@ -164,6 +164,8 @@ pub(crate) struct Audio {
     open: OpenAudio,
     /// One source per stream the clip plays; several are summed.
     clips: HashMap<ClipId, Vec<ClipAudio>>,
+    /// Effect state of the clips in `clips`.
+    fx: HashMap<ClipId, Fx>,
     scratch: Vec<f32>,
     /// One segment's samples, summed into its track since a transition overlaps two.
     seg: Vec<f32>,
@@ -179,6 +181,7 @@ impl Audio {
         Self {
             open,
             clips: HashMap::new(),
+            fx: HashMap::new(),
             scratch: Vec::new(),
             seg: Vec::new(),
             stretch: Vec::new(),
@@ -192,6 +195,7 @@ impl Audio {
     pub(crate) fn prime(&mut self, project: &Project, pos: Time) {
         let segs = audio_in(project.sequence(), pos, pos + AUDIO_AHEAD);
         self.clips.retain(|c, _| segs.iter().any(|s| s.clip == *c));
+        self.fx.retain(|c, _| self.clips.contains_key(c));
         for s in segs {
             if let Some(a) = project.asset(s.asset)
                 && !self.clips.contains_key(&s.clip)
@@ -223,6 +227,7 @@ impl Audio {
                 pan: t.pan,
                 muted: t.muted,
                 solo: t.solo,
+                fx: t.fx,
             })
             .collect();
         self.mixer.set_strips(&strips);
@@ -261,6 +266,11 @@ impl Audio {
             if let Some((t, c)) = seq.clip(s.clip)
                 && let Some(track) = seq.track(t)
             {
+                // Effects before gain, so fades and automation don't change how it compresses.
+                if !c.transform.audio_fx.is_default() {
+                    let fx = self.fx.entry(s.clip).or_default();
+                    fx.process(&c.transform.audio_fx, out);
+                }
                 let first = sample(s.start);
                 let at = |i: usize| {
                     let t = Time((first + i as i64) * FLICKS_PER_SAMPLE);

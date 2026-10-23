@@ -342,6 +342,9 @@ pub struct Track {
     /// Holds imported subtitles: its text clips are the cues an `.srt` sidecar writes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub subtitles: bool,
+    /// EQ and compressor on the track's mix, before its volume and pan.
+    #[serde(default, skip_serializing_if = "AudioFx::is_default")]
+    pub fx: AudioFx,
     /// Sorted by `start`, never overlapping. Mutate through `Sequence`.
     clips: Vec<Clip>,
 }
@@ -359,6 +362,7 @@ pub struct TrackSettings {
     pub pan: f32,
     pub height: f32,
     pub target: bool,
+    pub fx: AudioFx,
 }
 
 impl Track {
@@ -381,6 +385,7 @@ impl Track {
             pan: self.pan,
             height: self.height,
             target: self.target,
+            fx: self.fx,
         }
     }
 
@@ -484,6 +489,8 @@ pub struct Transform {
     pub volume: f64,
     /// Audio clip balance, -1.0 (left) to 1.0 (right); centre leaves both sides at unity.
     pub pan: f64,
+    /// Audio clip EQ and compressor, before its gain; not animatable.
+    pub audio_fx: AudioFx,
     /// Color adjustments, applied in linear light before blending; all 0 leaves pixels untouched.
     /// Stops, -4..=4.
     pub exposure: f64,
@@ -505,6 +512,82 @@ pub struct Transform {
     pub transition: Option<Transition>,
     /// WGSL effects run on the clip's image in order, before its color adjustments.
     pub effects: Vec<Effect>,
+}
+
+/// A clip's or track's audio effects, in processing order. The defaults change nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AudioFx {
+    pub eq: Equalizer,
+    pub compressor: Compressor,
+}
+
+impl AudioFx {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Three bands: a low shelf, a peak and a high shelf (RBJ cookbook, shelf slope 1). Gains in dB,
+/// frequencies in Hz.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Equalizer {
+    /// Off bypasses it, keeping the settings.
+    pub enabled: bool,
+    pub low: f32,
+    pub low_freq: f32,
+    pub mid: f32,
+    pub mid_freq: f32,
+    /// The peak's Q.
+    pub mid_q: f32,
+    pub high: f32,
+    pub high_freq: f32,
+}
+
+impl Default for Equalizer {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            low: 0.0,
+            low_freq: 100.0,
+            mid: 0.0,
+            mid_freq: 1_000.0,
+            mid_q: 1.0,
+            high: 0.0,
+            high_freq: 10_000.0,
+        }
+    }
+}
+
+/// A feed-forward peak compressor, stereo-linked. The default 1:1 ratio leaves the sound alone.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Compressor {
+    /// Off bypasses it, keeping the settings.
+    pub enabled: bool,
+    /// dBFS.
+    pub threshold: f32,
+    /// Input dB over the threshold per output dB, at least 1.
+    pub ratio: f32,
+    /// Milliseconds.
+    pub attack: f32,
+    pub release: f32,
+    /// dB of gain after compressing.
+    pub makeup: f32,
+}
+
+impl Default for Compressor {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            threshold: -20.0,
+            ratio: 1.0,
+            attack: 10.0,
+            release: 100.0,
+            makeup: 0.0,
+        }
+    }
 }
 
 /// A user WGSL effect on a clip: the effect file's stem and its parameter values by name.
@@ -589,6 +672,7 @@ impl Default for Transform {
             blend: Blend::Normal,
             volume: 1.0,
             pan: 0.0,
+            audio_fx: AudioFx::default(),
             exposure: 0.0,
             contrast: 0.0,
             saturation: 0.0,
@@ -981,6 +1065,7 @@ impl Sequence {
                 height: Track::default_height(),
                 target: false,
                 subtitles: false,
+                fx: AudioFx::default(),
                 clips: Vec::new(),
             },
         );
@@ -1000,6 +1085,7 @@ impl Sequence {
         t.pan = s.pan;
         t.height = s.height.clamp(Track::MIN_HEIGHT, Track::MAX_HEIGHT);
         t.target = s.target;
+        t.fx = s.fx;
         if s.target {
             for o in self
                 .tracks
@@ -2321,6 +2407,24 @@ mod tests {
             r#"{"id":1,"asset":1,"source_in":0,"source_out":1,"start":0,"link":null,"params":{}}"#;
         let old: Clip = serde_json::from_str(json).unwrap();
         assert_eq!(old.transform, Transform::default());
+    }
+
+    #[test]
+    fn audio_fx_default_off_the_page_and_round_trip() {
+        let (mut s, _, a) = seq();
+        let mut track = s.track(a).unwrap().clone();
+        // Projects from before audio effects load with none, and saving leaves them out again.
+        let json = serde_json::to_string(&track).unwrap();
+        assert!(!json.contains("fx"), "{json}");
+        assert_eq!(serde_json::from_str::<Track>(&json).unwrap(), track);
+        track.fx.eq.mid = 6.0;
+        track.fx.compressor.enabled = false;
+        let json = serde_json::to_string(&track).unwrap();
+        assert_eq!(serde_json::from_str::<Track>(&json).unwrap(), track);
+        let mut st = track.settings();
+        st.fx.compressor.ratio = 4.0;
+        s.set_track(st.clone()).unwrap();
+        assert_eq!(s.track(a).unwrap().fx, st.fx);
     }
 
     #[test]

@@ -2113,6 +2113,7 @@ name = "jvid-audio"
 version = "0.1.0"
 dependencies = [
  "cpal",
+ "jvid-core",
  "jvid-media",
  "rtrb",
  "tracing",

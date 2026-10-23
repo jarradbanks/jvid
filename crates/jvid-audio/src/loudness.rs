@@ -6,19 +6,20 @@ use std::collections::VecDeque;
 /// Frames per 100 ms gating step at 48 kHz.
 const STEP: usize = 4_800;
 
+/// Direct form II transposed, in f64 so low cutoffs stay accurate.
 #[derive(Clone, Copy, Default)]
-struct Biquad {
-    b: [f64; 3],
-    a: [f64; 2],
+pub(crate) struct Biquad {
+    pub(crate) b: [f64; 3],
+    pub(crate) a: [f64; 2],
     z: [f64; 2],
 }
 
 impl Biquad {
-    fn new(b: [f64; 3], a: [f64; 2]) -> Self {
+    pub(crate) fn new(b: [f64; 3], a: [f64; 2]) -> Self {
         Self { b, a, z: [0.0; 2] }
     }
 
-    fn run(&mut self, x: f64) -> f64 {
+    pub(crate) fn run(&mut self, x: f64) -> f64 {
         let y = self.b[0] * x + self.z[0];
         self.z[0] = self.b[1] * x - self.a[0] * y + self.z[1];
         self.z[1] = self.b[2] * x - self.a[1] * y;

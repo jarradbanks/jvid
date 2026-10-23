@@ -1569,10 +1569,12 @@ impl Timeline {
                 color::LIGHT_BLUE,
             );
         }
-        let ink = if track.target {
-            color::LIGHT_BLUE
-        } else {
-            color::INK
+        // Green while the track's EQ or compressor is on; the tooltip and label say so too.
+        let fx = track.kind == TrackKind::Audio && !track.fx.is_default();
+        let ink = match () {
+            _ if track.target => color::LIGHT_BLUE,
+            _ if fx => color::GREEN,
+            _ => color::INK,
         };
         painter.text(
             id_rect.center(),
@@ -1582,17 +1584,24 @@ impl Timeline {
             ink,
         );
         target.widget_info(|| {
-            let name = tr!("timeline.target");
+            let name = match fx {
+                true => format!("{}, {}", tr!("timeline.target"), tr!("timeline.fx_on")),
+                false => tr!("timeline.target").to_owned(),
+            };
             egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, track.target, name)
         });
         if target.clicked() {
             edit = set(&|s| s.target = !s.target);
         }
-        let target = target.on_hover_text(if track.target {
+        let tip = if track.target {
             tr!("timeline.target_on")
         } else {
             tr!("timeline.target_off")
-        });
+        };
+        let target = match fx {
+            true => target.on_hover_text(format!("{tip}\n{}", tr!("timeline.fx_on"))),
+            false => target.on_hover_text(tip),
+        };
         if target.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
@@ -1768,6 +1777,16 @@ impl Timeline {
         body.context_menu(|ui| {
             if ui.button(tr!("timeline.rename")).clicked() {
                 self.renaming = Some((track.id, track.name.clone()));
+            }
+            if track.kind == TrackKind::Audio {
+                ui.menu_button(tr!("timeline.audio_effects"), |ui| {
+                    ui.set_width(320.0);
+                    if let Some((f, gesture)) = crate::inspector::audio_fx(ui, &[track.fx]) {
+                        let mut s = track.settings();
+                        f(&mut s.fx);
+                        edit = Some((Command::SetTrack(s), gesture.map(|g| g ^ track.id.0)));
+                    }
+                });
             }
             let mv = |index| {
                 Some((
