@@ -492,15 +492,20 @@ impl Preview {
         // An empty sequence leaves the viewer empty, like a Source tab with nothing open.
         let empty = project.sequence().duration() == Time(0);
         if trim.is_some() || empty {
-            // A trim is a drag.
-            self.update_thumb(empty, trim.is_some());
+            // A trim is a drag. A new frame lands as this one draws: one more pass shows it in
+            // the thumbnails drawn on it.
+            if self.update_thumb(empty, trim.is_some()) {
+                ui.ctx().request_repaint();
+            }
             self.show(ui, trim, offline, None, None);
             return None;
         }
         self.proxy_sources(project);
         let dragging = ui.input(|i| i.pointer.primary_down());
         let follow = self.sync_program(project, playhead, dragging);
-        self.update_thumb(false, dragging);
+        if self.update_thumb(false, dragging) {
+            ui.ctx().request_repaint();
+        }
         if self.program.transport.speed() != 0 {
             ui.ctx().request_repaint();
         }
@@ -617,15 +622,12 @@ impl Preview {
 
     /// The thumbnail frame as an egui texture, and its [`Thumbs::generation`]; `None` without
     /// wgpu. The Program frame is copied in as it's drawn, so a change shows the frame after.
-    // shortcut: unused until the Effects (#235) and Text (#236) tabs draw thumbnails; drop the allow then.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn thumb_frame(&self) -> Option<(egui::TextureId, u64)> {
         Some((self.thumb.id?, self.with_thumbs(|t, _, _| t.generation)?))
     }
 
     /// Draws a thumbnail with `f`, such as [`Thumbs::effect`] or [`Thumbs::text`], into egui
     /// texture `id` (or a new one) and returns it; `None` without wgpu.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn draw_thumb(
         &self,
         id: Option<egui::TextureId>,
@@ -1358,8 +1360,12 @@ mod program_tests {
         assert_eq!(frame(&h), fallback, "an empty project shows the fallback");
         let (id, g) = h.state().preview.thumb_frame().expect("an egui texture");
         add_solid(&mut h.state_mut().history, [1.0, 0.0, 0.0, 1.0], Time(0));
-        h.run();
-        h.render().unwrap();
+        // Drawn frame by frame, as the app does: the copy happens as a frame draws, and the
+        // repaint asked for then shows it in the thumbnails drawn on it.
+        for _ in 0..3 {
+            h.step();
+            h.render().unwrap();
+        }
         assert!(frame(&h).chunks(4).all(|p| p == [255, 0, 0, 255]));
         assert_eq!(h.state().preview.thumb_frame(), Some((id, g + 1)));
         // A drawn thumbnail gets its own egui texture, kept on redraw.

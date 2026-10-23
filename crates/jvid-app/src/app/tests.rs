@@ -1130,6 +1130,58 @@ fn clicking_a_preset_shows_its_asset_in_the_media_tab() {
     assert_eq!((h.state().bin.tab, h.state().bin.selected), (0, id));
 }
 
+#[test]
+fn each_text_tile_shows_its_preset_on_the_frame() {
+    if !gpu() {
+        return;
+    }
+    let mut h = harness([1280.0, 720.0], 1.0);
+    h.state_mut().bin.tab = 2;
+    h.run();
+    let img = h.render().unwrap();
+    // Each tile's thumbnail: inset 4pt, 16:9 across the tile.
+    let thumb = |name: &str| {
+        let r = h.get_by_label(name).rect();
+        let w = r.width() - 8.0;
+        Rect::from_min_size(r.min + egui::vec2(4.0, 4.0), egui::vec2(w, w * 9.0 / 16.0))
+    };
+    let pixels = |r: Rect| -> Vec<[u8; 4]> {
+        let (x0, y0) = (r.left().ceil() as u32, r.top().ceil() as u32);
+        let (w, h) = (r.width() as u32 - 1, r.height() as u32 - 1);
+        (y0..y0 + h)
+            .flat_map(|y| (x0..x0 + w).map(move |x| (x, y)))
+            .map(|(x, y)| img.get_pixel(x, y).0)
+            .collect()
+    };
+    let [title, lower, caption] = ["Title", "Lower Third", "Caption"].map(|n| pixels(thumb(n)));
+    assert!(lower.iter().any(|p| p[..3] != [0, 0, 0]), "the frame draws");
+    // Same frame, same size: where they clearly differ is where a preset lands. The lower third's box
+    // draws whatever the fonts, and sits low on the frame.
+    let rows = |a: &[[u8; 4]], b: &[[u8; 4]]| {
+        let w = thumb("Title").width() as usize - 1;
+        let n = a.len() / w;
+        (0..n)
+            .filter(|y| {
+                // Columns differ by a subpixel of resampling; a preset by far more.
+                let far = |(p, q): (&[u8; 4], &[u8; 4])| (0..3).any(|c| p[c].abs_diff(q[c]) > 48);
+                a[y * w..][..w].iter().zip(&b[y * w..][..w]).any(far)
+            })
+            .map(|y| y as f32 / n as f32)
+            .collect::<Vec<_>>()
+    };
+    let low = rows(&lower, &caption);
+    assert!(!low.is_empty(), "the lower third draws");
+    assert!(low.iter().all(|y| *y > 0.5), "below the middle: {low:?}");
+    if !jvid_render::text::families().is_empty() {
+        assert!(
+            rows(&title, &caption)
+                .iter()
+                .any(|y| (0.4..0.6).contains(y)),
+            "the title, centred"
+        );
+    }
+}
+
 /// A selected title in a 1280x720 app, its clip id and the Program frame's center.
 fn title_harness() -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
     use jvid_core::history::Created;
