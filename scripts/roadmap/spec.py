@@ -961,20 +961,6 @@ I("srt", "SRT subtitles: import, burn-in and sidecar", "M6", ["export", "render"
 
 # ───────────────────────── Later ─────────────────────────
 
-for key, title, summary in [
-    ("chroma-key", "Chroma key", "Green and blue screen keying with spill suppression."),
-    ("masks", "Masks", "Rectangle, ellipse and bezier masks with feather, animatable."),
-    ("scopes", "Video scopes", "Waveform, vectorscope and histogram."),
-    ("speed-ramps", "Speed ramps", "Keyframed speed with smooth ramps."),
-    ("nested", "Nested sequences", "Use a sequence as a clip in another sequence."),
-    ("voiceover", "Voiceover recording", "Record from a microphone straight onto an audio track."),
-    ("audio-fx", "Audio EQ and compressor", "Basic per-clip and per-track audio effects."),
-    ("hdr", "HDR support", "PQ/HLG sources, tone mapping and HDR export."),
-    ("graph-editor", "Curve graph editor", "A full graph editor for keyframe curves."),
-    ("silence-detect", "Silence detection to cut dead air", "Find silent stretches in screen recordings and offer to cut or speed them up."),
-]:
-    I(key, title, None, [], None, summary=summary, labels=["later"])
-
 I("kf-discover", "Inspector gutter and keyframe lane discoverability", "M3", ["ui", "timeline"], "S", ["keyframe-lanes"],
   summary="Fixes from the owner's second hands-on test: cramped inspector buttons and hidden keyframe lane toggle.",
   scope=[
@@ -1243,3 +1229,119 @@ I("text-tiles", "Text tab preset tiles", None, ["ui"], "S", ["thumb-frame"],
       "Clicking a tile adds the preset to the bin; dragging one onto the timeline places it"],
   refs=[MOCK3],
   labels=["later"])
+
+# ───────────────────────── Later: scoped 2026-10-24 ─────────────────────────
+
+I("chroma-key", "Chroma key", None, ["render"], "S", labels=["later"],
+  summary="Green and blue screen keying with spill suppression.",
+  scope=[
+      "A bundled Chroma Key effect: key colour (green by default, blue preset or any hue), tolerance, edge softness and spill suppression",
+      "Keyed pixels become transparent so lower tracks show through, in preview, export and CLI render like every bundled effect",
+      "Parameters are animatable like other effect parameters",
+  ],
+  ac=["A green-screen frame keyed over a red lower track renders red where the green was and keeps the foreground",
+      "Spill suppression measurably reduces the green cast on foreground edge pixels (render test)"])
+
+I("masks", "Masks", None, ["core", "render", "ui"], "L", ["inspector-tabs"], labels=["later"],
+  summary="Rectangle, ellipse and bezier masks with feather, animatable.",
+  scope=[
+      "Clips carry a list of masks: rectangle, ellipse or bezier path, each with feather, opacity, invert and add/subtract mode",
+      "Mask shape and feather are keyframeable through the existing keyframe model",
+      "Draw and edit masks with handles on the Program view; list and edit them in the Inspector",
+      "Masks apply in preview, export and CLI render; older project files load unchanged",
+  ],
+  ac=["A feathered ellipse mask leaves the clip transparent outside the ellipse with a soft edge (render test)",
+      "A keyframed rectangle mask animates between two keys",
+      "Masks survive save and reopen, and every mask edit is one undo step"])
+
+I("scopes", "Video scopes", None, ["render", "ui"], "M", labels=["later"],
+  summary="Waveform, vectorscope and histogram.",
+  scope=[
+      "A Scopes panel showing luma waveform, vectorscope and RGB histogram of the Program frame",
+      "Computed from a downscaled copy of the composited frame on the GPU or a small readback; updates when paused and at a reduced rate during playback",
+      "Scope work never makes playback drop frames",
+  ],
+  ac=["A solid red frame puts the vectorscope trace at red and the histogram spike at red's code values (test)",
+      "A black-to-white ramp draws a diagonal luma waveform (test)",
+      "Playback with the Scopes panel open keeps the existing playback tests' frame budget"])
+
+I("speed-ramps", "Speed ramps", None, ["core", "media", "ui"], "L", labels=["later"],
+  summary="Keyframed speed with smooth ramps.",
+  scope=[
+      "Clip speed becomes keyframeable with the existing easing; the source time at any timeline time integrates the speed curve",
+      "The clip's timeline length follows the integrated curve; Ripple keeps its current meaning",
+      "Preview, export and audio follow the ramp (audio resampled to the speed; pitch preservation is a follow-up)",
+      "The Inspector Speed row gets the keyframe diamond like other rows",
+  ],
+  ac=["A 100% to 200% linear ramp maps timeline time to the analytically expected source time within one frame (test)",
+      "An export of a ramped clip has the expected duration and frame sequence",
+      "Adding, moving and removing speed keys are each one undo step"])
+
+I("nested", "Nested sequences", None, ["core", "render", "ui", "timeline"], "L", labels=["later"],
+  summary="Use a sequence as a clip in another sequence.",
+  scope=[
+      "A project holds several sequences; the bin lists them and the Timeline switches between them",
+      "Nest: replace selected clips with one clip that plays a new sequence holding them; sequences can also be dragged from the bin onto the timeline",
+      "A sequence clip composites and mixes its sequence recursively in preview, export and CLI render; cycles are refused",
+      "Older single-sequence project files load unchanged",
+  ],
+  ac=["A nested sequence renders the same frame as the clips it replaced (render test)",
+      "Nesting a sequence inside itself, directly or indirectly, is refused",
+      "Nest is one undo step, and nested projects survive save and reopen"])
+
+I("voiceover", "Voiceover recording", None, ["audio", "ui"], "M", labels=["later"],
+  summary="Record from a microphone straight onto an audio track.",
+  scope=[
+      "Arm an audio track and record from the selected input device (default device, choosable in Preferences) through cpal",
+      "Audio is written as WAV into the project's media folder and placed on the armed track at the record start, as one undo step",
+      "A level meter shows while recording; Stop or Space ends the take",
+      "Missing device or permission errors show as a toast and leave the project unchanged",
+  ],
+  ac=["With a fake input feed, a recording writes a WAV of the fed samples and places a clip of that length at the record start (test)",
+      "Undo removes the recorded clip; the WAV stays in the media folder",
+      "Recording from a real microphone works on Windows (needs user testing)"])
+
+I("audio-fx", "Audio EQ and compressor", None, ["audio", "core", "ui"], "M", ["inspector-tabs"], labels=["later"],
+  summary="Basic per-clip and per-track audio effects.",
+  scope=[
+      "A three-band EQ (low shelf, peak, high shelf) and a compressor (threshold, ratio, attack, release, makeup) per clip and per track",
+      "Applied in the playback mixer and in export, each bypassable; clip settings live in the Inspector's Audio tab, track settings on the track header",
+      "Parameters are undoable and saved with the project",
+  ],
+  ac=["A +6 dB peak at 1 kHz raises a 1 kHz sine by 6 dB within 0.5 dB and leaves 100 Hz within 0.5 dB (DSP test)",
+      "The compressor reduces a signal 12 dB over threshold at 4:1 to 3 dB over, after attack (DSP test)",
+      "An export of a clip with EQ matches the playback mixer's output"])
+
+I("hdr", "HDR support", None, ["media", "render"], "L", labels=["later"],
+  summary="PQ/HLG sources, tone mapping and HDR export.",
+  scope=[
+      "Probe detects PQ and HLG (BT.2020) sources and the bin marks them",
+      "HDR sources decode at 10 bits and tone-map to SDR BT.709 for preview and SDR export with one documented operator",
+      "Project setting for HDR output: HEVC 10-bit PQ export with BT.2020 tags and mastering metadata",
+  ],
+  ac=["A generated PQ test clip probes as PQ BT.2020 10-bit",
+      "Tone-mapped preview of the PQ clip stays within SDR range and keeps mid-grey near mid-grey (test)",
+      "An HDR export probes as HEVC 10-bit PQ BT.2020; viewing on an HDR display needs user testing"])
+
+I("graph-editor", "Curve graph editor", None, ["ui", "timeline"], "M", labels=["later"],
+  summary="A full graph editor for keyframe curves.",
+  scope=[
+      "A graph view for the selected clip's animated properties: value over time with every key and its bezier handles",
+      "Select, drag and box-select keys; drag handles to shape the easing; frame-fit and zoom",
+      "Open it from the keyframe lanes and close back to them; edits are undoable",
+  ],
+  ac=["Dragging a key in the graph changes its time and value as one undo step",
+      "Dragging a bezier handle changes that key's easing to the matching custom curve",
+      "kittests cover key drag, handle drag and undo"])
+
+I("silence-detect", "Silence detection to cut dead air", None, ["media", "timeline", "ui"], "M", labels=["later"],
+  summary="Find silent stretches in screen recordings and offer to cut or speed them up.",
+  scope=[
+      "Detect Silence on selected clips: find stretches below a threshold (dB) longer than a minimum length, with padding, from the clip's audio",
+      "A dialog previews the regions on the timeline and offers Cut (ripple delete) or Speed Up (split and set the region's speed)",
+      "Threshold, minimum length and padding are adjustable with a live region preview",
+      "The whole operation is one undo step",
+  ],
+  ac=["A tone, two seconds of silence, tone clip yields one region within one frame of the silence (test)",
+      "Cut leaves two adjacent clips with the silence removed; undo restores the original clip",
+      "Speed Up shortens the timeline by the expected amount"])

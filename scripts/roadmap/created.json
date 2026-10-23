@@ -1270,6 +1270,14 @@
     [
       "text-tiles",
       "thumb-frame"
+    ],
+    [
+      "masks",
+      "inspector-tabs"
+    ],
+    [
+      "audio-fx",
+      "inspector-tabs"
     ]
   ]
 }
