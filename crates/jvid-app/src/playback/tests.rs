@@ -911,6 +911,44 @@ fn volume_ramp_has_no_zipper() {
     }
 }
 
+/// A fade on an eased speed ramp finds the clip's length once per block, not once per sample
+/// (#82): a second of mix integrates dozens of pieces of the ramp, not two per sample.
+#[cfg(debug_assertions)]
+#[test]
+fn eased_ramp_fade_integrates_per_block_not_per_sample() {
+    use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value, integrated};
+    let mut h = History::new(Project::default());
+    let id = add(&mut h, TrackKind::Audio, "/a.wav", secs(4));
+    let c = h.project().sequence().clip(id).unwrap().1.clone();
+    let key = |t, v| Keyframe {
+        time: t,
+        value: Value::Scalar(v),
+        easing: Easing::EaseInOut,
+    };
+    // Keyed on past the out point, so every lookup of the clip's length lands mid-ease.
+    let keys = [(
+        SPEED.to_string(),
+        vec![key(Time(0), 1.0), key(secs(8), 2.0)],
+    )];
+    let x = Transform {
+        fade_in: secs(2),
+        ..c.transform
+    };
+    h.apply(Command::SetClipProps(vec![(id, x, keys.into())]))
+        .unwrap();
+    let mut audio = Audio::new(Box::new(|_, _| {
+        Box::new(|_, out: &mut [f32]| out.fill(1.0))
+    }));
+    let mut out = vec![0.0; 2 * SAMPLE_RATE as usize];
+    let before = integrated();
+    audio.mix(h.project(), 0, &mut out);
+    let n = integrated() - before;
+    assert!(n < 1_000, "{n} pieces integrated for {SAMPLE_RATE} samples");
+    // Still fading in: half way through the 2 s fade at the block's end.
+    let end = out[out.len() - 2] / pan_gains(0.0).0;
+    assert!(out[0] == 0.0 && (end - 0.5).abs() < 0.01, "{end}");
+}
+
 #[test]
 fn scrub_queues_a_snippet_from_the_parked_playhead() {
     let mut h = History::new(Project::default());

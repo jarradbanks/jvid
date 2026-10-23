@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::hdr::Hdr;
-use crate::keyframe::{Keyframe, Value};
+use crate::keyframe::{Keyframe, SPEEDS, Value};
 use crate::time::{Rate, Time};
 
 macro_rules! id {
@@ -1051,17 +1051,26 @@ impl Clip {
 
     /// The fade multiplier at timeline time `t`, 0..=1, for opacity and gain.
     pub fn fade_at(&self, t: Time) -> f64 {
-        let d = self.duration().0.max(1);
-        let ramp = |len: Time, from: i64| match len.0.min(d) {
+        self.fades()(t)
+    }
+
+    /// [`Clip::fade_at`] for many times in a row, the clip's length found once.
+    pub fn fades(&self) -> impl Fn(Time) -> f64 + '_ {
+        let len = self.duration();
+        let (d, end) = (len.0.max(1), self.start + len);
+        let ramp = move |len: Time, from: i64| match len.0.min(d) {
             n if n > 0 => (from as f64 / n as f64).clamp(0.0, 1.0),
             _ => 1.0,
         };
-        let x = &self.transform;
-        // Measured to the last instant shown, so a fade out reaches 0 on the final frame's start.
-        let x = ramp(x.fade_in, (t - self.start).0) * ramp(x.fade_out, (self.end() - t).0);
-        match self.transform.fade_curve {
-            FadeCurve::Linear => x,
-            FadeCurve::EqualPower => (x * std::f64::consts::FRAC_PI_2).sin(),
+        move |t| {
+            let x = &self.transform;
+            // Measured to the last instant shown, so a fade out reaches 0 on the final frame's
+            // start.
+            let x = ramp(x.fade_in, (t - self.start).0) * ramp(x.fade_out, (end - t).0);
+            match self.transform.fade_curve {
+                FadeCurve::Linear => x,
+                FadeCurve::EqualPower => (x * std::f64::consts::FRAC_PI_2).sin(),
+            }
         }
     }
 
@@ -1105,7 +1114,8 @@ pub enum ModelError {
     NoGap(TrackId),
     /// No in/out range is marked.
     NoRange,
-    /// A speed that isn't a positive, finite rate.
+    /// A speed that isn't a positive, finite rate, or a speed key outside
+    /// [`crate::keyframe::SPEEDS`].
     BadSpeed,
     /// The time is outside the clip.
     OutsideClip(ClipId),
@@ -1136,7 +1146,7 @@ impl std::fmt::Display for ModelError {
             Self::WrongKind(id) => write!(f, "track {} is the wrong kind", id.0),
             Self::NoGap(id) => write!(f, "no gap there on track {}", id.0),
             Self::NoRange => f.write_str("no in/out range is marked"),
-            Self::BadSpeed => f.write_str("speed must be above 0"),
+            Self::BadSpeed => f.write_str("speed must be above 0, and keyed from 1% to 10000%"),
             Self::OutsideClip(id) => write!(f, "time is outside clip {}", id.0),
             Self::NoHandles(_) => f.write_str(
                 "no media handles at that cut for a transition: trim the clips so media remains past it on both sides",
@@ -2298,7 +2308,7 @@ impl Sequence {
         ripple: bool,
     ) -> Result<(), ModelError> {
         let ok = |v: f64| v > 0.0 && v.is_finite();
-        let key = |k: &Keyframe| matches!(k.value, Value::Scalar(v) if ok(v));
+        let key = |k: &Keyframe| matches!(k.value, Value::Scalar(v) if SPEEDS.contains(&v));
         if !ok(speed) || !keys.iter().all(key) {
             return Err(ModelError::BadSpeed);
         }
@@ -2998,6 +3008,16 @@ mod tests {
         }
         assert_eq!(c.source_at(c.start), Time(0));
         assert!((c.speed_at(c.end() - Time(1)) - 2.0).abs() < 1e-6);
+        // A key outside 1%..10000% is refused, so the speed shown is the speed played.
+        for v in [0.0, 0.009, 100.5, f64::NAN] {
+            let k = Keyframe {
+                time: Time(0),
+                value: Value::Scalar(v),
+                easing: Easing::Linear,
+            };
+            let r = s.set_speed_keys(id, 1.0, vec![k], true);
+            assert_eq!(r, Err(ModelError::BadSpeed), "{v}");
+        }
     }
 
     #[test]

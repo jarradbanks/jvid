@@ -3,6 +3,8 @@
 //! Keyframe times are in the clip's source time, so they travel with the clip
 //! when it moves and stay on the same frame of media when it is trimmed.
 
+use std::cell::RefCell;
+
 use serde::{Deserialize, Serialize};
 
 use crate::time::Time;
@@ -140,12 +142,52 @@ pub fn speed_at(keys: &[Keyframe], s: Time) -> f64 {
 
 // Speed ramps. Timeline time is the integral of 1/speed over source time. Linear and Hold
 // segments integrate exactly. An eased one takes 3-point Gauss-Legendre over pieces of its
-// bezier parameter, split until the speed changes by at most `PIECE` across one: relative error
-// under 1e-5 for any speeds in `SPEEDS` (tested), so under a 60 fps frame for any segment up to
-// 25 minutes long on the timeline.
+// bezier parameter: split where the speed turns or meets an end of `SPEEDS`, so the integrand
+// is smooth and monotone on each, then halved until one piece agrees with its two halves to
+// `TOL`. That holds relative error under 1e-5 for any handles the easing editor allows and any
+// speeds in `SPEEDS` (tested), so under a 60 fps frame for any segment up to 25 minutes long on
+// the timeline. Each thread integrates a set of keys once and looks it up after.
 
 /// The most the speed may change by, as a ratio, across one piece of an eased segment.
 const PIECE: f64 = 1.5;
+/// The most a piece's integral may differ from the sum over its halves, relative to it.
+const TOL: f64 = 1e-7;
+/// How many integrated ramps each thread keeps.
+const CACHED: usize = 64;
+
+thread_local! {
+    /// Recently integrated ramps and the keys they come from, oldest first.
+    static RAMPS: RefCell<Vec<(Vec<Keyframe>, Ramp)>> = const { RefCell::new(Vec::new()) };
+}
+
+#[cfg(debug_assertions)]
+thread_local! {
+    static INTEGRATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many pieces of eased ramps this thread has integrated, so a test can check that a hot
+/// path doesn't integrate per call.
+#[cfg(debug_assertions)]
+pub fn integrated() -> usize {
+    INTEGRATED.get()
+}
+
+/// Calls `f` with the ramp `keys` key, integrating it only if this thread hasn't lately.
+fn ramp<R>(keys: &[Keyframe], f: impl FnOnce(&Ramp) -> R) -> R {
+    RAMPS.with_borrow_mut(|cache| {
+        let i = match cache.iter().position(|(k, _)| k == keys) {
+            Some(i) => i,
+            None => {
+                if cache.len() == CACHED {
+                    cache.remove(0);
+                }
+                cache.push((keys.to_vec(), Ramp::new(keys)));
+                cache.len() - 1
+            }
+        };
+        f(&cache[i].1)
+    })
+}
 
 /// Timeline flicks from the first of `keys` to source time `s` (negative before it) at the
 /// speed they key; the end speeds hold beyond them. `keys` must not be empty.
@@ -154,30 +196,46 @@ pub fn ramp_time(keys: &[Keyframe], s: f64) -> f64 {
     if s <= first.time.0 as f64 {
         return (s - first.time.0 as f64) / speed(first.value);
     }
-    let mut t = 0.0;
-    for seg in segments(keys) {
-        if s < seg.s0 + seg.len {
-            return t + seg.time(s - seg.s0);
+    ramp(keys, |r| {
+        let i = r.segs.partition_point(|g| g.s0 + g.len <= s);
+        match r.segs.get(i) {
+            Some(g) => r.at[i] + g.time(s - g.s0),
+            None => r.at[i] + (s - last.time.0 as f64) / speed(last.value),
         }
-        t += seg.total();
-    }
-    t + (s - last.time.0 as f64) / speed(last.value)
+    })
 }
 
 /// The source time `t` timeline flicks after the first of `keys`, the inverse of [`ramp_time`].
-pub fn ramp_source(keys: &[Keyframe], mut t: f64) -> f64 {
+pub fn ramp_source(keys: &[Keyframe], t: f64) -> f64 {
     let (first, last) = (&keys[0], &keys[keys.len() - 1]);
     if t <= 0.0 {
         return first.time.0 as f64 + t * speed(first.value);
     }
-    for seg in segments(keys) {
-        let n = seg.total();
-        if t < n {
-            return seg.s0 + seg.source(t);
+    ramp(keys, |r| {
+        let i = r.at[1..].partition_point(|&a| a <= t);
+        match r.segs.get(i) {
+            Some(g) => g.s0 + g.source(t - r.at[i]),
+            None => last.time.0 as f64 + (t - r.at[i]) * speed(last.value),
         }
-        t -= n;
+    })
+}
+
+/// A speed curve integrated once: its segments and the timeline flicks from the first key to
+/// each key.
+struct Ramp {
+    segs: Vec<Segment>,
+    at: Vec<f64>,
+}
+
+impl Ramp {
+    fn new(keys: &[Keyframe]) -> Self {
+        let segs: Vec<_> = keys.windows(2).map(Segment::new).collect();
+        let mut at = vec![0.0];
+        for g in &segs {
+            at.push(at[at.len() - 1] + g.total());
+        }
+        Self { segs, at }
     }
-    last.time.0 as f64 + t * speed(last.value)
 }
 
 /// One keyframe segment of a speed curve: source time `s0..s0 + len` from speed `a` to `b`.
@@ -187,19 +245,27 @@ struct Segment {
     a: f64,
     b: f64,
     easing: Easing,
-}
-
-fn segments(keys: &[Keyframe]) -> impl Iterator<Item = Segment> + '_ {
-    keys.windows(2).map(|w| Segment {
-        s0: w[0].time.0 as f64,
-        len: (w[1].time - w[0].time).0 as f64,
-        a: speed(w[0].value),
-        b: speed(w[1].value),
-        easing: w[0].easing,
-    })
+    /// An eased segment's pieces of the bezier parameter in order, each as its end and the
+    /// timeline time from the segment's start to there; empty otherwise.
+    pieces: Vec<(f64, f64)>,
 }
 
 impl Segment {
+    fn new(w: &[Keyframe]) -> Self {
+        let mut g = Segment {
+            s0: w[0].time.0 as f64,
+            len: (w[1].time - w[0].time).0 as f64,
+            a: speed(w[0].value),
+            b: speed(w[1].value),
+            easing: w[0].easing,
+            pieces: Vec::new(),
+        };
+        if let Some(h) = g.easing.handles().filter(|_| g.a != g.b) {
+            g.pieces = g.split(h);
+        }
+        g
+    }
+
     fn total(&self) -> f64 {
         self.time(self.len)
     }
@@ -213,12 +279,9 @@ impl Segment {
             Some(h) => {
                 let [x1, _, x2, _] = clamped(h);
                 let u = solve(0.0, 1.0, d / self.len, |u| cubic(x1, x2, u));
-                let mut t = 0.0;
-                self.pieces(h, |u0, u1| {
-                    t += self.piece(h, u0, u1.min(u));
-                    u1 >= u
-                });
-                t
+                let i = self.pieces.partition_point(|p| p.0 < u);
+                let (u0, t0) = i.checked_sub(1).map_or((0.0, 0.0), |j| self.pieces[j]);
+                t0 + self.piece(h, u0, u)
             }
         }
     }
@@ -231,48 +294,93 @@ impl Segment {
             None => a * (k * t).exp_m1() / k,
             Some(h) => {
                 let [x1, _, x2, _] = clamped(h);
-                let (mut left, mut u) = (t, 1.0);
-                self.pieces(h, |u0, u1| {
-                    let n = self.piece(h, u0, u1);
-                    if left < n {
-                        u = solve(u0, u1, left, |u| self.piece(h, u0, u));
-                        return true;
-                    }
-                    left -= n;
-                    false
+                let i = self.pieces.partition_point(|p| p.1 <= t);
+                let (u0, t0) = i.checked_sub(1).map_or((0.0, 0.0), |j| self.pieces[j]);
+                let u = self.pieces.get(i).map_or(1.0, |&(u1, _)| {
+                    solve(u0, u1, t - t0, |u| self.piece(h, u0, u))
                 });
                 self.len * cubic(x1, x2, u)
             }
         }
     }
 
+    /// The speed at bezier parameter `u`, before it is held to [`SPEEDS`].
+    fn raw_speed(&self, [_, y1, _, y2]: [f64; 4], u: f64) -> f64 {
+        self.a + (self.b - self.a) * cubic(y1, y2, u)
+    }
+
     /// The speed at bezier parameter `u`.
-    fn speed_at(&self, [_, y1, _, y2]: [f64; 4], u: f64) -> f64 {
-        let v = self.a + (self.b - self.a) * cubic(y1, y2, u);
-        v.clamp(*SPEEDS.start(), *SPEEDS.end())
+    fn speed_at(&self, h: [f64; 4], u: f64) -> f64 {
+        self.raw_speed(h, u).clamp(*SPEEDS.start(), *SPEEDS.end())
     }
 
     /// Timeline time over parameter `u0..u1`, by 3-point Gauss-Legendre.
     fn piece(&self, h: [f64; 4], u0: f64, u1: f64) -> f64 {
+        #[cfg(debug_assertions)]
+        INTEGRATED.set(INTEGRATED.get() + 1);
         let [x1, _, x2, _] = clamped(h);
         let f = |u| self.len * cubic_slope(x1, x2, u) / self.speed_at(h, u);
         let (c, r, x) = ((u0 + u1) / 2.0, (u1 - u0) / 2.0, 0.6f64.sqrt());
         r * (5.0 * f(c - r * x) + 8.0 * f(c) + 5.0 * f(c + r * x)) / 9.0
     }
 
-    /// Calls `f` with each piece `u0..u1` of the parameter in order until it returns true.
-    /// Pieces are at most a quarter long, and the speed changes by at most `PIECE` across one.
-    fn pieces(&self, h: [f64; 4], mut f: impl FnMut(f64, f64) -> bool) {
-        let mut todo = vec![(0.0, 1.0, 0)];
+    /// The pieces of the parameter, as [`Segment::pieces`] holds them. Each is at most a
+    /// quarter long, the speed changes by at most `PIECE` across it, and it agrees with the sum
+    /// over its halves to `TOL`.
+    fn split(&self, h: [f64; 4]) -> Vec<(f64, f64)> {
+        let mut todo: Vec<_> = self
+            .breaks(h)
+            .windows(2)
+            .rev()
+            .map(|w| (w[0], w[1], 0))
+            .collect();
+        let (mut out, mut t) = (Vec::new(), 0.0);
         while let Some((u0, u1, depth)) = todo.pop() {
-            let (v0, v1) = (self.speed_at(h, u0), self.speed_at(h, u1));
-            if depth < 16 && (u1 - u0 > 0.25 || v0.max(v1) > PIECE * v0.min(v1)) {
-                let mid = (u0 + u1) / 2.0;
+            let (v0, v1, mid) = (self.speed_at(h, u0), self.speed_at(h, u1), (u0 + u1) / 2.0);
+            let whole = self.piece(h, u0, u1);
+            let coarse = u1 - u0 > 0.25 || v0.max(v1) > PIECE * v0.min(v1);
+            if depth < 16
+                && (coarse
+                    || (whole - self.piece(h, u0, mid) - self.piece(h, mid, u1)).abs()
+                        > TOL * whole)
+            {
                 todo.extend([(mid, u1, depth + 1), (u0, mid, depth + 1)]);
-            } else if f(u0, u1) {
-                return;
+            } else {
+                t += whole;
+                out.push((u1, t));
             }
         }
+        out
+    }
+
+    /// 0, 1 and where the speed turns or meets an end of [`SPEEDS`] between them, in order.
+    fn breaks(&self, h: [f64; 4]) -> Vec<f64> {
+        let [_, y1, _, y2] = h;
+        // The turns, where y'(u) / 3 = p u² + q u + y1 is 0.
+        let (p, q) = (3.0 * (y1 - y2) + 1.0, 2.0 * (y2 - 2.0 * y1));
+        let d = q * q - 4.0 * p * y1;
+        let turns = match () {
+            _ if p == 0.0 => vec![-y1 / q],
+            _ if d > 0.0 => vec![(-q - d.sqrt()) / (2.0 * p), (-q + d.sqrt()) / (2.0 * p)],
+            _ => Vec::new(),
+        };
+        let mut u: Vec<f64> = turns.into_iter().filter(|u| 0.0 < *u && *u < 1.0).collect();
+        u.extend([0.0, 1.0]);
+        u.sort_by(f64::total_cmp);
+        // The speed is monotone between turns, so it meets each end at most once there.
+        let mut out = vec![0.0];
+        for w in u.windows(2) {
+            for end in [*SPEEDS.start(), *SPEEDS.end()] {
+                let (v0, v1) = (self.raw_speed(h, w[0]) - end, self.raw_speed(h, w[1]) - end);
+                if v0 * v1 < 0.0 {
+                    let rising = |u| (self.raw_speed(h, u) - end) * v1.signum();
+                    out.push(solve(w[0], w[1], 0.0, rising));
+                }
+            }
+            out.push(w[1]);
+        }
+        out.sort_by(f64::total_cmp);
+        out
     }
 }
 
@@ -388,21 +496,26 @@ mod tests {
             (0..=n).map(|i| w(i) * f(i as f64 * h)).sum::<f64>() * h / 3.0
         };
         let len = 705_600_000_000; // 1000 s keeps flick rounding out of the reference.
-        for easing in [
-            Easing::EaseIn,
-            Easing::EaseOut,
-            Easing::EaseInOut,
-            Easing::Bezier([0.3, 0.1, 0.7, 0.9]),
+        // The easing editor's handles go from y -1 to 2: a back ease and an overshoot run the
+        // speed past the keyed ones and into the ends of SPEEDS.
+        for (easing, within) in [
+            (Easing::EaseIn, true),
+            (Easing::EaseOut, true),
+            (Easing::EaseInOut, true),
+            (Easing::Bezier([0.3, 0.1, 0.7, 0.9]), true),
+            (Easing::Bezier([0.0, 1.0, 1.0, 0.0]), true),
+            (Easing::Bezier([0.68, -0.55, 0.27, 1.55]), false),
+            (Easing::Bezier([0.5, -1.0, 0.5, 2.0]), false),
         ] {
             let h = clamped(easing.handles().unwrap());
             for (a, b) in [(1.0, 2.0), (0.01, 100.0), (100.0, 0.01), (0.25, 4.0)] {
                 let keys = [key(0, a, easing), key(len, b, Easing::Linear)];
                 let got = ramp_time(&keys, len as f64);
                 // Reference: dense Simpson over the bezier parameter, where 1% peaks stay smooth.
-                let v = |u| a + (b - a) * cubic(h[1], h[3], u);
+                let v = |u| (a + (b - a) * cubic(h[1], h[3], u)).clamp(0.01, 100.0);
                 let want = simpson(400_000, &|u| len as f64 * cubic_slope(h[0], h[2], u) / v(u));
                 assert!((got - want).abs() < 1e-5 * want, "{easing:?} {a}->{b}");
-                if a.max(b) / a.min(b) < 10.0 {
+                if within && a.max(b) / a.min(b) < 10.0 {
                     // And over source time at the keyed speed, which checks the substitution.
                     let s = simpson(20_000, &|x| {
                         1.0 / speed_at(&keys, Time((x * len as f64) as i64))

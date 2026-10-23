@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Fx, Mixer, Output, SAMPLE_RATE, Strip, automate};
-use jvid_core::eval::{AudioSegment, Layer, audio_in, frame_at, gain_at};
+use jvid_core::eval::{AudioSegment, Layer, audio_in, frame_at, gains};
 use jvid_core::model::{
     AssetId, ClipId, MediaAsset, Project, ProjectSettings, Sequence, SequenceId, TrackKind,
     Transform,
@@ -368,11 +368,11 @@ impl Audio {
                     let fx = self.fx.entry(s.clip).or_default();
                     fx.process(&c.transform.audio_fx, out);
                 }
-                let first = sample(s.start);
+                let (first, gain) = (sample(s.start), gains(track, c));
                 let at = |i: usize| {
                     let t = Time((first + i as i64) * FLICKS_PER_SAMPLE);
                     let (v, p) = c.gain_at(t);
-                    ((v * gain_at(track, c, t)) as f32, p as f32)
+                    ((v * gain(t)) as f32, p as f32)
                 };
                 if c.gain_animated() || s.crossfade {
                     automate(out, at);

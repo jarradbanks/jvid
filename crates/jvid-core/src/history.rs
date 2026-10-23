@@ -622,8 +622,6 @@ impl Command {
     }
 }
 
-/// Removes a keyframe, dropping the param's list once empty so add then
-/// remove leaves the clip as it was.
 /// Applies `edit` to clip `id`'s keyframes. One that changes the speed keys retimes the clip
 /// and its linked clips, rippling the clips after them.
 fn edit_keys<R>(
@@ -643,6 +641,8 @@ fn edit_keys<R>(
     Ok(r)
 }
 
+/// Removes a keyframe, dropping the param's list once empty so add then
+/// remove leaves the clip as it was.
 fn take_key(
     keys: &mut BTreeMap<String, Vec<Keyframe>>,
     param: &str,
