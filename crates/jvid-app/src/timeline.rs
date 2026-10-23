@@ -2,8 +2,9 @@
 //! waveforms, zoom, scroll and a draggable playhead. Only what's in view is drawn. Track
 //! headers on the left hold the lock, hide or mute, and solo toggles, the target, a height
 //! grip, and a menu to add, rename, reorder and remove tracks. Media dropped from the bin
-//! overwrites at the drop point; dragged clips overwrite where they land. Clicks and a
-//! marquee select clips, which copy, cut, paste at the playhead, duplicate and delete.
+//! overwrites at the drop point, on a new track when dropped off every lane; dragged clips
+//! overwrite where they land. Clicks and a marquee select clips, which copy, cut, paste at
+//! the playhead, duplicate and delete.
 //! Clip edges drag to trim (Ctrl ripples), the razor tool and Ctrl+K split, a clicked gap
 //! ripple deletes, and Q/W ripple trim to the playhead. In/out marks shade the ruler and
 //! lanes, drag by their ruler flags, and lift (`;`) or extract (`'`) their range.
@@ -18,8 +19,8 @@ use egui::{
 };
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::model::{
-    AssetId, Clip, ClipId, Edge, MediaAsset, ProbeInfo, Project, Sequence, StreamInfo, Track,
-    TrackId, TrackKind,
+    AssetId, Clip, ClipId, Edge, MediaAsset, Placement, ProbeInfo, Project, Sequence, StreamInfo,
+    Track, TrackId, TrackKind,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_jobs::Priority;
@@ -1082,8 +1083,24 @@ impl Timeline {
         let moving: Vec<_> = moving.map_or(Vec::new(), |id| {
             seq.linked(id).iter().map(|(_, c)| c.id).collect()
         });
-        let mut ghosts = self.drops(ui, project, view, lanes, &lane_rects, held, &mut edit);
+        let mut top = false;
+        let mut ghosts = self.drops(
+            ui,
+            project,
+            view,
+            lanes,
+            &lane_rects,
+            held,
+            &mut edit,
+            &mut top,
+        );
         ghosts.extend(self.trim_ghosts(seq));
+        // Where a drop's new video track goes in: the top of the stack.
+        if top {
+            let y = (lanes.top() - self.vscroll).max(lanes.top());
+            let r = Rect::from_x_y_ranges(lanes.x_range(), y..=y + 2.0);
+            clip_painter.rect_filled(r, 0.0, color::LIGHT_BLUE);
+        }
         // Ghosts for tracks a drop will add go in rows below the last lane.
         let mut below = y;
         for (t, from, to) in ghosts {
@@ -1356,7 +1373,7 @@ impl Timeline {
     }
 
     /// Bin drops and clip drags: the ghosts to draw as (track, start, end), and the edit
-    /// once the pointer is released.
+    /// once the pointer is released. `top` is set when a bin drop adds a video track on top.
     #[allow(clippy::too_many_arguments)]
     fn drops(
         &mut self,
@@ -1367,6 +1384,7 @@ impl Timeline {
         lanes: &[(TrackId, TrackKind, Rect)],
         held: Option<(&Clip, &Track, egui::Response)>,
         edit: &mut Option<Edit>,
+        top: &mut bool,
     ) -> Vec<(Option<TrackId>, Time, Time)> {
         let rate = self.transport.rate;
         let snap = |t: Time| rate.time_floor(rate.index_nearest(t)).max(Time(0));
@@ -1395,8 +1413,9 @@ impl Timeline {
             && area.contains(p)
             // Alt merges a multi-stream file's audio into one clip.
             && let merge = ui.input(|i| i.modifiers.alt)
-            && let Some(pl) = project.placement(*asset, snap(view.time(p.x)), false, lane_at(None), merge)
+            && let Some(mut pl) = project.placement(*asset, snap(view.time(p.x)), false, lane_at(None), merge)
         {
+            *top = lane_at(None).is_none() && onto_new_track(&mut pl);
             let end = pl.start + (pl.source_out - pl.source_in);
             let ghosts = [(pl.video, pl.add_video), (pl.audio, pl.add_audio)].into_iter();
             let ghosts = ghosts.filter(|(t, add)| t.is_some() || *add);
@@ -1752,6 +1771,21 @@ impl Timeline {
 
 /// Clipboard clips moved onto the target tracks: each kind keeps its track spacing, its top
 /// clip's track becoming that kind's first target. Clips with no track there stay put.
+/// A bin drop off every lane lands on a new track: a video track on top of the stack, or for
+/// sound alone an audio track at the bottom. True when it adds the video track above others.
+fn onto_new_track(pl: &mut Placement) -> bool {
+    if pl.video.is_some() {
+        pl.video = None;
+        pl.add_video = true;
+        return true;
+    }
+    if pl.audio.is_some() && !pl.add_video {
+        pl.audio = None;
+        pl.add_audio = true;
+    }
+    false
+}
+
 fn to_targets(seq: &Sequence, clips: &[(TrackId, Clip)]) -> Vec<(TrackId, Clip)> {
     let tracks = seq.tracks();
     let place = |kind: TrackKind, t: TrackId| {
@@ -2944,6 +2978,65 @@ mod tests {
         );
         assert!(h.state_mut().1.undo());
         assert_eq!(seq(&h).tracks()[0].clips().len(), 1);
+    }
+
+    #[test]
+    fn bin_drop_below_the_lanes_adds_a_top_track_in_one_step() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut p = History::new(project(2));
+        let _ = p.apply(Command::AddSolid {
+            name: "Red".into(),
+            color: [1.0, 0.0, 0.0, 1.0],
+        });
+        let solid = p.project().assets()[1].id;
+        let mut h = harness(p.project().clone());
+        let drop = |h: &mut egui_kittest::Harness<'_, (Timeline, History)>, at| {
+            h.hover_at(at);
+            h.run();
+            egui::DragAndDrop::set_payload(&h.ctx, solid);
+            h.drag_at(at);
+            h.run();
+            h.drop_at(at);
+            h.run();
+        };
+        let lane_ys = |h: &egui_kittest::Harness<'_, (Timeline, History)>| -> Vec<f32> {
+            let locks = h.get_all_by_label("Lock");
+            locks.map(|n| n.rect().center().y).collect()
+        };
+        let at_secs = |s: i64| size::TRACK_HEADER + s as f32 * 20.0;
+        let tracks = |h: &egui_kittest::Harness<'_, (Timeline, History)>| {
+            h.state().1.project().sequence().tracks().to_vec()
+        };
+
+        // Under A1, past the last lane: a new video track on top takes the solid at 5s.
+        let below = lane_ys(&h)[1] + Track::default_height();
+        drop(&mut h, pos2(at_secs(5), below));
+        let t = tracks(&h);
+        assert_eq!(t.len(), 3);
+        assert_eq!(t[0].kind, TrackKind::Video);
+        let c = &t[0].clips()[0];
+        assert_eq!(c.asset, solid);
+        assert!((c.start.0 - 5 * S).abs() <= S, "{:?}", c.start);
+        assert_eq!(t[1].clips().len(), 1, "V1 untouched");
+
+        // Straight onto V1 (now second): no new track.
+        let v1 = lane_ys(&h)[1];
+        drop(&mut h, pos2(at_secs(10), v1));
+        let t = tracks(&h);
+        assert_eq!(t.len(), 3);
+        assert_eq!(t[1].clips().len(), 2);
+
+        // Undo takes the V1 clip, then the new track and its clip together; redo brings both.
+        assert!(h.state_mut().1.undo());
+        assert!(h.state_mut().1.undo());
+        assert_eq!(tracks(&h).len(), 2);
+        assert!(h.state_mut().1.redo());
+        let t = tracks(&h);
+        assert_eq!(t.len(), 3);
+        assert_eq!(t[0].clips()[0].asset, solid);
     }
 
     #[test]
