@@ -31,10 +31,25 @@ jobs:
       # FFmpeg dev libraries (docs/adr/0001-ffmpeg-binding.md). bindgen's libclang ships on all runners.
       # suite-ui GPU tests render on Mesa lavapipe; required on Linux so they can't pass by skipping.
       # Arabic and CJK fonts for the text shaping tests, also required on Linux.
-      - if: runner.os == 'Linux'
+      - name: Install Linux system packages
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers \
+          # Hosted Ubuntu uses this mirror list; fail visibly if a new image changes that integration.
+          cat /etc/apt/sources.list.d/ubuntu.sources
+          cat /etc/apt/apt-mirrors.txt
+          if [[ "$(grep '^URIs:' /etc/apt/sources.list.d/ubuntu.sources | sort -u)" != 'URIs: mirror+file:/etc/apt/apt-mirrors.txt' ]]; then
+            echo '::error::Unexpected Ubuntu APT sources; review the runner mirror configuration'
+            exit 1
+          fi
+          printf '%s\tpriority:%s\n' \
+            'https://archive.ubuntu.com/ubuntu/' 1 \
+            'http://azure.archive.ubuntu.com/ubuntu/' 2 \
+            'https://security.ubuntu.com/ubuntu/' 3 \
+            | sudo tee /etc/apt/apt-mirrors.txt
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends mesa-vulkan-drivers \
             libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev libasound2-dev \
             fonts-dejavu-core fonts-noto-cjk
       - if: runner.os == 'macOS'
@@ -69,20 +84,31 @@ jobs:
           key: test-media-${{ hashFiles('scripts/gen-test-media') }}
       - if: runner.os == 'Linux' && steps.media-cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
           time bash scripts/gen-test-media
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # macOS has no software adapter, so its GPU tests skip; Linux (lavapipe) and Windows (WARP) must run them.
       - if: runner.os == 'macOS'
         run: echo "::notice::GPU tests skip on macOS (no software adapter on hosted runners)"
-      - run: cargo test --workspace
+      # Every crate's failures, not just the first failing crate's.
+      - run: cargo test --workspace --no-fail-fast
         env:
           JVID_GPU_TESTS: ${{ runner.os != 'macOS' && 'required' || '' }}
           JVID_TEST_MEDIA_REQUIRED: ${{ runner.os == 'Linux' && '1' || '' }}
+      # Snapshot diffs differ per driver, so keep them to see what failed.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots-${{ matrix.os }}
+          path: crates/*/tests/snapshots/*.png
+          if-no-files-found: ignore
       # Playback throughput (#32) only means anything optimised; Linux only to save CI minutes.
       - if: runner.os == 'Linux'
         shell: bash # pipefail, so the tee doesn't hide a failure
-        run: cargo test --release -p jvid-app --bin jvid-app -- playback::tests::two_layer --nocapture | tee perf.log
+        # The grep fails the gate if the test didn't run (the tests are in the lib, not the bin).
+        run: |
+          cargo test --release -p jvid-app --lib -- playback::tests::two_layer --nocapture | tee perf.log
+          grep -q 'PERF playback two-layer' perf.log
         env:
           JVID_GPU_TESTS: required
           JVID_TEST_MEDIA_REQUIRED: '1'
@@ -94,8 +120,8 @@ jobs:
         run: |
           status=0
           {
-            cargo test --release -p jvid-app --bin jvid-app -- perf_cold_start --nocapture
-            cargo test --release -p jvid-app --bin jvid-app -- seek_latency scrub_1080p30 long_recording five_hundred_clips --nocapture
+            cargo test --release -p jvid-app --lib -- perf_cold_start --nocapture
+            cargo test --release -p jvid-app --lib -- seek_latency scrub_1080p30 long_recording five_hundred_clips --nocapture
             cargo test --release -p jvid-media -p jvid-audio -- one_hour_query sixteen_tracks lossless_minute --nocapture
             cargo bench -p jvid-core --bench core -- --quick
           } 2>&1 | tee -a perf.log || status=1

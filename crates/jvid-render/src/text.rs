@@ -393,6 +393,14 @@ mod tests {
         buf.shape_until_scroll(&mut f.system, false);
         let run = buf.layout_runs().next()?;
         let ids: Vec<u16> = run.glyphs.iter().map(|g| g.glyph_id).collect();
+        // Which fallback font shaped it differs per OS, so say, for failures.
+        let faces: Vec<_> = run
+            .glyphs
+            .iter()
+            .filter_map(|g| f.system.db().face(g.font_id))
+            .map(|face| face.post_script_name.clone())
+            .collect();
+        eprintln!("{s}: {ids:?} from {faces:?}");
         // Glyph 0 is .notdef: the font fell back to a tofu box.
         (!ids.contains(&0)).then_some((run.rtl, ids))
     }
@@ -426,9 +434,10 @@ mod tests {
             return;
         };
         assert!(rtl, "Arabic runs right to left");
-        // Joining picks contextual forms: the same letter differs alone and joined.
+        assert!(!ids.is_empty(), "Arabic produces shaped glyphs");
+        // Joining picks contextual forms: the same letter differs alone and joined. How many
+        // glyphs lam-alef makes is up to the font (DejaVu: one ligature, Segoe UI: two).
         let (_, alone) = shape("س").unwrap();
-        assert_eq!(ids.len(), 3, "lam-alef forms one ligature: {ids:?}");
         assert!(
             !ids.contains(&alone[0]),
             "initial seen is not the isolated form"
