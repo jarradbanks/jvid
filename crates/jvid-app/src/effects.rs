@@ -124,6 +124,7 @@ impl Library {
                 ),
                 description: self.description(stem).to_owned(),
                 bundled: bundled(stem),
+                shipped: self.shipped(stem),
                 disabled: self.disabled.contains(stem),
                 error: e.as_ref().err().cloned(),
             })
@@ -173,6 +174,8 @@ pub struct Row {
     pub name: String,
     pub description: String,
     pub bundled: bool,
+    /// See [`Library::shipped`].
+    pub shipped: bool,
     pub disabled: bool,
     /// Why the file doesn't load, when it doesn't.
     pub error: Option<String>,
@@ -257,9 +260,188 @@ fn shipped_text(shipped: bool, stem: &str, part: &str) -> Option<&'static str> {
         .flatten()
 }
 
-/// The name to show for effect `stem`, see [`Library::shipped`].
-pub fn name<'a>(stem: &str, shipped: bool, shader: &'a Shader) -> &'a str {
-    shipped_text(shipped, stem, "").unwrap_or(&shader.name)
+/// The name to show for effect `stem`, see [`Library::shipped`]: a shader header's in Title Case
+/// whatever its file says.
+pub fn name(stem: &str, shipped: bool, shader: &Shader) -> String {
+    shipped_text(shipped, stem, "").map_or_else(|| title_case_name(&shader.name), str::to_owned)
+}
+
+/// `film grain` -> `Film Grain`, leaving short joining words lowercase after the first and the
+/// rest of each word as written, so `LUT` stays.
+fn title_case_name(name: &str) -> String {
+    const SMALL: [&str; 15] = [
+        "a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "the",
+        "to",
+    ];
+    name.split(' ')
+        .enumerate()
+        .map(|(i, w)| {
+            if i > 0 && SMALL.contains(&w.to_lowercase().as_str()) {
+                return w.to_lowercase();
+            }
+            let mut c = w.chars();
+            c.next()
+                .map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `desc` split at its backticks: text, then whether it's a `parameter` id.
+fn param_spans(desc: &str) -> impl Iterator<Item = (&str, bool)> {
+    desc.split('`')
+        .enumerate()
+        .map(|(i, s)| (s, i % 2 == 1))
+        .filter(|(s, _)| !s.is_empty())
+}
+
+/// `row`'s description (or error) in `ink`, at most `rows` lines `width` wide, with its
+/// backticked parameter ids as their labels in Ink 2.
+pub fn about(row: &Row, width: f32, rows: usize, ink: egui::Color32) -> egui::text::LayoutJob {
+    use suite_ui::tokens::color;
+    let mut job = egui::text::LayoutJob::default();
+    let format = |color| egui::TextFormat::simple(suite_ui::theme::body(), color);
+    match &row.error {
+        Some(e) => job.append(e, 0.0, format(ink)),
+        None => {
+            for (s, param) in param_spans(&row.description) {
+                if param {
+                    job.append(
+                        &self::param(&row.stem, row.shipped, s),
+                        0.0,
+                        format(color::INK_2),
+                    );
+                } else {
+                    job.append(s, 0.0, format(ink));
+                }
+            }
+        }
+    }
+    job.wrap.max_width = width;
+    job.wrap.max_rows = rows;
+    job
+}
+
+/// `row`'s thumbnail filling `rect`: its effect on the thumbnail frame, black until drawn, or
+/// for one that doesn't load the frame dimmed under a warning.
+pub fn paint_thumb(ui: &egui::Ui, rect: egui::Rect, row: &Row) {
+    use suite_ui::tokens::{color, radius};
+    let t = thumbs(ui.ctx());
+    let corner = egui::CornerRadius::same(radius::CONTROL);
+    ui.painter().rect_filled(rect, corner, egui::Color32::BLACK);
+    let (tex, tint) = match &row.error {
+        Some(_) => (t.frame, egui::Color32::from_gray(80)),
+        None => (t.by_stem.get(&row.stem).copied(), egui::Color32::WHITE),
+    };
+    if let Some(id) = tex {
+        egui::Image::new((id, rect.size()))
+            .tint(tint)
+            .corner_radius(radius::CONTROL)
+            .paint_at(ui, rect);
+    }
+    if row.error.is_some() {
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            suite_ui::theme::icon::CIRCLE_ALERT,
+            suite_ui::theme::icon_font(),
+            color::RED,
+        );
+    }
+}
+
+/// Each effect run over the thumbnail frame, kept in egui's memory for the Effects tab and the
+/// Inspector's Add Effect menu; see [`draw_thumbs`].
+#[derive(Clone, Default)]
+pub struct Thumbs {
+    /// The bare frame, which an effect that doesn't load shows dimmed.
+    pub frame: Option<egui::TextureId>,
+    pub by_stem: BTreeMap<String, egui::TextureId>,
+    /// The frame and library generations they were drawn from.
+    drawn: Option<(u64, u64)>,
+}
+
+fn thumbs_id() -> egui::Id {
+    egui::Id::new("effect thumbnails")
+}
+
+fn wanted_id() -> egui::Id {
+    egui::Id::new("effect thumbnails wanted")
+}
+
+/// The thumbnails as last drawn.
+pub fn thumbs(ctx: &egui::Context) -> Arc<Thumbs> {
+    ctx.data(|d| d.get_temp(thumbs_id())).unwrap_or_default()
+}
+
+/// Asks for the thumbnails to be kept current next frame, as the Add Effect menu shows them.
+pub fn want_thumbs(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    let last = ctx.data_mut(|d| {
+        d.get_temp_mut_or_default::<Option<u64>>(wanted_id())
+            .replace(pass)
+    });
+    // Just opened: one more frame draws them.
+    if last.is_none_or(|l| l + 1 < pass) {
+        ctx.request_repaint();
+    }
+}
+
+/// Redraws the thumbnails if `shown` (the Effects tab is open) or [`want_thumbs`] asked last
+/// frame, and the thumbnail frame or the effects changed since they were last drawn.
+pub fn draw_thumbs(ctx: &egui::Context, preview: &crate::preview::Preview, shown: bool) {
+    let pass = ctx.cumulative_pass_nr();
+    let wanted = ctx.data(|d| d.get_temp::<Option<u64>>(wanted_id()).flatten());
+    let wanted = wanted.is_some_and(|l| l + 1 >= pass);
+    let Some((frame, generation)) = preview.thumb_frame().filter(|_| shown || wanted) else {
+        return;
+    };
+    let old = thumbs(ctx);
+    let (lib, shaders): (u64, Vec<(String, Arc<Shader>)>) = with(|l| {
+        let ok = l
+            .entries()
+            .filter_map(|(k, e)| Some((k.to_owned(), e.clone().ok()?)));
+        (l.generation, ok.collect())
+    });
+    if old.drawn == Some((generation, lib)) {
+        return;
+    }
+    // Shaders build only when the effects change; a new frame just reruns them.
+    let rebuild = old.drawn.is_none_or(|(_, g)| g != lib);
+    let mut by_stem = BTreeMap::new();
+    for (stem, shader) in &shaders {
+        if rebuild {
+            let built = preview.with_thumbs(|t, d, _| t.set_effect(d, stem, Some(shader)));
+            if let Some(Err(e)) = built {
+                tracing::warn!("effect {stem}: {e}");
+                // The library changes, so the next frame draws again without it.
+                fail(stem, e);
+                ctx.request_repaint();
+                continue;
+            }
+        }
+        let fx = jvid_core::model::Effect {
+            shader: stem.clone(),
+            params: Default::default(),
+            enabled: true,
+        };
+        let id = preview.draw_thumb(old.by_stem.get(stem).copied(), |t, d, q| {
+            t.effect(d, q, &fx)
+        });
+        by_stem.extend(id.map(|id| (stem.clone(), id)));
+    }
+    if rebuild {
+        // shortcut: a removed effect's egui texture stays registered; free it if folders churn.
+        for stem in old.by_stem.keys().filter(|k| !by_stem.contains_key(*k)) {
+            preview.with_thumbs(|t, d, _| t.set_effect(d, stem, None));
+        }
+    }
+    let new = Thumbs {
+        frame: Some(frame),
+        by_stem,
+        drawn: Some((generation, lib)),
+    };
+    ctx.data_mut(|d| d.insert_temp(thumbs_id(), Arc::new(new)));
 }
 
 /// The caption to show for parameter `id` of effect `stem`: a bundled example's translated,
@@ -383,8 +565,8 @@ mod tests {
                 let [en, es] = ["en", "es"].map(|l| CATALOG.get_in(l, &key));
                 assert!(en.is_some() && es.is_some() && en != es, "{key}");
             }
-            // English reads exactly as the file and the old title-cased ids did.
-            assert_eq!(name(stem, true, &shader), shader.name);
+            // English reads as the file, in Title Case, and as the old title-cased ids did.
+            assert_eq!(name(stem, true, &shader), title_case_name(&shader.name));
             assert_eq!(lib.description(stem), description(src));
             for p in &shader.params {
                 assert_eq!(param(stem, true, &p.name), title_case(&p.name));
@@ -402,8 +584,8 @@ mod tests {
         assert!(!lib.shipped("vignette") && !lib.shipped("film_grain"));
         assert!(lib.shipped("chromatic_aberration") && !lib.shipped("chromatic_aberration copy"));
         let row = |q: &str| lib.rows(q).pop().unwrap().name;
-        assert_eq!(row("propia"), "Viñeta propia");
-        assert_eq!(row("aberration copy"), "Chromatic aberration");
+        assert_eq!(row("propia"), "Viñeta Propia");
+        assert_eq!(row("aberration copy"), "Chromatic Aberration");
         assert_eq!(
             param("film_grain", lib.shipped("film_grain"), "grain"),
             "Grain"
@@ -414,6 +596,79 @@ mod tests {
         lib.scan(&tmp);
         assert!(lib.shipped("vignette"));
         std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn names_are_title_case_and_descriptions_mark_params() {
+        assert_eq!(title_case_name("film grain"), "Film Grain");
+        assert_eq!(title_case_name("the look of a LUT"), "The Look of a LUT");
+        assert_eq!(title_case_name(""), "");
+        let spans: Vec<_> = param_spans("up to `amount` px, `grain`").collect();
+        assert_eq!(
+            spans,
+            [
+                ("up to ", false),
+                ("amount", true),
+                (" px, ", false),
+                ("grain", true)
+            ]
+        );
+        // An unclosed backtick marks the rest as a parameter, as a label it simply won't find.
+        assert_eq!(param_spans("`a").collect::<Vec<_>>(), [("a", true)]);
+    }
+
+    #[test]
+    fn a_broken_effect_shows_the_frame_dimmed_and_its_error() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let row = Row {
+            stem: "broken".into(),
+            name: "broken.wgsl".into(),
+            description: "Does `amount` things".into(),
+            bundled: false,
+            shipped: false,
+            disabled: false,
+            error: Some("expected `)`".into()),
+        };
+        let about = about(&row, 200.0, 2, egui::Color32::RED);
+        assert_eq!(about.text, "expected `)`", "the error, as written");
+        let (mut frame, mut fresh) = (None, true);
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([100.0, 60.0])
+            .wgpu()
+            .build_ui(move |ui| {
+                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                // A mid-grey frame, as the thumbnail frame.
+                let tex = frame.get_or_insert_with(|| {
+                    let img =
+                        egui::ColorImage::new([16, 9], vec![egui::Color32::from_gray(200); 144]);
+                    ui.ctx().load_texture("frame", img, Default::default())
+                });
+                let t = Thumbs {
+                    frame: Some(tex.id()),
+                    ..Thumbs::default()
+                };
+                ui.data_mut(|d| d.insert_temp(thumbs_id(), Arc::new(t)));
+                let rect = egui::Rect::from_min_size(egui::pos2(10.0, 7.0), egui::vec2(80.0, 45.0));
+                paint_thumb(ui, rect, &row);
+            });
+        h.run();
+        let img = h.render().unwrap();
+        let near_corner = img.get_pixel(16, 12).0;
+        assert!(
+            near_corner[..3].iter().all(|c| (40..120).contains(c)),
+            "dimmed: {near_corner:?}"
+        );
+        let warning = (30..70)
+            .flat_map(|x| (20..40).map(move |y| (x, y)))
+            .any(|(x, y)| {
+                let p = img.get_pixel(x, y).0;
+                p[0] > 150 && p[1] < 120
+            });
+        assert!(warning, "a red warning sits on it");
     }
 
     #[test]

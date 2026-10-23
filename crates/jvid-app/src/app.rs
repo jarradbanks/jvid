@@ -953,6 +953,8 @@ impl eframe::App for App {
             top: 0,
             bottom: gutter,
         });
+        // Before the dock, so the Effects tab and Add Effect menu draw this frame's thumbnails.
+        crate::effects::draw_thumbs(&ctx, &self.preview, self.bin.tab == 1);
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             let focused = self.dock.find_active_focused().map(|(_, t)| *t);
             let mut viewer = Viewer {
@@ -1171,6 +1173,8 @@ impl TabViewer for Viewer<'_> {
             self.bin.text_thumbs(self.preview, self.project);
             // The Scopes tab, fourth in the bin.
             self.preview.scopes_open(self.bin.tab == 3);
+            let selected = self.timeline.selected();
+            self.bin.fx_apply = !crate::inspector::video_clips(self.project, selected).is_empty();
             let r = self
                 .bin
                 .show(ui, self.project, focused, self.importing, self.missing);
