@@ -4,6 +4,7 @@ pub mod composite;
 pub mod effect;
 pub mod lut;
 pub mod preview;
+pub mod scope;
 pub mod solid;
 pub mod text;
 pub mod thumb;

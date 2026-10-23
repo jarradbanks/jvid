@@ -311,10 +311,15 @@ retime.one = "The clip keeps its times; edits may land between frames at the new
 retime.other = "The {count} clips keep their times; edits may land between frames at the new rate."
 undo_note = "You can undo this."
 
-# The media bin: its Media, Effects and Text tabs.
+# The media bin: its Media, Effects, Text and Scopes tabs.
 [bin]
 effects = "Effects"
 text = "Text"
+scopes = "Scopes"
+scope_waveform = "Waveform"
+scope_vectorscope = "Vectorscope"
+scope_histogram = "Histogram"
+scopes_empty = "Scopes measure the Program frame"
 # Sort orders.
 sort_added = "Added"
 sort_name = "Name"

@@ -18,6 +18,7 @@ use jvid_jobs::Priority;
 use jvid_media::decode::{DecoderPool, Frame};
 use jvid_media::proxy::{self, Proxies};
 use jvid_render::preview::{self as render, Yuv};
+use jvid_render::scope::Scopes;
 use jvid_render::thumb::Thumbs;
 use jvid_render::{solid, text};
 use suite_ui::theme::{self, icon};
@@ -26,6 +27,7 @@ use suite_ui::widgets::{Button, Checkbox, Dropdown};
 
 use crate::i18n::{Label, tr, trn, verbatim};
 use crate::playback::{self, Pixels, Playback, Shown};
+use crate::scopes;
 use crate::transport::{AudioSource, Transport};
 
 const ZOOMS: [(Label, Option<f32>); 4] = [
@@ -179,6 +181,7 @@ pub struct Preview {
     /// Project sources [`proxy::suggested`] says want a proxy.
     suggested: usize,
     thumb: Thumb,
+    scopes: scopes::State,
 }
 
 impl Preview {
@@ -194,6 +197,7 @@ impl Preview {
                 program_view: render::Preview::new(&rs.device, rs.target_format),
                 program_drawn: None,
                 thumbs: Thumbs::new(&rs.device, &rs.queue),
+                scopes: Scopes::new(&rs.device),
             };
             let mut r = rs.renderer.write();
             let view = gpu.thumbs.frame().create_view(&Default::default());
@@ -229,6 +233,7 @@ impl Preview {
             proxied: HashSet::new(),
             suggested: 0,
             thumb,
+            scopes: scopes::State::default(),
         }
     }
 
@@ -497,6 +502,9 @@ impl Preview {
             if self.update_thumb(empty, trim.is_some()) {
                 ui.ctx().request_repaint();
             }
+            if empty {
+                scopes::clear(ui.ctx());
+            }
             self.show(ui, trim, offline, None, None);
             return None;
         }
@@ -506,6 +514,7 @@ impl Preview {
         if self.update_thumb(false, dragging) {
             ui.ctx().request_repaint();
         }
+        self.update_scopes(ui.ctx(), dragging);
         if self.program.transport.speed() != 0 {
             ui.ctx().request_repaint();
         }
@@ -613,6 +622,38 @@ impl Preview {
             self.with_thumbs(|t, d, q| t.set_fallback(d, q));
         }
         true
+    }
+
+    /// Whether the Scopes tab is showing; the Program frame is copied for it only while it is.
+    pub fn scopes_open(&mut self, open: bool) {
+        self.scopes.open = open;
+    }
+
+    /// Shows scopes that have landed, then picks whether the Program frame drawn next is
+    /// copied for them; see [`scopes::State::due`]. Never waits on the GPU.
+    fn update_scopes(&mut self, ctx: &egui::Context, dragging: bool) {
+        if !self.scopes.open || self.program_shown.is_none() {
+            return;
+        }
+        let polled = self.with_scopes(|s, d| (s.poll(d), s.busy()));
+        let (landed, busy) = polled.unwrap_or((None, false));
+        if let Some(a) = landed {
+            scopes::set(ctx, &a);
+        }
+        let moving = dragging || self.program.transport.speed() != 0;
+        let now = ctx.input(|i| i.time);
+        // A copy in flight lands within a frame or two; draw again to pick it up.
+        if self.scopes.due(self.program_gen, now, moving, busy) || busy {
+            ctx.request_repaint();
+        }
+    }
+
+    /// Runs `f` on the scopes' renderer; `None` without wgpu.
+    fn with_scopes<R>(&self, f: impl FnOnce(&mut Scopes, &wgpu::Device) -> R) -> Option<R> {
+        let rs = self.render_state.as_ref()?;
+        let mut r = rs.renderer.write();
+        let gpu = r.callback_resources.get_mut::<Gpu>()?;
+        Some(f(&mut gpu.scopes, &rs.device))
     }
 
     /// The Effects or Text tab opened: refresh the thumbnail frame once the playhead settles.
@@ -801,6 +842,7 @@ impl Preview {
                         generation: (g, scale, source),
                         clip,
                         thumb: !source && std::mem::take(&mut self.thumb.copy),
+                        scope: !source && std::mem::take(&mut self.scopes.copy),
                     },
                 ),
                 (_, _, Some(f)) => egui_wgpu::Callback::new_paint_callback(
@@ -1025,6 +1067,7 @@ struct Gpu {
     /// The program generation and preview scale last composited.
     program_drawn: Option<(u64, u32, bool)>,
     thumbs: Thumbs,
+    scopes: Scopes,
 }
 
 /// The Program tab's draw. Composites only when the frame or preview scale changed.
@@ -1035,6 +1078,8 @@ struct ProgramPaint {
     clip: [f32; 4],
     /// Copy the frame into the thumbnail frame too.
     thumb: bool,
+    /// Start a copy of the frame for the scopes too.
+    scope: bool,
 }
 
 impl CallbackTrait for ProgramPaint {
@@ -1059,6 +1104,11 @@ impl CallbackTrait for ProgramPaint {
                 && let Some(img) = gpu.program_view.image()
             {
                 gpu.thumbs.set_frame(device, queue, img);
+            }
+            if self.scope
+                && let Some(img) = gpu.program_view.image()
+            {
+                gpu.scopes.capture(device, queue, img);
             }
             gpu.program_view.set_dst(queue, self.clip);
         }
@@ -1382,6 +1432,51 @@ mod program_tests {
         let mine = draw(None).unwrap();
         assert_ne!(mine, id);
         assert_eq!(draw(Some(mine)), Some(mine));
+    }
+
+    #[test]
+    fn open_scopes_copy_the_program_frame_as_it_draws() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([640.0, 360.0])
+            .wgpu()
+            .build_eframe(|cc| Program {
+                preview: Preview::new(cc.wgpu_render_state.as_ref()),
+                history: History::new(Project::default()),
+                fresh: true,
+            });
+        let textures = |h: &egui_kittest::Harness<'_, Program>| {
+            h.ctx
+                .data(|d| d.get_temp::<[egui::TextureHandle; 3]>(scopes::id()))
+        };
+        add_solid(&mut h.state_mut().history, [1.0, 0.0, 0.0, 1.0], Time(0));
+        for _ in 0..3 {
+            h.step();
+            h.render().unwrap();
+        }
+        assert!(textures(&h).is_none(), "closed: nothing copied");
+        h.state_mut().preview.scopes_open(true);
+        // The copy starts as a frame draws and is picked up, without waiting, a frame or two on.
+        for _ in 0..4 {
+            h.step();
+            h.render().unwrap();
+        }
+        let [wave, vector, hist] = textures(&h).expect("scopes drawn");
+        assert_eq!(
+            wave.size(),
+            [256, 256],
+            "a 256-wide copy of the 1080p frame"
+        );
+        assert_eq!(vector.size(), [jvid_render::scope::VECTOR; 2]);
+        assert_eq!(hist.size()[0], 256);
+        let busy = h.state().preview.with_scopes(|s, _| s.busy());
+        assert_eq!(
+            busy,
+            Some(false),
+            "nothing left in flight on a parked frame"
+        );
     }
 
     #[test]

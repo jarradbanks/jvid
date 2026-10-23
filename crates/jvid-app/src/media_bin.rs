@@ -24,8 +24,13 @@ use crate::i18n::{tr, trn};
 use crate::preview::Preview;
 
 /// The bin's tabs, in order.
-fn tabs() -> [&'static str; 3] {
-    [tr!("panel.media"), tr!("bin.effects"), tr!("bin.text")]
+fn tabs() -> [&'static str; 4] {
+    [
+        tr!("panel.media"),
+        tr!("bin.effects"),
+        tr!("bin.text"),
+        tr!("bin.scopes"),
+    ]
 }
 
 /// Sort orders by index: added, name, duration.
@@ -235,13 +240,14 @@ impl MediaBin {
             .show(ui, |ui| match self.tab {
                 0 => self.media(ui, project, importing, missing, &mut out),
                 1 => self.effects_tab(ui, &mut out),
-                _ => {
+                2 => {
                     if let Some(dragged) = text_presets(ui, &self.text_tiles, &mut out) {
                         self.new_text = Some((project.assets().len(), dragged));
                     }
                 }
+                _ => crate::scopes::show(ui),
             });
-        out.thumbs = tab != self.tab && tab != 0;
+        out.thumbs = tab != self.tab && matches!(tab, 1 | 2);
         self.tab = tab;
         if let Some(id) = self.confirm_remove {
             out.command = out.command.or(self.remove_warning(ui, project, id));
