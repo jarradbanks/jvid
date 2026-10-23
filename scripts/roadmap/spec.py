@@ -1115,3 +1115,41 @@ I("release", "Packaging and v0.1.0 release", "M4", ["infra"], "L", ["cli", "expo
   refs=[f"[PLAN.md · Licensing]({PLAN}#licensing)"])
 
 # ───────────────────────── M5 · Polish (v0.2.0) ─────────────────────────
+
+# Owner-requested backlog; no release or milestone assignment yet.
+I("edit-preferences", "Move application settings to Edit > Preferences", None, ["ui"], "S",
+  summary="Make application preferences discoverable under Edit > Preferences instead of the title-bar project menu.",
+  scope=[
+      "Move the application Settings entry from the title-bar project-name menu into the existing Edit menu, labelled Preferences…",
+      "Open the existing application preferences dialog, including the language picker; preserve live switching and saved preferences",
+      "Keep Project Settings as a separate project action; translate the new menu label in all shipped languages",
+  ],
+  ac=["Edit > Preferences opens the application preferences dialog in English and Spanish",
+      "The old application Settings entry is absent from the project-name menu, while Project Settings remains available",
+      "Changing language from Preferences still applies live and persists"],
+  labels=["later"])
+
+I("drop-create-track", "Create a track when dropping assets outside existing tracks", None, ["ui", "timeline"], "M",
+  summary="Dropping text, solids or other assets into empty timeline space should create a track above the existing one.",
+  scope=[
+      "Dragging an asset from the bin into timeline space outside an existing track row creates an appropriate new track above the existing track and places the clip at the dragged time",
+      "Cover text, solid and other supported asset types using the existing media/track compatibility rules",
+      "A drop directly onto a valid existing track keeps the existing placement behaviour and does not create a track",
+      "Keep track creation and clip placement one undoable operation; cancelling or rejecting a drop leaves no empty track",
+  ],
+  ac=["With a video clip on an existing track, dropping a title or solid into empty space above it creates a track above it and places the new clip at the drop time",
+      "Dropping the same asset directly onto a compatible existing track adds no track",
+      "Undo removes the added clip and its new track together; redo restores both"],
+  labels=["later"])
+
+I("in-out-snap-edges", "Snap timeline In/Out flags to clip starts and ends", None, ["ui", "timeline"], "S",
+  summary="The timeline In/Out flags currently do not snap to clip boundaries when dragged.",
+  scope=[
+      "Apply the timeline's existing snapping behaviour to dragged In and Out flags, with clip starts and ends as snap targets",
+      "Respect the existing snapping toggle and pixel threshold, and show the existing snap indicator",
+      "Preserve frame alignment, valid In/Out ordering and undo behaviour; keyboard I/O marking at the playhead keeps its existing meaning",
+  ],
+  ac=["With snapping enabled, dragging either In or Out within the snap threshold of a clip start or end lands exactly on that boundary",
+      "With snapping disabled, or outside the threshold, dragging does not jump to a clip boundary",
+      "Regression coverage exercises both flags, both boundary types and snapping enabled/disabled"],
+  labels=["later"])

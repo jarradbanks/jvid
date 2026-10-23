@@ -460,6 +460,18 @@
     "font-picker": {
       "number": 212,
       "id": 5905306293
+    },
+    "edit-preferences": {
+      "number": 228,
+      "id": 6000354416
+    },
+    "drop-create-track": {
+      "number": 229,
+      "id": 6000355124
+    },
+    "in-out-snap-edges": {
+      "number": 230,
+      "id": 6000355849
     }
   },
   "links": [

@@ -438,6 +438,9 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#86](https://github.com/jarradbanks/jvid/issues/86) **HDR support** — PQ/HLG sources, tone mapping and HDR export.
 - [#87](https://github.com/jarradbanks/jvid/issues/87) **Curve graph editor** — A full graph editor for keyframe curves.
 - [#95](https://github.com/jarradbanks/jvid/issues/95) **Silence detection to cut dead air** — Find silent stretches in screen recordings and offer to cut or speed them up.
+- [#228](https://github.com/jarradbanks/jvid/issues/228) **Move application settings to Edit > Preferences** — Make application preferences discoverable under Edit > Preferences instead of the title-bar project menu.
+- [#229](https://github.com/jarradbanks/jvid/issues/229) **Create a track when dropping assets outside existing tracks** — Dropping text, solids or other assets into empty timeline space should create a track above the existing one.
+- [#230](https://github.com/jarradbanks/jvid/issues/230) **Snap timeline In/Out flags to clip starts and ends** — The timeline In/Out flags currently do not snap to clip boundaries when dragged.
 
 ---
 
