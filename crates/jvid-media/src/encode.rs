@@ -13,6 +13,7 @@ use jvid_core::preset::{AudioCodec, Preset, VideoCodec};
 use jvid_core::time::Rate;
 
 use crate::audio::SAMPLE_RATE;
+use crate::hwenc;
 
 /// Software H.264: libx264 only with the `gpl-ffmpeg` feature, per the licensing ADR; OpenH264
 /// otherwise; then MPEG-4 Part 2, which every FFmpeg build has.
@@ -26,9 +27,21 @@ const HEVC_CODECS: &[&str] = &["libx265"];
 #[cfg(not(feature = "gpl-ffmpeg"))]
 const HEVC_CODECS: &[&str] = &[];
 
-/// Hardware encoders, best first. They all take NV12.
-const HW_H264: &[&str] = &["h264_nvenc", "h264_qsv", "h264_amf", "h264_videotoolbox"];
-const HW_HEVC: &[&str] = &["hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_videotoolbox"];
+/// Hardware encoders, best first. They all take NV12 (VAAPI after an upload; see `hwenc`).
+const HW_H264: &[&str] = &[
+    "h264_nvenc",
+    "h264_qsv",
+    "h264_amf",
+    "h264_videotoolbox",
+    "h264_vaapi",
+];
+const HW_HEVC: &[&str] = &[
+    "hevc_nvenc",
+    "hevc_qsv",
+    "hevc_amf",
+    "hevc_videotoolbox",
+    "hevc_vaapi",
+];
 
 /// Software encoder names to try, the pixel format they take, and the hardware encoders.
 fn video_codec(c: VideoCodec) -> (&'static [&'static str], Pixel, &'static [&'static str]) {
@@ -98,6 +111,7 @@ fn rate_control(
     match name.rsplit('_').next() {
         Some("nvenc") => vec![("rc", "vbr".into()), ("cq", q), zero],
         Some("qsv") => vec![("global_quality", q), zero],
+        Some("vaapi") => vec![("rc_mode", "CQP".into()), ("qp", q), zero],
         Some("amf") => vec![
             ("rc", "cqp".into()),
             ("qp_i", q.clone()),
@@ -128,7 +142,14 @@ pub(crate) fn open_video(
     if global {
         e.set_flags(codec::Flags::GLOBAL_HEADER);
     }
-    e.set_format(pixel);
+    if hwenc::is_vaapi(name) {
+        if !hwenc::attach(&mut e, (width, height)) {
+            return None;
+        }
+        e.set_format(ffmpeg_next::ffi::AVPixelFormat::AV_PIX_FMT_VAAPI.into());
+    } else {
+        e.set_format(pixel);
+    }
     let mut opts = Dictionary::new();
     let software = HW_H264.iter().chain(HW_HEVC).all(|n| *n != name);
     if software {
@@ -332,7 +353,9 @@ impl Encoder {
     /// Ignored without a video stream.
     pub fn video(&mut self, rgba: &[u8]) -> Result<(), Error> {
         let Some(Video {
-            stream, convert, ..
+            stream,
+            convert,
+            name,
         }) = &mut self.video
         else {
             return Ok(());
@@ -350,6 +373,9 @@ impl Encoder {
                 let mut yuv = frame::Video::empty();
                 scaler.run(&src, &mut yuv)?;
                 yuv.set_pts(src.pts());
+                if hwenc::is_vaapi(name) {
+                    yuv = hwenc::upload(&stream.enc, &yuv)?;
+                }
                 stream.enc.send_frame(&yuv)?;
                 drain(&mut self.out, stream, |e, p| e.receive_packet(p))
             }
@@ -520,6 +546,21 @@ mod tests {
         );
     }
 
+    /// Without a render node (CI) VAAPI fails at the probe, so exports fall back; with one, it
+    /// opens with a frame pool.
+    #[test]
+    fn vaapi_opens_only_with_a_device() {
+        crate::ffmpeg::init().unwrap();
+        let rate = Rate::new(30, 1);
+        for name in ["h264_vaapi", "hevc_vaapi"] {
+            let opened = open_video(name, Pixel::NV12, (256, 256), rate, false, &opts(&[]));
+            assert_eq!(opened.is_some(), hardware().contains(&name), "{name}");
+            if std::fs::read_dir("/dev/dri").is_err() {
+                assert!(opened.is_none(), "{name} without a render node");
+            }
+        }
+    }
+
     #[test]
     fn quality_maps_to_each_rate_control() {
         let rc = |n, crf: Option<&str>| rate_control(n, crf.map(String::from).as_ref(), (100, 100));
@@ -538,6 +579,10 @@ mod tests {
         assert_eq!(
             get(&rc("h264_amf", Some("99")), "qp_i").as_deref(),
             Some("51")
+        );
+        assert_eq!(
+            get(&rc("hevc_vaapi", Some("23")), "qp").as_deref(),
+            Some("23")
         );
         // Bit-rate encoders: 6 bits per pixel at crf 20, half that 6 steps worse.
         assert_eq!(
