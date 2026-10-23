@@ -1082,7 +1082,14 @@ impl eframe::App for App {
                 self.bin.selected = Some(id);
                 self.run_action("focus_media", false);
             }
-            if let Some(id) = open {
+            // A sequence opens in the timeline rather than the source viewer.
+            let nested = open.and_then(|id| self.history.project().asset(id)?.sequence);
+            if let Some(id) = self.timeline.open_sequence.take().or(nested)
+                && let Err(e) = self.history.open_sequence(id)
+            {
+                tracing::warn!("open sequence: {e}");
+            }
+            if let Some(id) = open.filter(|_| nested.is_none()) {
                 self.preview.open(self.history.project(), id);
                 self.preview_active = 0;
             }

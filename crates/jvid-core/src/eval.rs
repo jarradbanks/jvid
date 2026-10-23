@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-    AssetId, Clip, ClipId, Sequence, Track, TrackId, TrackKind, Transform, TransitionKind,
+    AssetId, Clip, ClipId, Project, Sequence, Track, TrackId, TrackKind, Transform, TransitionKind,
 };
 use crate::time::Time;
 
@@ -25,6 +25,8 @@ pub struct Layer<'a> {
     /// The clip's keyed text style at this instant, applied over a text asset's with
     /// [`crate::model::Text::with`].
     pub text: Vec<(&'static str, crate::keyframe::Value)>,
+    /// A sequence clip's sequence at `source_time`, top first; filled by [`frame_at`].
+    pub nested: Vec<Layer<'a>>,
 }
 
 /// A piece of one clip to mix, clamped to the requested range.
@@ -146,6 +148,7 @@ fn layer<'a>(tr: TrackId, c: &'a Clip, t: Time) -> Layer<'a> {
             _ => None,
         },
         text: c.text_keys(t),
+        nested: Vec::new(),
     }
 }
 
@@ -191,6 +194,22 @@ pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
             vec![dip, layer(tr.id, under, t)]
         })
         .collect()
+}
+
+/// [`video_at`] on the open sequence, with each sequence clip's layers in
+/// [`Layer::nested`] however deep; edits refuse cycles, so it ends. Playback, export and the
+/// CLI draw this.
+pub fn frame_at(p: &Project, t: Time) -> Vec<Layer<'_>> {
+    nest(p, video_at(p.sequence(), t))
+}
+
+fn nest<'a>(p: &'a Project, mut layers: Vec<Layer<'a>>) -> Vec<Layer<'a>> {
+    for l in &mut layers {
+        if let Some(s) = p.nested(l.asset) {
+            l.nested = nest(p, video_at(s, l.source_time));
+        }
+    }
+    layers
 }
 
 /// `c`'s gain from its fades and its transitions at `t` on `track`, 0..=1; transitions are

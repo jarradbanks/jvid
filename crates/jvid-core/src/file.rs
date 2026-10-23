@@ -22,6 +22,8 @@ pub enum FileError {
     MissingVersion,
     /// A frame or sample rate has a zero part.
     InvalidRate,
+    /// A sequence is nested inside itself.
+    Cycle,
 }
 
 impl std::fmt::Display for FileError {
@@ -31,6 +33,7 @@ impl std::fmt::Display for FileError {
             Self::UnsupportedVersion(v) => write!(f, "unsupported project file version {v}"),
             Self::MissingVersion => f.write_str("project file has no schema_version"),
             Self::InvalidRate => f.write_str("project file has a zero frame or sample rate"),
+            Self::Cycle => f.write_str("project file nests a sequence inside itself"),
         }
     }
 }
@@ -95,6 +98,10 @@ pub fn from_json(
     );
     if s.sample_rate == 0 || rates.into_iter().any(|r| r.num == 0 || r.den == 0) {
         return Err(FileError::InvalidRate);
+    }
+    // Rendering recurses into nested sequences, so a loop would never end.
+    if project.has_cycle() {
+        return Err(FileError::Cycle);
     }
     Ok(project)
 }

@@ -22,6 +22,7 @@ fn describe(e: &FileError) -> String {
         FileError::UnsupportedVersion(v) => tr!("file.newer", version = v),
         FileError::MissingVersion => tr!("file.no_version").to_owned(),
         FileError::InvalidRate => tr!("file.zero_rate").to_owned(),
+        FileError::Cycle => tr!("file.cycle").to_owned(),
     }
 }
 
