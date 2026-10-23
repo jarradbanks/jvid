@@ -468,40 +468,145 @@ fn neighbour(clips: &[&Clip], names: &[&str], t: Time, dir: i64) -> Option<Time>
     }
 }
 
-/// The selected clips, or the solid selected in the bin, at playhead `t`; an edit, and
-/// where to seek the playhead.
+/// An Inspector tab, in the order they show.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pane {
+    Text,
+    Video,
+    Audio,
+    Effects,
+}
+
+/// What the Inspector edits: the selected clips by track kind, and the asset they share.
+pub struct Selection<'a> {
+    clips: Vec<&'a Clip>,
+    audio: Vec<&'a Clip>,
+    /// Only when every selected video clip shows it, so its editors edit them all.
+    shared: Option<&'a MediaAsset>,
+    same: bool,
+}
+
+impl<'a> Selection<'a> {
+    /// The selected clips, or the solid or text selected in the bin.
+    pub fn new(
+        project: &'a Project,
+        selected: &HashSet<ClipId>,
+        bin_selected: Option<&'a MediaAsset>,
+    ) -> Self {
+        let seq = project.sequence();
+        // Audio clips have no picture to transform, only the Audio section.
+        let of = |kind| {
+            let mut clips: Vec<&Clip> = selected
+                .iter()
+                .filter_map(|id| seq.clip(*id))
+                .filter(|(t, _)| seq.track(*t).is_some_and(|t| t.kind == kind))
+                .map(|(_, c)| c)
+                .collect();
+            clips.sort_by_key(|c| c.id.0);
+            clips
+        };
+        let (clips, audio) = (of(TrackKind::Video), of(TrackKind::Audio));
+        let same = clips.iter().all(|c| c.asset == clips[0].asset);
+        let shared = clips
+            .first()
+            .filter(|_| same)
+            .and_then(|c| project.asset(c.asset))
+            .or(bin_selected.filter(|a| a.generated()));
+        Self {
+            clips,
+            audio,
+            shared,
+            same,
+        }
+    }
+
+    /// The tabs this selection has; none when there's nothing to inspect.
+    pub fn panes(&self) -> Vec<Pane> {
+        let video = !self.clips.is_empty();
+        [
+            (Pane::Text, self.shared.is_some_and(|a| a.text.is_some())),
+            (
+                Pane::Video,
+                video || self.shared.is_some_and(|a| a.solid.is_some()),
+            ),
+            (Pane::Audio, !self.audio.is_empty()),
+            (Pane::Effects, video),
+        ]
+        .into_iter()
+        .filter_map(|(p, on)| on.then_some(p))
+        .collect()
+    }
+
+    /// The effects every video clip has, when they all have the same stack.
+    fn effect_count(&self) -> Option<usize> {
+        let n = self.clips.first()?.transform.effects.len();
+        let shaders = |c: &Clip| {
+            c.transform
+                .effects
+                .iter()
+                .map(|e| e.shader.clone())
+                .collect::<Vec<_>>()
+        };
+        let same = self
+            .clips
+            .iter()
+            .all(|c| shaders(c) == shaders(self.clips[0]));
+        same.then_some(n)
+    }
+
+    /// A tab's label; Effects carries its count once there are any.
+    pub fn label(&self, pane: Pane) -> String {
+        match pane {
+            Pane::Text => caption("text").to_owned(),
+            Pane::Video => caption("video").to_owned(),
+            Pane::Audio => caption("audio").to_owned(),
+            Pane::Effects => match self.effect_count() {
+                Some(n) if n > 0 => format!("{} {n}", caption("effects")),
+                _ => caption("effects").to_owned(),
+            },
+        }
+    }
+}
+
+fn pane_id() -> egui::Id {
+    egui::Id::new("inspector_pane")
+}
+
+/// The tab to show: the one last chosen while the selection has it, else the first.
+pub fn active(ctx: &egui::Context, panes: &[Pane]) -> usize {
+    let chosen = ctx.data(|d| d.get_temp::<Pane>(pane_id()));
+    panes.iter().position(|p| Some(*p) == chosen).unwrap_or(0)
+}
+
+/// Remembers a clicked tab, so it stays chosen across selections that have it.
+pub fn choose(ctx: &egui::Context, pane: Pane) {
+    ctx.data_mut(|d| d.insert_temp(pane_id(), pane));
+}
+
+/// Tab `pane` of `sel` at playhead `t`; an edit, and where to seek the playhead.
 pub fn show(
     ui: &mut Ui,
-    project: &Project,
-    selected: &HashSet<ClipId>,
-    bin_selected: Option<&MediaAsset>,
+    sel: &Selection,
+    pane: Option<Pane>,
     t: Time,
 ) -> (Option<Edit>, Option<Time>) {
     // A gutter keeps the row buttons clear of the scroll bar.
     let gutter = ui.spacing().scroll.allocated_width() + space::S4;
     ui.set_max_width(ui.available_width() - gutter);
-    let seq = project.sequence();
-    // Audio clips have no picture to transform, only the Audio section.
-    let of = |kind| {
-        let mut clips: Vec<&Clip> = selected
-            .iter()
-            .filter_map(|id| seq.clip(*id))
-            .filter(|(t, _)| seq.track(*t).is_some_and(|t| t.kind == kind))
-            .map(|(_, c)| c)
-            .collect();
-        clips.sort_by_key(|c| c.id.0);
-        clips
-    };
-    let (clips, audio) = (of(TrackKind::Video), of(TrackKind::Audio));
-    let (mut edit, mut seek) = (None, None);
-    if clips.is_empty() && audio.is_empty() && bin_selected.is_none_or(|a| !a.generated()) {
+    let Some(pane) = pane else {
         ui.label(egui::RichText::new(tr!("inspector.empty")).color(color::INK_3));
         return (None, None);
-    }
+    };
+    let (clips, audio, shared, same) = (&sel.clips, &sel.audio, sel.shared, sel.same);
+    let (mut edit, mut seek) = (None, None);
     let mut index = 0u64;
     for (id, props) in SECTIONS {
-        let clips = if id == "audio" { &audio } else { &clips };
-        if clips.is_empty() {
+        let (clips, here) = if id == "audio" {
+            (audio, Pane::Audio)
+        } else {
+            (clips, Pane::Video)
+        };
+        if clips.is_empty() || pane != here {
             index += props.len() as u64;
             continue;
         }
@@ -543,36 +648,36 @@ pub fn show(
             edit = Some(e);
         }
     }
-    if !clips.is_empty()
-        && section(ui, "effects", None).0
-        && let Some(e) = effects_rows(ui, &clips, t, &mut index, &mut seek)
+    if pane == Pane::Effects
+        && let Some(e) = effects_rows(ui, clips, t, &mut index, &mut seek)
     {
         edit = Some(e);
     }
-    if let Some(c) = clips.first().or(audio.first())
+    // Speed sits with the picture, or with the sound when there's no picture.
+    let speed = if clips.is_empty() {
+        Pane::Audio
+    } else {
+        Pane::Video
+    };
+    if pane == speed
+        && let Some(c) = clips.first().or(audio.first())
         && section(ui, "speed", None).0
         && let Some(e) = speed_row(ui, c)
     {
         edit = Some(e);
     }
-    // Only when every selected clip shows the same asset, so the editors edit them all.
-    let same = clips.iter().all(|c| c.asset == clips[0].asset);
-    let shared = clips
-        .first()
-        .filter(|_| same)
-        .and_then(|c| project.asset(c.asset))
-        .or(bin_selected);
-    if let Some(a) = shared.filter(|a| a.text.is_some())
-        && section(ui, "text", None).0
-        && let Some(e) = text_props(ui, a, if same { &clips } else { &[] }, t)
+    if pane == Pane::Text
+        && let Some(a) = shared.filter(|a| a.text.is_some())
+        && let Some(e) = text_props(ui, a, if same { &clips[..] } else { &[] }, t)
     {
         edit = Some(e);
     }
-    if (audio.is_empty() || !clips.is_empty()) && section(ui, "color", None).0 {
-        let solid = shared.filter(|a| a.solid.is_some());
-        if let Some(e) = solid.and_then(|a| solid_color(ui, a)) {
-            edit = Some(e);
-        }
+    if pane == Pane::Video
+        && let Some(a) = shared.filter(|a| a.solid.is_some())
+        && section(ui, "color", None).0
+        && let Some(e) = solid_color(ui, a)
+    {
+        edit = Some(e);
     }
     (edit, seek)
 }
@@ -2012,8 +2117,12 @@ mod tests {
         assert_eq!(clips[1].transform.opacity, 0.25);
     }
 
-    /// The inspector over a real history, with one video clip selected.
     fn harness() -> egui_kittest::Harness<'static, History> {
+        harness_on(Pane::Video)
+    }
+
+    /// The inspector's `pane` over a real history, with one video clip selected.
+    fn harness_on(pane: Pane) -> egui_kittest::Harness<'static, History> {
         use jvid_core::model::{NewClip, ProbeInfo};
         use jvid_core::time::FLICKS_PER_SECOND as S;
         let mut h = History::new(Project::default());
@@ -2053,7 +2162,8 @@ mod tests {
                         return;
                     }
                     ui.painter().rect_filled(ui.max_rect(), 0.0, color::PANEL);
-                    let (edit, _) = show(ui, h.project(), &HashSet::from([id]), None, Time(S));
+                    let sel = Selection::new(h.project(), &HashSet::from([id]), None);
+                    let (edit, _) = show(ui, &sel, Some(pane), Time(S));
                     match edit {
                         Some((c, Some(k))) => h.apply_coalesced(k, c).unwrap(),
                         Some((c, None)) => h.apply(c).unwrap(),
@@ -2064,6 +2174,84 @@ mod tests {
             );
         harness.run();
         harness
+    }
+
+    fn asset(text: bool) -> MediaAsset {
+        MediaAsset {
+            id: AssetId(1),
+            path: "/nonexistent/a.mp4".into(),
+            probe: None,
+            name: None,
+            in_point: None,
+            out_point: None,
+            solid: None,
+            text: text.then(Text::default),
+        }
+    }
+
+    #[test]
+    fn tabs_follow_the_selection() {
+        use Pane::*;
+        let (v, a, footage, text) = (clip(1, 0), clip(2, 0), asset(false), asset(true));
+        let sel = |clips: Vec<&Clip>, audio: Vec<&Clip>, shared| {
+            Selection {
+                clips,
+                audio,
+                shared,
+                same: true,
+            }
+            .panes()
+        };
+        assert_eq!(
+            sel(vec![&v], vec![&a], Some(&footage)),
+            [Video, Audio, Effects]
+        );
+        assert_eq!(sel(vec![], vec![&a], None), [Audio]);
+        assert_eq!(sel(vec![&v], vec![], Some(&text)), [Text, Video, Effects]);
+        assert_eq!(sel(vec![], vec![], Some(&text)), [Text]);
+        assert_eq!(sel(vec![], vec![], None), []);
+    }
+
+    #[test]
+    fn the_chosen_tab_stays_while_the_selection_has_it() {
+        use Pane::*;
+        let ctx = egui::Context::default();
+        assert_eq!(active(&ctx, &[Video, Audio, Effects]), 0);
+        choose(&ctx, Effects);
+        assert_eq!(active(&ctx, &[Text, Video, Effects]), 2);
+        // Audio-only falls back to its one tab, and Effects comes back with the video.
+        assert_eq!(active(&ctx, &[Audio]), 0);
+        assert_eq!(active(&ctx, &[Video, Audio, Effects]), 2);
+    }
+
+    #[test]
+    fn the_effects_tab_counts_a_shared_stack() {
+        let fx = |shaders: &[&str]| {
+            let mut c = clip(1, 0);
+            c.transform.effects = shaders
+                .iter()
+                .map(|s| Effect {
+                    shader: s.to_string(),
+                    params: BTreeMap::new(),
+                    enabled: true,
+                })
+                .collect();
+            c
+        };
+        let label = |clips: &[&Clip]| {
+            Selection {
+                clips: clips.to_vec(),
+                audio: vec![],
+                shared: None,
+                same: true,
+            }
+            .label(Pane::Effects)
+        };
+        let (none, two, other) = (fx(&[]), fx(&["vignette", "film_grain"]), fx(&["vignette"]));
+        assert_eq!(label(&[&none]), "Effects");
+        assert_eq!(label(&[&two]), "Effects 2");
+        assert_eq!(label(&[&two, &two]), "Effects 2");
+        assert_eq!(label(&[&two, &other]), "Effects");
     }
 
     #[test]
@@ -2264,7 +2452,7 @@ mod tests {
         ));
         crate::effects::scan_for_test(&tmp);
         let _ = std::fs::remove_dir_all(&tmp);
-        let mut h = harness();
+        let mut h = harness_on(Pane::Effects);
         h.set_size(vec2(340.0, 1000.0));
         let ids = HashSet::from([h.state().project().sequence().tracks()[0].clips()[0].id]);
         for stem in ["vignette", "film_grain"] {

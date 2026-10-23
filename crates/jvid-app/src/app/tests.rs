@@ -1234,6 +1234,28 @@ fn title_harness() -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Po
 }
 
 #[test]
+fn a_selected_title_puts_text_video_and_effects_tabs_in_the_inspector_header() {
+    if !gpu() {
+        return;
+    }
+    let (mut h, _, _) = title_harness();
+    // The bin has its own Text and Effects tabs.
+    let tabs = |name| h.query_all_by_label(name).count();
+    assert_eq!(
+        ["Text", "Video", "Audio", "Effects"].map(tabs),
+        [2, 1, 0, 2]
+    );
+    let s = Shot::take(&mut h, "title".into());
+    let (preview, inspector) = (s.panel(Tab::Preview), s.panel(Tab::Inspector));
+    assert_eq!(
+        s.column(inspector)[1],
+        s.column(preview)[1],
+        "header divider"
+    );
+    assert_eq!(s.label(inspector).2, s.label(preview).2, "header baseline");
+}
+
+#[test]
 fn double_clicking_a_title_in_program_edits_it_and_space_types() {
     if !gpu() {
         return;

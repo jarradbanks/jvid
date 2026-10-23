@@ -1265,13 +1265,25 @@ impl TabViewer for Viewer<'_> {
         }
         if *tab == Tab::Inspector {
             let solid = self.bin.selected.and_then(|id| self.project.asset(id));
-            panel.show(ui, |ui| {
-                let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
+            let sel =
+                crate::inspector::Selection::new(self.project, self.timeline.selected(), solid);
+            let panes = sel.panes();
+            let labels: Vec<String> = panes.iter().map(|p| sel.label(*p)).collect();
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            let shown = crate::inspector::active(ui.ctx(), &panes);
+            let mut active = shown;
+            let panel = if panes.is_empty() {
+                Panel::titled(tab.title())
+            } else {
+                Panel::tabbed(&labels, &mut active)
+            };
+            // The new tab shows next frame; the click already repaints.
+            panel.focused(focused).show(ui, |ui| {
+                let t = self.timeline.playhead();
+                let pane = panes.get(shown).copied();
                 let (edit, seek) = egui::ScrollArea::vertical()
                     .auto_shrink(false)
-                    .show(ui, |ui| {
-                        crate::inspector::show(ui, self.project, selected, solid, t)
-                    })
+                    .show(ui, |ui| crate::inspector::show(ui, &sel, pane, t))
                     .inner;
                 if let Some((c, g)) = edit {
                     (self.command, self.gesture) = (Some(c), g);
@@ -1280,6 +1292,9 @@ impl TabViewer for Viewer<'_> {
                     self.timeline.seek(t);
                 }
             });
+            if active != shown {
+                crate::inspector::choose(ui.ctx(), panes[active]);
+            }
             return;
         }
         // shortcut: panels are empty shells; their content lands in later issues.
