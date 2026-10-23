@@ -393,6 +393,14 @@ mod tests {
         buf.shape_until_scroll(&mut f.system, false);
         let run = buf.layout_runs().next()?;
         let ids: Vec<u16> = run.glyphs.iter().map(|g| g.glyph_id).collect();
+        // Which fallback font shaped it differs per OS, so say, for failures.
+        let faces: Vec<_> = run
+            .glyphs
+            .iter()
+            .filter_map(|g| f.system.db().face(g.font_id))
+            .map(|face| face.post_script_name.clone())
+            .collect();
+        eprintln!("{s}: {ids:?} from {faces:?}");
         // Glyph 0 is .notdef: the font fell back to a tofu box.
         (!ids.contains(&0)).then_some((run.rtl, ids))
     }

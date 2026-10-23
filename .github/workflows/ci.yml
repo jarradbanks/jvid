@@ -75,7 +75,8 @@ jobs:
       # macOS has no software adapter, so its GPU tests skip; Linux (lavapipe) and Windows (WARP) must run them.
       - if: runner.os == 'macOS'
         run: echo "::notice::GPU tests skip on macOS (no software adapter on hosted runners)"
-      - run: cargo test --workspace
+      # Every crate's failures, not just the first failing crate's.
+      - run: cargo test --workspace --no-fail-fast
         env:
           JVID_GPU_TESTS: ${{ runner.os != 'macOS' && 'required' || '' }}
           JVID_TEST_MEDIA_REQUIRED: ${{ runner.os == 'Linux' && '1' || '' }}
