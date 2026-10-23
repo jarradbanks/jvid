@@ -225,6 +225,30 @@ pub fn visuals_with(p: &Palette) -> Visuals {
 pub fn install(ctx: &Context) {
     ctx.set_fonts(fonts());
     ctx.set_global_style(style());
+    ctx.on_begin_pass("hairlines", Arc::new(|ui| sync_hairlines(ui.ctx())));
+}
+
+/// egui draws its own borders (popups, menus, separators) at 1pt, which is 1.5 physical
+/// pixels at 150%; this keeps them one physical pixel at the current scale.
+fn sync_hairlines(ctx: &Context) {
+    let width = 1.0 / ctx.pixels_per_point();
+    if ctx.global_style().visuals.window_stroke.width == width {
+        return;
+    }
+    ctx.global_style_mut(|s| {
+        let v = &mut s.visuals;
+        v.window_stroke.width = width;
+        let w = &mut v.widgets;
+        for wv in [
+            &mut w.noninteractive,
+            &mut w.inactive,
+            &mut w.hovered,
+            &mut w.active,
+            &mut w.open,
+        ] {
+            wv.bg_stroke.width = width;
+        }
+    });
 }
 
 /// A border or divider: exactly one physical pixel wide at any UI scale.
