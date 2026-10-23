@@ -632,8 +632,13 @@ impl Timeline {
             return Time(0);
         }
         let mut targets = vec![self.playhead()];
-        targets.extend(seq.in_point());
-        targets.extend(seq.out_point());
+        let flag = self.mark_drag.map(|(is_in, _)| is_in);
+        if flag != Some(true) {
+            targets.extend(seq.in_point());
+        }
+        if flag != Some(false) {
+            targets.extend(seq.out_point());
+        }
         for m in seq.markers() {
             targets.extend([m.time, m.time + m.duration]);
         }
@@ -795,6 +800,9 @@ impl Timeline {
                 && let Some(p) = h.interact_pointer_pos()
             {
                 let t = rate.time_floor(rate.index_nearest(view.time(p.x)).max(0));
+                // Set first so the snap skips this flag's own mark.
+                self.mark_drag = Some((is_in, t));
+                let t = t + self.snap(seq, &[], &[t]);
                 // Held a frame clear of the other mark.
                 let t = match (is_in, seq.in_point(), seq.out_point()) {
                     (true, _, Some(o)) => t.min(rate.time_floor(rate.index_floor(o) - 1)),
@@ -802,6 +810,9 @@ impl Timeline {
                     _ => t,
                 };
                 self.mark_drag = Some((is_in, t));
+            }
+            if h.drag_stopped() {
+                self.snapped = None;
             }
             if h.drag_stopped()
                 && let Some((_, t)) = self.mark_drag.take()
@@ -2741,6 +2752,69 @@ mod tests {
                 seq.tracks()[0].clips()[0].start,
                 want,
                 "snapping {snapping}"
+            );
+        }
+    }
+
+    #[test]
+    fn dragging_in_out_flags_snaps_to_clip_starts_and_ends() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        // One clip over 0..2s at 20pt/s; In at 1s, Out at 3s, playhead well clear.
+        let fifth = Rate::new(30, 1).time_floor(6);
+        let x = |t: f32| 8.0 + size::TRACK_HEADER + t * 20.0;
+        let y = 8.0 + size::RULER / 2.0;
+        let cases = [
+            // (flag, drop at secs, snapping, want): 4pt from a boundary snaps, 12pt doesn't.
+            (true, 0.2, true, Time(0)),
+            (true, 0.2, false, fifth),
+            (false, 2.2, true, Time(2 * S)),
+            (false, 2.2, false, Time(2 * S) + fifth),
+            (
+                false,
+                2.6,
+                true,
+                Time(2 * S) + Rate::new(30, 1).time_floor(18),
+            ),
+        ];
+        for (is_in, to, snapping, want) in cases {
+            let mut p = History::new(project(1));
+            p.apply(Command::SetInOut {
+                in_point: Some(Time(S)),
+                out_point: Some(Time(3 * S)),
+            })
+            .unwrap();
+            let mut h = harness(p.project().clone());
+            h.state_mut().0.seek(Time(30 * S));
+            if !snapping {
+                h.state_mut().0.action("snapping", &Project::default());
+            }
+            let from = pos2(x(if is_in { 1.0 } else { 3.0 }), y);
+            h.hover_at(from);
+            h.run();
+            h.drag_at(from);
+            h.run();
+            for t in [to + 0.5, to] {
+                h.hover_at(pos2(x(t), y));
+                h.run();
+            }
+            h.drop_at(pos2(x(to), y));
+            h.run();
+            let seq = h.state().1.project().sequence().clone();
+            let got = if is_in {
+                seq.in_point()
+            } else {
+                seq.out_point()
+            };
+            assert_eq!(got, Some(want), "in {is_in} to {to} snapping {snapping}");
+            assert_eq!(h.state().0.snapped, None);
+            // One undo step restores the original marks.
+            assert!(h.state_mut().1.undo());
+            let seq = h.state().1.project().sequence().clone();
+            assert_eq!(
+                (seq.in_point(), seq.out_point()),
+                (Some(Time(S)), Some(Time(3 * S)))
             );
         }
     }
