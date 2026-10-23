@@ -683,3 +683,80 @@ fn effect_ignoring_fx_renders_and_extra_bindings_are_rejected() {
     let px = read_back(&device, &queue, tex);
     assert!(near(px[0], 50) && near(px[2], 200), "{:?}", &px[..4]);
 }
+
+#[test]
+fn chroma_key_shows_the_lower_track_and_suppresses_spill() {
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping effect test: no software adapter on this platform");
+        return;
+    };
+    // Columns: green screen, skin-tone foreground, a foreground edge with a green cast, blue screen.
+    let cols = [
+        [40, 200, 60, 255],
+        [220, 170, 140, 255],
+        [150, 190, 140, 255],
+        [30, 60, 210, 255],
+    ];
+    let fg = image(&device, &queue, (32, 8), |x, _| cols[x as usize / 8]);
+    let red = image(&device, &queue, (32, 8), |_, _| [255, 0, 0, 255]);
+    let (_, src) = crate::effect::BUNDLED
+        .iter()
+        .find(|(f, _)| *f == "chroma_key.wgsl")
+        .unwrap();
+    let mut comp = Compositor::new(&device);
+    comp.set_effect(
+        &device,
+        "chroma_key",
+        Some(&crate::effect::parse(src).unwrap()),
+    )
+    .unwrap();
+    // The centre pixel of each column, keyed with defaults but `key_hue` and `spill_suppression`.
+    let mut run = |hue: f64, spill: f64| {
+        let t = Transform {
+            effects: vec![Effect {
+                shader: "chroma_key".into(),
+                params: [
+                    ("key_hue".to_owned(), hue),
+                    ("spill_suppression".to_owned(), spill),
+                ]
+                .into(),
+            }],
+            ..Default::default()
+        };
+        let layers = [(&fg, t), (&red, Transform::default())];
+        let tex = comp.render(&device, &queue, (32, 8), 1, [0, 0, 0, 255], &layers);
+        let rgba = read_back(&device, &queue, tex);
+        [4, 12, 20, 28].map(|x| {
+            let i = (4 * 32 + x) * 4;
+            [rgba[i], rgba[i + 1], rgba[i + 2]].map(i32::from)
+        })
+    };
+    let same = |a: [i32; 3], b: [i32; 3]| a.iter().zip(b).all(|(a, b)| (a - b).abs() <= 1);
+    let green = run(120.0, 0.0);
+    assert!(same(green[0], [255, 0, 0]), "green keyed: {:?}", green[0]);
+    assert!(
+        same(green[1], [220, 170, 140]),
+        "foreground kept: {:?}",
+        green[1]
+    );
+    assert!(same(green[2], [150, 190, 140]), "edge kept: {:?}", green[2]);
+    assert!(
+        same(green[3], [30, 60, 210]),
+        "blue not keyed: {:?}",
+        green[3]
+    );
+    let blue = run(240.0, 0.0);
+    assert!(same(blue[3], [255, 0, 0]), "blue keyed: {:?}", blue[3]);
+    assert!(
+        same(blue[0], [40, 200, 60]),
+        "green not keyed: {:?}",
+        blue[0]
+    );
+    // Green cast: how far green leads the other channels on the edge pixel.
+    let cast = |[r, g, b]: [i32; 3]| g - r.max(b);
+    let full = run(120.0, 1.0);
+    assert_eq!(cast(green[2]), 40);
+    assert!(cast(full[2]).abs() <= 1, "spill removed: {:?}", full[2]);
+    assert!(cast(run(120.0, 0.5)[2]) <= 21, "half spill");
+    assert!(same(full[1], [220, 170, 140]), "no cast, no change");
+}

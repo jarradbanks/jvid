@@ -39,20 +39,13 @@ pub struct Library {
 }
 
 impl Library {
-    /// Re-reads `dir`, creating it with the bundled examples if it doesn't exist (so deleting
-    /// the whole folder brings the examples back); only files whose modified time or length
-    /// changed are read and re-parsed.
+    /// Re-reads `dir`, creating it and adding bundled examples it hasn't been offered yet (see
+    /// [`offer_bundled`]); only files whose modified time or length changed are read and
+    /// re-parsed.
     /// shortcut: polls the folder instead of watching it, as no file-watch crate is in the stack.
     pub fn scan(&mut self, dir: &Path) {
-        if !dir.exists() {
-            let made = std::fs::create_dir_all(dir).and_then(|()| {
-                effect::BUNDLED
-                    .iter()
-                    .try_for_each(|(name, src)| std::fs::write(dir.join(name), src))
-            });
-            if let Err(e) = made {
-                tracing::warn!("effects: can't create {}: {e}", dir.display());
-            }
+        if let Err(e) = offer_bundled(dir) {
+            tracing::warn!("effects: can't add the examples to {}: {e}", dir.display());
         }
         let mut seen = BTreeMap::new();
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
@@ -186,6 +179,50 @@ pub struct Row {
 }
 
 const DISABLED: &str = "disabled.txt";
+/// The bundled examples' stems already written to the folder once, one per line.
+const OFFERED: &str = "bundled.txt";
+
+/// Creates `dir` and writes each bundled example not yet listed in [`OFFERED`], so a new
+/// release's examples reach an existing folder while one the user deleted stays deleted, and
+/// deleting the whole folder brings them all back. A folder from before [`OFFERED`] counts the
+/// examples it holds as offered.
+fn offer_bundled(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let stem = |file: &'static str| file.strip_suffix(".wgsl").unwrap_or(file);
+    let path = dir.join(OFFERED);
+    let (mut offered, mut dirty): (BTreeSet<&str>, _) = match std::fs::read_to_string(&path) {
+        Ok(text) => (
+            effect::BUNDLED
+                .iter()
+                .map(|(f, _)| stem(f))
+                .filter(|s| text.lines().any(|l| l == *s))
+                .collect(),
+            false,
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
+            effect::BUNDLED
+                .iter()
+                .filter(|(f, _)| dir.join(f).exists())
+                .map(|(f, _)| stem(f))
+                .collect(),
+            true,
+        ),
+        Err(e) => return Err(e),
+    };
+    for (file, src) in effect::BUNDLED {
+        if offered.insert(stem(file)) {
+            dirty = true;
+            if !dir.join(file).exists() {
+                std::fs::write(dir.join(file), src)?;
+            }
+        }
+    }
+    if dirty {
+        let out: String = offered.iter().map(|s| format!("{s}\n")).collect();
+        std::fs::write(path, out)?;
+    }
+    Ok(())
+}
 
 /// What a timeline drop of an Effects tab row carries: the effect's file stem.
 #[derive(Clone)]
@@ -386,7 +423,15 @@ mod tests {
         let mut lib = Library::default();
         lib.scan(&tmp);
         let names: Vec<_> = lib.entries().map(|(k, _)| k.to_owned()).collect();
-        assert_eq!(names, ["chromatic_aberration", "film_grain", "vignette"]);
+        assert_eq!(
+            names,
+            [
+                "chroma_key",
+                "chromatic_aberration",
+                "film_grain",
+                "vignette"
+            ]
+        );
         assert!(lib.entries().all(|(_, e)| e.is_ok()));
         let g = lib.generation;
         lib.scan(&tmp);
@@ -418,6 +463,27 @@ mod tests {
     }
 
     #[test]
+    fn new_examples_reach_an_existing_folder_once() {
+        let tmp = std::env::temp_dir().join(format!("jvid-effects-offer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        // A folder from before chroma_key and the offered list.
+        for (file, src) in effect::BUNDLED {
+            if file != "chroma_key.wgsl" {
+                std::fs::write(tmp.join(file), src).unwrap();
+            }
+        }
+        let mut lib = Library::default();
+        lib.scan(&tmp);
+        assert!(lib.shipped("chroma_key"));
+        std::fs::remove_file(tmp.join("chroma_key.wgsl")).unwrap();
+        lib.scan(&tmp);
+        assert!(!tmp.join("chroma_key.wgsl").exists() && lib.get("chroma_key").is_none());
+        assert_eq!(lib.entries().count(), effect::BUNDLED.len() - 1);
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
     fn describes_creates_duplicates_disables_and_deletes() {
         let tmp = std::env::temp_dir().join(format!("jvid-effects-ops-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
@@ -430,7 +496,7 @@ mod tests {
         let rows = lib.rows("CORNERS");
         assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].name.as_str(), rows[0].bundled), ("Vignette", true));
-        assert_eq!(lib.rows("").len(), 3);
+        assert_eq!(lib.rows("").len(), 4);
         assert!(bundled("vignette") && !bundled("new_effect"));
 
         // A broken user shader: listed by file name with the compiler's message.
