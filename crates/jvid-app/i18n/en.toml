@@ -81,6 +81,7 @@ focus_program = "Focus Program"
 focus_inspector = "Focus Inspector"
 focus_effects = "Focus Effects"
 export_frame = "Export Frame"
+record = "Record Voiceover"
 
 # Dock panel titles.
 [panel]
@@ -243,7 +244,9 @@ language_note = "Applies right away. Names already in a project, such as track n
 save_failed = "Couldn't save the setting: {error}"
 done = "Done"
 no_config_dir = "This system has no settings folder"
-not_written = "The language didn't save as expected"
+not_written = "The setting didn't save as expected"
+input_device = "Input Device"
+input_default = "System Default"
 
 # Project size presets, on the welcome screen and in Project Settings.
 [size]
@@ -422,6 +425,14 @@ hide = "Hide"
 mute = "Mute"
 lock = "Lock"
 solo = "Solo"
+arm = "Arm for Recording"
+stop_recording = "Stop Recording"
+# The file name of a voiceover take, without its .wav extension.
+recording_file = "Voiceover {n}"
+record_no_track = "Arm an audio track to record onto first"
+record_failed = "Couldn't start recording: {error}"
+record_lost = "Recording stopped: the input device went away"
+record_save_failed = "Couldn't add the recording: {error}"
 rename = "Rename"
 move_up = "Move Up"
 move_down = "Move Down"

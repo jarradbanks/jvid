@@ -115,6 +115,10 @@ pub struct Timeline {
     keys: keyframes::Keys,
     /// The Detect Silence dialog, while open.
     silence: Option<silence::Silence>,
+    /// The audio track a voiceover records onto; disarming it ends a take.
+    pub armed: Option<TrackId>,
+    /// The input level while a take records onto `armed`, 0..=1; the app sets it.
+    pub level: Option<f32>,
 }
 
 /// Snap reach in points.
@@ -173,6 +177,8 @@ impl Default for Timeline {
             notice: None,
             keys: keyframes::Keys::default(),
             silence: None,
+            armed: None,
+            level: None,
         }
     }
 }
@@ -1627,7 +1633,10 @@ impl Timeline {
         ];
         let step = size::SMALL_CONTROL + space::S4;
         let mut x = rect.right() - space::S8 - toggles.len() as f32 * step + space::S4;
-        let name_right = x - space::S4;
+        // Audio tracks put record arm before the rest, so the columns line up across kinds.
+        let audio = track.kind == TrackKind::Audio;
+        let arm_x = x - step;
+        let name_right = if audio { arm_x } else { x } - space::S4;
         for (n, (glyph, on, font, tip, solo)) in toggles.into_iter().enumerate() {
             let r = Rect::from_min_size(
                 pos2(x, mid - size::SMALL_CONTROL / 2.0),
@@ -1653,6 +1662,64 @@ impl Timeline {
                     _ => set(&|s| s.solo = !s.solo),
                 };
             }
+        }
+        let armed = self.armed == Some(track.id);
+        let level = self.level.filter(|_| armed);
+        if audio {
+            let r = Rect::from_min_size(
+                pos2(arm_x, mid - size::SMALL_CONTROL / 2.0),
+                vec2(size::SMALL_CONTROL, size::SMALL_CONTROL),
+            );
+            let tip = if level.is_some() {
+                tr!("timeline.stop_recording")
+            } else {
+                tr!("timeline.arm")
+            };
+            let font = theme::body_strong();
+            if toggle(
+                ui,
+                painter,
+                r,
+                column,
+                id.with("arm"),
+                "",
+                font,
+                armed,
+                false,
+                tip,
+            ) {
+                self.armed = (!armed).then_some(track.id);
+            }
+            // A Red dot once armed, a Red stop square while recording.
+            let ink = match armed {
+                true => color::RED,
+                false if ui.rect_contains_pointer(r.intersect(column)) => color::INK_2,
+                false => color::INK_3,
+            };
+            if level.is_some() {
+                let square = Rect::from_center_size(r.center(), vec2(8.0, 8.0));
+                painter.rect_filled(square, CornerRadius::same(2), ink);
+            } else {
+                painter.circle_filled(r.center(), 4.0, ink);
+            }
+        }
+        if let Some(level) = level {
+            // The input meter under the header row, -60 to 0 dBFS.
+            let top = (mid + size::SMALL_CONTROL / 2.0 + 2.0).min(rect.bottom() - 4.0);
+            let bar = Rect::from_x_y_ranges(
+                rect.left() + space::INSET..=rect.right() - space::S8,
+                top..=top + 3.0,
+            );
+            let db = 20.0 * level.max(1e-6).log10();
+            let fill = match db {
+                d if d >= 0.0 => color::RED,
+                d if d > -6.0 => color::AMBER,
+                _ => color::GREEN,
+            };
+            let w = ((db + 60.0) / 60.0).clamp(0.0, 1.0) * bar.width();
+            let corner = CornerRadius::same(1);
+            painter.rect_filled(bar, corner, color::FIELD);
+            painter.rect_filled(Rect::from_min_size(bar.min, vec2(w, 3.0)), corner, fill);
         }
 
         // Name, or the rename field.
@@ -2762,6 +2829,32 @@ mod tests {
         assert_eq!(snap_height(43.0), 44.0);
         assert_eq!(snap_height(5.0), Track::MIN_HEIGHT);
         assert_eq!(snap_height(999.0), Track::MAX_HEIGHT);
+    }
+
+    #[test]
+    fn audio_headers_arm_one_track_for_recording() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(2));
+        assert_eq!(
+            h.get_all_by_label("Arm for Recording").count(),
+            1,
+            "audio only"
+        );
+        h.get_by_label("Arm for Recording").click();
+        h.run();
+        let a1 = h.state().1.project().sequence().tracks()[1].id;
+        assert_eq!(h.state().0.armed, Some(a1));
+        assert!(!h.state().1.can_undo(), "arming isn't an edit");
+        // While a take records, the toggle stops it.
+        h.state_mut().0.level = Some(0.5);
+        h.run();
+        h.snapshot("timeline_recording");
+        h.get_by_label("Stop Recording").click();
+        h.run();
+        assert_eq!(h.state().0.armed, None);
     }
 
     #[test]

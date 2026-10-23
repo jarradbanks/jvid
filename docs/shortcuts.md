@@ -63,6 +63,7 @@ Work in any panel except while typing in a text field.
 | Focus Inspector | `Shift+5` |
 | Focus Effects | `Shift+7` |
 | Export Frame | `Ctrl+Shift+E` |
+| Record Voiceover | `Shift+R` |
 
 ## Timeline
 
