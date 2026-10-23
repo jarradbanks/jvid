@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use jvid_render::effect::{self, Shader};
 
+use crate::i18n::tr;
+
 /// An effect file by stem: its parsed shader, or why it doesn't load.
 pub type Entry = Result<Arc<Shader>, String>;
 
@@ -187,11 +189,12 @@ pub fn bundled(stem: &str) -> bool {
         .any(|(f, _)| f.strip_suffix(".wgsl") == Some(stem))
 }
 
-/// What New Effect writes: a working effect with one parameter to start from.
-const TEMPLATE: &str = r#"// @jvid effect "New Effect"
+/// What New Effect writes: a working effect with one parameter to start from. `EFFECT_NAME`
+/// and `EFFECT_ABOUT` become the shown name and description in the UI language.
+const TEMPLATE: &str = r#"// @jvid effect "EFFECT_NAME"
 // @param amount float 0.0..1.0 = 0.0
 
-// Blends towards the inverted image; the first comment line shows in the Effects tab.
+// EFFECT_ABOUT
 fn effect(uv: vec2<f32>) -> vec4<f32> {
     let c = textureSample(src, smp, uv);
     return vec4<f32>(mix(c.rgb, 1.0 - c.rgb, fx.amount), c.a);
@@ -212,7 +215,12 @@ fn free_path(dir: &Path, base: &str) -> PathBuf {
 /// Writes the template as a new file in `dir`, returning its path.
 pub fn create(dir: &Path) -> std::io::Result<PathBuf> {
     let path = free_path(dir, "new_effect");
-    std::fs::write(&path, TEMPLATE).map(|()| path)
+    let name = tr!("bin.template_name").replace('"', "'");
+    let about = tr!("bin.template_about").replace('\n', " ");
+    let source = TEMPLATE
+        .replacen("EFFECT_NAME", &name, 1)
+        .replacen("EFFECT_ABOUT", &about, 1);
+    std::fs::write(&path, source).map(|()| path)
 }
 
 /// Copies `stem`'s file to a free name beside it.

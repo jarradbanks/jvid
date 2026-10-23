@@ -9,6 +9,7 @@ use suite_ui::tokens::{size, space};
 use suite_ui::widgets::{Button, State};
 
 use super::{Edit, Timeline, add_menu};
+use crate::i18n::tr;
 use crate::keymap::Keymap;
 
 /// The app bar's File menu; "" is a separator and "recent" the Open Recent submenu.
@@ -144,7 +145,7 @@ impl Timeline {
     ) {
         self.items(ui, seq, keymap, CLIP);
         ui.separator();
-        if ui.button("Reveal in Media Bin").clicked() {
+        if ui.button(tr!("timeline.reveal_in_bin")).clicked() {
             self.reveal = Some(asset);
         }
     }
@@ -158,7 +159,15 @@ impl Timeline {
         edit: &mut Option<Edit>,
     ) {
         self.items(ui, seq, keymap, &["paste"]);
-        if self.gap.is_some() && item(ui, keymap, "ripple_delete", Some("Close Gap"), true) {
+        if self.gap.is_some()
+            && item(
+                ui,
+                keymap,
+                "ripple_delete",
+                Some(tr!("timeline.close_gap")),
+                true,
+            )
+        {
             self.menu = Some("ripple_delete");
         }
         ui.separator();

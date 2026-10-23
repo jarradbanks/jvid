@@ -46,3 +46,43 @@ pub fn install_theme(ui: &egui::Ui, fresh: &mut bool) -> bool {
     }
     false
 }
+
+/// Each character of `catalog`'s text, in every language, that the theme's fonts can't draw
+/// (egui shows its replacement glyph instead), as `lang key: 'c'`.
+pub fn missing_glyphs(catalog: &crate::i18n::Catalog) -> Vec<String> {
+    use crate::theme;
+    let ctx = egui::Context::default();
+    theme::install(&ctx);
+    let mut out = Vec::new();
+    // The theme's fonts load on the first pass.
+    for _ in 0..2 {
+        let mut pass = ctx.run_ui(Default::default(), |ui| {
+            // egui's `has_glyph` says no to everything when the main face also holds the
+            // replacement glyph, so compare against what a code point no font has draws as.
+            let uv = |c: char, font: &egui::FontId| {
+                let g = ui
+                    .painter()
+                    .layout_no_wrap(c.into(), font.clone(), egui::Color32::WHITE);
+                g.rows[0].glyphs[0].uv_rect
+            };
+            out.clear();
+            for font in [theme::body(), theme::body_strong(), theme::title()] {
+                let none = uv('\u{10FFFD}', &font);
+                for lang in crate::i18n::LANGUAGES {
+                    for key in catalog.keys(lang) {
+                        let text = catalog.get_in(lang, key).unwrap_or_default();
+                        for c in text.chars().filter(|c| !c.is_whitespace() && *c != '?') {
+                            if uv(c, &font) == none {
+                                out.push(format!("{lang} {key}: {c:?}"));
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        pass.textures_delta.clear();
+    }
+    out.sort();
+    out.dedup();
+    out
+}

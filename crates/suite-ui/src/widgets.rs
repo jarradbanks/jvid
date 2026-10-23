@@ -8,8 +8,10 @@ use egui::{
     StrokeKind, TextEdit, Ui, Vec2, Widget, WidgetInfo, WidgetType, pos2, vec2,
 };
 
+use crate::i18n::CATALOG;
 use crate::theme::{self, hairline, icon};
 use crate::tokens::{color, radius, size, space};
+use crate::tr;
 
 /// The interaction state a control is drawn in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -423,7 +425,7 @@ impl<'a> TextInput<'a> {
 
     /// A search field: search icon prefix and an Ink 3 placeholder.
     pub fn search(text: &'a mut String) -> Self {
-        let mut s = Self::new(text).hint("Search");
+        let mut s = Self::new(text).hint(tr!(CATALOG, "input.search"));
         s.glyph = Some(icon::SEARCH);
         s
     }

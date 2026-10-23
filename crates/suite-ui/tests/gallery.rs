@@ -29,6 +29,11 @@ fn gallery_snapshot() {
 }
 
 #[test]
+fn gallery_catalogs_match() {
+    assert_eq!(gallery::CATALOG.mismatches(), Vec::<String>::new());
+}
+
+#[test]
 fn corners_come_from_the_scale() {
     let sources = [
         include_str!("../src/panel.rs"),

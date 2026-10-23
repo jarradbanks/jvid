@@ -32,6 +32,8 @@ gpl-ffmpeg = ["jvid-media/gpl-ffmpeg"]
 egui_kittest = { workspace = true, features = ["eframe"] }
 suite-ui = { workspace = true, features = ["test-support"] }
 jvid-media = { workspace = true, features = ["test-support"] }
+# The translation guard in tests/i18n_guard.rs parses the UI sources.
+syn = { version = "2.0.119", features = ["full", "visit-mut"] }
 
 [lints]
 workspace = true

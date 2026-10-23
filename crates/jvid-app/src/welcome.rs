@@ -18,16 +18,18 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
 use suite_ui::widgets::{Button, Segmented, State};
 
+use crate::i18n::{Label, tr, trn, verbatim};
+
 /// Label and size; `None` is Match source.
-pub const PRESETS: [(&str, Option<(u32, u32)>); 6] = [
-    ("Match Source", None),
-    ("16:9 · 1080p", Some((1920, 1080))),
-    ("16:9 · 1440p", Some((2560, 1440))),
-    ("16:9 · 4K", Some((3840, 2160))),
-    ("9:16 · Vertical", Some((1080, 1920))),
-    ("1:1 · Square", Some((1080, 1080))),
+pub const PRESETS: [(Label, Option<(u32, u32)>); 6] = [
+    (|| tr!("size.match_source"), None),
+    (|| verbatim("16:9 · 1080p"), Some((1920, 1080))),
+    (|| verbatim("16:9 · 1440p"), Some((2560, 1440))),
+    (|| verbatim("16:9 · 4K"), Some((3840, 2160))),
+    (|| tr!("size.vertical"), Some((1080, 1920))),
+    (|| tr!("size.square"), Some((1080, 1080))),
 ];
-const FPS: [&str; 2] = ["30 fps", "60 fps"];
+const FPS: [u32; 2] = [30, 60];
 const RECENT_MAX: usize = 8;
 
 /// A project opened or saved before, kept in eframe storage.
@@ -125,11 +127,12 @@ impl Welcome {
                     theme::small(),
                     color::INK_3,
                 );
-                let hint = if cfg!(target_os = "macos") {
-                    "⌘N new · ⌘O open"
+                let (new, open) = if cfg!(target_os = "macos") {
+                    (verbatim("⌘N"), verbatim("⌘O"))
                 } else {
-                    "Ctrl+N new · Ctrl+O open"
+                    (verbatim("Ctrl+N"), verbatim("Ctrl+O"))
                 };
+                let hint = tr!("welcome.hint", new = new, open = open);
                 p.text(
                     r.right_center(),
                     Align2::RIGHT_CENTER,
@@ -199,7 +202,7 @@ impl Welcome {
         ui.painter().text(
             head.center(),
             Align2::CENTER_CENTER,
-            "jvid",
+            verbatim("jvid"),
             theme::display(),
             color::INK,
         );
@@ -209,13 +212,21 @@ impl Welcome {
             // Each fills half the preset grid, edges aligned to it.
             let half = (W - space::S8) / 2.0;
             if ui
-                .add(Button::primary("New Project").width(half).height(40.0))
+                .add(
+                    Button::primary(tr!("menu.new_project"))
+                        .width(half)
+                        .height(40.0),
+                )
                 .clicked()
             {
                 action = Some(Action::New(self.settings()));
             }
             if ui
-                .add(Button::secondary("Open Project…").width(half).height(40.0))
+                .add(
+                    Button::secondary(tr!("welcome.open_project"))
+                        .width(half)
+                        .height(40.0),
+                )
                 .clicked()
             {
                 action = Some(Action::Open);
@@ -227,7 +238,7 @@ impl Welcome {
             ui.horizontal(|ui| {
                 for (j, (label, dims)) in row.1.iter().enumerate() {
                     let i = row.0 * 3 + j;
-                    if preset_card(ui, label, *dims, self.preset == i).clicked() {
+                    if preset_card(ui, label(), *dims, self.preset == i).clicked() {
                         self.preset = i;
                     }
                 }
@@ -242,8 +253,9 @@ impl Welcome {
             } else {
                 State::Live
             };
-            ui.add(Segmented::new(&mut self.fps, &FPS).state(state))
-                .on_disabled_hover_text("Match Source takes the frame rate from the first clip");
+            let fps = FPS.map(|rate| tr!("unit.fps", rate = rate));
+            ui.add(Segmented::new(&mut self.fps, &fps.each_ref().map(String::as_str)).state(state))
+                .on_disabled_hover_text(tr!("welcome.match_source_rate"));
         });
         ui.add_space(space::S8);
 
@@ -270,12 +282,12 @@ impl Welcome {
         p.text(
             zone.center() + vec2(0.0, 12.0),
             Align2::CENTER_CENTER,
-            "Drop media here, or click to choose files",
+            tr!("welcome.drop"),
             theme::body(),
             color::INK_2,
         );
-        let r = r.on_hover_text("Starts a Match Source project and imports everything");
-        r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Import"));
+        let r = r.on_hover_text(tr!("welcome.drop_tooltip"));
+        r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, tr!("action.import")));
         if r.clicked() {
             action = Some(Action::Import);
         }
@@ -288,19 +300,19 @@ impl Welcome {
         ui.painter().text(
             r.left_top(),
             Align2::LEFT_TOP,
-            "Recent",
+            tr!("welcome.recent"),
             theme::title(),
             color::INK,
         );
         let mut y = r.top() + 20.0 + space::S12;
         if self.recent.is_empty() {
-            ui.painter().text(
-                egui::pos2(r.left(), y),
-                Align2::LEFT_TOP,
-                "Projects you open or save show here.",
-                theme::body(),
-                color::INK_3,
-            );
+            // Wraps for languages longer than the column; English fits on one line.
+            let text = tr!("welcome.recent_empty").to_owned();
+            let galley = ui
+                .painter()
+                .layout(text, theme::body(), color::INK_3, r.width());
+            ui.painter()
+                .galley(egui::pos2(r.left(), y), galley, color::INK_3);
             return None;
         }
         let now = now();
@@ -475,23 +487,29 @@ pub fn relative_date(now: u64, then: u64) -> String {
     let ago = now.saturating_sub(then);
     let (today, day) = (civil(now / 86_400), civil(then / 86_400));
     match ago {
-        0..60 => "Just now".into(),
-        60..120 => "1 minute ago".into(),
-        120..3600 => format!("{} minutes ago", ago / 60),
-        _ if now / 86_400 == then / 86_400 => match ago / 3600 {
-            1 => "1 hour ago".into(),
-            n => format!("{n} hours ago"),
-        },
-        _ if now / 86_400 == then / 86_400 + 1 => "Yesterday".into(),
+        0..60 => tr!("date.just_now").into(),
+        60..3600 => trn!("date.minutes_ago", ago / 60),
+        _ if now / 86_400 == then / 86_400 => trn!("date.hours_ago", ago / 3600),
+        _ if now / 86_400 == then / 86_400 + 1 => tr!("date.yesterday").into(),
         _ => {
-            const MONTHS: [&str; 12] = [
-                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-            ];
-            let md = format!("{} {}", MONTHS[day.1 as usize - 1], day.2);
+            let month = [
+                tr!("date.jan"),
+                tr!("date.feb"),
+                tr!("date.mar"),
+                tr!("date.apr"),
+                tr!("date.may"),
+                tr!("date.jun"),
+                tr!("date.jul"),
+                tr!("date.aug"),
+                tr!("date.sep"),
+                tr!("date.oct"),
+                tr!("date.nov"),
+                tr!("date.dec"),
+            ][day.1 as usize - 1];
             if day.0 == today.0 {
-                md
+                tr!("date.this_year", month = month, day = day.2)
             } else {
-                format!("{md}, {}", day.0)
+                tr!("date.other_year", month = month, day = day.2, year = day.0)
             }
         }
     }

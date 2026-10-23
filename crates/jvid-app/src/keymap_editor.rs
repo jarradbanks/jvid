@@ -7,6 +7,7 @@ use suite_ui::theme;
 use suite_ui::tokens::{radius, space};
 use suite_ui::widgets::{Button, TextInput};
 
+use crate::i18n::tr;
 use crate::keymap::{self, ACTIONS, Keymap};
 
 #[derive(Default)]
@@ -53,7 +54,7 @@ impl KeymapEditor {
             )
             .show(ui.ctx(), |ui| {
                 ui.set_width(560.0);
-                ui.label(egui::RichText::new("Keyboard Shortcuts").font(theme::headline()));
+                ui.label(egui::RichText::new(tr!("keymap.title")).font(theme::headline()));
                 ui.add_space(space::S8);
                 ui.add(TextInput::search(&mut self.search).width(560.0));
                 ui.add_space(space::S8);
@@ -65,7 +66,7 @@ impl KeymapEditor {
                             let a = &ACTIONS[i];
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = space::S8;
-                                ui.label(a.name);
+                                ui.label(a.name());
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -73,9 +74,12 @@ impl KeymapEditor {
                                         if ui
                                             .add_visible(
                                                 map.bindings[i] != defaults.bindings[i],
-                                                Button::ghost("Reset"),
+                                                Button::ghost(tr!("keymap.reset")),
                                             )
-                                            .on_hover_text(format!("Back to {}", a.default))
+                                            .on_hover_text(tr!(
+                                                "keymap.back_to",
+                                                shortcut = a.default
+                                            ))
                                             .clicked()
                                         {
                                             map.bindings[i] = defaults.bindings[i];
@@ -88,17 +92,16 @@ impl KeymapEditor {
                                                 _ => None,
                                             })
                                             .filter_map(|id| ACTIONS.iter().find(|b| b.id == id))
-                                            .map(|b| b.name)
+                                            .map(|b| b.name())
                                             .collect();
                                         if !clash.is_empty() {
                                             ui.colored_label(
                                                 ui.visuals().warn_fg_color,
-                                                format!("Also {}", clash.join(", ")),
+                                                tr!("keymap.also", actions = clash.join(", ")),
                                             );
                                         }
                                         let label = if self.recording == Some(i) {
-                                            "Press keys… (Esc cancels, Backspace unbinds)"
-                                                .to_owned()
+                                            tr!("keymap.recording").to_owned()
                                         } else {
                                             map.bindings[i].as_ref().map_or("—".to_owned(), shown)
                                         };
@@ -107,7 +110,7 @@ impl KeymapEditor {
                                                 Button::secondary(&label)
                                                     .on(self.recording == Some(i)),
                                             )
-                                            .on_hover_text("Click, then press the new shortcut")
+                                            .on_hover_text(tr!("keymap.record_tooltip"))
                                             .clicked()
                                         {
                                             self.recording = Some(i);
@@ -124,7 +127,7 @@ impl KeymapEditor {
                 ui.add_space(space::S16);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = space::S8;
-                    if ui.add(Button::secondary("Import…")).clicked()
+                    if ui.add(Button::secondary(tr!("keymap.import"))).clicked()
                         && let Some(p) = toml_dialog().pick_file()
                     {
                         match std::fs::read_to_string(&p)
@@ -132,20 +135,20 @@ impl KeymapEditor {
                             .and_then(|s| Keymap::from_toml(&s).map_err(|e| e.to_string()))
                         {
                             Ok(m) => (*map, self.error) = (m, None),
-                            Err(e) => self.error = Some(format!("Couldn't import: {e}")),
+                            Err(e) => self.error = Some(tr!("keymap.import_error", error = e)),
                         }
                     }
-                    if ui.add(Button::secondary("Export…")).clicked()
+                    if ui.add(Button::secondary(tr!("keymap.export"))).clicked()
                         && let Some(p) = toml_dialog().set_file_name("keymap.toml").save_file()
                         && let Err(e) = std::fs::write(&p, map.to_toml())
                     {
-                        self.error = Some(format!("Couldn't export: {e}"));
+                        self.error = Some(tr!("keymap.export_error", error = e));
                     }
-                    if ui.add(Button::secondary("Reset All")).clicked() {
+                    if ui.add(Button::secondary(tr!("keymap.reset_all"))).clicked() {
                         *map = Keymap::default();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(Button::primary("Done")).clicked() {
+                        if ui.add(Button::primary(tr!("settings.done"))).clicked() {
                             ui.close();
                         }
                     });
@@ -200,7 +203,7 @@ fn matches(query: &str) -> Vec<usize> {
     (0..ACTIONS.len())
         .filter(|&i| {
             let a = &ACTIONS[i];
-            [a.name, a.id, a.default]
+            [a.name(), a.id, a.default]
                 .iter()
                 .any(|s| s.to_lowercase().contains(&q))
         })
@@ -221,7 +224,7 @@ fn shown(sc: &KeyboardShortcut) -> String {
 }
 
 fn toml_dialog() -> FileDialog {
-    FileDialog::new().add_filter("Keymap", &["toml"])
+    FileDialog::new().add_filter(tr!("keymap.file_type"), &["toml"])
 }
 
 #[cfg(test)]

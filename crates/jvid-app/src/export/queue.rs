@@ -11,6 +11,7 @@ use suite_ui::tokens::space;
 use suite_ui::widgets::{Button, State};
 
 use super::Error;
+use crate::i18n::{tr, trn};
 
 struct Job {
     path: PathBuf,
@@ -62,7 +63,7 @@ impl Queue {
                 Err(TryRecvError::Empty) => continue,
                 // A job skipped after cancelling drops its sender; so does one that panicked.
                 Err(TryRecvError::Disconnected) if j.handle.is_cancelled() => Err(Error::Cancelled),
-                Err(TryRecvError::Disconnected) => Err(Error::Failed("the export crashed".into())),
+                Err(TryRecvError::Disconnected) => Err(Error::Failed(tr!("export.crashed").into())),
             };
             ended.push((j.path.clone(), r.clone()));
             j.result = Some(r);
@@ -115,25 +116,27 @@ impl Queue {
                     .on_hover_text(j.path.display().to_string());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| match &j.result {
                     None => {
-                        if ui.add(Button::destructive("Cancel")).clicked() {
+                        if ui.add(Button::destructive(tr!("prompt.cancel"))).clicked() {
                             self.cancel(i);
                         }
                         let p = j.handle.progress();
                         let text = if p > 0.0 {
                             format!("{:.0}%", p * 100.0)
                         } else {
-                            "Waiting".into()
+                            tr!("export.waiting").into()
                         };
                         ui.add(egui::ProgressBar::new(p).desired_width(120.0).text(text));
                     }
                     Some(r) => {
-                        if r.is_ok() && ui.add(Button::secondary("Reveal")).clicked() {
+                        if r.is_ok() && ui.add(Button::secondary(tr!("export.reveal"))).clicked() {
                             reveal(&j.path);
                         }
                         match r {
-                            Ok(()) => ui.label("Done"),
-                            Err(Error::Cancelled) => ui.label("Cancelled"),
-                            Err(Error::Failed(e)) => ui.label("Failed").on_hover_text(e),
+                            Ok(()) => ui.label(tr!("export.done")),
+                            Err(Error::Cancelled) => ui.label(tr!("export.cancelled")),
+                            Err(Error::Failed(e)) => {
+                                ui.label(tr!("export.failed_short")).on_hover_text(e)
+                            }
                         };
                     }
                 });
@@ -146,17 +149,24 @@ impl Queue {
         let mut new = false;
         ui.horizontal(|ui| {
             if self.confirm_all {
-                ui.label(format!("Cancel {} Exports?", self.pending()));
-                if ui.add(Button::destructive("Cancel All")).clicked() {
+                ui.label(trn!("export.cancel_confirm", self.pending()));
+                if ui
+                    .add(Button::destructive(tr!("export.cancel_all")))
+                    .clicked()
+                {
                     self.cancel_all();
                 }
-                if ui.add(Button::ghost("Keep Exporting")).clicked() {
+                if ui
+                    .add(Button::ghost(tr!("export.keep_exporting")))
+                    .clicked()
+                {
                     self.confirm_all = false;
                 }
                 return;
             }
-            new = ui.add(Button::secondary("New Export…")).clicked();
-            let cancel_all = Button::destructive("Cancel All").state(live(self.pending() > 0));
+            new = ui.add(Button::secondary(tr!("export.new"))).clicked();
+            let cancel_all =
+                Button::destructive(tr!("export.cancel_all")).state(live(self.pending() > 0));
             if ui.add(cancel_all).clicked() {
                 if self.pending() > 1 {
                     self.confirm_all = true;
@@ -164,8 +174,8 @@ impl Queue {
                     self.cancel_all();
                 }
             }
-            let clear =
-                Button::ghost("Clear Finished").state(live(self.jobs.len() > self.pending()));
+            let clear = Button::ghost(tr!("export.clear_finished"))
+                .state(live(self.jobs.len() > self.pending()));
             if ui.add(clear).clicked() {
                 self.clear_finished();
             }

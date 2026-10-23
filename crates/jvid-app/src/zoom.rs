@@ -12,6 +12,8 @@ use jvid_core::model::{Clip, ClipId, Project, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
 use suite_ui::tokens::color;
 
+use crate::i18n::tr;
+
 /// Duration and easing of the zoom in and out.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Preset {
@@ -22,6 +24,13 @@ pub enum Preset {
 
 impl Preset {
     const ALL: [Self; 2] = [Self::Quick, Self::Smooth];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Quick => tr!("zoom.quick"),
+            Self::Smooth => tr!("zoom.smooth"),
+        }
+    }
 
     /// Each transition's length and easing.
     fn ramp(self) -> (Time, Easing) {
@@ -140,9 +149,9 @@ pub fn show(
     let bar = Rect::from_min_size(frame.min + Vec2::splat(8.0), Vec2::new(160.0, 20.0));
     ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| {
         ui.horizontal(|ui| {
-            ui.label("Zoom");
+            ui.label(tr!("zoom.label"));
             for p in Preset::ALL {
-                ui.selectable_value(&mut preset, p, format!("{p:?}"));
+                ui.selectable_value(&mut preset, p, p.name());
             }
         });
     });

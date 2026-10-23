@@ -1,0 +1,67 @@
+# The suite-ui gallery example's demo labels, Spanish.
+
+[state]
+default = "Normal"
+hover = "Al pasar"
+focus = "Foco visible"
+pressed = "Pulsado"
+disabled = "Desactivado"
+loading_error = "Cargando / Error"
+
+[panel]
+widgets = "Controles"
+effects = "Efectos"
+text = "Texto"
+add = "Añadir"
+more = "Más"
+inspector = "Inspector"
+source = "Origen"
+program = "Programa"
+audio = "Audio"
+markers = "Marcadores"
+history = "Historial"
+captions = "Subtítulos"
+overflow = "Las pestañas de menos de 64 px pasan al menú desplegable."
+type_and_colour = "Tipografía y color"
+
+[row]
+primary = "Principal"
+secondary = "Secundario"
+ghost = "Fantasma"
+destructive = "Destructivo"
+icon = "Icono"
+input = "Entrada"
+search = "Búsqueda"
+numeric = "Numérico"
+dropdown = "Desplegable"
+segmented = "Segmentado"
+checkbox = "Casilla"
+section = "Sección"
+
+[demo]
+delete = "Eliminar"
+export = "Exportar"
+width_prefix = "An"
+min_error = "Debe ser al menos 2"
+full = "Completa"
+fit = "Ajustar"
+fill = "Rellenar"
+snap = "Imán"
+live = "En vivo"
+transform = "Transformación"
+position = "Posición"
+plus_second = "+1 s"
+
+[type]
+display = "Portada 22"
+headline = "Titular 16"
+title = "Título 14"
+body_strong = "Cuerpo fuerte 12"
+body = "Cuerpo 12 · 0123456789 no se mueve"
+small = "Pequeño 10 · pista de atajo"
+
+[clip]
+video = "Vídeo"
+title = "Título"
+still = "Imagen fija"
+audio = "Audio"

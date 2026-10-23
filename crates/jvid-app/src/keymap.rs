@@ -6,6 +6,8 @@ use std::{fs, io};
 
 use egui::{Event, Key, KeyboardShortcut, Modifiers};
 
+use crate::i18n::CATALOG;
+
 /// Where an action listens. Global fires in any panel; text fields swallow everything.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Context {
@@ -15,24 +17,30 @@ pub enum Context {
 
 pub struct Action {
     pub id: &'static str,
-    pub name: &'static str,
     pub default: &'static str,
     pub context: Context,
 }
 
-const fn a(id: &'static str, name: &'static str, default: &'static str) -> Action {
+impl Action {
+    /// The action's name in the UI language, from the `action.<id>` key.
+    pub fn name(&self) -> &'static str {
+        CATALOG
+            .get(&format!("action.{}", self.id))
+            .unwrap_or(self.id)
+    }
+}
+
+const fn a(id: &'static str, default: &'static str) -> Action {
     Action {
         id,
-        name,
         default,
         context: Context::Global,
     }
 }
 
-const fn t(id: &'static str, name: &'static str, default: &'static str) -> Action {
+const fn t(id: &'static str, default: &'static str) -> Action {
     Action {
         id,
-        name,
         default,
         context: Context::Timeline,
     }
@@ -40,95 +48,83 @@ const fn t(id: &'static str, name: &'static str, default: &'static str) -> Actio
 
 /// Every action. "Ctrl" means Cmd on macOS.
 pub const ACTIONS: &[Action] = &[
-    a("new_project", "New Project", "Ctrl+Alt+N"),
-    a("open_project", "Open Project", "Ctrl+O"),
-    a("save", "Save", "Ctrl+S"),
-    a("save_as", "Save As", "Ctrl+Shift+S"),
-    a("import", "Import", "Ctrl+I"),
-    a("import_subtitles", "Import Subtitles", "Ctrl+Shift+I"),
-    a("export", "Export Media", "Ctrl+M"),
-    a("quit", "Quit", "Ctrl+Q"),
-    a("play_stop", "Play/Stop", "Space"),
-    a("shuttle_left", "Shuttle Left", "J"),
-    a("shuttle_stop", "Shuttle Stop", "K"),
-    a("shuttle_right", "Shuttle Right", "L"),
-    a("loop_playback", "Loop Playback", "Ctrl+Alt+L"),
-    a("audio_scrub", "Audio Scrubbing", "Shift+S"),
-    a("mark_in", "Mark In", "I"),
-    a("mark_out", "Mark Out", "O"),
-    a("clear_in", "Clear In", "Alt+I"),
-    a("clear_out", "Clear Out", "Alt+O"),
-    a("clear_in_out", "Clear In and Out", "Alt+X"),
-    a("go_to_in", "Go to In", "Shift+I"),
-    a("go_to_out", "Go to Out", "Shift+O"),
-    a("mark_clip", "Mark Clip", "X"),
-    a("mark_selection", "Mark Selection", "/"),
-    a("add_marker", "Add Marker", "M"),
-    a("add_range_marker", "Add Ranged Marker from In/Out", "Alt+M"),
-    a("next_marker", "Go to Next Marker", "Shift+M"),
-    a("prev_marker", "Go to Previous Marker", "Ctrl+Shift+M"),
-    t("lift", "Lift", ";"),
-    t("extract", "Extract", "'"),
-    a("insert", "Insert", ","),
-    a("overwrite", "Overwrite", "."),
-    t(
-        "ripple_trim_prev",
-        "Ripple Trim Previous Edit to Playhead",
-        "Q",
-    ),
-    t("ripple_trim_next", "Ripple Trim Next Edit to Playhead", "W"),
-    a("undo", "Undo", "Ctrl+Z"),
-    a("redo", "Redo", "Ctrl+Shift+Z"),
-    a("redo_alt", "Redo (alternate)", "Ctrl+Y"),
-    t("select_all", "Select All", "Ctrl+A"),
-    t("copy", "Copy", "Ctrl+C"),
-    t("cut", "Cut", "Ctrl+X"),
-    t("paste", "Paste", "Ctrl+V"),
-    t("duplicate", "Duplicate", "Ctrl+Shift+D"),
-    t("delete", "Delete", "Delete"),
-    t("ripple_delete", "Ripple Delete", "Shift+Delete"),
-    t("link", "Link/Unlink", "Ctrl+L"),
-    t("enable", "Enable/Disable", "Shift+E"),
-    t("reverse", "Reverse", "Ctrl+R"),
-    t("freeze_frame", "Freeze Frame at Playhead", "Shift+F"),
-    t("crossfade", "Add Crossfade", "Ctrl+D"),
-    t("dip_to_black", "Add Dip to Black", "Ctrl+Alt+B"),
-    t("dip_to_white", "Add Dip to White", "Ctrl+Alt+W"),
-    t("linked_selection", "Linked Selection", "Ctrl+Shift+L"),
-    t("snapping", "Snapping", "S"),
-    a("razor_tool", "Razor Tool", "C"),
-    a("selection_tool", "Selection Tool", "V"),
-    t("add_edit", "Split at Playhead", "Ctrl+K"),
-    a("step_back", "Step Back One Frame", "Left"),
-    a("step_forward", "Step Forward One Frame", "Right"),
-    a("step_back_second", "Step Back One Second", "Shift+Left"),
-    a(
-        "step_forward_second",
-        "Step Forward One Second",
-        "Shift+Right",
-    ),
-    a("prev_edit", "Go to Previous Edit Point", "Ctrl+Left"),
-    a("next_edit", "Go to Next Edit Point", "Ctrl+Right"),
-    a(
-        "prev_edit_alt",
-        "Go to Previous Edit Point (Alternate)",
-        "Up",
-    ),
-    a("next_edit_alt", "Go to Next Edit Point (Alternate)", "Down"),
-    a("clip_start", "Go to Clip Start", "Ctrl+Shift+Left"),
-    a("clip_end", "Go to Clip End", "Ctrl+Shift+Right"),
-    a("go_to_start", "Go to Start", "Home"),
-    a("go_to_end", "Go to End", "End"),
-    t("zoom_in", "Zoom In", "="),
-    t("zoom_out", "Zoom Out", "-"),
-    t("zoom_fit", "Zoom to Fit", "\\"),
-    a("focus_media", "Focus Media", "Shift+1"),
-    a("focus_source", "Focus Source", "Shift+2"),
-    a("focus_timeline", "Focus Timeline", "Shift+3"),
-    a("focus_program", "Focus Program", "Shift+4"),
-    a("focus_inspector", "Focus Inspector", "Shift+5"),
-    a("focus_effects", "Focus Effects", "Shift+7"),
-    a("export_frame", "Export Frame", "Ctrl+Shift+E"),
+    a("new_project", "Ctrl+Alt+N"),
+    a("open_project", "Ctrl+O"),
+    a("save", "Ctrl+S"),
+    a("save_as", "Ctrl+Shift+S"),
+    a("import", "Ctrl+I"),
+    a("import_subtitles", "Ctrl+Shift+I"),
+    a("export", "Ctrl+M"),
+    a("quit", "Ctrl+Q"),
+    a("play_stop", "Space"),
+    a("shuttle_left", "J"),
+    a("shuttle_stop", "K"),
+    a("shuttle_right", "L"),
+    a("loop_playback", "Ctrl+Alt+L"),
+    a("audio_scrub", "Shift+S"),
+    a("mark_in", "I"),
+    a("mark_out", "O"),
+    a("clear_in", "Alt+I"),
+    a("clear_out", "Alt+O"),
+    a("clear_in_out", "Alt+X"),
+    a("go_to_in", "Shift+I"),
+    a("go_to_out", "Shift+O"),
+    a("mark_clip", "X"),
+    a("mark_selection", "/"),
+    a("add_marker", "M"),
+    a("add_range_marker", "Alt+M"),
+    a("next_marker", "Shift+M"),
+    a("prev_marker", "Ctrl+Shift+M"),
+    t("lift", ";"),
+    t("extract", "'"),
+    a("insert", ","),
+    a("overwrite", "."),
+    t("ripple_trim_prev", "Q"),
+    t("ripple_trim_next", "W"),
+    a("undo", "Ctrl+Z"),
+    a("redo", "Ctrl+Shift+Z"),
+    a("redo_alt", "Ctrl+Y"),
+    t("select_all", "Ctrl+A"),
+    t("copy", "Ctrl+C"),
+    t("cut", "Ctrl+X"),
+    t("paste", "Ctrl+V"),
+    t("duplicate", "Ctrl+Shift+D"),
+    t("delete", "Delete"),
+    t("ripple_delete", "Shift+Delete"),
+    t("link", "Ctrl+L"),
+    t("enable", "Shift+E"),
+    t("reverse", "Ctrl+R"),
+    t("freeze_frame", "Shift+F"),
+    t("crossfade", "Ctrl+D"),
+    t("dip_to_black", "Ctrl+Alt+B"),
+    t("dip_to_white", "Ctrl+Alt+W"),
+    t("linked_selection", "Ctrl+Shift+L"),
+    t("snapping", "S"),
+    a("razor_tool", "C"),
+    a("selection_tool", "V"),
+    t("add_edit", "Ctrl+K"),
+    a("step_back", "Left"),
+    a("step_forward", "Right"),
+    a("step_back_second", "Shift+Left"),
+    a("step_forward_second", "Shift+Right"),
+    a("prev_edit", "Ctrl+Left"),
+    a("next_edit", "Ctrl+Right"),
+    a("prev_edit_alt", "Up"),
+    a("next_edit_alt", "Down"),
+    a("clip_start", "Ctrl+Shift+Left"),
+    a("clip_end", "Ctrl+Shift+Right"),
+    a("go_to_start", "Home"),
+    a("go_to_end", "End"),
+    t("zoom_in", "="),
+    t("zoom_out", "-"),
+    t("zoom_fit", "\\"),
+    a("focus_media", "Shift+1"),
+    a("focus_source", "Shift+2"),
+    a("focus_timeline", "Shift+3"),
+    a("focus_program", "Shift+4"),
+    a("focus_inspector", "Shift+5"),
+    a("focus_effects", "Shift+7"),
+    a("export_frame", "Ctrl+Shift+E"),
 ];
 
 /// "Ctrl+Shift+K" → shortcut. Ctrl and Cmd both mean the platform command key.
@@ -217,7 +213,7 @@ impl Keymap {
             .position(|a| a.id == id)
             .expect("known action");
         let sc = self.bindings[i].as_ref().map(format).unwrap_or_default();
-        (ACTIONS[i].name, sc)
+        (ACTIONS[i].name(), sc)
     }
 
     /// Pairs of action ids sharing a shortcut where both could fire.
@@ -334,11 +330,11 @@ mod tests {
     fn action_names_are_title_case() {
         const SMALL: [&str; 7] = ["a", "and", "at", "from", "in", "of", "to"];
         for a in ACTIONS {
-            for w in a.name.split([' ', '/']).skip(1) {
+            for w in a.name().split([' ', '/']).skip(1) {
                 assert!(
                     SMALL.contains(&w) || !w.starts_with(|c: char| c.is_lowercase()),
                     "{:?} isn't Title Case",
-                    a.name
+                    a.name()
                 );
             }
         }
@@ -455,7 +451,7 @@ mod tests {
             for a in ACTIONS.iter().filter(|a| a.context == context) {
                 // Code spans don't take backslash escapes, but a table cell still needs `|` escaped.
                 let key = a.default.replace('|', "\\|");
-                md += &format!("| {} | `{key}` |\n", a.name);
+                md += &format!("| {} | `{key}` |\n", a.name());
             }
         }
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/shortcuts.md");

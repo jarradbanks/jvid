@@ -13,8 +13,9 @@ use suite_ui::theme;
 use suite_ui::tokens::{radius, space};
 use suite_ui::widgets::{Button, Dropdown, State};
 
-use super::Request;
 use super::lossless::{self, Lossless};
+use super::{Request, preset_name};
+use crate::i18n::{tr, verbatim};
 
 /// Which part of the timeline to export.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -112,13 +113,18 @@ impl ExportDialog {
             )
             .show(ui.ctx(), |ui| {
                 ui.set_width(420.0);
-                ui.label(egui::RichText::new("Export").font(theme::headline()));
+                ui.label(egui::RichText::new(tr!("export.export")).font(theme::headline()));
                 ui.add_space(space::S8);
                 egui::Grid::new("export_grid")
                     .spacing([space::S8, space::S8])
                     .show(ui, |ui| {
-                        ui.label("Preset");
-                        let names: Vec<&str> = self.presets.iter().map(|p| &*p.name).collect();
+                        ui.label(tr!("export.preset"));
+                        let names: Vec<&str> = self
+                            .presets
+                            .iter()
+                            .enumerate()
+                            .map(|(i, p)| preset_name(i, p))
+                            .collect();
                         let before = self.preset;
                         ui.add(Dropdown::new(&mut self.preset, &names).width(260.0));
                         let preset = &self.presets[self.preset];
@@ -127,54 +133,55 @@ impl ExportDialog {
                         }
                         ui.end_row();
 
-                        ui.label("Video");
+                        ui.label(tr!("export.video"));
                         ui.horizontal(|ui| {
                             ui.label(video_summary(preset, s.width, s.height, s.frame_rate));
-                            if let Some(w) = preset.aspect_warning((s.width, s.height)) {
+                            let name = preset_name(self.preset, preset);
+                            if let Some(w) = aspect_warning(name, preset, (s.width, s.height)) {
                                 ui.label("⚠").on_hover_text(w);
                             }
                         });
                         ui.end_row();
 
-                        ui.label("Audio");
-                        ui.label(preset.audio.map_or("None", audio_name));
+                        ui.label(tr!("inspector.audio"));
+                        ui.label(preset.audio.map_or(tr!("export.none"), audio_name));
                         ui.end_row();
 
-                        ui.label("Loudness");
+                        ui.label(tr!("export.loudness"));
                         let enabled = preset.audio.is_some();
                         ui.add_enabled_ui(enabled, |ui| loudness_picker(ui, &mut self.loudness));
                         ui.end_row();
 
                         if seq.tracks().iter().any(|t| t.subtitles) {
-                            ui.label("Subtitles");
+                            ui.label(tr!("app.subtitles"));
                             ui.horizontal(|ui| {
-                                ui.radio_value(&mut self.sidecar, false, "Burn In");
-                                ui.radio_value(&mut self.sidecar, true, "Sidecar .srt");
+                                ui.radio_value(&mut self.sidecar, false, tr!("export.burn_in"));
+                                ui.radio_value(&mut self.sidecar, true, tr!("export.sidecar"));
                             });
                             ui.end_row();
                         }
 
-                        ui.label("Range");
+                        ui.label(tr!("export.range"));
                         ui.horizontal(|ui| {
                             let marked = seq.in_point().is_some() || seq.out_point().is_some();
-                            ui.radio_value(range, Range::Entire, "Entire Timeline");
+                            ui.radio_value(range, Range::Entire, tr!("export.entire"));
                             ui.add_enabled_ui(marked, |ui| {
-                                ui.radio_value(range, Range::InOut, "In to Out")
-                                    .on_disabled_hover_text("Set In or Out on the timeline first")
+                                ui.radio_value(range, Range::InOut, tr!("export.in_out"))
+                                    .on_disabled_hover_text(tr!("export.in_out_off"))
                             });
                             ui.add_enabled_ui(!selected.is_empty(), |ui| {
-                                ui.radio_value(range, Range::Selected, "Selected Clips")
-                                    .on_disabled_hover_text("Select clips on the timeline first")
+                                ui.radio_value(range, Range::Selected, tr!("export.selected"))
+                                    .on_disabled_hover_text(tr!("export.selected_off"))
                             });
                             ui.add_enabled_ui(highlights(seq).next().is_some(), |ui| {
-                                ui.radio_value(range, Range::Highlights, "Highlights")
-                                    .on_disabled_hover_text("Add ranged markers first")
+                                ui.radio_value(range, Range::Highlights, tr!("export.highlights"))
+                                    .on_disabled_hover_text(tr!("export.highlights_off"))
                             });
                         });
                         ui.end_row();
 
                         if *range == Range::Highlights {
-                            ui.label("Highlights");
+                            ui.label(tr!("export.highlights"));
                             ui.vertical(|ui| {
                                 for m in highlights(seq) {
                                     let mut on = !self.skipped.contains(&m.id);
@@ -188,11 +195,16 @@ impl ExportDialog {
                                 }
                             });
                             ui.end_row();
-                            ui.label("File Names");
+                            ui.label(tr!("export.file_names"));
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.template).desired_width(260.0),
                             )
-                            .on_hover_text("{project}, {marker} and {index} are filled in");
+                            .on_hover_text(tr!(
+                                "export.file_names_tooltip",
+                                project = verbatim("{project}"),
+                                marker = verbatim("{marker}"),
+                                index = verbatim("{index}"),
+                            ));
                             ui.end_row();
                         }
 
@@ -200,13 +212,18 @@ impl ExportDialog {
                         let rate = s.frame_rate;
                         let tc = |t: Time| format_timecode(rate.index_floor(t).max(0) as u64, rate);
                         let (a, b) = span.unwrap_or_default();
-                        for (label, t) in [("In", a), ("Out", b), ("Duration", b - a)] {
+                        let rows = [
+                            (tr!("export.in"), a),
+                            (tr!("export.out"), b),
+                            (tr!("bin.sort_duration"), b - a),
+                        ];
+                        for (label, t) in rows {
                             ui.label(label);
                             ui.monospace(tc(t));
                             ui.end_row();
                         }
 
-                        ui.label("Lossless");
+                        ui.label(tr!("export.lossless"));
                         let copyable = lossless::check(project, (a, b));
                         lossless_picker(ui, &mut self.lossless, &copyable);
                         ui.end_row();
@@ -216,7 +233,7 @@ impl ExportDialog {
                             path.set_extension(ext);
                         }
 
-                        ui.label("Output");
+                        ui.label(tr!("export.output"));
                         ui.horizontal(|ui| {
                             let mut text = path.display().to_string();
                             if ui
@@ -225,10 +242,13 @@ impl ExportDialog {
                             {
                                 *path = text.into();
                             }
-                            if ui.add(Button::secondary("Browse…")).clicked()
+                            if ui.add(Button::secondary(tr!("export.browse"))).clicked()
                                 && let Some(p) = FileDialog::new()
-                                    .set_title("Export")
-                                    .add_filter(&preset.name, &[&preset.extension])
+                                    .set_title(tr!("export.export"))
+                                    .add_filter(
+                                        preset_name(self.preset, preset),
+                                        &[&preset.extension],
+                                    )
                                     .set_directory(path.parent().unwrap_or(&PathBuf::new()))
                                     .set_file_name(
                                         path.file_name().unwrap_or_default().to_string_lossy(),
@@ -240,20 +260,20 @@ impl ExportDialog {
                         });
                         ui.end_row();
 
-                        ui.label("Target Size");
+                        ui.label(tr!("export.target_size"));
                         let sizable =
                             matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
                         ui.horizontal(|ui| {
                             ui.add_enabled_ui(sizable, |ui| target_picker(ui, &mut self.target))
                                 .response
-                                .on_disabled_hover_text("Only H.264 and HEVC presets");
+                                .on_disabled_hover_text(tr!("export.target_size_off"));
                             let secs = (b - a).0 as f64 / FLICKS_PER_SECOND as f64;
                             let warning = match self.target.filter(|_| sizable && secs > 0.0) {
                                 Some(mb) => match super::target_bitrate(preset, mb * MB, secs) {
                                     Some(bits) => {
                                         too_small(preset, (s.width, s.height), rate, bits)
                                     }
-                                    None => Some("Too small even for the audio".into()),
+                                    None => Some(tr!("export.too_small_audio").into()),
                                 },
                                 None => None,
                             };
@@ -263,9 +283,9 @@ impl ExportDialog {
                         });
                         ui.end_row();
 
-                        ui.label("Estimated Size");
+                        ui.label(tr!("export.estimated_size"));
                         match self.target.filter(|_| sizable) {
-                            Some(mb) => ui.label(format!("under {mb} MB")),
+                            Some(mb) => ui.label(tr!("export.under_mb", mb = mb)),
                             None => ui.label(format_size(estimate(
                                 preset,
                                 (s.width, s.height),
@@ -285,9 +305,11 @@ impl ExportDialog {
                         && path.file_name().is_some()
                         && (kind != Range::Highlights || !chosen.is_empty());
                     let state = if ok { State::Live } else { State::Disabled };
-                    let export = ui.add(Button::primary("Export").state(state)).clicked();
+                    let export = ui
+                        .add(Button::primary(tr!("export.export")).state(state))
+                        .clicked();
                     let queue = ui
-                        .add(Button::secondary("Add to Queue").state(state))
+                        .add(Button::secondary(tr!("export.add_to_queue")).state(state))
                         .clicked();
                     if (export || queue)
                         && let Some(range) = span
@@ -330,7 +352,7 @@ impl ExportDialog {
                         request = Some((reqs, export));
                         ui.close();
                     }
-                    if ui.add(Button::secondary("Cancel")).clicked() {
+                    if ui.add(Button::secondary(tr!("prompt.cancel"))).clicked() {
                         ui.close();
                     }
                 });
@@ -343,8 +365,9 @@ impl ExportDialog {
 }
 
 fn loudness_picker(ui: &mut Ui, loudness: &mut Option<f64>) {
-    let label = |l: Option<f64>| l.map_or("Off".into(), |l| format!("{l} LUFS"));
-    egui::ComboBox::from_id_salt("export loudness")
+    let label =
+        |l: Option<f64>| l.map_or(tr!("export.off").into(), |l| tr!("export.lufs", value = l));
+    egui::ComboBox::from_id_salt("export_loudness")
         .selected_text(label(*loudness))
         .show_ui(ui, |ui| {
             for l in [None, Some(-14.0), Some(-16.0), Some(-23.0)] {
@@ -354,8 +377,8 @@ fn loudness_picker(ui: &mut Ui, loudness: &mut Option<f64>) {
             let drag = egui::DragValue::new(&mut custom)
                 .range(-40.0..=-5.0)
                 .speed(0.1)
-                .prefix("Custom ")
-                .suffix(" LUFS");
+                .prefix(tr!("export.custom_prefix"))
+                .suffix(verbatim(" LUFS"));
             if ui.add(drag).changed() {
                 *loudness = Some(custom);
             }
@@ -372,20 +395,18 @@ fn lossless_picker(
     match copyable {
         Ok(_) => {
             ui.horizontal(|ui| {
-                ui.radio_value(mode, None, "Off");
-                ui.radio_value(mode, Some(Lossless::Copy), "Copy")
-                    .on_hover_text("No re-encode; cuts snap to the nearest keyframe");
+                ui.radio_value(mode, None, tr!("export.off"));
+                ui.radio_value(mode, Some(Lossless::Copy), tr!("export.copy"))
+                    .on_hover_text(tr!("export.copy_tooltip"));
                 ui.add_enabled_ui(SMART_ENCODER.is_some(), |ui| {
-                    ui.radio_value(mode, Some(Lossless::Smart), "Smart Render")
-                        .on_hover_text(
-                            "Re-encodes only the frames around each cut, so cuts are exact",
-                        )
-                        .on_disabled_hover_text("Needs a GPL FFmpeg build with x264")
+                    ui.radio_value(mode, Some(Lossless::Smart), tr!("export.smart"))
+                        .on_hover_text(tr!("export.smart_tooltip"))
+                        .on_disabled_hover_text(tr!("export.smart_off"))
                 });
             });
         }
         Err(why) => {
-            ui.label(format!("Unavailable: {}", why[0]))
+            ui.label(tr!("export.unavailable", reason = why[0]))
                 .on_hover_text(why.join("\n"));
         }
     }
@@ -394,8 +415,9 @@ fn lossless_picker(
 const MB: u64 = 1_000_000;
 
 fn target_picker(ui: &mut Ui, target: &mut Option<u64>) {
-    let label = |t: Option<u64>| t.map_or("Off".into(), |t| format!("{t} MB"));
-    egui::ComboBox::from_id_salt("export target size")
+    let label =
+        |t: Option<u64>| t.map_or(tr!("export.off").into(), |t| tr!("export.mb", value = t));
+    egui::ComboBox::from_id_salt("export_target_size")
         .selected_text(label(*target))
         .show_ui(ui, |ui| {
             for t in [None, Some(10), Some(25), Some(50), Some(100), Some(500)] {
@@ -404,8 +426,8 @@ fn target_picker(ui: &mut Ui, target: &mut Option<u64>) {
             let mut custom = target.unwrap_or(25);
             let drag = egui::DragValue::new(&mut custom)
                 .range(1..=100_000)
-                .prefix("Custom ")
-                .suffix(" MB");
+                .prefix(tr!("export.custom_prefix"))
+                .suffix(verbatim(" MB"));
             if ui.add(drag).changed() {
                 *target = Some(custom);
             }
@@ -429,8 +451,12 @@ pub fn too_small(p: &Preset, src: (u32, u32), rate: Rate, bits: u64) -> Option<S
         nw < w && per_frame / (w as f64 * h as f64) * (w as f64 / nw as f64).powi(2) >= MIN_BPP
     });
     Some(match fits {
-        Some(nw) => format!("Too small for {w}×{h}; try a {nw}-wide preset"),
-        None => format!("Too small for {w}×{h} at any common size; shorten the range"),
+        Some(nw) => tr!(
+            "export.too_small",
+            size = format_args!("{w}×{h}"),
+            width = nw
+        ),
+        None => tr!("export.too_small_any", size = format_args!("{w}×{h}")),
     })
 }
 
@@ -506,28 +532,43 @@ pub fn span(range: Range, seq: &Sequence, selected: &HashSet<ClipId>) -> Option<
     }
 }
 
+/// Why `p` would stretch the picture, when its size has another aspect than the project's.
+fn aspect_warning(name: &str, p: &Preset, (w, h): (u32, u32)) -> Option<String> {
+    p.aspect_warning((w, h))?;
+    let [pw, ph] = p.size?;
+    Some(tr!(
+        "export.aspect",
+        name = name,
+        size = format_args!("{pw}×{ph}"),
+        project = format_args!("{w}×{h}"),
+    ))
+}
+
 fn video_summary(p: &Preset, w: u32, h: u32, rate: Rate) -> String {
     let Some(v) = p.video else {
-        return "None".into();
+        return tr!("export.none").into();
     };
     let (w, h) = p.output_size((w, h));
     let rate = p.frame_rate.unwrap_or(rate);
     let fps = rate.num as f64 / rate.den as f64;
     let codec = match v {
-        VideoCodec::H264 => "H.264",
-        VideoCodec::Hevc => "HEVC",
-        VideoCodec::ProRes => "ProRes",
-        VideoCodec::Gif => "GIF",
+        VideoCodec::H264 => verbatim("H.264"),
+        VideoCodec::Hevc => verbatim("HEVC"),
+        VideoCodec::ProRes => verbatim("ProRes"),
+        VideoCodec::Gif => verbatim("GIF"),
     };
-    format!("{codec} · {w}×{h} · {fps:.3} fps").replace(".000 fps", " fps")
+    let rate = format!("{fps:.3}");
+    let rate = rate.strip_suffix(".000").unwrap_or(&rate);
+    let fps = tr!("unit.fps", rate = rate);
+    format!("{codec} · {w}×{h} · {fps}")
 }
 
 fn audio_name(a: AudioCodec) -> &'static str {
     match a {
-        AudioCodec::Aac => "AAC Stereo",
-        AudioCodec::Mp3 => "MP3 Stereo",
-        AudioCodec::Pcm => "PCM 16-bit Stereo",
-        AudioCodec::Pcm24 => "PCM 24-bit Stereo",
+        AudioCodec::Aac => tr!("export.aac"),
+        AudioCodec::Mp3 => tr!("export.mp3"),
+        AudioCodec::Pcm => tr!("export.pcm16"),
+        AudioCodec::Pcm24 => tr!("export.pcm24"),
     }
 }
 
@@ -553,9 +594,15 @@ pub fn estimate(p: &Preset, (w, h): (u32, u32), rate: Rate, len: Time) -> u64 {
 
 fn format_size(bytes: u64) -> String {
     match bytes {
-        b if b >= 1 << 30 => format!("≈ {:.1} GB", b as f64 / (1u64 << 30) as f64),
-        b if b >= 1 << 20 => format!("≈ {:.0} MB", b as f64 / (1u64 << 20) as f64),
-        b => format!("≈ {} KB", b.div_ceil(1024)),
+        b if b >= 1 << 30 => {
+            let value = format!("{:.1}", b as f64 / (1u64 << 30) as f64);
+            tr!("export.about_gb", value = value)
+        }
+        b if b >= 1 << 20 => {
+            let value = format!("{:.0}", b as f64 / (1u64 << 20) as f64);
+            tr!("export.about_mb", value = value)
+        }
+        b => tr!("export.about_kb", value = b.div_ceil(1024)),
     }
 }
 

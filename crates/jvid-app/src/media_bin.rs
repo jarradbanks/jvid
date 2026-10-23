@@ -20,8 +20,21 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
 use suite_ui::widgets::{Button, Dropdown, TextInput};
 
-pub const TABS: [&str; 3] = ["Media", "Effects", "Text"];
-pub const SORTS: [&str; 3] = ["Added", "Name", "Duration"];
+use crate::i18n::{tr, trn};
+
+/// The bin's tabs, in order.
+fn tabs() -> [&'static str; 3] {
+    [tr!("panel.media"), tr!("bin.effects"), tr!("bin.text")]
+}
+
+/// Sort orders by index: added, name, duration.
+fn sorts() -> [&'static str; 3] {
+    [
+        tr!("bin.sort_added"),
+        tr!("bin.sort_name"),
+        tr!("bin.sort_duration"),
+    ]
+}
 /// Grid tiles shrink to this width before a column drops.
 const TILE_MIN: f32 = 120.0;
 const ROW: f32 = 24.0;
@@ -62,7 +75,7 @@ pub struct MediaBin {
     pub tab: usize,
     pub list: bool,
     pub query: String,
-    /// Index into [`SORTS`].
+    /// Index into [`sorts`].
     pub sort: usize,
     pub selected: Option<AssetId>,
     /// The asset being renamed and its name stem typed so far; the extension stays.
@@ -116,9 +129,9 @@ pub fn visible<'a>(assets: &'a [MediaAsset], query: &str, sort: usize) -> Vec<&'
         .iter()
         .filter(|a| a.display_name().to_lowercase().contains(&q))
         .collect();
-    match SORTS[sort] {
-        "Name" => v.sort_by_cached_key(|a| a.display_name().to_lowercase()),
-        "Duration" => v.sort_by_key(|a| std::cmp::Reverse(a.probe.as_ref().map(|p| p.duration))),
+    match sort {
+        1 => v.sort_by_cached_key(|a| a.display_name().to_lowercase()),
+        2 => v.sort_by_key(|a| std::cmp::Reverse(a.probe.as_ref().map(|p| p.duration))),
         _ => {}
     }
     v
@@ -189,7 +202,7 @@ impl MediaBin {
         }
         // The new tab shows next frame; the click already repaints.
         let mut tab = self.tab;
-        Panel::tabbed(&TABS, &mut tab)
+        Panel::tabbed(&tabs(), &mut tab)
             .wide(true)
             .focused(focused)
             .show(ui, |ui| match self.tab {
@@ -217,16 +230,23 @@ impl MediaBin {
         out: &mut BinResponse,
     ) {
         // Import stays pinned below the list, shown even when the bin is empty.
-        let solid_w = 88.0;
+        let solid_label = tr!("bin.add_solid");
+        // 88 fits English; a longer translation widens it rather than spilling out.
+        let text_w = ui
+            .painter()
+            .layout_no_wrap(solid_label.into(), theme::body_strong(), color::INK)
+            .size()
+            .x;
+        let solid_w = (2.0 * space::S12 + text_w).ceil().max(88.0);
         let (bar, solid_bar, rect) = bottom_bar(ui.max_rect(), solid_w);
-        let import = Button::secondary("Import")
+        let import = Button::secondary(tr!("action.import"))
             .with_icon(icon::PLUS)
             .width(bar.width());
         out.import |= ui.put(bar, import).clicked();
-        let solid = Button::secondary("Add Solid").width(solid_w);
+        let solid = Button::secondary(solid_label).width(solid_w);
         if ui.put(solid_bar, solid).clicked() {
             out.command = Some(Command::AddSolid {
-                name: "Solid".into(),
+                name: tr!("bin.solid_name").into(),
                 color: [0.0, 0.0, 0.0, 1.0],
             });
         }
@@ -237,15 +257,15 @@ impl MediaBin {
                 let sort_w = 96.0;
                 let search_w = rect.width() - sort_w - 2.0 * size::CONTROL - 3.0 * space::S4;
                 ui.add(TextInput::search(&mut self.query).width(search_w.max(48.0)));
-                ui.add(Dropdown::new(&mut self.sort, &SORTS).width(sort_w));
+                ui.add(Dropdown::new(&mut self.sort, &sorts()).width(sort_w));
                 if ui
-                    .add(Button::icon(icon::GRID, "Grid View").on(!self.list))
+                    .add(Button::icon(icon::GRID, tr!("bin.grid_view")).on(!self.list))
                     .clicked()
                 {
                     self.list = false;
                 }
                 if ui
-                    .add(Button::icon(icon::LIST, "List View").on(self.list))
+                    .add(Button::icon(icon::LIST, tr!("bin.list_view")).on(self.list))
                     .clicked()
                 {
                     self.list = true;
@@ -255,9 +275,9 @@ impl MediaBin {
             let assets = visible(project.assets(), &self.query, self.sort);
             if assets.is_empty() {
                 let msg = match (importing, project.assets().is_empty()) {
-                    (true, _) => "Importing…",
-                    (false, true) => "Drop media here or click Import",
-                    (false, false) => "No media matches the search",
+                    (true, _) => tr!("bin.importing"),
+                    (false, true) => tr!("bin.empty"),
+                    (false, false) => tr!("bin.no_match"),
                 };
                 ui.label(egui::RichText::new(msg).color(color::INK_3));
                 return;
@@ -291,7 +311,7 @@ impl MediaBin {
                     }
                 });
             if importing {
-                ui.label(egui::RichText::new("Importing…").color(color::INK_3));
+                ui.label(egui::RichText::new(tr!("bin.importing")).color(color::INK_3));
             }
         });
         self.drag_preview(ui, project, missing);
@@ -394,7 +414,7 @@ impl MediaBin {
             p.text(
                 thumb.center() + vec2(0.0, space::S12),
                 Align2::CENTER_TOP,
-                "Media Offline",
+                tr!("bin.offline"),
                 theme::small(),
                 color::INK_2,
             );
@@ -490,7 +510,7 @@ impl MediaBin {
         let b = ui
             .scope_builder(
                 UiBuilder::new().max_rect(rect).id_salt(("remove", a.id)),
-                |ui| ui.add(Button::icon(icon::X, "Remove from Project")),
+                |ui| ui.add(Button::icon(icon::X, tr!("bin.remove"))),
             )
             .inner;
         if b.has_focus() {
@@ -548,7 +568,7 @@ impl MediaBin {
     ) {
         if offline {
             r.clone()
-                .on_hover_text(format!("Media Offline: {}", a.path.display()));
+                .on_hover_text(tr!("bin.offline_path", path = a.path.display()));
         }
         if self.reveal == Some(a.id) {
             r.scroll_to_me(None);
@@ -567,13 +587,13 @@ impl MediaBin {
         r.dnd_set_drag_payload(a.id);
         r.context_menu(|ui| {
             self.selected = Some(a.id);
-            if offline && ui.button("Relink…").clicked() {
+            if offline && ui.button(tr!("bin.relink")).clicked() {
                 out.relink = Some(a.id);
             }
-            if ui.button("Rename").clicked() {
+            if ui.button(tr!("bin.rename")).clicked() {
                 self.renaming = Some((a.id, stem.to_owned()));
             }
-            if ui.button("Remove from Project").clicked() {
+            if ui.button(tr!("bin.remove")).clicked() {
                 out.command = self.remove(project, a.id);
             }
         });
@@ -627,23 +647,28 @@ impl MediaBin {
                     .inner_margin(space::S16),
             )
             .show(ui.ctx(), |ui| {
-            ui.set_width(320.0);
-            ui.label(egui::RichText::new(format!("Remove “{}”?", asset.display_name())).font(theme::headline()));
-            ui.add_space(space::S8);
-            let clips = if n == 1 { "1 clip" } else { &format!("{n} clips") };
-            ui.label(format!("It's used by {clips} in the timeline. Removing it removes them too. You can undo this."));
-            ui.add_space(space::S16);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = space::S8;
-                if ui.add(Button::destructive("Remove")).clicked() {
-                    command = Some(Command::RemoveAsset(id));
-                    ui.close();
-                }
-                if ui.add(Button::secondary("Cancel")).clicked() {
-                    ui.close();
-                }
+                ui.set_width(320.0);
+                ui.label(
+                    egui::RichText::new(tr!("bin.remove_title", name = asset.display_name()))
+                        .font(theme::headline()),
+                );
+                ui.add_space(space::S8);
+                ui.label(trn!("bin.remove_body", n));
+                ui.add_space(space::S16);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = space::S8;
+                    if ui
+                        .add(Button::destructive(tr!("bin.remove_button")))
+                        .clicked()
+                    {
+                        command = Some(Command::RemoveAsset(id));
+                        ui.close();
+                    }
+                    if ui.add(Button::secondary(tr!("prompt.cancel"))).clicked() {
+                        ui.close();
+                    }
+                });
             });
-        });
         if modal.should_close() {
             self.confirm_remove = None;
             if command.is_some() {
@@ -790,7 +815,15 @@ fn letterbox(ui: &Ui, rect: Rect, tex: &TextureHandle) {
 fn text_presets(ui: &mut Ui, out: &mut BinResponse) -> Option<bool> {
     ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
     let mut added = None;
-    for (name, text) in jvid_core::model::Text::presets() {
+    // In `Text::presets` order: name, then the text a new one starts with.
+    let shown = [
+        (tr!("bin.title"), tr!("bin.title_text")),
+        (tr!("bin.lower_third"), tr!("bin.lower_third_text")),
+        (tr!("bin.caption"), tr!("bin.caption_text")),
+    ];
+    for ((_, mut text), (name, content)) in jvid_core::model::Text::presets().into_iter().zip(shown)
+    {
+        text.content = content.into();
         let b = Button::secondary(name).width(ui.available_width());
         let r = ui.add(b).interact(Sense::click_and_drag());
         let dragged = r.drag_started();
@@ -805,9 +838,6 @@ fn text_presets(ui: &mut Ui, out: &mut BinResponse) -> Option<bool> {
     added
 }
 
-/// What an Effects tab row says about how to use it.
-const FX_HINT: &str = "Drag onto a clip, or double-click to add to the selected clips";
-
 impl MediaBin {
     /// The Effects tab: the effects folder's files with what each does or why it doesn't
     /// load, applied by dragging onto a clip or to the selected clips by double-click or Apply.
@@ -815,7 +845,7 @@ impl MediaBin {
         let dir = crate::effects::dir();
         let reveal_w = 136.0;
         let (bar, reveal_bar, rect) = bottom_bar(ui.max_rect(), reveal_w);
-        let new = Button::secondary("New Effect")
+        let new = Button::secondary(tr!("bin.new_effect"))
             .with_icon(icon::PLUS)
             .width(bar.width());
         if ui.put(bar, new).clicked()
@@ -826,7 +856,7 @@ impl MediaBin {
                 Err(e) => tracing::warn!("effects: can't create a new effect: {e}"),
             }
         }
-        let open = Button::secondary("Open Effects Folder").width(reveal_w);
+        let open = Button::secondary(tr!("bin.open_effects")).width(reveal_w);
         if ui.put(reveal_bar, open).clicked()
             && let Some(dir) = &dir
         {
@@ -841,9 +871,9 @@ impl MediaBin {
             ui.add(TextInput::search(&mut self.fx_query).width(rect.width()));
             if rows.is_empty() {
                 let hint = if empty_folder {
-                    "Drop .wgsl files in the effects folder or click New Effect, then drag one onto a clip"
+                    tr!("bin.fx_empty")
                 } else {
-                    "No effects match the search"
+                    tr!("bin.fx_no_match")
                 };
                 ui.label(egui::RichText::new(hint).color(color::INK_3));
                 return;
@@ -855,7 +885,11 @@ impl MediaBin {
                     for row in &rows {
                         self.effect_row(ui, row, dir.as_deref(), out);
                     }
-                    ui.label(egui::RichText::new(FX_HINT).small().color(color::INK_3));
+                    ui.label(
+                        egui::RichText::new(tr!("bin.fx_hint"))
+                            .small()
+                            .color(color::INK_3),
+                    );
                 });
         });
     }
@@ -893,10 +927,10 @@ impl MediaBin {
             ink,
         );
         let (status, status_ink) = match (&row.error, row.disabled, row.bundled) {
-            (Some(_), _, _) => ("Error", color::RED),
-            (None, true, _) => ("Disabled", color::INK_3),
-            (None, false, true) => ("Bundled", color::INK_3),
-            (None, false, false) => ("User", color::INK_3),
+            (Some(_), _, _) => (tr!("bin.fx_error"), color::RED),
+            (None, true, _) => (tr!("bin.fx_disabled"), color::INK_3),
+            (None, false, true) => (tr!("bin.fx_bundled"), color::INK_3),
+            (None, false, false) => (tr!("bin.fx_user"), color::INK_3),
         };
         p.text(
             inset.right_top(),
@@ -908,7 +942,10 @@ impl MediaBin {
         let confirming = self.fx_confirm_delete.as_deref() == Some(row.stem.as_str());
         let second = row.error.as_deref().unwrap_or(&row.description);
         let line = if confirming {
-            format!("Delete {}.wgsl?", row.stem)
+            tr!(
+                "bin.fx_delete_confirm",
+                file = format_args!("{}.wgsl", row.stem)
+            )
         } else {
             second.lines().next().unwrap_or_default().to_owned()
         };
@@ -929,7 +966,7 @@ impl MediaBin {
         let usable = row.error.is_none();
         let r = match &row.error {
             Some(e) => r.on_hover_text(e),
-            None => r.on_hover_text(format!("{}\n{FX_HINT}", row.description)),
+            None => r.on_hover_text(format!("{}\n{}", row.description, tr!("bin.fx_hint"))),
         };
         if r.clicked() {
             self.fx_selected = Some(row.stem.clone());
@@ -952,42 +989,49 @@ impl MediaBin {
             ui.put(at, b.width(w)).clicked()
         };
         if confirming {
-            if button(ui, Button::destructive("Delete"), 64.0)
+            if button(ui, Button::destructive(tr!("bin.fx_delete")), 64.0)
                 && let Some(dir) = dir
                 && let Err(e) = crate::effects::delete(dir, &row.stem)
             {
                 tracing::warn!("effects: can't delete {}: {e}", row.stem);
             }
-            if button(ui, Button::ghost("Cancel"), 64.0)
+            if button(ui, Button::ghost(tr!("prompt.cancel")), 64.0)
                 || confirming && ui.input(|i| i.key_pressed(Key::Escape))
             {
                 self.fx_confirm_delete = None;
             }
-        } else if usable && (selected || r.hovered()) && button(ui, Button::ghost("Apply"), 56.0) {
+        } else if usable
+            && (selected || r.hovered())
+            && button(ui, Button::ghost(tr!("project.apply")), 56.0)
+        {
             out.apply_effect = Some(row.stem.clone());
         }
         let Some(dir) = dir else { return };
         let path = dir.join(format!("{}.wgsl", row.stem));
         r.context_menu(|ui| {
             self.fx_selected = Some(row.stem.clone());
-            if usable && ui.button("Apply to Selected Clips").clicked() {
+            if usable && ui.button(tr!("bin.fx_apply_selected")).clicked() {
                 out.apply_effect = Some(row.stem.clone());
             }
-            if ui.button("Reveal File").clicked() {
+            if ui.button(tr!("bin.fx_reveal")).clicked() {
                 crate::export::queue::reveal(&path);
             }
-            if ui.button("Duplicate").clicked()
+            if ui.button(tr!("bin.fx_duplicate")).clicked()
                 && let Err(e) = crate::effects::duplicate(dir, &row.stem)
             {
                 tracing::warn!("effects: can't duplicate {}: {e}", row.stem);
             }
-            let toggle = if row.disabled { "Enable" } else { "Disable" };
+            let toggle = if row.disabled {
+                tr!("bin.fx_enable")
+            } else {
+                tr!("bin.fx_disable")
+            };
             if ui.button(toggle).clicked()
                 && let Err(e) = crate::effects::set_disabled(dir, &row.stem, !row.disabled)
             {
                 tracing::warn!("effects: can't change {}: {e}", row.stem);
             }
-            if !row.bundled && ui.button("Delete").clicked() {
+            if !row.bundled && ui.button(tr!("bin.fx_delete")).clicked() {
                 self.fx_confirm_delete = Some(row.stem.clone());
             }
         });

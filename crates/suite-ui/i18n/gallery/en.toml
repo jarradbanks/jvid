@@ -1,0 +1,70 @@
+# The suite-ui gallery example's demo labels, English. Not shipped in any app.
+
+# Column heads: the widget states.
+[state]
+default = "Default"
+hover = "Hover"
+focus = "Focus-visible"
+pressed = "Pressed"
+disabled = "Disabled"
+loading_error = "Loading / Error"
+
+[panel]
+widgets = "Widgets"
+effects = "Effects"
+text = "Text"
+add = "Add"
+more = "More"
+inspector = "Inspector"
+source = "Source"
+program = "Program"
+audio = "Audio"
+markers = "Markers"
+history = "History"
+captions = "Captions"
+overflow = "Tabs below 64px move into the chevron menu."
+type_and_colour = "Type and Colour"
+
+# Row heads: the widget kinds.
+[row]
+primary = "Primary"
+secondary = "Secondary"
+ghost = "Ghost"
+destructive = "Destructive"
+icon = "Icon"
+input = "Input"
+search = "Search"
+numeric = "Numeric"
+dropdown = "Dropdown"
+segmented = "Segmented"
+checkbox = "Checkbox"
+section = "Section"
+
+[demo]
+delete = "Delete"
+export = "Export"
+width_prefix = "W"
+min_error = "Must be at least 2"
+full = "Full"
+fit = "Fit"
+fill = "Fill"
+snap = "Snap"
+live = "Live"
+transform = "Transform"
+position = "Position"
+plus_second = "+1s"
+
+# The type scale, each line in its own style.
+[type]
+display = "Display 22"
+headline = "Headline 16"
+title = "Title 14"
+body_strong = "Body strong 12"
+body = "Body 12 · 0123456789 holds still"
+small = "Small 10 · shortcut hint"
+
+[clip]
+video = "Video"
+title = "Title"
+still = "Still"
+audio = "Audio"

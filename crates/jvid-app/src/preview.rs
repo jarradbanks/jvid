@@ -23,24 +23,25 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, Checkbox, Dropdown};
 
+use crate::i18n::{Label, tr, trn, verbatim};
 use crate::playback::{self, Pixels, Playback, Shown};
 use crate::transport::{AudioSource, Transport};
 
-const ZOOMS: [(&str, Option<f32>); 4] = [
-    ("Fit", None),
-    ("50%", Some(0.5)),
-    ("100%", Some(1.0)),
-    ("200%", Some(2.0)),
+const ZOOMS: [(Label, Option<f32>); 4] = [
+    (|| tr!("preview.fit"), None),
+    (|| "50%", Some(0.5)),
+    (|| "100%", Some(1.0)),
+    (|| "200%", Some(2.0)),
 ];
-const QUALITIES: [(&str, PreviewQuality); 3] = [
-    ("Full", PreviewQuality::Full),
-    ("½", PreviewQuality::Half),
-    ("¼", PreviewQuality::Quarter),
+const QUALITIES: [(Label, PreviewQuality); 3] = [
+    (|| tr!("preview.full"), PreviewQuality::Full),
+    (|| "½", PreviewQuality::Half),
+    (|| "¼", PreviewQuality::Quarter),
 ];
 /// Action-safe and title-safe as fractions of the frame (SMPTE ST 2046-1).
 const SAFE: [f32; 2] = [0.93, 0.9];
 /// Aspect guides, width over height.
-const ASPECTS: [(&str, f32); 2] = [("9:16 guide", 9.0 / 16.0), ("1:1 guide", 1.0)];
+const ASPECTS: [(&str, f32); 2] = [("9:16", 9.0 / 16.0), ("1:1", 1.0)];
 
 /// Framing guides drawn over the viewer by egui only, so they never reach a render or export.
 #[derive(Default)]
@@ -242,7 +243,7 @@ impl Preview {
     /// once the timeline (#33) and playback (#32) land.
     pub fn export_frame(&self, settings: &ProjectSettings, path: &Path) -> Result<(), String> {
         let (Some(rs), Some(f)) = (&self.render_state, &self.frame) else {
-            return Err("there's no frame to export".into());
+            return Err(tr!("preview.no_frame").into());
         };
         let mut rgb = render::Preview::new(&rs.device, rs.target_format);
         let yuv = Yuv {
@@ -370,7 +371,7 @@ impl Preview {
             ui.painter().text(
                 ui.max_rect().center(),
                 Align2::CENTER_CENTER,
-                "Double-click a clip in the bin to open it here",
+                tr!("preview.source_empty"),
                 theme::body(),
                 color::INK_3,
             );
@@ -653,7 +654,7 @@ impl Preview {
             ui.painter().text(
                 viewer.center() + vec2(0.0, space::S8),
                 Align2::CENTER_TOP,
-                "Media offline. Relink it from the media bin.",
+                tr!("preview.offline"),
                 theme::body(),
                 color::INK_2,
             );
@@ -661,7 +662,7 @@ impl Preview {
             ui.painter().text(
                 viewer.center(),
                 Align2::CENTER_CENTER,
-                format!("Can't show this frame: {e}"),
+                tr!("preview.frame_error", error = e),
                 theme::body(),
                 color::INK_2,
             );
@@ -758,7 +759,7 @@ impl Preview {
                 let room = ui.available_width() - timecode.width() - width - 4.0 * space::S8;
                 if galley.size().x <= room {
                     ui.add(egui::Label::new(text).selectable(false))
-                        .on_hover_text("Duration");
+                        .on_hover_text(tr!("bin.sort_duration"));
                 }
                 ui.min_rect().left()
             });
@@ -773,20 +774,42 @@ impl Preview {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = space::S4;
                     let play = if r.playing {
-                        (icon::PAUSE, "Stop (Space)")
+                        (icon::PAUSE, tr!("preview.stop"))
                     } else {
-                        (icon::PLAY, "Play (Space)")
+                        (icon::PLAY, tr!("preview.play"))
                     };
-                    for (glyph, name, id) in [
-                        (icon::SKIP_BACK, "Go to Start (Home)", "go_to_start"),
-                        (icon::REWIND, "Shuttle Left (J)", "shuttle_left"),
-                        (play.0, play.1, "play_stop"),
-                        (icon::FAST_FORWARD, "Shuttle Right (L)", "shuttle_right"),
-                        (icon::SKIP_FORWARD, "Go to End (End)", "go_to_end"),
+                    // Keycaps stay English, like shortcuts everywhere.
+                    for (glyph, name, key, id) in [
+                        (
+                            icon::SKIP_BACK,
+                            tr!("action.go_to_start"),
+                            verbatim("Home"),
+                            "go_to_start",
+                        ),
+                        (
+                            icon::REWIND,
+                            tr!("action.shuttle_left"),
+                            verbatim("J"),
+                            "shuttle_left",
+                        ),
+                        (play.0, play.1, verbatim("Space"), "play_stop"),
+                        (
+                            icon::FAST_FORWARD,
+                            tr!("action.shuttle_right"),
+                            verbatim("L"),
+                            "shuttle_right",
+                        ),
+                        (
+                            icon::SKIP_FORWARD,
+                            tr!("action.go_to_end"),
+                            verbatim("End"),
+                            "go_to_end",
+                        ),
                     ] {
+                        let name = tr!("preview.with_key", action = name, key = key);
                         if ui
-                            .add(Button::icon(glyph, name))
-                            .on_hover_text(name)
+                            .add(Button::icon(glyph, &name))
+                            .on_hover_text(&name)
                             .clicked()
                         {
                             action = Some(id);
@@ -806,24 +829,24 @@ impl Preview {
     }
 
     fn dropdowns(&mut self, ui: &mut Ui) {
-        let zooms = ZOOMS.map(|z| z.0);
+        let zooms = ZOOMS.map(|z| z.0());
         ui.add(Dropdown::new(&mut self.zoom, &zooms).width(88.0))
-            .on_hover_text("Zoom");
-        let qualities = QUALITIES.map(|q| q.0);
+            .on_hover_text(tr!("zoom.label"));
+        let qualities = QUALITIES.map(|q| q.0());
         if ui
             .add(Dropdown::new(&mut self.quality, &qualities).width(72.0))
-            .on_hover_text("Preview Resolution")
+            .on_hover_text(tr!("preview.resolution"))
             .changed()
         {
             self.generation += 1;
         }
         let mut on = self.proxies.enabled();
         let hint = match self.suggested {
-            0 => "Preview from low-res proxies; export always uses the originals".to_string(),
-            n => format!("{n} 4K or HEVC source(s): proxies suggested for smooth scrubbing"),
+            0 => tr!("preview.proxies_tooltip").to_string(),
+            n => trn!("preview.proxies_suggested", n),
         };
         if ui
-            .add(Checkbox::new(&mut on, "Proxies"))
+            .add(Checkbox::new(&mut on, tr!("preview.proxies")))
             .on_hover_text(hint)
             .changed()
         {
@@ -836,15 +859,18 @@ impl Preview {
         let glyph = egui::RichText::new(icon::GRID).font(theme::icon_font());
         ui.menu_button(glyph, |ui| {
             let o = &mut self.overlays;
-            ui.add(Checkbox::new(&mut o.safe, "Safe Areas"));
-            ui.add(Checkbox::new(&mut o.thirds, "Rule of Thirds"));
-            ui.add(Checkbox::new(&mut o.center, "Center Cross"));
-            for (on, (name, _)) in o.aspects.iter_mut().zip(ASPECTS) {
-                ui.add(Checkbox::new(on, name));
+            ui.add(Checkbox::new(&mut o.safe, tr!("preview.safe_areas")));
+            ui.add(Checkbox::new(&mut o.thirds, tr!("preview.thirds")));
+            ui.add(Checkbox::new(&mut o.center, tr!("preview.center")));
+            for (on, (ratio, _)) in o.aspects.iter_mut().zip(ASPECTS) {
+                ui.add(Checkbox::new(
+                    on,
+                    &tr!("preview.aspect_guide", ratio = ratio),
+                ));
             }
         })
         .response
-        .on_hover_text("Guides");
+        .on_hover_text(tr!("preview.guides"));
     }
 }
 

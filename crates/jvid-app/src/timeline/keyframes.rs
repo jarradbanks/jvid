@@ -13,6 +13,8 @@ use jvid_core::time::Time;
 use suite_ui::theme;
 use suite_ui::tokens::color;
 
+use crate::i18n::tr;
+
 use super::{Edit, Timeline, View};
 
 /// Height of one property lane.
@@ -218,9 +220,9 @@ impl Timeline {
         let resp = ui
             .interact(hit, id.with(("kf toggle", clip.id)), Sense::click())
             .on_hover_text(if open {
-                "Hide Keyframes"
+                tr!("timeline.hide_keyframes")
             } else {
-                "Show Keyframes"
+                tr!("timeline.show_keyframes")
             });
         diamond(
             painter,

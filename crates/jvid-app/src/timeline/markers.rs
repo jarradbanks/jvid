@@ -8,6 +8,8 @@ use jvid_core::model::Sequence;
 use jvid_core::time::Time;
 use suite_ui::tokens::color;
 
+use crate::i18n::tr;
+
 use super::{Edit, Timeline, View};
 
 /// `Marker::color` indexes this.
@@ -94,7 +96,7 @@ impl Timeline {
                 self.seek(m.time);
             }
             let tip = match (m.name.is_empty(), m.note.is_empty()) {
-                (true, true) => "Marker".to_owned(),
+                (true, true) => tr!("timeline.marker").to_owned(),
                 (false, true) => m.name.clone(),
                 (true, false) => m.note.clone(),
                 (false, false) => format!("{}\n{}", m.name, m.note),
@@ -103,7 +105,7 @@ impl Timeline {
             let gesture = r.id.value();
             r.context_menu(|ui| {
                 let mut e = m.clone();
-                ui.label("Name");
+                ui.label(tr!("timeline.marker_name"));
                 let mut changed = ui.text_edit_singleline(&mut e.name).changed();
                 ui.horizontal(|ui| {
                     for (i, c) in PALETTE.iter().enumerate() {
@@ -123,12 +125,12 @@ impl Timeline {
                         }
                     }
                 });
-                ui.label("Note");
+                ui.label(tr!("timeline.marker_note"));
                 changed |= ui.text_edit_multiline(&mut e.note).changed();
                 if changed {
                     edit = Some((Command::SetMarker(e), Some(gesture)));
                 }
-                if ui.button("Delete Marker").clicked() {
+                if ui.button(tr!("timeline.delete_marker")).clicked() {
                     edit = Some((Command::RemoveMarker(m.id), None));
                     ui.close();
                 }

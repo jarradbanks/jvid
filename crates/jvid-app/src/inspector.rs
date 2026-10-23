@@ -13,12 +13,14 @@ use suite_ui::theme::icon;
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, DragField, Dropdown, SectionHeader};
 
+use crate::i18n::{CATALOG, tr, verbatim};
 use crate::timeline::Edit;
 
 /// One animatable property: its keyframe name and how its fields show.
 struct Prop<'a> {
     name: &'a str,
-    label: &'a str,
+    /// Shown name; `None` for built-ins, which [`caption`] names.
+    label: Option<&'a str>,
     fields: &'static [&'static str],
     /// Shown value per stored value, e.g. 100 for a percentage.
     display: f64,
@@ -29,6 +31,17 @@ struct Prop<'a> {
     range: (f64, f64),
     /// What reset sets; `None` for [`Transform::default`]'s value.
     default: Option<f64>,
+}
+
+impl Prop<'_> {
+    fn label(&self) -> &str {
+        self.label.unwrap_or_else(|| caption(self.name))
+    }
+}
+
+/// A built-in section's or property's name in the UI language, by its id (`inspector.<id>`).
+fn caption(id: &str) -> &str {
+    CATALOG.get(&format!("inspector.{id}")).unwrap_or(id)
 }
 
 /// A WGSL param id as a label: `grain_size` -> `Grain Size`.
@@ -44,10 +57,10 @@ fn title_case(id: &str) -> String {
         .join(" ")
 }
 
-const fn prop<'a>(name: &'a str, label: &'a str, fields: &'static [&'static str]) -> Prop<'a> {
+const fn prop<'a>(name: &'a str, fields: &'static [&'static str]) -> Prop<'a> {
     Prop {
         name,
-        label,
+        label: None,
         fields,
         display: 1.0,
         speed: 1.0,
@@ -58,108 +71,109 @@ const fn prop<'a>(name: &'a str, label: &'a str, fields: &'static [&'static str]
     }
 }
 
-const XY: &[&str] = &["X", "Y"];
+const XY: &[&str] = &[verbatim("X"), verbatim("Y")];
 const ONE: &[&str] = &[""];
 
+/// Sections by id, which names them through [`caption`] and keeps their open state.
 const SECTIONS: [(&str, &[Prop<'static>]); 5] = [
     (
-        "Transform",
+        "transform",
         &[
-            prop("position", "Position", XY),
+            prop("position", XY),
             Prop {
                 display: 100.0,
                 suffix: "%",
-                ..prop("scale", "Scale", ONE)
+                ..prop("scale", ONE)
             },
             Prop {
                 suffix: "°",
-                ..prop("rotation", "Rotation", ONE)
+                ..prop("rotation", ONE)
             },
-            prop("anchor", "Anchor", XY),
+            prop("anchor", XY),
         ],
     ),
     (
-        "Opacity",
+        "opacity",
         &[Prop {
             display: 100.0,
             decimals: 0,
             suffix: "%",
             range: (0.0, 1.0),
-            ..prop("opacity", "Opacity", ONE)
+            ..prop("opacity", ONE)
         }],
     ),
     (
-        "Crop",
+        "crop",
         &[
             Prop {
                 range: (0.0, f64::INFINITY),
-                ..prop("crop_left", "Left", ONE)
+                ..prop("crop_left", ONE)
             },
             Prop {
                 range: (0.0, f64::INFINITY),
-                ..prop("crop_top", "Top", ONE)
+                ..prop("crop_top", ONE)
             },
             Prop {
                 range: (0.0, f64::INFINITY),
-                ..prop("crop_right", "Right", ONE)
+                ..prop("crop_right", ONE)
             },
             Prop {
                 range: (0.0, f64::INFINITY),
-                ..prop("crop_bottom", "Bottom", ONE)
+                ..prop("crop_bottom", ONE)
             },
         ],
     ),
     (
-        "Color",
+        "color",
         &[
             Prop {
                 speed: 0.02,
                 decimals: 2,
                 range: (-4.0, 4.0),
-                ..prop("exposure", "Exposure", ONE)
+                ..prop("exposure", ONE)
             },
-            grade("contrast", "Contrast"),
-            grade("saturation", "Saturation"),
-            grade("temperature", "Temperature"),
-            grade("tint", "Tint"),
+            grade("contrast"),
+            grade("saturation"),
+            grade("temperature"),
+            grade("tint"),
             Prop {
                 display: 100.0,
                 decimals: 0,
                 suffix: "%",
                 range: (0.0, 1.0),
-                ..prop("lut_intensity", "LUT Mix", ONE)
+                ..prop("lut_intensity", ONE)
             },
         ],
     ),
     // Audio clips only.
     (
-        "Audio",
+        "audio",
         &[
             Prop {
                 display: 100.0,
                 decimals: 0,
                 suffix: "%",
                 range: (0.0, 2.0),
-                ..prop("volume", "Volume", ONE)
+                ..prop("volume", ONE)
             },
             Prop {
                 display: 100.0,
                 decimals: 0,
                 speed: 0.5,
                 range: (-1.0, 1.0),
-                ..prop("pan", "Pan", ONE)
+                ..prop("pan", ONE)
             },
         ],
     ),
 ];
 
 /// A -100..100% color adjustment.
-const fn grade(name: &'static str, label: &'static str) -> Prop<'static> {
+const fn grade(name: &'static str) -> Prop<'static> {
     Prop {
         display: 100.0,
         decimals: 0,
         range: (-1.0, 1.0),
-        ..prop(name, label, ONE)
+        ..prop(name, ONE)
     }
 }
 
@@ -444,18 +458,18 @@ pub fn show(
     let (clips, audio) = (of(TrackKind::Video), of(TrackKind::Audio));
     let (mut edit, mut seek) = (None, None);
     if clips.is_empty() && audio.is_empty() && bin_selected.is_none_or(|a| !a.generated()) {
-        ui.label(egui::RichText::new("Select a clip to see its properties").color(color::INK_3));
+        ui.label(egui::RichText::new(tr!("inspector.empty")).color(color::INK_3));
         return (None, None);
     }
     let mut index = 0u64;
-    for (title, props) in SECTIONS {
-        let clips = if title == "Audio" { &audio } else { &clips };
+    for (id, props) in SECTIONS {
+        let clips = if id == "audio" { &audio } else { &clips };
         if clips.is_empty() {
             index += props.len() as u64;
             continue;
         }
         let names: Vec<&str> = props.iter().map(|p| p.name).collect();
-        let (open, head) = section(ui, title, true);
+        let (open, head) = section(ui, id, true);
         match head {
             Some(Head::Reset) => edit = Some((reset(clips, &names), None)),
             Some(Head::Key) => edit = Some((key_all(clips, &names, t), None)),
@@ -471,25 +485,25 @@ pub fn show(
                 edit = Some(e);
             }
         }
-        if title == "Opacity"
+        if id == "opacity"
             && let Some(e) = blend_row(ui, clips)
         {
             edit = Some(e);
         }
-        if title == "Color"
+        if id == "color"
             && let Some(e) = lut_row(ui, clips)
         {
             edit = Some(e);
         }
     }
     if !clips.is_empty()
-        && section(ui, "Effects", false).0
+        && section(ui, "effects", false).0
         && let Some(e) = effects_rows(ui, &clips, t, &mut index, &mut seek)
     {
         edit = Some(e);
     }
     if let Some(c) = clips.first().or(audio.first())
-        && section(ui, "Speed", false).0
+        && section(ui, "speed", false).0
         && let Some(e) = speed_row(ui, c)
     {
         edit = Some(e);
@@ -502,12 +516,12 @@ pub fn show(
         .and_then(|c| project.asset(c.asset))
         .or(bin_selected);
     if let Some(a) = shared.filter(|a| a.text.is_some())
-        && section(ui, "Text", false).0
+        && section(ui, "text", false).0
         && let Some(e) = text_props(ui, a, if same { &clips } else { &[] }, t)
     {
         edit = Some(e);
     }
-    if (audio.is_empty() || !clips.is_empty()) && section(ui, "Color", false).0 {
+    if (audio.is_empty() || !clips.is_empty()) && section(ui, "color", false).0 {
         let solid = shared.filter(|a| a.solid.is_some());
         if let Some(e) = solid.and_then(|a| solid_color(ui, a)) {
             edit = Some(e);
@@ -516,16 +530,19 @@ pub fn show(
     (edit, seek)
 }
 
-const BLENDS: [&str; 8] = [
-    "Normal",
-    "Multiply",
-    "Screen",
-    "Overlay",
-    "Add",
-    "Darken",
-    "Lighten",
-    "Difference",
-];
+/// Blend mode names, in [`Blend::ALL`] order.
+fn blends() -> [&'static str; 8] {
+    [
+        tr!("blend.normal"),
+        tr!("blend.multiply"),
+        tr!("blend.screen"),
+        tr!("blend.overlay"),
+        tr!("blend.add"),
+        tr!("blend.darken"),
+        tr!("blend.lighten"),
+        tr!("blend.difference"),
+    ]
+}
 
 /// Sets every clip's blend mode; one undo step.
 fn set_blend(clips: &[&Clip], blend: Blend) -> Command {
@@ -543,10 +560,10 @@ fn blend_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.set_min_width(size::INSPECTOR_LABEL);
-                ui.label(egui::RichText::new("Blend").color(color::INK_2))
+                ui.label(egui::RichText::new(tr!("inspector.blend")).color(color::INK_2))
             },
         );
-        ui.add(Dropdown::new(&mut i, &BLENDS).width(132.0))
+        ui.add(Dropdown::new(&mut i, &blends()).width(132.0))
             .changed()
             .then(|| (set_blend(clips, Blend::ALL[i]), None))
     })
@@ -561,7 +578,7 @@ fn set_lut(clips: &[&Clip], lut: Option<String>) -> Command {
 /// The LUT picker, showing the first clip's file name, with a clear button when set.
 fn lut_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
     let current = clips[0].transform.lut.as_deref();
-    let name = current.map_or("None".into(), |p| {
+    let name = current.map_or(tr!("inspector.lut_none").into(), |p| {
         std::path::Path::new(p)
             .file_name()
             .map_or(p.into(), |n| n.to_string_lossy())
@@ -573,19 +590,19 @@ fn lut_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.set_min_width(size::INSPECTOR_LABEL);
-                ui.label(egui::RichText::new("LUT").color(color::INK_2))
+                ui.label(egui::RichText::new(tr!("inspector.lut")).color(color::INK_2))
             },
         );
         let mut edit = None;
         if ui.add(Button::secondary(&name).width(132.0)).clicked()
             && let Some(path) = rfd::FileDialog::new()
-                .set_title("Choose a LUT")
-                .add_filter("Cube LUT", &["cube"])
+                .set_title(tr!("inspector.choose_lut"))
+                .add_filter(tr!("inspector.cube_filter"), &["cube"])
                 .pick_file()
         {
             edit = Some((set_lut(clips, Some(path.to_string_lossy().into())), None));
         }
-        if current.is_some() && ui.add(Button::ghost("Clear")).clicked() {
+        if current.is_some() && ui.add(Button::ghost(tr!("inspector.clear"))).clicked() {
             edit = Some((set_lut(clips, None), None));
         }
         edit
@@ -632,9 +649,7 @@ fn effects_rows(
     };
     let effects = &clips[0].transform.effects;
     if clips.iter().any(|c| stack(c) != stack(clips[0])) {
-        ui.label(
-            egui::RichText::new("The selected clips have different effects").color(color::INK_3),
-        );
+        ui.label(egui::RichText::new(tr!("inspector.mixed_effects")).color(color::INK_3));
         return None;
     }
     let lib: Vec<(String, crate::effects::Entry)> = crate::effects::with(|l| {
@@ -652,17 +667,20 @@ fn effects_rows(
                 Some(Err(err)) => (e.shader.clone(), Some(err.clone())),
                 None => (
                     e.shader.clone(),
-                    Some(format!("{}.wgsl is not in the effects folder", e.shader)),
+                    Some(tr!(
+                        "inspector.effect_missing",
+                        file = format!("{}.wgsl", e.shader)
+                    )),
                 ),
             };
             let label = ui.label(egui::RichText::new(&title).color(color::INK).strong());
             if let Some(p) = problem {
                 label.on_hover_text(&p);
-                ui.label(egui::RichText::new("passthrough").color(color::RED));
+                ui.label(egui::RichText::new(tr!("inspector.passthrough")).color(color::RED));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let n = effects.len();
-                if ui.add(Button::ghost("Remove")).clicked() {
+                if ui.add(Button::ghost(tr!("inspector.fx_remove"))).clicked() {
                     edit = Some((
                         restack(clips, |o| {
                             o.remove(i);
@@ -670,10 +688,10 @@ fn effects_rows(
                         None,
                     ));
                 }
-                if i + 1 < n && ui.add(Button::ghost("Down")).clicked() {
+                if i + 1 < n && ui.add(Button::ghost(tr!("inspector.fx_down"))).clicked() {
                     edit = Some((restack(clips, |o| o.swap(i, i + 1)), None));
                 }
-                if i > 0 && ui.add(Button::ghost("Up")).clicked() {
+                if i > 0 && ui.add(Button::ghost(tr!("inspector.fx_up"))).clicked() {
                     edit = Some((restack(clips, |o| o.swap(i - 1, i)), None));
                 }
             });
@@ -688,7 +706,8 @@ fn effects_rows(
                 decimals: 2,
                 range: (q.min, q.max),
                 default: Some(q.default),
-                ..prop(&name, &label, ONE)
+                label: Some(&label),
+                ..prop(&name, ONE)
             };
             if let Some(e) = row(ui, clips, &p, t, *index, seek) {
                 edit = Some(e);
@@ -701,7 +720,7 @@ fn effects_rows(
         .filter(|(k, _)| !disabled.contains(k))
         .filter_map(|(k, e)| Some((k.as_str(), e.as_deref().ok()?)))
         .collect();
-    let mut names = vec!["Add Effect"];
+    let mut names = vec![tr!("inspector.add_effect")];
     names.extend(usable.iter().map(|(_, s)| s.name.as_str()));
     let mut pick = 0;
     if ui
@@ -752,15 +771,17 @@ fn speed_row(ui: &mut Ui, c: &Clip) -> Option<Edit> {
     let (mut pct, mut reverse) = (c.speed * 100.0, c.reverse);
     let changed = ui
         .horizontal(|ui| {
-            ui.label(egui::RichText::new("Speed").color(color::INK_2));
+            ui.label(egui::RichText::new(tr!("inspector.speed")).color(color::INK_2));
             let drag = egui::DragValue::new(&mut pct)
                 .range(1.0..=10000.0)
                 .suffix("%")
                 .speed(1.0);
             let a = ui.add_enabled(c.freeze.is_none(), drag).changed();
-            let b = ui.checkbox(&mut reverse, "Reverse").changed();
-            ui.checkbox(&mut ripple, "Ripple")
-                .on_hover_text("Move later clips by the change in length");
+            let b = ui
+                .checkbox(&mut reverse, tr!("inspector.reverse"))
+                .changed();
+            ui.checkbox(&mut ripple, tr!("inspector.ripple"))
+                .on_hover_text(tr!("inspector.ripple_tooltip"));
             a || b
         })
         .inner;
@@ -784,8 +805,9 @@ enum Head {
 
 /// A section header remembering whether it's open, with reset and keyframe-all buttons on
 /// the right if `buttons`.
-fn section(ui: &mut Ui, title: &str, buttons: bool) -> (bool, Option<Head>) {
-    let id = ui.id().with(("inspector", title));
+fn section(ui: &mut Ui, id: &str, buttons: bool) -> (bool, Option<Head>) {
+    let title = caption(id);
+    let id = ui.id().with(("inspector", id));
     let mut open = ui.data_mut(|d| *d.get_temp_mut_or(id, true));
     let rect = ui.add(SectionHeader::new(title, &mut open)).rect;
     ui.data_mut(|d| d.insert_temp(id, open));
@@ -803,14 +825,17 @@ fn section(ui: &mut Ui, title: &str, buttons: bool) -> (bool, Option<Head>) {
             &mut ui,
             Glyph::Diamond,
             false,
-            &format!("Keyframe All {title}"),
+            &tr!("inspector.keyframe_all", section = title),
         )
         .clicked()
         {
             head = Some(Head::Key);
         }
         if ui
-            .add(Button::icon(icon::UNDO, &format!("Reset {title}")))
+            .add(Button::icon(
+                icon::UNDO,
+                &tr!("inspector.reset_section", section = title),
+            ))
             .clicked()
         {
             head = Some(Head::Reset);
@@ -840,7 +865,7 @@ fn row(
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.set_min_width(size::INSPECTOR_LABEL);
-                ui.label(egui::RichText::new(p.label).color(color::INK_2))
+                ui.label(egui::RichText::new(p.label()).color(color::INK_2))
             },
         );
         for (i, field) in p.fields.iter().enumerate() {
@@ -878,11 +903,15 @@ fn row(
             }
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let animate = glyph(ui, Glyph::Diamond, anim, &format!("Animate {}", p.label));
+            let tip = tr!("inspector.animate", name = p.label());
+            let animate = glyph(ui, Glyph::Diamond, anim, &tip);
             if animate.clicked() {
                 edit = Some((toggle_animate(clips, p.name, t), None));
             }
-            if ui.add(Button::icon(icon::UNDO, "Reset")).clicked() {
+            if ui
+                .add(Button::icon(icon::UNDO, tr!("inspector.reset")))
+                .clicked()
+            {
                 let cmd = match p.default {
                     Some(d) => rewrite(clips, |_, x, keys| {
                         keys.remove(p.name);
@@ -895,11 +924,11 @@ fn row(
             if !anim {
                 return;
             }
-            if glyph(ui, Glyph::Right, false, "Next Keyframe").clicked() {
+            if glyph(ui, Glyph::Right, false, tr!("inspector.next_key")).clicked() {
                 *seek = neighbour(clips, p.name, t, 1);
             }
             let here = clips.iter().all(|c| key_at(c, p.name, t));
-            let diamond = glyph(ui, Glyph::Diamond, here, "Keyframe at Playhead");
+            let diamond = glyph(ui, Glyph::Diamond, here, tr!("inspector.key_here"));
             if diamond.clicked() {
                 edit = Some((toggle_key(clips, p.name, t), None));
             }
@@ -912,7 +941,7 @@ fn row(
                         }
                     });
             }
-            if glyph(ui, Glyph::Left, false, "Previous Keyframe").clicked() {
+            if glyph(ui, Glyph::Left, false, tr!("inspector.previous_key")).clicked() {
                 *seek = neighbour(clips, p.name, t, -1);
             }
         });
@@ -999,7 +1028,7 @@ fn solid_color(ui: &mut Ui, a: &MediaAsset) -> Option<Edit> {
     let mut rgba = jvid_render::solid::rgba8(a.solid?);
     let changed = ui
         .horizontal(|ui| {
-            ui.label("Color");
+            ui.label(tr!("inspector.color"));
             ui.color_edit_button_srgba_unmultiplied(&mut rgba).changed()
         })
         .inner;
@@ -1062,13 +1091,13 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     let Some(mut st) = ui.data(|d| d.get_temp::<FontSearch>(id)) else {
         let missing = !family.is_empty() && !list.contains(family);
         let shown = match family.as_str() {
-            "" => "Sans-serif".to_owned(),
-            f if missing => format!("{f} (missing)"),
+            "" => tr!("inspector.sans_serif").to_owned(),
+            f if missing => tr!("inspector.font_missing", family = f),
             f => f.to_owned(),
         };
         let r = ui.button(shown);
         let r = if missing {
-            r.on_hover_text("Not installed here; drawn in the default sans-serif")
+            r.on_hover_text(tr!("inspector.font_missing_tooltip"))
         } else {
             r
         };
@@ -1107,7 +1136,9 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     let mut pick = matches.get(st.at).copied();
     let mut clicked = false;
     let inner = ui.vertical(|ui| {
-        let q = ui.add(egui::TextEdit::singleline(&mut st.query).hint_text("Search Fonts"));
+        let q = ui.add(
+            egui::TextEdit::singleline(&mut st.query).hint_text(tr!("inspector.search_fonts")),
+        );
         q.request_focus();
         if q.changed() {
             st.at = 0;
@@ -1149,7 +1180,15 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
 /// A text style row's animate toggle, when clips are selected; sets `toggle` once clicked.
 fn animate(ui: &mut Ui, clips: &[&Clip], name: &'static str, toggle: &mut Option<&'static str>) {
     let on = clips.iter().any(|c| animated(c, name));
-    if !clips.is_empty() && glyph(ui, Glyph::Diamond, on, &format!("Animate {name}")).clicked() {
+    if !clips.is_empty()
+        && glyph(
+            ui,
+            Glyph::Diamond,
+            on,
+            &tr!("inspector.animate", name = caption(name)),
+        )
+        .clicked()
+    {
         *toggle = Some(name);
     }
 }
@@ -1201,16 +1240,16 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
     );
     let mut changed = content.changed();
     ui.horizontal(|ui| {
-        ui.label("Font");
+        ui.label(tr!("inspector.font"));
         changed |= font_field(ui, &mut s.family, jvid_render::text::families());
     });
     ui.horizontal(|ui| {
-        ui.label("Size");
+        ui.label(tr!("inspector.text_size"));
         changed |= ui
             .add(egui::DragValue::new(&mut s.size).range(1.0..=1000.0))
             .changed();
         animate(ui, clips, "text_size", &mut toggle);
-        ui.label("Weight");
+        ui.label(tr!("inspector.weight"));
         changed |= ui
             .add(
                 egui::DragValue::new(&mut s.weight)
@@ -1219,18 +1258,23 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
             )
             .changed();
     });
-    changed |= color_field(ui, "Color", &mut s.color, (clips, "color", &mut toggle));
+    changed |= color_field(
+        ui,
+        tr!("inspector.color"),
+        &mut s.color,
+        (clips, "color", &mut toggle),
+    );
     ui.horizontal(|ui| {
         for (al, name) in [
-            (Align::Left, "Left"),
-            (Align::Center, "Center"),
-            (Align::Right, "Right"),
+            (Align::Left, tr!("inspector.align_left")),
+            (Align::Center, tr!("inspector.align_center")),
+            (Align::Right, tr!("inspector.align_right")),
         ] {
             changed |= ui.selectable_value(&mut s.align, al, name).changed();
         }
     });
     ui.horizontal(|ui| {
-        ui.label("Position");
+        ui.label(tr!("inspector.text_anchor"));
         for v in &mut s.anchor {
             changed |= ui
                 .add(egui::DragValue::new(v).range(0.0..=1.0).speed(0.005))
@@ -1239,16 +1283,21 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
         animate(ui, clips, "text_anchor", &mut toggle);
     });
     ui.horizontal(|ui| {
-        ui.label("Outline");
+        ui.label(tr!("inspector.outline"));
         changed |= ui
             .add(egui::DragValue::new(&mut s.outline).range(0.0..=32.0))
             .changed();
         animate(ui, clips, "outline", &mut toggle);
     });
     let outline = (clips, "outline_color", &mut toggle);
-    changed |= color_field(ui, "Outline Color", &mut s.outline_color, outline);
+    changed |= color_field(
+        ui,
+        tr!("inspector.outline_color"),
+        &mut s.outline_color,
+        outline,
+    );
     ui.horizontal(|ui| {
-        ui.label("Shadow");
+        ui.label(tr!("inspector.shadow"));
         for v in &mut s.shadow {
             changed |= ui
                 .add(egui::DragValue::new(v).range(-64.0..=64.0))
@@ -1257,9 +1306,14 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
         animate(ui, clips, "shadow", &mut toggle);
     });
     let shadow = (clips, "shadow_color", &mut toggle);
-    changed |= color_field(ui, "Shadow Color", &mut s.shadow_color, shadow);
+    changed |= color_field(
+        ui,
+        tr!("inspector.shadow_color"),
+        &mut s.shadow_color,
+        shadow,
+    );
     ui.horizontal(|ui| {
-        ui.label("Box Padding");
+        ui.label(tr!("inspector.box_padding"));
         changed |= ui
             .add(egui::DragValue::new(&mut s.box_padding).range(0.0..=200.0))
             .changed();
@@ -1267,7 +1321,7 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
     });
     changed |= color_field(
         ui,
-        "Box Color",
+        tr!("inspector.box_color"),
         &mut s.box_color,
         (clips, "box_color", &mut toggle),
     );
@@ -1367,6 +1421,21 @@ mod tests {
                 shown.iter().any(|s| s == want),
                 "{want} missing from {shown:?}"
             );
+        }
+    }
+
+    #[test]
+    fn every_section_and_property_has_a_name_in_each_language() {
+        let ids = SECTIONS
+            .iter()
+            .flat_map(|(id, props)| std::iter::once(*id).chain(props.iter().map(|p| p.name)))
+            .chain(["effects", "speed", "text"])
+            .chain(text_names());
+        for id in ids {
+            let key = format!("inspector.{id}");
+            for lang in suite_ui::i18n::LANGUAGES {
+                assert!(CATALOG.get_in(lang, &key).is_some(), "{lang} lacks {key}");
+            }
         }
     }
 
@@ -1503,7 +1572,7 @@ mod tests {
         assert!(clips.iter().all(|c| c.transform.blend == Blend::Screen));
         assert_eq!(clips[1].transform.opacity, 0.5);
         let names = Blend::ALL.map(|b| format!("{b:?}"));
-        assert_eq!(names, BLENDS, "labels follow Blend::ALL");
+        assert_eq!(names, blends(), "labels follow Blend::ALL");
     }
 
     #[test]
@@ -1733,5 +1802,22 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let h = font_harness("Helvetica");
         assert!(h.query_by_label("Helvetica (missing)").is_some());
+    }
+
+    #[test]
+    fn spanish_captions_fit_the_label_column_as_well_as_english() {
+        let keys = SECTIONS
+            .iter()
+            .flat_map(|(_, props)| props.iter().map(|p| format!("inspector.{}", p.name)))
+            .chain(["inspector.blend".into(), "inspector.lut".into()]);
+        for key in keys {
+            let [en, es] = ["en", "es"].map(|l| crate::i18n::CATALOG.get_in(l, &key).unwrap());
+            let [en_w, es_w] = crate::i18n::widths(&[en, es]).try_into().unwrap();
+            // English's Temperature already runs a fraction past the column.
+            assert!(
+                es_w <= size::INSPECTOR_LABEL.max(en_w),
+                "{es:?} is {es_w:.1}pt, {en:?} {en_w:.1}pt"
+            );
+        }
     }
 }

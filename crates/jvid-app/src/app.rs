@@ -17,6 +17,7 @@ use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, ButtonKind, State};
 
 use crate::export::{Error as ExportError, Request};
+use crate::i18n::{tr, trn, verbatim};
 use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
@@ -41,10 +42,32 @@ pub enum Tab {
     Timeline,
 }
 
+impl Tab {
+    /// The panel's title in the UI language.
+    fn title(self) -> &'static str {
+        match self {
+            Tab::Media => tr!("panel.media"),
+            Tab::Preview => tr!("panel.preview"),
+            Tab::Inspector => tr!("panel.inspector"),
+            Tab::Timeline => tr!("panel.timeline"),
+        }
+    }
+}
+
+/// A preview view's title, by id: `source` or `program`.
+fn view_title(id: &str) -> &'static str {
+    match id {
+        "source" => tr!("panel.source"),
+        _ => tr!("panel.program"),
+    }
+}
+
 pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
+    // Here rather than in App::new, so tests and embedders pick their own language.
+    suite_ui::i18n::set_language(suite_ui::i18n::resolve(&settings.language));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("jvid")
+            .with_title(verbatim("jvid"))
             .with_app_id("jvid")
             .with_icon(app_icon())
             .with_inner_size([1280.0, 720.0])
@@ -82,6 +105,9 @@ pub struct App {
     /// Match source: the next imported video sets the project's size and frame rate.
     match_source: bool,
     settings_dialog: crate::project_settings::SettingsDialog,
+    preferences: crate::preferences::Preferences,
+    /// The `language` setting: `system` or a language code.
+    language: String,
     theme: suite_ui::themes::LiveTheme,
     keymap_editor: crate::keymap_editor::KeymapEditor,
     exports: jvid_jobs::Pool,
@@ -129,6 +155,7 @@ impl App {
         app.preview.set_proxies(caches.proxies.clone());
         app.timeline = Timeline::new(caches);
         app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
+        app.language = settings.language.clone();
         if let Some(auto) = autosave::untitled().as_deref().and_then(autosave::newer) {
             app.prompts.push(Prompt::Restore { path: None, auto });
         }
@@ -155,7 +182,7 @@ impl App {
             history: History::new(Project::default()),
             path: None,
             dock: hide_tab_bars(dock),
-            preview_views: &["Source", "Program"],
+            preview_views: &["source", "program"],
             preview_active: 1,
             window_title: String::new(),
             keymap: keymap::load(),
@@ -173,6 +200,8 @@ impl App {
             on_welcome: true,
             match_source: false,
             settings_dialog: Default::default(),
+            preferences: Default::default(),
+            language: jvid_core::settings::Settings::default().language,
             theme: suite_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
             exports,
@@ -212,7 +241,7 @@ impl App {
                 self.match_source = false;
                 self.on_welcome = false;
             }
-            Err(e) => self.error(format!("Couldn't open {}: {e}", path.display())),
+            Err(e) => self.error(tr!("app.open_failed", path = path.display(), error = e)),
         }
     }
 
@@ -222,7 +251,10 @@ impl App {
             welcome::Action::Open => self.file_action(FileAction::Open),
             welcome::Action::OpenRecent(path) => self.open(path),
             welcome::Action::Import => {
-                if let Some(paths) = FileDialog::new().set_title("Import").pick_files() {
+                if let Some(paths) = FileDialog::new()
+                    .set_title(tr!("app.import_title"))
+                    .pick_files()
+                {
                     self.new_project(None);
                     self.import(paths);
                 }
@@ -234,7 +266,9 @@ impl App {
         self.path
             .as_deref()
             .and_then(|p| p.file_stem())
-            .map_or("Untitled".into(), |s| s.to_string_lossy().into_owned())
+            .map_or(tr!("app.untitled").into(), |s| {
+                s.to_string_lossy().into_owned()
+            })
     }
 
     fn app_bar(&mut self, ui: &mut Ui) {
@@ -242,7 +276,7 @@ impl App {
         let logo = ui.painter().text(
             rect.left_center() + vec2(space::GUTTER + space::INSET, 0.0),
             Align2::LEFT_CENTER,
-            "jvid",
+            verbatim("jvid"),
             theme::title(),
             color::INK,
         );
@@ -259,16 +293,17 @@ impl App {
         let menu = egui::Rect::from_center_size(rect.center(), vec2(w, size::CONTROL));
         let r = ui
             .put(menu, Button::ghost(&name))
-            .on_hover_text("New, open and save");
+            .on_hover_text(tr!("menu.project_tooltip"));
         let mut action = None;
         egui::Popup::menu(&r).show(|ui| {
             for (a, label) in [
-                (FileAction::New, "New Project"),
-                (FileAction::Open, "Open…"),
-                (FileAction::Save, "Save"),
-                (FileAction::SaveAs, "Save As…"),
-                (FileAction::Settings, "Project Settings…"),
-                (FileAction::Shortcuts, "Keyboard Shortcuts…"),
+                (FileAction::New, tr!("menu.new_project")),
+                (FileAction::Open, tr!("menu.open")),
+                (FileAction::Save, tr!("menu.save")),
+                (FileAction::SaveAs, tr!("menu.save_as")),
+                (FileAction::Preferences, tr!("menu.settings")),
+                (FileAction::Settings, tr!("menu.project_settings")),
+                (FileAction::Shortcuts, tr!("menu.shortcuts")),
             ] {
                 if ui.button(label).clicked() {
                     action = Some(a);
@@ -291,11 +326,13 @@ impl App {
             self.export_button(ui);
             ui.spacing_mut().item_spacing.x = space::S4;
             let live = |on: bool| if on { State::Live } else { State::Disabled };
-            let redo = Button::icon(icon::REDO, "Redo").state(live(self.history.can_redo()));
+            let redo =
+                Button::icon(icon::REDO, tr!("action.redo")).state(live(self.history.can_redo()));
             if ui.add(redo).clicked() {
                 self.run_action("redo", true);
             }
-            let undo = Button::icon(icon::UNDO, "Undo").state(live(self.history.can_undo()));
+            let undo =
+                Button::icon(icon::UNDO, tr!("action.undo")).state(live(self.history.can_undo()));
             if ui.add(undo).clicked() {
                 self.run_action("undo", true);
             }
@@ -305,7 +342,7 @@ impl App {
     /// The File menu, its left edge at `left`: each row runs its keymap action.
     /// Returns its right edge.
     fn file_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
-        let button = menu_button(ui, "File", left);
+        let button = menu_button(ui, tr!("menu.file"), left);
         let mut picked = None;
         let mut recent = None;
         egui::Popup::menu(&button).show(|ui| {
@@ -316,7 +353,7 @@ impl App {
                     }
                     "recent" => {
                         ui.add_enabled_ui(!self.welcome.recent.is_empty(), |ui| {
-                            ui.menu_button("Open Recent", |ui| {
+                            ui.menu_button(tr!("menu.open_recent"), |ui| {
                                 for r in &self.welcome.recent {
                                     let name = r.path.file_stem().unwrap_or_default();
                                     let b = ui.button(name.to_string_lossy());
@@ -349,7 +386,7 @@ impl App {
 
     /// The Edit menu, its left edge at `left`: each row runs its keymap action.
     fn edit_menu(&mut self, ui: &mut Ui, left: f32) {
-        let button = menu_button(ui, "Edit", left);
+        let button = menu_button(ui, tr!("menu.edit"), left);
         let mut picked = None;
         egui::Popup::menu(&button).show(|ui| {
             for &id in menus::EDIT {
@@ -382,6 +419,7 @@ impl App {
             FileAction::SaveAs => {
                 self.save(true);
             }
+            FileAction::Preferences => self.preferences.open(),
             FileAction::Settings => self.settings_dialog.open(self.history.project()),
             FileAction::Shortcuts => self.keymap_editor.open(),
         }
@@ -421,7 +459,7 @@ impl App {
                 true
             }
             Err(e) => {
-                self.error(format!("Couldn't save {}: {e}", path.display()));
+                self.error(tr!("app.save_failed", path = path.display(), error = e));
                 false
             }
         }
@@ -432,8 +470,8 @@ impl App {
     fn export_button(&mut self, ui: &mut Ui) {
         if !self.queue.is_empty() {
             let r = ui
-                .add(Button::icon(icon::CHEVRON_DOWN, "Render Queue"))
-                .on_hover_text(format!("{} in the render queue", self.queue.pending()));
+                .add(Button::icon(icon::CHEVRON_DOWN, tr!("export.queue")))
+                .on_hover_text(trn!("export.queue_pending", self.queue.pending()));
             let mut new = false;
             egui::Popup::menu(&r)
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
@@ -447,8 +485,8 @@ impl App {
             ui.ctx().request_repaint();
         }
         let label = match self.queue.running() {
-            Some(p) => format!("Exporting {:.0}%", p * 100.0),
-            None => "Export".into(),
+            Some(p) => tr!("export.progress", percent = format!("{:.0}", p * 100.0)),
+            None => tr!("export.export").into(),
         };
         let state = if self.can_export() {
             State::Live
@@ -457,7 +495,7 @@ impl App {
         };
         if ui
             .add(Button::primary(&label).state(state))
-            .on_disabled_hover_text("Nothing to export yet")
+            .on_disabled_hover_text(tr!("export.nothing"))
             .clicked()
         {
             self.run_action("export", true);
@@ -471,7 +509,7 @@ impl App {
     /// Queues `req` on a snapshot of the project, so later edits don't change the file.
     fn queue_export(&mut self, req: Request, gpu: (wgpu::Device, wgpu::Queue), now: f64) {
         if self.queue.writing(&req.path) {
-            let msg = format!("{} is already being exported", req.path.display());
+            let msg = tr!("export.busy", path = req.path.display());
             self.toasts.push((msg, now + TOAST_SECS));
             return;
         }
@@ -486,11 +524,14 @@ impl App {
         for (path, r) in self.queue.poll() {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             match r {
-                Ok(()) => crate::export::queue::notify("Export Finished", &name),
+                Ok(()) => crate::export::queue::notify(tr!("export.finished"), &name),
                 Err(ExportError::Failed(e)) => {
-                    crate::export::queue::notify("Export Failed", &format!("{name}: {e}"));
+                    crate::export::queue::notify(
+                        tr!("export.failed_title"),
+                        &format!("{name}: {e}"),
+                    );
                     self.toasts
-                        .push((format!("Export failed: {e}"), now + TOAST_SECS));
+                        .push((tr!("export.failed", error = e), now + TOAST_SECS));
                 }
                 Err(ExportError::Cancelled) => {}
             }
@@ -500,9 +541,9 @@ impl App {
     /// Saves the shown frame as a PNG at full project resolution.
     fn export_frame(&mut self) {
         let Some(path) = FileDialog::new()
-            .set_title("Export Frame")
-            .add_filter("PNG image", &["png"])
-            .set_file_name("frame.png")
+            .set_title(tr!("action.export_frame"))
+            .add_filter(tr!("app.png_filter"), &["png"])
+            .set_file_name(tr!("app.frame_file"))
             .save_file()
         else {
             return;
@@ -511,7 +552,7 @@ impl App {
             .preview
             .export_frame(self.history.project().settings(), &path)
         {
-            self.error(format!("Couldn't export {}: {e}", path.display()));
+            self.error(tr!("app.export_failed", path = path.display(), error = e));
         }
     }
 
@@ -622,7 +663,10 @@ impl App {
 
     /// Asks for media files and queues them for import.
     fn import_dialog(&mut self) {
-        if let Some(paths) = FileDialog::new().set_title("Import").pick_files() {
+        if let Some(paths) = FileDialog::new()
+            .set_title(tr!("app.import_title"))
+            .pick_files()
+        {
             self.import(paths);
         }
     }
@@ -630,8 +674,8 @@ impl App {
     /// Asks for an `.srt` and adds it as a subtitle track in the Caption style.
     fn import_subtitles(&mut self) {
         let Some(path) = FileDialog::new()
-            .set_title("Import Subtitles")
-            .add_filter("SubRip", &["srt"])
+            .set_title(tr!("action.import_subtitles"))
+            .add_filter(verbatim("SubRip"), &["srt"])
             .pick_file()
         else {
             return;
@@ -641,7 +685,7 @@ impl App {
             Err(e) => return tracing::warn!("couldn't read {}: {e}", path.display()),
         };
         let [.., (_, style)] = jvid_core::model::Text::presets();
-        let name = "Subtitles".to_string();
+        let name = tr!("app.subtitles").to_string();
         if let Err(e) = self
             .history
             .apply(Command::ImportSubtitles { name, cues, style })
@@ -692,7 +736,8 @@ impl App {
         let Some(asset) = self.history.project().asset(id) else {
             return;
         };
-        let dialog = FileDialog::new().set_title(format!("Relink {}", asset.display_name()));
+        let dialog =
+            FileDialog::new().set_title(tr!("app.relink_title", name = asset.display_name()));
         let dialog = match asset.path.parent().filter(|d| d.is_dir()) {
             Some(d) => dialog.set_directory(d),
             None => dialog,
@@ -746,30 +791,36 @@ impl App {
         let name = self.name();
         let (title, body, buttons, cancel): (_, _, &[_], _) = match prompt {
             Prompt::Discard(_) => (
-                "Unsaved Changes",
-                format!("Save changes to {name} before continuing?"),
+                tr!("prompt.unsaved"),
+                tr!("prompt.unsaved_body", name = name),
                 &[
-                    ("Save", ButtonKind::Primary),
-                    ("Cancel", ButtonKind::Secondary),
-                    ("Don't Save", ButtonKind::Destructive),
+                    (tr!("prompt.save"), ButtonKind::Primary),
+                    (tr!("prompt.cancel"), ButtonKind::Secondary),
+                    (tr!("prompt.dont_save"), ButtonKind::Destructive),
                 ],
                 1,
             ),
             Prompt::Restore { path, .. } => (
-                "Restore Autosave",
-                format!(
-                    "{} has an autosave newer than its last save, probably from a crash. Restore it?",
-                    path.as_deref()
+                tr!("prompt.restore"),
+                tr!(
+                    "prompt.restore_body",
+                    name = path
+                        .as_deref()
                         .and_then(Path::file_stem)
-                        .map_or("Untitled".into(), |s| s.to_string_lossy())
+                        .map_or(tr!("app.untitled").into(), |s| s.to_string_lossy())
                 ),
                 &[
-                    ("Restore", ButtonKind::Primary),
-                    ("Discard", ButtonKind::Destructive),
+                    (tr!("prompt.restore_button"), ButtonKind::Primary),
+                    (tr!("prompt.discard"), ButtonKind::Destructive),
                 ],
                 1,
             ),
-            Prompt::Error(message) => ("Error", message.clone(), &[("OK", ButtonKind::Primary)], 0),
+            Prompt::Error(message) => (
+                tr!("prompt.error"),
+                message.clone(),
+                &[(tr!("prompt.ok"), ButtonKind::Primary)],
+                0,
+            ),
         };
         let dialog = Dialog {
             title,
@@ -805,7 +856,7 @@ impl App {
                     self.history = History::new(project);
                     self.history.mark_unsaved();
                 }
-                Err(e) => self.error(format!("Couldn't restore {}: {e}", auto.display())),
+                Err(e) => self.error(tr!("app.restore_failed", path = auto.display(), error = e)),
             },
             (Prompt::Restore { path: None, .. }, _) => {
                 if let Some(p) = autosave::untitled() {
@@ -984,6 +1035,11 @@ impl eframe::App for App {
             {
                 tracing::warn!("edit failed: {e}");
             }
+            self.preferences.show(ui, &mut self.language, |language| {
+                let path = crate::settings_file::path()
+                    .ok_or_else(|| std::io::Error::other(tr!("settings.no_config_dir")))?;
+                crate::settings_file::save_language_to(&path, language)
+            });
         });
 
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
@@ -992,7 +1048,7 @@ impl eframe::App for App {
         self.show_toasts(&ctx);
 
         let dirty = if self.history.is_dirty() { " •" } else { "" };
-        let title = format!("{}{dirty} — jvid", self.name());
+        let title = tr!("app.window_title", name = self.name(), dirty = dirty);
         if title != self.window_title {
             ctx.send_viewport_cmd(ViewportCommand::Title(title.clone()));
             self.window_title = title;
@@ -1011,6 +1067,7 @@ enum FileAction {
     Open,
     Save,
     SaveAs,
+    Preferences,
     Settings,
     Shortcuts,
 }
@@ -1032,7 +1089,7 @@ fn menu_button(ui: &mut Ui, name: &str, left: f32) -> egui::Response {
 }
 
 fn project_dialog() -> FileDialog {
-    FileDialog::new().add_filter("jvid project", &["jvid"])
+    FileDialog::new().add_filter(tr!("app.project_filter"), &["jvid"])
 }
 
 /// Premiere's arrangement: media, preview and inspector over a full-width timeline.
@@ -1104,7 +1161,7 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn title(&mut self, tab: &mut Tab) -> egui::WidgetText {
-        format!("{tab:?}").into()
+        tab.title().into()
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
@@ -1125,12 +1182,12 @@ impl TabViewer for Viewer<'_> {
             self.open = r.open;
             return;
         }
-        let source_tab = self.preview_views.get(*self.preview_active) == Some(&"Source");
-        let title = format!("{tab:?}");
-        let panel = match (*tab, self.preview_views) {
+        let source_tab = self.preview_views.get(*self.preview_active) == Some(&"source");
+        let views: Vec<&str> = self.preview_views.iter().map(|v| view_title(v)).collect();
+        let panel = match (*tab, views.as_slice()) {
             (Tab::Preview, [one]) => Panel::titled(one),
             (Tab::Preview, views) => Panel::tabbed(views, self.preview_active),
-            _ => Panel::titled(&title),
+            _ => Panel::titled(tab.title()),
         };
         let panel = panel.focused(focused);
         if *tab == Tab::Preview && source_tab {
@@ -1193,7 +1250,7 @@ impl TabViewer for Viewer<'_> {
                 .with_max_y(r.response.rect.top() + size::HEADER);
             let title_w = ui
                 .painter()
-                .layout_no_wrap(title.clone(), theme::body_strong(), color::INK)
+                .layout_no_wrap(tab.title().to_owned(), theme::body_strong(), color::INK)
                 .size()
                 .x;
             let left = header.left() + space::INSET + title_w + space::S12;
@@ -1251,7 +1308,7 @@ fn drop_overlay(ctx: &egui::Context) {
     painter.text(
         rect.center(),
         Align2::CENTER_CENTER,
-        "Drop to Import",
+        tr!("app.drop_to_import"),
         theme::title(),
         color::INK,
     );
@@ -1279,7 +1336,7 @@ impl App {
                                         .color(color::RED),
                                 );
                                 ui.add(egui::Label::new(msg.as_str()).wrap());
-                                if ui.add(Button::icon(icon::X, "Dismiss")).clicked() {
+                                if ui.add(Button::icon(icon::X, tr!("app.dismiss"))).clicked() {
                                     dismiss = Some(i);
                                 }
                             });
