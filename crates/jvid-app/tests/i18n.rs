@@ -145,6 +145,8 @@ fn selected_clip_inspector_switches_live() {
     let _es = switch("es");
     let mut h = titled_project();
     let spanish = [
+        "Fuente",
+        "Contorno",
         "Transformación",
         "Escala",
         "Rotación",
@@ -153,10 +155,10 @@ fn selected_clip_inspector_switches_live() {
         "Fusión",
         "Animar: Posición",
         "Fotograma clave en todo: Transformación",
-        "Fuente",
-        "Contorno",
     ];
     let english = [
+        "Font",
+        "Outline",
         "Transform",
         "Scale",
         "Rotation",
@@ -164,21 +166,25 @@ fn selected_clip_inspector_switches_live() {
         "Opacity",
         "Animate Position",
         "Keyframe All Transform",
-        "Font",
-        "Outline",
     ];
-    for label in spanish {
+    // A title opens on the Inspector's Text tab; the rest is under Video.
+    for label in &spanish[..2] {
+        assert!(has(&h, label), "no {label:?}");
+    }
+    // The preset's text was made in Spanish; it's the project's now, not interface text.
+    assert_eq!(content(&h).as_deref(), Some("Título"));
+    click_rightmost(&mut h, "Vídeo");
+    for label in &spanish[2..] {
         assert!(has(&h, label), "no {label:?}");
     }
     assert!(!english.iter().any(|l| has(&h, l)));
-    // The preset's text was made in Spanish; it's the project's now, not interface text.
-    assert_eq!(content(&h).as_deref(), Some("Título"));
 
     // Section state is keyed by id, not caption: collapsed in Spanish, collapsed in English.
     h.get_all_by_label("Opacidad").next().unwrap().click();
     h.run();
     assert!(!has(&h, "Fusión"));
     // Typing into the text field is one undo step.
+    click_rightmost(&mut h, "Texto");
     h.get_by_role(Role::MultilineTextInput).scroll_to_me();
     h.run();
     h.get_by_role(Role::MultilineTextInput).click();
@@ -191,7 +197,17 @@ fn selected_clip_inspector_switches_live() {
 
     i18n::set_language("en");
     h.run();
-    for label in english {
+    assert!(
+        !has(&h, "Select a clip to see its properties"),
+        "selection lost"
+    );
+    assert_eq!(content(&h).as_deref(), Some("Título, toma 3"));
+    assert!(h.get_by_role(Role::MultilineTextInput).is_focused());
+    for label in &english[..2] {
+        assert!(has(&h, label), "no {label:?}");
+    }
+    click_rightmost(&mut h, "Video");
+    for label in &english[2..] {
         assert!(has(&h, label), "no {label:?}");
     }
     assert!(!spanish.iter().any(|l| has(&h, l)));
@@ -199,20 +215,15 @@ fn selected_clip_inspector_switches_live() {
         has(&h, "Opacity") && !has(&h, "Blend"),
         "opacity section reopened"
     );
-    assert!(
-        !has(&h, "Select a clip to see its properties"),
-        "selection lost"
-    );
-    assert_eq!(content(&h).as_deref(), Some("Título, toma 3"));
-    assert!(h.get_by_role(Role::MultilineTextInput).is_focused());
 
     h.get_by_label("Undo").click();
     h.run();
+    assert!(has(&h, "Transform"), "selection lost");
+    click_rightmost(&mut h, "Text");
     assert_eq!(content(&h).as_deref(), Some("Título"));
     h.get_by_label("Redo").click();
     h.run();
     assert_eq!(content(&h).as_deref(), Some("Título, toma 3"));
-    assert!(has(&h, "Transform") && has(&h, "Font"), "selection lost");
 }
 
 /// Every text painted in the last frame, including what's drawn without a widget.
@@ -248,6 +259,16 @@ fn search(h: &mut Harness<'_, App>, shows: &str, erase: usize, text: &str) {
     h.run();
 }
 
+/// The Inspector's tab, right of the bin's tab of the same name.
+fn click_rightmost(h: &mut Harness<'_, impl Sized>, label: &str) {
+    let x = |n: &egui_kittest::Node<'_>| n.rect().min.x;
+    let tab = h
+        .get_all_by_label(label)
+        .max_by(|a, b| x(a).total_cmp(&x(b)));
+    tab.unwrap().click();
+    h.run();
+}
+
 fn click_leftmost(h: &mut Harness<'_, impl Sized>, label: &str) {
     let x = |n: &egui_kittest::Node<'_>| n.rect().min.x;
     let tab = h
@@ -266,6 +287,7 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
     }
     let _es = switch("es");
     let mut h = titled_project();
+    click_rightmost(&mut h, "Efectos");
     h.get_by_label("Añadir efecto").scroll_to_me();
     h.run();
     h.get_by_label("Añadir efecto").click();
@@ -276,7 +298,11 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
     h.get_by_label("Viñeta").click();
     h.run();
     // The Transform section's position comes before the text's own.
-    for (key, caption) in [("Posición", "posición"), ("Intensidad", "fx0.intensidad")] {
+    for (tab, key, caption) in [
+        ("Vídeo", "Posición", "posición"),
+        ("Efectos 1", "Intensidad", "fx0.intensidad"),
+    ] {
+        click_rightmost(&mut h, tab);
         let label = format!("Animar: {key}");
         h.get_all_by_label(&label).next().unwrap().scroll_to_me();
         h.run();
