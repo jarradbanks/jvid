@@ -1719,6 +1719,43 @@ impl Sequence {
         Ok(())
     }
 
+    /// Cuts each `(clip, start, end)` timeline span out of its clip and linked clips with a
+    /// split at both ends, then ripple deletes the middle or, with `speed`, sets its speed
+    /// with ripple. Spans are clamped to their clip; empty ones are skipped.
+    pub(crate) fn cut_spans(
+        &mut self,
+        mut spans: Vec<(ClipId, Time, Time)>,
+        speed: Option<f64>,
+    ) -> Result<(), ModelError> {
+        let mut s = self.clone();
+        // Latest first, so no edit moves a span still to come.
+        spans.sort_by_key(|&(_, a, _)| std::cmp::Reverse(a));
+        for (id, a, b) in spans {
+            let (t, c) = s.clip(id).ok_or(ModelError::UnknownClip(id))?;
+            let (a, b) = (a.max(c.start), b.min(c.end()));
+            if a >= b {
+                continue;
+            }
+            let group: Vec<_> = s.linked(id).iter().map(|(_, c)| c.id).collect();
+            s.split_at(&group, b)?;
+            s.split_at(&group, a)?;
+            // The head keeps `id`, so the middle is whatever now starts at `a`.
+            let mid = s
+                .track(t)
+                .and_then(|t| t.clips.iter().find(|c| c.start == a));
+            let mid = mid.ok_or(ModelError::UnknownClip(id))?;
+            match speed {
+                None => {
+                    let ids: Vec<_> = s.linked(mid.id).iter().map(|(_, c)| c.id).collect();
+                    s.remove_clips(&ids, true)?;
+                }
+                Some(v) => s.set_speed(mid.id, v, mid.reverse, true)?,
+            }
+        }
+        *self = s;
+        Ok(())
+    }
+
     /// Holds the frame `id` shows at `at` for the rest of the clip, cutting it there first.
     /// The held part keeps its length and drops its link, as it no longer plays in sync.
     pub(crate) fn freeze_frame(&mut self, id: ClipId, at: Time) -> Result<(), ModelError> {
