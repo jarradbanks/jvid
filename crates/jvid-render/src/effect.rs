@@ -136,13 +136,14 @@ fn jvid_fs(in: JvidOut) -> @location(0) vec4<f32> { return effect(in.uv); }
 ";
 
 /// The bundled examples, as (file name, source), copied into a new effects folder.
-pub const BUNDLED: [(&str, &str); 3] = [
+pub const BUNDLED: [(&str, &str); 4] = [
     ("vignette.wgsl", include_str!("effects/vignette.wgsl")),
     (
         "chromatic_aberration.wgsl",
         include_str!("effects/chromatic_aberration.wgsl"),
     ),
     ("film_grain.wgsl", include_str!("effects/film_grain.wgsl")),
+    ("chroma_key.wgsl", include_str!("effects/chroma_key.wgsl")),
 ];
 
 #[cfg(test)]

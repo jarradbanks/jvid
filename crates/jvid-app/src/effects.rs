@@ -386,7 +386,15 @@ mod tests {
         let mut lib = Library::default();
         lib.scan(&tmp);
         let names: Vec<_> = lib.entries().map(|(k, _)| k.to_owned()).collect();
-        assert_eq!(names, ["chromatic_aberration", "film_grain", "vignette"]);
+        assert_eq!(
+            names,
+            [
+                "chroma_key",
+                "chromatic_aberration",
+                "film_grain",
+                "vignette"
+            ]
+        );
         assert!(lib.entries().all(|(_, e)| e.is_ok()));
         let g = lib.generation;
         lib.scan(&tmp);
@@ -430,7 +438,7 @@ mod tests {
         let rows = lib.rows("CORNERS");
         assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].name.as_str(), rows[0].bundled), ("Vignette", true));
-        assert_eq!(lib.rows("").len(), 3);
+        assert_eq!(lib.rows("").len(), 4);
         assert!(bundled("vignette") && !bundled("new_effect"));
 
         // A broken user shader: listed by file name with the compiler's message.
