@@ -222,7 +222,8 @@ impl Compositor {
         }
     }
 
-    /// `tex` with `effects` applied in order into `encoder`, or `None` when none of them is set.
+    /// `tex` with `effects` applied in order into `encoder`, or `None` when none of them is set;
+    /// bypassed ones are skipped.
     /// `slot` (the layer index) picks the pooled textures and uniforms, so layers don't share them.
     fn apply_effects(
         &mut self,
@@ -256,7 +257,7 @@ impl Compositor {
         let mut out: Option<&wgpu::Texture> = None;
         // `i` counts applied effects, so it never skips past `uniforms.len()`.
         let mut i = 0;
-        for e in effects {
+        for e in effects.iter().filter(|e| e.enabled) {
             let Some((pipeline, params)) = self.effects.get(&e.shader) else {
                 continue;
             };

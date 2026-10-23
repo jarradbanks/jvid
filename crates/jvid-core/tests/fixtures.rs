@@ -85,3 +85,38 @@ fn markers_are_saved() {
     assert_eq!(seq.markers()[0].name, "kill");
     assert_eq!(seq.markers()[1], m);
 }
+
+#[test]
+fn bypassed_effects_are_saved_with_their_keyframes() {
+    use jvid_core::keyframe::{Easing, Keyframe, Value};
+    use jvid_core::model::Effect;
+    let dir = Path::new("/new/proj");
+    let mut h = History::new(load("basic.jvid", dir));
+    let c = h.project().sequence().tracks()[0].clips()[0].clone();
+    let fx = |enabled| Effect {
+        shader: "vignette".into(),
+        params: [("strength".to_owned(), 0.25)].into(),
+        enabled,
+    };
+    let mut x = c.transform.clone();
+    x.effects = vec![fx(true), fx(false)];
+    let mut keys = c.keyframes.clone();
+    keys.insert(
+        Effect::key(1, "strength"),
+        vec![Keyframe {
+            time: c.source_in,
+            value: Value::Scalar(0.75),
+            easing: Easing::Linear,
+        }],
+    );
+    h.apply(Command::SetClipProps(vec![(c.id, x, keys)]))
+        .unwrap();
+    let json = to_json(h.project(), dir).unwrap();
+    // Only the bypassed one says so, so older files (and unchanged ones) read as on.
+    assert_eq!(json.matches("\"enabled\": false").count(), 1);
+    let again = from_json(&json, dir, |_| true).unwrap();
+    assert_eq!(again, *h.project());
+    let saved = &again.sequence().tracks()[0].clips()[0];
+    assert_eq!(saved.transform.effects, [fx(true), fx(false)]);
+    assert!(saved.keyframes.contains_key("fx1.strength"));
+}

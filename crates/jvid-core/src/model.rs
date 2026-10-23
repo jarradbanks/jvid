@@ -512,6 +512,9 @@ pub struct Transform {
 pub struct Effect {
     pub shader: String,
     pub params: BTreeMap<String, f64>,
+    /// A bypassed effect keeps its settings and keyframes but doesn't render.
+    #[serde(default = "enabled", skip_serializing_if = "is_enabled")]
+    pub enabled: bool,
 }
 
 impl Effect {

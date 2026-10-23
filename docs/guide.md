@@ -72,8 +72,11 @@ On the timeline, an animated clip has a toggle in its name strip that shows a la
 ## Effects
 
 The bin's Effects tab lists the WGSL effects in your effects folder; add one to the selected clips
-from the Inspector's Effects section, where each parameter is a keyframeable slider. To write
-your own, see [Writing effects](effects.md).
+from the Inspector's Effects section (**Add Effect** searches names and descriptions), where each
+parameter is a keyframeable slider. Effects run top to bottom: drag a block's header, or use its
+**…** menu, to reorder. The eye bypasses an effect, keeping its settings and keyframes, so it
+drops out of the Program monitor and exports until you turn it back on. To write your own, see
+[Writing effects](effects.md).
 
 ## Export
 

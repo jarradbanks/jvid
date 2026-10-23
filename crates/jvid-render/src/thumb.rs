@@ -237,6 +237,7 @@ mod tests {
         let effect = Effect {
             shader: "vignette".into(),
             params: Default::default(),
+            enabled: true,
         };
         let out = read_back(&device, &queue, &thumbs.effect(&device, &queue, &effect));
         let changed = frame

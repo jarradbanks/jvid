@@ -603,6 +603,7 @@ fn effect(uv: vec2<f32>) -> vec4<f32> {
     let fx = |shader: &str, amount: f64| Effect {
         shader: shader.into(),
         params: [("amount".to_owned(), amount)].into(),
+        enabled: true,
     };
     let run = |comp: &mut Compositor, effects: Vec<Effect>| {
         let t = Transform {
@@ -626,6 +627,16 @@ fn effect(uv: vec2<f32>) -> vec4<f32> {
     assert!(same(
         &run(&mut comp, vec![fx("invert", 1.0), fx("invert", 1.0)]),
         [200, 100, 50]
+    ));
+    // Bypassed: skipped, so only the other one inverts.
+    let off = Effect {
+        enabled: false,
+        ..fx("invert", 1.0)
+    };
+    assert!(same(&run(&mut comp, vec![off.clone()]), [200, 100, 50]));
+    assert!(same(
+        &run(&mut comp, vec![off, fx("invert", 1.0)]),
+        [55, 155, 205]
     ));
     comp.set_effect(&device, "invert", None).unwrap();
     assert!(same(
@@ -664,6 +675,7 @@ fn effect_ignoring_fx_renders_and_extra_bindings_are_rejected() {
         effects: vec![Effect {
             shader: "swap".into(),
             params: Default::default(),
+            enabled: true,
         }],
         ..Default::default()
     };
