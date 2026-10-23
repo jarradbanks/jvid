@@ -18,10 +18,11 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::wgpu;
-use jvid_audio::{Fx, Mixer, Output, SAMPLE_RATE, Strip, audible, automate, balance};
+use jvid_audio::{Fx, Mixer, Output, SAMPLE_RATE, Strip, automate};
 use jvid_core::eval::{AudioSegment, Layer, audio_in, frame_at, gain_at};
 use jvid_core::model::{
-    AssetId, ClipId, MediaAsset, Project, ProjectSettings, Sequence, TrackKind, Transform,
+    AssetId, ClipId, MediaAsset, Project, ProjectSettings, Sequence, SequenceId, TrackKind,
+    Transform,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Handle, Pool, Priority};
@@ -244,6 +245,13 @@ impl Audio {
         }
     }
 
+    /// Closes every clip's audio, to reopen as each is next heard.
+    fn reset(&mut self) {
+        self.clips.clear();
+        self.fx.clear();
+        self.nested.clear();
+    }
+
     /// Opens and seeks clips heard within [`AUDIO_AHEAD`] of `pos`, so they start on time, and
     /// closes the rest.
     pub(crate) fn prime(&mut self, project: &Project, pos: Time) {
@@ -291,20 +299,27 @@ impl Audio {
             .iter()
             .filter(|t| t.kind == TrackKind::Audio)
             .collect();
-        if self.inputs.len() != tracks.len() {
-            self.mixer = Mixer::new(tracks.len());
-            self.inputs = vec![Vec::new(); tracks.len()];
-        }
+        // A nest's tracks pan relative to the outer track's centre, so the pan law applies once
+        // and a nest at default settings sounds as its clips did before nesting.
+        let unity = if nested {
+            std::f32::consts::SQRT_2
+        } else {
+            1.0
+        };
         let strips: Vec<_> = tracks
             .iter()
             .map(|t| Strip {
-                volume: t.volume,
+                volume: t.volume * unity,
                 pan: t.pan,
                 muted: t.muted,
                 solo: t.solo,
                 fx: t.fx,
             })
             .collect();
+        if self.inputs.len() != tracks.len() {
+            self.mixer = Mixer::with_strips(&strips);
+            self.inputs = vec![Vec::new(); tracks.len()];
+        }
         for b in &mut self.inputs {
             b.clear();
             b.resize(out.len(), 0.0);
@@ -368,25 +383,6 @@ impl Audio {
             }
             let mixed = &mut self.inputs[i][range];
             mixed.iter_mut().zip(&*out).for_each(|(m, x)| *m += x);
-        }
-        if nested {
-            // The outer track's pan law applies once, so a nest's tracks sum without the
-            // centre's -3 dB and sound as their clips did before nesting.
-            // shortcut: no ramps on a nest's track volume changes; add them if they click.
-            let solo = strips.iter().any(|s| s.solo);
-            out.fill(0.0);
-            for (input, s) in self.inputs.iter().zip(&strips) {
-                if audible(s, solo) {
-                    let (l, r) = balance(s.pan);
-                    let (l, r) = (l * s.volume, r * s.volume);
-                    let frames = out.as_chunks_mut::<2>().0.iter_mut();
-                    for (o, x) in frames.zip(input.as_chunks::<2>().0) {
-                        o[0] += x[0] * l;
-                        o[1] += x[1] * r;
-                    }
-                }
-            }
-            return;
         }
         self.mixer.set_strips(&strips);
         let inputs: Vec<&[f32]> = self.inputs.iter().map(Vec::as_slice).collect();
@@ -460,6 +456,8 @@ pub struct Playback {
     /// The frame index last returned by `tick`, and whether it was exact.
     shown: Option<(i64, bool)>,
     audio: Audio,
+    /// The sequence `audio` was opened for; clip ids are per sequence.
+    sequence: SequenceId,
 }
 
 impl Playback {
@@ -486,6 +484,7 @@ impl Playback {
             done,
             shown: None,
             audio: Audio::new(open_audio),
+            sequence: SequenceId::default(),
         }
     }
 
@@ -567,13 +566,16 @@ impl Playback {
             let out = seq.out_point().unwrap_or(t.duration);
             (seq.in_point().unwrap_or(Time(0)), out)
         });
+        if self.sequence != seq.id() {
+            self.sequence = seq.id();
+            self.audio.reset();
+        }
         for a in project.assets() {
             if self.paths.get(&a.id).is_some_and(|p| *p != a.path) {
                 self.cache.forget(a.id);
                 self.failed.retain(|k, _| k.0 != a.id);
                 // Clips are reopened on the new path as they're next heard.
-                self.audio.clips.clear();
-                self.audio.nested.clear();
+                self.audio.reset();
             }
             self.paths.insert(a.id, a.path.clone());
         }

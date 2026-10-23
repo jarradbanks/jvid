@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use jvid_audio::pan_gains;
 use jvid_core::history::{Command, Created, History};
-use jvid_core::model::NewClip;
+use jvid_core::model::{NewClip, TrackSettings};
 
 use super::*;
 use crate::transport::tests::Fake;
@@ -1148,7 +1148,24 @@ fn nested_sequence_mixes_what_it_replaced() {
     };
     h.apply(Command::SetClipProps(vec![(b, quiet, c.keyframes)]))
         .unwrap();
-    let nested = nest_all(&h);
+    // And with b's track turned down and panned, which the nest takes inside with it.
+    let mut turned = h.clone();
+    let t = turned.project().sequence().clip(b).unwrap().0;
+    let t = turned.project().sequence().track(t).unwrap().settings();
+    turned
+        .apply(Command::SetTrack(TrackSettings {
+            volume: 0.3,
+            pan: 0.5,
+            ..t
+        }))
+        .unwrap();
+    for h in [h, turned] {
+        mixes_the_same(&h);
+    }
+}
+
+fn mixes_the_same(h: &History) {
+    let nested = nest_all(h);
     let mix = |p: &Project| {
         let mut audio = Audio::new(indexed());
         let mut all = Vec::new();
@@ -1170,4 +1187,51 @@ fn nested_sequence_mixes_what_it_replaced() {
         worst < 1e-6,
         "nested mix differs from the flat one by {worst}"
     );
+}
+
+/// Clip ids are per sequence, so after a switch a clip sharing an id with one in the last
+/// sequence plays its own file, not the source opened for the other.
+#[test]
+fn a_clip_id_shared_across_a_sequence_switch_plays_its_own_audio() {
+    // Each file plays a constant: its name's first letter.
+    let by_name = || -> OpenAudio {
+        Box::new(|p, _| {
+            let x = p.file_name().unwrap().as_encoded_bytes()[0] as f32;
+            Box::new(move |_, out| out.fill(x))
+        })
+    };
+    let mut h = History::new(Project::default());
+    let a = add(&mut h, TrackKind::Audio, "/a.wav", secs(3));
+    let nest = Command::Nest {
+        ids: vec![a],
+        name: "Nest".into(),
+        outer: "Main".into(),
+    };
+    h.apply(nest).unwrap();
+    let c = add(&mut h, TrackKind::Audio, "/c.wav", secs(3));
+    let main = h.project().clone();
+    h.open_sequence(SequenceId(1)).unwrap();
+    let kind = TrackKind::Audio;
+    h.apply(Command::AddTrack {
+        kind,
+        name: "A".into(),
+    })
+    .unwrap();
+    let b = add(&mut h, TrackKind::Audio, "/b.wav", secs(3));
+    assert_eq!(b, c, "the two sequences allocate ids apart");
+    let n = h.project();
+    let decode: DecodeFn = Arc::new(|_, t| Ok(tiny(t)));
+    let mut pb = Playback::new(decode, by_name(), DEFAULT_BUDGET);
+    let mut got = vec![0.0; 2000];
+    for p in [&main, n] {
+        pb.sync(p);
+        pb.audio.prime(p, Time(0));
+        pb.audio.mix(p, 0, &mut got);
+    }
+    let mut fresh = Audio::new(by_name());
+    let mut want = vec![0.0; 2000];
+    fresh.prime(n, Time(0));
+    fresh.mix(n, 0, &mut want);
+    assert!(want.iter().all(|&s| s != 0.0));
+    assert_eq!(got, want);
 }

@@ -24,6 +24,10 @@ pub enum FileError {
     InvalidRate,
     /// A sequence is nested inside itself.
     Cycle,
+    /// Sequences nest more than [`crate::model::MAX_NEST_DEPTH`] deep.
+    TooDeep,
+    /// Sequence ids repeat, or an asset names a missing one.
+    BadSequence,
 }
 
 impl std::fmt::Display for FileError {
@@ -34,6 +38,8 @@ impl std::fmt::Display for FileError {
             Self::MissingVersion => f.write_str("project file has no schema_version"),
             Self::InvalidRate => f.write_str("project file has a zero frame or sample rate"),
             Self::Cycle => f.write_str("project file nests a sequence inside itself"),
+            Self::TooDeep => f.write_str("project file nests sequences too deep"),
+            Self::BadSequence => f.write_str("project file has mismatched sequence ids"),
         }
     }
 }
@@ -99,9 +105,16 @@ pub fn from_json(
     if s.sample_rate == 0 || rates.into_iter().any(|r| r.num == 0 || r.den == 0) {
         return Err(FileError::InvalidRate);
     }
+    // A reused id would let the next Nest play another sequence.
+    if !project.sequence_ids_ok() {
+        return Err(FileError::BadSequence);
+    }
     // Rendering recurses into nested sequences, so a loop would never end.
     if project.has_cycle() {
         return Err(FileError::Cycle);
+    }
+    if project.too_deep() {
+        return Err(FileError::TooDeep);
     }
     Ok(project)
 }

@@ -424,13 +424,16 @@ impl Timeline {
                 ids.sort();
                 let nest = Command::Nest {
                     ids,
-                    name: tr!("timeline.nest_name", n = project.sequences().len()),
+                    name: tr!("timeline.nest_name", n = project.next_sequence().0),
                     outer: tr!("timeline.main_sequence").to_owned(),
                 };
                 // Tried on a copy, so a clip in the way says why rather than failing quietly.
                 match History::new(project.clone()).apply(nest.clone()) {
                     Err(ModelError::Overlap(_)) => {
                         self.notice = Some(tr!("timeline.nest_overlap").to_owned());
+                    }
+                    Err(ModelError::SplitTransition) => {
+                        self.notice = Some(tr!("timeline.nest_transition").to_owned());
                     }
                     _ => self.pending = Some(nest),
                 }

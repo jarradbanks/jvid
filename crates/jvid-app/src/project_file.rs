@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use jvid_core::file::{FileError, from_json, to_json};
-use jvid_core::model::Project;
+use jvid_core::model::{MAX_NEST_DEPTH, Project};
 
 use crate::i18n::tr;
 
@@ -23,6 +23,8 @@ fn describe(e: &FileError) -> String {
         FileError::MissingVersion => tr!("file.no_version").to_owned(),
         FileError::InvalidRate => tr!("file.zero_rate").to_owned(),
         FileError::Cycle => tr!("file.cycle").to_owned(),
+        FileError::TooDeep => tr!("file.too_deep", max = MAX_NEST_DEPTH),
+        FileError::BadSequence => tr!("file.bad_sequence").to_owned(),
     }
 }
 

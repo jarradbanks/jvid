@@ -310,15 +310,15 @@ impl Command {
         if let Some(t) = self.locked(p) {
             return Err(ModelError::Locked(t));
         }
-        let cycle = match &self {
-            Self::Place(pl) => p.would_cycle(pl.asset),
-            Self::AddClip { clip, .. } => p.would_cycle(clip.asset),
-            Self::SetClipAsset { asset, .. } => p.would_cycle(*asset),
-            Self::Paste { clips, .. } => clips.iter().any(|(_, c)| p.would_cycle(c.asset)),
-            _ => false,
+        let nest = match &self {
+            Self::Place(pl) => p.nest_error(pl.asset),
+            Self::AddClip { clip, .. } => p.nest_error(clip.asset),
+            Self::SetClipAsset { asset, .. } => p.nest_error(*asset),
+            Self::Paste { clips, .. } => clips.iter().find_map(|(_, c)| p.nest_error(c.asset)),
+            _ => None,
         };
-        if cycle {
-            return Err(ModelError::Cycle);
+        if let Some(e) = nest {
+            return Err(e);
         }
         let s = &mut p.sequence;
         Ok(match self {
@@ -2188,5 +2188,161 @@ mod tests {
                 .iter()
                 .all(|t| t.clips().is_empty())
         );
+    }
+
+    #[test]
+    fn nesting_deeper_than_the_limit_is_refused() {
+        use crate::model::MAX_NEST_DEPTH;
+        let mut h = History::new(Project::default());
+        h.apply(Command::AddAsset("a.mkv".into())).unwrap();
+        let v = track(&mut h);
+        let mut add = |start| match h.apply(Command::AddClip {
+            track: v,
+            clip: new_clip(AssetId(1), start, 10),
+        }) {
+            Ok(Created::Clip(c)) => c,
+            _ => panic!(),
+        };
+        let (mut c, aside) = (add(0), add(100));
+        let nest = |ids| Command::Nest {
+            ids,
+            name: "N".into(),
+            outer: "Main".into(),
+        };
+        // Sequence 1 sits beside the chain; each nest of the nest clip deepens it by one.
+        h.apply(nest(vec![aside])).unwrap();
+        let side = h.project().sequence_asset(SequenceId(1)).unwrap().id;
+        for _ in 1..MAX_NEST_DEPTH {
+            let Ok(Created::Clip(n)) = h.apply(nest(vec![c])) else {
+                panic!()
+            };
+            c = n;
+        }
+        assert!(!h.project().too_deep());
+        assert_eq!(h.apply(nest(vec![c])), Err(ModelError::TooDeep));
+        let dir = std::path::Path::new("/p");
+        let json = crate::file::to_json(h.project(), dir).unwrap();
+        assert!(crate::file::from_json(&json, dir, |_| true).is_ok());
+        // The innermost sequence, at the limit, takes no sequence clip.
+        h.open_sequence(SequenceId(2)).unwrap();
+        let add_side = Command::AddClip {
+            track: v,
+            clip: new_clip(side, 200, 10),
+        };
+        assert_eq!(h.apply(add_side), Err(ModelError::TooDeep));
+        // A file with one anyway doesn't open.
+        let mut p = h.project().clone();
+        p.sequence.add_clip(v, new_clip(side, 200, 10)).unwrap();
+        assert!(p.too_deep());
+        let json = crate::file::to_json(&p, dir).unwrap();
+        let opened = crate::file::from_json(&json, dir, |_| true);
+        assert!(matches!(opened, Err(crate::file::FileError::TooDeep)));
+    }
+
+    #[test]
+    fn a_file_with_mismatched_sequence_ids_is_refused() {
+        use crate::file::{FileError, from_json, to_json};
+        let (h, ..) = nested();
+        let dir = std::path::Path::new("/p");
+        let json = to_json(h.project(), dir).unwrap();
+        let load = |edit: &dyn Fn(&mut serde_json::Value)| {
+            let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+            edit(&mut v["project"]);
+            from_json(&v.to_string(), dir, |_| true)
+        };
+        assert!(load(&|_| {}).is_ok());
+        let bad = |edit: &dyn Fn(&mut serde_json::Value)| {
+            assert!(matches!(load(edit), Err(FileError::BadSequence)));
+        };
+        // Assets: a.mkv, N (sequence 1), Main (sequence 0).
+        bad(&|p| p["assets"][1]["sequence"] = 7.into());
+        bad(&|p| {
+            p["sequence"]["id"] = 1.into();
+            p["assets"][2]["sequence"] = 1.into();
+        });
+        // The next Nest would reuse sequence 1.
+        bad(&|p| p["next_sequence"] = 0.into());
+    }
+
+    #[test]
+    fn nest_refuses_to_split_a_transition() {
+        use crate::model::{Transition, TransitionKind};
+        let mut h = History::new(Project::default());
+        h.apply(Command::AddAsset("a.mkv".into())).unwrap();
+        let v = track(&mut h);
+        let mut ids = Vec::new();
+        for start in [0, 10] {
+            let clip = new_clip(AssetId(1), start, 10);
+            let Ok(Created::Clip(c)) = h.apply(Command::AddClip { track: v, clip }) else {
+                panic!()
+            };
+            ids.push(c);
+        }
+        let c = h.project().sequence().clip(ids[0]).unwrap().1.clone();
+        let fade = Transform {
+            transition: Some(Transition {
+                kind: TransitionKind::Crossfade,
+                duration: Time(4),
+            }),
+            ..c.transform
+        };
+        h.apply(Command::SetClipProps(vec![(ids[0], fade, c.keyframes)]))
+            .unwrap();
+        for one in [ids[0], ids[1]] {
+            let nest = Command::Nest {
+                ids: vec![one],
+                name: "N".into(),
+                outer: "Main".into(),
+            };
+            assert_eq!(h.apply(nest), Err(ModelError::SplitTransition));
+        }
+        let both = Command::Nest {
+            ids,
+            name: "N".into(),
+            outer: "Main".into(),
+        };
+        assert!(h.apply(both).is_ok());
+    }
+
+    /// A trimmed nest clip at double speed plays its sequence from the trimmed point, twice as
+    /// fast, in picture and sound.
+    #[test]
+    fn a_trimmed_fast_nest_clip_maps_time_into_its_sequence() {
+        use crate::eval::{audio_in, frame_at};
+        let (mut h, _, [c1, c2, c3], _) = nested();
+        let outer = h.project().sequence().tracks().iter();
+        let outer: Vec<_> = outer.flat_map(|t| t.clips()).map(|c| c.id).collect();
+        for &id in &outer {
+            let trim = Command::TrimClip {
+                id,
+                start: Time(10),
+                source_in: Time(4),
+                source_out: Time(24),
+            };
+            h.apply(trim).unwrap();
+        }
+        let speed = Command::SetClipSpeed {
+            id: outer[0],
+            speed: 2.0,
+            reverse: false,
+            ripple: false,
+        };
+        h.apply(speed).unwrap();
+        let p = h.project();
+        // Nest time 4 + 2 × (t - 10): 8 in c1 (at 0), then 16 in c2 (at 15).
+        for (t, clip, source) in [(12, c1, 8), (16, c2, 1)] {
+            let layers = frame_at(p, Time(t));
+            let inner = &layers[0].nested[0];
+            assert_eq!((inner.clip, inner.source_time), (clip, Time(source)), "{t}");
+        }
+        let seg = audio_in(p.sequence(), Time(12), Time(14));
+        assert_eq!(
+            (seg.len(), seg[0].source_start, seg[0].speed),
+            (1, Time(8), 2.0)
+        );
+        let nest = p.nested(seg[0].asset).unwrap();
+        let inner = audio_in(nest, Time(8), Time(12));
+        assert_eq!((inner.len(), inner[0].clip), (1, c3));
+        assert_eq!((inner[0].source_start, inner[0].end), (Time(8), Time(10)));
     }
 }

@@ -1044,6 +1044,10 @@ pub enum ModelError {
     Cycle,
     /// The open sequence can't be removed.
     SequenceOpen,
+    /// The edit would nest sequences more than [`MAX_NEST_DEPTH`] deep.
+    TooDeep,
+    /// Nest would split a transition between a chosen clip and an unchosen one.
+    SplitTransition,
 }
 
 impl std::fmt::Display for ModelError {
@@ -1068,6 +1072,10 @@ impl std::fmt::Display for ModelError {
             Self::UnknownSequence(id) => write!(f, "unknown sequence {}", id.0),
             Self::Cycle => f.write_str("a sequence can't be nested inside itself"),
             Self::SequenceOpen => f.write_str("the open sequence can't be removed"),
+            Self::TooDeep => write!(f, "sequences can't nest more than {MAX_NEST_DEPTH} deep"),
+            Self::SplitTransition => {
+                f.write_str("a transition joins a chosen clip to one that isn't")
+            }
         }
     }
 }
@@ -1704,6 +1712,10 @@ pub struct Project {
     next_sequence: u64,
 }
 
+/// The most sequences a chain of sequence clips may pass through, the outermost counted;
+/// playback recurses and makes a compositor once per level.
+pub const MAX_NEST_DEPTH: usize = 16;
+
 fn is_zero(n: &u64) -> bool {
     *n == 0
 }
@@ -1763,10 +1775,96 @@ impl Project {
         false
     }
 
-    /// Whether a clip of `asset` in the open sequence would nest that sequence inside itself.
-    pub fn would_cycle(&self, asset: AssetId) -> bool {
-        self.nested(asset)
-            .is_some_and(|n| self.nests(n.id, self.sequence.id))
+    /// Why a clip of `asset` can't go in the open sequence: it would nest that sequence inside
+    /// itself, or too deep.
+    pub fn nest_error(&self, asset: AssetId) -> Option<ModelError> {
+        let n = self.nested(asset)?;
+        if self.nests(n.id, self.sequence.id) {
+            return Some(ModelError::Cycle);
+        }
+        let (down, up) = (self.held(), self.holding());
+        let mut memo = BTreeMap::new();
+        let above = self.chain(self.sequence.id, MAX_NEST_DEPTH, &up, &mut memo);
+        memo.clear();
+        let below = self.chain(n.id, MAX_NEST_DEPTH, &down, &mut memo);
+        (above + below > MAX_NEST_DEPTH).then_some(ModelError::TooDeep)
+    }
+
+    /// Whether some chain of sequence clips passes through more than [`MAX_NEST_DEPTH`]
+    /// sequences.
+    pub fn too_deep(&self) -> bool {
+        let (down, mut memo) = (self.held(), BTreeMap::new());
+        let seqs = self.sequences();
+        seqs.iter()
+            .any(|s| self.chain(s.id, MAX_NEST_DEPTH, &down, &mut memo) > MAX_NEST_DEPTH)
+    }
+
+    /// The sequences each sequence holds a clip of.
+    fn held(&self) -> BTreeMap<SequenceId, Vec<SequenceId>> {
+        let mut m = BTreeMap::new();
+        for s in self.sequences() {
+            let clips = s.tracks.iter().flat_map(|t| &t.clips);
+            let mut ids: Vec<_> = clips
+                .filter_map(|c| self.asset(c.asset)?.sequence)
+                .collect();
+            ids.sort();
+            ids.dedup();
+            m.insert(s.id, ids);
+        }
+        m
+    }
+
+    /// The sequences holding a clip of each sequence.
+    fn holding(&self) -> BTreeMap<SequenceId, Vec<SequenceId>> {
+        let mut m: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for (from, to) in self.held() {
+            for id in to {
+                m.entry(id).or_default().push(from);
+            }
+        }
+        m
+    }
+
+    /// The most sequences on a path from `id` along `next`, `id` counted; more than `room`
+    /// stops the count above [`MAX_NEST_DEPTH`], so a damaged file can't recurse unbounded.
+    fn chain(
+        &self,
+        id: SequenceId,
+        room: usize,
+        next: &BTreeMap<SequenceId, Vec<SequenceId>>,
+        memo: &mut BTreeMap<SequenceId, usize>,
+    ) -> usize {
+        if let Some(&d) = memo.get(&id) {
+            return d;
+        }
+        if room == 0 {
+            return MAX_NEST_DEPTH + 1;
+        }
+        let ids = next.get(&id).into_iter().flatten();
+        let d = 1 + ids
+            .map(|&n| self.chain(n, room - 1, next, memo))
+            .max()
+            .unwrap_or(0);
+        if d <= MAX_NEST_DEPTH {
+            memo.insert(id, d);
+        }
+        d
+    }
+
+    /// Whether sequence ids add up: unique, each sequence asset's found, and below the next
+    /// one Nest makes. Only a damaged file breaks this.
+    pub fn sequence_ids_ok(&self) -> bool {
+        let all = self.sequences();
+        let unique = all.windows(2).all(|w| w[0].id != w[1].id);
+        let fresh = all.iter().all(|s| s.id.0 <= self.next_sequence);
+        let mut ids = self.assets.iter().filter_map(|a| a.sequence);
+        let found = ids.all(|id| self.find_sequence(id).is_some());
+        unique && fresh && found
+    }
+
+    /// The id the next sequence Nest makes gets.
+    pub fn next_sequence(&self) -> SequenceId {
+        SequenceId(self.next_sequence + 1)
     }
 
     /// Whether some sequence holds itself, which edits refuse; only a damaged file has one.
@@ -1806,6 +1904,15 @@ impl Project {
         let start = picked.iter().map(|c| c.start).min();
         let start = start.ok_or(ModelError::EmptyClip)?;
         let end = picked.iter().map(|c| c.end()).max().expect("not empty");
+        // A transition into or out of the selection would lose its other side.
+        for t in &s.tracks {
+            for w in t.clips.windows(2) {
+                let joined = w[0].transform.transition.is_some() && w[1].start == w[0].end();
+                if joined && ids.contains(&w[0].id) != ids.contains(&w[1].id) {
+                    return Err(ModelError::SplitTransition);
+                }
+            }
+        }
         p.next_sequence += 1;
         let mut inner = Sequence {
             id: SequenceId(p.next_sequence),
@@ -1820,7 +1927,6 @@ impl Project {
                     ..c
                 })
                 .collect();
-            // Mixed again on the outer track, so the inner one starts at unity.
             if !clips.is_empty() {
                 inner.tracks.push(Track {
                     id: t.id,
@@ -1829,18 +1935,29 @@ impl Project {
                     hidden: t.hidden,
                     locked: false,
                     muted: t.muted,
-                    solo: false,
-                    volume: 1.0,
-                    pan: 0.0,
+                    solo: t.solo,
+                    volume: t.volume,
+                    pan: t.pan,
                     height: t.height,
                     target: false,
                     subtitles: t.subtitles,
+                    fx: t.fx,
                     clips,
                 });
             }
         }
         let top = |kind| inner.tracks.iter().find(|t| t.kind == kind).map(|t| t.id);
         let tops = [top(TrackKind::Video), top(TrackKind::Audio)];
+        // The nest clip lands on each top track, whose settings mix it again; the other tracks
+        // leave the outer sequence, so theirs come inside.
+        for t in inner
+            .tracks
+            .iter_mut()
+            .filter(|t| tops.contains(&Some(t.id)))
+        {
+            (t.hidden, t.muted, t.solo) = (false, false, false);
+            (t.volume, t.pan, t.fx) = (1.0, 0.0, AudioFx::default());
+        }
         p.sequence.remove_clips(ids, false)?;
         for (id, name) in [(inner.id, name), (p.sequence.id, outer)] {
             if p.sequence_asset(id).is_none() {
@@ -1866,6 +1983,9 @@ impl Project {
             made.push(p.sequence.add_clip(t, clip)?);
         }
         p.sequences.push(inner);
+        if p.too_deep() {
+            return Err(ModelError::TooDeep);
+        }
         *self = p;
         Ok(made[0])
     }

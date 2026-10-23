@@ -297,6 +297,7 @@ retime.other = "Los {count} clips conservan sus tiempos; las ediciones pueden qu
 undo_note = "Puedes deshacerlo."
 
 [bin]
+sequence_open = "No se puede quitar la secuencia abierta; abre otra secuencia primero"
 effects = "Efectos"
 text = "Texto"
 scopes = "Ámbitos"
@@ -385,6 +386,9 @@ close_gap = "Cerrar hueco"
 no_handles = "No hay margen de medio en ese corte para una transición: recorta los clips para que quede medio a ambos lados"
 no_cut = "No hay un corte entre dos clips contiguos donde poner una transición"
 nest_overlap = "No se puede anidar: un clip no seleccionado está en el rango de la selección en su pista superior; selecciónalo también o muévelo"
+nest_transition = "No se puede anidar: una transición une un clip seleccionado con uno no seleccionado; selecciona ambos o quita la transición"
+cycle = "Una secuencia no puede anidarse dentro de sí misma"
+too_deep = "Las secuencias no pueden anidarse a más de {max} niveles"
 nest_name = "Secuencia anidada {n}"
 main_sequence = "Secuencia principal"
 open_sequence = "Abrir secuencia"
@@ -458,6 +462,8 @@ newer = "versión de archivo de proyecto no compatible: {version}"
 no_version = "el archivo de proyecto no tiene schema_version"
 zero_rate = "el archivo de proyecto tiene una velocidad de fotogramas o de muestreo de cero"
 cycle = "el archivo de proyecto anida una secuencia dentro de sí misma"
+too_deep = "el archivo de proyecto anida secuencias a más de {max} niveles"
+bad_sequence = "el archivo de proyecto tiene ids de secuencia que no coinciden"
 
 [inspector]
 empty = "Selecciona un clip para ver sus propiedades"

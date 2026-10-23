@@ -235,13 +235,15 @@ impl Timeline {
             let names: Vec<&str> = names.iter().map(String::as_str).collect();
             let open = project.sequence().id();
             let mut i = seqs.iter().position(|s| s.id() == open).unwrap_or(0);
-            let w = 160.0;
+            // Up to the header's end, and left out where too little of it is left.
+            let w = f32::min(160.0, header.right() - space::S8 - (left + space::S8));
             let y = header.center().y - size::CONTROL / 2.0;
             let r = Rect::from_min_size(pos2(left + space::S8, y), Vec2::new(w, size::CONTROL));
-            if ui
-                .put(r, Dropdown::new(&mut i, &names).width(w))
-                .on_hover_text(tr!("timeline.open_sequence"))
-                .changed()
+            if w >= 3.0 * size::CONTROL
+                && ui
+                    .put(r, Dropdown::new(&mut i, &names).width(w))
+                    .on_hover_text(tr!("timeline.open_sequence"))
+                    .changed()
             {
                 self.open_sequence = Some(seqs[i].id());
             }

@@ -145,6 +145,14 @@ impl Mixer {
         m
     }
 
+    /// A mixer already at `strips`, rather than ramping to them from unity.
+    pub fn with_strips(strips: &[Strip]) -> Self {
+        let mut m = Self::new(strips.len());
+        m.strips.copy_from_slice(strips);
+        m.ramps = (0..strips.len()).map(|i| Ramp::new(m.target(i))).collect();
+        m
+    }
+
     pub fn meters(&self) -> Arc<Meters> {
         self.meters.clone()
     }
