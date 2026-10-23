@@ -14,7 +14,7 @@ use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Ctx, Handle, Pool, Priority};
 use jvid_media::audio::AudioDecoder;
 use jvid_media::decode::DecoderPool;
-use jvid_media::encode::Encoder;
+use jvid_media::encode::{EncodeError, Encoder};
 use jvid_render::composite::Readback;
 
 use crate::playback::{Audio, ClipAudio, Gpu, Pixels, Shown, generated, sample};
@@ -123,6 +123,122 @@ impl From<String> for Error {
     }
 }
 
+/// Internal failure provenance; only a VAAPI upload/codec failure permits replay.
+#[derive(Debug)]
+enum AttemptError {
+    Export(Error),
+    Vaapi(EncodeError),
+}
+
+impl From<Error> for AttemptError {
+    fn from(e: Error) -> Self {
+        Self::Export(e)
+    }
+}
+
+impl From<String> for AttemptError {
+    fn from(e: String) -> Self {
+        Self::Export(Error::Failed(e))
+    }
+}
+
+impl From<EncodeError> for AttemptError {
+    fn from(e: EncodeError) -> Self {
+        match e {
+            EncodeError::Vaapi(_) => Self::Vaapi(e),
+            EncodeError::Other(_) => Self::Export(Error::Failed(err(e))),
+        }
+    }
+}
+
+/// A private sibling directory created exclusively for this attempt. Every file cleaned up on
+/// failure belongs to this attempt, including a target-size pass's saved best output.
+struct AttemptFiles {
+    dir: PathBuf,
+    output: PathBuf,
+}
+
+impl AttemptFiles {
+    fn new(destination: &Path) -> Result<Self, String> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let parent = destination
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let name = destination
+            .file_name()
+            .ok_or("output path has no file name")?;
+        loop {
+            let id = NEXT.fetch_add(1, Ordering::Relaxed);
+            let dir = parent.join(format!(".jvid-export-{}-{id}", std::process::id()));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => {
+                    return Ok(Self {
+                        output: dir.join(name),
+                        dir,
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(format!("couldn't create export attempt: {e}")),
+            }
+        }
+    }
+}
+
+impl Drop for AttemptFiles {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// Replays the entire shared job once in software, with fresh encoder/render/audio state.
+/// Preset overrides live in a request clone and never affect project or saved dialog settings.
+fn replay<T>(
+    req: &Request,
+    ctx: &Ctx,
+    mut attempt: impl FnMut(&Request) -> Result<T, AttemptError>,
+) -> Result<T, Error> {
+    let mut request = req.clone();
+    for retry in 0..=1 {
+        if ctx.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        let files = AttemptFiles::new(&req.path)?;
+        request.path.clone_from(&files.output);
+        let result = attempt(&request);
+        // Cancellation wins even if the driver fails in the same frame or during final flush.
+        if ctx.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        match result {
+            Ok(info) => {
+                std::fs::rename(&files.output, &req.path)
+                    .map_err(|e| format!("couldn't publish {}: {e}", req.path.display()))?;
+                return Ok(info);
+            }
+            Err(AttemptError::Vaapi(error))
+                if retry == 0
+                    && request
+                        .preset
+                        .options
+                        .get("encoder")
+                        .is_none_or(|e| e != "software") =>
+            {
+                tracing::warn!(%error, "VAAPI export failed; retrying once in software");
+                request
+                    .preset
+                    .options
+                    .insert("encoder".into(), "software".into());
+                ctx.set_progress(0.0);
+            }
+            Err(AttemptError::Vaapi(error)) => return Err(Error::Failed(err(error))),
+            Err(AttemptError::Export(error)) => return Err(error),
+        }
+    }
+    unreachable!("each attempt returns or the first retries")
+}
+
 /// Removes the file it guards when dropped, including by a panic.
 struct Partial<'a>(&'a Path);
 
@@ -132,8 +248,8 @@ impl Drop for Partial<'_> {
     }
 }
 
-/// Exports and validates; on failure, cancellation or panic after the file was created, the
-/// partial file is removed. A failure before that leaves whatever was at `req.path` alone.
+/// Exports and validates in a private attempt directory, then publishes the finished file.
+/// Failure, cancellation and panic discard only attempt files and preserve any existing output.
 pub fn run(
     project: &Project,
     req: &Request,
@@ -161,6 +277,18 @@ fn encode(
     if let Some(mode) = req.lossless {
         return lossless::run(project, req, mode, ctx);
     }
+    replay(req, ctx, |req| {
+        encode_attempt(project, req, device, queue, ctx)
+    })
+}
+
+fn encode_attempt(
+    project: &Project,
+    req: &Request,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    ctx: &Ctx,
+) -> Result<ProbeInfo, AttemptError> {
     let s = project.settings();
     let (first, end) = frames(project, req);
     if end <= first {
@@ -342,7 +470,7 @@ fn render(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     ctx: &Ctx,
-) -> Result<(), Error> {
+) -> Result<(), AttemptError> {
     let (first, end) = frames(project, req);
     let decoders = DecoderPool::default();
     let mut audio = Audio::new(Box::new(blocking));
@@ -356,7 +484,7 @@ fn render(
     let (mut mix, mut limited) = (Vec::new(), Vec::new());
     for (k, time, a, b) in spans(project, req) {
         if ctx.is_cancelled() {
-            return Err(Error::Cancelled);
+            return Err(Error::Cancelled.into());
         }
         let mut layers = Vec::new();
         let video = if enc.has_video() {
@@ -392,7 +520,7 @@ fn render(
                 },
             );
             if let Some(rgba) = readback.push(device, queue, tex) {
-                enc.video(&rgba).map_err(err)?;
+                enc.video(&rgba)?;
             }
         }
         mix.clear();
@@ -411,7 +539,7 @@ fn render(
         ctx.set_progress((k + 1 - first) as f32 / (end - first) as f32);
     }
     if let Some(rgba) = readback.take(device) {
-        enc.video(&rgba).map_err(err)?;
+        enc.video(&rgba)?;
     }
     if let Some(l) = &mut limiter {
         limited.clear();
@@ -419,11 +547,11 @@ fn render(
         enc.audio(&limited).map_err(err)?;
     }
     if ctx.is_cancelled() {
-        return Err(Error::Cancelled);
+        return Err(Error::Cancelled.into());
     }
-    enc.finish().map_err(err)?;
+    enc.finish()?;
     if ctx.is_cancelled() {
-        return Err(Error::Cancelled);
+        return Err(Error::Cancelled.into());
     }
     Ok(())
 }

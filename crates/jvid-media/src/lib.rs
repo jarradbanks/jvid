@@ -5,6 +5,7 @@ pub mod decode;
 pub mod encode;
 pub mod ffmpeg;
 pub mod hwdec;
+pub mod hwenc;
 pub mod probe;
 pub mod proxy;
 pub mod remux;
