@@ -31,10 +31,25 @@ jobs:
       # FFmpeg dev libraries (docs/adr/0001-ffmpeg-binding.md). bindgen's libclang ships on all runners.
       # suite-ui GPU tests render on Mesa lavapipe; required on Linux so they can't pass by skipping.
       # Arabic and CJK fonts for the text shaping tests, also required on Linux.
-      - if: runner.os == 'Linux'
+      - name: Install Linux system packages
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers \
+          # Hosted Ubuntu uses this mirror list; fail visibly if a new image changes that integration.
+          cat /etc/apt/sources.list.d/ubuntu.sources
+          cat /etc/apt/apt-mirrors.txt
+          if [[ "$(grep '^URIs:' /etc/apt/sources.list.d/ubuntu.sources | sort -u)" != 'URIs: mirror+file:/etc/apt/apt-mirrors.txt' ]]; then
+            echo '::error::Unexpected Ubuntu APT sources; review the runner mirror configuration'
+            exit 1
+          fi
+          printf '%s\tpriority:%s\n' \
+            'https://archive.ubuntu.com/ubuntu/' 1 \
+            'http://azure.archive.ubuntu.com/ubuntu/' 2 \
+            'https://security.ubuntu.com/ubuntu/' 3 \
+            | sudo tee /etc/apt/apt-mirrors.txt
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends mesa-vulkan-drivers \
             libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev libasound2-dev \
             fonts-dejavu-core fonts-noto-cjk
       - if: runner.os == 'macOS'
@@ -69,7 +84,7 @@ jobs:
           key: test-media-${{ hashFiles('scripts/gen-test-media') }}
       - if: runner.os == 'Linux' && steps.media-cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
           time bash scripts/gen-test-media
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # macOS has no software adapter, so its GPU tests skip; Linux (lavapipe) and Windows (WARP) must run them.
