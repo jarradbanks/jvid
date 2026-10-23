@@ -9,7 +9,7 @@ use egui::{
     Align2, CornerRadius, Key, Rect, Sense, StrokeKind, TextureHandle, Ui, UiBuilder, pos2, vec2,
 };
 use jvid_core::history::Command;
-use jvid_core::model::{AssetId, MediaAsset, Project};
+use jvid_core::model::{AssetId, MediaAsset, Project, Text};
 use jvid_core::time::FLICKS_PER_SECOND;
 use jvid_jobs::Pool;
 use jvid_media::proxy::Proxies;
@@ -21,6 +21,7 @@ use suite_ui::tokens::{color, radius, size, space};
 use suite_ui::widgets::{Button, Dropdown, TextInput};
 
 use crate::i18n::{tr, trn};
+use crate::preview::Preview;
 
 /// The bin's tabs, in order.
 fn tabs() -> [&'static str; 3] {
@@ -98,6 +99,10 @@ pub struct MediaBin {
     /// The user effect showing the inline delete confirm.
     pub fx_confirm_delete: Option<String>,
     thumbs: Thumbs,
+    /// The Text tab's tiles as drawn, by preset; see [`MediaBin::text_thumbs`].
+    text_tiles: [Option<egui::TextureId>; 3],
+    /// The thumbnail frame generation, project size and presets they were drawn from.
+    text_drawn: Option<(u64, (u32, u32), [Text; 3])>,
 }
 
 /// What the bin asked the app to do this frame.
@@ -181,6 +186,26 @@ impl MediaBin {
         bin
     }
 
+    /// Redraws the Text tab's tiles while it's open, when the thumbnail frame, project size or
+    /// presets (the UI language) changed since they were drawn.
+    pub fn text_thumbs(&mut self, preview: &Preview, project: &Project) {
+        if self.tab != 2 {
+            return;
+        }
+        let Some((_, generation)) = preview.thumb_frame() else {
+            return;
+        };
+        let s = project.settings();
+        let key = (generation, (s.width, s.height), presets().map(|(.., t)| t));
+        if self.text_drawn.as_ref() == Some(&key) {
+            return;
+        }
+        for (id, text) in self.text_tiles.iter_mut().zip(&key.2) {
+            *id = preview.draw_thumb(*id, |t, d, q| t.text(d, q, text, key.1));
+        }
+        self.text_drawn = Some(key);
+    }
+
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -211,7 +236,7 @@ impl MediaBin {
                 0 => self.media(ui, project, importing, missing, &mut out),
                 1 => self.effects_tab(ui, &mut out),
                 _ => {
-                    if let Some(dragged) = text_presets(ui, &mut out) {
+                    if let Some(dragged) = text_presets(ui, &self.text_tiles, &mut out) {
                         self.new_text = Some((project.assets().len(), dragged));
                     }
                 }
@@ -813,31 +838,109 @@ fn letterbox(ui: &Ui, rect: Rect, tex: &TextureHandle) {
         .paint_at(ui, r);
 }
 
-/// The Text tab: one button per preset, each adding a text asset to the bin when clicked
-/// or dragged out. Returns whether the press was a drag, when one was.
-fn text_presets(ui: &mut Ui, out: &mut BinResponse) -> Option<bool> {
-    ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
-    let mut added = None;
-    // In `Text::presets` order: name, then the text a new one starts with.
+/// The Text tab's presets in `Text::presets` order: name, one line on what it makes, and
+/// its style with the text a new one starts with.
+fn presets() -> [(&'static str, &'static str, Text); 3] {
     let shown = [
-        (tr!("bin.title"), tr!("bin.title_text")),
-        (tr!("bin.lower_third"), tr!("bin.lower_third_text")),
-        (tr!("bin.caption"), tr!("bin.caption_text")),
+        (
+            tr!("bin.title"),
+            tr!("bin.title_about"),
+            tr!("bin.title_text"),
+        ),
+        (
+            tr!("bin.lower_third"),
+            tr!("bin.lower_third_about"),
+            tr!("bin.lower_third_text"),
+        ),
+        (
+            tr!("bin.caption"),
+            tr!("bin.caption_about"),
+            tr!("bin.caption_text"),
+        ),
     ];
-    for ((_, mut text), (name, content)) in jvid_core::model::Text::presets().into_iter().zip(shown)
-    {
-        text.content = content.into();
-        let b = Button::secondary(name).width(ui.available_width());
-        let r = ui.add(b).interact(Sense::click_and_drag());
-        let dragged = r.drag_started();
-        if dragged || r.clicked() {
-            out.command = Some(Command::AddText {
-                name: name.into(),
-                text,
-            });
-            added = Some(dragged);
-        }
+    let mut out = Text::presets().map(|(_, t)| ("", "", t));
+    for ((name, about, text), (n, a, content)) in out.iter_mut().zip(shown) {
+        (*name, *about, text.content) = (n, a, content.into());
     }
+    out
+}
+
+/// The Text tab: two columns of tiles, each its preset drawn on the thumbnail frame (`tiles`,
+/// black until drawn) over its name and what it makes, adding a text asset to the bin when
+/// clicked or dragged out. Returns whether the press was a drag, when one was.
+fn text_presets(
+    ui: &mut Ui,
+    tiles: &[Option<egui::TextureId>; 3],
+    out: &mut BinResponse,
+) -> Option<bool> {
+    let mut added = None;
+    let w = ((ui.available_width() - space::S8) / 2.0).floor();
+    let inner = w - 2.0 * space::S4;
+    let thumb_h = inner * 9.0 / 16.0;
+    let p = ui.painter().clone();
+    let laid: Vec<_> = presets()
+        .into_iter()
+        .zip(tiles)
+        .map(|((name, about, text), tex)| {
+            let n = p.layout(name.into(), theme::body_strong(), color::INK, inner);
+            let a = p.layout(about.into(), theme::body(), color::INK_3, inner);
+            (name, text, tex, n, a)
+        })
+        .collect();
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(space::S8, space::S8);
+            for row in laid.chunks(2) {
+                // Both tiles in a row as tall as the taller one's two text lines.
+                let text_h = row
+                    .iter()
+                    .map(|(.., n, a)| n.size().y + a.size().y)
+                    .fold(0.0, f32::max);
+                let h = space::S4 + thumb_h + space::S4 + text_h + space::S8;
+                ui.horizontal(|ui| {
+                    for (name, text, tex, n, a) in row {
+                        let (rect, r) = ui.allocate_exact_size(vec2(w, h), Sense::click_and_drag());
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *name)
+                        });
+                        let p = ui.painter();
+                        if r.hovered() {
+                            p.rect_filled(rect, CornerRadius::same(radius::CONTROL), color::RAISED);
+                        }
+                        let thumb = Rect::from_min_size(
+                            rect.min + vec2(space::S4, space::S4),
+                            vec2(inner, thumb_h),
+                        );
+                        match tex {
+                            Some(id) => {
+                                egui::Image::new((*id, thumb.size()))
+                                    .corner_radius(radius::SMALL)
+                                    .paint_at(ui, thumb);
+                            }
+                            None => {
+                                let corner = CornerRadius::same(radius::SMALL);
+                                p.rect_filled(thumb, corner, egui::Color32::BLACK);
+                            }
+                        }
+                        let at = thumb.left_bottom() + vec2(0.0, space::S4);
+                        p.galley(at, n.clone(), color::INK);
+                        p.galley(at + vec2(0.0, n.size().y), a.clone(), color::INK_3);
+                        if r.has_focus() {
+                            p.add(suite_ui::widgets::focus_ring(rect, radius::CONTROL));
+                        }
+                        let dragged = r.drag_started();
+                        if dragged || r.clicked() {
+                            out.command = Some(Command::AddText {
+                                name: (*name).into(),
+                                text: text.clone(),
+                            });
+                            added = Some(dragged);
+                        }
+                    }
+                });
+            }
+        });
     added
 }
 

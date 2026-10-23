@@ -1168,6 +1168,7 @@ impl TabViewer for Viewer<'_> {
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
         let focused = self.focused == Some(*tab);
         if *tab == Tab::Media {
+            self.bin.text_thumbs(self.preview, self.project);
             let r = self
                 .bin
                 .show(ui, self.project, focused, self.importing, self.missing);

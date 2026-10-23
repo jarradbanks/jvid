@@ -356,12 +356,15 @@ fx_disable = "Disable"
 # Written into a new effect file: its name and the comment that describes it.
 template_name = "New Effect"
 template_about = "Blends towards the inverted image; the first comment line shows in the Effects tab."
-# Text presets: the name, and the text a new one starts with.
+# Text presets: the name, the one line under its tile, and the text a new one starts with.
 title = "Title"
+title_about = "Bold, centered"
 title_text = "Title"
-lower_third = "Lower third"
+lower_third = "Lower Third"
+lower_third_about = "Name and role on a box, bottom left"
 lower_third_text = "Name\nRole"
 caption = "Caption"
+caption_about = "Outlined, bottom center"
 caption_text = "Caption"
 
 # Keyframe easing presets.

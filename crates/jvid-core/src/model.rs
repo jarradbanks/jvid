@@ -271,7 +271,7 @@ impl Text {
         [
             ("Title", d.clone()),
             (
-                "Lower third",
+                "Lower Third",
                 Text {
                     content: "Name\nRole".into(),
                     size: 48.0,

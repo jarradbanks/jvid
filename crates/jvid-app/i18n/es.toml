@@ -333,10 +333,13 @@ fx_disable = "Desactivar"
 template_name = "Nuevo efecto"
 template_about = "Mezcla hacia la imagen invertida; la primera línea de comentario aparece en la pestaña Efectos."
 title = "Título"
+title_about = "Negrita, centrado"
 title_text = "Título"
 lower_third = "Rótulo inferior"
+lower_third_about = "Nombre y cargo sobre un fondo, abajo a la izquierda"
 lower_third_text = "Nombre\nCargo"
 caption = "Leyenda"
+caption_about = "Con contorno, abajo al centro"
 caption_text = "Leyenda"
 
 [easing]
