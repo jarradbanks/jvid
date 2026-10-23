@@ -108,6 +108,10 @@ pub struct App {
     preferences: crate::preferences::Preferences,
     /// The `language` setting: `system` or a language code.
     language: String,
+    /// The `input_device` setting: a device name, empty for the system default.
+    input_device: String,
+    /// The voiceover being recorded.
+    take: Option<crate::record::Take>,
     theme: suite_ui::themes::LiveTheme,
     keymap_editor: crate::keymap_editor::KeymapEditor,
     exports: jvid_jobs::Pool,
@@ -156,6 +160,7 @@ impl App {
         app.timeline = Timeline::new(caches);
         app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
         app.language = settings.language.clone();
+        app.input_device = settings.input_device.clone();
         if let Some(auto) = autosave::untitled().as_deref().and_then(autosave::newer) {
             app.prompts.push(Prompt::Restore { path: None, auto });
         }
@@ -202,6 +207,8 @@ impl App {
             settings_dialog: Default::default(),
             preferences: Default::default(),
             language: jvid_core::settings::Settings::default().language,
+            input_device: String::new(),
+            take: None,
             theme: suite_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
             exports,
@@ -215,6 +222,7 @@ impl App {
 
     /// Replaces the project with an empty one; `None` settings is Match source.
     fn new_project(&mut self, settings: Option<ProjectSettings>) {
+        self.leave_project();
         self.history = History::new(Project::default());
         if let Some(s) = &settings {
             // Setting up isn't an edit: no undo step, nothing to save yet.
@@ -232,6 +240,7 @@ impl App {
             Ok(project) => {
                 welcome::remember(&mut self.welcome.recent, Recent::of(&path, &project));
                 self.missing = relink::missing(&project);
+                self.leave_project();
                 self.history = History::new(project);
                 if let Some(auto) = autosave::newer(&path) {
                     let path = Some(path.clone());
@@ -404,7 +413,9 @@ impl App {
             }
             ui.separator();
             if ui.button(tr!("menu.preferences")).clicked() {
-                self.preferences.open();
+                use jvid_audio::InputBackend;
+                self.preferences
+                    .open(jvid_audio::CpalInput::default().devices());
             }
         });
         if let Some(id) = picked {
@@ -582,7 +593,12 @@ impl App {
     /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
     /// focus. shortcut: unimplemented actions are stubs until their features land.
     fn run_action(&mut self, id: &str, menu: bool) {
+        // Space and K stop the take along with playback, wherever focus is.
+        if self.take.is_some() && matches!(id, "play_stop" | "shuttle_stop" | "record") {
+            return self.end_take();
+        }
         match id {
+            "record" => return self.start_take(),
             "undo" => {
                 self.history.undo();
                 return;
@@ -661,6 +677,72 @@ impl App {
         if let Some(path) = self.dock.find_tab(&tab) {
             self.dock.set_focused_node_and_surface(path.node_path());
         }
+    }
+
+    /// Starts a voiceover take on the armed track at the playhead, and plays the timeline
+    /// under it. Errors leave the project unchanged.
+    fn start_take(&mut self) {
+        let seq = self.history.project().sequence();
+        let armed = self.timeline.armed.and_then(|id| seq.track(id));
+        let Some(track) = armed.filter(|t| t.kind == jvid_core::model::TrackKind::Audio) else {
+            self.timeline.notice = Some(tr!("timeline.record_no_track").into());
+            return;
+        };
+        let Some(dir) = crate::record::media_dir(self.path.as_deref()) else {
+            return;
+        };
+        let device = Some(self.input_device.as_str()).filter(|d| !d.is_empty());
+        let mut input = jvid_audio::CpalInput::default();
+        let start = self.timeline.playhead();
+        match crate::record::Take::start(&mut input, device, &dir, track.id, start) {
+            Ok(take) => {
+                self.take = Some(take);
+                self.preview_active = 1;
+                if !self.preview.playing() {
+                    self.preview.program_action("shuttle_right");
+                }
+            }
+            Err(e) => self.timeline.notice = Some(tr!("timeline.record_failed", error = e)),
+        }
+    }
+
+    /// Ends the take, stops playback and places the recording.
+    fn end_take(&mut self) {
+        let Some(take) = self.take.take() else {
+            return;
+        };
+        self.timeline.level = None;
+        self.preview.program_action("shuttle_stop");
+        if let Err(e) = take.finish(&mut self.history) {
+            self.timeline.notice = Some(tr!("timeline.record_save_failed", error = e));
+        }
+    }
+
+    /// Runs the take a frame: feeds the header meter, and ends it when the track is disarmed
+    /// or the device fails.
+    fn poll_take(&mut self, ctx: &egui::Context) {
+        let Some(take) = &mut self.take else {
+            return;
+        };
+        if self.timeline.armed != Some(take.track) {
+            return self.end_take();
+        }
+        match take.poll() {
+            Ok(level) => {
+                self.timeline.level = Some(level);
+                ctx.request_repaint();
+            }
+            Err(e) => {
+                self.end_take();
+                self.timeline.notice = Some(e);
+            }
+        }
+    }
+
+    /// Before the project is replaced: a take in progress lands in the old one.
+    fn leave_project(&mut self) {
+        self.end_take();
+        self.timeline.armed = None;
     }
 
     /// Asks for media files and queues them for import.
@@ -855,6 +937,7 @@ impl App {
                     if path.is_none() {
                         self.new_project(Some(project.settings().clone()));
                     }
+                    self.leave_project();
                     self.history = History::new(project);
                     self.history.mark_unsaved();
                 }
@@ -922,6 +1005,7 @@ impl eframe::App for App {
             self.import(dropped);
         }
         let now = ctx.input(|i| i.time);
+        self.poll_take(&ctx);
         self.poll_import(now);
         self.poll_export(now);
         let target = self.autosave_target().filter(|_| !self.on_welcome);
@@ -1039,10 +1123,11 @@ impl eframe::App for App {
             {
                 tracing::warn!("edit failed: {e}");
             }
-            self.preferences.show(ui, &mut self.language, |language| {
+            let (language, input) = (&mut self.language, &mut self.input_device);
+            self.preferences.show(ui, language, input, |key, value| {
                 let path = crate::settings_file::path()
                     .ok_or_else(|| std::io::Error::other(tr!("settings.no_config_dir")))?;
-                crate::settings_file::save_language_to(&path, language)
+                crate::settings_file::save_string_to(&path, key, value)
             });
         });
 

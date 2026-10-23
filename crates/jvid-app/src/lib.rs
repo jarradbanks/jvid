@@ -17,6 +17,7 @@ pub mod preferences;
 mod preview;
 pub mod project_file;
 mod project_settings;
+mod record;
 mod relink;
 mod scopes;
 pub mod settings_file;

@@ -126,6 +126,7 @@ pub const ACTIONS: &[Action] = &[
     a("focus_inspector", "Shift+5"),
     a("focus_effects", "Shift+7"),
     a("export_frame", "Ctrl+Shift+E"),
+    a("record", "Shift+R"),
 ];
 
 /// "Ctrl+Shift+K" → shortcut. Ctrl and Cmd both mean the platform command key.

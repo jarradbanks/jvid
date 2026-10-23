@@ -37,10 +37,15 @@ pub fn load_from(path: &std::path::Path) -> Settings {
     }
 }
 
-/// Sets `language` in the settings file, keeping every other byte, comments included.
-/// A file that isn't TOML is left as it is and reported, so a hand edit with a typo
-/// isn't overwritten.
+/// Sets `language` in the settings file; see [`save_string_to`].
 pub fn save_language_to(path: &Path, language: &str) -> io::Result<()> {
+    save_string_to(path, "language", language)
+}
+
+/// Sets the string setting `key` in the settings file, keeping every other byte, comments
+/// included. A file that isn't TOML is left as it is and reported, so a hand edit with a typo
+/// isn't overwritten.
+pub fn save_string_to(path: &Path, key: &str, value: &str) -> io::Result<()> {
     let old = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
@@ -49,16 +54,16 @@ pub fn save_language_to(path: &Path, language: &str) -> io::Result<()> {
     let not_written = || io::Error::other(tr!("settings.not_written"));
     let parsed = toml::de::DeTable::parse(&old).map_err(io::Error::other)?;
     let mut line = toml::Table::new();
-    line.insert("language".into(), language.into());
+    line.insert(key.into(), value.into());
     // The parser's spans see through quoted keys, multiline strings and comments.
     let found = parsed
         .get_ref()
         .iter()
-        .find(|(k, _)| k.get_ref().as_ref() == "language");
+        .find(|(k, _)| k.get_ref().as_ref() == key);
     let new = match found {
         Some((_, v)) if matches!(v.get_ref(), toml::de::DeValue::String(_)) => {
             let at = v.span();
-            let value = line["language"].to_string();
+            let value = line[key].to_string();
             [&old[..at.start], &value, &old[at.end..]].concat()
         }
         Some(_) => return Err(not_written()),
@@ -67,9 +72,9 @@ pub fn save_language_to(path: &Path, language: &str) -> io::Result<()> {
     };
     let mut before: toml::Table = old.parse().map_err(io::Error::other)?;
     let mut after: toml::Table = new.parse().map_err(io::Error::other)?;
-    let written = after.remove("language");
-    before.remove("language");
-    if written.as_ref().and_then(|v| v.as_str()) != Some(language) || before != after {
+    let written = after.remove(key);
+    before.remove(key);
+    if written.as_ref().and_then(|v| v.as_str()) != Some(value) || before != after {
         return Err(not_written());
     }
     if let Some(dir) = path.parent() {

@@ -433,18 +433,18 @@ fn settings_picker_switches_at_once_and_saves() {
     let path = dir.join("settings.toml");
     std::fs::write(&path, "theme = \"light\"\n").unwrap();
     let mut prefs = Preferences::default();
-    prefs.open();
+    prefs.open(vec!["USB Mic".into()]);
     let saved = path.clone();
     let mut fresh = true;
     let mut h = Harness::builder().with_size([800.0, 600.0]).build_ui_state(
-        move |ui, (p, language): &mut (Preferences, String)| {
+        move |ui, (p, language, input): &mut (Preferences, String, String)| {
             if !install_theme(ui, &mut fresh) {
-                p.show(ui, language, |l| {
-                    jvid_app::settings_file::save_language_to(&saved, l)
+                p.show(ui, language, input, |k, v| {
+                    jvid_app::settings_file::save_string_to(&saved, k, v)
                 });
             }
         },
-        (prefs, i18n::SYSTEM.to_owned()),
+        (prefs, i18n::SYSTEM.to_owned(), String::new()),
     );
     h.run();
     assert!(has(&h, "Idioma"));
@@ -466,6 +466,10 @@ fn settings_picker_switches_at_once_and_saves() {
     pick("English", "Español");
     assert_eq!(i18n::language(), "es");
     assert_eq!(settings(&path).language, "es");
+
+    pick("Predeterminado del sistema", "USB Mic");
+    assert_eq!(settings(&path).input_device, "USB Mic");
+    assert_eq!(settings(&path).language, "es", "other settings kept");
 
     pick("Español", &system);
     assert_eq!(settings(&path).language, "system");

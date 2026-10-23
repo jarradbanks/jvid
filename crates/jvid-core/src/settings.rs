@@ -38,6 +38,8 @@ pub struct Settings {
     /// UI language: `system` follows the OS, or a language code such as `en` or `es`.
     /// A language the app doesn't ship shows English.
     pub language: String,
+    /// Voiceover input device name; empty follows the system default.
+    pub input_device: String,
 }
 
 impl Default for Settings {
@@ -52,6 +54,7 @@ impl Default for Settings {
             theme: "dark".into(),
             hardware_decode: true,
             language: "system".into(),
+            input_device: String::new(),
         }
     }
 }
@@ -89,6 +92,7 @@ impl Settings {
                 "theme" => set(&mut out.theme, &key, value, |v: &String| !v.is_empty()),
                 "hardware_decode" => set(&mut out.hardware_decode, &key, value, |_| true),
                 "language" => set(&mut out.language, &key, value, |v: &String| !v.is_empty()),
+                "input_device" => set(&mut out.input_device, &key, value, |_| true),
                 _ => tracing::warn!("settings: ignoring unknown key `{key}`"),
             }
         }
@@ -185,6 +189,7 @@ mod tests {
             theme: "/home/me/mine.toml".into(),
             hardware_decode: false,
             language: "es".into(),
+            input_device: "USB Mic".into(),
         };
         assert_eq!(Settings::from_toml(&s.to_toml()).unwrap(), s);
         let d = Settings::default();

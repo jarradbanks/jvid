@@ -309,7 +309,6 @@ impl Preview {
         });
     }
 
-    #[cfg(test)]
     pub fn playing(&self) -> bool {
         self.program.transport.speed() != 0
     }

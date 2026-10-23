@@ -1,4 +1,5 @@
-//! The app preferences dialog, under Edit > Preferences: the UI language, applied at once and saved to `settings.toml`.
+//! The app preferences dialog, under Edit > Preferences: the UI language, applied at once, and
+//! the voiceover input device, each saved to `settings.toml` as it changes.
 
 use egui::Ui;
 use suite_ui::i18n::{self, LANGUAGES, SYSTEM};
@@ -13,25 +14,30 @@ pub struct Preferences {
     open: bool,
     /// Why the last change didn't save, shown until the next one.
     error: Option<String>,
+    /// Input device names, listed when the dialog opened.
+    inputs: Vec<String>,
 }
 
 impl Preferences {
-    pub fn open(&mut self) {
+    pub fn open(&mut self, inputs: Vec<String>) {
         self.open = true;
         self.error = None;
+        self.inputs = inputs;
     }
 
     pub fn is_open(&self) -> bool {
         self.open
     }
 
-    /// Shows the dialog while open. `language` is the setting (`system` or a code); a pick
-    /// switches the UI at once and saves through `save`.
+    /// Shows the dialog while open. `language` is the setting (`system` or a code), and
+    /// `input` the input device name (empty for the system default); a pick switches the UI
+    /// at once and saves through `save(key, value)`.
     pub fn show(
         &mut self,
         ui: &mut Ui,
         language: &mut String,
-        save: impl FnOnce(&str) -> std::io::Result<()>,
+        input: &mut String,
+        mut save: impl FnMut(&str, &str) -> std::io::Result<()>,
     ) {
         if !self.open {
             return;
@@ -59,7 +65,26 @@ impl Preferences {
                         {
                             *language = setting(picked).into();
                             i18n::set_language(i18n::resolve(language));
-                            self.error = save(language).err().map(|e| e.to_string());
+                            self.error = save("language", language).err().map(|e| e.to_string());
+                        }
+                        ui.end_row();
+                        ui.label(tr!("settings.input_device"));
+                        let rows = input_rows(&self.inputs, input);
+                        let names: Vec<&str> = rows.iter().map(String::as_str).collect();
+                        let mut picked = rows[1..]
+                            .iter()
+                            .position(|r| r == input)
+                            .map_or(0, |i| i + 1);
+                        if ui
+                            .add(Dropdown::new(&mut picked, &names).width(200.0))
+                            .changed()
+                        {
+                            *input = if picked == 0 {
+                                String::new()
+                            } else {
+                                rows[picked].clone()
+                            };
+                            self.error = save("input_device", input).err().map(|e| e.to_string());
                         }
                         ui.end_row();
                     });
@@ -99,6 +124,17 @@ pub fn options() -> Vec<String> {
     out
 }
 
+/// The input picker's rows: System Default, then each device. A saved device that isn't
+/// plugged in stays listed, so opening the dialog doesn't lose it.
+fn input_rows(devices: &[String], input: &str) -> Vec<String> {
+    let mut rows = vec![tr!("settings.input_default").to_owned()];
+    rows.extend(devices.iter().cloned());
+    if !input.is_empty() && !devices.iter().any(|d| d == input) {
+        rows.push(input.into());
+    }
+    rows
+}
+
 /// The picker row for a setting; an unshipped code shows as English, which is what it gives.
 pub fn choice(setting: &str) -> usize {
     match setting.trim() {
@@ -134,5 +170,16 @@ mod tests {
         assert_eq!(choice(""), 0);
         assert_eq!(choice("es-MX"), 2);
         assert_eq!(choice("fr"), 1);
+    }
+
+    #[test]
+    fn input_rows_keep_an_unplugged_choice() {
+        let devices = ["Mic".to_owned(), "Line In".to_owned()];
+        assert_eq!(
+            input_rows(&devices, ""),
+            ["System Default", "Mic", "Line In"]
+        );
+        assert_eq!(input_rows(&devices, "Mic").len(), 3);
+        assert_eq!(input_rows(&devices, "USB")[3], "USB");
     }
 }
