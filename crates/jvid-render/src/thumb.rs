@@ -263,6 +263,38 @@ mod tests {
     }
 
     #[test]
+    fn every_bundled_effect_shows_at_its_defaults() {
+        let Some((device, queue)) = device() else {
+            eprintln!("skipping thumbnail test: no software adapter on this platform");
+            return;
+        };
+        let mut thumbs = Thumbs::new(&device, &queue);
+        let frame = read_back(&device, &queue, thumbs.frame());
+        // Chroma Key keys green, and the fallback sunset has none: it rightly shows unchanged.
+        for (file, src) in BUNDLED.iter().filter(|(f, _)| *f != "chroma_key.wgsl") {
+            thumbs
+                .set_effect(&device, file, Some(&parse(src).unwrap()))
+                .unwrap();
+            let effect = Effect {
+                shader: file.to_string(),
+                params: Default::default(),
+                enabled: true,
+            };
+            let out = read_back(&device, &queue, &thumbs.effect(&device, &queue, &effect));
+            // Visibly: pixels that move by more than a rounding step.
+            let changed = frame
+                .chunks(4)
+                .zip(out.chunks(4))
+                .filter(|(a, b)| (0..3).any(|c| a[c].abs_diff(b[c]) > 8))
+                .count();
+            assert!(
+                changed > SIZE.0 as usize * SIZE.1 as usize / 20,
+                "{file}: {changed}"
+            );
+        }
+    }
+
+    #[test]
     fn a_text_preset_draws_where_it_lands() {
         let Some((device, queue)) = device() else {
             eprintln!("skipping thumbnail test: no software adapter on this platform");

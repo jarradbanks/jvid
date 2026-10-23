@@ -1182,6 +1182,101 @@ fn each_text_tile_shows_its_preset_on_the_frame() {
     }
 }
 
+#[test]
+fn effect_rows_show_each_effect_and_hover_only_fills() {
+    if !gpu() {
+        return;
+    }
+    let tmp = std::env::temp_dir().join(format!("jvid-fx-rows-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    crate::effects::scan_for_test(&tmp);
+    let mut h = harness([1280.0, 720.0], 1.0);
+    h.state_mut().bin.tab = 1;
+    h.run();
+    let names = [
+        "Chroma Key",
+        "Chromatic Aberration",
+        "Film Grain",
+        "Vignette",
+    ];
+    let nodes = |h: &Harness<'_, App>| {
+        h.root()
+            .children_recursive()
+            .map(|n| n.accesskit_node())
+            .map(|n| format!("{:?} {:?} {:?}", n.role(), n.label(), n.bounding_box()))
+            .collect::<Vec<_>>()
+    };
+    // Apply and More are there before any hover, and Apply waits for a selected clip.
+    h.get_by_label("New Effect").hover();
+    h.run();
+    let before = nodes(&h);
+    let apply: Vec<_> = h.get_all_by_label("Apply to Selected Clips").collect();
+    assert_eq!(apply.len(), names.len());
+    assert!(apply.iter().all(|n| n.accesskit_node().is_disabled()));
+    assert_eq!(h.get_all_by_label("More").count(), names.len());
+    h.get_by_label("Vignette").hover();
+    h.run();
+    assert_eq!(nodes(&h), before, "hover moved or added something");
+    h.snapshot("bin_effects_hover");
+
+    // Each row's 80x45 thumbnail, 4pt in and centred, is drawn and differs from the others.
+    let img = h.render().unwrap();
+    let thumb = |name: &str| {
+        let r = h.get_by_label(name).rect();
+        Rect::from_center_size(
+            egui::pos2(r.left() + 4.0 + 40.0, r.center().y),
+            egui::vec2(78.0, 43.0),
+        )
+    };
+    let pixels = |r: Rect| -> Vec<[u8; 4]> {
+        let (x0, y0) = (r.left().ceil() as u32, r.top().ceil() as u32);
+        (y0..y0 + r.height() as u32)
+            .flat_map(|y| (x0..x0 + r.width() as u32).map(move |x| (x, y)))
+            .map(|(x, y)| img.get_pixel(x, y).0)
+            .collect()
+    };
+    let thumbs = names.map(|n| pixels(thumb(n)));
+    for (n, t) in names.iter().zip(&thumbs) {
+        assert!(t.iter().any(|p| p[..3] != [0, 0, 0]), "{n} isn't drawn");
+    }
+    let n = names.len();
+    for i in 0..n {
+        let (a, b) = (&thumbs[i], &thumbs[(i + 1) % n]);
+        let far = a
+            .iter()
+            .zip(b)
+            .filter(|(p, q)| (0..3).any(|c| p[c].abs_diff(q[c]) > 8))
+            .count();
+        assert!(
+            far > a.len() / 20,
+            "{} looks like {}",
+            names[i],
+            names[(i + 1) % n]
+        );
+    }
+
+    // The Media tab's grid toggle shows them as tiles, Apply only over the hovered one.
+    h.get_by_label("Grid View").click();
+    h.run();
+    h.get_by_label("Film Grain").hover();
+    h.run();
+    assert!(h.state().bin.fx_grid);
+    assert_eq!(h.get_all_by_label("Apply to Selected Clips").count(), 1);
+    h.snapshot("bin_effects_grid");
+    h.get_by_label("List View").click();
+    h.run();
+
+    // Selecting a video clip turns Apply on.
+    let clip = crate::playback::tests::add_solid(&mut h.state_mut().history, [1.0; 4], Time(0));
+    let app = h.state_mut();
+    app.timeline
+        .select_clip(app.history.project().sequence(), clip);
+    h.run();
+    let apply: Vec<_> = h.get_all_by_label("Apply to Selected Clips").collect();
+    assert!(apply.iter().all(|n| !n.accesskit_node().is_disabled()));
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
 /// A selected title in a 1280x720 app, its clip id and the Program frame's center.
 fn title_harness() -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
     use jvid_core::history::Created;

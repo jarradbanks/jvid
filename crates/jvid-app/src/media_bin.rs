@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use egui::{
-    Align2, CornerRadius, Key, Rect, Sense, StrokeKind, TextureHandle, Ui, UiBuilder, pos2, vec2,
+    Align2, CornerRadius, Key, Rect, Sense, StrokeKind, TextureHandle, Ui, UiBuilder, Vec2, pos2,
+    vec2,
 };
 use jvid_core::history::Command;
 use jvid_core::model::{AssetId, MediaAsset, Project, Text};
@@ -103,6 +104,10 @@ pub struct MediaBin {
     pub fx_selected: Option<String>,
     /// The user effect showing the inline delete confirm.
     pub fx_confirm_delete: Option<String>,
+    /// The Effects tab shows tiles instead of rows.
+    pub fx_grid: bool,
+    /// Video clips are selected for Apply to add to; set by the app each frame.
+    pub fx_apply: bool,
     thumbs: Thumbs,
     /// The Text tab's tiles as drawn, by preset; see [`MediaBin::text_thumbs`].
     text_tiles: [Option<egui::TextureId>; 3],
@@ -292,18 +297,7 @@ impl MediaBin {
                 let search_w = rect.width() - sort_w - 2.0 * size::CONTROL - 3.0 * space::S4;
                 ui.add(TextInput::search(&mut self.query).width(search_w.max(48.0)));
                 ui.add(Dropdown::new(&mut self.sort, &sorts()).width(sort_w));
-                if ui
-                    .add(Button::icon(icon::GRID, tr!("bin.grid_view")).on(!self.list))
-                    .clicked()
-                {
-                    self.list = false;
-                }
-                if ui
-                    .add(Button::icon(icon::LIST, tr!("bin.list_view")).on(self.list))
-                    .clicked()
-                {
-                    self.list = true;
-                }
+                view_toggle(ui, &mut self.list);
             });
 
             let assets = visible(project.assets(), &self.query, self.sort);
@@ -950,9 +944,61 @@ fn text_presets(
     added
 }
 
+/// An Effects tab list row: padding, the 80x45 thumbnail, and its name over two lines.
+const FX_ROW: f32 = 2.0 * space::S4 + 50.0;
+const FX_THUMB: egui::Vec2 = vec2(80.0, 45.0);
+
+/// The Media tab's Grid View and List View toggle, shared by the Effects tab.
+fn view_toggle(ui: &mut Ui, list: &mut bool) {
+    if ui
+        .add(Button::icon(icon::GRID, tr!("bin.grid_view")).on(!*list))
+        .clicked()
+    {
+        *list = false;
+    }
+    if ui
+        .add(Button::icon(icon::LIST, tr!("bin.list_view")).on(*list))
+        .clicked()
+    {
+        *list = true;
+    }
+}
+
+/// `w` at `rect` over what's already laid out, leaving the layout cursor where it was.
+fn put_over(ui: &mut Ui, rect: Rect, w: impl egui::Widget) -> egui::Response {
+    ui.new_child(UiBuilder::new().max_rect(rect)).add(w)
+}
+
+/// An effect's name in Body Strong, then Error or Disabled when it is, on one line `width` wide.
+fn fx_name(ui: &Ui, row: &crate::effects::Row, width: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::default();
+    let ink = if row.disabled {
+        color::INK_3
+    } else {
+        color::INK
+    };
+    job.append(
+        &row.name,
+        0.0,
+        egui::TextFormat::simple(theme::body_strong(), ink),
+    );
+    let tag = match (&row.error, row.disabled) {
+        (Some(_), _) => Some((tr!("bin.fx_error"), color::RED)),
+        (None, true) => Some((tr!("bin.fx_disabled"), color::INK_3)),
+        _ => None,
+    };
+    if let Some((tag, ink)) = tag {
+        job.append(tag, 6.0, egui::TextFormat::simple(theme::body(), ink));
+    }
+    job.wrap.max_width = width;
+    job.wrap.max_rows = 1;
+    ui.fonts_mut(|f| f.layout_job(job))
+}
+
 impl MediaBin {
-    /// The Effects tab: the effects folder's files with what each does or why it doesn't
-    /// load, applied by dragging onto a clip or to the selected clips by double-click or Apply.
+    /// The Effects tab: the effects folder's files, Bundled then My Effects, each its effect on
+    /// the thumbnail frame with what it does or why it doesn't load, applied by dragging onto a
+    /// clip or to the selected clips by double-click or Apply.
     fn effects_tab(&mut self, ui: &mut Ui, out: &mut BinResponse) {
         let dir = crate::effects::dir();
         let reveal_w = 136.0;
@@ -980,7 +1026,13 @@ impl MediaBin {
             rows.is_empty() && crate::effects::with(|l| l.entries().next().is_none());
         ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
             ui.spacing_mut().item_spacing = vec2(space::S4, space::S8);
-            ui.add(TextInput::search(&mut self.fx_query).width(rect.width()));
+            ui.horizontal(|ui| {
+                let search_w = rect.width() - 2.0 * size::CONTROL - 2.0 * space::S4;
+                ui.add(TextInput::search(&mut self.fx_query).width(search_w.max(48.0)));
+                let mut list = !self.fx_grid;
+                view_toggle(ui, &mut list);
+                self.fx_grid = !list;
+            });
             if rows.is_empty() {
                 let hint = if empty_folder {
                     tr!("bin.fx_empty")
@@ -990,13 +1042,39 @@ impl MediaBin {
                 ui.label(egui::RichText::new(hint).color(color::INK_3));
                 return;
             }
+            let (bundled, mine): (Vec<_>, Vec<_>) = rows.iter().partition(|r| r.bundled);
             egui::ScrollArea::vertical()
                 .auto_shrink(false)
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = space::S4;
-                    for row in &rows {
-                        self.effect_row(ui, row, dir.as_deref(), out);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let groups = [(tr!("bin.fx_bundled"), bundled), (tr!("bin.fx_mine"), mine)];
+                    for (i, (title, rows)) in groups.into_iter().enumerate() {
+                        if rows.is_empty() {
+                            continue;
+                        }
+                        if i > 0 {
+                            ui.add_space(space::S8);
+                        }
+                        let (head, _) = ui.allocate_exact_size(
+                            vec2(ui.available_width(), size::CONTROL),
+                            Sense::hover(),
+                        );
+                        ui.painter().text(
+                            head.left_center(),
+                            Align2::LEFT_CENTER,
+                            title,
+                            theme::body_strong(),
+                            color::INK_3,
+                        );
+                        if self.fx_grid {
+                            self.effect_tiles(ui, &rows, dir.as_deref(), out);
+                        } else {
+                            for row in rows {
+                                self.effect_row(ui, row, dir.as_deref(), out);
+                            }
+                        }
                     }
+                    ui.add_space(space::S12);
                     ui.label(
                         egui::RichText::new(tr!("bin.fx_hint"))
                             .small()
@@ -1006,6 +1084,8 @@ impl MediaBin {
         });
     }
 
+    /// A list row in fixed columns: thumbnail, name over two lines of description, then Apply
+    /// and More. Hovering changes only the fill.
     fn effect_row(
         &mut self,
         ui: &mut Ui,
@@ -1014,139 +1094,226 @@ impl MediaBin {
         out: &mut BinResponse,
     ) {
         let w = ui.available_width();
-        let (rect, r) = ui.allocate_exact_size(vec2(w, 2.0 * ROW), Sense::click_and_drag());
-        let selected = self.fx_selected.as_deref() == Some(row.stem.as_str());
-        let p = ui.painter();
-        if selected || r.hovered() {
-            let fill = if selected {
-                color::BLUE.gamma_multiply(0.2)
-            } else {
-                color::RAISED
-            };
-            p.rect_filled(rect, radius::SMALL, fill);
-        }
-        let inset = rect.shrink2(vec2(space::S8, space::S4));
-        let ink = if row.disabled {
-            color::INK_3
-        } else {
-            color::INK
-        };
-        p.text(
-            inset.left_top(),
-            Align2::LEFT_TOP,
-            &row.name,
-            theme::body_strong(),
-            ink,
+        let (rect, r) = ui.allocate_exact_size(vec2(w, FX_ROW), Sense::click_and_drag());
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &row.name));
+        self.fx_fill(ui, rect, row);
+        let inset = rect.shrink(space::S4);
+        let thumb = Rect::from_min_size(
+            pos2(inset.left(), inset.center().y - FX_THUMB.y / 2.0),
+            FX_THUMB,
         );
-        let (status, status_ink) = match (&row.error, row.disabled, row.bundled) {
-            (Some(_), _, _) => (tr!("bin.fx_error"), color::RED),
-            (None, true, _) => (tr!("bin.fx_disabled"), color::INK_3),
-            (None, false, true) => (tr!("bin.fx_bundled"), color::INK_3),
-            (None, false, false) => (tr!("bin.fx_user"), color::INK_3),
-        };
-        p.text(
-            inset.right_top(),
-            Align2::RIGHT_TOP,
-            status,
-            theme::body(),
-            status_ink,
-        );
+        crate::effects::paint_thumb(ui, thumb, row);
         let confirming = self.fx_confirm_delete.as_deref() == Some(row.stem.as_str());
-        let second = row.error.as_deref().unwrap_or(&row.description);
-        let line = if confirming {
-            tr!(
+        let button_w = if confirming { 64.0 } else { size::CONTROL };
+        let buttons = 2.0 * button_w + space::S4;
+        let text = Rect::from_x_y_ranges(
+            thumb.right() + space::S8..=inset.right() - buttons - space::S8,
+            inset.y_range(),
+        );
+        let name = fx_name(ui, row, text.width());
+        let about = if confirming {
+            let msg = tr!(
                 "bin.fx_delete_confirm",
                 file = format_args!("{}.wgsl", row.stem)
-            )
+            );
+            let mut job =
+                egui::text::LayoutJob::simple(msg, theme::body(), color::RED, text.width());
+            job.wrap.max_rows = 2;
+            job
         } else {
-            second.lines().next().unwrap_or_default().to_owned()
+            let ink = if row.error.is_some() {
+                color::RED
+            } else {
+                color::INK_3
+            };
+            crate::effects::about(row, text.width(), 2, ink)
         };
-        let line_ink = if row.error.is_some() || confirming {
-            color::RED
-        } else {
-            color::INK_3
-        };
-        let second_rect = inset.with_min_y(inset.top() + ROW - space::S4);
-        let painter = p.with_clip_rect(second_rect.intersect(p.clip_rect()));
-        painter.text(
-            second_rect.left_top(),
-            Align2::LEFT_TOP,
-            line,
-            theme::body(),
-            line_ink,
-        );
-        let usable = row.error.is_none();
+        let about = ui.fonts_mut(|f| f.layout_job(about));
+        let top = text.center().y - (name.size().y + 2.0 + 2.0 * 16.0) / 2.0;
+        let p = ui.painter();
+        p.galley(pos2(text.left(), top), name.clone(), color::INK);
+        let below = pos2(text.left(), top + name.size().y + 2.0);
+        p.galley(below, about.clone(), color::INK_3);
+        // A compiler message can run long; descriptions are clamped to two lines, as drawn.
         let r = match &row.error {
-            Some(e) => r.on_hover_text(e),
-            None => r.on_hover_text(format!("{}\n{}", row.description, tr!("bin.fx_hint"))),
+            Some(e) if about.elided && !confirming => r.on_hover_text(e),
+            _ => r,
         };
+        self.fx_interact(ui, &r, row, dir, out);
+        let mut right = inset.right();
+        let mut column = |ui: &mut Ui, b: Button| {
+            let at = Rect::from_min_size(
+                pos2(right - button_w, rect.center().y - size::CONTROL / 2.0),
+                vec2(button_w, size::CONTROL),
+            );
+            right -= button_w + space::S4;
+            put_over(ui, at, b.width(button_w))
+        };
+        if confirming {
+            if column(ui, Button::destructive(tr!("bin.fx_delete"))).clicked()
+                && let Some(dir) = dir
+                && let Err(e) = crate::effects::delete(dir, &row.stem)
+            {
+                tracing::warn!("effects: can't delete {}: {e}", row.stem);
+            }
+            if column(ui, Button::ghost(tr!("prompt.cancel"))).clicked()
+                || ui.input(|i| i.key_pressed(Key::Escape))
+            {
+                self.fx_confirm_delete = None;
+            }
+            return;
+        }
+        let more = column(ui, Button::icon(icon::ELLIPSIS, tr!("bin.fx_more")));
+        egui::Popup::menu(&more).show(|ui| self.fx_menu(ui, row, dir, out));
+        let apply =
+            Button::icon(icon::PLUS, tr!("bin.fx_apply_selected")).state(self.apply_state(row));
+        if column(ui, apply).clicked() {
+            out.apply_effect = Some(row.stem.clone());
+        }
+    }
+
+    /// Grid tiles: the thumbnail across the tile over the name, with Apply in its corner on hover.
+    fn effect_tiles(
+        &mut self,
+        ui: &mut Ui,
+        rows: &[&crate::effects::Row],
+        dir: Option<&std::path::Path>,
+        out: &mut BinResponse,
+    ) {
+        let gap = space::S8;
+        let w = ui.available_width();
+        let cols = ((w + gap) / (TILE_MIN + gap)).floor().max(1.0) as usize;
+        let tile_w = (w - gap * (cols as f32 - 1.0)) / cols as f32;
+        let thumb_w = tile_w - 2.0 * space::S4;
+        let tile = vec2(tile_w, space::S4 + thumb_w * 9.0 / 16.0 + 6.0 + ROW);
+        for chunk in rows.chunks(cols) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for row in chunk {
+                    let (rect, r) = ui.allocate_exact_size(tile, Sense::click_and_drag());
+                    r.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &row.name)
+                    });
+                    self.fx_fill(ui, rect, row);
+                    let thumb = Rect::from_min_size(
+                        rect.min + vec2(space::S4, space::S4),
+                        vec2(thumb_w, thumb_w * 9.0 / 16.0),
+                    );
+                    crate::effects::paint_thumb(ui, thumb, row);
+                    let name = fx_name(ui, row, thumb_w);
+                    let at = pos2(thumb.left(), thumb.bottom() + 6.0);
+                    ui.painter().galley(at, name, color::INK);
+                    // Tiles show no description, so it's the tooltip.
+                    let ink = if row.error.is_some() {
+                        color::RED
+                    } else {
+                        color::INK
+                    };
+                    let r = r.on_hover_ui(|ui| {
+                        ui.label(crate::effects::about(row, 320.0, 8, ink));
+                    });
+                    self.fx_interact(ui, &r, row, dir, out);
+                    if ui.rect_contains_pointer(rect) || r.has_focus() {
+                        let at = Rect::from_min_size(
+                            thumb.right_top() + vec2(-space::S4 - size::CONTROL, space::S4),
+                            Vec2::splat(size::CONTROL),
+                        );
+                        ui.painter().rect_filled(at, radius::CONTROL, color::PANEL);
+                        let apply = Button::icon(icon::PLUS, tr!("bin.fx_apply_selected"))
+                            .state(self.apply_state(row));
+                        if put_over(ui, at, apply).clicked() {
+                            out.apply_effect = Some(row.stem.clone());
+                        }
+                    }
+                }
+            });
+            ui.add_space(space::S4);
+        }
+    }
+
+    /// Selected or hovered (by the pointer over `rect`, so its buttons don't clear it), the fill.
+    fn fx_fill(&self, ui: &Ui, rect: Rect, row: &crate::effects::Row) {
+        let selected = self.fx_selected.as_deref() == Some(row.stem.as_str());
+        let fill = if selected {
+            color::BLUE.gamma_multiply(0.2)
+        } else if ui.rect_contains_pointer(rect) {
+            color::RAISED
+        } else {
+            return;
+        };
+        ui.painter().rect_filled(rect, radius::CONTROL, fill);
+    }
+
+    /// Apply works on a usable effect with video clips selected.
+    fn apply_state(&self, row: &crate::effects::Row) -> suite_ui::widgets::State {
+        if self.fx_apply && row.error.is_none() && !row.disabled {
+            suite_ui::widgets::State::Live
+        } else {
+            suite_ui::widgets::State::Disabled
+        }
+    }
+
+    /// A row's or tile's click selects, double-click applies, drag goes onto a clip, and
+    /// right-click opens its menu.
+    fn fx_interact(
+        &mut self,
+        ui: &Ui,
+        r: &egui::Response,
+        row: &crate::effects::Row,
+        dir: Option<&std::path::Path>,
+        out: &mut BinResponse,
+    ) {
+        if r.has_focus() {
+            ui.painter()
+                .add(suite_ui::widgets::focus_ring(r.rect, radius::CONTROL));
+        }
         if r.clicked() {
             self.fx_selected = Some(row.stem.clone());
         }
-        if usable {
+        if row.error.is_none() {
             if r.double_clicked() {
                 out.apply_effect = Some(row.stem.clone());
             }
             // The timeline adds it to the clip it's dropped on.
             r.dnd_set_drag_payload(crate::effects::Drag(row.stem.clone()));
         }
-        // Buttons on the second line, right-aligned, over the row.
-        let mut right = second_rect.right();
-        let mut button = |ui: &mut Ui, b: Button, w: f32| {
-            let at = Rect::from_min_max(
-                pos2(right - w, second_rect.top() - space::S4),
-                pos2(right, rect.bottom() - space::S4),
-            );
-            right -= w + space::S4;
-            ui.put(at, b.width(w)).clicked()
-        };
-        if confirming {
-            if button(ui, Button::destructive(tr!("bin.fx_delete")), 64.0)
-                && let Some(dir) = dir
-                && let Err(e) = crate::effects::delete(dir, &row.stem)
-            {
-                tracing::warn!("effects: can't delete {}: {e}", row.stem);
-            }
-            if button(ui, Button::ghost(tr!("prompt.cancel")), 64.0)
-                || confirming && ui.input(|i| i.key_pressed(Key::Escape))
-            {
-                self.fx_confirm_delete = None;
-            }
-        } else if usable
-            && (selected || r.hovered())
-            && button(ui, Button::ghost(tr!("project.apply")), 56.0)
-        {
+        r.context_menu(|ui| self.fx_menu(ui, row, dir, out));
+    }
+
+    /// A row's menu, from right-click or More.
+    fn fx_menu(
+        &mut self,
+        ui: &mut Ui,
+        row: &crate::effects::Row,
+        dir: Option<&std::path::Path>,
+        out: &mut BinResponse,
+    ) {
+        self.fx_selected = Some(row.stem.clone());
+        if row.error.is_none() && ui.button(tr!("bin.fx_apply_selected")).clicked() {
             out.apply_effect = Some(row.stem.clone());
         }
         let Some(dir) = dir else { return };
-        let path = dir.join(format!("{}.wgsl", row.stem));
-        r.context_menu(|ui| {
-            self.fx_selected = Some(row.stem.clone());
-            if usable && ui.button(tr!("bin.fx_apply_selected")).clicked() {
-                out.apply_effect = Some(row.stem.clone());
-            }
-            if ui.button(tr!("bin.fx_reveal")).clicked() {
-                crate::export::queue::reveal(&path);
-            }
-            if ui.button(tr!("bin.fx_duplicate")).clicked()
-                && let Err(e) = crate::effects::duplicate(dir, &row.stem)
-            {
-                tracing::warn!("effects: can't duplicate {}: {e}", row.stem);
-            }
-            let toggle = if row.disabled {
-                tr!("bin.fx_enable")
-            } else {
-                tr!("bin.fx_disable")
-            };
-            if ui.button(toggle).clicked()
-                && let Err(e) = crate::effects::set_disabled(dir, &row.stem, !row.disabled)
-            {
-                tracing::warn!("effects: can't change {}: {e}", row.stem);
-            }
-            if !row.bundled && ui.button(tr!("bin.fx_delete")).clicked() {
-                self.fx_confirm_delete = Some(row.stem.clone());
-            }
-        });
+        if ui.button(tr!("bin.fx_reveal")).clicked() {
+            crate::export::queue::reveal(&dir.join(format!("{}.wgsl", row.stem)));
+        }
+        if ui.button(tr!("bin.fx_duplicate")).clicked()
+            && let Err(e) = crate::effects::duplicate(dir, &row.stem)
+        {
+            tracing::warn!("effects: can't duplicate {}: {e}", row.stem);
+        }
+        let toggle = if row.disabled {
+            tr!("bin.fx_enable")
+        } else {
+            tr!("bin.fx_disable")
+        };
+        if ui.button(toggle).clicked()
+            && let Err(e) = crate::effects::set_disabled(dir, &row.stem, !row.disabled)
+        {
+            tracing::warn!("effects: can't change {}: {e}", row.stem);
+        }
+        if !row.bundled && ui.button(tr!("bin.fx_delete")).clicked() {
+            self.fx_confirm_delete = Some(row.stem.clone());
+        }
     }
 }
 

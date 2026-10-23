@@ -353,7 +353,7 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
             .any(|t| t.starts_with("Darkens towards the corners"))
     );
     assert!(
-        !shown.iter().any(|t| t == "Film grain"),
+        !shown.iter().any(|t| t == "Film Grain"),
         "search kept a non-match"
     );
 
@@ -369,7 +369,7 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
     h.run();
     h.get_by_label("Add Effect").click();
     h.run();
-    assert!(has(&h, "Film grain") && has(&h, "Chromatic aberration"));
+    assert!(has(&h, "Film Grain") && has(&h, "Chromatic Aberration"));
 }
 
 /// 960 physical px at 150 % display scaling, in points: narrower than the minimum app.rs asks
