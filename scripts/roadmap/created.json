@@ -472,6 +472,30 @@
     "in-out-snap-edges": {
       "number": 230,
       "id": 6000355849
+    },
+    "inspector-rows": {
+      "number": 231,
+      "id": 6001994059
+    },
+    "inspector-effects": {
+      "number": 232,
+      "id": 6001994701
+    },
+    "inspector-tabs": {
+      "number": 233,
+      "id": 6001995317
+    },
+    "thumb-frame": {
+      "number": 234,
+      "id": 6001995918
+    },
+    "effect-thumbs": {
+      "number": 235,
+      "id": 6001996542
+    },
+    "text-tiles": {
+      "number": 236,
+      "id": 6001997176
     }
   },
   "links": [
@@ -1226,6 +1250,26 @@
     [
       "release",
       "timeline-arrow-nav"
+    ],
+    [
+      "inspector-effects",
+      "inspector-rows"
+    ],
+    [
+      "inspector-tabs",
+      "inspector-effects"
+    ],
+    [
+      "effect-thumbs",
+      "thumb-frame"
+    ],
+    [
+      "effect-thumbs",
+      "inspector-effects"
+    ],
+    [
+      "text-tiles",
+      "thumb-frame"
     ]
   ]
 }

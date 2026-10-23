@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inspector, Effects and Text</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ground: #0A0B0D; --panel: #121416; --raised: #1C1E21; --field: #0D0E11;
+  --border: #232529; --border2: #36383C;
+  --ink: #EDEEF1; --ink2: #ADB1B8; --ink3: #82868E; --ink4: #5A5E63;
+  --blue: #2368C9; --bluel: #7AACF6; --red: #EC5B57;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ground); color: var(--ink2); }
+body { font: 400 14px/1.55 Inter, system-ui, sans-serif; font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased; }
+::selection { background: rgba(35, 104, 201, .45); color: var(--ink); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+:focus-visible { outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* The page around the mockups */
+.page { max-width: 1240px; margin: 0 auto; padding: 56px 32px 120px; }
+h1 { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); margin: 0 0 12px; }
+h2 { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); margin: 0 0 12px; }
+h3 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); margin: 32px 0 8px; }
+section { margin-top: 88px; }
+p { margin: 0 0 12px; max-width: 68ch; }
+ul.notes { margin: 0; padding-left: 18px; max-width: 68ch; }
+ul.notes li { margin: 6px 0; }
+ul.notes li::marker { color: var(--ink4); }
+.page b { color: var(--ink); font-weight: 500; }
+.compare { display: flex; flex-wrap: wrap; gap: 32px 56px; align-items: flex-start; margin-top: 32px; }
+.pair { display: flex; flex-wrap: wrap; gap: 32px 56px; align-items: flex-start; margin-top: 32px; }
+.pair > .notes-col { flex: 1 1 320px; padding-top: 4px; }
+figure { margin: 0; width: 440px; max-width: 100%; }
+figure.bin { width: 500px; }
+figcaption { margin: 16px 0 6px; color: var(--ink); font-weight: 500; }
+.stage { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; max-width: 1040px; margin-top: 16px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 16px 10px 0; border-top: 1px solid var(--border); }
+th { color: var(--ink3); font-weight: 500; font-size: 12px; }
+td:first-child { color: var(--ink); font-weight: 500; white-space: nowrap; }
+td.n { white-space: nowrap; }
+
+/* App chrome, at the app's own scale */
+.app { font-size: 12px; line-height: 16px; color: var(--ink); user-select: none; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.phead { height: 32px; flex: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; font-weight: 500; }
+.phead.tabs { padding: 0 4px; gap: 4px; }
+.tab { flex: 1 1 0; max-width: 160px; min-width: 64px; height: 24px; border-radius: 6px; color: var(--ink3); font-weight: 500; transition: color .1s, background .1s; }
+.tab:hover { color: var(--ink2); }
+.tab.on { background: var(--raised); color: var(--ink); }
+.tab .n { color: var(--ink3); font-weight: 400; margin-left: 6px; }
+.pbody { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 12px 12px; scrollbar-gutter: stable; }
+.pfoot { flex: none; display: flex; gap: 4px; padding: 8px 12px 12px; }
+
+.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ib { width: 20px; height: 20px; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); transition: background .1s, color .1s; flex: none; }
+.ib:hover { background: var(--raised); color: var(--ink); }
+.ib.ph { pointer-events: none; }
+.ib[disabled] { color: var(--ink4); pointer-events: none; }
+
+/* Inspector sections and rows */
+.sec + .sec { border-top: 1px solid var(--border); }
+.shead { height: 32px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500; }
+.shead .chev { color: var(--ink2); transition: transform .1s; }
+.sec:not(.open) > .shead .chev { transform: rotate(-90deg); }
+.sec:not(.open) > .sbody { display: none; }
+.sbody { padding-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+.count { color: var(--ink3); font-weight: 400; }
+.tools { margin-left: auto; display: flex; gap: 2px; flex: none; }
+.row .reset, .shead .reset, .fxhead .reset { visibility: hidden; }
+.row.changed .reset, .sec.changed > .shead .reset, .fx.changed .fxhead .reset { visibility: visible; }
+.row .nav { visibility: hidden; }
+.row.anim .nav { visibility: visible; }
+.dia { width: 8px; height: 8px; transform: rotate(45deg); border: 1px solid var(--ink4); border-radius: 1px; transition: border-color .1s, background .1s; }
+.key:hover .dia { border-color: var(--ink2); }
+.row.anim .dia { border-color: var(--bluel); }
+.row.anim.here .dia { background: var(--bluel); }
+
+.row { display: flex; align-items: center; gap: 4px; height: 24px; }
+.row[hidden] { display: none; }
+.lbl { width: 72px; flex: none; color: var(--ink2); white-space: nowrap; }
+.vals { flex: 1; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.fld { height: 24px; border-radius: 6px; background: var(--field); border: 1px solid var(--border); padding: 0 8px; display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; cursor: ew-resize; white-space: nowrap; transition: border-color .1s; }
+.fld:hover { border-color: var(--border2); }
+.fld.w64 { flex: 0 0 64px; }
+.pre { color: var(--ink3); }
+.dd { cursor: pointer; justify-content: space-between; }
+.dd .i { color: var(--ink3); margin-right: -4px; }
+
+.sl { flex: 1; position: relative; display: flex; align-items: center; margin-left: 4px; min-width: 40px; }
+.sl.bi::before { content: ""; position: absolute; left: 50%; top: 7px; height: 10px; width: 1px; background: var(--border2); }
+.sl input { position: relative; -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; --lo: 0%; --hi: 0%; }
+.sl input:focus-visible { outline: none; }
+.sl input::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: linear-gradient(90deg, var(--border2) var(--lo), var(--ink3) var(--lo) var(--hi), var(--border2) var(--hi)); }
+.sl input::-moz-range-track { height: 2px; border-radius: 1px; background: linear-gradient(90deg, var(--border2) var(--lo), var(--ink3) var(--lo) var(--hi), var(--border2) var(--hi)); }
+.sl input::-webkit-slider-thumb { -webkit-appearance: none; width: 6px; height: 14px; border-radius: 2px; background: var(--ink2); margin-top: -6px; transition: background .1s; }
+.sl input::-moz-range-thumb { width: 6px; height: 14px; border: 0; border-radius: 2px; background: var(--ink2); }
+.sl input:hover::-webkit-slider-thumb, .sl input:active::-webkit-slider-thumb { background: var(--ink); }
+.sl input:hover::-moz-range-thumb { background: var(--ink); }
+.sl input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px rgba(122, 172, 246, .6); }
+.sl input:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px rgba(122, 172, 246, .6); }
+
+.chk { display: flex; align-items: center; gap: 6px; color: var(--ink2); height: 24px; margin-left: 8px; white-space: nowrap; }
+.box { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border2); background: var(--field); display: grid; place-items: center; }
+.box .i { width: 12px; height: 12px; stroke: var(--ink); visibility: hidden; }
+.chk.on .box { background: var(--raised); }
+.chk.on .box .i { visibility: visible; }
+
+/* Effect blocks in the inspector */
+.fx + .fx { border-top: 1px solid var(--border); }
+.fxhead { height: 28px; display: flex; align-items: center; gap: 2px; cursor: grab; margin-left: -2px; }
+.fxhead:active { cursor: grabbing; }
+.fxname { font-weight: 500; margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fxchev .i { transition: transform .1s; }
+.fx.collapsed .fxchev .i { transform: rotate(-90deg); }
+.fx.collapsed .fxbody { display: none; }
+.fx.off .fxname { color: var(--ink3); }
+.fx.off .fxbody { opacity: .4; pointer-events: none; }
+.fxbody { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; }
+.empty { color: var(--ink3); margin: 4px 0 12px; }
+.btn { height: 24px; border-radius: 6px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500; color: var(--ink); background: var(--raised); border: 1px solid var(--border); transition: border-color .1s; white-space: nowrap; }
+.btn:hover { border-color: var(--border2); }
+.btn .i { color: var(--ink2); }
+.btn.full { width: 100%; }
+.pane[hidden] { display: none; }
+.fxpad { padding-top: 4px; }
+
+/* Thumbnails: one sample frame, each effect drawn over it */
+.thumb { position: relative; flex: none; width: 80px; aspect-ratio: 16 / 9; border-radius: 4px; overflow: hidden; background: #000; }
+.thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.thumb::after { content: ""; position: absolute; inset: 0; pointer-events: none; }
+.fx-ca img { filter: url(#ca); }
+.fx-grain img { filter: saturate(.85); }
+.fx-grain::after { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='96' height='96' filter='url(%23n)'/%3E%3C/svg%3E"); background-size: 48px; mix-blend-mode: overlay; opacity: .9; }
+.fx-vig::after { background: radial-gradient(ellipse at center, transparent 38%, rgba(0, 0, 0, .82) 100%); }
+.fx-scan::after { background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, .5) 0 1px, transparent 1px 3px); }
+.fx-pix img { opacity: .35; }
+.fx-glow img { opacity: .25; }
+.warn { position: absolute; inset: 0; display: grid; place-items: center; color: var(--red); }
+
+/* Effects tab */
+.toolbar { display: flex; gap: 4px; align-items: center; padding: 8px 0 4px; }
+.search { flex: 1; color: var(--ink3); cursor: text; }
+.search .i { color: var(--ink3); margin-left: -2px; }
+.vt { width: 24px; height: 24px; border-radius: 6px; }
+.vt.on { background: var(--raised); color: var(--ink); }
+.grp { height: 24px; display: flex; align-items: center; color: var(--ink3); font-weight: 500; margin-top: 8px; }
+.fxrow { display: flex; align-items: center; gap: 8px; padding: 4px; border-radius: 6px; min-height: 53px; transition: background .1s; cursor: grab; }
+.fxrow:hover { background: var(--raised); }
+.fxrow.sel { background: rgba(35, 104, 201, .2); }
+.fxtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fxn { font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tag { font-weight: 400; color: var(--ink3); margin-left: 6px; }
+.tag.err { color: var(--red); }
+.fxrow.off .fxn { color: var(--ink3); }
+.fxd { color: var(--ink3); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fxd .pn { color: var(--ink2); }
+.fxrow.err .fxd { color: var(--red); }
+.fxrow .ib { width: 24px; height: 24px; border-radius: 6px; }
+.hint { color: var(--ink3); font-size: 10px; line-height: 12px; margin: 12px 4px 0; }
+.fxlib.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 8px; }
+.fxlib.grid .grp { grid-column: 1 / -1; }
+.fxlib.grid .fxrow { flex-direction: column; align-items: stretch; gap: 6px; position: relative; padding: 4px 4px 6px; }
+.fxlib.grid .thumb { width: 100%; }
+.fxlib.grid .fxd, .fxlib.grid .more { display: none; }
+.fxlib.grid .apply { position: absolute; top: 8px; right: 8px; background: var(--panel); border: 1px solid var(--border); opacity: 0; transition: opacity .1s; }
+.fxlib.grid .fxrow:hover .apply, .fxlib.grid .fxrow:focus-within .apply { opacity: 1; }
+
+/* Text tab */
+.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding-top: 8px; }
+.tile { width: 100%; display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 4px 4px 8px; border-radius: 6px; transition: background .1s; cursor: grab; }
+.tile:hover { background: var(--raised); }
+.tthumb { display: block; width: 100%; position: relative; aspect-ratio: 16 / 9; border-radius: 4px; overflow: hidden; container-type: inline-size; background: #000; }
+.tthumb img { width: 100%; height: 100%; object-fit: cover; filter: brightness(.55); display: block; }
+.tx { position: absolute; color: #fff; white-space: pre; line-height: 1.2; transform: translate(-50%, -50%); }
+.t-title { left: 50%; top: 50%; font-size: 5cqw; font-weight: 700; text-align: center; }
+.t-lower { left: 25%; top: 80%; font-size: 2.5cqw; font-weight: 600; text-align: left; background: rgba(0, 0, 0, .7); padding: .833cqw; }
+.t-cap { left: 50%; top: 90%; font-size: 2.083cqw; font-weight: 400; text-align: center; -webkit-text-stroke: .21cqw #000; paint-order: stroke fill; text-shadow: .104cqw .104cqw 0 rgba(0, 0, 0, .6); }
+.tname { font-weight: 500; color: var(--ink); padding: 0 2px; }
+.tdesc { color: var(--ink3); padding: 0 2px; margin-top: -4px; }
+
+/* Menus */
+.menu { position: fixed; z-index: 50; min-width: 168px; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, .4); animation: pop .15s ease-out; }
+.menu[hidden] { display: none; }
+@keyframes pop { from { opacity: 0; transform: translateY(-4px); } }
+.mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 24px; padding: 0 8px; border-radius: 6px; text-align: left; white-space: nowrap; }
+.mi:hover { background: var(--border); }
+.mi[disabled] { color: var(--ink4); pointer-events: none; }
+.mi .k { margin-left: auto; padding-left: 16px; font-size: 10px; color: var(--ink3); }
+.mi .ck { width: 12px; height: 12px; stroke: var(--ink); }
+.msep { height: 1px; background: var(--border); margin: 4px 0; }
+.mi.lib { height: 40px; padding: 0 4px; }
+.mi.lib .thumb { width: 48px; }
+.mi.lib .t { display: flex; flex-direction: column; min-width: 0; }
+.mi.lib .d { color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mi.lib .d .pn { color: var(--ink2); }
+.msearch { margin-bottom: 4px; color: var(--ink3); }
+
+@media (prefers-reduced-motion: reduce) {
+  .menu { animation: none; }
+  *, *::before, *::after { transition: none !important; }
+}
+@media (max-width: 600px) {
+  .page { padding: 32px 16px 80px; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="ca" color-interpolation-filters="sRGB">
+    <feColorMatrix in="SourceGraphic" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="r"/>
+    <feOffset in="r" dx="-1.5" result="r2"/>
+    <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="g"/>
+    <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="b"/>
+    <feOffset in="b" dx="1.5" result="b2"/>
+    <feBlend in="r2" in2="g" mode="screen" result="rg"/>
+    <feBlend in="rg" in2="b2" mode="screen"/>
+  </filter>
+  <symbol id="i-chev-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-chev-left" viewBox="0 0 16 16"><path d="M10 4L6 8l4 4"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 16 16"><path d="M3 3.5v3.5h3.5"/><path d="M3.4 7A5 5 0 1 1 4.6 11.6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 16 16"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 16 16"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/><path d="M2.5 2.5l11 11"/></symbol>
+  <symbol id="i-more" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="12.5" cy="8" r=".9" fill="currentColor"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></symbol>
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L13.5 13.5"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></symbol>
+  <symbol id="i-list" viewBox="0 0 16 16"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><path d="M2.5 4h.5M2.5 8h.5M2.5 12h.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.5l6 10.5H2z"/><path d="M8 6.5v3M8 11.3v.2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
+</svg>
+
+<main class="page">
+  <h1>Inspector, Effects and Text</h1>
+  <p>Mockups for the three places that feel unfinished. The values and effects match the 24 Oct screenshot. Sliders, chevrons, diamonds, menus and tabs all work: drag Scale or Exposure, right-click a lit diamond, open Add Effect, switch the Effects tab to grid.</p>
+  <p>Thumbnails show the Program frame at the playhead with the effect or preset drawn over it. With nothing on the timeline they fall back to a bundled frame from the owner's own footage, which is the one used here.</p>
+
+  <section id="inspector">
+    <h2>Inspector</h2>
+    <h3>What's wrong now</h3>
+    <ul class="notes">
+      <li>Every row ends in the same reset and keyframe icons, about 250px from the value they act on. Twenty rows make forty identical icons, so the right edge reads as noise.</li>
+      <li>Values sit in a 64px column in a 440px panel. Most of the panel is empty, and it still scrolls.</li>
+      <li>Every section opens on launch and forgets that you closed it. Crop and Color, untouched, take as much room as the Transform you're editing.</li>
+      <li>Crop spends four rows on four zeros. LUT Mix shows while the LUT is None.</li>
+      <li>Effects sit at the bottom, under Audio. Up, Down and Remove are text buttons that appear or vanish with an effect's position, so they jump.</li>
+      <li>Add Effect is a dropdown pretending to be a button: its first item is "Add Effect" with a tick.</li>
+      <li>An animated row carries two diamonds, one to animate and one for a key at the playhead.</li>
+    </ul>
+
+    <div class="compare">
+      <figure>
+        <div class="stage"><div class="panel app" id="insp-a" style="width:440px;height:760px">
+          <div class="phead">Inspector</div>
+          <div class="pbody"></div>
+        </div></div>
+        <figcaption>A. One list, tidied</figcaption>
+        <ul class="notes">
+          <li>One scroll, as now. The smallest change.</li>
+          <li>Open and closed sections are remembered. First run opens Transform, Opacity and Effects only.</li>
+          <li>Effects move up under Opacity, beside the other picture controls.</li>
+          <li>Cost: a long effect stack still pushes Color and Audio far down.</li>
+        </ul>
+      </figure>
+      <figure>
+        <div class="stage"><div class="panel app" id="insp-b" style="width:440px;height:760px">
+          <div class="phead tabs">
+            <button class="tab on" data-tab="video">Video</button>
+            <button class="tab" data-tab="audio">Audio</button>
+            <button class="tab" data-tab="fx">Effects<span class="n fxcount">2</span></button>
+          </div>
+          <div class="pbody"></div>
+        </div></div>
+        <figcaption>B. Video, Audio and Effects tabs (chosen)</figcaption>
+        <ul class="notes">
+          <li>The tabs take the header row, as Media, Effects and Text do in the bin. No second header row.</li>
+          <li>Each tab is short enough to leave every section open.</li>
+          <li>Effects get a whole tab, and the count on it shows a clip has effects without opening it.</li>
+          <li>Tabs follow the selection: a text clip adds Text first, and an audio-only selection shows Audio alone.</li>
+          <li>Cost: opacity then volume is a tab switch, and the "Inspector" title gives way to the tabs.</li>
+        </ul>
+      </figure>
+    </div>
+
+    <h3>Row changes for both</h3>
+    <ul class="notes">
+      <li><b>One diamond per row.</b> Click it to start animating. After that it shows whether there's a key at the playhead, and a click adds or removes one. Stop Animating moves to the diamond's right-click menu, beside easing.</li>
+      <li><b>Reset shows only when a value differs from its default.</b> Its slot stays reserved, so nothing shifts, and the icon doubles as a "changed" marker. Section heads work the same way.</li>
+      <li><b>Keyframe arrows show only on animated rows</b>, also in reserved slots.</li>
+      <li><b>Ranged values get a slider</b> in the space after the field. Color grades, Rotation and Pan fill from the centre. The field still drags and types.</li>
+      <li><b>Crop is one row:</b> L, T, R, B.</li>
+      <li><b>LUT Mix appears once a LUT is chosen.</b> Try the LUT dropdown.</li>
+      <li><b>Effects are blocks:</b> collapse, bypass, name, reset, and a menu with Move Up, Move Down, Reset and Remove. Drag a block's header to reorder.</li>
+      <li><b>Add Effect is a button</b> that opens a menu with the same thumbnails as the Effects tab.</li>
+      <li><b>Speed uses the house field and checkboxes</b>, not egui's stock DragValue.</li>
+    </ul>
+  </section>
+
+  <section id="effects">
+    <h2>Effects tab</h2>
+    <div class="pair">
+      <figure class="bin">
+        <div class="stage"><div class="panel app" id="bin-fx" style="width:500px;height:600px">
+          <div class="phead tabs">
+            <button class="tab">Media</button>
+            <button class="tab on">Effects</button>
+            <button class="tab">Text</button>
+          </div>
+          <div class="pbody">
+            <div class="toolbar">
+              <span class="fld search"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg>Search</span>
+              <button class="ib vt on" data-view="list" title="List"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg></button>
+              <button class="ib vt" data-view="grid" title="Grid"><svg class="i" aria-hidden="true"><use href="#i-grid"/></svg></button>
+            </div>
+            <div class="fxlib list"></div>
+            <p class="hint">Drag onto a clip, or double-click to add to the selected clips</p>
+          </div>
+          <div class="pfoot">
+            <button class="btn" style="flex:1"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>New Effect</button>
+            <button class="btn" style="width:136px">Open Folder</button>
+          </div>
+        </div></div>
+      </figure>
+      <div class="notes-col">
+        <h3 style="margin-top:0">What's wrong now</h3>
+        <ul class="notes">
+          <li>Hovering draws Apply on top of the description, so the line you're reading disappears under a button.</li>
+          <li>Every row says Bundled.</li>
+          <li>Descriptions show raw backticks (<code>`amount`</code>) and stop after one line.</li>
+          <li>Nothing shows what an effect looks like.</li>
+        </ul>
+        <h3>Proposed</h3>
+        <ul class="notes">
+          <li>A thumbnail of each effect drawn on the Program frame at the playhead, at 160×90. Redrawn when the playhead settles or the tab opens, never during playback. A broken shader shows the frame dimmed with a warning.</li>
+          <li>Apply (+) and More (⋯) sit in fixed columns on every row. + is greyed out with nothing selected. Hover changes only the fill.</li>
+          <li>Bundled and My Effects groups replace the per-row tag. Rows call out only Error and Disabled.</li>
+          <li>Parameter names in descriptions show as their labels, in Ink 2.</li>
+          <li>Grid view uses the same toggle as the Media tab.</li>
+          <li>Effect names show in Title Case ("Film Grain"), whatever the shader header says.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="text">
+    <h2>Text tab</h2>
+    <div class="pair">
+      <figure class="bin">
+        <div class="stage"><div class="panel app" style="width:500px;height:420px">
+          <div class="phead tabs">
+            <button class="tab">Media</button>
+            <button class="tab">Effects</button>
+            <button class="tab on">Text</button>
+          </div>
+          <div class="pbody">
+            <div class="tiles">
+              <button class="tile">
+                <span class="tthumb"><img src="sample.jpg" alt=""><span class="tx t-title">Title</span></span>
+                <span class="tname">Title</span>
+                <span class="tdesc">Bold, centred</span>
+              </button>
+              <button class="tile">
+                <span class="tthumb"><img src="sample.jpg" alt=""><span class="tx t-lower">Name
+Role</span></span>
+                <span class="tname">Lower Third</span>
+                <span class="tdesc">Name and role on a box, bottom left</span>
+              </button>
+              <button class="tile">
+                <span class="tthumb"><img src="sample.jpg" alt=""><span class="tx t-cap">Caption</span></span>
+                <span class="tname">Caption</span>
+                <span class="tdesc">Outlined, bottom centre</span>
+              </button>
+            </div>
+            <p class="hint">Click to add to the bin, or drag onto the timeline</p>
+          </div>
+        </div></div>
+      </figure>
+      <div class="notes-col">
+        <h3 style="margin-top:0">What's wrong now</h3>
+        <ul class="notes">
+          <li>Three full-width buttons with no hint of what each one makes.</li>
+          <li>"Lower third" breaks the Title Case rule.</li>
+        </ul>
+        <h3>Proposed</h3>
+        <ul class="notes">
+          <li>Tiles that draw each preset on the Program frame with the real text renderer, at its true size and position, so you see how it sits on your own shot. Name and one line under each.</li>
+          <li>Same click and drag as now: click adds to the bin, drag goes onto the timeline.</li>
+          <li>True scale means a Caption reads small at tile size. It still shows where the text sits and how it's styled, which is the thing a button can't.</li>
+          <li>The frame is dimmed here so the mockup reads. The app should draw it as it is: white text on a bright shot looks the same in the tile as it will in the export.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="scope">
+    <h2>Proposed issues</h2>
+    <p>Sized for <code>scripts/roadmap/spec.py</code>. Build the shared row work first; it pays off whichever layout you pick.</p>
+    <table>
+      <thead><tr><th>Key</th><th>Size</th><th>Area</th><th>What</th><th>Needs</th></tr></thead>
+      <tbody>
+        <tr><td>inspector-rows</td><td class="n">M</td><td class="n">ui</td><td>One diamond per row, reset only when changed, keyframe arrows only when animated (both in reserved slots), sliders for ranged values, Crop on one row, LUT Mix only with a LUT, remembered section state, house controls in Speed.</td><td></td></tr>
+        <tr><td>inspector-effects</td><td class="n">M</td><td class="n">ui, core, render</td><td>Effect blocks with collapse, bypass, reset and a menu; drag to reorder; Add Effect as a button and menu. Bypass adds <code>enabled</code> to <code>Effect</code> (serde default true, skipped when true, so old projects open and unchanged files stay unchanged); the compositor skips bypassed effects in preview and export.</td><td>inspector-rows</td></tr>
+        <tr><td>inspector-tabs</td><td class="n">S</td><td class="n">ui</td><td>Video, Audio and Effects (and Text, for text clips) tabs in the Inspector header, following the selection. Each tab keeps its sections open.</td><td>inspector-rows</td></tr>
+        <tr><td>thumb-frame</td><td class="n">M</td><td class="n">render, ui</td><td>A 160×90 copy of the Program frame at the playhead for thumbnails, refreshed when the playhead settles, never during playback. With nothing on the timeline, a bundled fallback frame from the owner's footage, with its source in the assets README.</td><td></td></tr>
+        <tr><td>effect-thumbs</td><td class="n">M</td><td class="n">render, ui</td><td>Run each effect on the thumbnail frame. Effects tab rows with fixed Apply and More columns, groups, parameter labels in descriptions, grid view. Add Effect menu reuses the thumbnails.</td><td>thumb-frame</td></tr>
+        <tr><td>text-tiles</td><td class="n">S</td><td class="n">ui, render</td><td>Preset tiles drawn with the text rasterizer on the thumbnail frame; "Lower Third" in Title Case.</td><td>thumb-frame</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<div class="menu app" id="menu" hidden role="menu"></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const I = n => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const IMG = '<img src="sample.jpg" alt="">';
+const F = {
+  pct: v => `${Math.round(v * 10) / 10}%`,
+  deg: v => `${v.toFixed(1)}°`,
+  dec1: v => v.toFixed(1),
+  dec2: v => v.toFixed(2),
+  int: v => `${Math.round(v)}`,
+};
+
+const TRANSFORM = [
+  { t: 'multi', l: 'Position', fields: [['X', 1.5, 0], ['Y', -28.6, 0]] },
+  { t: 'num', l: 'Scale', v: 135.8, def: 100, min: 0, max: 400, f: 'pct', anim: 'here' },
+  { t: 'num', l: 'Rotation', v: 0, def: 0, min: -180, max: 180, f: 'deg', bi: 1 },
+  { t: 'multi', l: 'Anchor', fields: [['X', 0, 0], ['Y', 0, 0]] },
+  { t: 'multi', l: 'Crop', fields: [['L', 0, 0], ['T', 0, 0], ['R', 0, 0], ['B', 0, 0]] },
+];
+const OPACITY = [
+  { t: 'num', l: 'Opacity', v: 100, def: 100, min: 0, max: 100, f: 'pct' },
+  { t: 'dd', l: 'Blend', v: 'Normal', opts: ['Normal', 'Multiply', 'Screen', 'Overlay', 'Add', 'Darken', 'Lighten', 'Difference'] },
+];
+const COLOR = [
+  { t: 'num', l: 'Exposure', v: 0, def: 0, min: -4, max: 4, f: 'dec2', bi: 1 },
+  { t: 'num', l: 'Contrast', v: 0, def: 0, min: -100, max: 100, f: 'int', bi: 1 },
+  { t: 'num', l: 'Saturation', v: 0, def: 0, min: -100, max: 100, f: 'int', bi: 1 },
+  { t: 'num', l: 'Temperature', v: 0, def: 0, min: -100, max: 100, f: 'int', bi: 1 },
+  { t: 'num', l: 'Tint', v: 0, def: 0, min: -100, max: 100, f: 'int', bi: 1 },
+  { t: 'dd', l: 'LUT', v: 'None', lut: 1, opts: ['None', 'Kodak 2383.cube', 'Teal and Orange.cube', 'Choose File…'] },
+  { t: 'num', l: 'LUT Mix', v: 100, def: 100, min: 0, max: 100, f: 'pct', hidden: 1 },
+];
+const AUDIO = [
+  { t: 'num', l: 'Volume', v: 100, def: 100, min: 0, max: 200, f: 'pct' },
+  { t: 'num', l: 'Pan', v: 0, def: 0, min: -100, max: 100, f: 'int', bi: 1 },
+];
+const SPEED = [{ t: 'speed', l: 'Speed' }];
+
+const LIB = {
+  ca: { name: 'Chromatic Aberration', desc: 'Splits red and blue outwards from the centre by up to <span class="pn">Amount</span> pixels at the edges.', params: [{ l: 'Amount', def: 2, min: 0, max: 20 }] },
+  grain: { name: 'Film Grain', desc: 'Monochrome noise in <span class="pn">Grain</span>-pixel cells, new each frame, strongest in the midtones.', params: [{ l: 'Amount', def: .2, min: 0, max: 1 }, { l: 'Grain', def: 1.5, min: .5, max: 8 }] },
+  vig: { name: 'Vignette', desc: 'Darkens towards the corners: full strength at the corners, none inside the <span class="pn">Radius</span>.', params: [{ l: 'Amount', def: .5, min: 0, max: 1 }, { l: 'Radius', def: .6, min: 0, max: 1 }] },
+  scan: { name: 'Scanlines', user: 1, desc: 'Dark rows every <span class="pn">Spacing</span> pixels, like an old CRT.', params: [{ l: 'Spacing', def: 3, min: 1, max: 12 }, { l: 'Strength', def: .4, min: 0, max: 1 }] },
+  pix: { name: 'Pixelate', user: 1, disabled: 1, desc: 'Averages the picture into <span class="pn">Size</span>-pixel blocks.' },
+  glow: { name: 'Glow', user: 1, error: 'glow.wgsl line 14: expected ",", found ")"' },
+};
+const STACK = [['ca', { Amount: 4 }], ['grain', {}]];
+
+const thumb = k => `<span class="thumb fx-${k}">${IMG}${LIB[k].error ? `<span class="warn">${I('alert')}</span>` : ''}</span>`;
+const fld = (pre, text, def) => `<span class="fld">${pre ? `<span class="pre">${pre}</span>` : ''}<span class="val" data-def="${def}">${text}</span></span>`;
+const tools = (key = true) => `<span class="tools">
+  <button class="ib reset" title="Reset">${I('reset')}</button>
+  <button class="ib nav" title="Previous Keyframe">${I('chev-left')}</button>
+  <button class="ib nav" title="Next Keyframe">${I('chev-right')}</button>
+  ${key ? '<button class="ib key" title="Animate. Right-click for easing."><span class="dia"></span></button>' : '<span class="ib ph"></span>'}
+</span>`;
+const chk = (label, on) => `<button class="chk${on ? ' on' : ''}"><span class="box">${I('check')}</span>${label}</button>`;
+
+function row(p) {
+  const lbl = `<span class="lbl">${p.l}</span>`;
+  if (p.t === 'num') {
+    const cls = ['row', p.anim && 'anim', p.anim === 'here' && 'here', p.lut === undefined && p.hidden && 'lutmix'].filter(Boolean).join(' ');
+    return `<div class="${cls}" data-def="${p.def}" data-f="${p.f}"${p.bi ? ' data-bi="1"' : ''}${p.hidden ? ' hidden' : ''}>${lbl}
+      <span class="vals"><span class="fld w64"><span class="val"></span></span>
+      <span class="sl${p.bi ? ' bi' : ''}"><input type="range" min="${p.min}" max="${p.max}" step="${p.f === 'int' ? 1 : 'any'}" value="${p.v}" aria-label="${p.l}"></span></span>
+      ${tools()}</div>`;
+  }
+  if (p.t === 'multi') {
+    const changed = p.fields.some(([, v, d]) => v !== d);
+    return `<div class="row${changed ? ' changed' : ''}">${lbl}<span class="vals">${p.fields.map(([k, v, d]) => fld(k, F.dec1(v), F.dec1(d))).join('')}</span>${tools()}</div>`;
+  }
+  if (p.t === 'dd') {
+    return `<div class="row"${p.lut ? ' data-lut="1"' : ''} data-opts="${p.opts.join('|')}">${lbl}<span class="vals"><span class="fld dd" role="button" tabindex="0"><span class="val" data-def="${p.opts[0]}">${p.v}</span>${I('chev-down')}</span></span>${tools(false)}</div>`;
+  }
+  return `<div class="row">${lbl}<span class="vals"><span class="fld w64"><span class="val" data-def="100%">100%</span></span>${chk('Reverse', false)}${chk('Ripple', true)}</span>${tools(false)}</div>`;
+}
+
+function sec(title, rows, open, opts = {}) {
+  const head = opts.fx
+    ? `<span class="count fxcount"></span><span class="tools"><span class="ib ph"></span></span>`
+    : `<span class="tools"><button class="ib reset" title="Reset ${title}">${I('reset')}</button><span class="ib ph"></span><span class="ib ph"></span>${opts.nokey ? '<span class="ib ph"></span>' : `<button class="ib key" title="Keyframe All of ${title}"><span class="dia"></span></button>`}</span>`;
+  return `<div class="sec${open ? ' open' : ''}">
+    <div class="shead" role="button" tabindex="0" aria-expanded="${!!open}">${I('chev-down').replace('class="i"', 'class="i chev"')}<span>${title}</span>${head}</div>
+    <div class="sbody">${opts.fx ? fxStack() : rows.map(row).join('')}</div></div>`;
+}
+
+function fxBlock(k, vals = {}) {
+  const fx = LIB[k];
+  return `<div class="fx" data-k="${k}">
+    <div class="fxhead" title="Drag to reorder">
+      <button class="ib fxchev" title="Collapse">${I('chev-down')}</button>
+      <button class="ib eye" title="Bypass">${I('eye')}</button>
+      <span class="fxname">${fx.name}</span>
+      <span class="tools"><button class="ib reset" title="Reset ${fx.name}">${I('reset')}</button><span class="ib ph"></span><span class="ib ph"></span><button class="ib more" title="More">${I('more')}</button></span>
+    </div>
+    <div class="fxbody">${fx.params.map(p => row({ t: 'num', f: 'dec2', v: vals[p.l] ?? p.def, ...p })).join('')}</div></div>`;
+}
+const fxStack = () => `<div class="fxstack">${STACK.map(([k, v]) => fxBlock(k, v)).join('')}</div>
+  <p class="empty" hidden>No effects on this clip. Drag one from the Effects tab, or use Add Effect.</p>
+  <button class="btn full addfx">${I('plus')}Add Effect</button>`;
+
+$('#insp-a .pbody').innerHTML =
+  sec('Transform', TRANSFORM, 1) + sec('Opacity', OPACITY, 1) + sec('Effects', [], 1, { fx: 1 }) +
+  sec('Color', COLOR, 0) + sec('Audio', AUDIO, 0) + sec('Speed', SPEED, 0, { nokey: 1 });
+$('#insp-b .pbody').innerHTML =
+  `<div class="pane" data-pane="video">${sec('Transform', TRANSFORM, 1) + sec('Opacity', OPACITY, 1) + sec('Color', COLOR, 1) + sec('Speed', SPEED, 1, { nokey: 1 })}</div>
+   <div class="pane" data-pane="audio" hidden>${sec('Audio', AUDIO, 1)}</div>
+   <div class="pane fxpad" data-pane="fx" hidden>${fxStack()}</div>`;
+
+function libRow(k) {
+  const fx = LIB[k];
+  const tag = fx.error ? '<span class="tag err">Error</span>' : fx.disabled ? '<span class="tag">Disabled</span>' : '';
+  const cls = ['fxrow', fx.error && 'err', fx.disabled && 'off'].filter(Boolean).join(' ');
+  return `<div class="${cls}" data-k="${k}" tabindex="0" draggable="true">${thumb(k)}
+    <span class="fxtext"><span class="fxn">${fx.name}${tag}</span><span class="fxd">${fx.error || fx.desc}</span></span>
+    <button class="ib apply" title="Apply to Selected Clips"${fx.error || fx.disabled ? ' disabled' : ''}>${I('plus')}</button>
+    <button class="ib more" title="More">${I('more')}</button></div>`;
+}
+$('#bin-fx .fxlib').innerHTML =
+  `<div class="grp">Bundled</div>${['ca', 'grain', 'vig'].map(libRow).join('')}
+   <div class="grp">My Effects</div>${['scan', 'pix', 'glow'].map(libRow).join('')}`;
+
+function paint(r) {
+  const inp = $('input', r);
+  if (!inp) return;
+  const v = +inp.value, min = +inp.min, max = +inp.max;
+  const p = (v - min) / (max - min) * 100;
+  const z = r.dataset.bi ? (0 - min) / (max - min) * 100 : 0;
+  inp.style.setProperty('--lo', `${Math.min(p, z)}%`);
+  inp.style.setProperty('--hi', `${Math.max(p, z)}%`);
+  $('.val', r).textContent = F[r.dataset.f](v);
+  r.classList.toggle('changed', Math.abs(v - +r.dataset.def) > 1e-9);
+}
+function refresh() {
+  $$('.sec').forEach(s => s.classList.toggle('changed', !!$('.sbody .row.changed', s)));
+  $$('.fx').forEach(f => f.classList.toggle('changed', !!$('.row.changed', f)));
+  ['#insp-a', '#insp-b'].forEach(id => {
+    const root = $(id), n = $$('.fx', root).length;
+    $$('.fxcount', root).forEach(e => { e.textContent = n || ''; });
+    $$('.fxstack', root).forEach(s => { s.nextElementSibling.hidden = n > 0; });
+  });
+}
+function resetRow(r) {
+  const inp = $('input', r);
+  if (inp) { inp.value = r.dataset.def; paint(r); }
+  $$('.val[data-def]', r).forEach(v => { v.textContent = v.dataset.def; });
+  if (r.dataset.lut) $('.row.lutmix', r.parentElement).hidden = true;
+  r.classList.remove('changed', 'anim', 'here');
+}
+$$('.row').forEach(paint);
+refresh();
+
+// Menus
+const menu = $('#menu');
+let onPick = null, opener = null;
+function openMenu(anchor, html, pick, align = 'left') {
+  menu.innerHTML = html;
+  menu.style.width = align === 'full' ? `${anchor.getBoundingClientRect().width}px` : '';
+  menu.hidden = false;
+  onPick = pick; opener = anchor;
+  const a = anchor.getBoundingClientRect(), m = menu.getBoundingClientRect();
+  let x = align === 'right' ? a.right - m.width : a.left;
+  x = Math.max(8, Math.min(x, innerWidth - m.width - 8));
+  let y = a.bottom + 4;
+  if (y + m.height > innerHeight - 8) y = a.top - m.height - 4;
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+}
+function closeMenu() { menu.hidden = true; onPick = opener = null; }
+const items = list => list.map(it => it === '-' ? '<div class="msep"></div>'
+  : `<button class="mi" data-act="${it.act}"${it.off ? ' disabled' : ''}>${'check' in it ? `<svg class="i ck" style="visibility:${it.check ? 'visible' : 'hidden'}"><use href="#i-check"/></svg>` : ''}${it.label}${it.k ? `<span class="k">${it.k}</span>` : ''}</button>`).join('');
+menu.addEventListener('click', e => {
+  const b = e.target.closest('.mi');
+  if (!b) return;
+  const pick = onPick;
+  closeMenu();
+  pick && pick(b.dataset.act);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+addEventListener('scroll', closeMenu, true);
+
+function addFx(k) {
+  $$('.fxstack').forEach(s => {
+    s.insertAdjacentHTML('beforeend', fxBlock(k));
+    $$('.row', s.lastElementChild).forEach(paint);
+  });
+  refresh();
+}
+
+document.addEventListener('contextmenu', e => {
+  const key = e.target.closest('.row .key');
+  if (!key) return;
+  e.preventDefault();
+  const r = key.closest('.row');
+  if (!r.classList.contains('anim')) return;
+  const ease = r.dataset.ease || 'Linear';
+  openMenu(key, items([
+    ...['Linear', 'Ease In', 'Ease Out', 'Ease In and Out', 'Hold'].map(l => ({ label: l, act: l, check: l === ease, off: !r.classList.contains('here') })),
+    '-', { label: 'Stop Animating', act: 'stop' },
+  ]), act => {
+    if (act === 'stop') r.classList.remove('anim', 'here');
+    else r.dataset.ease = act;
+  }, 'right');
+});
+
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (!menu.hidden && !menu.contains(t)) { const o = opener; closeMenu(); if (o && o.contains(t)) return; }
+
+  const tab = t.closest('.tab[data-tab]');
+  if (tab) {
+    const p = tab.closest('.panel');
+    $$('.tab', p).forEach(x => x.classList.toggle('on', x === tab));
+    $$('.pane', p).forEach(x => { x.hidden = x.dataset.pane !== tab.dataset.tab; });
+    return;
+  }
+  const reset = t.closest('.reset');
+  if (reset) {
+    const scope = reset.closest('.row') || reset.closest('.fx') || reset.closest('.sec');
+    (scope.classList.contains('row') ? [scope] : $$('.row', scope)).forEach(resetRow);
+    return refresh();
+  }
+  const key = t.closest('.key');
+  if (key) {
+    const r = key.closest('.row');
+    if (r) {
+      if (!r.classList.contains('anim')) r.classList.add('anim', 'here');
+      else r.classList.toggle('here');
+    } else {
+      $$('.row', key.closest('.sec')).filter(x => $('.key', x)).forEach(x => x.classList.add('anim', 'here'));
+    }
+    return;
+  }
+  if (t.closest('.shead') && !t.closest('.ib')) {
+    const s = t.closest('.sec');
+    s.classList.toggle('open');
+    t.closest('.shead').setAttribute('aria-expanded', s.classList.contains('open'));
+    return;
+  }
+  const eye = t.closest('.eye');
+  if (eye) {
+    const fx = eye.closest('.fx'), off = fx.classList.toggle('off');
+    eye.innerHTML = I(off ? 'eye-off' : 'eye');
+    eye.title = off ? 'Turn On' : 'Bypass';
+    return;
+  }
+  const fc = t.closest('.fxchev');
+  if (fc) { fc.closest('.fx').classList.toggle('collapsed'); return; }
+
+  const more = t.closest('.more');
+  if (more && more.closest('.fx')) {
+    const fx = more.closest('.fx');
+    return openMenu(more, items([
+      { label: 'Move Up', act: 'up', off: !fx.previousElementSibling },
+      { label: 'Move Down', act: 'down', off: !fx.nextElementSibling },
+      { label: 'Reset', act: 'reset' },
+      '-', { label: 'Remove', act: 'remove', k: 'Delete' },
+    ]), act => {
+      if (act === 'up') fx.previousElementSibling.before(fx);
+      if (act === 'down') fx.nextElementSibling.after(fx);
+      if (act === 'reset') $$('.row', fx).forEach(resetRow);
+      if (act === 'remove') fx.remove();
+      refresh();
+    }, 'right');
+  }
+  if (more && more.closest('.fxrow')) {
+    const fr = more.closest('.fxrow'), fx = LIB[fr.dataset.k];
+    return openMenu(more, items([
+      { label: 'Apply to Selected Clips', act: 'apply', off: fx.error || fx.disabled },
+      { label: 'Reveal File', act: 'reveal' },
+      { label: 'Duplicate', act: 'dup' },
+      { label: fx.disabled ? 'Enable' : 'Disable', act: 'toggle' },
+      ...(fx.user ? ['-', { label: 'Delete', act: 'delete' }] : []),
+    ]), act => { if (act === 'apply') addFx(fr.dataset.k); }, 'right');
+  }
+  const add = t.closest('.addfx');
+  if (add) {
+    const usable = Object.keys(LIB).filter(k => !LIB[k].error && !LIB[k].disabled);
+    return openMenu(add, `<div class="fld search msearch">${I('search')}Search Effects</div>` +
+      usable.map(k => `<button class="mi lib" data-act="${k}">${thumb(k)}<span class="t"><span>${LIB[k].name}</span><span class="d">${LIB[k].desc}</span></span></button>`).join(''),
+      addFx, 'full');
+  }
+  const dd = t.closest('.dd');
+  if (dd) {
+    const r = dd.closest('.row'), val = $('.val', r);
+    return openMenu(dd, items(r.dataset.opts.split('|').map(o => ({ label: o, act: o, check: o === val.textContent }))), act => {
+      if (act === 'Choose File…') return;
+      val.textContent = act;
+      r.classList.toggle('changed', act !== val.dataset.def);
+      if (r.dataset.lut) $('.row.lutmix', r.parentElement).hidden = act === 'None';
+      refresh();
+    }, 'full');
+  }
+  const c = t.closest('.chk');
+  if (c) { c.classList.toggle('on'); return; }
+
+  const apply = t.closest('.fxrow .apply');
+  if (apply) return addFx(apply.closest('.fxrow').dataset.k);
+  const vt = t.closest('.vt');
+  if (vt) {
+    $$('.vt', vt.parentElement).forEach(x => x.classList.toggle('on', x === vt));
+    const lib = $('.fxlib', vt.closest('.panel'));
+    lib.classList.toggle('grid', vt.dataset.view === 'grid');
+    lib.classList.toggle('list', vt.dataset.view === 'list');
+    return;
+  }
+  const fr = t.closest('.fxrow');
+  if (fr) $$('.fxrow', fr.parentElement).forEach(x => x.classList.toggle('sel', x === fr));
+});
+
+document.addEventListener('dblclick', e => {
+  const fr = e.target.closest('.fxrow');
+  if (fr && !fr.classList.contains('err') && !fr.classList.contains('off') && !e.target.closest('.ib')) addFx(fr.dataset.k);
+});
+document.addEventListener('input', e => {
+  const r = e.target.closest('.row');
+  if (r) { paint(r); refresh(); }
+});
+document.addEventListener('keydown', e => {
+  const h = e.target.closest && e.target.closest('.shead, .dd');
+  if (h && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); h.click(); }
+});
+</script>
+</body>
+</html>

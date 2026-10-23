@@ -1153,3 +1153,93 @@ I("in-out-snap-edges", "Snap timeline In/Out flags to clip starts and ends", Non
       "With snapping disabled, or outside the threshold, dragging does not jump to a clip boundary",
       "Regression coverage exercises both flags, both boundary types and snapping enabled/disabled"],
   labels=["later"])
+
+MOCK3 = f"[Inspector, Effects and Text mockup]({PROTO}/v3/inspector-effects-text.html)"
+
+I("inspector-rows", "Inspector rows: one diamond, reset on change, sliders", None, ["ui"], "M",
+  summary="Inspector rows are noisy and mostly empty: every row ends in the same reset and keyframe icons far from its value. Tidy them so values, changes and keyframes read at a glance.",
+  scope=[
+      "One keyframe diamond per row: a click starts animating; once animated it shows and toggles the key at the playhead. Stop Animating moves to its right-click menu beside easing",
+      "Reset shows only when the value differs from its default, in a reserved slot so nothing shifts. Section heads do the same",
+      "Previous and next keyframe arrows show only on animated rows, also in reserved slots",
+      "Ranged values get a slider after the field; colour grades, Rotation and Pan fill from the centre. The field still drags and types",
+      "Crop on one row (L, T, R, B); LUT Mix only once a LUT is set",
+      "Speed row uses suite-ui's drag field and checkboxes instead of egui's DragValue",
+  ],
+  ac=["A clip with default values shows no reset buttons; changing Scale shows reset on that row and on Transform's head, and nothing else moves",
+      "An unanimated row shows one diamond; clicking it adds a key at the playhead and shows the arrows",
+      "Dragging a slider changes the value as one undo step",
+      "Rows match the mockup"],
+  refs=[MOCK3, f"[DESIGN.md]({DESIGN})"],
+  labels=["later"])
+
+I("inspector-effects", "Inspector effect stack: blocks, bypass, reorder, Add Effect menu", None, ["ui", "core", "render"], "M", ["inspector-rows"],
+  summary="Effects in the Inspector are bare labels with Up, Down and Remove text buttons that appear and vanish, and Add Effect is a dropdown. Make each effect a block you can collapse, bypass and reorder.",
+  scope=[
+      "Each effect is a block: a header with collapse, bypass (eye), name, reset and a More menu (Move Up, Move Down, Reset, Remove), then its parameter rows",
+      "Drag a block's header to reorder; menu items disable instead of disappearing",
+      "Bypass: `enabled: bool` on `Effect`, default true. The compositor skips bypassed effects in preview, export and CLI render. Toggling is undoable",
+      "Add Effect is a button opening a menu with a search field and each effect's name and description (thumbnails come with the Effects tab thumbnails issue)",
+  ],
+  ac=["Bypassing an effect removes it from the Program view and from an export, keeps its settings and keyframes, and undo restores it",
+      "Bypass survives save and reopen",
+      "Reordering by drag and by menu both change the render order and are undoable",
+      "No buttons appear, vanish or move when the stack changes"],
+  refs=[MOCK3],
+  labels=["later"])
+
+I("inspector-tabs", "Inspector tabs: Video, Audio and Effects", None, ["ui"], "S", ["inspector-effects"],
+  summary="Split the Inspector into tabs so each one is short and effects are one click away (option B in the mockup).",
+  scope=[
+      "Tabs in the Inspector's header row in place of its title, styled like the bin's Media, Effects and Text tabs; no second header row",
+      "Video (Transform, Opacity, Color, Speed), Audio (Audio) and Effects (the effect stack, with its count in the tab label); text clips add a Text tab first",
+      "Tabs follow the selection: an audio-only selection shows Audio alone; the chosen tab is kept while it exists",
+      "Sections inside a tab start open",
+  ],
+  ac=["A video clip with linked audio shows Video, Audio and Effects; a text clip shows Text first",
+      "The Effects tab label shows how many effects the selection has",
+      "The Inspector header stays on one line with the other panels' headers (DESIGN.md Layout checks)"],
+  refs=[MOCK3, f"[DESIGN.md · Layout]({DESIGN}#layout)"],
+  labels=["later"])
+
+I("thumb-frame", "Thumbnail frame from the Program view", None, ["render", "ui"], "M",
+  summary="Effect and text thumbnails need a picture to draw on: use the Program frame at the playhead, with a bundled fallback.",
+  scope=[
+      "A 160×90 copy of the composited Program frame at the playhead, kept on the GPU and shown through an egui texture",
+      "Refreshed when the playhead settles or the Effects or Text tab opens; never during playback or scrubbing",
+      "With nothing on the timeline, a bundled fallback frame (`docs/prototypes/v3/sample.jpg`, the owner's own footage), its source recorded in the assets README",
+      "Run one effect, or draw one text preset, over that frame into a thumbnail texture",
+  ],
+  ac=["Playback and scrubbing do no thumbnail work while the Effects tab is open",
+      "An empty project shows the fallback frame",
+      "A test renders a bundled effect's thumbnail and checks it differs from the source frame"],
+  refs=[MOCK3],
+  labels=["later"])
+
+I("effect-thumbs", "Effects tab thumbnails and a row layout that never shifts", None, ["ui"], "M", ["thumb-frame", "inspector-effects"],
+  summary="In the Effects tab, hovering draws Apply over the description, and nothing shows what an effect does. Add thumbnails and fixed columns.",
+  scope=[
+      "Each row: a thumbnail (the effect run on the thumbnail frame), name, two-line description, then Apply (+) and More (⋯) in fixed columns. + is disabled with nothing selected; hover only changes the fill",
+      "Bundled and My Effects groups replace the per-row tag; rows call out only Error (thumbnail dimmed with a warning) and Disabled",
+      "Backticked parameter names in descriptions show as their labels in Ink 2",
+      "Grid view behind the Media tab's list and grid toggle",
+      "Effect names show in Title Case whatever the shader header says",
+      "The Inspector's Add Effect menu reuses the thumbnails",
+  ],
+  ac=["Hovering a row changes nothing but its fill",
+      "Each bundled effect's thumbnail visibly shows the effect on the current frame",
+      "A broken user shader shows a dimmed thumbnail and its error"],
+  refs=[MOCK3],
+  labels=["later"])
+
+I("text-tiles", "Text tab preset tiles", None, ["ui"], "S", ["thumb-frame"],
+  summary="The Text tab is three plain buttons with no hint of what each makes. Show each preset on the current frame.",
+  scope=[
+      "Two-column tiles: each preset drawn on the thumbnail frame with the text renderer at its true size and position, then its name and a one-line description",
+      "Click adds to the bin and drag goes onto the timeline, as now",
+      "\"Lower third\" becomes \"Lower Third\" in the English catalog",
+  ],
+  ac=["Each tile shows its preset's text where it lands on the frame",
+      "Clicking a tile adds the preset to the bin; dragging one onto the timeline places it"],
+  refs=[MOCK3],
+  labels=["later"])

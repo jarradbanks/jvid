@@ -441,6 +441,12 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#228](https://github.com/jarradbanks/jvid/issues/228) **Move application settings to Edit > Preferences** — Make application preferences discoverable under Edit > Preferences instead of the title-bar project menu.
 - [#229](https://github.com/jarradbanks/jvid/issues/229) **Create a track when dropping assets outside existing tracks** — Dropping text, solids or other assets into empty timeline space should create a track above the existing one.
 - [#230](https://github.com/jarradbanks/jvid/issues/230) **Snap timeline In/Out flags to clip starts and ends** — The timeline In/Out flags currently do not snap to clip boundaries when dragged.
+- [#231](https://github.com/jarradbanks/jvid/issues/231) **Inspector rows: one diamond, reset on change, sliders** — Inspector rows are noisy and mostly empty: every row ends in the same reset and keyframe icons far from its value. Tidy them so values, changes and keyframes read at a glance.
+- [#232](https://github.com/jarradbanks/jvid/issues/232) **Inspector effect stack: blocks, bypass, reorder, Add Effect menu** — Effects in the Inspector are bare labels with Up, Down and Remove text buttons that appear and vanish, and Add Effect is a dropdown. Make each effect a block you can collapse, bypass and reorder.
+- [#233](https://github.com/jarradbanks/jvid/issues/233) **Inspector tabs: Video, Audio and Effects** — Split the Inspector into tabs so each one is short and effects are one click away (option B in the mockup).
+- [#234](https://github.com/jarradbanks/jvid/issues/234) **Thumbnail frame from the Program view** — Effect and text thumbnails need a picture to draw on: use the Program frame at the playhead, with a bundled fallback.
+- [#235](https://github.com/jarradbanks/jvid/issues/235) **Effects tab thumbnails and a row layout that never shifts** — In the Effects tab, hovering draws Apply over the description, and nothing shows what an effect does. Add thumbnails and fixed columns.
+- [#236](https://github.com/jarradbanks/jvid/issues/236) **Text tab preset tiles** — The Text tab is three plain buttons with no hint of what each makes. Show each preset on the current frame.
 
 ---
 
