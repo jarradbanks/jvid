@@ -9,10 +9,10 @@ use jvid_core::model::{
     Blend, Clip, ClipId, Effect, MediaAsset, Project, Text, TrackKind, Transform,
 };
 use jvid_core::time::Time;
-use suite_ui::theme::icon;
+use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{
-    Button, Checkbox, DragField, Dropdown, KeyButton, Keyed, SectionHeader, Slider,
+    Button, Checkbox, DragField, Dropdown, KeyButton, Keyed, SectionHeader, Slider, TextInput,
 };
 
 use crate::i18n::{CATALOG, Label, tr, verbatim};
@@ -663,8 +663,47 @@ fn restack(clips: &[&Clip], f: impl Fn(&mut Vec<usize>)) -> Command {
     })
 }
 
-/// The effect stack, shown when every clip has the same one: each effect's parameters as
-/// keyframeable rows with move and remove buttons, then a picker adding one to the end.
+/// What an effect block's header drags: the block's index in the stack.
+#[derive(Clone, Copy)]
+struct FxDrag(usize);
+
+/// Moves the effect at `from` into gap `to`: 0 is above the first, `order.len()` below the last.
+fn move_to(order: &mut Vec<usize>, from: usize, to: usize) {
+    let fx = order.remove(from);
+    order.insert(if to > from { to - 1 } else { to }, fx);
+}
+
+/// Bypasses effect `i` on every clip, or turns it back on when the first clip's is bypassed.
+fn bypass(clips: &[&Clip], i: usize) -> Command {
+    let on = !clips[0].transform.effects[i].enabled;
+    rewrite(clips, |_, x, _| {
+        if let Some(e) = x.effects.get_mut(i) {
+            e.enabled = on;
+        }
+    })
+}
+
+/// Sets every one of an effect's parameter rows `props` back to its default, dropping keys.
+fn reset_fx(clips: &[&Clip], props: &[Prop]) -> Command {
+    rewrite(clips, |_, x, keys| {
+        for p in props {
+            keys.remove(p.name);
+            set(x, p.name, Value::Scalar(p.default.unwrap_or_default()));
+        }
+    })
+}
+
+/// What an effect block's header asks for.
+enum FxAction {
+    Bypass,
+    /// Into this gap, as [`move_to`] takes it.
+    Move(usize),
+    Reset,
+    Remove,
+}
+
+/// The effect stack, shown when every clip has the same one: a block per effect, a header
+/// then its parameters as keyframeable rows, and Add Effect at the end.
 fn effects_rows(
     ui: &mut Ui,
     clips: &[&Clip],
@@ -690,85 +729,290 @@ fn effects_rows(
             .collect()
     });
     let mut edit = None;
+    let n = effects.len();
+    // Each block's top, then the stack's bottom: the gaps a dragged block drops into.
+    let mut gaps = Vec::with_capacity(n + 1);
     for (i, e) in effects.iter().enumerate() {
+        gaps.push(ui.cursor().top());
+        if i > 0 {
+            let y = ui.cursor().top() - ui.spacing().item_spacing.y / 2.0;
+            let line = egui::Stroke::new(1.0 / ui.pixels_per_point(), color::BORDER);
+            ui.painter().hline(ui.max_rect().x_range(), y, line);
+        }
         let found = lib.iter().find(|(k, ..)| *k == e.shader);
         let (entry, shipped) = (found.map(|(_, e, _)| e), found.is_some_and(|f| f.2));
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = space::S4;
-            let (title, problem) = match entry {
-                Some(Ok(s)) => (crate::effects::name(&e.shader, shipped, s).to_owned(), None),
-                Some(Err(err)) => (e.shader.clone(), Some(err.clone())),
-                None => (
-                    e.shader.clone(),
-                    Some(tr!(
-                        "inspector.effect_missing",
-                        file = format!("{}.wgsl", e.shader)
-                    )),
-                ),
-            };
-            let label = ui.label(egui::RichText::new(&title).color(color::INK).strong());
-            if let Some(p) = problem {
-                label.on_hover_text(&p);
-                ui.label(egui::RichText::new(tr!("inspector.passthrough")).color(color::RED));
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let n = effects.len();
-                if ui.add(Button::ghost(tr!("inspector.fx_remove"))).clicked() {
-                    edit = Some((
-                        restack(clips, |o| {
-                            o.remove(i);
-                        }),
-                        None,
-                    ));
-                }
-                if i + 1 < n && ui.add(Button::ghost(tr!("inspector.fx_down"))).clicked() {
-                    edit = Some((restack(clips, |o| o.swap(i, i + 1)), None));
-                }
-                if i > 0 && ui.add(Button::ghost(tr!("inspector.fx_up"))).clicked() {
-                    edit = Some((restack(clips, |o| o.swap(i - 1, i)), None));
-                }
-            });
-        });
-        let Some(Ok(shader)) = entry else { continue };
-        for q in &shader.params {
-            *index += 1;
-            let name = Effect::key(i, &q.name);
-            let label = crate::effects::param(&e.shader, shipped, &q.name);
-            let p = Prop {
+        let (title, problem) = match entry {
+            Some(Ok(s)) => (crate::effects::name(&e.shader, shipped, s).to_owned(), None),
+            Some(Err(err)) => (e.shader.clone(), Some(err.clone())),
+            None => (
+                e.shader.clone(),
+                Some(tr!(
+                    "inspector.effect_missing",
+                    file = format!("{}.wgsl", e.shader)
+                )),
+            ),
+        };
+        let params: Vec<_> = match entry {
+            Some(Ok(shader)) => shader.params.iter().collect(),
+            _ => Vec::new(),
+        };
+        let names: Vec<(String, String)> = params
+            .iter()
+            .map(|q| {
+                let label = crate::effects::param(&e.shader, shipped, &q.name);
+                (Effect::key(i, &q.name), label)
+            })
+            .collect();
+        let props: Vec<Prop> = params
+            .iter()
+            .zip(&names)
+            .map(|(q, (name, label))| Prop {
                 speed: (q.max - q.min) / 200.0,
                 decimals: 2,
                 range: (q.min, q.max),
                 default: Some(q.default),
-                label: Some(&label),
-                ..prop(&name, ONE)
-            };
-            if let Some(e) = row(ui, clips, &p, t, *index, seek) {
-                edit = Some(e);
-            }
+                label: Some(label),
+                ..prop(name, ONE)
+            })
+            .collect();
+        let changed = props.iter().any(|p| differs(clips, p, t));
+        // Keyed by shader and which of that shader it is, so it follows its block when moved.
+        let nth = effects[..i].iter().filter(|x| x.shader == e.shader).count();
+        let id = ui.id().with(("inspector fx", &e.shader, nth));
+        let mut open = ui.data_mut(|d| *d.get_temp_mut_or(id, true));
+        let head = FxHead {
+            title: &title,
+            problem,
+            on: e.enabled,
+            changed,
+        };
+        let cmd = match fx_head(ui, head, &mut open, i, n) {
+            Some(FxAction::Bypass) => Some(bypass(clips, i)),
+            Some(FxAction::Move(to)) => Some(restack(clips, |o| move_to(o, i, to))),
+            Some(FxAction::Reset) => Some(reset_fx(clips, &props)),
+            Some(FxAction::Remove) => Some(restack(clips, |o| {
+                o.remove(i);
+            })),
+            None => None,
+        };
+        if let Some(cmd) = cmd {
+            edit = Some((cmd, None));
+        }
+        ui.data_mut(|d| d.insert_temp(id, open));
+        let first = *index;
+        *index += props.len() as u64;
+        if open {
+            // Bypassed: the settings stay, greyed out, until it's back on.
+            ui.add_enabled_ui(e.enabled, |ui| {
+                for (k, p) in (first + 1..).zip(&props) {
+                    if let Some(e) = row(ui, clips, p, t, k, seek) {
+                        edit = Some(e);
+                    }
+                }
+            });
         }
     }
-    let disabled = crate::effects::with(|l| l.disabled.clone());
-    let usable: Vec<(&str, &jvid_render::effect::Shader, bool)> = lib
-        .iter()
-        .filter(|(k, ..)| !disabled.contains(k))
-        .filter_map(|(k, e, shipped)| Some((k.as_str(), e.as_deref().ok()?, *shipped)))
-        .collect();
-    let mut names = vec![tr!("inspector.add_effect")];
-    names.extend(
-        usable
-            .iter()
-            .map(|(k, s, shipped)| crate::effects::name(k, *shipped, s)),
-    );
-    let mut pick = 0;
-    if ui
-        .add(Dropdown::new(&mut pick, &names).width(ui.available_width()))
-        .changed()
-        && pick > 0
-    {
-        let (stem, shader, _) = usable[pick - 1];
-        edit = Some((push_effect(clips, stem, shader), None));
+    gaps.push(ui.cursor().top());
+    if let Some(e) = drop_block(ui, clips, &gaps) {
+        edit = Some(e);
+    }
+    if let Some(e) = add_menu(ui, clips) {
+        edit = Some(e);
     }
     edit
+}
+
+/// What an effect block's header shows.
+struct FxHead<'a> {
+    title: &'a str,
+    /// Why the effect passes the image through unchanged, when it does.
+    problem: Option<String>,
+    on: bool,
+    /// Whether any parameter is off its default, which shows reset.
+    changed: bool,
+}
+
+/// Block `i` of `n`'s header: collapse and bypass, the name, then reset and More in the row
+/// tool slots. Nothing in it moves or vanishes as the stack changes; menu items disable
+/// instead. Dragging it moves the block, see [`drop_block`].
+fn fx_head(ui: &mut Ui, head: FxHead, open: &mut bool, i: usize, n: usize) -> Option<FxAction> {
+    let w = ui.available_width();
+    let (rect, drag) = ui.allocate_exact_size(vec2(w, size::CONTROL), Sense::drag());
+    drag.dnd_set_drag_payload(FxDrag(i));
+    if drag.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
+    let mut ui = ui.new_child(UiBuilder::new().max_rect(rect));
+    let left = |k: f32| {
+        let x = rect.left() + k * (size::SMALL_CONTROL + GAP);
+        let y = rect.center().y - size::SMALL_CONTROL / 2.0;
+        Rect::from_min_size(pos2(x, y), Vec2::splat(size::SMALL_CONTROL))
+    };
+    let mut act = None;
+    let (glyph, name) = match *open {
+        true => (icon::CHEVRON_DOWN, tr!("inspector.fx_collapse")),
+        false => (icon::CHEVRON_RIGHT, tr!("inspector.fx_expand")),
+    };
+    if ui
+        .put(left(0.0), Button::icon(glyph, name).small())
+        .clicked()
+    {
+        *open = !*open;
+    }
+    let (glyph, name) = match head.on {
+        true => (icon::EYE, tr!("inspector.fx_bypass")),
+        false => (icon::EYE_OFF, tr!("inspector.fx_turn_on")),
+    };
+    let eye = Button::icon(glyph, name).small().on(!head.on);
+    if ui.put(left(1.0), eye).clicked() {
+        act = Some(FxAction::Bypass);
+    }
+    let ink = if head.on { color::INK } else { color::INK_3 };
+    let mut job = egui::text::LayoutJob::default();
+    let format = |font, color| egui::TextFormat::simple(font, color);
+    job.append(head.title, 0.0, format(theme::body_strong(), ink));
+    if head.problem.is_some() {
+        let pass = tr!("inspector.passthrough");
+        job.append(pass, space::S4, format(theme::body(), color::RED));
+    }
+    let x = left(2.0).left() + space::S4;
+    let text = Rect::from_x_y_ranges(x..=rect.right() - TOOLS - space::S4, rect.y_range());
+    let layout = Layout::left_to_right(Align::Center);
+    let mut name = ui.new_child(UiBuilder::new().max_rect(text).layout(layout));
+    let label = name.add(egui::Label::new(job).truncate().selectable(false));
+    if let Some(p) = &head.problem {
+        label.on_hover_text(p);
+    }
+    let reset = tr!("inspector.reset_section", section = head.title);
+    if head.changed
+        && ui
+            .put(slot(rect, 0.0), Button::icon(icon::UNDO, &reset).small())
+            .clicked()
+    {
+        act = Some(FxAction::Reset);
+    }
+    let more = Button::icon(icon::ELLIPSIS, tr!("inspector.more")).small();
+    let more = ui.put(slot(rect, 3.0), more);
+    egui::Popup::menu(&more).show(|ui| {
+        let item = |ui: &mut Ui, label: &str, enabled| {
+            ui.add_enabled(enabled, egui::Button::new(label)).clicked()
+        };
+        if item(ui, tr!("inspector.fx_up"), i > 0) {
+            act = Some(FxAction::Move(i - 1));
+        }
+        if item(ui, tr!("inspector.fx_down"), i + 1 < n) {
+            act = Some(FxAction::Move(i + 2));
+        }
+        if item(ui, tr!("inspector.reset"), head.changed) {
+            act = Some(FxAction::Reset);
+        }
+        ui.separator();
+        if item(ui, tr!("inspector.fx_remove"), true) {
+            act = Some(FxAction::Remove);
+        }
+    });
+    act
+}
+
+/// While a block's header is dragged over the stack, a line at the gap it would drop into
+/// among `gaps` (see [`effects_rows`]); dropping there moves it, one undo step.
+fn drop_block(ui: &mut Ui, clips: &[&Clip], gaps: &[f32]) -> Option<Edit> {
+    let from = egui::DragAndDrop::payload::<FxDrag>(ui.ctx())?.0;
+    let pos = ui.ctx().pointer_latest_pos()?;
+    let (top, bottom) = (gaps[0], gaps[gaps.len() - 1]);
+    let area = Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=bottom);
+    // Below a block's middle drops after it.
+    let to = gaps
+        .windows(2)
+        .filter(|w| (w[0] + w[1]) / 2.0 < pos.y)
+        .count();
+    if !area.contains(pos) || to == from || to == from + 1 {
+        return None;
+    }
+    let y = gaps[to] - ui.spacing().item_spacing.y / 2.0;
+    let line = egui::Stroke::new(2.0, color::LIGHT_BLUE);
+    ui.painter().hline(area.x_range(), y, line);
+    let dropped = ui.input(|i| i.pointer.any_released());
+    dropped.then(|| (restack(clips, |o| move_to(o, from, to)), None))
+}
+
+/// Add Effect: a button opening a search field over each usable effect's name and
+/// description; picking one adds it to the end of every clip's stack.
+fn add_menu(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
+    let w = ui.available_width();
+    let add = Button::secondary(tr!("inspector.add_effect")).with_icon(icon::PLUS);
+    let r = ui.add(add.width(w));
+    let query = ui.id().with("inspector fx query");
+    if r.clicked() {
+        ui.data_mut(|d| d.remove::<String>(query));
+    }
+    let mut pick = None;
+    egui::Popup::menu(&r)
+        .width(w)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            let mut q = ui.data(|d| d.get_temp::<String>(query)).unwrap_or_default();
+            let hint = tr!("inspector.search_effects");
+            let field = TextInput::search(&mut q).hint(hint);
+            let field = ui.add(field.width(ui.available_width()));
+            if ui.memory(|m| m.focused().is_none()) {
+                field.request_focus();
+            }
+            let rows: Vec<_> = crate::effects::with(|l| l.rows(&q))
+                .into_iter()
+                .filter(|r| r.error.is_none() && !r.disabled)
+                .collect();
+            if rows.is_empty() {
+                ui.label(egui::RichText::new(tr!("bin.fx_no_match")).color(color::INK_3));
+            }
+            if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                pick = rows.first().map(|r| r.stem.clone());
+            }
+            egui::ScrollArea::vertical()
+                .max_height(320.0)
+                .show(ui, |ui| {
+                    for row in &rows {
+                        if menu_entry(ui, &row.name, &row.description).clicked() {
+                            pick = Some(row.stem.clone());
+                        }
+                    }
+                });
+            ui.data_mut(|d| d.insert_temp(query, q));
+            if pick.is_some() {
+                ui.close();
+            }
+        });
+    let stem = pick?;
+    let shader = crate::effects::with(|l| l.get(&stem).and_then(|e| e.clone().ok()))?;
+    Some((push_effect(clips, &stem, &shader), None))
+}
+
+/// An Add Effect menu row: the name in Ink over its description in Ink 3, with the menu
+/// rows' hover fill.
+fn menu_entry(ui: &mut Ui, name: &str, about: &str) -> egui::Response {
+    let w = ui.available_width();
+    let mut job = egui::text::LayoutJob::default();
+    let format = |color| egui::TextFormat::simple(theme::body(), color);
+    job.append(name, 0.0, format(color::INK));
+    if !about.is_empty() {
+        job.append(&format!("\n{about}"), 0.0, format(color::INK_3));
+    }
+    job.wrap.max_width = w - 2.0 * space::S8;
+    job.wrap.max_rows = 3;
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let h = galley.size().y + 2.0 * space::S4;
+    let (rect, r) = ui.allocate_exact_size(vec2(w, h.max(size::CONTROL)), Sense::click());
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    if r.hovered() || r.has_focus() {
+        let corner = suite_ui::tokens::radius::CONTROL;
+        ui.painter().rect_filled(rect, corner, color::BORDER);
+    }
+    let at = pos2(
+        rect.left() + space::S8,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    ui.painter().galley(at, galley, color::INK);
+    r
 }
 
 fn push_effect(clips: &[&Clip], stem: &str, shader: &jvid_render::effect::Shader) -> Command {
@@ -779,6 +1023,7 @@ fn push_effect(clips: &[&Clip], stem: &str, shader: &jvid_render::effect::Shader
             .iter()
             .map(|q| (q.name.clone(), q.default))
             .collect(),
+        enabled: true,
     };
     rewrite(clips, |_, x, _| x.effects.push(fx.clone()))
 }
@@ -894,13 +1139,17 @@ struct Clicks {
     key: Option<egui::Response>,
 }
 
+/// Tool slot `i` at the right edge of `rect`: 0 reset, 1 and 2 the keyframe arrows, 3 the
+/// diamond (or an effect's More).
+fn slot(rect: Rect, i: f32) -> Rect {
+    let x = rect.right() - TOOLS + i * (size::SMALL_CONTROL + GAP);
+    let y = rect.center().y - size::SMALL_CONTROL / 2.0;
+    Rect::from_min_size(pos2(x, y), Vec2::splat(size::SMALL_CONTROL))
+}
+
 /// Draws `tools` in the slots at the right edge of `rect`.
 fn slots(ui: &mut Ui, rect: Rect, tools: Tools) -> Clicks {
-    let slot = |i: f32| {
-        let x = rect.right() - TOOLS + i * (size::SMALL_CONTROL + GAP);
-        let y = rect.center().y - size::SMALL_CONTROL / 2.0;
-        Rect::from_min_size(pos2(x, y), Vec2::splat(size::SMALL_CONTROL))
-    };
+    let slot = |i: f32| slot(rect, i);
     let mut c = Clicks::default();
     if let Some(name) = tools.reset {
         c.reset = ui
@@ -1530,6 +1779,7 @@ mod tests {
         let fx = |shader: &str| Effect {
             shader: shader.into(),
             params: [("amount".to_owned(), 0.5)].into(),
+            enabled: true,
         };
         let mut clips = [clip(1, 0)];
         clips[0].transform.effects = vec![fx("a"), fx("b")];
@@ -1556,6 +1806,44 @@ mod tests {
         });
         assert_eq!(clips[0].transform.effects, [fx("a")]);
         assert!(clips[0].keyframes.is_empty());
+    }
+
+    #[test]
+    fn bypass_keeps_settings_and_keys_and_blocks_move_into_gaps() {
+        let fx = |shader: &str| Effect {
+            shader: shader.into(),
+            params: [("amount".to_owned(), 0.5)].into(),
+            enabled: true,
+        };
+        let mut clips = [clip(1, 0), clip(2, 0)];
+        for c in &mut clips {
+            c.transform.effects = vec![fx("a"), fx("b")];
+        }
+        let b = Effect::key(1, "amount");
+        apply(&mut clips, |c| toggle_animate(c, &[b.as_str()], Time(0)));
+        let before = clips.clone();
+        apply(&mut clips, |c| bypass(c, 1));
+        for (c, was) in clips.iter().zip(&before) {
+            assert!(!c.transform.effects[1].enabled);
+            assert_eq!(
+                c.transform.effects[1].params,
+                was.transform.effects[1].params
+            );
+            assert_eq!(c.keyframes, was.keyframes);
+        }
+        apply(&mut clips, |c| bypass(c, 1));
+        assert_eq!(clips, before);
+
+        let order = |from, to| {
+            let mut o = vec![0, 1, 2];
+            move_to(&mut o, from, to);
+            o
+        };
+        // Move Down drops into gap i + 2, Move Up into gap i - 1.
+        assert_eq!(order(0, 2), [1, 0, 2]);
+        assert_eq!(order(2, 1), [0, 2, 1]);
+        assert_eq!(order(0, 3), [1, 2, 0]);
+        assert_eq!(order(2, 0), [2, 0, 1]);
     }
 
     #[test]
@@ -1964,6 +2252,190 @@ mod tests {
         assert!(scale(&h) > 1.0, "{}", scale(&h));
         assert!(h.state_mut().undo());
         assert_eq!(scale(&h), 1.0);
+    }
+
+    /// [`harness`] with Vignette then Film Grain on its clip, tall enough to show them.
+    fn fx_harness() -> egui_kittest::Harness<'static, History> {
+        // One folder per test thread, so parallel tests never scan one another's half-written.
+        let tmp = std::env::temp_dir().join(format!(
+            "jvid-fx-stack-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        crate::effects::scan_for_test(&tmp);
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mut h = harness();
+        h.set_size(vec2(340.0, 1000.0));
+        let ids = HashSet::from([h.state().project().sequence().tracks()[0].clips()[0].id]);
+        for stem in ["vignette", "film_grain"] {
+            let cmd = add_effect(h.state().project(), &ids, stem).unwrap();
+            h.state_mut().apply(cmd).unwrap();
+        }
+        h.run();
+        h
+    }
+
+    fn stack(h: &egui_kittest::Harness<'_, History>) -> Vec<(String, bool)> {
+        let c = &h.state().project().sequence().tracks()[0].clips()[0];
+        let fx = c.transform.effects.iter();
+        fx.map(|e| (e.shader.clone(), e.enabled)).collect()
+    }
+
+    fn on(shaders: &[&str]) -> Vec<(String, bool)> {
+        shaders.iter().map(|s| (s.to_string(), true)).collect()
+    }
+
+    #[test]
+    fn the_eye_bypasses_an_effect_in_place_and_undoes() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = fx_harness();
+        let rects = |h: &egui_kittest::Harness<'_, History>| -> Vec<_> {
+            let nodes = h.query_all_by(|_| true);
+            nodes.map(|n| n.accesskit_node().bounding_box()).collect()
+        };
+        let before = rects(&h);
+        h.get_all_by_label("Bypass").next().unwrap().click();
+        h.run();
+        let params = |h: &egui_kittest::Harness<'_, History>| {
+            h.state().project().sequence().tracks()[0].clips()[0]
+                .transform
+                .effects[0]
+                .params
+                .clone()
+        };
+        assert_eq!(stack(&h)[0], ("vignette".into(), false));
+        assert_eq!(params(&h)["strength"], 0.5);
+        assert_eq!(h.query_all_by_label("Turn On").count(), 1);
+        // Same widgets in the same places, only the eye's name and the greyed rows change.
+        assert_eq!(rects(&h), before);
+        h.snapshot("inspector_fx_bypassed");
+        assert!(h.state_mut().undo());
+        h.run();
+        assert_eq!(stack(&h), on(&["vignette", "film_grain"]));
+    }
+
+    #[test]
+    fn the_more_menu_disables_moves_at_the_ends_and_moves_in_one_step() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::{NodeT, Queryable};
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = fx_harness();
+        // Each menu row's label, whether it's enabled, and its offset from the first row.
+        let menu = |h: &mut egui_kittest::Harness<'_, History>, block: usize| {
+            h.get_all_by_label("More").nth(block).unwrap().click();
+            h.run();
+            let labels = ["Move Up", "Move Down", "Reset", "Remove"];
+            let rows: Vec<_> = labels
+                .iter()
+                .map(|l| h.get_by_role_and_label(Role::Button, l))
+                .map(|n| (n.rect(), !n.accesskit_node().is_disabled()))
+                .collect();
+            let top = rows[0].0.min;
+            let rows: Vec<_> = rows
+                .iter()
+                .map(|(r, on)| (r.translate(-top.to_vec2()), *on))
+                .collect();
+            h.key_press(egui::Key::Escape);
+            h.run();
+            rows
+        };
+        let (first, last) = (menu(&mut h, 0), menu(&mut h, 1));
+        let enabled = |rows: &[(Rect, bool)]| rows.iter().map(|r| r.1).collect::<Vec<_>>();
+        assert_eq!(enabled(&first), [false, true, false, true]);
+        assert_eq!(enabled(&last), [true, false, false, true]);
+        let at = |rows: &[(Rect, bool)]| rows.iter().map(|r| r.0).collect::<Vec<_>>();
+        assert_eq!(at(&first), at(&last));
+
+        h.get_all_by_label("More").next().unwrap().click();
+        h.run();
+        h.get_by_role_and_label(Role::Button, "Move Down").click();
+        h.run();
+        assert_eq!(stack(&h), on(&["film_grain", "vignette"]));
+        assert!(h.state_mut().undo());
+        assert_eq!(stack(&h), on(&["vignette", "film_grain"]));
+    }
+
+    #[test]
+    fn dragging_a_header_moves_its_block_in_one_step() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = fx_harness();
+        let from = h.get_by_label("Vignette").rect().center();
+        let to = pos2(from.x, h.get_by_label("Add Effect").rect().top() - 1.0);
+        h.hover_at(from);
+        h.run();
+        h.drag_at(from);
+        h.run();
+        for y in [from.y + 10.0, (from.y + to.y) / 2.0, to.y] {
+            h.hover_at(pos2(from.x, y));
+            h.run();
+        }
+        h.drop_at(to);
+        h.run();
+        assert_eq!(stack(&h), on(&["film_grain", "vignette"]));
+        assert!(h.state_mut().undo());
+        assert_eq!(stack(&h), on(&["vignette", "film_grain"]));
+    }
+
+    #[test]
+    fn removing_a_block_moves_nothing_above_it() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::{NodeT, Queryable};
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = fx_harness();
+        let more = h.get_all_by_label("More").nth(1).unwrap();
+        let cut = more.rect().top() - space::S4;
+        // Every widget above the last block's header, by role, label and rect.
+        let above = |h: &egui_kittest::Harness<'_, History>| {
+            let nodes = h.query_all_by(|n| n.bounding_box().is_some_and(|b| (b.y1 as f32) < cut));
+            let nodes = nodes.map(|n| n.accesskit_node());
+            nodes
+                .map(|n| format!("{:?} {:?} {:?}", n.role(), n.label(), n.bounding_box()))
+                .collect::<Vec<_>>()
+        };
+        let before = above(&h);
+        more.click();
+        h.run();
+        h.get_by_role_and_label(Role::Button, "Remove").click();
+        h.run();
+        assert_eq!(stack(&h), on(&["vignette"]));
+        assert_eq!(above(&h), before);
+    }
+
+    #[test]
+    fn add_effect_searches_names_and_descriptions() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = fx_harness();
+        h.get_by_label("Add Effect").click();
+        h.run();
+        assert!(
+            h.query_by_role_and_label(Role::Button, "Chromatic aberration")
+                .is_some()
+        );
+        h.snapshot("inspector_fx_add");
+        // Only Film grain's description mentions midtones.
+        h.get_by_role(Role::TextInput).type_text("midtones");
+        h.run();
+        assert!(
+            h.query_by_role_and_label(Role::Button, "Chromatic aberration")
+                .is_none()
+        );
+        h.get_by_role_and_label(Role::Button, "Film grain").click();
+        h.run();
+        assert_eq!(stack(&h), on(&["vignette", "film_grain", "film_grain"]));
     }
 
     #[test]

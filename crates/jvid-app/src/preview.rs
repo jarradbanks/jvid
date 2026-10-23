@@ -1372,6 +1372,7 @@ mod program_tests {
         let effect = jvid_core::model::Effect {
             shader: "none".into(),
             params: Default::default(),
+            enabled: true,
         };
         let draw = |id| {
             h.state()
