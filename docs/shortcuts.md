@@ -87,6 +87,7 @@ Work while the timeline has focus.
 | Reverse | `Ctrl+R` |
 | Freeze Frame at Playhead | `Shift+F` |
 | Detect Silence… | `Ctrl+Alt+S` |
+| Nest | `Alt+N` |
 | Add Crossfade | `Ctrl+D` |
 | Add Dip to Black | `Ctrl+Alt+B` |
 | Add Dip to White | `Ctrl+Alt+W` |

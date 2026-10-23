@@ -20,8 +20,14 @@ fn fixtures_load_and_round_trip() {
     let dir = Path::new("/new/proj");
     for name in ["empty.jvid", "basic.jvid"] {
         let p = load(name, dir);
-        let again = from_json(&to_json(&p, dir).unwrap(), dir, |_| true).unwrap();
+        let json = to_json(&p, dir).unwrap();
+        let again = from_json(&json, dir, |_| true).unwrap();
         assert_eq!(again, p, "{name}");
+        // One sequence saves as before nesting (#83), so older builds still open it.
+        assert!(
+            !json.contains("sequences") && !json.contains("next_sequence"),
+            "{name}"
+        );
     }
     let p = load("basic.jvid", dir);
     assert_eq!(p.assets()[0].path, Path::new("/new/proj/media/rec.mkv"));

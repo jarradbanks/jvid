@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, channel};
 
 use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Limiter, Meter};
-use jvid_core::eval::video_at;
+use jvid_core::eval::frame_at;
 use jvid_core::model::{ProbeInfo, Project};
 use jvid_core::preset::Preset;
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
@@ -18,7 +18,7 @@ use jvid_media::encode::{EncodeError, Encoder};
 use jvid_render::composite::Readback;
 
 use crate::i18n::tr;
-use crate::playback::{Audio, ClipAudio, Gpu, Pixels, Shown, generated, sample};
+use crate::playback::{Audio, ClipAudio, Gpu, Pixels, Shown, resolve, sample};
 
 /// What to export: `range` is a half-open timeline span, rounded out to whole output frames.
 #[derive(Clone)]
@@ -519,33 +519,20 @@ fn render(
         if ctx.is_cancelled() {
             return Err(Error::Cancelled.into());
         }
-        let mut layers = Vec::new();
-        let video = if enc.has_video() {
-            video_at(project.sequence(), time)
-        } else {
-            Vec::new()
-        };
-        for layer in video {
-            let Some(asset) = project.asset(layer.asset) else {
-                continue;
-            };
-            let s = project.settings();
-            if let Some(px) = generated(asset, &layer, (s.width, s.height)) {
-                layers.push((px, layer.transform));
-                continue;
-            }
-            let f = decoders
-                .frame_at(&asset.path, layer.source_time)
-                .map_err(|e| {
-                    tr!(
-                        "export.decode_error",
-                        path = asset.path.display(),
-                        error = e
-                    )
-                })?;
-            layers.push((Pixels::Frame(Arc::new(f)), layer.transform));
-        }
         if enc.has_video() {
+            let layers =
+                resolve::<String, _>(project, frame_at(project, time), &mut |asset, layer| {
+                    let f = decoders
+                        .frame_at(&asset.path, layer.source_time)
+                        .map_err(|e| {
+                            tr!(
+                                "export.decode_error",
+                                path = asset.path.display(),
+                                error = e
+                            )
+                        })?;
+                    Ok(Some(Pixels::Frame(Arc::new(f))))
+                })?;
             let tex = gpu.get_or_insert_with(|| Gpu::new(device)).draw(
                 device,
                 queue,

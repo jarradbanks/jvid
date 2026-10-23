@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use jvid_audio::pan_gains;
 use jvid_core::history::{Command, Created, History};
-use jvid_core::model::NewClip;
+use jvid_core::model::{NewClip, TrackSettings};
 
 use super::*;
 use crate::transport::tests::Fake;
@@ -733,7 +733,7 @@ fn high_fps_clip_conforms_to_the_project_rate_without_drift() {
     let frames = rate.index_floor(duration);
     assert_eq!(frames, 180);
     for k in 0..frames {
-        let layers = video_at(p.sequence(), rate.time_floor(k));
+        let layers = jvid_core::eval::video_at(p.sequence(), rate.time_floor(k));
         let got = pool.frame_at(&path, layers[0].source_time).unwrap().pts;
         // Source frame floor(k * 144 / 60), exactly: flicks divide both rates.
         let want = Time(k * 144 / 60 * FLICKS_PER_SECOND / 144);
@@ -1058,4 +1058,181 @@ fn transition_mixes_both_clips_at_equal_power() {
         "{}",
         out[0]
     );
+}
+
+/// `h`'s project with every clip of its open sequence nested into one sequence clip.
+fn nest_all(h: &History) -> Project {
+    let seq = h.project().sequence();
+    let ids = seq.tracks().iter().flat_map(|t| t.clips()).map(|c| c.id);
+    let mut nested = h.clone();
+    let nest = Command::Nest {
+        ids: ids.collect(),
+        name: "Nest".into(),
+        outer: "Main".into(),
+    };
+    assert!(matches!(nested.apply(nest), Ok(Created::Clip(_))));
+    nested.project().clone()
+}
+
+/// Acceptance (#83): a nested sequence renders the same frame as the clips it replaced, pixel
+/// for pixel, with a part-covering, half-opaque layer and a text layer inside it.
+#[test]
+fn nested_sequence_renders_the_frame_it_replaced() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut h = History::new(Project::default());
+    add_solid(&mut h, [0.9, 0.2, 0.1, 1.0], Time(0));
+    let top = add_solid(&mut h, [0.1, 0.3, 1.0, 1.0], Time(0));
+    let x = Transform {
+        opacity: 0.5,
+        scale: [0.5, 0.5],
+        position: [200.0, -100.0],
+        rotation: 10.0,
+        ..Transform::default()
+    };
+    h.apply(Command::SetClipProps(vec![(top, x, Default::default())]))
+        .unwrap();
+    let Ok(Created::Asset(asset)) = h.apply(Command::AddText {
+        name: "Title".into(),
+        text: jvid_core::model::Text::default(),
+    }) else {
+        panic!("text")
+    };
+    let Ok(Created::Track(track)) = h.apply(Command::AddTrack {
+        kind: TrackKind::Video,
+        name: "V3".into(),
+    }) else {
+        panic!("track")
+    };
+    let clip = NewClip {
+        asset,
+        source_in: Time(0),
+        source_out: secs(1),
+        start: Time(0),
+        link: None,
+    };
+    h.apply(Command::AddClip { track, clip }).unwrap();
+    let nested = nest_all(&h);
+    let draw = |p: &Project| {
+        let decode: DecodeFn = Arc::new(|_, _| panic!("generated layers never decode"));
+        let shown = Playback::new(decode, silent(), DEFAULT_BUDGET)
+            .park(p)
+            .expect("shown");
+        let tex = Gpu::new(&device)
+            .draw(&device, &queue, p.settings(), 1, &shown)
+            .clone();
+        (
+            shown.layers.len(),
+            composite::read_back(&device, &queue, &tex),
+        )
+    };
+    let (flat, nest) = (draw(h.project()), draw(&nested));
+    assert_eq!(
+        (flat.0, nest.0),
+        (3, 1),
+        "one nested layer in place of three"
+    );
+    assert!(flat.1 == nest.1, "nested frame differs from the flat one");
+}
+
+/// A nested sequence mixes the same samples as the clips it replaced, at their speed.
+#[test]
+fn nested_sequence_mixes_what_it_replaced() {
+    let mut h = History::new(Project::default());
+    add_at(&mut h, TrackKind::Audio, "/a.wav", secs(1), secs(1));
+    let b = add_at(&mut h, TrackKind::Audio, "/b.wav", Time(0), secs(3));
+    let c = h.project().sequence().clip(b).unwrap().1.clone();
+    let quiet = Transform {
+        volume: 0.5,
+        ..c.transform.clone()
+    };
+    h.apply(Command::SetClipProps(vec![(b, quiet, c.keyframes)]))
+        .unwrap();
+    // And with b's track turned down and panned, which the nest takes inside with it.
+    let mut turned = h.clone();
+    let t = turned.project().sequence().clip(b).unwrap().0;
+    let t = turned.project().sequence().track(t).unwrap().settings();
+    turned
+        .apply(Command::SetTrack(TrackSettings {
+            volume: 0.3,
+            pan: 0.5,
+            ..t
+        }))
+        .unwrap();
+    for h in [h, turned] {
+        mixes_the_same(&h);
+    }
+}
+
+fn mixes_the_same(h: &History) {
+    let nested = nest_all(h);
+    let mix = |p: &Project| {
+        let mut audio = Audio::new(indexed());
+        let mut all = Vec::new();
+        for block in 0..(3 * SAMPLE_RATE as i64 / 1000) {
+            let mut out = vec![0.0; 2000];
+            audio.prime(p, Time(block * 1000 * FLICKS_PER_SAMPLE));
+            audio.mix(p, block * 1000, &mut out);
+            all.extend(out);
+        }
+        all
+    };
+    let (flat, nest) = (mix(h.project()), mix(&nested));
+    assert!(flat.iter().any(|&s| s != 0.0));
+    assert_eq!(flat.len(), nest.len());
+    // Two tracks' pan gains applied apiece or once to their sum: equal but for rounding.
+    let off = |(a, b): (&f32, &f32)| (a - b).abs() / a.abs().max(1.0);
+    let worst = flat.iter().zip(&nest).map(off).fold(0.0, f32::max);
+    assert!(
+        worst < 1e-6,
+        "nested mix differs from the flat one by {worst}"
+    );
+}
+
+/// Clip ids are per sequence, so after a switch a clip sharing an id with one in the last
+/// sequence plays its own file, not the source opened for the other.
+#[test]
+fn a_clip_id_shared_across_a_sequence_switch_plays_its_own_audio() {
+    // Each file plays a constant: its name's first letter.
+    let by_name = || -> OpenAudio {
+        Box::new(|p, _| {
+            let x = p.file_name().unwrap().as_encoded_bytes()[0] as f32;
+            Box::new(move |_, out| out.fill(x))
+        })
+    };
+    let mut h = History::new(Project::default());
+    let a = add(&mut h, TrackKind::Audio, "/a.wav", secs(3));
+    let nest = Command::Nest {
+        ids: vec![a],
+        name: "Nest".into(),
+        outer: "Main".into(),
+    };
+    h.apply(nest).unwrap();
+    let c = add(&mut h, TrackKind::Audio, "/c.wav", secs(3));
+    let main = h.project().clone();
+    h.open_sequence(SequenceId(1)).unwrap();
+    let kind = TrackKind::Audio;
+    h.apply(Command::AddTrack {
+        kind,
+        name: "A".into(),
+    })
+    .unwrap();
+    let b = add(&mut h, TrackKind::Audio, "/b.wav", secs(3));
+    assert_eq!(b, c, "the two sequences allocate ids apart");
+    let n = h.project();
+    let decode: DecodeFn = Arc::new(|_, t| Ok(tiny(t)));
+    let mut pb = Playback::new(decode, by_name(), DEFAULT_BUDGET);
+    let mut got = vec![0.0; 2000];
+    for p in [&main, n] {
+        pb.sync(p);
+        pb.audio.prime(p, Time(0));
+        pb.audio.mix(p, 0, &mut got);
+    }
+    let mut fresh = Audio::new(by_name());
+    let mut want = vec![0.0; 2000];
+    fresh.prime(n, Time(0));
+    fresh.mix(n, 0, &mut want);
+    assert!(want.iter().all(|&s| s != 0.0));
+    assert_eq!(got, want);
 }

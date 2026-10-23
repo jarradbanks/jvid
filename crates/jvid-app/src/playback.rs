@@ -9,17 +9,20 @@
 //! [`Gpu::draw`]. Drive play, pause, J/K/L, seek and loop through [`Playback::transport`]; after
 //! an edit that changes the picture under a parked playhead, call [`Playback::refresh`].
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Fx, Mixer, Output, SAMPLE_RATE, Strip, automate};
-use jvid_core::eval::{AudioSegment, Layer, audio_in, gain_at, video_at};
+use jvid_core::eval::{AudioSegment, Layer, audio_in, frame_at, gain_at};
 use jvid_core::model::{
-    AssetId, ClipId, MediaAsset, Project, ProjectSettings, TrackKind, Transform,
+    AssetId, ClipId, MediaAsset, Project, ProjectSettings, Sequence, SequenceId, TrackKind,
+    Transform,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Handle, Pool, Priority};
@@ -76,6 +79,8 @@ pub enum Pixels {
     Solid([u8; 4]),
     /// A text layer rasterized at project size, straight RGBA.
     Text(Arc<Vec<u8>>),
+    /// A sequence clip: its sequence's layers, top first, composited over transparent.
+    Nested(Vec<(Pixels, Transform)>),
 }
 
 /// The pixels of a solid or text asset's `layer` on a `size` frame; `None` for a file.
@@ -86,6 +91,48 @@ pub fn generated(asset: &MediaAsset, layer: &Layer, size: (u32, u32)) -> Option<
     }
     let c = layer.color.or(asset.solid)?;
     Some(Pixels::Solid(solid::rgba8(c)))
+}
+
+/// What each of `layers` (from [`frame_at`]) shows, top first: generated pixels, a nested
+/// sequence's layers, or `frame`'s pixels for a file. `Ok(None)` from `frame` leaves the layer
+/// out; an error gives up on the whole frame.
+pub fn resolve<E, F>(
+    project: &Project,
+    layers: Vec<Layer>,
+    frame: &mut F,
+) -> Result<Vec<(Pixels, Transform)>, E>
+where
+    F: FnMut(&MediaAsset, &Layer) -> Result<Option<Pixels>, E>,
+{
+    let s = project.settings();
+    let mut out = Vec::new();
+    for mut layer in layers {
+        let Some(asset) = project.asset(layer.asset) else {
+            continue;
+        };
+        let px = if asset.sequence.is_some() {
+            let nested = std::mem::take(&mut layer.nested);
+            Some(Pixels::Nested(resolve(project, nested, frame)?))
+        } else if let Some(px) = generated(asset, &layer, (s.width, s.height)) {
+            Some(px)
+        } else {
+            frame(asset, &layer)?
+        };
+        out.extend(px.map(|px| (px, layer.transform)));
+    }
+    Ok(out)
+}
+
+/// The layers read from files: `layers` with each nested sequence's in its place, however deep.
+fn leaves(layers: Vec<Layer>) -> Vec<Layer> {
+    let mut out = Vec::new();
+    for mut l in layers {
+        match std::mem::take(&mut l.nested) {
+            n if n.is_empty() => out.push(l),
+            n => out.extend(leaves(n)),
+        }
+    }
+    out
 }
 
 /// Decoded frames up to a byte budget; the least recently used go first.
@@ -161,11 +208,14 @@ pub(crate) fn sample(t: Time) -> i64 {
 
 /// Per-clip audio sources and the track mixer.
 pub(crate) struct Audio {
-    open: OpenAudio,
+    /// Shared with the nested mixers.
+    open: Rc<RefCell<OpenAudio>>,
     /// One source per stream the clip plays; several are summed.
     clips: HashMap<ClipId, Vec<ClipAudio>>,
     /// Effect state of the clips in `clips`.
     fx: HashMap<ClipId, Fx>,
+    /// What mixes each sequence clip's sequence.
+    nested: HashMap<ClipId, Audio>,
     scratch: Vec<f32>,
     /// One segment's samples, summed into its track since a transition overlaps two.
     seg: Vec<f32>,
@@ -178,10 +228,15 @@ pub(crate) struct Audio {
 
 impl Audio {
     pub(crate) fn new(open: OpenAudio) -> Self {
+        Self::sharing(Rc::new(RefCell::new(open)))
+    }
+
+    fn sharing(open: Rc<RefCell<OpenAudio>>) -> Self {
         Self {
             open,
             clips: HashMap::new(),
             fx: HashMap::new(),
+            nested: HashMap::new(),
             scratch: Vec::new(),
             seg: Vec::new(),
             stretch: Vec::new(),
@@ -190,17 +245,34 @@ impl Audio {
         }
     }
 
+    /// Closes every clip's audio, to reopen as each is next heard.
+    fn reset(&mut self) {
+        self.clips.clear();
+        self.fx.clear();
+        self.nested.clear();
+    }
+
     /// Opens and seeks clips heard within [`AUDIO_AHEAD`] of `pos`, so they start on time, and
     /// closes the rest.
     pub(crate) fn prime(&mut self, project: &Project, pos: Time) {
-        let segs = audio_in(project.sequence(), pos, pos + AUDIO_AHEAD);
+        self.prime_in(project, project.sequence(), pos);
+    }
+
+    fn prime_in(&mut self, project: &Project, seq: &Sequence, pos: Time) {
+        let segs = audio_in(seq, pos, pos + AUDIO_AHEAD);
         self.clips.retain(|c, _| segs.iter().any(|s| s.clip == *c));
-        self.fx.retain(|c, _| self.clips.contains_key(c));
+        self.fx.retain(|c, _| segs.iter().any(|s| s.clip == *c));
+        self.nested.retain(|c, _| segs.iter().any(|s| s.clip == *c));
         for s in segs {
-            if let Some(a) = project.asset(s.asset)
+            if let Some(n) = project.nested(s.asset) {
+                let open = &self.open;
+                let child = self.nested.entry(s.clip);
+                let child = child.or_insert_with(|| Audio::sharing(open.clone()));
+                child.prime_in(project, n, s.source_start);
+            } else if let Some(a) = project.asset(s.asset)
                 && !self.clips.contains_key(&s.clip)
             {
-                let mut srcs = open_streams(&mut self.open, a, s.stream);
+                let mut srcs = open_streams(&mut self.open.borrow_mut(), a, s.stream);
                 srcs.iter_mut()
                     .for_each(|src| src(sample(s.source_start), &mut []));
                 self.clips.insert(s.clip, srcs);
@@ -210,27 +282,44 @@ impl Audio {
 
     /// Fills `out` with the mix from timeline sample frame `start`.
     pub(crate) fn mix(&mut self, project: &Project, start: i64, out: &mut [f32]) {
-        let seq = project.sequence();
+        self.mix_in(project, project.sequence(), false, start, out);
+    }
+
+    /// [`Audio::mix`] of `seq`, which is `nested` in another.
+    fn mix_in(
+        &mut self,
+        project: &Project,
+        seq: &Sequence,
+        nested: bool,
+        start: i64,
+        out: &mut [f32],
+    ) {
         let tracks: Vec<_> = seq
             .tracks()
             .iter()
             .filter(|t| t.kind == TrackKind::Audio)
             .collect();
-        if self.inputs.len() != tracks.len() {
-            self.mixer = Mixer::new(tracks.len());
-            self.inputs = vec![Vec::new(); tracks.len()];
-        }
+        // A nest's tracks pan relative to the outer track's centre, so the pan law applies once
+        // and a nest at default settings sounds as its clips did before nesting.
+        let unity = if nested {
+            std::f32::consts::SQRT_2
+        } else {
+            1.0
+        };
         let strips: Vec<_> = tracks
             .iter()
             .map(|t| Strip {
-                volume: t.volume,
+                volume: t.volume * unity,
                 pan: t.pan,
                 muted: t.muted,
                 solo: t.solo,
                 fx: t.fx,
             })
             .collect();
-        self.mixer.set_strips(&strips);
+        if self.inputs.len() != tracks.len() {
+            self.mixer = Mixer::with_strips(&strips);
+            self.inputs = vec![Vec::new(); tracks.len()];
+        }
         for b in &mut self.inputs {
             b.clear();
             b.resize(out.len(), 0.0);
@@ -245,17 +334,25 @@ impl Audio {
             ) else {
                 continue;
             };
-            let srcs = self
-                .clips
-                .entry(s.clip)
-                .or_insert_with(|| open_streams(&mut self.open, asset, s.stream));
             let range = span(s.start)..span(s.end);
             let out = &mut self.seg;
             out.clear();
             out.resize(range.len(), 0.0);
-            if let [src] = srcs.as_mut_slice() {
+            if let Some(n) = project.nested(asset.id) {
+                let open = &self.open;
+                let child = self.nested.entry(s.clip);
+                let child = child.or_insert_with(|| Audio::sharing(open.clone()));
+                let mut src = |from, buf: &mut [f32]| child.mix_in(project, n, true, from, buf);
+                read(&mut src, &s, out, &mut self.stretch);
+            } else if let [src] = self
+                .clips
+                .entry(s.clip)
+                .or_insert_with(|| open_streams(&mut self.open.borrow_mut(), asset, s.stream))
+                .as_mut_slice()
+            {
                 read(src, &s, out, &mut self.stretch);
             } else {
+                let srcs = self.clips.get_mut(&s.clip).expect("opened above");
                 for src in srcs {
                     self.scratch.clear();
                     self.scratch.resize(out.len(), 0.0);
@@ -287,6 +384,7 @@ impl Audio {
             let mixed = &mut self.inputs[i][range];
             mixed.iter_mut().zip(&*out).for_each(|(m, x)| *m += x);
         }
+        self.mixer.set_strips(&strips);
         let inputs: Vec<&[f32]> = self.inputs.iter().map(Vec::as_slice).collect();
         self.mixer.mix(&inputs, out);
     }
@@ -294,7 +392,12 @@ impl Audio {
 
 /// Fills stereo `out` with segment `s` from `src`, resampled linearly when not at 100%
 /// speed, so pitch follows speed, and backwards when reversed.
-fn read(src: &mut ClipAudio, s: &AudioSegment, out: &mut [f32], tmp: &mut Vec<f32>) {
+fn read(
+    src: &mut dyn FnMut(i64, &mut [f32]),
+    s: &AudioSegment,
+    out: &mut [f32],
+    tmp: &mut Vec<f32>,
+) {
     let from = sample(s.source_start);
     if s.speed == 1.0 && !s.reverse {
         return src(from, out);
@@ -353,6 +456,8 @@ pub struct Playback {
     /// The frame index last returned by `tick`, and whether it was exact.
     shown: Option<(i64, bool)>,
     audio: Audio,
+    /// The sequence `audio` was opened for; clip ids are per sequence.
+    sequence: SequenceId,
 }
 
 impl Playback {
@@ -379,6 +484,7 @@ impl Playback {
             done,
             shown: None,
             audio: Audio::new(open_audio),
+            sequence: SequenceId::default(),
         }
     }
 
@@ -460,12 +566,16 @@ impl Playback {
             let out = seq.out_point().unwrap_or(t.duration);
             (seq.in_point().unwrap_or(Time(0)), out)
         });
+        if self.sequence != seq.id() {
+            self.sequence = seq.id();
+            self.audio.reset();
+        }
         for a in project.assets() {
             if self.paths.get(&a.id).is_some_and(|p| *p != a.path) {
                 self.cache.forget(a.id);
                 self.failed.retain(|k, _| k.0 != a.id);
                 // Clips are reopened on the new path as they're next heard.
-                self.audio.clips.clear();
+                self.audio.reset();
             }
             self.paths.insert(a.id, a.path.clone());
         }
@@ -523,7 +633,7 @@ impl Playback {
             if k < 0 || time >= t.duration {
                 break;
             }
-            for layer in video_at(project.sequence(), time) {
+            for layer in leaves(frame_at(project, time)) {
                 let key = (layer.asset, layer.source_time);
                 want.insert(key);
                 let Some(asset) = project.asset(layer.asset).filter(|a| !a.generated()) else {
@@ -576,7 +686,7 @@ impl Playback {
         };
         let time = t.rate.time_floor(t.frame(clock));
         let mut want = HashSet::new();
-        for layer in video_at(project.sequence(), time) {
+        for layer in leaves(frame_at(project, time)) {
             let key = (layer.asset, layer.source_time);
             let Some(asset) = project.asset(layer.asset).filter(|a| !a.generated()) else {
                 continue;
@@ -608,29 +718,23 @@ impl Playback {
         }
         let mut exact = true;
         let time = self.transport.rate.time_floor(index);
-        let mut layers = Vec::new();
-        for layer in video_at(project.sequence(), time) {
-            let Some(asset) = project.asset(layer.asset) else {
-                continue;
-            };
-            let s = project.settings();
-            if let Some(px) = generated(asset, &layer, (s.width, s.height)) {
-                layers.push((px, layer.transform));
-                continue;
-            }
+        let (cache, failed, stand_ins) = (&mut self.cache, &self.failed, &self.stand_ins);
+        let layers = resolve::<(), _>(project, frame_at(project, time), &mut |_, layer| {
             // Not decoded yet: keep what's on screen. A failed decode leaves the layer out.
             let key = (layer.asset, layer.source_time);
-            if !self.failed.contains_key(&key) {
-                let f = match self.cache.get(&key) {
-                    Some(f) => f,
-                    None => {
-                        exact = false;
-                        self.stand_ins.get(&key)?.clone()?
-                    }
-                };
-                layers.push((Pixels::Frame(f), layer.transform));
+            if failed.contains_key(&key) {
+                return Ok(None);
             }
-        }
+            let f = match cache.get(&key) {
+                Some(f) => f,
+                None => {
+                    exact = false;
+                    stand_ins.get(&key).cloned().flatten().ok_or(())?
+                }
+            };
+            Ok(Some(Pixels::Frame(f)))
+        })
+        .ok()?;
         if self.shown == Some((index, exact)) {
             return None;
         }
@@ -660,6 +764,8 @@ pub struct Gpu {
     pub pin_effects: bool,
     /// Effects named by a layer but not loaded, already warned about.
     missing: HashSet<String>,
+    /// By layer index, what composites a nested sequence's layers.
+    nested: HashMap<usize, Gpu>,
 }
 
 impl Gpu {
@@ -672,6 +778,7 @@ impl Gpu {
             effects: Default::default(),
             pin_effects: false,
             missing: HashSet::new(),
+            nested: HashMap::new(),
         }
     }
 
@@ -684,15 +791,41 @@ impl Gpu {
         scale: u32,
         shown: &Shown,
     ) -> &wgpu::Texture {
-        while self.layers.len() < shown.layers.len() {
+        let index = shown.index.max(0) as u32;
+        self.composite(device, queue, s, scale, s.background, index, &shown.layers)
+    }
+
+    /// `layers` composited over `background`, for timeline frame `index`.
+    #[allow(clippy::too_many_arguments)]
+    fn composite(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        s: &ProjectSettings,
+        scale: u32,
+        background: [u8; 4],
+        index: u32,
+        layers: &[(Pixels, Transform)],
+    ) -> &wgpu::Texture {
+        while self.layers.len() < layers.len() {
             self.layers.push(Preview::new(device, composite::FORMAT));
         }
         // shortcut: a solid texture per layer per frame; cache by color if playback profiles hot.
         let mut solids = Vec::new();
         let mut texts = Vec::new();
-        for ((px, _), preview) in shown.layers.iter().zip(&mut self.layers) {
+        for (i, ((px, _), preview)) in layers.iter().zip(&mut self.layers).enumerate() {
             let f = match px {
                 Pixels::Frame(f) => f,
+                Pixels::Nested(inner) => {
+                    let pin = self.pin_effects;
+                    let gpu = self.nested.entry(i).or_insert_with(|| Gpu {
+                        pin_effects: pin,
+                        ..Gpu::new(device)
+                    });
+                    let tex = gpu.composite(device, queue, s, scale, [0; 4], index, inner);
+                    solids.push(tex.clone());
+                    continue;
+                }
                 Pixels::Solid(c) => {
                     solids.push(solid::solid(device, queue, (s.width, s.height), *c));
                     continue;
@@ -720,7 +853,7 @@ impl Gpu {
             preview.upload(device, queue, &yuv, scale);
         }
         self.texts = texts;
-        for path in shown.layers.iter().filter_map(|(_, t)| t.lut.as_ref()) {
+        for path in layers.iter().filter_map(|(_, t)| t.lut.as_ref()) {
             if self.luts.insert(path.clone()) {
                 let lut = std::fs::read_to_string(path)
                     .map_err(|e| e.to_string())
@@ -757,22 +890,27 @@ impl Gpu {
             tracing::warn!("effect {stem}: {e}");
             crate::effects::fail(&stem, e);
         }
-        for (_, t) in &shown.layers {
+        for (_, t) in layers {
             for e in &t.effects {
                 if !self.effects.1.contains(&e.shader) && self.missing.insert(e.shader.clone()) {
                     tracing::warn!("effect {}: not loaded, drawing without it", e.shader);
                 }
             }
         }
-        self.compositor.frame = shown.index.max(0) as u32;
-        let layers: Vec<_> = shown
-            .layers
+        self.compositor.frame = index;
+        self.compositor.premultiplied = layers
+            .iter()
+            .map(|(px, _)| matches!(px, Pixels::Nested(_)))
+            .collect();
+        let layers: Vec<_> = layers
             .iter()
             .zip(&self.layers)
             .scan(solids.iter(), |solids, ((px, t), p)| {
                 let tex = match px {
                     Pixels::Frame(_) => p.image().expect("uploaded above"),
-                    Pixels::Solid(_) | Pixels::Text(_) => solids.next().expect("made above"),
+                    Pixels::Solid(_) | Pixels::Text(_) | Pixels::Nested(_) => {
+                        solids.next().expect("made above")
+                    }
                 };
                 Some((tex, t.clone()))
             })
@@ -782,7 +920,7 @@ impl Gpu {
             queue,
             (s.width, s.height),
             scale,
-            s.background,
+            background,
             &layers,
         )
     }

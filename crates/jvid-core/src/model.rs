@@ -14,7 +14,17 @@ macro_rules! id {
     ($name:ident) => {
         /// Stable id, unique within its project or sequence and never reused.
         #[derive(
-            Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+            Debug,
+            Clone,
+            Copy,
+            Default,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            Serialize,
+            Deserialize,
         )]
         #[serde(transparent)]
         pub struct $name(pub u64);
@@ -25,6 +35,7 @@ id!(TrackId);
 id!(ClipId);
 id!(MarkerId);
 id!(LinkId);
+id!(SequenceId);
 
 /// Project-wide output settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -174,6 +185,9 @@ pub struct MediaAsset {
     /// with a `color` keyframe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<Text>,
+    /// A nested sequence instead of a file; `path` is empty. Its clips play that sequence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<SequenceId>,
 }
 
 /// Horizontal alignment of text lines.
@@ -321,9 +335,9 @@ impl Text {
 }
 
 impl MediaAsset {
-    /// Made by jvid (a solid or text) rather than read from a file.
+    /// Made by jvid (a solid, text or sequence) rather than read from a file.
     pub fn generated(&self) -> bool {
-        self.solid.is_some() || self.text.is_some()
+        self.solid.is_some() || self.text.is_some() || self.sequence.is_some()
     }
 
     pub fn display_name(&self) -> String {
@@ -1047,6 +1061,15 @@ pub enum ModelError {
     OutsideClip(ClipId),
     /// No media past the cut on one side or both for a transition there.
     NoHandles(ClipId),
+    UnknownSequence(SequenceId),
+    /// The edit would nest a sequence inside itself, directly or through others.
+    Cycle,
+    /// The open sequence can't be removed.
+    SequenceOpen,
+    /// The edit would nest sequences more than [`MAX_NEST_DEPTH`] deep.
+    TooDeep,
+    /// Nest would split a transition between a chosen clip and an unchosen one.
+    SplitTransition,
 }
 
 impl std::fmt::Display for ModelError {
@@ -1068,6 +1091,13 @@ impl std::fmt::Display for ModelError {
             Self::NoHandles(_) => f.write_str(
                 "no media handles at that cut for a transition: trim the clips so media remains past it on both sides",
             ),
+            Self::UnknownSequence(id) => write!(f, "unknown sequence {}", id.0),
+            Self::Cycle => f.write_str("a sequence can't be nested inside itself"),
+            Self::SequenceOpen => f.write_str("the open sequence can't be removed"),
+            Self::TooDeep => write!(f, "sequences can't nest more than {MAX_NEST_DEPTH} deep"),
+            Self::SplitTransition => {
+                f.write_str("a transition joins a chosen clip to one that isn't")
+            }
         }
     }
 }
@@ -1077,6 +1107,9 @@ impl std::error::Error for ModelError {}
 /// Tracks (video top-first, then audio), markers and in/out points.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Sequence {
+    /// 0 for a project's first sequence, as in files from before nesting.
+    #[serde(default, skip_serializing_if = "is_first")]
+    id: SequenceId,
     tracks: Vec<Track>,
     pub(crate) markers: Vec<Marker>,
     pub(crate) in_point: Option<Time>,
@@ -1115,7 +1148,15 @@ pub struct Placement {
     pub insert: bool,
 }
 
+fn is_first(id: &SequenceId) -> bool {
+    id.0 == 0
+}
+
 impl Sequence {
+    pub fn id(&self) -> SequenceId {
+        self.id
+    }
+
     fn alloc(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
@@ -1683,8 +1724,22 @@ fn insert_sorted(clips: &mut Vec<Clip>, c: Clip) {
 pub struct Project {
     pub(crate) settings: ProjectSettings,
     pub(crate) assets: Vec<MediaAsset>,
+    /// The open sequence: the one the Timeline shows and edits change.
     pub(crate) sequence: Sequence,
+    /// The other sequences; opening one swaps it with `sequence`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) sequences: Vec<Sequence>,
     next_asset: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    next_sequence: u64,
+}
+
+/// The most sequences a chain of sequence clips may pass through, the outermost counted;
+/// playback recurses and makes a compositor once per level.
+pub const MAX_NEST_DEPTH: usize = 16;
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// Read-only from outside the crate; edit it through [`crate::history::History`].
@@ -1697,8 +1752,284 @@ impl Project {
         &self.assets
     }
 
+    /// The open sequence.
     pub fn sequence(&self) -> &Sequence {
         &self.sequence
+    }
+
+    /// Every sequence, the open one included, oldest first.
+    pub fn sequences(&self) -> Vec<&Sequence> {
+        let mut all: Vec<_> = std::iter::once(&self.sequence)
+            .chain(&self.sequences)
+            .collect();
+        all.sort_by_key(|s| s.id);
+        all
+    }
+
+    pub fn find_sequence(&self, id: SequenceId) -> Option<&Sequence> {
+        std::iter::once(&self.sequence)
+            .chain(&self.sequences)
+            .find(|s| s.id == id)
+    }
+
+    /// The sequence a sequence asset's clips play.
+    pub fn nested(&self, asset: AssetId) -> Option<&Sequence> {
+        self.find_sequence(self.asset(asset)?.sequence?)
+    }
+
+    /// The bin entry for sequence `id`; a project's only sequence has none.
+    pub fn sequence_asset(&self, id: SequenceId) -> Option<&MediaAsset> {
+        self.assets.iter().find(|a| a.sequence == Some(id))
+    }
+
+    /// Whether sequence `from` is `to` or holds a clip of it, however deep.
+    pub fn nests(&self, from: SequenceId, to: SequenceId) -> bool {
+        let (mut stack, mut seen) = (vec![from], std::collections::BTreeSet::new());
+        while let Some(id) = stack.pop() {
+            if id == to {
+                return true;
+            }
+            if let Some(s) = self.find_sequence(id).filter(|_| seen.insert(id)) {
+                let clips = s.tracks.iter().flat_map(|t| &t.clips);
+                stack.extend(clips.filter_map(|c| self.asset(c.asset)?.sequence));
+            }
+        }
+        false
+    }
+
+    /// Why a clip of `asset` can't go in the open sequence: it would nest that sequence inside
+    /// itself, or too deep.
+    pub fn nest_error(&self, asset: AssetId) -> Option<ModelError> {
+        let n = self.nested(asset)?;
+        if self.nests(n.id, self.sequence.id) {
+            return Some(ModelError::Cycle);
+        }
+        let (down, up) = (self.held(), self.holding());
+        let mut memo = BTreeMap::new();
+        let above = self.chain(self.sequence.id, MAX_NEST_DEPTH, &up, &mut memo);
+        memo.clear();
+        let below = self.chain(n.id, MAX_NEST_DEPTH, &down, &mut memo);
+        (above + below > MAX_NEST_DEPTH).then_some(ModelError::TooDeep)
+    }
+
+    /// Whether some chain of sequence clips passes through more than [`MAX_NEST_DEPTH`]
+    /// sequences.
+    pub fn too_deep(&self) -> bool {
+        let (down, mut memo) = (self.held(), BTreeMap::new());
+        let seqs = self.sequences();
+        seqs.iter()
+            .any(|s| self.chain(s.id, MAX_NEST_DEPTH, &down, &mut memo) > MAX_NEST_DEPTH)
+    }
+
+    /// The sequences each sequence holds a clip of.
+    fn held(&self) -> BTreeMap<SequenceId, Vec<SequenceId>> {
+        let mut m = BTreeMap::new();
+        for s in self.sequences() {
+            let clips = s.tracks.iter().flat_map(|t| &t.clips);
+            let mut ids: Vec<_> = clips
+                .filter_map(|c| self.asset(c.asset)?.sequence)
+                .collect();
+            ids.sort();
+            ids.dedup();
+            m.insert(s.id, ids);
+        }
+        m
+    }
+
+    /// The sequences holding a clip of each sequence.
+    fn holding(&self) -> BTreeMap<SequenceId, Vec<SequenceId>> {
+        let mut m: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for (from, to) in self.held() {
+            for id in to {
+                m.entry(id).or_default().push(from);
+            }
+        }
+        m
+    }
+
+    /// The most sequences on a path from `id` along `next`, `id` counted; more than `room`
+    /// stops the count above [`MAX_NEST_DEPTH`], so a damaged file can't recurse unbounded.
+    fn chain(
+        &self,
+        id: SequenceId,
+        room: usize,
+        next: &BTreeMap<SequenceId, Vec<SequenceId>>,
+        memo: &mut BTreeMap<SequenceId, usize>,
+    ) -> usize {
+        if let Some(&d) = memo.get(&id) {
+            return d;
+        }
+        if room == 0 {
+            return MAX_NEST_DEPTH + 1;
+        }
+        let ids = next.get(&id).into_iter().flatten();
+        let d = 1 + ids
+            .map(|&n| self.chain(n, room - 1, next, memo))
+            .max()
+            .unwrap_or(0);
+        if d <= MAX_NEST_DEPTH {
+            memo.insert(id, d);
+        }
+        d
+    }
+
+    /// Whether sequence ids add up: unique, each sequence asset's found, and below the next
+    /// one Nest makes. Only a damaged file breaks this.
+    pub fn sequence_ids_ok(&self) -> bool {
+        let all = self.sequences();
+        let unique = all.windows(2).all(|w| w[0].id != w[1].id);
+        let fresh = all.iter().all(|s| s.id.0 <= self.next_sequence);
+        let mut ids = self.assets.iter().filter_map(|a| a.sequence);
+        let found = ids.all(|id| self.find_sequence(id).is_some());
+        unique && fresh && found
+    }
+
+    /// The id the next sequence Nest makes gets.
+    pub fn next_sequence(&self) -> SequenceId {
+        SequenceId(self.next_sequence + 1)
+    }
+
+    /// Whether some sequence holds itself, which edits refuse; only a damaged file has one.
+    pub fn has_cycle(&self) -> bool {
+        self.sequences().into_iter().any(|s| {
+            let mut clips = s.tracks.iter().flat_map(|t| &t.clips);
+            clips.any(|c| self.nested(c.asset).is_some_and(|n| self.nests(n.id, s.id)))
+        })
+    }
+
+    /// Opens sequence `id` in the Timeline.
+    pub(crate) fn open(&mut self, id: SequenceId) -> Result<(), ModelError> {
+        if self.sequence.id != id {
+            let i = self.sequences.iter().position(|s| s.id == id);
+            let i = i.ok_or(ModelError::UnknownSequence(id))?;
+            std::mem::swap(&mut self.sequence, &mut self.sequences[i]);
+        }
+        Ok(())
+    }
+
+    /// Nest: moves clips `ids` of the open sequence into a new sequence named `name` and puts
+    /// one clip of it where they were, on the top track of each kind they were on, linked.
+    /// Their tracks come along in order, the earliest clip starting at zero; an unchosen clip
+    /// in the way fails it. `outer` names the open sequence in the bin if it isn't there yet.
+    pub(crate) fn nest(
+        &mut self,
+        ids: &[ClipId],
+        name: String,
+        outer: String,
+    ) -> Result<ClipId, ModelError> {
+        let mut p = self.clone();
+        let s = &p.sequence;
+        let mut picked = Vec::new();
+        for &id in ids {
+            picked.push(s.clip(id).ok_or(ModelError::UnknownClip(id))?.1);
+        }
+        let start = picked.iter().map(|c| c.start).min();
+        let start = start.ok_or(ModelError::EmptyClip)?;
+        let end = picked.iter().map(|c| c.end()).max().expect("not empty");
+        // A transition into or out of the selection would lose its other side.
+        for t in &s.tracks {
+            for w in t.clips.windows(2) {
+                let joined = w[0].transform.transition.is_some() && w[1].start == w[0].end();
+                if joined && ids.contains(&w[0].id) != ids.contains(&w[1].id) {
+                    return Err(ModelError::SplitTransition);
+                }
+            }
+        }
+        p.next_sequence += 1;
+        let mut inner = Sequence {
+            id: SequenceId(p.next_sequence),
+            next_id: s.next_id,
+            ..Sequence::default()
+        };
+        for t in &s.tracks {
+            let clips = t.clips.iter().filter(|c| ids.contains(&c.id)).cloned();
+            let clips: Vec<_> = clips
+                .map(|c| Clip {
+                    start: c.start - start,
+                    ..c
+                })
+                .collect();
+            if !clips.is_empty() {
+                inner.tracks.push(Track {
+                    id: t.id,
+                    kind: t.kind,
+                    name: t.name.clone(),
+                    hidden: t.hidden,
+                    locked: false,
+                    muted: t.muted,
+                    solo: t.solo,
+                    volume: t.volume,
+                    pan: t.pan,
+                    height: t.height,
+                    target: false,
+                    subtitles: t.subtitles,
+                    fx: t.fx,
+                    clips,
+                });
+            }
+        }
+        let top = |kind| inner.tracks.iter().find(|t| t.kind == kind).map(|t| t.id);
+        let tops = [top(TrackKind::Video), top(TrackKind::Audio)];
+        // The nest clip lands on each top track, whose settings mix it again; the other tracks
+        // leave the outer sequence, so theirs come inside.
+        for t in inner
+            .tracks
+            .iter_mut()
+            .filter(|t| tops.contains(&Some(t.id)))
+        {
+            (t.hidden, t.muted, t.solo) = (false, false, false);
+            (t.volume, t.pan, t.fx) = (1.0, 0.0, AudioFx::default());
+        }
+        p.sequence.remove_clips(ids, false)?;
+        for (id, name) in [(inner.id, name), (p.sequence.id, outer)] {
+            if p.sequence_asset(id).is_none() {
+                let a = p.add_asset(PathBuf::new());
+                let a = p.asset_mut(a).expect("just added");
+                (a.name, a.sequence) = (Some(name), Some(id));
+            }
+        }
+        let asset = p.sequence_asset(inner.id).expect("added above").id;
+        let link = tops
+            .iter()
+            .all(Option::is_some)
+            .then(|| p.sequence.new_link());
+        let mut made = Vec::new();
+        for t in tops.into_iter().flatten() {
+            let clip = NewClip {
+                asset,
+                source_in: Time(0),
+                source_out: end - start,
+                start,
+                link,
+            };
+            made.push(p.sequence.add_clip(t, clip)?);
+        }
+        p.sequences.push(inner);
+        if p.too_deep() {
+            return Err(ModelError::TooDeep);
+        }
+        *self = p;
+        Ok(made[0])
+    }
+
+    /// Removes the asset and every clip of it in every sequence; a sequence asset takes its
+    /// sequence with it, unless that's the open one.
+    pub(crate) fn remove_asset(&mut self, id: AssetId) -> Result<(), ModelError> {
+        let i = self.assets.iter().position(|a| a.id == id);
+        let i = i.ok_or(ModelError::UnknownAsset(id))?;
+        if let Some(s) = self.assets[i].sequence {
+            if s == self.sequence.id {
+                return Err(ModelError::SequenceOpen);
+            }
+            self.sequences.retain(|o| o.id != s);
+        }
+        self.assets.remove(i);
+        for s in std::iter::once(&mut self.sequence).chain(&mut self.sequences) {
+            for t in &mut s.tracks {
+                t.clips.retain(|c| c.asset != id);
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn add_asset(&mut self, path: impl Into<PathBuf>) -> AssetId {
@@ -1713,6 +2044,7 @@ impl Project {
             out_point: None,
             solid: None,
             text: None,
+            sequence: None,
         });
         id
     }
@@ -1721,9 +2053,10 @@ impl Project {
         self.assets.iter().find(|a| a.id == id)
     }
 
-    /// How many clips use the asset; removing it removes them too.
+    /// How many clips use the asset, in every sequence; removing it removes them too.
     pub fn clips_using(&self, id: AssetId) -> usize {
-        let clips = self.sequence.tracks.iter().flat_map(|t| &t.clips);
+        let tracks = self.sequences().into_iter().flat_map(|s| &s.tracks);
+        let clips = tracks.flat_map(|t| &t.clips);
         clips.filter(|c| c.asset == id).count()
     }
 
@@ -1741,12 +2074,24 @@ impl Project {
     ) -> Option<Placement> {
         let a = self.asset(asset)?;
         // Text and solids have no file to probe: a video-only source of the default still length.
-        let generated = a.generated().then(|| ProbeInfo {
-            duration: Time(
-                crate::time::FLICKS_PER_SECOND * i64::from(crate::settings::DEFAULT_STILL_SECS),
-            ),
-            width: Some(1),
-            ..ProbeInfo::default()
+        // A sequence is as long as it is, with each kind it has clips of.
+        let generated = a.generated().then(|| match self.nested(asset) {
+            Some(s) => {
+                let has = |k| s.tracks.iter().any(|t| t.kind == k && !t.clips.is_empty());
+                ProbeInfo {
+                    duration: s.duration(),
+                    width: has(TrackKind::Video).then_some(1),
+                    audio_streams: has(TrackKind::Audio).into(),
+                    ..ProbeInfo::default()
+                }
+            }
+            None => ProbeInfo {
+                duration: Time(
+                    crate::time::FLICKS_PER_SECOND * i64::from(crate::settings::DEFAULT_STILL_SECS),
+                ),
+                width: Some(1),
+                ..ProbeInfo::default()
+            },
         });
         let probe = a.probe.as_ref().or(generated.as_ref())?;
         let source_in = a.in_point.unwrap_or_default();
@@ -2064,9 +2409,11 @@ impl Project {
         let (mut lo, mut hi) = (Time(i64::MIN / 4), Time(i64::MAX / 4));
         for (t, c) in s.linked(id) {
             let clips = s.track(t).expect("listed").clips();
-            // Stills and solids report no duration and extend freely, as does a freeze.
+            // Stills and solids report no duration and extend freely, as does a freeze; a
+            // sequence is held to its length.
             let media = self.asset(c.asset).filter(|a| !a.generated());
             let media = media.and_then(|a| a.probe.as_ref()).map(|p| p.duration);
+            let media = media.or(self.nested(c.asset).map(Sequence::duration));
             let media = media.filter(|d| *d > Time(0)).map(|d| d - c.source_out);
             // Source to spare before the first frame shown and after the last.
             let (before, after) = match (c.freeze, c.reverse) {

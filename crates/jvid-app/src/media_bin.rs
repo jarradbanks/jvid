@@ -776,6 +776,27 @@ impl Thumbs {
             );
             return;
         }
+        if asset.sequence.is_some() {
+            // A sequence: a little timeline of three tracks, shrunk to fit a list row.
+            let (w, h) = (
+                (rect.width() - space::S8).min(56.0),
+                (rect.height() / 6.0).min(space::S4),
+            );
+            let left = rect.center().x - w / 2.0;
+            let rows = [
+                [0.0, 0.55, 0.62, 1.0],
+                [0.18, 0.8, 0.8, 0.8],
+                [0.0, 0.4, 0.46, 0.9],
+            ];
+            for (i, [a, b, c, d]) in rows.into_iter().enumerate() {
+                let y = rect.center().y + (i as f32 - 1.0) * 2.0 * h - h / 2.0;
+                for (from, to) in [(a, b), (c, d)].into_iter().filter(|(f, t)| t > f) {
+                    let bar = Rect::from_x_y_ranges(left + from * w..=left + to * w, y..=y + h);
+                    p.rect_filled(bar, CornerRadius::same(1), color::INK_3);
+                }
+            }
+            return;
+        }
         let Some(probe) = &asset.probe else { return };
         for (path, img) in self.done.lock().unwrap().drain(..) {
             let tex = ui
@@ -1355,6 +1376,7 @@ mod tests {
             out_point: None,
             solid: None,
             text: None,
+            sequence: None,
         }
     }
 

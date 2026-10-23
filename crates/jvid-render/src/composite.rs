@@ -60,6 +60,9 @@ pub struct Compositor {
     masks: crate::mask::Masker,
     /// The timeline frame number effects see as `fx.frame`.
     pub frame: u32,
+    /// By layer index: the layer is premultiplied, as a nested sequence's frame from another
+    /// `Compositor` is. Unlisted layers are straight alpha.
+    pub premultiplied: Vec<bool>,
 }
 
 impl Compositor {
@@ -161,6 +164,7 @@ impl Compositor {
             fx_pool: Vec::new(),
             masks: crate::mask::Masker::new(device),
             frame: 0,
+            premultiplied: Vec::new(),
         }
     }
 
@@ -425,14 +429,16 @@ impl Compositor {
         let binds: Vec<_> = layers
             .iter()
             .zip(&effected)
-            .map(|((tex, t), fx)| (fx.as_ref().unwrap_or(tex), t))
+            .enumerate()
+            .map(|(i, ((tex, t), fx))| (fx.as_ref().unwrap_or(tex), t, self.premultiplied.get(i)))
             .rev()
-            .filter(|(_, t)| t.opacity > 0.0)
-            .filter_map(|(tex, t)| {
+            .filter(|(_, t, _)| t.opacity > 0.0)
+            .filter_map(|(tex, t, pre)| {
                 let corners = quad([tex.width() as f32, tex.height() as f32], frame, t)?;
                 let mut p = corners.concat();
                 let mode = Blend::ALL.iter().position(|b| *b == t.blend).unwrap_or(0);
-                p.extend([t.opacity.clamp(0.0, 1.0) as f32, mode as f32, 0.0, 0.0]);
+                let pre = f32::from(u8::from(pre == Some(&true)));
+                p.extend([t.opacity.clamp(0.0, 1.0) as f32, mode as f32, pre, 0.0]);
                 let g = t.grade();
                 let on = g.iter().any(|v| *v != 0.0);
                 p.extend(g.map(|v| v as f32));
