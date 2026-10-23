@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
 use jvid_core::history::{Command, GestureKey};
-use jvid_core::keyframe::{Easing, Keyframe, Value};
+use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value};
 use jvid_core::model::{
     AudioFx, Blend, Clip, ClipId, Effect, Mask, MaskMode, MaskShape, MediaAsset, Project, Text,
     TrackKind, Transform,
@@ -736,7 +736,7 @@ pub fn show(
     if pane == speed
         && let Some(c) = clips.first().or(audio.first())
         && section(ui, "speed", None).0
-        && let Some(e) = speed_row(ui, c)
+        && let Some(e) = speed_row(ui, c, t, index, &mut seek)
     {
         edit = Some(e);
     }
@@ -1531,17 +1531,54 @@ fn add_mask_menu(
 /// Undo gesture for speed drags, xored with the clip id.
 const SPEED_GESTURE: GestureKey = 0x7370_6565_6400; // "speed"
 
-/// Speed percentage, reverse and ripple for the first selected clip and its links.
-fn speed_row(ui: &mut Ui, c: &Clip) -> Option<Edit> {
+/// Speed percentage, reverse and ripple for the first selected clip and its links. Once
+/// animated, the percentage and the diamond edit the speed keys at playhead `t`.
+fn speed_row(ui: &mut Ui, c: &Clip, t: Time, index: u64, seek: &mut Option<Time>) -> Option<Edit> {
     let ripple_id = egui::Id::new("speed_ripple");
     let mut ripple = ui.data(|d| d.get_temp(ripple_id)).unwrap_or(true);
-    let (mut pct, mut reverse) = (c.speed * 100.0, c.reverse);
-    let (changed, _) = prop_row(ui, tr!("inspector.speed"), Tools::default(), |ui| {
+    let names = [SPEED];
+    let keys = c.ramp().unwrap_or_default();
+    let (anim, s) = (!keys.is_empty(), source(c, t));
+    let keyed = match () {
+        _ if !anim => Keyed::Static,
+        _ if keys.iter().any(|k| k.time == s) => Keyed::Here,
+        _ => Keyed::Animated,
+    };
+    let label = match keyed {
+        Keyed::Static => tr!("inspector.animate", name = tr!("inspector.speed")),
+        _ => tr!("inspector.key_here").to_owned(),
+    };
+    // A freeze ignores its speed, so it gets no diamond.
+    let tools = Tools {
+        reset: None,
+        nav: anim,
+        key: c.freeze.is_none().then_some((keyed, label.as_str())),
+    };
+    // The keys with speed `v` keyed at source time `at`.
+    let with_key = |at: Time, v: f64| {
+        let mut keys = keys.to_vec();
+        match keys.binary_search_by(|k| k.time.cmp(&at)) {
+            Ok(i) => keys[i].value = Value::Scalar(v),
+            Err(i) => keys.insert(
+                i,
+                Keyframe {
+                    time: at,
+                    value: Value::Scalar(v),
+                    easing: Easing::Linear,
+                },
+            ),
+        }
+        keys
+    };
+    let gesture = Some(SPEED_GESTURE ^ c.id.0);
+    let speed = if anim { c.speed_at(t) } else { c.speed };
+    let (mut pct, mut reverse) = (speed * 100.0, c.reverse);
+    let ((changed, flipped, at), tool) = prop_row(ui, tr!("inspector.speed"), tools, |ui| {
         let drag = DragField::new(&mut pct)
             .range(1.0..=10000.0)
             .suffix("%")
             .width(64.0);
-        let a = ui.add_enabled(c.freeze.is_none(), drag).changed();
+        let r = ui.add_enabled(c.freeze.is_none(), drag);
         ui.add_space(space::S4);
         let b = ui
             .add(Checkbox::new(&mut reverse, tr!("inspector.reverse")))
@@ -1549,18 +1586,84 @@ fn speed_row(ui: &mut Ui, c: &Clip) -> Option<Edit> {
         ui.add_space(space::S4);
         ui.add(Checkbox::new(&mut ripple, tr!("inspector.ripple")))
             .on_hover_text(tr!("inspector.ripple_tooltip"));
-        a || b
+        // The ramp moves the playhead's source time as it changes, so a drag keeps keying
+        // the one it started on.
+        let at = ui.id().with("speed key");
+        if r.drag_started() {
+            ui.data_mut(|d| d.insert_temp(at, s));
+        }
+        let at = r.dragged().then(|| ui.data(|d| d.get_temp(at))).flatten();
+        (r.changed(), b, at.unwrap_or(s))
     });
     ui.data_mut(|d| d.insert_temp(ripple_id, ripple));
-    changed.then(|| {
-        let cmd = Command::SetClipSpeed {
-            id: c.id,
-            speed: pct / 100.0,
-            reverse,
-            ripple,
+    // Every speed edit is one retime, rippling as the checkbox says.
+    let retime = |speed, keys| Command::SetSpeedKeys {
+        id: c.id,
+        speed,
+        keys,
+        ripple,
+    };
+    let v = pct / 100.0;
+    let mut edit = match () {
+        _ if changed && anim => Some((retime(c.speed, with_key(at, v)), gesture)),
+        _ if changed || flipped => {
+            let speed = if changed { v } else { c.speed };
+            let cmd = Command::SetClipSpeed {
+                id: c.id,
+                speed,
+                reverse,
+                ripple,
+            };
+            Some((cmd, gesture))
+        }
+        _ => None,
+    };
+    if tool.previous {
+        *seek = neighbour(&[c], &names, t, -1);
+    }
+    if tool.next {
+        *seek = neighbour(&[c], &names, t, 1);
+    }
+    let diamond = tool.key?;
+    let here = c.speed_at(t);
+    if diamond.clicked() {
+        let cmd = match keyed {
+            Keyed::Static => retime(c.speed, with_key(s, c.speed)),
+            Keyed::Animated => retime(c.speed, with_key(s, here)),
+            // The last key gone, its speed holds.
+            Keyed::Here => match keys
+                .iter()
+                .filter(|k| k.time != s)
+                .copied()
+                .collect::<Vec<_>>()
+            {
+                rest if rest.is_empty() => retime(here, rest),
+                rest => retime(c.speed, rest),
+            },
         };
-        (cmd, Some(SPEED_GESTURE ^ c.id.0))
-    })
+        edit = Some((cmd, None));
+    }
+    if anim {
+        egui::Popup::context_menu(&diamond)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                if keyed == Keyed::Here
+                    && let Some((Command::SetClipProps(mut v), g)) =
+                        easing_menu(ui, &[c], &names, t, index)
+                {
+                    let keys = v.pop().and_then(|(.., mut k)| k.remove(SPEED));
+                    edit = Some((retime(c.speed, keys.unwrap_or_default()), g));
+                }
+                if ui
+                    .add(Button::ghost(tr!("inspector.stop_animating")))
+                    .clicked()
+                {
+                    edit = Some((retime(here, Vec::new()), None));
+                    ui.close();
+                }
+            });
+    }
+    edit
 }
 
 /// Undo gesture for audio effect drags, xored with the setting and drag count.
@@ -3074,6 +3177,35 @@ mod tests {
         h.get_by_label("Keyframe at Playhead").click();
         h.run();
         assert!(!animated(&clip(&h), "scale"));
+    }
+
+    #[test]
+    fn the_speed_diamond_keys_the_ramp_in_one_step_each() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness();
+        // Speed is the Video tab's last section.
+        h.set_size(vec2(340.0, 1600.0));
+        h.run();
+        let before = h.state().project().clone();
+        let clip = |h: &egui_kittest::Harness<'_, History>| {
+            h.state().project().sequence().tracks()[0].clips()[0].clone()
+        };
+        h.get_by_label("Animate Speed").click();
+        h.run();
+        // Keyed at the playhead's source time, at the speed the clip had.
+        let keys = clip(&h).ramp().unwrap().to_vec();
+        let s = Time(jvid_core::time::FLICKS_PER_SECOND);
+        assert_eq!((keys.len(), keys[0].time), (1, s));
+        assert_eq!(keys[0].value, Value::Scalar(1.0));
+        assert_eq!(h.query_all_by_label("Next Keyframe").count(), 1);
+        h.get_by_label("Keyframe at Playhead").click();
+        h.run();
+        assert_eq!((clip(&h).ramp(), clip(&h).speed), (None, 1.0));
+        assert!(h.state_mut().undo() && h.state_mut().undo());
+        assert_eq!(h.state().project(), &before);
     }
 
     #[test]

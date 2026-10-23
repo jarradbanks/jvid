@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use egui::{Align2, Id, Painter, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use jvid_core::history::{Command, GestureKey};
-use jvid_core::keyframe::{Easing, Keyframe};
+use jvid_core::keyframe::{Easing, Keyframe, SPEED};
 use jvid_core::model::{Clip, ClipId, Sequence, Track};
 use jvid_core::time::Time;
 use suite_ui::theme;
@@ -88,12 +88,74 @@ fn picked<'a>(
     sel.iter().filter(move |s| s.0 == c.id).map(|s| (&s.1, s.2))
 }
 
-/// Shifts the selected keys of `c` by `delta`; they replace keys they land on.
-fn shift(c: &Clip, sel: &BTreeSet<(ClipId, String, Time)>, delta: Time) -> Command {
-    rewrite(c, |keys| shift_keys(keys, c, sel, delta))
+/// Drags the selected keys of `c` `delta` along the timeline, each to the source time the clip
+/// then shows there; they replace keys they land on. A speed key retimes the clip after it, so
+/// speed keys go first, in timeline order, each found on the clip it retimes. Returns the edit
+/// and the keys where they landed.
+fn shift(
+    c: &Clip,
+    sel: &BTreeSet<(ClipId, String, Time)>,
+    delta: Time,
+) -> (Command, BTreeSet<(ClipId, String, Time)>) {
+    let mut x = c.clone();
+    let mut moved: Vec<_> = picked(sel, c)
+        .filter_map(|(p, t)| {
+            let v = x.keyframes.get_mut(p)?;
+            let i = v.iter().position(|k| k.time == t)?;
+            Some((p.clone(), v.remove(i)))
+        })
+        .collect();
+    moved.sort_by_key(|(p, k)| (p != SPEED, c.timeline_at(k.time)));
+    let mut landed = BTreeSet::new();
+    for (p, k) in moved {
+        let to = c.timeline_at(k.time) + delta;
+        let time = match () {
+            // A freeze shows every key at its start, so its keys move in source time.
+            _ if c.freeze.is_some() => (k.time + delta).max(Time(0)),
+            _ if p == SPEED => land(&x, k, to),
+            _ => x.source_beyond(to),
+        };
+        put(
+            x.keyframes.entry(p.clone()).or_default(),
+            Keyframe { time, ..k },
+        );
+        landed.insert((c.id, p, time));
+    }
+    (rewrite(c, |keys| *keys = x.keyframes), landed)
 }
 
-/// [`shift`] on `keys`, a copy of `c`'s.
+/// The source time where speed key `k`, put there on `c`, shows at timeline time `to`. The key
+/// retimes the clip as it moves, so it is searched for: its timeline time rises with its source
+/// time, or falls on a reversed clip.
+fn land(c: &Clip, k: Keyframe, to: Time) -> Time {
+    let at = |s: Time| {
+        let mut x = c.clone();
+        put(
+            x.keyframes.entry(SPEED.into()).or_default(),
+            Keyframe { time: s, ..k },
+        );
+        x.timeline_at(s)
+    };
+    // True below the answer, and up to it on a reversed clip.
+    let early = |s: Time| (at(s) < to) != c.reverse;
+    let mut hi = c.source_beyond(to).max(Time(1));
+    while early(hi) && hi.0 < i64::MAX / 4 {
+        hi = hi + hi;
+    }
+    let (mut lo, mut hi) = (0, hi.0);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if early(Time(mid)) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    Time(lo - i64::from(c.reverse)).max(Time(0))
+}
+
+/// Shifts the selected keys of `c` by `delta` in source time, as the graph editor drags them;
+/// they replace keys they land on. `keys` is a copy of `c`'s.
 pub(super) fn shift_keys(
     keys: &mut BTreeMap<String, Vec<Keyframe>>,
     c: &Clip,
@@ -376,20 +438,25 @@ impl Timeline {
                     let to = tl(k.time) + (view.time(p.x) - view.time(o.x));
                     let to = rate.time_floor(rate.index_nearest(to));
                     let to = to + self.snap(seq, &[], &[to]);
+                    // No key goes before source 0, which is to the right on a reversed clip.
                     let min = picked(&self.keys.selected, clip).map(|s| s.1).min();
-                    let floor = min.map_or(Time(0), |m| Time(0) - m);
-                    if to - tl(k.time) < floor {
+                    let lim = min.map_or(Time(0), |m| tl(Time(0)) - tl(m));
+                    let d = to - tl(k.time);
+                    let held = if clip.reverse { d.min(lim) } else { d.max(lim) };
+                    if held != d {
                         self.snapped = None;
                     }
-                    self.keys.drag = Some((to - tl(k.time)).max(floor));
+                    self.keys.drag = Some(held);
                 }
                 if r.drag_stopped()
                     && let Some(d) = self.keys.drag.take()
                 {
                     self.snapped = None;
                     if d != Time(0) {
-                        edit = Some((shift(clip, &self.keys.selected, d), None));
-                        self.keys.moved(clip.id, d);
+                        let (cmd, landed) = shift(clip, &self.keys.selected, d);
+                        edit = Some((cmd, None));
+                        self.keys.selected.retain(|s| s.0 != clip.id);
+                        self.keys.selected.extend(landed);
                     }
                 }
                 r.context_menu(|ui| {
@@ -493,6 +560,7 @@ mod tests {
             "lut_intensity",
             "volume",
             "pan",
+            "speed",
             "color",
         ];
         keys.extend(jvid_core::model::Text::ANIMATED);
@@ -547,7 +615,7 @@ mod tests {
         keys.selected = BTreeSet::from([sel("opacity", 0), sel("scale", 5)]);
 
         // Moving onto an existing key replaces it.
-        let cmd = shift(&c(&h), &keys.selected, Time(5 * S / 10));
+        let (cmd, _) = shift(&c(&h), &keys.selected, Time(5 * S / 10));
         h.apply(cmd).unwrap();
         assert_eq!(times(&h, "opacity"), [(5, Easing::Linear)]);
         assert_eq!(times(&h, "scale"), [(10, Easing::Linear)]);
@@ -578,6 +646,57 @@ mod tests {
             times(&h, "scale"),
             [(10, Easing::Linear), (15, Easing::Hold)]
         );
+    }
+
+    /// On a speed ramp a dragged key lands on the frame it was dropped on, forwards and
+    /// reversed: a speed key too, though moving it retimes the clip (#82).
+    #[test]
+    fn dragged_keys_land_on_the_frame_they_were_dropped_on_over_a_ramp() {
+        use jvid_core::time::Rate;
+        let rate = Rate::new(30, 1);
+        for reverse in [false, true] {
+            let mut h = History::new(project(1));
+            let id = h.project().sequence().tracks()[0].clips()[0].id;
+            let speed = 1.0;
+            h.apply(Command::SetClipSpeed {
+                id,
+                speed,
+                reverse,
+                ripple: true,
+            })
+            .unwrap();
+            let keys = [(SPEED, 0, 1.0), (SPEED, 10, 3.0), (SPEED, 20, 0.5)];
+            for (param, t, v) in keys.into_iter().chain([("volume", 15, 1.0)]) {
+                let key = Keyframe {
+                    time: Time(t * S / 10),
+                    value: Value::Scalar(v),
+                    easing: Easing::EaseInOut,
+                };
+                let param = param.into();
+                h.apply(Command::AddKeyframe { id, param, key }).unwrap();
+            }
+            // Drags `param`'s key at `s` by `frames` and checks it lands on that frame.
+            let drag = |h: &mut History, param: &str, s: Time, frames: i64| {
+                let c = |h: &History| h.project().sequence().tracks()[0].clips()[0].clone();
+                let from = c(h).timeline_at(s);
+                let to = rate.time_floor(rate.index_nearest(from) + frames);
+                let sel = BTreeSet::from([(id, param.to_owned(), s)]);
+                let (cmd, landed) = shift(&c(h), &sel, to - from);
+                h.apply(cmd).unwrap();
+                let [(_, p, s)] = <[_; 1]>::try_from(Vec::from_iter(landed)).unwrap();
+                assert!(p == param && c(h).keyframes[param].iter().any(|k| k.time == s));
+                let at = c(h).timeline_at(s);
+                assert_eq!(
+                    rate.index_floor(at),
+                    rate.index_floor(to),
+                    "{param} {reverse}"
+                );
+                s
+            };
+            let s = drag(&mut h, SPEED, Time(S), 7);
+            drag(&mut h, "volume", Time(15 * S / 10), -5);
+            drag(&mut h, SPEED, s, -9);
+        }
     }
 
     #[test]

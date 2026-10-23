@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Fx, Mixer, Output, SAMPLE_RATE, Strip, automate};
-use jvid_core::eval::{AudioSegment, Layer, audio_in, frame_at, gain_at};
+use jvid_core::eval::{AudioSegment, Layer, audio_in, frame_at, gains};
 use jvid_core::model::{
     AssetId, ClipId, MediaAsset, Project, ProjectSettings, Sequence, SequenceId, TrackKind,
     Transform,
@@ -368,11 +368,11 @@ impl Audio {
                     let fx = self.fx.entry(s.clip).or_default();
                     fx.process(&c.transform.audio_fx, out);
                 }
-                let first = sample(s.start);
+                let (first, gain) = (sample(s.start), gains(track, c));
                 let at = |i: usize| {
                     let t = Time((first + i as i64) * FLICKS_PER_SAMPLE);
                     let (v, p) = c.gain_at(t);
-                    ((v * gain_at(track, c, t)) as f32, p as f32)
+                    ((v * gain(t)) as f32, p as f32)
                 };
                 if c.gain_animated() || s.crossfade {
                     automate(out, at);
@@ -391,7 +391,8 @@ impl Audio {
 }
 
 /// Fills stereo `out` with segment `s` from `src`, resampled linearly when not at 100%
-/// speed, so pitch follows speed, and backwards when reversed.
+/// speed, so pitch follows speed, and backwards when reversed. On a ramp the speed glides
+/// across the segment to land on its source end.
 fn read(
     src: &mut dyn FnMut(i64, &mut [f32]),
     s: &AudioSegment,
@@ -399,17 +400,27 @@ fn read(
     tmp: &mut Vec<f32>,
 ) {
     let from = sample(s.source_start);
-    if s.speed == 1.0 && !s.reverse {
+    if s.speed == 1.0 && !s.reverse && s.source_end.is_none() {
         return src(from, out);
     }
     let frames = out.len() / 2;
-    let n = (frames as f64 * s.speed).ceil() as usize;
+    let (mut speed, mut glide) = (s.speed, 0.0);
+    if let Some(end) = s.source_end.filter(|_| frames > 0) {
+        // x(i) = speed·i + glide·i² meets the end exactly; a glide that would turn back
+        // within the block plays at the mean speed instead.
+        let (span, n) = ((sample(end) - from).abs() as f64, frames as f64);
+        glide = (span - speed * n) / (n * n);
+        if speed + 2.0 * glide * n < 0.0 {
+            (speed, glide) = (span / n, 0.0);
+        }
+    }
+    let n = (frames as f64 * (speed + glide * frames as f64)).ceil() as usize;
     // One frame spare to interpolate towards.
     tmp.clear();
     tmp.resize((n + 1) * 2, 0.0);
     src(if s.reverse { from - n as i64 } else { from }, tmp);
     for i in 0..frames {
-        let x = i as f64 * s.speed;
+        let x = (i as f64 * (speed + glide * i as f64)).min(n as f64);
         let x = if s.reverse { n as f64 - x } else { x };
         let (j, f) = (x.floor() as usize, (x.fract()) as f32);
         for ch in 0..2 {

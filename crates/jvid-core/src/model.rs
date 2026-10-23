@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::hdr::Hdr;
-use crate::keyframe::{Keyframe, Value};
+use crate::keyframe::{Keyframe, SPEEDS, Value};
 use crate::time::{Rate, Time};
 
 macro_rules! id {
@@ -506,6 +506,7 @@ fn is_first_stream(s: &Option<u32>) -> bool {
 /// the color adjustments by field name (`exposure`, `contrast`, ..., `lut_intensity`), effect
 /// parameters as `fx{index}.{param}` (see [`Effect::key`]), mask shapes and feather as
 /// `mask{index}.{param}` (see [`Mask::key`]), and for audio clips `volume` and `pan`.
+/// The clip's own [`crate::keyframe::SPEED`] keys its speed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Transform {
@@ -809,8 +810,19 @@ impl Transform {
     }
 }
 
+/// A ramp's timeline clock at source time `s`: whole flicks from its first key.
+fn clock(keys: &[Keyframe], s: Time) -> i64 {
+    crate::keyframe::ramp_time(keys, s.0 as f64).floor() as i64
+}
+
 impl Clip {
-    /// The source rate: 1 for a freeze, which spends its range 1:1.
+    /// The speed keys the clip ramps through, if any; a freeze ignores them.
+    pub fn ramp(&self) -> Option<&[Keyframe]> {
+        let keys = self.keyframes.get(crate::keyframe::SPEED)?;
+        (self.freeze.is_none() && !keys.is_empty()).then_some(keys.as_slice())
+    }
+
+    /// The source rate when it is constant: 1 for a freeze, which spends its range 1:1.
     fn rate(&self) -> f64 {
         if self.freeze.is_some() {
             1.0
@@ -819,20 +831,27 @@ impl Clip {
         }
     }
 
-    /// Timeline length of `source` source time. Floors, as [`Clip::source_len`] does, so a
-    /// length converted there and back never grows.
-    pub fn timeline_len(&self, source: Time) -> Time {
-        Time((source.0 as f64 / self.rate()).floor() as i64)
+    /// The speed at timeline time `t`: source time per timeline time.
+    pub fn speed_at(&self, t: Time) -> f64 {
+        match self.ramp() {
+            None => self.rate(),
+            Some(keys) => crate::keyframe::speed_at(keys, self.source_at(t)),
+        }
     }
 
-    /// Source time spent over `timeline` timeline time.
-    pub fn source_len(&self, timeline: Time) -> Time {
-        Time((timeline.0 as f64 * self.rate()).floor() as i64)
+    /// Timeline length of source `from..to`. Floors, so a length converted to source and back
+    /// never grows. On a ramp both ends floor on one clock, so the lengths of adjacent source
+    /// ranges add up exactly and a split never overlaps.
+    pub fn timeline_len(&self, from: Time, to: Time) -> Time {
+        match self.ramp() {
+            None => Time(((to - from).0 as f64 / self.rate()).floor() as i64),
+            Some(keys) => Time(clock(keys, to) - clock(keys, from)),
+        }
     }
 
     /// Length on the timeline: the source range at the clip's speed.
     pub fn duration(&self) -> Time {
-        self.timeline_len(self.source_out - self.source_in)
+        self.timeline_len(self.source_in, self.source_out)
     }
 
     /// The source time shown at timeline time `t`, held inside the source range.
@@ -850,12 +869,21 @@ impl Clip {
         if let Some(f) = self.freeze {
             return f;
         }
-        let d = self.source_len(t - self.start);
+        let d = t - self.start;
         let last = Time(self.source_out.0 - 1).max(self.source_in);
-        let s = if self.reverse {
-            last - d
-        } else {
-            self.source_in + d
+        let s = match (self.ramp(), self.reverse) {
+            (None, false) => self.source_in + Time((d.0 as f64 * self.speed).floor() as i64),
+            (None, true) => last - Time((d.0 as f64 * self.speed).floor() as i64),
+            (Some(keys), reverse) => {
+                use crate::keyframe::{ramp_source, ramp_time};
+                let (from, d) = if reverse {
+                    (last, -d.0)
+                } else {
+                    (self.source_in, d.0)
+                };
+                let s = ramp_source(keys, ramp_time(keys, from.0 as f64) + d as f64);
+                Time(s.round() as i64)
+            }
         };
         s.max(Time(0))
     }
@@ -863,35 +891,57 @@ impl Clip {
     /// Where source time `s` shows on the timeline, the inverse of [`Clip::source_at`]; a
     /// freeze shows it from the start.
     pub fn timeline_at(&self, s: Time) -> Time {
-        let d = match (self.freeze, self.reverse) {
-            (Some(_), _) => Time(0),
-            (None, false) => s - self.source_in,
-            (None, true) => Time(self.source_out.0 - 1) - s,
+        let (from, to) = match (self.freeze, self.reverse) {
+            (Some(_), _) => (s, s),
+            (None, false) => (self.source_in, s),
+            (None, true) => (s, Time(self.source_out.0 - 1)),
         };
-        self.start + self.timeline_len(d)
+        self.start + self.timeline_len(from, to)
     }
 
     /// Keeps the first `len` of the clip on the timeline; its end lands at or before
     /// `start + len`.
     pub(crate) fn keep_head(&mut self, len: Time) {
-        let n = self.source_len(len);
-        if self.reverse {
-            self.source_in = self.source_out - n;
-        } else {
-            self.source_out = self.source_in + n;
-        }
+        self.keep_source(len, self.reverse);
     }
 
     /// Keeps the last `len` of the clip on the timeline, its end staying where it is.
     pub(crate) fn keep_tail(&mut self, len: Time) {
         let end = self.end();
-        let n = self.source_len(len);
-        if self.reverse {
-            self.source_out = self.source_in + n;
-        } else {
-            self.source_in = self.source_out - n;
-        }
+        self.keep_source(len, !self.reverse);
         self.start = end - self.duration();
+    }
+
+    /// Keeps at most `len` of timeline at the low end of the source range, or the high end.
+    fn keep_source(&mut self, len: Time, high: bool) {
+        let Some(keys) = self.ramp() else {
+            let n = Time((len.0 as f64 * self.rate()).floor() as i64);
+            if high {
+                self.source_in = self.source_out - n;
+            } else {
+                self.source_out = self.source_in + n;
+            }
+            return;
+        };
+        // The first source flick where the clock reads `g` or later, checked on the clock
+        // itself so float error can't move it.
+        let first = |g: i64| {
+            let mut x = Time(crate::keyframe::ramp_source(keys, g as f64).ceil() as i64);
+            while clock(keys, x) < g {
+                x.0 += 1;
+            }
+            while clock(keys, Time(x.0 - 1)) >= g {
+                x.0 -= 1;
+            }
+            x
+        };
+        if high {
+            let g = clock(keys, self.source_out) - len.0;
+            self.source_in = first(g).max(Time(0));
+        } else {
+            let g = clock(keys, self.source_in) + len.0;
+            self.source_out = Time(first(g + 1).0 - 1);
+        }
     }
 
     /// The animated value of `param` at timeline time `t`.
@@ -1001,17 +1051,26 @@ impl Clip {
 
     /// The fade multiplier at timeline time `t`, 0..=1, for opacity and gain.
     pub fn fade_at(&self, t: Time) -> f64 {
-        let d = self.duration().0.max(1);
-        let ramp = |len: Time, from: i64| match len.0.min(d) {
+        self.fades()(t)
+    }
+
+    /// [`Clip::fade_at`] for many times in a row, the clip's length found once.
+    pub fn fades(&self) -> impl Fn(Time) -> f64 + '_ {
+        let len = self.duration();
+        let (d, end) = (len.0.max(1), self.start + len);
+        let ramp = move |len: Time, from: i64| match len.0.min(d) {
             n if n > 0 => (from as f64 / n as f64).clamp(0.0, 1.0),
             _ => 1.0,
         };
-        let x = &self.transform;
-        // Measured to the last instant shown, so a fade out reaches 0 on the final frame's start.
-        let x = ramp(x.fade_in, (t - self.start).0) * ramp(x.fade_out, (self.end() - t).0);
-        match self.transform.fade_curve {
-            FadeCurve::Linear => x,
-            FadeCurve::EqualPower => (x * std::f64::consts::FRAC_PI_2).sin(),
+        move |t| {
+            let x = &self.transform;
+            // Measured to the last instant shown, so a fade out reaches 0 on the final frame's
+            // start.
+            let x = ramp(x.fade_in, (t - self.start).0) * ramp(x.fade_out, (end - t).0);
+            match self.transform.fade_curve {
+                FadeCurve::Linear => x,
+                FadeCurve::EqualPower => (x * std::f64::consts::FRAC_PI_2).sin(),
+            }
         }
     }
 
@@ -1055,7 +1114,8 @@ pub enum ModelError {
     NoGap(TrackId),
     /// No in/out range is marked.
     NoRange,
-    /// A speed that isn't a positive, finite rate.
+    /// A speed that isn't a positive, finite rate, or a speed key outside
+    /// [`crate::keyframe::SPEEDS`].
     BadSpeed,
     /// The time is outside the clip.
     OutsideClip(ClipId),
@@ -1086,7 +1146,7 @@ impl std::fmt::Display for ModelError {
             Self::WrongKind(id) => write!(f, "track {} is the wrong kind", id.0),
             Self::NoGap(id) => write!(f, "no gap there on track {}", id.0),
             Self::NoRange => f.write_str("no in/out range is marked"),
-            Self::BadSpeed => f.write_str("speed must be above 0"),
+            Self::BadSpeed => f.write_str("speed must be above 0, and keyed from 1% to 10000%"),
             Self::OutsideClip(id) => write!(f, "time is outside clip {}", id.0),
             Self::NoHandles(_) => f.write_str(
                 "no media handles at that cut for a transition: trim the clips so media remains past it on both sides",
@@ -1305,7 +1365,8 @@ impl Sequence {
             .find_map(|t| t.clips.iter().find(|c| c.id == id).map(|c| (t.id, c)))
     }
 
-    /// Fields that cannot break the overlap invariant: asset, link, params.
+    /// Fields that cannot break the overlap invariant: asset, link, params. Speed keys can, so
+    /// their callers retime with [`Sequence::set_speed_keys`].
     pub(crate) fn with_clip_mut<R>(
         &mut self,
         id: ClipId,
@@ -1364,7 +1425,7 @@ impl Sequence {
             return Err(ModelError::EmptyClip);
         }
         let (track, c) = self.clip(id).ok_or(ModelError::UnknownClip(id))?;
-        let len = c.timeline_len(source_out - source_in);
+        let len = c.timeline_len(source_in, source_out);
         self.check_free(track, start, start + len, Some(id))?;
         let (_, mut c) = self.remove_clip(id)?;
         c.start = start;
@@ -1488,6 +1549,14 @@ impl Sequence {
         let mut tail = head.clone();
         tail.keep_tail(head.end() - at);
         head.keep_head(at - head.start);
+        if head.ramp().is_some() {
+            // Both halves cut at one source flick, so their lengths add up to the whole.
+            if head.reverse {
+                head.source_in = tail.source_out;
+            } else {
+                head.source_out = tail.source_in;
+            }
+        }
         // The cut's transition stays with the tail, which now ends there.
         head.transform.transition = None;
         (tail.id, tail.link) = (tail_id, link);
@@ -2214,7 +2283,8 @@ impl Sequence {
 
     /// Sets the speed and direction of `id` and its linked clips, each keeping its source
     /// range so its length follows the speed. Ripple shifts the later clips on their tracks
-    /// by the change in length; without it a longer clip must fit before the next.
+    /// by the change in length; without it a longer clip must fit before the next. Speed keys
+    /// stay, and override `speed`.
     pub(crate) fn set_speed(
         &mut self,
         id: ClipId,
@@ -2225,6 +2295,41 @@ impl Sequence {
         if !(speed > 0.0 && speed.is_finite()) {
             return Err(ModelError::BadSpeed);
         }
+        self.retime(id, ripple, |c| (c.speed, c.reverse) = (speed, reverse))
+    }
+
+    /// Keys the speed of `id` and its linked clips, as [`Sequence::set_speed`] sets it, with
+    /// `speed` the constant speed they play at without keys.
+    pub(crate) fn set_speed_keys(
+        &mut self,
+        id: ClipId,
+        speed: f64,
+        keys: Vec<Keyframe>,
+        ripple: bool,
+    ) -> Result<(), ModelError> {
+        let ok = |v: f64| v > 0.0 && v.is_finite();
+        let key = |k: &Keyframe| matches!(k.value, Value::Scalar(v) if SPEEDS.contains(&v));
+        if !ok(speed) || !keys.iter().all(key) {
+            return Err(ModelError::BadSpeed);
+        }
+        self.retime(id, ripple, |c| {
+            c.speed = speed;
+            if keys.is_empty() {
+                c.keyframes.remove(crate::keyframe::SPEED);
+            } else {
+                c.keyframes
+                    .insert(crate::keyframe::SPEED.into(), keys.clone());
+            }
+        })
+    }
+
+    /// Applies `f` to `id` and its linked clips, then ripples as [`Sequence::set_speed`] does.
+    fn retime(
+        &mut self,
+        id: ClipId,
+        ripple: bool,
+        f: impl Fn(&mut Clip),
+    ) -> Result<(), ModelError> {
         let (_, c) = self.clip(id).ok_or(ModelError::UnknownClip(id))?;
         let old = c.duration();
         let mut s = self.clone();
@@ -2239,7 +2344,7 @@ impl Sequence {
             let ti = s.index(t)?;
             for c in &mut s.tracks[ti].clips {
                 if c.id == cid {
-                    (c.speed, c.reverse) = (speed, reverse);
+                    f(c);
                     if cid == id {
                         grow = c.duration() - old;
                     }
@@ -2273,17 +2378,21 @@ impl Sequence {
             let group: Vec<_> = s.linked(id).iter().map(|(_, c)| c.id).collect();
             s.split_at(&group, b)?;
             s.split_at(&group, a)?;
-            // The head keeps `id`, so the middle is whatever now starts at `a`.
+            // The head keeps `id`, so the middle is whatever now starts at `a`, or a flick
+            // after where slow motion can't cut on it exactly.
             let mid = s
                 .track(t)
-                .and_then(|t| t.clips.iter().find(|c| c.start == a));
+                .and_then(|t| t.clips.iter().find(|c| c.start >= a));
             let mid = mid.ok_or(ModelError::UnknownClip(id))?;
             match speed {
                 None => {
                     let ids: Vec<_> = s.linked(mid.id).iter().map(|(_, c)| c.id).collect();
                     s.remove_clips(&ids, true)?;
                 }
-                Some(v) => s.set_speed(mid.id, v, mid.reverse, true)?,
+                Some(v) => {
+                    // The span plays at `v` throughout, dropping any ramp.
+                    s.set_speed_keys(mid.id, v, Vec::new(), true)?;
+                }
             }
         }
         *self = s;
@@ -2414,17 +2523,18 @@ impl Project {
             let media = self.asset(c.asset).filter(|a| !a.generated());
             let media = media.and_then(|a| a.probe.as_ref()).map(|p| p.duration);
             let media = media.or(self.nested(c.asset).map(Sequence::duration));
-            let media = media.filter(|d| *d > Time(0)).map(|d| d - c.source_out);
-            // Source to spare before the first frame shown and after the last.
+            let media = media.filter(|d| *d > Time(0)).map(|d| (c.source_out, d));
+            // Source ranges to spare before the first frame shown and after the last.
+            let head = Some((Time(0), c.source_in));
             let (before, after) = match (c.freeze, c.reverse) {
                 (Some(_), _) => (None, None),
-                (None, false) => (Some(c.source_in), media),
-                (None, true) => (media, Some(c.source_in)),
+                (None, false) => (head, media),
+                (None, true) => (media, head),
             };
             match edge {
                 Edge::Head => {
-                    if let Some(b) = before {
-                        lo = lo.max(Time(0) - c.timeline_len(b));
+                    if let Some((a, b)) = before {
+                        lo = lo.max(Time(0) - c.timeline_len(a, b));
                     }
                     hi = hi.min(c.duration() - min);
                     if !ripple {
@@ -2434,8 +2544,8 @@ impl Project {
                 }
                 Edge::Tail => {
                     lo = lo.max(min - c.duration());
-                    if let Some(a) = after {
-                        hi = hi.min(c.timeline_len(a));
+                    if let Some((a, b)) = after {
+                        hi = hi.min(c.timeline_len(a, b));
                     }
                     let next = clips.iter().map(|o| o.start).filter(|&o| o >= c.end());
                     if let (false, Some(n)) = (ripple, next.min()) {
@@ -2857,6 +2967,116 @@ mod tests {
             r#"{"id":1,"asset":1,"source_in":0,"source_out":1,"start":0,"link":null,"params":{}}"#;
         let old: Clip = serde_json::from_str(json).unwrap();
         assert_eq!(old.transform, Transform::default());
+    }
+
+    /// Keys `id` from speed `a` at its in point to `b` at its out point.
+    fn ramp(s: &mut Sequence, id: ClipId, easing: crate::keyframe::Easing, a: f64, b: f64) {
+        let c = s.clip(id).unwrap().1;
+        let key = |time, v| Keyframe {
+            time,
+            value: Value::Scalar(v),
+            easing,
+        };
+        let keys = vec![key(c.source_in, a), key(c.source_out, b)];
+        s.set_speed_keys(id, 1.0, keys, true).unwrap();
+    }
+
+    #[test]
+    fn linear_ramp_maps_timeline_to_source_within_a_frame() {
+        use crate::keyframe::Easing;
+        let sec = crate::time::FLICKS_PER_SECOND;
+        let (mut s, v, _) = seq();
+        let new = NewClip {
+            source_in: Time(0),
+            source_out: Time(10 * sec),
+            start: Time(sec),
+            ..clip(0, 0)
+        };
+        let id = s.add_clip(v, new).unwrap();
+        ramp(&mut s, id, Easing::Linear, 1.0, 2.0);
+        let c = s.clip(id).unwrap().1;
+        // At speed 1 + s/L, timeline time is L ln(1 + s/L): 10 s of source play in 10 ln 2.
+        let l = 10.0 * sec as f64;
+        let frame = Rate::new(60, 1).time_floor(1).0 as f64;
+        assert!((c.duration().0 as f64 - l * 2f64.ln()).abs() < 1.0);
+        for n in 0..(c.duration().0 / frame as i64) {
+            let t = n as f64 * frame;
+            let want = l * (t / l).exp_m1();
+            let got = c.source_at(c.start + Time(t as i64)).0 as f64;
+            assert!((got - want).abs() < frame, "frame {n}: {got} vs {want}");
+            assert!((c.timeline_at(Time(want as i64)) - c.start).0 as f64 - t <= 1.0);
+        }
+        assert_eq!(c.source_at(c.start), Time(0));
+        assert!((c.speed_at(c.end() - Time(1)) - 2.0).abs() < 1e-6);
+        // A key outside 1%..10000% is refused, so the speed shown is the speed played.
+        for v in [0.0, 0.009, 100.5, f64::NAN] {
+            let k = Keyframe {
+                time: Time(0),
+                value: Value::Scalar(v),
+                easing: Easing::Linear,
+            };
+            let r = s.set_speed_keys(id, 1.0, vec![k], true);
+            assert_eq!(r, Err(ModelError::BadSpeed), "{v}");
+        }
+    }
+
+    #[test]
+    fn constant_speed_takes_the_exact_path() {
+        let (mut s, v, _) = seq();
+        let id = s.add_clip(v, clip(0, 1_000_003)).unwrap();
+        s.set_speed(id, 1.5, false, true).unwrap();
+        let c = s.clip(id).unwrap().1;
+        assert!(c.ramp().is_none());
+        assert_eq!(c.duration(), Time((1_000_003.0f64 / 1.5).floor() as i64));
+        assert_eq!(c.source_at(Time(1000)), Time(100 + 1500));
+        assert_eq!(c.timeline_at(Time(100 + 1500)), Time(1000));
+        assert_eq!(c.speed_at(Time(0)), 1.5);
+        // Empty speed keys are no ramp, and keys under a freeze are ignored.
+        let mut c = c.clone();
+        c.keyframes
+            .insert(crate::keyframe::SPEED.into(), Vec::new());
+        assert!(c.ramp().is_none());
+    }
+
+    #[test]
+    fn ramped_splits_add_up_and_never_overlap() {
+        use crate::keyframe::Easing;
+        let (mut s, v, _) = seq();
+        let id = s.add_clip(v, clip(7, 7_056_000_000)).unwrap();
+        let cases = [
+            (Easing::Linear, 1.0, 2.0),
+            (Easing::EaseInOut, 1.0, 2.0),
+            (Easing::Linear, 0.5, 0.25),
+        ];
+        for (easing, a, b) in cases {
+            ramp(&mut s, id, easing, a, b);
+            let whole = s.clip(id).unwrap().1.clone();
+            for at in [1, 2_345_678_901, whole.duration().0 - 1] {
+                let at = whole.start + Time(at);
+                let mut t = s.clone();
+                t.split_at(&[id], at).unwrap();
+                let clips = t.track(v).unwrap().clips();
+                let (head, tail) = (&clips[0], &clips[1]);
+                let msg = format!("{easing:?} {a}->{b} at {at:?}");
+                assert_eq!(head.duration() + tail.duration(), whole.duration(), "{msg}");
+                assert_eq!(
+                    (head.start, tail.end()),
+                    (whole.start, whole.end()),
+                    "{msg}"
+                );
+                assert_eq!(
+                    (head.end(), head.source_out),
+                    (tail.start, tail.source_in),
+                    "{msg}"
+                );
+                // Exact where the clock ticks every flick; slow motion lands within 1/speed.
+                let off = (tail.start - at).0;
+                assert!(
+                    off == 0 || (a < 1.0 && (0..=4).contains(&off)),
+                    "{msg}: {off}"
+                );
+            }
+        }
     }
 
     #[test]

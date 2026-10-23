@@ -40,14 +40,17 @@ pub struct AudioSegment {
     pub end: Time,
     /// Asset time matching `start`.
     pub source_start: Time,
-    /// Source time per timeline time; 1 plays as recorded, other rates resample (pitch
-    /// shifts with them).
+    /// Source time per timeline time at `start`; 1 plays as recorded, other rates resample
+    /// (pitch shifts with them).
     pub speed: f64,
+    /// Asset time matching `end` on a speed ramp, whose speed glides from `speed` to reach it;
+    /// `None` at a constant speed.
+    pub source_end: Option<Time>,
     /// The source plays backwards from `source_start`.
     pub reverse: bool,
     /// The clip's audio stream; `None` mixes all of them.
     pub stream: Option<u32>,
-    /// The segment plays through a transition, so its gain ([`gain_at`]) changes within it.
+    /// The segment plays through a transition, so its gain ([`gains`]) changes within it.
     pub crossfade: bool,
     pub volume: f32,
     pub pan: f32,
@@ -212,9 +215,10 @@ fn nest<'a>(p: &'a Project, mut layers: Vec<Layer<'a>>) -> Vec<Layer<'a>> {
     layers
 }
 
-/// `c`'s gain from its fades and its transitions at `t` on `track`, 0..=1; transitions are
-/// equal-power crossfades whatever their kind.
-pub fn gain_at(track: &Track, c: &Clip, t: Time) -> f64 {
+/// `c`'s gain over time on `track` from its fades and its transitions, 0..=1; transitions are
+/// equal-power crossfades whatever their kind. The clip's edges are found once, so it is cheap
+/// per sample.
+pub fn gains<'a>(track: &'a Track, c: &'a Clip) -> impl Fn(Time) -> f64 + 'a {
     let clips = track.clips();
     let i = clips.iter().position(|o| o.id == c.id);
     let before = i
@@ -222,14 +226,18 @@ pub fn gain_at(track: &Track, c: &Clip, t: Time) -> f64 {
         .and_then(|j| window(&clips[j], c));
     let after = i.and_then(|i| clips.get(i + 1)).and_then(|n| window(c, n));
     let quarter = std::f64::consts::FRAC_PI_2;
-    let mut g = fade(c, t);
-    if let Some(w) = before.filter(|w| w.0 <= t && t < w.1) {
-        g *= (progress(w, t) * quarter).sin();
+    // As `fade`, held at the clip's edge value through its handles.
+    let (fade, last) = (c.fades(), Time(c.end().0 - 1).max(c.start));
+    move |t| {
+        let mut g = fade(t.clamp(c.start, last));
+        if let Some(w) = before.filter(|w| w.0 <= t && t < w.1) {
+            g *= (progress(w, t) * quarter).sin();
+        }
+        if let Some(w) = after.filter(|w| w.0 <= t && t < w.1) {
+            g *= (progress(w, t) * quarter).cos();
+        }
+        g
     }
-    if let Some(w) = after.filter(|w| w.0 <= t && t < w.1) {
-        g *= (progress(w, t) * quarter).cos();
-    }
-    g
 }
 
 /// Audible segments within `[start, end)`, in track order then time order.
@@ -249,7 +257,8 @@ pub fn audio_in(seq: &Sequence, start: Time, end: Time) -> Vec<AudioSegment> {
                         start: s,
                         end: e,
                         source_start: source(c, s),
-                        speed: c.speed,
+                        speed: c.speed_at(s),
+                        source_end: c.ramp().map(|_| source(c, e)),
                         reverse: c.reverse,
                         stream: c.stream,
                         crossfade: before.is_some_and(|w| s < w.1)
@@ -629,14 +638,14 @@ mod tests {
         let tr = &s.tracks()[0];
         let (ca, cb) = (&tr.clips()[0], &tr.clips()[1]);
         for x in 90..110 {
-            let (ga, gb) = (gain_at(tr, ca, Time(x)), gain_at(tr, cb, Time(x)));
+            let (ga, gb) = (gains(tr, ca)(Time(x)), gains(tr, cb)(Time(x)));
             assert!(
                 (ga * ga + gb * gb - 1.0).abs() < 1e-9,
                 "constant power at {x}"
             );
         }
-        assert_eq!(gain_at(tr, ca, Time(50)), 1.0);
-        assert_eq!(gain_at(tr, cb, Time(90)), 0.0);
+        assert_eq!(gains(tr, ca)(Time(50)), 1.0);
+        assert_eq!(gains(tr, cb)(Time(90)), 0.0);
         assert!(!audio_in(&s, Time(0), Time(50))[0].crossfade);
     }
 

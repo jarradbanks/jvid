@@ -911,6 +911,44 @@ fn volume_ramp_has_no_zipper() {
     }
 }
 
+/// A fade on an eased speed ramp finds the clip's length once per block, not once per sample
+/// (#82): a second of mix integrates dozens of pieces of the ramp, not two per sample.
+#[cfg(debug_assertions)]
+#[test]
+fn eased_ramp_fade_integrates_per_block_not_per_sample() {
+    use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value, integrated};
+    let mut h = History::new(Project::default());
+    let id = add(&mut h, TrackKind::Audio, "/a.wav", secs(4));
+    let c = h.project().sequence().clip(id).unwrap().1.clone();
+    let key = |t, v| Keyframe {
+        time: t,
+        value: Value::Scalar(v),
+        easing: Easing::EaseInOut,
+    };
+    // Keyed on past the out point, so every lookup of the clip's length lands mid-ease.
+    let keys = [(
+        SPEED.to_string(),
+        vec![key(Time(0), 1.0), key(secs(8), 2.0)],
+    )];
+    let x = Transform {
+        fade_in: secs(2),
+        ..c.transform
+    };
+    h.apply(Command::SetClipProps(vec![(id, x, keys.into())]))
+        .unwrap();
+    let mut audio = Audio::new(Box::new(|_, _| {
+        Box::new(|_, out: &mut [f32]| out.fill(1.0))
+    }));
+    let mut out = vec![0.0; 2 * SAMPLE_RATE as usize];
+    let before = integrated();
+    audio.mix(h.project(), 0, &mut out);
+    let n = integrated() - before;
+    assert!(n < 1_000, "{n} pieces integrated for {SAMPLE_RATE} samples");
+    // Still fading in: half way through the 2 s fade at the block's end.
+    let end = out[out.len() - 2] / pan_gains(0.0).0;
+    assert!(out[0] == 0.0 && (end - 0.5).abs() < 0.01, "{end}");
+}
+
 #[test]
 fn scrub_queues_a_snippet_from_the_parked_playhead() {
     let mut h = History::new(Project::default());
@@ -993,6 +1031,7 @@ fn speed_resamples_and_reverse_reads_backwards() {
         volume: 1.0,
         pan: 0.0,
         speed,
+        source_end: None,
         reverse,
     };
     let left = |s: &AudioSegment, src: &mut ClipAudio| {
@@ -1013,6 +1052,21 @@ fn speed_resamples_and_reverse_reads_backwards() {
         [100.0, 100.5, 101.0, 101.5]
     );
     assert_eq!(left(&seg(1.0, true), &mut src), [100.0, 99.0, 98.0, 97.0]);
+    // A ramp from 1x glides to land 8 samples on over these 4: x = i + i²/4.
+    let end = Some(Time(108 * FLICKS_PER_SAMPLE));
+    let ramp = |reverse| AudioSegment {
+        source_end: end.map(|e| {
+            if reverse {
+                Time(92 * FLICKS_PER_SAMPLE)
+            } else {
+                e
+            }
+        }),
+        ..seg(1.0, reverse)
+    };
+    let glide = [100.0, 101.25, 103.0, 105.25];
+    assert_eq!(left(&ramp(false), &mut src), glide);
+    assert_eq!(left(&ramp(true), &mut src), glide.map(|x| 200.0 - x));
 }
 
 /// Through a transition both clips on a track are summed at equal power, not one written over
@@ -1188,6 +1242,71 @@ fn mixes_the_same(h: &History) {
         worst < 1e-6,
         "nested mix differs from the flat one by {worst}"
     );
+}
+
+/// A nest clip ramped from 100% to 200% maps time into its sequence as the same ramp on a plain
+/// clip maps it into the file (#82, #83): the same inner frames, and the same samples gliding.
+#[test]
+fn a_ramped_nest_clip_plays_like_a_ramped_plain_clip() {
+    use jvid_core::keyframe::{Easing, Keyframe, Value};
+    let mut flat = History::new(Project::default());
+    add(&mut flat, TrackKind::Video, "/a.mp4", secs(3));
+    add(&mut flat, TrackKind::Audio, "/a.wav", secs(3));
+    let mut nested = History::new(nest_all(&flat));
+    let key = |time, v| Keyframe {
+        time,
+        value: Value::Scalar(v),
+        easing: Easing::Linear,
+    };
+    for h in [&mut flat, &mut nested] {
+        let ids: Vec<_> = (h.project().sequence().tracks().iter())
+            .flat_map(|t| t.clips())
+            .map(|c| c.id)
+            .collect();
+        for id in ids {
+            let keys = vec![key(Time(0), 1.0), key(secs(3), 2.0)];
+            let ramp = Command::SetSpeedKeys {
+                id,
+                speed: 1.0,
+                keys,
+                ripple: true,
+            };
+            h.apply(ramp).unwrap();
+        }
+    }
+    let (flat, nested) = (flat.project(), nested.project());
+    // 3 s of source at 1 + s/3 per second play in 3 ln 2 s.
+    let len = nested.sequence().tracks()[0].clips()[0].duration();
+    assert!((len.0 as f64 / FLICKS_PER_SECOND as f64 - 3.0 * 2f64.ln()).abs() < 1e-6);
+    for n in 0..FPS30.index_floor(len) {
+        let t = FPS30.time_floor(n);
+        let shown = |p| {
+            leaves(frame_at(p, t))
+                .iter()
+                .map(|l| l.source_time)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shown(flat), shown(nested), "frame {n}");
+    }
+    // Short of the end, where the nest's sequence runs out of samples to interpolate towards.
+    let mix = |p: &Project| {
+        let mut audio = Audio::new(indexed());
+        let mut all = Vec::new();
+        for block in 0..(2 * SAMPLE_RATE as i64 / 1000) {
+            let mut out = vec![0.0; 2000];
+            audio.prime(p, Time(block * 1000 * FLICKS_PER_SAMPLE));
+            audio.mix(p, block * 1000, &mut out);
+            all.extend(out);
+        }
+        all
+    };
+    let (a, b) = (mix(flat), mix(nested));
+    let off = |(a, b): (&f32, &f32)| (a - b).abs() / a.abs().max(1.0);
+    let worst = a.iter().zip(&b).map(off).fold(0.0, f32::max);
+    assert!(worst < 1e-6, "ramped nest mix differs by {worst}");
+    // Gliding: the last block reads near twice as many source samples as it plays.
+    let step = (a[a.len() - 2] - a[a.len() - 4]) / pan_gains(0.0).0;
+    assert!(step > 1.8, "{step}");
 }
 
 /// Clip ids are per sequence, so after a switch a clip sharing an id with one in the last
