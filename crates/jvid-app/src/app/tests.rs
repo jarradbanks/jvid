@@ -1051,6 +1051,27 @@ fn file_menu_saves_exports_and_shows_keymap_shortcuts() {
 }
 
 #[test]
+fn edit_menu_opens_preferences_and_the_project_menu_keeps_project_settings() {
+    let mut h = plain_harness();
+    h.state_mut().on_welcome = false;
+    h.run();
+    h.get_by_label("Untitled").click();
+    h.run();
+    assert!(h.query_by_label("Project Settings…").is_some());
+    assert!(h.query_by_label("Preferences…").is_none());
+    assert!(h.query_by_label("Settings…").is_none());
+    h.key_press(egui::Key::Escape);
+    h.run();
+
+    h.get_by_label("Edit").click();
+    h.run();
+    h.get_by_label("Preferences…").click();
+    h.run();
+    assert!(h.state().preferences.is_open());
+    assert!(h.query_by_label("Language").is_some());
+}
+
+#[test]
 fn dragging_a_title_preset_onto_v2_places_a_text_clip() {
     if !gpu() {
         return;

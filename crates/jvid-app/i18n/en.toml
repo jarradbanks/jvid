@@ -123,7 +123,7 @@ new_project = "New Project"
 open = "Open…"
 save = "Save"
 save_as = "Save As…"
-settings = "Settings…"
+preferences = "Preferences…"
 project_settings = "Project Settings…"
 shortcuts = "Keyboard Shortcuts…"
 file = "File"
@@ -234,7 +234,7 @@ ok = "OK"
 
 # The app settings dialog (the project menu in the title bar > Settings…).
 [settings]
-title = "Settings"
+title = "Preferences"
 language = "Language"
 # Follow the operating system; {language} is the language that gives, in its own name.
 system = "System ({language})"

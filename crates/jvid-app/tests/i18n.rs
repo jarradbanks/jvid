@@ -89,11 +89,11 @@ fn editor_menus_inspector_and_dialogs_show_spanish() {
     h.key_press(egui::Key::Escape);
     h.run();
 
-    h.get_by_label("Sin título").click();
+    h.get_by_label("Edición").click();
     h.run();
-    h.get_by_label("Ajustes…").click();
+    h.get_by_label("Preferencias…").click();
     h.run();
-    assert!(has(&h, "Ajustes") && has(&h, "Idioma"));
+    assert!(has(&h, "Preferencias") && has(&h, "Idioma"));
     h.get_by_label("Listo").click();
     h.run();
 

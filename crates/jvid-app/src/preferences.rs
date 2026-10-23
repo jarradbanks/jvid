@@ -1,4 +1,4 @@
-//! The app settings dialog: the UI language, applied at once and saved to `settings.toml`.
+//! The app preferences dialog, under Edit > Preferences: the UI language, applied at once and saved to `settings.toml`.
 
 use egui::Ui;
 use suite_ui::i18n::{self, LANGUAGES, SYSTEM};
