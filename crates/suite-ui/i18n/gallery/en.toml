@@ -39,6 +39,8 @@ dropdown = "Dropdown"
 segmented = "Segmented"
 checkbox = "Checkbox"
 section = "Section"
+slider = "Slider"
+keyframe = "Keyframe"
 
 [demo]
 delete = "Delete"
@@ -52,6 +54,11 @@ snap = "Snap"
 live = "Live"
 transform = "Transform"
 position = "Position"
+scale = "Scale"
+reset = "Reset"
+previous = "Previous Keyframe"
+next = "Next Keyframe"
+animate = "Animate"
 plus_second = "+1s"
 
 # The type scale, each line in its own style.

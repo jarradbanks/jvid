@@ -999,11 +999,11 @@ fn inspector_scrolls_to_its_last_field_in_a_small_window() {
         .select_clip(app.history.project().sequence(), clip);
     h.run();
     let panel = Shot::take(&mut h, "inspector".into()).panel(Tab::Inspector);
-    let last = h.get_by_label("LUT Mix");
+    let last = h.get_by_label("LUT");
     assert!(last.rect().top() > panel.bottom(), "fits without scrolling");
     last.scroll_to_me();
     h.run();
-    let r = h.get_by_label("LUT Mix").rect();
+    let r = h.get_by_label("LUT").rect();
     assert!(panel.contains_rect(r), "{r:?} not inside {panel:?}");
 }
 

@@ -152,7 +152,7 @@ fn selected_clip_inspector_switches_live() {
         "Opacidad",
         "Fusión",
         "Animar: Posición",
-        "Restablecer: Transformación",
+        "Fotograma clave en todo: Transformación",
         "Fuente",
         "Contorno",
     ];
@@ -162,9 +162,8 @@ fn selected_clip_inspector_switches_live() {
         "Rotation",
         "Anchor",
         "Opacity",
-        "Blend",
         "Animate Position",
-        "Reset Transform",
+        "Keyframe All Transform",
         "Font",
         "Outline",
     ];
@@ -176,9 +175,9 @@ fn selected_clip_inspector_switches_live() {
     assert_eq!(content(&h).as_deref(), Some("Título"));
 
     // Section state is keyed by id, not caption: collapsed in Spanish, collapsed in English.
-    h.get_by_label("Recorte").click();
+    h.get_all_by_label("Opacidad").next().unwrap().click();
     h.run();
-    assert!(!has(&h, "Abajo"));
+    assert!(!has(&h, "Fusión"));
     // Typing into the text field is one undo step.
     h.get_by_role(Role::MultilineTextInput).scroll_to_me();
     h.run();
@@ -197,8 +196,8 @@ fn selected_clip_inspector_switches_live() {
     }
     assert!(!spanish.iter().any(|l| has(&h, l)));
     assert!(
-        has(&h, "Crop") && !has(&h, "Bottom"),
-        "crop section reopened"
+        has(&h, "Opacity") && !has(&h, "Blend"),
+        "opacity section reopened"
     );
     assert!(
         !has(&h, "Select a clip to see its properties"),
@@ -317,7 +316,7 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
     for text in ["posición", "fx0.intensidad", "Viñeta", corners] {
         assert!(!shown.iter().any(|t| t == text), "{text:?} still drawn");
     }
-    assert!(has(&h, "Strength") && has(&h, "Softness") && has(&h, "Animate Strength"));
+    assert!(has(&h, "Strength") && has(&h, "Softness") && has(&h, "Animate Softness"));
     // The query is the user's, kept as typed; it searches what the rows now say.
     assert!(has(&h, "No effects match the search"));
     search(&mut h, "esquinas", "esquinas".len(), "corners");

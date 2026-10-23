@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use egui::{Color32, Pos2, Sense, Shape, Stroke, Ui, vec2};
+use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
 use jvid_core::model::{
@@ -11,9 +11,11 @@ use jvid_core::model::{
 use jvid_core::time::Time;
 use suite_ui::theme::icon;
 use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, DragField, Dropdown, SectionHeader};
+use suite_ui::widgets::{
+    Button, Checkbox, DragField, Dropdown, KeyButton, Keyed, SectionHeader, Slider,
+};
 
-use crate::i18n::{CATALOG, tr, verbatim};
+use crate::i18n::{CATALOG, Label, tr, verbatim};
 use crate::timeline::Edit;
 
 /// One animatable property: its keyframe name and how its fields show.
@@ -21,7 +23,10 @@ struct Prop<'a> {
     name: &'a str,
     /// Shown name; `None` for built-ins, which [`caption`] names.
     label: Option<&'a str>,
-    fields: &'static [&'static str],
+    /// Each field's prefix.
+    fields: &'static [Label],
+    /// Each field's own property, for a row of several; empty when the fields are `name`'s.
+    parts: &'static [&'static str],
     /// Shown value per stored value, e.g. 100 for a percentage.
     display: f64,
     speed: f64,
@@ -29,6 +34,8 @@ struct Prop<'a> {
     suffix: &'static str,
     /// Bounds of the stored value.
     range: (f64, f64),
+    /// The slider's bounds where `range` has none.
+    slider: Option<(f64, f64)>,
     /// What reset sets; `None` for [`Transform::default`]'s value.
     default: Option<f64>,
 }
@@ -37,6 +44,32 @@ impl Prop<'_> {
     fn label(&self) -> &str {
         self.label.unwrap_or_else(|| caption(self.name))
     }
+
+    /// The properties the row edits.
+    fn names(&self) -> Vec<&str> {
+        match self.parts {
+            [] => vec![self.name],
+            parts => parts.to_vec(),
+        }
+    }
+
+    /// Field `i`'s property, and its index in that property's value.
+    fn field(&self, i: usize) -> (&str, usize) {
+        self.parts.get(i).map_or((self.name, i), |n| (n, 0))
+    }
+
+    /// The slider's bounds, for a one-field row with any.
+    fn slider(&self) -> Option<(f64, f64)> {
+        let (lo, hi) = self.range;
+        let ranged = lo.is_finite() && hi.is_finite();
+        let one = self.fields.len() == 1;
+        self.slider.or(ranged.then_some(self.range)).filter(|_| one)
+    }
+
+    fn default(&self, name: &str, i: usize) -> f64 {
+        self.default
+            .unwrap_or_else(|| fields(get(&Transform::default(), name))[i])
+    }
 }
 
 /// A built-in section's or property's name in the UI language, by its id (`inspector.<id>`).
@@ -44,11 +77,13 @@ fn caption(id: &str) -> &str {
     CATALOG.get(&format!("inspector.{id}")).unwrap_or(id)
 }
 
-const fn prop<'a>(name: &'a str, fields: &'static [&'static str]) -> Prop<'a> {
+const fn prop<'a>(name: &'a str, fields: &'static [Label]) -> Prop<'a> {
     Prop {
         name,
         label: None,
         fields,
+        parts: &[],
+        slider: None,
         display: 1.0,
         speed: 1.0,
         decimals: 1,
@@ -58,11 +93,17 @@ const fn prop<'a>(name: &'a str, fields: &'static [&'static str]) -> Prop<'a> {
     }
 }
 
-const XY: &[&str] = &[verbatim("X"), verbatim("Y")];
-const ONE: &[&str] = &[""];
+const XY: &[Label] = &[|| verbatim("X"), || verbatim("Y")];
+const ONE: &[Label] = &[|| ""];
+const CROP: &[Label] = &[
+    || tr!("inspector.crop_l"),
+    || tr!("inspector.crop_t"),
+    || tr!("inspector.crop_r"),
+    || tr!("inspector.crop_b"),
+];
 
 /// Sections by id, which names them through [`caption`] and keeps their open state.
-const SECTIONS: [(&str, &[Prop<'static>]); 5] = [
+const SECTIONS: [(&str, &[Prop<'static>]); 4] = [
     (
         "transform",
         &[
@@ -70,13 +111,22 @@ const SECTIONS: [(&str, &[Prop<'static>]); 5] = [
             Prop {
                 display: 100.0,
                 suffix: "%",
+                slider: Some((0.0, 4.0)),
                 ..prop("scale", ONE)
             },
             Prop {
                 suffix: "°",
+                slider: Some((-180.0, 180.0)),
                 ..prop("rotation", ONE)
             },
             prop("anchor", XY),
+            Prop {
+                parts: &["crop_left", "crop_top", "crop_right", "crop_bottom"],
+                range: (0.0, f64::INFINITY),
+                // Whole pixels, so four fit on one row.
+                decimals: 0,
+                ..prop("crop", CROP)
+            },
         ],
     ),
     (
@@ -88,27 +138,6 @@ const SECTIONS: [(&str, &[Prop<'static>]); 5] = [
             range: (0.0, 1.0),
             ..prop("opacity", ONE)
         }],
-    ),
-    (
-        "crop",
-        &[
-            Prop {
-                range: (0.0, f64::INFINITY),
-                ..prop("crop_left", ONE)
-            },
-            Prop {
-                range: (0.0, f64::INFINITY),
-                ..prop("crop_top", ONE)
-            },
-            Prop {
-                range: (0.0, f64::INFINITY),
-                ..prop("crop_right", ONE)
-            },
-            Prop {
-                range: (0.0, f64::INFINITY),
-                ..prop("crop_bottom", ONE)
-            },
-        ],
     ),
     (
         "color",
@@ -353,35 +382,50 @@ pub fn set_props(clips: &[&Clip], names: &[&str], x: &Transform, t: Time) -> Com
     })
 }
 
-/// Animates `name` from its value at `t`, or, if any clip animates it, stops animating
-/// and keeps the value at `t`.
-fn toggle_animate(clips: &[&Clip], name: &str, t: Time) -> Command {
-    let on = clips.iter().any(|c| animated(c, name));
+/// Whether any clip animates any of `names`.
+fn any_animated(clips: &[&Clip], names: &[&str]) -> bool {
+    names.iter().any(|n| clips.iter().any(|c| animated(c, n)))
+}
+
+/// Whether every clip has a keyframe of each of `names` at `t`.
+fn all_keyed(clips: &[&Clip], names: &[&str], t: Time) -> bool {
+    names.iter().all(|n| clips.iter().all(|c| key_at(c, n, t)))
+}
+
+/// Animates `names` from their values at `t`, or, if any clip animates one, stops
+/// animating them and keeps the values at `t`.
+fn toggle_animate(clips: &[&Clip], names: &[&str], t: Time) -> Command {
+    let on = any_animated(clips, names);
     rewrite(clips, |c, x, keys| {
-        let v = value(c, name, t);
-        if on {
-            keys.remove(name);
-            set(x, name, v);
-        } else {
-            key(c, keys, name, t, v);
+        for name in names {
+            let v = value(c, name, t);
+            if on {
+                keys.remove(*name);
+                set(x, name, v);
+            } else {
+                key(c, keys, name, t, v);
+            }
         }
     })
 }
 
-/// Removes the keyframes at `t` if every clip has one there, else adds them.
-fn toggle_key(clips: &[&Clip], name: &str, t: Time) -> Command {
-    let all = clips.iter().all(|c| key_at(c, name, t));
+/// Removes the keyframes of `names` at `t` if every clip has them all there, else adds them.
+fn toggle_key(clips: &[&Clip], names: &[&str], t: Time) -> Command {
+    let all = all_keyed(clips, names, t);
     rewrite(clips, |c, x, keys| {
-        let v = value(c, name, t);
-        if !all {
-            return key(c, keys, name, t, v);
-        }
-        let list = keys.get_mut(name).expect("all have a key");
-        list.retain(|k| k.time != source(c, t));
-        if list.is_empty() {
-            // The last key gone: hold its value rather than jump back to the old static one.
-            keys.remove(name);
-            set(x, name, v);
+        for name in names {
+            let v = value(c, name, t);
+            if !all {
+                key(c, keys, name, t, v);
+                continue;
+            }
+            let list = keys.get_mut(*name).expect("all have a key");
+            list.retain(|k| k.time != source(c, t));
+            if list.is_empty() {
+                // The last key gone: hold its value rather than jump back to the old static one.
+                keys.remove(*name);
+                set(x, name, v);
+            }
         }
     })
 }
@@ -404,12 +448,18 @@ fn key_all(clips: &[&Clip], names: &[&str], t: Time) -> Command {
     })
 }
 
-/// The nearest keyframe of `name` before (`dir` < 0) or after `t` across the clips, in
+/// The nearest keyframe of `names` before (`dir` < 0) or after `t` across the clips, in
 /// timeline time.
-fn neighbour(clips: &[&Clip], name: &str, t: Time, dir: i64) -> Option<Time> {
+fn neighbour(clips: &[&Clip], names: &[&str], t: Time, dir: i64) -> Option<Time> {
     let times = clips.iter().flat_map(|c| {
-        let keys = c.keyframes.get(name).map(Vec::as_slice).unwrap_or_default();
-        keys.iter().map(move |k| c.timeline_at(k.time))
+        names.iter().flat_map(move |name| {
+            let keys = c
+                .keyframes
+                .get(*name)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            keys.iter().map(move |k| c.timeline_at(k.time))
+        })
     });
     if dir < 0 {
         times.filter(|k| *k < t).max()
@@ -455,8 +505,16 @@ pub fn show(
             index += props.len() as u64;
             continue;
         }
-        let names: Vec<&str> = props.iter().map(|p| p.name).collect();
-        let (open, head) = section(ui, id, true);
+        // LUT Mix waits for a LUT.
+        let lut = clips.iter().any(|c| c.transform.lut.is_some());
+        let shown = |p: &Prop| p.name != "lut_intensity" || lut;
+        let names: Vec<&str> = props
+            .iter()
+            .filter(|p| shown(p))
+            .flat_map(Prop::names)
+            .collect();
+        let changed = props.iter().any(|p| shown(p) && differs(clips, p, t));
+        let (open, head) = section(ui, id, Some(changed));
         match head {
             Some(Head::Reset) => edit = Some((reset(clips, &names), None)),
             Some(Head::Key) => edit = Some((key_all(clips, &names, t), None)),
@@ -468,7 +526,14 @@ pub fn show(
         }
         for p in props {
             index += 1;
-            if let Some(e) = row(ui, clips, p, t, index, &mut seek) {
+            if p.name == "lut_intensity"
+                && let Some(e) = lut_row(ui, clips)
+            {
+                edit = Some(e);
+            }
+            if shown(p)
+                && let Some(e) = row(ui, clips, p, t, index, &mut seek)
+            {
                 edit = Some(e);
             }
         }
@@ -477,20 +542,15 @@ pub fn show(
         {
             edit = Some(e);
         }
-        if id == "color"
-            && let Some(e) = lut_row(ui, clips)
-        {
-            edit = Some(e);
-        }
     }
     if !clips.is_empty()
-        && section(ui, "effects", false).0
+        && section(ui, "effects", None).0
         && let Some(e) = effects_rows(ui, &clips, t, &mut index, &mut seek)
     {
         edit = Some(e);
     }
     if let Some(c) = clips.first().or(audio.first())
-        && section(ui, "speed", false).0
+        && section(ui, "speed", None).0
         && let Some(e) = speed_row(ui, c)
     {
         edit = Some(e);
@@ -503,12 +563,12 @@ pub fn show(
         .and_then(|c| project.asset(c.asset))
         .or(bin_selected);
     if let Some(a) = shared.filter(|a| a.text.is_some())
-        && section(ui, "text", false).0
+        && section(ui, "text", None).0
         && let Some(e) = text_props(ui, a, if same { &clips } else { &[] }, t)
     {
         edit = Some(e);
     }
-    if (audio.is_empty() || !clips.is_empty()) && section(ui, "color", false).0 {
+    if (audio.is_empty() || !clips.is_empty()) && section(ui, "color", None).0 {
         let solid = shared.filter(|a| a.solid.is_some());
         if let Some(e) = solid.and_then(|a| solid_color(ui, a)) {
             edit = Some(e);
@@ -540,21 +600,12 @@ fn set_blend(clips: &[&Clip], blend: Blend) -> Command {
 fn blend_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
     let first = clips[0].transform.blend;
     let mut i = Blend::ALL.iter().position(|b| *b == first).unwrap_or(0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = space::S4;
-        ui.allocate_ui_with_layout(
-            vec2(size::INSPECTOR_LABEL, size::CONTROL),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.set_min_width(size::INSPECTOR_LABEL);
-                ui.label(egui::RichText::new(tr!("inspector.blend")).color(color::INK_2))
-            },
-        );
-        ui.add(Dropdown::new(&mut i, &blends()).width(132.0))
-            .changed()
-            .then(|| (set_blend(clips, Blend::ALL[i]), None))
-    })
-    .inner
+    let tools = Tools::default();
+    let (changed, _) = prop_row(ui, tr!("inspector.blend"), tools, |ui| {
+        let w = ui.available_width();
+        ui.add(Dropdown::new(&mut i, &blends()).width(w)).changed()
+    });
+    changed.then(|| (set_blend(clips, Blend::ALL[i]), None))
 }
 
 /// Sets every clip's `.cube` LUT, or clears it; one undo step.
@@ -570,18 +621,11 @@ fn lut_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
             .file_name()
             .map_or(p.into(), |n| n.to_string_lossy())
     });
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = space::S4;
-        ui.allocate_ui_with_layout(
-            vec2(size::INSPECTOR_LABEL, size::CONTROL),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.set_min_width(size::INSPECTOR_LABEL);
-                ui.label(egui::RichText::new(tr!("inspector.lut")).color(color::INK_2))
-            },
-        );
+    prop_row(ui, tr!("inspector.lut"), Tools::default(), |ui| {
         let mut edit = None;
-        if ui.add(Button::secondary(&name).width(132.0)).clicked()
+        let clear = size::CONTROL + space::S4;
+        let w = ui.available_width() - if current.is_some() { clear } else { 0.0 };
+        if ui.add(Button::secondary(&name).width(w)).clicked()
             && let Some(path) = rfd::FileDialog::new()
                 .set_title(tr!("inspector.choose_lut"))
                 .add_filter(tr!("inspector.cube_filter"), &["cube"])
@@ -589,12 +633,13 @@ fn lut_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
         {
             edit = Some((set_lut(clips, Some(path.to_string_lossy().into())), None));
         }
-        if current.is_some() && ui.add(Button::ghost(tr!("inspector.clear"))).clicked() {
+        let clear = Button::icon(icon::X, tr!("inspector.clear"));
+        if current.is_some() && ui.add(clear).clicked() {
             edit = Some((set_lut(clips, None), None));
         }
         edit
     })
-    .inner
+    .0
 }
 
 /// Rebuilds every clip's effect stack from old indices `f` gives, renumbering the effects'
@@ -761,22 +806,21 @@ fn speed_row(ui: &mut Ui, c: &Clip) -> Option<Edit> {
     let ripple_id = egui::Id::new("speed_ripple");
     let mut ripple = ui.data(|d| d.get_temp(ripple_id)).unwrap_or(true);
     let (mut pct, mut reverse) = (c.speed * 100.0, c.reverse);
-    let changed = ui
-        .horizontal(|ui| {
-            ui.label(egui::RichText::new(tr!("inspector.speed")).color(color::INK_2));
-            let drag = egui::DragValue::new(&mut pct)
-                .range(1.0..=10000.0)
-                .suffix("%")
-                .speed(1.0);
-            let a = ui.add_enabled(c.freeze.is_none(), drag).changed();
-            let b = ui
-                .checkbox(&mut reverse, tr!("inspector.reverse"))
-                .changed();
-            ui.checkbox(&mut ripple, tr!("inspector.ripple"))
-                .on_hover_text(tr!("inspector.ripple_tooltip"));
-            a || b
-        })
-        .inner;
+    let (changed, _) = prop_row(ui, tr!("inspector.speed"), Tools::default(), |ui| {
+        let drag = DragField::new(&mut pct)
+            .range(1.0..=10000.0)
+            .suffix("%")
+            .width(64.0);
+        let a = ui.add_enabled(c.freeze.is_none(), drag).changed();
+        ui.add_space(space::S4);
+        let b = ui
+            .add(Checkbox::new(&mut reverse, tr!("inspector.reverse")))
+            .changed();
+        ui.add_space(space::S4);
+        ui.add(Checkbox::new(&mut ripple, tr!("inspector.ripple")))
+            .on_hover_text(tr!("inspector.ripple_tooltip"));
+        a || b
+    });
     ui.data_mut(|d| d.insert_temp(ripple_id, ripple));
     changed.then(|| {
         let cmd = Command::SetClipSpeed {
@@ -795,49 +839,138 @@ enum Head {
     Key,
 }
 
-/// A section header remembering whether it's open, with reset and keyframe-all buttons on
-/// the right if `buttons`.
-fn section(ui: &mut Ui, id: &str, buttons: bool) -> (bool, Option<Head>) {
+/// A section header remembering whether it's open. `Some(changed)` adds the tool slots:
+/// keyframe-all, and reset when `changed`.
+fn section(ui: &mut Ui, id: &str, tools: Option<bool>) -> (bool, Option<Head>) {
     let title = caption(id);
     let id = ui.id().with(("inspector", id));
     let mut open = ui.data_mut(|d| *d.get_temp_mut_or(id, true));
     let rect = ui.add(SectionHeader::new(title, &mut open)).rect;
     ui.data_mut(|d| d.insert_temp(id, open));
     let mut head = None;
-    if buttons {
-        let mut right = egui::Rect::from_x_y_ranges(rect.x_range(), rect.y_range());
-        right.min.x = right.max.x - KEY_HIT - space::S4 - size::CONTROL;
-        let mut ui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(right)
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        );
-        ui.spacing_mut().item_spacing.x = space::S4;
-        if glyph(
+    if let Some(changed) = tools {
+        let mut ui = ui.new_child(UiBuilder::new().max_rect(rect));
+        let reset = tr!("inspector.reset_section", section = title);
+        let key = tr!("inspector.keyframe_all", section = title);
+        let c = slots(
             &mut ui,
-            Glyph::Diamond,
-            false,
-            &tr!("inspector.keyframe_all", section = title),
-        )
-        .clicked()
-        {
+            rect,
+            Tools {
+                reset: changed.then_some(&reset),
+                nav: false,
+                key: Some((Keyed::Static, &key)),
+            },
+        );
+        if c.key.is_some_and(|k| k.clicked()) {
             head = Some(Head::Key);
         }
-        if ui
-            .add(Button::icon(
-                icon::UNDO,
-                &tr!("inspector.reset_section", section = title),
-            ))
-            .clicked()
-        {
+        if c.reset {
             head = Some(Head::Reset);
         }
     }
     (open, head)
 }
 
-/// The width of a keyframe toggle's hit area.
-const KEY_HIT: f32 = 24.0;
+/// Width of a row's tool slots: reset, previous and next keyframe, then the diamond.
+const TOOLS: f32 = 4.0 * size::SMALL_CONTROL + 3.0 * GAP;
+/// Space between tool slots.
+const GAP: f32 = 2.0;
+
+/// What a row's tool slots show, with names for screen readers. An empty slot keeps its
+/// place, so nothing moves when another appears.
+#[derive(Default)]
+struct Tools<'a> {
+    reset: Option<&'a str>,
+    nav: bool,
+    key: Option<(Keyed, &'a str)>,
+}
+
+/// What happened in a row's tool slots.
+#[derive(Default)]
+struct Clicks {
+    reset: bool,
+    previous: bool,
+    next: bool,
+    key: Option<egui::Response>,
+}
+
+/// Draws `tools` in the slots at the right edge of `rect`.
+fn slots(ui: &mut Ui, rect: Rect, tools: Tools) -> Clicks {
+    let slot = |i: f32| {
+        let x = rect.right() - TOOLS + i * (size::SMALL_CONTROL + GAP);
+        let y = rect.center().y - size::SMALL_CONTROL / 2.0;
+        Rect::from_min_size(pos2(x, y), Vec2::splat(size::SMALL_CONTROL))
+    };
+    let mut c = Clicks::default();
+    if let Some(name) = tools.reset {
+        c.reset = ui
+            .put(slot(0.0), Button::icon(icon::UNDO, name).small())
+            .clicked();
+    }
+    if tools.nav {
+        let previous = KeyButton::previous(tr!("inspector.previous_key"));
+        c.previous = ui.put(slot(1.0), previous).clicked();
+        c.next = ui
+            .put(slot(2.0), KeyButton::next(tr!("inspector.next_key")))
+            .clicked();
+    }
+    c.key = tools
+        .key
+        .map(|(k, name)| ui.put(slot(3.0), KeyButton::diamond(k, name)));
+    c
+}
+
+/// An inspector row: the label column, `vals` in the width after it, and `tools` in their
+/// slots at the right edge. Effect parameters use it too.
+fn prop_row<R>(
+    ui: &mut Ui,
+    label: &str,
+    tools: Tools,
+    vals: impl FnOnce(&mut Ui) -> R,
+) -> (R, Clicks) {
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(ui.available_width(), size::CONTROL), Sense::hover());
+    let layout = Layout::left_to_right(Align::Center);
+    let mut row = ui.new_child(UiBuilder::new().max_rect(rect).layout(layout));
+    row.spacing_mut().item_spacing.x = space::S4;
+    row.allocate_ui_with_layout(vec2(size::INSPECTOR_LABEL, size::CONTROL), layout, |ui| {
+        ui.set_min_width(size::INSPECTOR_LABEL);
+        ui.label(egui::RichText::new(label).color(color::INK_2))
+    });
+    let w = rect.right() - TOOLS - space::S4 - row.cursor().left();
+    let inner = row
+        .allocate_ui_with_layout(vec2(w, size::CONTROL), layout, |ui| {
+            ui.set_max_width(w);
+            vals(ui)
+        })
+        .inner;
+    (inner, slots(&mut row, rect, tools))
+}
+
+/// Whether any clip animates `p` or, at `t`, shows a value other than its default.
+fn differs(clips: &[&Clip], p: &Prop, t: Time) -> bool {
+    // Off by less than the field shows reads as the default.
+    let close = 0.5 * 10f64.powi(-(p.decimals as i32)) / p.display;
+    let off = |i| {
+        let (name, j) = p.field(i);
+        let d = p.default(name, j);
+        clips
+            .iter()
+            .any(|c| (fields(value(c, name, t))[j] - d).abs() >= close)
+    };
+    any_animated(clips, &p.names()) || (0..p.fields.len()).any(off)
+}
+
+/// Sets `p` back to its default and drops its keyframes.
+fn reset_prop(clips: &[&Clip], p: &Prop) -> Command {
+    match p.default {
+        Some(d) => rewrite(clips, |_, x, keys| {
+            keys.remove(p.name);
+            set(x, p.name, Value::Scalar(d));
+        }),
+        None => reset(clips, &p.names()),
+    }
+}
 
 fn row(
     ui: &mut Ui,
@@ -847,104 +980,128 @@ fn row(
     index: u64,
     seek: &mut Option<Time>,
 ) -> Option<Edit> {
-    let anim = clips.iter().any(|c| animated(c, p.name));
-    let values: Vec<Vec<f64>> = clips.iter().map(|c| fields(value(c, p.name, t))).collect();
+    let names = p.names();
+    let anim = any_animated(clips, &names);
+    let keyed = match () {
+        _ if !anim => Keyed::Static,
+        _ if all_keyed(clips, &names, t) => Keyed::Here,
+        _ => Keyed::Animated,
+    };
+    let reset = tr!("inspector.reset");
+    let key = match keyed {
+        Keyed::Static => tr!("inspector.animate", name = p.label()),
+        _ => tr!("inspector.key_here").to_owned(),
+    };
+    let tools = Tools {
+        reset: differs(clips, p, t).then_some(reset),
+        nav: anim,
+        key: Some((keyed, &key)),
+    };
     let mut edit = None;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = space::S4;
-        ui.allocate_ui_with_layout(
-            vec2(size::INSPECTOR_LABEL, size::CONTROL),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.set_min_width(size::INSPECTOR_LABEL);
-                ui.label(egui::RichText::new(p.label()).color(color::INK_2))
-            },
-        );
+    let (_, c) = prop_row(ui, p.label(), tools, |ui| {
+        // Each drag is its own undo step, even of the field the last one dragged.
+        let drags = ui.id().with("inspector drags");
+        let mut put = |ui: &Ui, r: &egui::Response, cmd: Command, slot: usize| {
+            if r.drag_started() {
+                ui.data_mut(|d| *d.get_temp_mut_or(drags, 0u64) += 1);
+            }
+            let drag = ui.data(|d| d.get_temp(drags).unwrap_or(0u64));
+            let key = GESTURE ^ (index << 4 | slot as u64) ^ (drag << 16);
+            edit = Some((cmd, r.dragged().then_some(key)));
+        };
+        let n = p.fields.len();
+        let slider = p.slider();
+        let width = match slider {
+            Some(_) => 64.0,
+            None => (ui.available_width() - space::S4 * (n - 1) as f32) / n as f32,
+        };
+        let (lo, hi) = p.range;
         for (i, field) in p.fields.iter().enumerate() {
-            let first = values[0][i];
-            let mixed = values.iter().any(|v| v[i] != first);
+            let (name, j) = p.field(i);
+            let values: Vec<f64> = clips.iter().map(|c| fields(value(c, name, t))[j]).collect();
+            let first = values[0];
+            let mixed = values.iter().any(|v| *v != first);
             let mut shown = first * p.display;
             let mut f = DragField::new(&mut shown)
                 .speed(p.speed)
                 .decimals(p.decimals)
                 .suffix(p.suffix)
                 .mixed(mixed)
-                .width(64.0);
-            if !field.is_empty() {
-                f = f.prefix(field);
+                .range(lo * p.display..=hi * p.display)
+                .width(width);
+            if !field().is_empty() {
+                f = f.prefix(field());
             }
-            let (lo, hi) = p.range;
-            f = f.range(lo * p.display..=hi * p.display);
             let r = ui.add(f);
-            // Each drag is its own undo step, even of the field the last one dragged.
-            let drags = ui.id().with("inspector drags");
-            if r.drag_started() {
-                ui.data_mut(|d| *d.get_temp_mut_or(drags, 0u64) += 1);
-            }
             if r.changed() {
-                let n = shown / p.display;
+                let v = shown / p.display;
                 // A drag of a mixed field moves each clip by the delta, not to the first's value.
                 let cmd = if mixed && r.dragged() {
-                    set_field(clips, p.name, i, |v| (v + n - first).clamp(lo, hi), t)
+                    set_field(clips, name, j, |o| (o + v - first).clamp(lo, hi), t)
                 } else {
-                    set_field(clips, p.name, i, |_| n, t)
+                    set_field(clips, name, j, |_| v, t)
                 };
-                let drag = ui.data(|d| d.get_temp(drags).unwrap_or(0u64));
-                let key = GESTURE ^ (index << 4 | i as u64) ^ (drag << 16);
-                edit = Some((cmd, r.dragged().then_some(key)));
+                put(ui, &r, cmd, i);
             }
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let tip = tr!("inspector.animate", name = p.label());
-            let animate = glyph(ui, Glyph::Diamond, anim, &tip);
-            if animate.clicked() {
-                edit = Some((toggle_animate(clips, p.name, t), None));
+        if let Some((a, b)) = slider {
+            let mut shown = fields(value(clips[0], p.name, t))[0] * p.display;
+            let s = Slider::new(&mut shown, a * p.display..=b * p.display, p.label())
+                .centred(a < 0.0 && b > 0.0);
+            let r = ui.add(s);
+            if r.changed() {
+                let v = shown / p.display;
+                put(ui, &r, set_field(clips, p.name, 0, |_| v, t), n);
             }
-            if ui
-                .add(Button::icon(icon::UNDO, tr!("inspector.reset")))
-                .clicked()
-            {
-                let cmd = match p.default {
-                    Some(d) => rewrite(clips, |_, x, keys| {
-                        keys.remove(p.name);
-                        set(x, p.name, Value::Scalar(d));
-                    }),
-                    None => reset(clips, &[p.name]),
-                };
-                edit = Some((cmd, None));
-            }
-            if !anim {
-                return;
-            }
-            if glyph(ui, Glyph::Right, false, tr!("inspector.next_key")).clicked() {
-                *seek = neighbour(clips, p.name, t, 1);
-            }
-            let here = clips.iter().all(|c| key_at(c, p.name, t));
-            let diamond = glyph(ui, Glyph::Diamond, here, tr!("inspector.key_here"));
-            if diamond.clicked() {
-                edit = Some((toggle_key(clips, p.name, t), None));
-            }
-            if here {
-                egui::Popup::context_menu(&diamond)
-                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                    .show(|ui| {
-                        if let Some(e) = easing_menu(ui, clips, p.name, t, index) {
-                            edit = Some(e);
-                        }
-                    });
-            }
-            if glyph(ui, Glyph::Left, false, tr!("inspector.previous_key")).clicked() {
-                *seek = neighbour(clips, p.name, t, -1);
-            }
-        });
+        }
     });
+    if c.reset {
+        edit = Some((reset_prop(clips, p), None));
+    }
+    if c.previous {
+        *seek = neighbour(clips, &names, t, -1);
+    }
+    if c.next {
+        *seek = neighbour(clips, &names, t, 1);
+    }
+    let diamond = c.key.expect("rows have a diamond");
+    if diamond.clicked() {
+        let cmd = match anim {
+            false => toggle_animate(clips, &names, t),
+            true => toggle_key(clips, &names, t),
+        };
+        edit = Some((cmd, None));
+    }
+    if anim {
+        egui::Popup::context_menu(&diamond)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                if keyed == Keyed::Here
+                    && let Some(e) = easing_menu(ui, clips, &names, t, index)
+                {
+                    edit = Some(e);
+                }
+                if ui
+                    .add(Button::ghost(tr!("inspector.stop_animating")))
+                    .clicked()
+                {
+                    edit = Some((toggle_animate(clips, &names, t), None));
+                    ui.close();
+                }
+            });
+    }
     edit
 }
 
-/// The easing editor for the keyframes of `name` at `t`, opened by right-clicking their diamond.
-fn easing_menu(ui: &mut Ui, clips: &[&Clip], name: &str, t: Time, index: u64) -> Option<Edit> {
+/// The easing editor for the keyframes of `names` at `t`, opened by right-clicking their
+/// diamond.
+fn easing_menu(ui: &mut Ui, clips: &[&Clip], names: &[&str], t: Time, index: u64) -> Option<Edit> {
     let s = source(clips[0], t);
-    let k = clips[0].keyframes.get(name)?.iter().find(|k| k.time == s)?;
+    let k = clips[0]
+        .keyframes
+        .get(names[0])?
+        .iter()
+        .find(|k| k.time == s)?;
     let (e, dragging) = crate::easing::editor(ui, k.easing)?;
     // One undo step per handle drag.
     let drags = ui.id().with("easing drags");
@@ -955,63 +1112,21 @@ fn easing_menu(ui: &mut Ui, clips: &[&Clip], name: &str, t: Time, index: u64) ->
         n.0
     });
     let key = EASING_GESTURE ^ index ^ (drag << 16);
-    Some((set_easing(clips, name, t, e), dragging.then_some(key)))
+    Some((set_easing(clips, names, t, e), dragging.then_some(key)))
 }
 
-/// Sets the easing of every clip's keyframe of `name` at `t`.
-fn set_easing(clips: &[&Clip], name: &str, t: Time, e: Easing) -> Command {
+/// Sets the easing of every clip's keyframes of `names` at `t`.
+fn set_easing(clips: &[&Clip], names: &[&str], t: Time, e: Easing) -> Command {
     rewrite(clips, |c, _, keys| {
         let s = source(c, t);
-        for k in keys.get_mut(name).into_iter().flatten() {
-            if k.time == s {
-                k.easing = e;
+        for name in names {
+            for k in keys.get_mut(*name).into_iter().flatten() {
+                if k.time == s {
+                    k.easing = e;
+                }
             }
         }
     })
-}
-
-enum Glyph {
-    Diamond,
-    Left,
-    Right,
-}
-
-/// A small painted icon button; `on` fills it.
-fn glyph(ui: &mut Ui, g: Glyph, on: bool, name: &str) -> egui::Response {
-    let (rect, r) = ui.allocate_exact_size(vec2(KEY_HIT, size::CONTROL), Sense::click());
-    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, name));
-    let ink = if r.hovered() {
-        color::INK
-    } else {
-        color::INK_2
-    };
-    // 4 makes an 8px diamond, as DESIGN.md asks.
-    let (c, h) = (rect.center(), 4.0);
-    let points: Vec<Pos2> = match g {
-        Glyph::Diamond => vec![
-            c + vec2(0.0, -h),
-            c + vec2(h, 0.0),
-            c + vec2(0.0, h),
-            c + vec2(-h, 0.0),
-        ],
-        Glyph::Left => vec![
-            c + vec2(h * 0.6, -h),
-            c + vec2(h * 0.6, h),
-            c + vec2(-h * 0.6, 0.0),
-        ],
-        Glyph::Right => vec![
-            c + vec2(-h * 0.6, -h),
-            c + vec2(-h * 0.6, h),
-            c + vec2(h * 0.6, 0.0),
-        ],
-    };
-    let (fill, line) = match (g, on) {
-        (Glyph::Diamond, false) => (Color32::TRANSPARENT, Stroke::new(1.0, color::INK)),
-        (Glyph::Diamond, true) => (color::LIGHT_BLUE, Stroke::new(1.0, color::LIGHT_BLUE)),
-        _ => (ink, Stroke::NONE),
-    };
-    ui.painter().add(Shape::convex_polygon(points, fill, line));
-    r
 }
 
 /// The color picker for a solid; the edit once the color changes.
@@ -1171,16 +1286,12 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
 
 /// A text style row's animate toggle, when clips are selected; sets `toggle` once clicked.
 fn animate(ui: &mut Ui, clips: &[&Clip], name: &'static str, toggle: &mut Option<&'static str>) {
-    let on = clips.iter().any(|c| animated(c, name));
-    if !clips.is_empty()
-        && glyph(
-            ui,
-            Glyph::Diamond,
-            on,
-            &tr!("inspector.animate", name = caption(name)),
-        )
-        .clicked()
-    {
+    let on = match clips.iter().any(|c| animated(c, name)) {
+        true => Keyed::Animated,
+        false => Keyed::Static,
+    };
+    let tip = tr!("inspector.animate", name = caption(name));
+    if !clips.is_empty() && ui.add(KeyButton::diamond(on, &tip)).clicked() {
         *toggle = Some(name);
     }
 }
@@ -1423,7 +1534,7 @@ mod tests {
         let mut clips = [clip(1, 0)];
         clips[0].transform.effects = vec![fx("a"), fx("b")];
         let b = Effect::key(1, "amount");
-        apply(&mut clips, |c| toggle_animate(c, &b, Time(0)));
+        apply(&mut clips, |c| toggle_animate(c, &[b.as_str()], Time(0)));
         apply(&mut clips, |c| set_field(c, &b, 0, |_| 1.0, Time(100)));
         // Halfway between the keys, give or take the clamp to the clip's last frame.
         let mid = |c: &Clip, i: usize| c.transform_at(Time(50)).effects[i].params["amount"];
@@ -1466,13 +1577,13 @@ mod tests {
     #[test]
     fn easing_applies_to_every_clips_key_and_changes_playback() {
         let mut clips = [clip(1, 0), clip(2, 50)];
-        apply(&mut clips, |c| toggle_animate(c, "opacity", Time(50)));
+        apply(&mut clips, |c| toggle_animate(c, &["opacity"], Time(50)));
         apply(&mut clips, |c| {
             set_field(c, "opacity", 0, |_| 0.0, Time(80))
         });
         let before = clips[1].transform_at(Time(65)).opacity;
         apply(&mut clips, |c| {
-            set_easing(c, "opacity", Time(50), Easing::Hold)
+            set_easing(c, &["opacity"], Time(50), Easing::Hold)
         });
         assert_eq!(clips[0].keyframes["opacity"][0].easing, Easing::Hold);
         assert_eq!(clips[1].keyframes["opacity"][0].easing, Easing::Hold);
@@ -1495,7 +1606,7 @@ mod tests {
     #[test]
     fn animated_edits_key_at_the_playhead_in_source_time() {
         let mut clips = [clip(1, 100)];
-        apply(&mut clips, |c| toggle_animate(c, "opacity", Time(120)));
+        apply(&mut clips, |c| toggle_animate(c, &["opacity"], Time(120)));
         assert_eq!(clips[0].keyframes["opacity"][0].time, Time(30));
         apply(&mut clips, |c| {
             set_field(c, "opacity", 0, |_| 0.25, Time(150))
@@ -1505,25 +1616,25 @@ mod tests {
         assert_eq!(clips[0].transform.opacity, 1.0, "static value untouched");
         assert_eq!(clips[0].transform_at(Time(150)).opacity, 0.25);
         assert_eq!(
-            neighbour(&refs(&clips), "opacity", Time(150), -1),
+            neighbour(&refs(&clips), &["opacity"], Time(150), -1),
             Some(Time(120))
         );
         assert_eq!(
-            neighbour(&refs(&clips), "opacity", Time(120), 1),
+            neighbour(&refs(&clips), &["opacity"], Time(120), 1),
             Some(Time(150))
         );
-        assert_eq!(neighbour(&refs(&clips), "opacity", Time(150), 1), None);
+        assert_eq!(neighbour(&refs(&clips), &["opacity"], Time(150), 1), None);
     }
 
     #[test]
     fn removing_the_last_key_holds_its_value() {
         let mut clips = [clip(1, 0)];
-        apply(&mut clips, |c| toggle_animate(c, "rotation", Time(5)));
+        apply(&mut clips, |c| toggle_animate(c, &["rotation"], Time(5)));
         apply(&mut clips, |c| {
             set_field(c, "rotation", 0, |_| 45.0, Time(5))
         });
         assert!(key_at(&clips[0], "rotation", Time(5)));
-        apply(&mut clips, |c| toggle_key(c, "rotation", Time(5)));
+        apply(&mut clips, |c| toggle_key(c, &["rotation"], Time(5)));
         assert!(!animated(&clips[0], "rotation"));
         assert_eq!(clips[0].transform.rotation, 45.0);
     }
@@ -1531,11 +1642,11 @@ mod tests {
     #[test]
     fn key_toggle_adds_where_any_clip_lacks_one() {
         let mut clips = [clip(1, 0), clip(2, 0)];
-        apply(&mut clips, |c| toggle_animate(c, "scale", Time(0)));
-        apply(&mut clips, |c| toggle_key(c, "scale", Time(0)));
+        apply(&mut clips, |c| toggle_animate(c, &["scale"], Time(0)));
+        apply(&mut clips, |c| toggle_key(c, &["scale"], Time(0)));
         assert!(!animated(&clips[0], "scale") && !animated(&clips[1], "scale"));
-        apply(&mut clips[..1], |c| toggle_animate(c, "scale", Time(0)));
-        apply(&mut clips, |c| toggle_key(c, "scale", Time(0)));
+        apply(&mut clips[..1], |c| toggle_animate(c, &["scale"], Time(0)));
+        apply(&mut clips, |c| toggle_key(c, &["scale"], Time(0)));
         assert!(clips.iter().all(|c| key_at(c, "scale", Time(0))));
     }
 
@@ -1569,7 +1680,7 @@ mod tests {
     fn reset_clears_keys_and_value() {
         let mut clips = [clip(1, 0)];
         clips[0].transform.crop[2] = 9.0;
-        apply(&mut clips, |c| toggle_animate(c, "crop_right", Time(0)));
+        apply(&mut clips, |c| toggle_animate(c, &["crop_right"], Time(0)));
         apply(&mut clips, |c| reset(c, &["crop_right"]));
         assert_eq!(clips[0].transform, Transform::default());
         assert!(clips[0].keyframes.is_empty());
@@ -1579,7 +1690,7 @@ mod tests {
     fn keys_stay_inside_the_clip() {
         // Source 10..110 at timeline 100..200.
         let mut clips = [clip(1, 100)];
-        apply(&mut clips, |c| toggle_animate(c, "rotation", Time(50)));
+        apply(&mut clips, |c| toggle_animate(c, &["rotation"], Time(50)));
         apply(&mut clips, |c| {
             set_field(c, "rotation", 0, |_| 9.0, Time(500))
         });
@@ -1681,7 +1792,7 @@ mod tests {
                 "{:?}",
                 b.rect()
             );
-            assert!(b.rect().width() >= KEY_HIT);
+            assert!(b.rect().width() >= size::SMALL_CONTROL);
         }
     }
 
@@ -1714,6 +1825,145 @@ mod tests {
         assert_eq!(rotation(&h), 10.0);
         assert!(h.state_mut().undo());
         assert_eq!(rotation(&h), 0.0);
+    }
+
+    /// The scale row, as in [`SECTIONS`].
+    fn scale() -> &'static Prop<'static> {
+        SECTIONS[0].1.iter().find(|p| p.name == "scale").unwrap()
+    }
+
+    #[test]
+    fn reset_shows_once_a_value_reads_off_its_default_or_animates() {
+        let mut clips = [clip(1, 0)];
+        assert!(!differs(&refs(&clips), scale(), Time(0)));
+        // Under what the field shows still reads as 100%.
+        clips[0].transform.scale = [1.000_1; 2];
+        assert!(!differs(&refs(&clips), scale(), Time(0)));
+        clips[0].transform.scale = [1.5; 2];
+        assert!(differs(&refs(&clips), scale(), Time(0)));
+        apply(&mut clips, |c| reset_prop(c, scale()));
+        assert_eq!(clips[0].transform, Transform::default());
+        apply(&mut clips, |c| toggle_animate(c, &["scale"], Time(0)));
+        assert!(differs(&refs(&clips), scale(), Time(0)));
+    }
+
+    #[test]
+    fn the_crop_row_keys_and_resets_its_four_sides_together() {
+        let crop = SECTIONS[0].1.iter().find(|p| p.name == "crop").unwrap();
+        let names = crop.names();
+        let mut clips = [clip(1, 0)];
+        clips[0].transform.crop[1] = 8.0;
+        assert!(differs(&refs(&clips), crop, Time(0)));
+        apply(&mut clips, |c| toggle_animate(c, &names, Time(0)));
+        assert!(all_keyed(&refs(&clips), &names, Time(0)));
+        apply(&mut clips, |c| {
+            set_field(c, "crop_top", 0, |_| 4.0, Time(50))
+        });
+        assert_eq!(
+            neighbour(&refs(&clips), &names, Time(50), -1),
+            Some(Time(0))
+        );
+        apply(&mut clips, |c| reset_prop(c, crop));
+        assert!(clips[0].keyframes.is_empty());
+        assert_eq!(clips[0].transform, Transform::default());
+    }
+
+    /// Every widget's role, label and rect.
+    fn widgets(h: &egui_kittest::Harness<'_, History>) -> Vec<String> {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        h.query_all_by(|_| true)
+            .map(|n| {
+                let n = n.accesskit_node();
+                format!("{:?} {:?} {:?}", n.role(), n.label(), n.bounding_box())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn changing_scale_shows_reset_on_its_row_and_head_and_moves_nothing() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness();
+        assert!(h.query_all_by_label_contains("Reset").next().is_none());
+        let before = widgets(&h);
+        let id = h.state().project().sequence().tracks()[0].clips()[0].id;
+        let x = Transform {
+            scale: [1.5; 2],
+            ..Transform::default()
+        };
+        let clip = h.state().project().sequence().clip(id).unwrap().1.clone();
+        h.state_mut()
+            .apply(set_props(&[&clip], &["scale"], &x, Time(0)))
+            .unwrap();
+        h.run();
+        let resets: Vec<_> = h
+            .query_all_by_label_contains("Reset")
+            .map(|n| n.accesskit_node().label().unwrap_or_default())
+            .collect();
+        assert_eq!(resets, ["Reset Transform", "Reset"]);
+        let after = widgets(&h);
+        let moved: Vec<_> = before.iter().filter(|w| !after.contains(w)).collect();
+        assert!(moved.is_empty(), "{moved:#?}");
+    }
+
+    #[test]
+    fn the_diamond_animates_then_keys_and_shows_the_arrows() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness();
+        assert_eq!(h.query_all_by_label("Animate Scale").count(), 1);
+        assert!(h.query_by_label("Previous Keyframe").is_none());
+        h.get_by_label("Animate Scale").click();
+        h.run();
+        let clip = |h: &egui_kittest::Harness<'_, History>| {
+            h.state().project().sequence().tracks()[0].clips()[0].clone()
+        };
+        assert!(key_at(
+            &clip(&h),
+            "scale",
+            Time(jvid_core::time::FLICKS_PER_SECOND)
+        ));
+        assert_eq!(h.query_all_by_label("Previous Keyframe").count(), 1);
+        assert_eq!(h.query_all_by_label("Next Keyframe").count(), 1);
+        h.snapshot("inspector_animated");
+        // Keyed at the playhead, the same one diamond removes the key.
+        h.get_by_label("Keyframe at Playhead").click();
+        h.run();
+        assert!(!animated(&clip(&h), "scale"));
+    }
+
+    #[test]
+    fn a_slider_drag_is_one_undo_step() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness();
+        let scale = |h: &egui_kittest::Harness<'_, History>| {
+            h.state().project().sequence().tracks()[0].clips()[0]
+                .transform
+                .scale[0]
+        };
+        let rect = h.get_by_role_and_label(Role::Slider, "Scale").rect();
+        let from = egui::pos2(rect.left() + rect.width() / 4.0, rect.center().y);
+        h.hover_at(from);
+        h.run();
+        h.drag_at(from);
+        h.run();
+        for dx in [10.0, 20.0, 30.0] {
+            h.hover_at(from + vec2(dx, 0.0));
+            h.run();
+        }
+        h.drop_at(from + vec2(30.0, 0.0));
+        h.run();
+        assert!(scale(&h) > 1.0, "{}", scale(&h));
+        assert!(h.state_mut().undo());
+        assert_eq!(scale(&h), 1.0);
     }
 
     #[test]

@@ -123,6 +123,7 @@ pub struct Button<'a> {
     state: State,
     min_width: f32,
     min_height: f32,
+    small: bool,
 }
 
 impl<'a> Button<'a> {
@@ -137,6 +138,7 @@ impl<'a> Button<'a> {
             state: State::Live,
             min_width: 0.0,
             min_height: 0.0,
+            small: false,
         }
     }
 
@@ -161,6 +163,12 @@ impl<'a> Button<'a> {
         let mut b = Self::ghost(name).with_icon(glyph);
         b.icon_only = true;
         b
+    }
+
+    /// A 20px icon button with 4px corners, for the tool slots of an inspector row.
+    pub fn small(mut self) -> Self {
+        self.small = true;
+        self
     }
 
     pub fn with_icon(mut self, glyph: &'static str) -> Self {
@@ -210,16 +218,20 @@ impl Widget for Button<'_> {
                 0.0
             };
             2.0 * space::S12 + icon_w + text_width(ui, self.label, &font)
+        } else if self.small {
+            size::SMALL_CONTROL
+        } else {
+            size::CONTROL
+        };
+        let side = if self.small {
+            size::SMALL_CONTROL
         } else {
             size::CONTROL
         };
         let pad = (self.min_width - width).max(0.0) / 2.0;
         let (rect, response) = allocate(
             ui,
-            vec2(
-                (width + 2.0 * pad).ceil(),
-                size::CONTROL.max(self.min_height),
-            ),
+            vec2((width + 2.0 * pad).ceil(), side.max(self.min_height)),
             self.state,
             Sense::click(),
         );
@@ -287,10 +299,15 @@ impl Widget for Button<'_> {
                 }
             }
         };
-        let corner = CornerRadius::same(radius::CONTROL);
-        ui.painter().rect_filled(rect, corner, fill);
+        let corner = if self.small {
+            radius::SMALL
+        } else {
+            radius::CONTROL
+        };
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(corner), fill);
         if let Some(stroke) = stroke {
-            ui.painter().add(border(ui, rect, radius::CONTROL, stroke));
+            ui.painter().add(border(ui, rect, corner, stroke));
         }
         let mut x = if has_label {
             rect.left() + space::S12 + pad
@@ -328,7 +345,7 @@ impl Widget for Button<'_> {
             );
         }
         if l.focus {
-            ui.painter().add(focus_ring(rect, radius::CONTROL));
+            ui.painter().add(focus_ring(rect, corner));
         }
         response
     }
@@ -978,6 +995,244 @@ impl Widget for Checkbox<'_> {
         );
         if l.focus {
             ui.painter().add(focus_ring(check, radius::SMALL));
+        }
+        response
+    }
+}
+
+/// Whether a property is animated, and whether it has a keyframe at the playhead.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Keyed {
+    #[default]
+    Static,
+    Animated,
+    /// Animated, with a keyframe at the playhead.
+    Here,
+}
+
+#[derive(Clone, Copy)]
+enum KeyGlyph {
+    Diamond(Keyed),
+    Previous,
+    Next,
+}
+
+/// A 20px keyframe control: the diamond that animates a property and shows a key at the
+/// playhead, or an arrow to the previous or next keyframe.
+#[must_use = "add it with `ui.add(..)`"]
+pub struct KeyButton<'a> {
+    glyph: KeyGlyph,
+    name: &'a str,
+    state: State,
+}
+
+impl<'a> KeyButton<'a> {
+    /// An outline at rest, Light Blue once animated, filled when keyed at the playhead.
+    pub fn diamond(keyed: Keyed, name: &'a str) -> Self {
+        Self::new(KeyGlyph::Diamond(keyed), name)
+    }
+
+    pub fn previous(name: &'a str) -> Self {
+        Self::new(KeyGlyph::Previous, name)
+    }
+
+    pub fn next(name: &'a str) -> Self {
+        Self::new(KeyGlyph::Next, name)
+    }
+
+    fn new(glyph: KeyGlyph, name: &'a str) -> Self {
+        Self {
+            glyph,
+            name,
+            state: State::Live,
+        }
+    }
+
+    pub fn state(mut self, state: State) -> Self {
+        self.state = state;
+        self
+    }
+}
+
+impl Widget for KeyButton<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let (rect, response) = allocate(
+            ui,
+            Vec2::splat(size::SMALL_CONTROL),
+            self.state,
+            Sense::click(),
+        );
+        let on = matches!(self.glyph, KeyGlyph::Diamond(Keyed::Here));
+        response.widget_info(|| {
+            WidgetInfo::selected(
+                WidgetType::Button,
+                self.state != State::Disabled,
+                on,
+                self.name,
+            )
+        });
+        let l = look(&response, self.state);
+        let fill = if l.pressed {
+            color::BORDER
+        } else {
+            hover_fade(
+                ui,
+                response.id,
+                l.hover,
+                Color32::TRANSPARENT,
+                color::RAISED,
+            )
+        };
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(radius::SMALL), fill);
+        let ink = match () {
+            _ if l.disabled => color::INK_4,
+            _ if l.hover || l.pressed => color::INK,
+            _ => color::INK_3,
+        };
+        // The timeline's diamond size, so a row's key matches its lane.
+        let (c, h) = (rect.center(), 5.0);
+        let shape = match self.glyph {
+            KeyGlyph::Diamond(keyed) => {
+                let points = vec![
+                    c + vec2(0.0, -h),
+                    c + vec2(h, 0.0),
+                    c + vec2(0.0, h),
+                    c + vec2(-h, 0.0),
+                ];
+                let (fill, line) = match keyed {
+                    _ if l.disabled => (Color32::TRANSPARENT, color::INK_4),
+                    Keyed::Static => (Color32::TRANSPARENT, ink),
+                    Keyed::Animated => (Color32::TRANSPARENT, color::LIGHT_BLUE),
+                    Keyed::Here => (color::LIGHT_BLUE, color::LIGHT_BLUE),
+                };
+                Shape::convex_polygon(points, fill, Stroke::new(1.0, line))
+            }
+            KeyGlyph::Previous | KeyGlyph::Next => {
+                let dx = if matches!(self.glyph, KeyGlyph::Next) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let points = vec![
+                    c + vec2(-2.0 * dx, -4.0),
+                    c + vec2(2.0 * dx, 0.0),
+                    c + vec2(-2.0 * dx, 4.0),
+                ];
+                Shape::line(points, Stroke::new(1.5, ink))
+            }
+        };
+        ui.painter().add(shape);
+        if l.focus {
+            ui.painter().add(focus_ring(rect, radius::SMALL));
+        }
+        response
+    }
+}
+
+/// A slider for a ranged value: a 2px track filled from its start, or from zero when
+/// `centred`, and a 6x14 thumb. Drag or click to set; arrow keys step 1% of the range.
+/// Takes the width left in the row.
+#[must_use = "add it with `ui.add(..)`"]
+pub struct Slider<'a> {
+    value: &'a mut f64,
+    range: std::ops::RangeInclusive<f64>,
+    centred: bool,
+    name: &'a str,
+    state: State,
+}
+
+impl<'a> Slider<'a> {
+    /// `name` is for screen readers.
+    pub fn new(value: &'a mut f64, range: std::ops::RangeInclusive<f64>, name: &'a str) -> Self {
+        Self {
+            value,
+            range,
+            centred: false,
+            name,
+            state: State::Live,
+        }
+    }
+
+    /// Fills from zero, for values that go either way from it.
+    pub fn centred(mut self, centred: bool) -> Self {
+        self.centred = centred;
+        self
+    }
+
+    pub fn state(mut self, state: State) -> Self {
+        self.state = state;
+        self
+    }
+}
+
+impl Widget for Slider<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let width = ui.available_width().max(40.0);
+        let (rect, mut response) = allocate(
+            ui,
+            vec2(width, size::CONTROL),
+            self.state,
+            Sense::click_and_drag(),
+        );
+        let (lo, hi) = (*self.range.start(), *self.range.end());
+        // The thumb's centre travels inside the track so it never overhangs the row.
+        let track = rect.shrink2(vec2(3.0, 0.0)).x_range();
+        let x_of =
+            |v: f64| track.min + (((v - lo) / (hi - lo)).clamp(0.0, 1.0) as f32) * track.span();
+        if (response.dragged() || response.clicked())
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            let t = ((p.x - track.min) / track.span()).clamp(0.0, 1.0) as f64;
+            *self.value = lo + t * (hi - lo);
+            response.mark_changed();
+        }
+        if response.has_focus() {
+            let step = ui.input(|i| {
+                i32::from(i.key_pressed(Key::ArrowRight)) - i32::from(i.key_pressed(Key::ArrowLeft))
+            });
+            if step != 0 {
+                *self.value = (*self.value + f64::from(step) * (hi - lo) / 100.0).clamp(lo, hi);
+                response.mark_changed();
+            }
+        }
+        response.widget_info(|| {
+            WidgetInfo::slider(self.state != State::Disabled, *self.value, self.name)
+        });
+        let l = look(&response, self.state);
+        let y = rect.center().y;
+        let from = if self.centred { 0.0 } else { lo };
+        let (a, b) = (x_of(from), x_of(*self.value));
+        let painter = ui.painter();
+        if self.centred {
+            let line = 1.0 / ui.pixels_per_point();
+            painter.rect_filled(
+                Rect::from_x_y_ranges(a - line / 2.0..=a + line / 2.0, y - 5.0..=y + 5.0),
+                0.0,
+                color::BORDER_STRONG,
+            );
+        }
+        let bar = |x: egui::Rangef| Rect::from_x_y_ranges(x, y - 1.0..=y + 1.0);
+        painter.rect_filled(bar(track), 0.0, color::BORDER_STRONG);
+        if !l.disabled {
+            painter.rect_filled(
+                bar(egui::Rangef::new(a.min(b), a.max(b))),
+                0.0,
+                color::INK_3,
+            );
+        }
+        let thumb = Rect::from_center_size(pos2(b, y), vec2(6.0, 14.0))
+            .round_to_pixels(ui.pixels_per_point());
+        let ink = if l.disabled {
+            color::INK_4
+        } else {
+            let lit = l.hover || l.pressed || response.dragged();
+            hover_fade(ui, response.id, lit, color::INK_2, color::INK)
+        };
+        ui.painter()
+            .rect_filled(thumb, CornerRadius::same(radius::SMALL), ink);
+        if l.focus {
+            ui.painter().add(focus_ring(thumb, radius::SMALL));
         }
         response
     }

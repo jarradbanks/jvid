@@ -37,6 +37,8 @@ dropdown = "Desplegable"
 segmented = "Segmentado"
 checkbox = "Casilla"
 section = "Sección"
+slider = "Deslizador"
+keyframe = "Fotograma clave"
 
 [demo]
 delete = "Eliminar"
@@ -50,6 +52,11 @@ snap = "Imán"
 live = "En vivo"
 transform = "Transformación"
 position = "Posición"
+scale = "Escala"
+reset = "Restablecer"
+previous = "Fotograma clave anterior"
+next = "Fotograma clave siguiente"
+animate = "Animar"
 plus_second = "+1 s"
 
 [type]

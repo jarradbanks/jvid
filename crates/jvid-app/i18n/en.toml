@@ -451,6 +451,11 @@ crop_left = "Left"
 crop_top = "Top"
 crop_right = "Right"
 crop_bottom = "Bottom"
+# Crop field prefixes: left, top, right, bottom.
+crop_l = "L"
+crop_t = "T"
+crop_r = "R"
+crop_b = "B"
 exposure = "Exposure"
 contrast = "Contrast"
 saturation = "Saturation"
@@ -499,6 +504,7 @@ reset = "Reset"
 next_key = "Next Keyframe"
 key_here = "Keyframe at Playhead"
 previous_key = "Previous Keyframe"
+stop_animating = "Stop Animating"
 
 # Blend modes, as in image editors.
 [blend]
