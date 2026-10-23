@@ -67,7 +67,7 @@ pub fn check(project: &Project, (start, end): (Time, Time)) -> Result<Vec<Cut>, 
         let n = name(c);
         if project.asset(c.asset).is_none_or(|a| a.generated()) {
             why.push(tr!("lossless.generated", clip = n));
-        } else if c.speed != 1.0 || c.reverse || c.freeze.is_some() {
+        } else if c.speed != 1.0 || c.ramp().is_some() || c.reverse || c.freeze.is_some() {
             why.push(tr!("lossless.speed", clip = n));
         } else if c.transform != Transform::default() || !c.keyframes.is_empty() {
             why.push(tr!("lossless.changed", clip = n));

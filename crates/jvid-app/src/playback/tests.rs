@@ -993,6 +993,7 @@ fn speed_resamples_and_reverse_reads_backwards() {
         volume: 1.0,
         pan: 0.0,
         speed,
+        source_end: None,
         reverse,
     };
     let left = |s: &AudioSegment, src: &mut ClipAudio| {
@@ -1013,6 +1014,21 @@ fn speed_resamples_and_reverse_reads_backwards() {
         [100.0, 100.5, 101.0, 101.5]
     );
     assert_eq!(left(&seg(1.0, true), &mut src), [100.0, 99.0, 98.0, 97.0]);
+    // A ramp from 1x glides to land 8 samples on over these 4: x = i + i²/4.
+    let end = Some(Time(108 * FLICKS_PER_SAMPLE));
+    let ramp = |reverse| AudioSegment {
+        source_end: end.map(|e| {
+            if reverse {
+                Time(92 * FLICKS_PER_SAMPLE)
+            } else {
+                e
+            }
+        }),
+        ..seg(1.0, reverse)
+    };
+    let glide = [100.0, 101.25, 103.0, 105.25];
+    assert_eq!(left(&ramp(false), &mut src), glide);
+    assert_eq!(left(&ramp(true), &mut src), glide.map(|x| 200.0 - x));
 }
 
 /// Through a transition both clips on a track are summed at equal power, not one written over

@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use crate::keyframe::{self, Keyframe};
 use crate::model::{
     AssetId, Clip, ClipId, Edge, LinkId, Marker, MarkerId, ModelError, NewClip, Placement,
-    ProbeInfo, Project, ProjectSettings, SequenceId, Text, TrackId, TrackKind, TrackSettings,
-    Transform,
+    ProbeInfo, Project, ProjectSettings, Sequence, SequenceId, Text, TrackId, TrackKind,
+    TrackSettings, Transform,
 };
 use crate::time::Time;
 
@@ -86,6 +86,16 @@ pub enum Command {
         id: ClipId,
         speed: f64,
         reverse: bool,
+        ripple: bool,
+    },
+    /// Keys a clip's speed, its linked clips' with it, with `speed` the constant speed they
+    /// play at without keys; see [`Sequence::set_speed_keys`](crate::model::Sequence). The
+    /// keyframe commands and `SetClipProps` retime the same way when they change the `speed`
+    /// keys, with ripple.
+    SetSpeedKeys {
+        id: ClipId,
+        speed: f64,
+        keys: Vec<Keyframe>,
         ripple: bool,
     },
     /// Ripple deletes each `(clip, start, end)` timeline span from its clip and linked clips
@@ -237,6 +247,12 @@ impl Command {
         let s = p.sequence();
         let track = |id: TrackId| s.track(id).filter(|t| t.locked).map(|t| t.id);
         let clip = |id: ClipId| s.clip(id).and_then(|(t, _)| track(t));
+        let linked = |id: ClipId| s.linked(id).iter().find_map(|(t, _)| track(*t));
+        // A speed key edit retimes the linked clips too.
+        let keyed = |id: ClipId, param: &str| match param {
+            keyframe::SPEED => linked(id),
+            _ => clip(id),
+        };
         match self {
             Self::RemoveTrack(id)
             | Self::AddClip { track: id, .. }
@@ -247,10 +263,10 @@ impl Command {
             | Self::SetClipLink { id, .. }
             | Self::SetClipAsset { id, .. }
             | Self::SetClipParam { id, .. }
-            | Self::FreezeFrame { id, .. }
-            | Self::AddKeyframe { id, .. }
-            | Self::RemoveKeyframe { id, .. }
-            | Self::MoveKeyframe { id, .. } => clip(*id),
+            | Self::FreezeFrame { id, .. } => clip(*id),
+            Self::AddKeyframe { id, param, .. }
+            | Self::RemoveKeyframe { id, param, .. }
+            | Self::MoveKeyframe { id, param, .. } => keyed(*id, param),
             Self::Place(p) => {
                 // Insert leaves locked tracks where they are rather than failing.
                 [p.video, p.audio].into_iter().flatten().find_map(track)
@@ -260,8 +276,13 @@ impl Command {
                 .iter()
                 .find_map(|(t, _)| track(*t))
                 .or_else(|| track(*to)),
-            Self::SetClipProps(edits) => edits.iter().find_map(|(id, ..)| clip(*id)),
-            Self::SetClipSpeed { id, .. } => s.linked(*id).iter().find_map(|(t, _)| track(*t)),
+            Self::SetClipProps(edits) => edits.iter().find_map(|(id, _, keys)| match s.clip(*id) {
+                Some((_, c)) if c.keyframes.get(keyframe::SPEED) != keys.get(keyframe::SPEED) => {
+                    linked(*id)
+                }
+                _ => clip(*id),
+            }),
+            Self::SetClipSpeed { id, .. } | Self::SetSpeedKeys { id, .. } => linked(*id),
             Self::Trim { trims, .. } => trims
                 .iter()
                 .flat_map(|(id, ..)| s.linked(*id))
@@ -395,6 +416,15 @@ impl Command {
                 s.set_speed(id, speed, reverse, ripple)?;
                 Created::Nothing
             }
+            Self::SetSpeedKeys {
+                id,
+                speed,
+                keys,
+                ripple,
+            } => {
+                s.set_speed_keys(id, speed, keys, ripple)?;
+                Created::Nothing
+            }
             Self::FreezeFrame { id, at } => {
                 s.freeze_frame(id, at)?;
                 Created::Nothing
@@ -429,13 +459,13 @@ impl Command {
                 Created::Nothing
             }
             Self::AddKeyframe { id, param, key } => {
-                s.with_clip_mut(id, |c| {
-                    keyframe::insert(c.keyframes.entry(param).or_default(), key)
+                edit_keys(s, id, |k| {
+                    keyframe::insert(k.entry(param).or_default(), key)
                 })?;
                 Created::Nothing
             }
             Self::RemoveKeyframe { id, param, time } => {
-                s.with_clip_mut(id, |c| take_key(c.keyframes, &param, time))?
+                edit_keys(s, id, |k| take_key(k, &param, time))?
                     .ok_or(ModelError::UnknownKeyframe(id, time))?;
                 Created::Nothing
             }
@@ -445,10 +475,10 @@ impl Command {
                 from,
                 to,
             } => {
-                s.with_clip_mut(id, |c| {
-                    let mut k = take_key(c.keyframes, &param, from)?;
+                edit_keys(s, id, |keys| {
+                    let mut k = take_key(keys, &param, from)?;
                     k.time = to;
-                    keyframe::insert(c.keyframes.entry(param).or_default(), k);
+                    keyframe::insert(keys.entry(param).or_default(), k);
                     Some(())
                 })?
                 .ok_or(ModelError::UnknownKeyframe(id, from))?;
@@ -458,9 +488,13 @@ impl Command {
                 if let Some(id) = edits.iter().find(|(id, ..)| s.clip(*id).is_none()) {
                     return Err(ModelError::UnknownClip(id.0));
                 }
+                // Speed keys can fail to fit; leave the sequence as it was if they do.
+                let mut next = s.clone();
                 for (id, transform, keys) in edits {
-                    s.with_clip_mut(id, |c| (*c.transform, *c.keyframes) = (transform, keys))?;
+                    next.with_clip_mut(id, |c| *c.transform = transform)?;
+                    edit_keys(&mut next, id, |k| *k = keys)?;
                 }
+                *s = next;
                 Created::Nothing
             }
             Self::AddMarker {
@@ -590,6 +624,25 @@ impl Command {
 
 /// Removes a keyframe, dropping the param's list once empty so add then
 /// remove leaves the clip as it was.
+/// Applies `edit` to clip `id`'s keyframes. One that changes the speed keys retimes the clip
+/// and its linked clips, rippling the clips after them.
+fn edit_keys<R>(
+    s: &mut Sequence,
+    id: ClipId,
+    edit: impl FnOnce(&mut BTreeMap<String, Vec<Keyframe>>) -> R,
+) -> Result<R, ModelError> {
+    let (_, c) = s.clip(id).ok_or(ModelError::UnknownClip(id))?;
+    let mut keys = c.keyframes.clone();
+    let r = edit(&mut keys);
+    let speed = keys.get(keyframe::SPEED);
+    if speed != c.keyframes.get(keyframe::SPEED) {
+        let keys = speed.cloned().unwrap_or_default();
+        s.set_speed_keys(id, c.speed, keys, true)?;
+    }
+    s.with_clip_mut(id, |c| *c.keyframes = keys)?;
+    Ok(r)
+}
+
 fn take_key(
     keys: &mut BTreeMap<String, Vec<Keyframe>>,
     param: &str,
@@ -1785,6 +1838,68 @@ mod tests {
         assert_eq!(h.project().sequence().duration(), fr(65));
         assert!(h.undo());
         assert_eq!(h.project(), &before);
+    }
+
+    #[test]
+    fn speed_keys_retime_linked_clips_one_step_each() {
+        use crate::keyframe::{Easing, SPEED, Value};
+        let (mut h, f, [c, next], a) = cut_project();
+        let fr = |n: i64| Time(f.0 * n);
+        let key = |n, v| Keyframe {
+            time: fr(n),
+            value: Value::Scalar(v),
+            easing: Easing::Linear,
+        };
+        let add = |key| Command::AddKeyframe {
+            id: c,
+            param: SPEED.into(),
+            key,
+        };
+        // The clip plays source 10..50 from 5, and the next clip starts 15 frames after it.
+        let check = |h: &History, len: f64| {
+            let s = h.project().sequence();
+            let clip = |t: TrackId| s.track(t).unwrap().clips()[0].clone();
+            let (v, au) = (s.clip(c).unwrap().1.clone(), clip(a));
+            assert_eq!(v.keyframes, au.keyframes, "linked clips share the ramp");
+            assert_eq!((v.start, v.duration()), (au.start, au.duration()));
+            assert!(
+                (v.duration().0 as f64 - len * f.0 as f64).abs() <= 1.0,
+                "{len}"
+            );
+            assert_eq!(s.clip(next).unwrap().1.start - v.end(), fr(15), "ripples");
+        };
+        let mut steps = vec![h.project().clone()];
+        h.apply(add(key(10, 1.0))).unwrap();
+        check(&h, 40.0);
+        steps.push(h.project().clone());
+        h.apply(add(key(50, 2.0))).unwrap();
+        check(&h, 40.0 * 2f64.ln());
+        steps.push(h.project().clone());
+        h.apply(Command::MoveKeyframe {
+            id: c,
+            param: SPEED.into(),
+            from: fr(50),
+            to: fr(30),
+        })
+        .unwrap();
+        check(&h, 20.0 * 2f64.ln() + 10.0);
+        steps.push(h.project().clone());
+        h.apply(Command::RemoveKeyframe {
+            id: c,
+            param: SPEED.into(),
+            time: fr(10),
+        })
+        .unwrap();
+        check(&h, 20.0);
+        // Each edit undoes on its own, back through every state.
+        while let Some(want) = steps.pop() {
+            assert!(h.undo());
+            assert_eq!(h.project(), &want);
+        }
+        // A bad speed changes nothing.
+        let bad = add(key(20, f64::NAN));
+        assert!(h.apply(bad).is_err());
+        assert_eq!(h.project().sequence().clip(c).unwrap().1.ramp(), None);
     }
 
     #[test]

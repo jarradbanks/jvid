@@ -721,9 +721,8 @@ impl Timeline {
         let video = |tr: TrackId| seq.track(tr).is_some_and(|x| x.kind == TrackKind::Video);
         let c = group.iter().find(|(tr, _)| video(*tr)).or(group.first())?.1;
         let frame = match t.edge {
-            // shortcut: forward clips only; a reversed clip previews the wrong end.
-            Edge::Head => c.source_in + c.source_len(t.by),
-            Edge::Tail => c.source_out + c.source_len(t.by) - self.transport.rate.time_floor(1),
+            Edge::Head => c.source_beyond(c.start + t.by),
+            Edge::Tail => c.source_beyond(c.end() + t.by - self.transport.rate.time_floor(1)),
         };
         Some((c.asset, frame))
     }

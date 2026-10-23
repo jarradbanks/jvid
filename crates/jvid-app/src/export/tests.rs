@@ -372,6 +372,74 @@ fn export_matches_range_with_audio_in_sync() {
     }
 }
 
+/// A 100% to 200% linear ramp over the clip's 10 s exports 10·ln 2 s, every frame the one the
+/// ramp maps to.
+#[test]
+fn a_ramped_clip_exports_its_curve() {
+    use jvid_core::keyframe::{Easing, Keyframe, Value};
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let mut h = History::new(Project::default());
+    let video = dir.join("frame-index-1080p30.mp4");
+    add(&mut h, TrackKind::Video, video, Time(0), secs(10));
+    let id = h.project().sequence().tracks()[0].clips()[0].id;
+    let key = |time, v| Keyframe {
+        time,
+        value: Value::Scalar(v),
+        easing: Easing::Linear,
+    };
+    let keys = vec![key(Time(0), 1.0), key(secs(10), 2.0)];
+    h.apply(Command::SetSpeedKeys {
+        id,
+        speed: 1.0,
+        keys,
+        ripple: true,
+    })
+    .unwrap();
+    let c = h.project().sequence().tracks()[0].clips()[0].clone();
+    let rate = Rate::new(30, 1);
+    let frame = rate.time_floor(1);
+    let expected = 10.0 * 2f64.ln() * FLICKS_PER_SECOND as f64;
+    assert!((c.duration().0 as f64 - expected).abs() < frame.0 as f64);
+
+    let path = out("ramp.mp4");
+    let req = Request {
+        path: path.clone(),
+        range: (Time(0), c.duration()),
+        preset: preset("YouTube 1080p"),
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    let info = run_now(h.project(), &req, false).unwrap();
+    assert!(
+        (info.duration - c.duration()).0.abs() <= frame.0,
+        "{:?}",
+        info.duration
+    );
+    let mut v = VideoDecoder::open(&path).unwrap();
+    let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
+    // The mp4 drops a final part frame at any speed (its edit list ends at the last frame's
+    // start), so this compares the whole frames.
+    let whole = rate.index_floor(c.duration());
+    let (got, want): (Vec<_>, Vec<_>) = (0..whole)
+        .map(|n| {
+            let t = rate.time_floor(n);
+            let f = v.frame_at(t).unwrap();
+            (
+                index(&f),
+                (c.source_at(t).0 * 30 / FLICKS_PER_SECOND) as u32,
+            )
+        })
+        .unzip();
+    assert_eq!(got.len(), 207);
+    assert_eq!(got, want);
+    // It speeds up: one source frame a frame at the start, two at the end.
+    assert_eq!((got[1] - got[0], got[206] - got[205]), (1, 2));
+    std::fs::remove_file(&path).unwrap();
+}
+
 /// The dialog's In to Out range exports exactly the marked frames: In at 1 s, Out at 2.5 s.
 #[test]
 fn in_to_out_exports_the_marked_range() {

@@ -40,9 +40,12 @@ pub struct AudioSegment {
     pub end: Time,
     /// Asset time matching `start`.
     pub source_start: Time,
-    /// Source time per timeline time; 1 plays as recorded, other rates resample (pitch
-    /// shifts with them).
+    /// Source time per timeline time at `start`; 1 plays as recorded, other rates resample
+    /// (pitch shifts with them).
     pub speed: f64,
+    /// Asset time matching `end` on a speed ramp, whose speed glides from `speed` to reach it;
+    /// `None` at a constant speed.
+    pub source_end: Option<Time>,
     /// The source plays backwards from `source_start`.
     pub reverse: bool,
     /// The clip's audio stream; `None` mixes all of them.
@@ -249,7 +252,8 @@ pub fn audio_in(seq: &Sequence, start: Time, end: Time) -> Vec<AudioSegment> {
                         start: s,
                         end: e,
                         source_start: source(c, s),
-                        speed: c.speed,
+                        speed: c.speed_at(s),
+                        source_end: c.ramp().map(|_| source(c, e)),
                         reverse: c.reverse,
                         stream: c.stream,
                         crossfade: before.is_some_and(|w| s < w.1)

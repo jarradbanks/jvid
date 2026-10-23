@@ -493,6 +493,7 @@ mod tests {
             "lut_intensity",
             "volume",
             "pan",
+            "speed",
             "color",
         ];
         keys.extend(jvid_core::model::Text::ANIMATED);

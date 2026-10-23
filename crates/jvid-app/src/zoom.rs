@@ -68,19 +68,15 @@ pub fn zoom(c: &Clip, t: Time, region: Rect, w: f32, h: f32, preset: Preset) -> 
     let scale = x0.scale.map(|s| s * k);
 
     let (ramp, easing) = preset.ramp();
-    let s0 = c.source_in + (t - c.start);
     let mut steps = [ramp, HOLD, ramp];
     // Squeeze it into what is left of the clip.
-    let room = (c.source_out - s0).0 as f64 / (2 * ramp.0 + HOLD.0) as f64;
+    let room = (c.end() - t).0 as f64 / (2 * ramp.0 + HOLD.0) as f64;
     if room < 1.0 {
         steps = steps.map(|d| Time((d.0 as f64 * room) as i64));
     }
-    let times = [
-        s0,
-        s0 + steps[0],
-        s0 + steps[0] + steps[1],
-        s0 + steps[0] + steps[1] + steps[2],
-    ];
+    // Keys are source time, so each step lands where the clip's speed puts it.
+    let at = |n: usize| c.source_beyond(t + steps[..n].iter().fold(Time(0), |a, &d| a + d));
+    let times = [at(0), at(1), at(2), at(3)];
     let eases = [easing, Easing::Linear, easing, Easing::Linear];
     let uniform = x0.scale[0] == x0.scale[1];
     let sv = |s: [f64; 2]| {
