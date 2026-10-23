@@ -51,6 +51,7 @@ enable = "Enable/Disable"
 reverse = "Reverse"
 freeze_frame = "Freeze Frame at Playhead"
 detect_silence = "Detect Silence…"
+nest = "Nest"
 crossfade = "Add Crossfade"
 dip_to_black = "Add Dip to Black"
 dip_to_white = "Add Dip to White"
@@ -316,6 +317,8 @@ undo_note = "You can undo this."
 
 # The media bin: its Media, Effects, Text and Scopes tabs.
 [bin]
+# Toast when removing the sequence the Timeline shows.
+sequence_open = "the open sequence can't be removed; open another sequence first"
 effects = "Effects"
 text = "Text"
 scopes = "Scopes"
@@ -410,6 +413,16 @@ reveal_in_bin = "Reveal in Media Bin"
 close_gap = "Close Gap"
 no_handles = "no media handles at that cut for a transition: trim the clips so media remains past it on both sides"
 no_cut = "no cut between two touching clips to put a transition on"
+nest_overlap = "can't nest: an unselected clip sits in the selection's range on its top track; select it too or move it"
+nest_transition = "can't nest: a transition joins a selected clip to an unselected one; select both or remove the transition"
+# Toasts when an edit would nest a sequence inside itself, or past the depth limit {max}.
+cycle = "a sequence can't be nested inside itself"
+too_deep = "sequences can't nest more than {max} deep"
+# Bin names for the sequences Nest makes: the new one, and the one it was made from.
+nest_name = "Nested Sequence {n}"
+main_sequence = "Main Sequence"
+# Tooltip on the header dropdown that picks the sequence the timeline shows.
+open_sequence = "Open Sequence"
 remove_transition = "Remove Transition"
 # Put on the system clipboard when clips are copied, so other apps see something readable.
 copied.one = "{count} jvid clip"
@@ -485,6 +498,9 @@ invalid = "invalid project file: {error}"
 newer = "unsupported project file version {version}"
 no_version = "project file has no schema_version"
 zero_rate = "project file has a zero frame or sample rate"
+cycle = "project file nests a sequence inside itself"
+too_deep = "project file nests sequences more than {max} deep"
+bad_sequence = "project file has mismatched sequence ids"
 
 # The Inspector. Section and property names are keyed by their ids.
 [inspector]

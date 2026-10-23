@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use crate::keyframe::{self, Keyframe};
 use crate::model::{
     AssetId, Clip, ClipId, Edge, LinkId, Marker, MarkerId, ModelError, NewClip, Placement,
-    ProbeInfo, Project, ProjectSettings, Text, TrackId, TrackKind, TrackSettings, Transform,
+    ProbeInfo, Project, ProjectSettings, SequenceId, Text, TrackId, TrackKind, TrackSettings,
+    Transform,
 };
 use crate::time::Time;
 
@@ -92,6 +93,13 @@ pub enum Command {
     CutSpans {
         spans: Vec<(ClipId, Time, Time)>,
         speed: Option<f64>,
+    },
+    /// Moves clips into a new sequence named `name` and puts one clip of it in their place;
+    /// see [`Project::nest`]. `outer` names the open sequence in the bin if it isn't there.
+    Nest {
+        ids: Vec<ClipId>,
+        name: String,
+        outer: String,
     },
     /// Holds the frame shown at `at` for the rest of the clip.
     FreezeFrame {
@@ -199,7 +207,7 @@ pub enum Command {
         id: AssetId,
         name: Option<String>,
     },
-    /// Removes the asset and every clip that uses it.
+    /// Removes the asset and every clip that uses it; a sequence's takes the sequence too.
     RemoveAsset(AssetId),
     /// Points assets at new paths as one step, e.g. after their media moved.
     RelinkAssets(Vec<(AssetId, PathBuf)>),
@@ -263,6 +271,7 @@ impl Command {
                 .flat_map(|(id, ..)| s.linked(*id))
                 .find_map(|(t, _)| track(t)),
             Self::RemoveClips { ids, .. }
+            | Self::Nest { ids, .. }
             | Self::LinkClips { ids, .. }
             | Self::SetClipsEnabled { ids, .. }
             | Self::Split { ids, .. } => ids.iter().find_map(|id| clip(*id)),
@@ -300,6 +309,16 @@ impl Command {
     fn apply(self, p: &mut Project) -> Result<Created, ModelError> {
         if let Some(t) = self.locked(p) {
             return Err(ModelError::Locked(t));
+        }
+        let nest = match &self {
+            Self::Place(pl) => p.nest_error(pl.asset),
+            Self::AddClip { clip, .. } => p.nest_error(clip.asset),
+            Self::SetClipAsset { asset, .. } => p.nest_error(*asset),
+            Self::Paste { clips, .. } => clips.iter().find_map(|(_, c)| p.nest_error(c.asset)),
+            _ => None,
+        };
+        if let Some(e) = nest {
+            return Err(e);
         }
         let s = &mut p.sequence;
         Ok(match self {
@@ -380,6 +399,7 @@ impl Command {
                 s.freeze_frame(id, at)?;
                 Created::Nothing
             }
+            Self::Nest { ids, name, outer } => Created::Clip(p.nest(&ids, name, outer)?),
             Self::Split { ids, at } => {
                 s.split_at(&ids, at)?;
                 Created::Nothing
@@ -552,14 +572,7 @@ impl Command {
                 Created::Nothing
             }
             Self::RemoveAsset(id) => {
-                let i = p.assets.iter().position(|a| a.id == id);
-                p.assets.remove(i.ok_or(ModelError::UnknownAsset(id))?);
-                let s = &mut p.sequence;
-                let used = s.tracks().iter().flat_map(|t| t.clips());
-                let used: Vec<_> = used.filter(|c| c.asset == id).map(|c| c.id).collect();
-                for c in used {
-                    s.remove_clip(c)?;
-                }
+                p.remove_asset(id)?;
                 Created::Nothing
             }
             Self::RelinkAssets(items) => {
@@ -637,6 +650,22 @@ impl History {
 
     pub fn project(&self) -> &Project {
         &self.project
+    }
+
+    /// Opens sequence `id` in the Timeline. Navigation, so neither an undo step nor unsaved
+    /// work; undo goes back to the sequence open at that step.
+    pub fn open_sequence(&mut self, id: SequenceId) -> Result<(), ModelError> {
+        if self.txn.is_some() || self.project.sequence().id() == id {
+            return Ok(());
+        }
+        self.project.open(id)?;
+        self.gesture = None;
+        let saved = !self.is_dirty();
+        self.bump();
+        if saved {
+            self.mark_saved();
+        }
+        Ok(())
     }
 
     /// Applies `cmd` as its own undo step, or as part of the open transaction.
@@ -1951,5 +1980,369 @@ mod tests {
             h.undo() && h.undo() && h.project().assets().is_empty(),
             "one undo step each"
         );
+    }
+
+    fn new_clip(asset: AssetId, start: i64, len: i64) -> NewClip {
+        NewClip {
+            asset,
+            source_in: Time(0),
+            source_out: Time(len),
+            start: Time(start),
+            link: None,
+        }
+    }
+
+    /// V1 holds clips at 10 and 25 and A1 one at 10, all 10 long; nested into "N".
+    fn nested() -> (History, Project, [ClipId; 3], TrackId) {
+        let mut h = History::new(Project::default());
+        h.apply(Command::AddAsset("a.mkv".into())).unwrap();
+        let v = track(&mut h);
+        let Ok(Created::Track(a)) = h.apply(Command::AddTrack {
+            kind: TrackKind::Audio,
+            name: "A1".into(),
+        }) else {
+            panic!()
+        };
+        let mut ids = [ClipId(0); 3];
+        for (i, (t, start)) in [(v, 10), (v, 25), (a, 10)].into_iter().enumerate() {
+            let clip = new_clip(AssetId(1), start, 10);
+            let Ok(Created::Clip(c)) = h.apply(Command::AddClip { track: t, clip }) else {
+                panic!()
+            };
+            ids[i] = c;
+        }
+        let before = h.project().clone();
+        let nest = Command::Nest {
+            ids: ids.to_vec(),
+            name: "N".into(),
+            outer: "Main".into(),
+        };
+        assert!(matches!(h.apply(nest), Ok(Created::Clip(_))));
+        (h, before, ids, v)
+    }
+
+    #[test]
+    fn nest_replaces_clips_in_one_undo_step_and_renders_the_same() {
+        use crate::eval::{frame_at, video_at};
+        let (mut h, before, [c1, c2, c3], v) = nested();
+        let p = h.project();
+        let (outer, inner) = (p.sequence(), p.sequences()[1]);
+        assert_eq!(outer.id(), SequenceId(0));
+        assert_eq!(inner.id(), SequenceId(1));
+        let names: Vec<_> = p.assets().iter().map(|a| a.display_name()).collect();
+        assert_eq!(names, ["a.mkv", "N", "Main"]);
+        // One linked clip per kind over [10, 35), playing the nest from its start.
+        let clips: Vec<_> = outer.tracks().iter().flat_map(|t| t.clips()).collect();
+        assert_eq!(clips.len(), 2);
+        for c in &clips {
+            assert_eq!(
+                (c.asset, c.start, c.source_in),
+                (AssetId(2), Time(10), Time(0))
+            );
+            assert_eq!(c.source_out, Time(25));
+            assert!(c.link.is_some() && c.link == clips[0].link);
+        }
+        let starts = |id| inner.clip(id).map(|(_, c)| c.start);
+        assert_eq!(
+            [starts(c1), starts(c2), starts(c3)],
+            [Some(Time(0)), Some(Time(15)), Some(Time(0))]
+        );
+        // The nest shows what the clips showed, however deep.
+        for t in [12, 22, 27] {
+            let was: Vec<_> = video_at(before.sequence(), Time(t))
+                .iter()
+                .map(|l| (l.clip, l.source_time))
+                .collect();
+            let now = frame_at(p, Time(t));
+            let now: Vec<_> = now
+                .iter()
+                .flat_map(|l| &l.nested)
+                .map(|l| (l.clip, l.source_time))
+                .collect();
+            assert_eq!(now, was, "{t}");
+        }
+        // Survives a save.
+        let dir = std::path::Path::new("/p");
+        let json = crate::file::to_json(p, dir).unwrap();
+        assert_eq!(&crate::file::from_json(&json, dir, |_| true).unwrap(), p);
+        // An unchosen clip in the way refuses it and changes nothing.
+        let nested = h.project().clone();
+        h.apply(Command::AddClip {
+            track: v,
+            clip: new_clip(AssetId(1), 100, 10),
+        })
+        .unwrap();
+        let Created::Clip(far) = h
+            .apply(Command::AddClip {
+                track: v,
+                clip: new_clip(AssetId(1), 140, 10),
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let edited = h.project().clone();
+        let first = edited.sequence().tracks()[0]
+            .clips()
+            .iter()
+            .find(|c| c.start == Time(100))
+            .unwrap()
+            .id;
+        let bad = Command::Nest {
+            ids: vec![first, far],
+            name: "M".into(),
+            outer: "Main".into(),
+        };
+        h.apply(Command::AddClip {
+            track: v,
+            clip: new_clip(AssetId(1), 120, 10),
+        })
+        .unwrap();
+        assert!(matches!(h.apply(bad), Err(ModelError::Overlap(_))));
+        assert!(h.undo() && h.undo() && h.undo());
+        assert_eq!(h.project(), &nested);
+        assert!(h.undo(), "nest is one step");
+        assert_eq!(h.project(), &before);
+    }
+
+    #[test]
+    fn nesting_a_sequence_in_itself_is_refused() {
+        let (mut h, _, [c1, ..], v) = nested();
+        let (n, main) = (AssetId(2), AssetId(3));
+        let add = |asset| Command::AddClip {
+            track: v,
+            clip: new_clip(asset, 100, 5),
+        };
+        // Directly: Main into Main, N into N.
+        assert_eq!(h.apply(add(main)), Err(ModelError::Cycle));
+        let p = h.project();
+        let place = p.placement(main, Time(100), false, Some(v), false).unwrap();
+        assert_eq!(h.apply(Command::Place(place)), Err(ModelError::Cycle));
+        h.open_sequence(SequenceId(1)).unwrap();
+        assert_eq!(h.apply(add(n)), Err(ModelError::Cycle));
+        // Indirectly: Main holds N, which would hold Main; and through a nest inside N.
+        assert_eq!(h.apply(add(main)), Err(ModelError::Cycle));
+        let deeper = Command::Nest {
+            ids: vec![c1],
+            name: "N2".into(),
+            outer: "N".into(),
+        };
+        let Ok(Created::Clip(inner)) = h.apply(deeper) else {
+            panic!()
+        };
+        assert_eq!(h.project().assets().len(), 4, "N was already in the bin");
+        let set = Command::SetClipAsset {
+            id: inner,
+            asset: main,
+        };
+        assert_eq!(h.apply(set), Err(ModelError::Cycle));
+        h.open_sequence(SequenceId(2)).unwrap();
+        assert_eq!(h.apply(add(main)), Err(ModelError::Cycle));
+        assert_eq!(h.apply(add(n)), Err(ModelError::Cycle));
+        assert!(h.apply(add(AssetId(1))).is_ok());
+        // A file with one anyway doesn't open.
+        let mut p = h.project().clone();
+        p.sequence.add_clip(v, new_clip(main, 200, 5)).unwrap();
+        assert!(p.has_cycle());
+        let dir = std::path::Path::new("/p");
+        let json = crate::file::to_json(&p, dir).unwrap();
+        let opened = crate::file::from_json(&json, dir, |_| true);
+        assert!(matches!(opened, Err(crate::file::FileError::Cycle)));
+    }
+
+    #[test]
+    fn switching_sequences_is_not_an_edit() {
+        let (mut h, _, _, v) = nested();
+        h.mark_saved();
+        assert_eq!(
+            h.open_sequence(SequenceId(9)),
+            Err(ModelError::UnknownSequence(SequenceId(9)))
+        );
+        h.open_sequence(SequenceId(1)).unwrap();
+        assert_eq!(h.project().sequence().id(), SequenceId(1));
+        assert!(!h.is_dirty());
+        // The open sequence can't go; another one takes its clips with it.
+        assert_eq!(
+            h.apply(Command::RemoveAsset(AssetId(2))),
+            Err(ModelError::SequenceOpen)
+        );
+        h.apply(Command::AddClip {
+            track: v,
+            clip: new_clip(AssetId(1), 100, 5),
+        })
+        .unwrap();
+        assert!(h.undo());
+        assert_eq!(
+            h.project().sequence().id(),
+            SequenceId(1),
+            "undo stays in the sequence"
+        );
+        h.open_sequence(SequenceId(0)).unwrap();
+        assert_eq!(h.project().clips_using(AssetId(1)), 3);
+        h.apply(Command::RemoveAsset(AssetId(2))).unwrap();
+        assert_eq!(h.project().sequences().len(), 1);
+        assert!(
+            h.project()
+                .sequence()
+                .tracks()
+                .iter()
+                .all(|t| t.clips().is_empty())
+        );
+    }
+
+    #[test]
+    fn nesting_deeper_than_the_limit_is_refused() {
+        use crate::model::MAX_NEST_DEPTH;
+        let mut h = History::new(Project::default());
+        h.apply(Command::AddAsset("a.mkv".into())).unwrap();
+        let v = track(&mut h);
+        let mut add = |start| match h.apply(Command::AddClip {
+            track: v,
+            clip: new_clip(AssetId(1), start, 10),
+        }) {
+            Ok(Created::Clip(c)) => c,
+            _ => panic!(),
+        };
+        let (mut c, aside) = (add(0), add(100));
+        let nest = |ids| Command::Nest {
+            ids,
+            name: "N".into(),
+            outer: "Main".into(),
+        };
+        // Sequence 1 sits beside the chain; each nest of the nest clip deepens it by one.
+        h.apply(nest(vec![aside])).unwrap();
+        let side = h.project().sequence_asset(SequenceId(1)).unwrap().id;
+        for _ in 1..MAX_NEST_DEPTH {
+            let Ok(Created::Clip(n)) = h.apply(nest(vec![c])) else {
+                panic!()
+            };
+            c = n;
+        }
+        assert!(!h.project().too_deep());
+        assert_eq!(h.apply(nest(vec![c])), Err(ModelError::TooDeep));
+        let dir = std::path::Path::new("/p");
+        let json = crate::file::to_json(h.project(), dir).unwrap();
+        assert!(crate::file::from_json(&json, dir, |_| true).is_ok());
+        // The innermost sequence, at the limit, takes no sequence clip.
+        h.open_sequence(SequenceId(2)).unwrap();
+        let add_side = Command::AddClip {
+            track: v,
+            clip: new_clip(side, 200, 10),
+        };
+        assert_eq!(h.apply(add_side), Err(ModelError::TooDeep));
+        // A file with one anyway doesn't open.
+        let mut p = h.project().clone();
+        p.sequence.add_clip(v, new_clip(side, 200, 10)).unwrap();
+        assert!(p.too_deep());
+        let json = crate::file::to_json(&p, dir).unwrap();
+        let opened = crate::file::from_json(&json, dir, |_| true);
+        assert!(matches!(opened, Err(crate::file::FileError::TooDeep)));
+    }
+
+    #[test]
+    fn a_file_with_mismatched_sequence_ids_is_refused() {
+        use crate::file::{FileError, from_json, to_json};
+        let (h, ..) = nested();
+        let dir = std::path::Path::new("/p");
+        let json = to_json(h.project(), dir).unwrap();
+        let load = |edit: &dyn Fn(&mut serde_json::Value)| {
+            let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+            edit(&mut v["project"]);
+            from_json(&v.to_string(), dir, |_| true)
+        };
+        assert!(load(&|_| {}).is_ok());
+        let bad = |edit: &dyn Fn(&mut serde_json::Value)| {
+            assert!(matches!(load(edit), Err(FileError::BadSequence)));
+        };
+        // Assets: a.mkv, N (sequence 1), Main (sequence 0).
+        bad(&|p| p["assets"][1]["sequence"] = 7.into());
+        bad(&|p| {
+            p["sequence"]["id"] = 1.into();
+            p["assets"][2]["sequence"] = 1.into();
+        });
+        // The next Nest would reuse sequence 1.
+        bad(&|p| p["next_sequence"] = 0.into());
+    }
+
+    #[test]
+    fn nest_refuses_to_split_a_transition() {
+        use crate::model::{Transition, TransitionKind};
+        let mut h = History::new(Project::default());
+        h.apply(Command::AddAsset("a.mkv".into())).unwrap();
+        let v = track(&mut h);
+        let mut ids = Vec::new();
+        for start in [0, 10] {
+            let clip = new_clip(AssetId(1), start, 10);
+            let Ok(Created::Clip(c)) = h.apply(Command::AddClip { track: v, clip }) else {
+                panic!()
+            };
+            ids.push(c);
+        }
+        let c = h.project().sequence().clip(ids[0]).unwrap().1.clone();
+        let fade = Transform {
+            transition: Some(Transition {
+                kind: TransitionKind::Crossfade,
+                duration: Time(4),
+            }),
+            ..c.transform
+        };
+        h.apply(Command::SetClipProps(vec![(ids[0], fade, c.keyframes)]))
+            .unwrap();
+        for one in [ids[0], ids[1]] {
+            let nest = Command::Nest {
+                ids: vec![one],
+                name: "N".into(),
+                outer: "Main".into(),
+            };
+            assert_eq!(h.apply(nest), Err(ModelError::SplitTransition));
+        }
+        let both = Command::Nest {
+            ids,
+            name: "N".into(),
+            outer: "Main".into(),
+        };
+        assert!(h.apply(both).is_ok());
+    }
+
+    /// A trimmed nest clip at double speed plays its sequence from the trimmed point, twice as
+    /// fast, in picture and sound.
+    #[test]
+    fn a_trimmed_fast_nest_clip_maps_time_into_its_sequence() {
+        use crate::eval::{audio_in, frame_at};
+        let (mut h, _, [c1, c2, c3], _) = nested();
+        let outer = h.project().sequence().tracks().iter();
+        let outer: Vec<_> = outer.flat_map(|t| t.clips()).map(|c| c.id).collect();
+        for &id in &outer {
+            let trim = Command::TrimClip {
+                id,
+                start: Time(10),
+                source_in: Time(4),
+                source_out: Time(24),
+            };
+            h.apply(trim).unwrap();
+        }
+        let speed = Command::SetClipSpeed {
+            id: outer[0],
+            speed: 2.0,
+            reverse: false,
+            ripple: false,
+        };
+        h.apply(speed).unwrap();
+        let p = h.project();
+        // Nest time 4 + 2 × (t - 10): 8 in c1 (at 0), then 16 in c2 (at 15).
+        for (t, clip, source) in [(12, c1, 8), (16, c2, 1)] {
+            let layers = frame_at(p, Time(t));
+            let inner = &layers[0].nested[0];
+            assert_eq!((inner.clip, inner.source_time), (clip, Time(source)), "{t}");
+        }
+        let seg = audio_in(p.sequence(), Time(12), Time(14));
+        assert_eq!(
+            (seg.len(), seg[0].source_start, seg[0].speed),
+            (1, Time(8), 2.0)
+        );
+        let nest = p.nested(seg[0].asset).unwrap();
+        let inner = audio_in(nest, Time(8), Time(12));
+        assert_eq!((inner.len(), inner[0].clip), (1, c3));
+        assert_eq!((inner[0].source_start, inner[0].end), (Time(8), Time(10)));
     }
 }

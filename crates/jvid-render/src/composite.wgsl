@@ -8,7 +8,8 @@ struct Out {
 struct Params {
     // Corners in triangle-strip order: clip-space xy, then uv.
     corners: array<vec4<f32>, 4>,
-    // x: opacity 0..1, y: blend mode (jvid_core::model::Blend's index).
+    // x: opacity 0..1, y: blend mode (jvid_core::model::Blend's index), z: 1 when the image is
+    // premultiplied (a nested sequence's frame).
     opacity: vec4<f32>,
     // Color adjustments (jvid_core::model::Transform::grade): exposure, contrast, saturation,
     // temperature in grade.xyzw, tint in grade2.x; grade2.y is 1 when any is non-neutral.
@@ -63,10 +64,19 @@ fn adjusted(c: vec3<f32>) -> vec3<f32> {
     return to_srgb(clamp(l, vec3<f32>(0.0), vec3<f32>(1.0)));
 }
 
+// The image at `uv` with straight alpha.
+fn straight(uv: vec2<f32>) -> vec4<f32> {
+    let c = textureSample(image, image_smp, uv);
+    if params.opacity.z > 0.0 && c.a > 0.0 {
+        return vec4<f32>(c.rgb / c.a, c.a);
+    }
+    return c;
+}
+
 // Straight-alpha source in, premultiplied out for premultiplied "over" blending.
 @fragment
 fn fs_layer(in: Out) -> @location(0) vec4<f32> {
-    let c = graded(textureSample(image, image_smp, in.uv));
+    let c = graded(straight(in.uv));
     let a = c.a * params.opacity.x;
     return vec4<f32>(c.rgb * a, a);
 }
@@ -90,7 +100,7 @@ fn mix_mode(mode: u32, b: vec3<f32>, s: vec3<f32>) -> vec3<f32> {
 // W3C separable blending then source-over, written over the copied backdrop (no fixed blend).
 @fragment
 fn fs_blend(in: Out) -> @location(0) vec4<f32> {
-    let c = graded(textureSample(image, image_smp, in.uv));
+    let c = graded(straight(in.uv));
     let a = c.a * params.opacity.x;
     let d = textureLoad(backdrop, vec2<i32>(in.pos.xy), 0);
     let b = select(vec3<f32>(0.0), d.rgb / d.a, d.a > 0.0);

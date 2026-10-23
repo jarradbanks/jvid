@@ -17,10 +17,10 @@ use egui::{
     Align2, Color32, CornerRadius, CursorIcon, FontId, Key, Pos2, Rect, Sense, Stroke,
     TextureHandle, Ui, pos2, vec2,
 };
-use jvid_core::history::{Command, GestureKey};
+use jvid_core::history::{Command, GestureKey, History};
 use jvid_core::model::{
-    AssetId, Clip, ClipId, Edge, MediaAsset, Placement, ProbeInfo, Project, Sequence, StreamInfo,
-    Track, TrackId, TrackKind,
+    AssetId, Clip, ClipId, Edge, MediaAsset, ModelError, Placement, ProbeInfo, Project, Sequence,
+    SequenceId, StreamInfo, Track, TrackId, TrackKind,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_jobs::Priority;
@@ -111,6 +111,10 @@ pub struct Timeline {
     pub reveal: Option<AssetId>,
     /// A message for the app to show, such as why a transition couldn't be added.
     pub notice: Option<String>,
+    /// The sequence picked in the header to show instead; the app opens it.
+    pub open_sequence: Option<SequenceId>,
+    /// The sequence shown last frame, to drop a selection made in another.
+    shown_sequence: SequenceId,
     /// Keyframe lanes: expanded clips, picked keys and their clipboard.
     keys: keyframes::Keys,
     /// The Detect Silence dialog, while open.
@@ -175,6 +179,8 @@ impl Default for Timeline {
             mark_drag: None,
             reveal: None,
             notice: None,
+            open_sequence: None,
+            shown_sequence: SequenceId::default(),
             keys: keyframes::Keys::default(),
             silence: None,
             armed: None,
@@ -413,6 +419,26 @@ impl Timeline {
                     Err(e) => self.notice = Some(e),
                 }
             }
+            "nest" if !self.selected.is_empty() => {
+                let mut ids: Vec<_> = self.selected.iter().copied().collect();
+                ids.sort();
+                let nest = Command::Nest {
+                    ids,
+                    name: tr!("timeline.nest_name", n = project.next_sequence().0),
+                    outer: tr!("timeline.main_sequence").to_owned(),
+                };
+                // Tried on a copy, so a clip in the way says why rather than failing quietly.
+                match History::new(project.clone()).apply(nest.clone()) {
+                    Err(ModelError::Overlap(_)) => {
+                        self.notice = Some(tr!("timeline.nest_overlap").to_owned());
+                    }
+                    Err(ModelError::SplitTransition) => {
+                        self.notice = Some(tr!("timeline.nest_transition").to_owned());
+                    }
+                    _ => self.pending = Some(nest),
+                }
+            }
+            "nest" => {}
             "copy" | "cut" | "paste" | "duplicate" | "delete" | "ripple_delete" | "link"
             | "enable" | "reverse" | "freeze_frame" => {
                 self.pending = self.clip_action(id, project.sequence());
@@ -751,6 +777,12 @@ impl Timeline {
     }
 
     fn sync(&mut self, project: &Project) {
+        // Clip ids are per sequence, so a selection doesn't carry over to another.
+        if self.shown_sequence != project.sequence().id() {
+            self.shown_sequence = project.sequence().id();
+            self.selected.clear();
+            self.keys.selected.clear();
+        }
         self.transport.rate = project.settings().frame_rate;
         // Room past the last clip, so the end of the sequence can be reached and seen.
         let tail = Time(10 * FLICKS_PER_SECOND);
@@ -1875,11 +1907,11 @@ impl Timeline {
                     self.media
                         .filmstrip(ui, &clipped, content, view.x(clip.start), a, &source)
                 }
-                TrackKind::Audio => {
+                TrackKind::Audio if !a.generated() => {
                     let nth = clip.stream.unwrap_or(0) as usize;
                     self.media.waveform(ui, &clipped, content, a, nth, &source)
                 }
-                TrackKind::Video => {}
+                _ => {}
             }
         }
         let keyed = clip.keyframes.values().any(|k| !k.is_empty());

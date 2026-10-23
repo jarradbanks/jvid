@@ -6,7 +6,7 @@ use egui::{Rect, Ui, Vec2, pos2};
 use jvid_core::model::{AssetId, Project, Sequence};
 use suite_ui::theme::icon;
 use suite_ui::tokens::{size, space};
-use suite_ui::widgets::{Button, State};
+use suite_ui::widgets::{Button, Dropdown, State};
 
 use super::{Edit, Timeline, add_menu};
 use crate::i18n::tr;
@@ -74,6 +74,7 @@ const CLIP: &[&str] = &[
     "reverse",
     "freeze_frame",
     "detect_silence",
+    "nest",
     "",
     "crossfade",
     "dip_to_black",
@@ -106,7 +107,7 @@ impl Timeline {
         match id {
             "paste" => !self.clipboard.is_empty(),
             "delete" | "ripple_delete" => any || self.gap.is_some(),
-            "copy" | "cut" | "duplicate" | "link" | "enable" | "reverse" => any,
+            "copy" | "cut" | "duplicate" | "link" | "enable" | "reverse" | "nest" => any,
             "freeze_frame" => self.clip_action(id, seq).is_some(),
             "detect_silence" => super::silence::Silence::open(seq, &self.selected).is_some(),
             // cut_action's only side effect is Q's seek, put back after.
@@ -219,6 +220,32 @@ impl Timeline {
                 // The edit, if any, goes out with the next `show`.
                 self.action(id, project);
                 ui.ctx().request_repaint();
+            }
+        }
+        // Which sequence the timeline shows, once Nest has made a second.
+        let seqs = project.sequences();
+        if seqs.len() > 1 {
+            let names: Vec<String> = seqs
+                .iter()
+                .map(|s| match project.sequence_asset(s.id()) {
+                    Some(a) => a.display_name(),
+                    None => tr!("timeline.main_sequence").to_owned(),
+                })
+                .collect();
+            let names: Vec<&str> = names.iter().map(String::as_str).collect();
+            let open = project.sequence().id();
+            let mut i = seqs.iter().position(|s| s.id() == open).unwrap_or(0);
+            // Up to the header's end, and left out where too little of it is left.
+            let w = f32::min(160.0, header.right() - space::S8 - (left + space::S8));
+            let y = header.center().y - size::CONTROL / 2.0;
+            let r = Rect::from_min_size(pos2(left + space::S8, y), Vec2::new(w, size::CONTROL));
+            if w >= 3.0 * size::CONTROL
+                && ui
+                    .put(r, Dropdown::new(&mut i, &names).width(w))
+                    .on_hover_text(tr!("timeline.open_sequence"))
+                    .changed()
+            {
+                self.open_sequence = Some(seqs[i].id());
             }
         }
     }

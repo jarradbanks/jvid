@@ -2847,6 +2847,7 @@ mod tests {
             out_point: None,
             solid: None,
             text: text.then(Text::default),
+            sequence: None,
         }
     }
 

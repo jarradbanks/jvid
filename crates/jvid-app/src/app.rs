@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use egui::{Align, Align2, Frame, Layout, Margin, Stroke, Ui, UiBuilder, ViewportCommand, vec2};
 use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
 use jvid_core::history::{Command, History};
-use jvid_core::model::{AssetId, Project, ProjectSettings};
+use jvid_core::model::{AssetId, MAX_NEST_DEPTH, ModelError, Project, ProjectSettings};
 use jvid_core::time::Time;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
@@ -1082,7 +1082,14 @@ impl eframe::App for App {
                 self.bin.selected = Some(id);
                 self.run_action("focus_media", false);
             }
-            if let Some(id) = open {
+            // A sequence opens in the timeline rather than the source viewer.
+            let nested = open.and_then(|id| self.history.project().asset(id)?.sequence);
+            if let Some(id) = self.timeline.open_sequence.take().or(nested)
+                && let Err(e) = self.history.open_sequence(id)
+            {
+                tracing::warn!("open sequence: {e}");
+            }
+            if let Some(id) = open.filter(|_| nested.is_none()) {
                 self.preview.open(self.history.project(), id);
                 self.preview_active = 0;
             }
@@ -1096,6 +1103,16 @@ impl eframe::App for App {
             }
             if let Some(Err(e)) = applied {
                 tracing::warn!("edit failed: {e}");
+                // Refusals a bin drop or delete can meet, which nothing else explains.
+                let msg = match e {
+                    ModelError::Cycle => Some(tr!("timeline.cycle").to_owned()),
+                    ModelError::TooDeep => Some(tr!("timeline.too_deep", max = MAX_NEST_DEPTH)),
+                    ModelError::SequenceOpen => Some(tr!("bin.sequence_open").to_owned()),
+                    _ => None,
+                };
+                if let Some(msg) = msg {
+                    self.toasts.push((msg, now + TOAST_SECS));
+                }
             }
             if import {
                 self.import_dialog();
