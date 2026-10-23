@@ -404,7 +404,7 @@ flowchart LR
 | [#94](https://github.com/jarradbanks/jvid/issues/94) | Zoom-to-region for screen recordings | done | M | ui, render | [#47](https://github.com/jarradbanks/jvid/issues/47), [#43](https://github.com/jarradbanks/jvid/issues/43), [#49](https://github.com/jarradbanks/jvid/issues/49) |
 | [#207](https://github.com/jarradbanks/jvid/issues/207) | Render queue in the Export button menu | need testing | S | ui, export | [#203](https://github.com/jarradbanks/jvid/issues/203) |
 | [#208](https://github.com/jarradbanks/jvid/issues/208) | Timeline arrow-key navigation with modifiers | need testing | S | ui, timeline | [#203](https://github.com/jarradbanks/jvid/issues/203) |
-| [#210](https://github.com/jarradbanks/jvid/issues/210) | Localisation (i18n) support |  | M | ui, suite-ui | [#124](https://github.com/jarradbanks/jvid/issues/124), [#203](https://github.com/jarradbanks/jvid/issues/203) |
+| [#210](https://github.com/jarradbanks/jvid/issues/210) | Localisation (i18n) support | need testing | M | ui, suite-ui | [#124](https://github.com/jarradbanks/jvid/issues/124), [#203](https://github.com/jarradbanks/jvid/issues/203) |
 
 ### [M6 · Extend (v0.3.0)](https://github.com/jarradbanks/jvid/milestone/7)
 
