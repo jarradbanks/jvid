@@ -174,6 +174,9 @@ struct Seen {
     heard: f32,
 }
 
+/// How far [`play`] lets its clock fall behind real time before it stops catching up.
+const STALL: Duration = Duration::from_millis(100);
+
 /// Plays `pb` from its playhead as the app would: first parked until the frame there is shown and
 /// decode-ahead is idle, then playing until the clock reaches `until` samples or play stops, with
 /// one `tick` per 800-sample device callback (~60Hz) and the fake device held to wall time, so
@@ -188,7 +191,7 @@ fn play(pb: &mut Playback, p: &Project, until: u64, mut each: impl FnMut(&Shown)
         std::thread::sleep(Duration::from_millis(1));
     }
     pb.transport.toggle(out.clock());
-    let start = Instant::now();
+    let mut start = Instant::now();
     while out.clock() < until && pb.transport.speed() != 0 {
         let shown = pb.tick(p, &mut out);
         if let Some(s) = &shown {
@@ -205,6 +208,13 @@ fn play(pb: &mut Playback, p: &Project, until: u64, mut each: impl FnMut(&Shown)
             });
         }
         let due = Duration::from_secs_f64(out.clock() as f64 / SAMPLE_RATE as f64);
+        // Oversleeping is caught up, so the clock keeps real time. A longer stall (the process
+        // descheduled on a loaded CI runner) is mostly waited out, as a device would, rather
+        // than pulled in a burst no decoder could keep up with.
+        let late = start.elapsed().saturating_sub(due);
+        if late > STALL {
+            start += late - STALL;
+        }
         std::thread::sleep(due.saturating_sub(start.elapsed()));
     }
     seen

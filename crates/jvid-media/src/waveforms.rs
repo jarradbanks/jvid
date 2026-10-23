@@ -252,10 +252,10 @@ mod tests {
         let d = tmp("progress");
         let a = d.join("a.wav");
         fs::write(&a, b"x").unwrap();
-        // Grows by 100 peaks every 100 ms: about one partial per 250 ms.
+        // Grows by 100 peaks every 100 ms (or more, on a loaded machine), short of the whole.
         let scan = Box::new(|_: &Path, _, progress: &mut dyn FnMut(&[Peak])| {
             let all = ramp(1000);
-            for n in (100..=1000).step_by(100) {
+            for n in (100..1000).step_by(100) {
                 std::thread::sleep(Duration::from_millis(100));
                 progress(&all[..n]);
             }
@@ -263,8 +263,19 @@ mod tests {
         });
         let c = Cache::with_scan(d.join("cache"), u64::MAX, scan);
         let mut partials = Vec::new();
-        let full = c.load_with(&a, 0, |p| partials.push(p)).unwrap();
-        assert!((2..=5).contains(&partials.len()), "{}", partials.len());
+        let mut at = Vec::new();
+        let full = c
+            .load_with(&a, 0, |p| {
+                partials.push(p);
+                at.push(Instant::now());
+            })
+            .unwrap();
+        // Throttled by time, not by count, since sleeps overshoot on slow CI runners.
+        assert!(partials.len() >= 2, "{}", partials.len());
+        assert!(
+            at.windows(2).all(|w| w[1] - w[0] >= PROGRESS_EVERY),
+            "{at:?}"
+        );
         // Each partial reads like the finished pyramid over what it has, and silent past it
         // (but for the pixel either side of its end, which may overshoot).
         for p in &partials {

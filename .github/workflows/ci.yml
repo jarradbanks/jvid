@@ -79,6 +79,13 @@ jobs:
         env:
           JVID_GPU_TESTS: ${{ runner.os != 'macOS' && 'required' || '' }}
           JVID_TEST_MEDIA_REQUIRED: ${{ runner.os == 'Linux' && '1' || '' }}
+      # Snapshot diffs differ per driver, so keep them to see what failed.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots-${{ matrix.os }}
+          path: crates/*/tests/snapshots/*.png
+          if-no-files-found: ignore
       # Playback throughput (#32) only means anything optimised; Linux only to save CI minutes.
       - if: runner.os == 'Linux'
         shell: bash # pipefail, so the tee doesn't hide a failure
