@@ -354,6 +354,18 @@ bezier = "Bézier"
 [timeline]
 hide_keyframes = "Ocultar fotogramas clave"
 show_keyframes = "Mostrar fotogramas clave"
+# The curve graph editor, opened from the keyframe lanes. Parts name a point's or colour's
+# numbers after the lane caption.
+open_graph = "Abrir editor de curvas"
+graph_editor = "Editor de curvas"
+close_graph = "Cerrar editor de curvas"
+frame_all = "Encuadrar todo (\\)"
+part_x = "X"
+part_y = "Y"
+part_r = "R"
+part_g = "V"
+part_b = "A"
+part_a = "Alfa"
 marker = "Marcador"
 marker_name = "Nombre"
 marker_note = "Nota"

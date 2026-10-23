@@ -34,7 +34,7 @@ fn index(e: Easing) -> usize {
 }
 
 /// The bezier control points `e` is, if it is one; linear is the straight bezier.
-fn points(e: Easing) -> Option<[f64; 4]> {
+pub(crate) fn points(e: Easing) -> Option<[f64; 4]> {
     match e {
         Easing::Linear => Some([0.0, 0.0, 1.0, 1.0]),
         Easing::EaseIn => Some([0.42, 0.0, 1.0, 1.0]),
@@ -58,7 +58,7 @@ fn preset(i: usize, old: Easing) -> Easing {
 
 /// Moves handle `h` (0 or 1) of `p` to curve-space `(x, y)`; x stays in 0..=1 so the curve
 /// stays a function of time, y may overshoot.
-fn drag(mut p: [f64; 4], h: usize, x: f64, y: f64) -> [f64; 4] {
+pub(crate) fn drag(mut p: [f64; 4], h: usize, x: f64, y: f64) -> [f64; 4] {
     p[2 * h] = x.clamp(0.0, 1.0);
     p[2 * h + 1] = y.clamp(-1.0, 2.0);
     p

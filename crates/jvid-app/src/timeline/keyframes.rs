@@ -2,6 +2,7 @@
 //! lane per animated property under it. Keys click and marquee select, drag (snapping to
 //! frames, the playhead, edges and markers), delete, copy and paste at the playhead, and
 //! open the easing editor on right-click. Edits are `SetClipProps`, as in the inspector.
+//! The lanes' right-click menu opens the curve graph editor ([`super::graph`]).
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -38,16 +39,18 @@ pub struct Keys {
     clip: Option<ClipId>,
     /// Timeline shift of the selected keys while they're dragged.
     pub(super) drag: Option<Time>,
+    /// The curve graph editor, while it covers the lanes.
+    pub(super) graph: Option<super::graph::Graph>,
 }
 
 /// The properties of `c` that have keyframes, in lane order.
-fn lanes(c: &Clip) -> impl Iterator<Item = (&String, &Vec<Keyframe>)> {
+pub(super) fn lanes(c: &Clip) -> impl Iterator<Item = (&String, &Vec<Keyframe>)> {
     c.keyframes.iter().filter(|(_, k)| !k.is_empty())
 }
 
 /// Lane `name`'s caption: a built-in property's `lane.<name>`, a bundled effect's parameter
 /// after its stored slot (`fx0.amount`), anything else as stored with spaces for underscores.
-fn caption(c: &Clip, name: &str) -> String {
+pub(super) fn caption(c: &Clip, name: &str) -> String {
     if let Some(s) = CATALOG.get(&format!("lane.{name}")) {
         return s.to_owned();
     }
@@ -87,19 +90,27 @@ fn picked<'a>(
 
 /// Shifts the selected keys of `c` by `delta`; they replace keys they land on.
 fn shift(c: &Clip, sel: &BTreeSet<(ClipId, String, Time)>, delta: Time) -> Command {
-    rewrite(c, |keys| {
-        let moved: Vec<_> = picked(sel, c)
-            .filter_map(|(p, t)| {
-                let v = keys.get_mut(p)?;
-                let i = v.iter().position(|k| k.time == t)?;
-                Some((p.clone(), v.remove(i)))
-            })
-            .collect();
-        for (p, mut k) in moved {
-            k.time = k.time + delta;
-            put(keys.entry(p).or_default(), k);
-        }
-    })
+    rewrite(c, |keys| shift_keys(keys, c, sel, delta))
+}
+
+/// [`shift`] on `keys`, a copy of `c`'s.
+pub(super) fn shift_keys(
+    keys: &mut BTreeMap<String, Vec<Keyframe>>,
+    c: &Clip,
+    sel: &BTreeSet<(ClipId, String, Time)>,
+    delta: Time,
+) {
+    let moved: Vec<_> = picked(sel, c)
+        .filter_map(|(p, t)| {
+            let v = keys.get_mut(p)?;
+            let i = v.iter().position(|k| k.time == t)?;
+            Some((p.clone(), v.remove(i)))
+        })
+        .collect();
+    for (p, mut k) in moved {
+        k.time = k.time + delta;
+        put(keys.entry(p).or_default(), k);
+    }
 }
 
 fn delete(c: &Clip, sel: &BTreeSet<(ClipId, String, Time)>) -> Command {
@@ -159,9 +170,18 @@ fn paste(c: &Clip, copied: &[(String, Keyframe)], at: Time) -> Command {
 
 impl Keys {
     /// Picks keys on `clip`, dropping any picked on other clips: edits go to one clip.
-    fn pick_clip(&mut self, clip: ClipId) {
+    pub(super) fn pick_clip(&mut self, clip: ClipId) {
         self.clip = Some(clip);
         self.selected.retain(|s| s.0 == clip);
+    }
+
+    /// Follows `clip`'s selected keys after they shift by `d`.
+    pub(super) fn moved(&mut self, clip: ClipId, d: Time) {
+        let s = std::mem::take(&mut self.selected);
+        self.selected = s
+            .into_iter()
+            .map(|(c, p, t)| if c == clip { (c, p, t + d) } else { (c, p, t) })
+            .collect();
     }
 
     /// Extra height under `track`'s clips for its tallest expanded clip.
@@ -369,17 +389,7 @@ impl Timeline {
                     self.snapped = None;
                     if d != Time(0) {
                         edit = Some((shift(clip, &self.keys.selected, d), None));
-                        let s = std::mem::take(&mut self.keys.selected);
-                        self.keys.selected = s
-                            .into_iter()
-                            .map(|(c, p, t)| {
-                                if c == clip.id {
-                                    (c, p, t + d)
-                                } else {
-                                    (c, p, t)
-                                }
-                            })
-                            .collect();
+                        self.keys.moved(clip.id, d);
                     }
                 }
                 r.context_menu(|ui| {
@@ -402,6 +412,12 @@ impl Timeline {
         if bg.clicked() && !mods.shift && !mods.command {
             self.keys.selected.clear();
         }
+        bg.context_menu(|ui| {
+            if ui.button(tr!("timeline.open_graph")).clicked() {
+                self.keys.graph = Some(super::graph::Graph::new(clip.id));
+                ui.close();
+            }
+        });
         if let (Some(a), Some(b)) = (
             ui.input(|i| i.pointer.press_origin()),
             bg.interact_pointer_pos(),
@@ -430,7 +446,7 @@ impl Timeline {
     }
 }
 
-fn diamond(painter: &Painter, c: egui::Pos2, fill: egui::Color32, solid: bool) {
+pub(super) fn diamond(painter: &Painter, c: egui::Pos2, fill: egui::Color32, solid: bool) {
     let pts = vec![
         c + vec2(0.0, -KEY_R),
         c + vec2(KEY_R, 0.0),
