@@ -15,7 +15,8 @@ pub fn missing(project: &Project) -> HashSet<PathBuf> {
 }
 
 /// Relinks `id` to `chosen`, plus every other missing asset whose file name is in `chosen`'s
-/// folder with the size it had when probed (any size if that's unknown).
+/// folder with the size it had when probed (any size if that's unknown). A name shared by
+/// several missing paths (camera cards reuse `C0001.MP4`) is ambiguous, so it's left offline.
 // shortcut: only the chosen folder, not its subfolders; recurse if users keep media nested.
 pub fn plan(
     project: &Project,
@@ -24,6 +25,7 @@ pub fn plan(
     chosen: PathBuf,
 ) -> Command {
     let dir = chosen.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let names: Vec<_> = missing.iter().filter_map(|p| p.file_name()).collect();
     let mut items = vec![(id, chosen)];
     for a in project.assets() {
         if a.id == id || !missing.contains(&a.path) {
@@ -32,6 +34,9 @@ pub fn plan(
         let Some(name) = a.path.file_name() else {
             continue;
         };
+        if names.iter().filter(|&&n| n == name).count() > 1 {
+            continue;
+        }
         let candidate = dir.join(name);
         let size = std::fs::metadata(&candidate).ok().filter(|m| m.is_file());
         let want = a.probe.as_ref().and_then(|p| p.file_size);
@@ -109,6 +114,43 @@ mod tests {
         );
         h.undo();
         assert!(h.project().assets().iter().all(|a| gone.contains(&a.path)));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Two cards' same-named clips moved: neither may be guessed into the other's folder.
+    #[test]
+    fn duplicate_names_from_different_folders_stay_offline() {
+        let root = std::env::temp_dir().join(format!("jvid-relink-dup-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (a, b, moved) = (root.join("a"), root.join("b"), root.join("moved"));
+        fs::create_dir_all(&moved).unwrap();
+        for n in ["C0001.MP4", "C0002.MP4", "only.wav"] {
+            fs::write(moved.join(n), b"x").unwrap();
+        }
+        // Unknown sizes, as in projects saved before probes recorded them.
+        let items = [
+            a.join("C0001.MP4"),
+            a.join("C0002.MP4"),
+            b.join("C0001.MP4"),
+            b.join("only.wav"),
+        ]
+        .map(|p| (p, jvid_core::model::ProbeInfo::default()));
+        let mut h = History::new(Project::default());
+        h.apply(Command::Import(items.to_vec())).unwrap();
+        let gone = missing(h.project());
+        let ids: Vec<_> = h.project().assets().iter().map(|a| a.id).collect();
+
+        let Command::RelinkAssets(got) = plan(h.project(), &gone, ids[1], moved.join("C0002.MP4"))
+        else {
+            panic!("not a relink");
+        };
+        assert_eq!(
+            got,
+            [
+                (ids[1], moved.join("C0002.MP4")),
+                (ids[3], moved.join("only.wav"))
+            ]
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 }
