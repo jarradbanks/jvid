@@ -44,19 +44,6 @@ fn caption(id: &str) -> &str {
     CATALOG.get(&format!("inspector.{id}")).unwrap_or(id)
 }
 
-/// A WGSL param id as a label: `grain_size` -> `Grain Size`.
-fn title_case(id: &str) -> String {
-    id.split('_')
-        .filter(|w| !w.is_empty())
-        .map(|w| {
-            let mut c = w.chars();
-            c.next()
-                .map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 const fn prop<'a>(name: &'a str, fields: &'static [&'static str]) -> Prop<'a> {
     Prop {
         name,
@@ -189,7 +176,7 @@ const SOLID_GESTURE: GestureKey = 0x736f_6c69_6400; // "solid"
 const TEXT_GESTURE: GestureKey = 0x7465_7874_0000; // "text"
 
 /// The effect index and parameter of an effect keyframe name (see [`Effect::key`]).
-fn fx_param(name: &str) -> Option<(usize, &str)> {
+pub(crate) fn fx_param(name: &str) -> Option<(usize, &str)> {
     let (i, p) = name.strip_prefix("fx")?.split_once('.')?;
     Some((i.parse().ok()?, p))
 }
@@ -652,18 +639,19 @@ fn effects_rows(
         ui.label(egui::RichText::new(tr!("inspector.mixed_effects")).color(color::INK_3));
         return None;
     }
-    let lib: Vec<(String, crate::effects::Entry)> = crate::effects::with(|l| {
+    let lib: Vec<(String, crate::effects::Entry, bool)> = crate::effects::with(|l| {
         l.entries()
-            .map(|(k, e)| (k.to_owned(), e.clone()))
+            .map(|(k, e)| (k.to_owned(), e.clone(), l.shipped(k)))
             .collect()
     });
     let mut edit = None;
     for (i, e) in effects.iter().enumerate() {
-        let entry = lib.iter().find(|(k, _)| *k == e.shader).map(|(_, e)| e);
+        let found = lib.iter().find(|(k, ..)| *k == e.shader);
+        let (entry, shipped) = (found.map(|(_, e, _)| e), found.is_some_and(|f| f.2));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = space::S4;
             let (title, problem) = match entry {
-                Some(Ok(s)) => (s.name.clone(), None),
+                Some(Ok(s)) => (crate::effects::name(&e.shader, shipped, s).to_owned(), None),
                 Some(Err(err)) => (e.shader.clone(), Some(err.clone())),
                 None => (
                     e.shader.clone(),
@@ -700,7 +688,7 @@ fn effects_rows(
         for q in &shader.params {
             *index += 1;
             let name = Effect::key(i, &q.name);
-            let label = title_case(&q.name);
+            let label = crate::effects::param(&e.shader, shipped, &q.name);
             let p = Prop {
                 speed: (q.max - q.min) / 200.0,
                 decimals: 2,
@@ -715,20 +703,24 @@ fn effects_rows(
         }
     }
     let disabled = crate::effects::with(|l| l.disabled.clone());
-    let usable: Vec<(&str, &jvid_render::effect::Shader)> = lib
+    let usable: Vec<(&str, &jvid_render::effect::Shader, bool)> = lib
         .iter()
-        .filter(|(k, _)| !disabled.contains(k))
-        .filter_map(|(k, e)| Some((k.as_str(), e.as_deref().ok()?)))
+        .filter(|(k, ..)| !disabled.contains(k))
+        .filter_map(|(k, e, shipped)| Some((k.as_str(), e.as_deref().ok()?, *shipped)))
         .collect();
     let mut names = vec![tr!("inspector.add_effect")];
-    names.extend(usable.iter().map(|(_, s)| s.name.as_str()));
+    names.extend(
+        usable
+            .iter()
+            .map(|(k, s, shipped)| crate::effects::name(k, *shipped, s)),
+    );
     let mut pick = 0;
     if ui
         .add(Dropdown::new(&mut pick, &names).width(ui.available_width()))
         .changed()
         && pick > 0
     {
-        let (stem, shader) = usable[pick - 1];
+        let (stem, shader, _) = usable[pick - 1];
         edit = Some((push_effect(clips, stem, shader), None));
     }
     edit
@@ -1405,23 +1397,6 @@ mod tests {
 
     fn refs(clips: &[Clip]) -> Vec<&Clip> {
         clips.iter().collect()
-    }
-
-    #[test]
-    fn effect_param_labels_are_title_case() {
-        assert_eq!(title_case("amount"), "Amount");
-        assert_eq!(title_case("grain_size"), "Grain Size");
-        let shown: Vec<String> = jvid_render::effect::BUNDLED
-            .iter()
-            .flat_map(|(_, src)| jvid_render::effect::parse(src).unwrap().params)
-            .map(|p| title_case(&p.name))
-            .collect();
-        for want in ["Amount", "Strength", "Softness", "Grain"] {
-            assert!(
-                shown.iter().any(|s| s == want),
-                "{want} missing from {shown:?}"
-            );
-        }
     }
 
     #[test]

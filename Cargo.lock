@@ -2099,6 +2099,7 @@ dependencies = [
  "jvid-log",
  "jvid-media",
  "jvid-render",
+ "proc-macro2",
  "rfd",
  "serde",
  "suite-ui",

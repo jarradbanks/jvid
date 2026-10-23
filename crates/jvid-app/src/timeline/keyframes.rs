@@ -13,7 +13,7 @@ use jvid_core::time::Time;
 use suite_ui::theme;
 use suite_ui::tokens::color;
 
-use crate::i18n::tr;
+use crate::i18n::{CATALOG, tr};
 
 use super::{Edit, Timeline, View};
 
@@ -43,6 +43,23 @@ pub struct Keys {
 /// The properties of `c` that have keyframes, in lane order.
 fn lanes(c: &Clip) -> impl Iterator<Item = (&String, &Vec<Keyframe>)> {
     c.keyframes.iter().filter(|(_, k)| !k.is_empty())
+}
+
+/// Lane `name`'s caption: a built-in property's `lane.<name>`, a bundled effect's parameter
+/// after its stored slot (`fx0.amount`), anything else as stored with spaces for underscores.
+fn caption(c: &Clip, name: &str) -> String {
+    if let Some(s) = CATALOG.get(&format!("lane.{name}")) {
+        return s.to_owned();
+    }
+    if let Some((i, id)) = crate::inspector::fx_param(name)
+        && let Some(fx) = c.transform.effects.get(i)
+        && crate::effects::with(|l| l.shipped(&fx.shader))
+    {
+        let slot = &name[..name.len() - id.len()];
+        let id = crate::effects::param(&fx.shader, true, id).to_lowercase();
+        return format!("{slot}{id}");
+    }
+    name.replace('_', " ")
 }
 
 /// Inserts `k`, replacing any key at the same time.
@@ -281,7 +298,7 @@ impl Timeline {
             painter.text(
                 pos2(area.left().max(painter.clip_rect().left()) + 6.0, y),
                 Align2::LEFT_CENTER,
-                name.replace('_', " "),
+                caption(clip, name),
                 theme::small(),
                 color::INK_3,
             );
@@ -439,6 +456,47 @@ mod tests {
 
     use super::super::tests::project;
     use super::*;
+
+    #[test]
+    fn lane_captions_cover_every_built_in_key_and_read_as_before_in_english() {
+        let mut keys = vec![
+            "position",
+            "scale",
+            "rotation",
+            "anchor",
+            "opacity",
+            "crop_left",
+            "crop_top",
+            "crop_right",
+            "crop_bottom",
+            "exposure",
+            "contrast",
+            "saturation",
+            "temperature",
+            "tint",
+            "lut_intensity",
+            "volume",
+            "pan",
+            "color",
+        ];
+        keys.extend(jvid_core::model::Text::ANIMATED);
+        let lanes: Vec<&str> = CATALOG
+            .keys("en")
+            .into_iter()
+            .filter_map(|k| k.strip_prefix("lane."))
+            .collect();
+        for key in &keys {
+            assert!(lanes.contains(key), "no lane.{key}");
+        }
+        let c = project(1).sequence().tracks()[0].clips()[0].clone();
+        for key in lanes {
+            assert!(keys.contains(&key), "lane.{key} isn't a built-in key");
+            assert_eq!(caption(&c, key), key.replace('_', " "));
+        }
+        // An effect's parameter, or any other name, shows as stored.
+        assert_eq!(caption(&c, "fx0.grain_size"), "fx0.grain size");
+        assert_eq!(caption(&c, "fx_bad"), "fx bad");
+    }
 
     fn times(h: &History, p: &str) -> Vec<(i64, Easing)> {
         let c = &h.project().sequence().tracks()[0].clips()[1];

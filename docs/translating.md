@@ -124,8 +124,14 @@ These are data, not interface text, and must never be translated:
 
 - anything the user typed or imported: project, clip, marker and track names, text clips,
   subtitles, file names and paths;
-- identifiers saved in files: keymap action ids, serialized enum values, effect ids, preset
-  file names, egui ids, the autosave file name;
+- an effect's name, description and parameter names, which its `.wgsl` file declares. The
+  three bundled examples are the exception while their file is exactly as shipped: their text
+  comes from the `[bundled]` keys. Once the user edits the file, even by a character, or
+  saves their own effect under the same file name, it shows as the file says;
+- identifiers saved in files: keymap action ids, serialized enum values, effect ids, keyframe
+  property names, preset file names, egui ids, the autosave file name. A keyframe lane shows
+  a built-in property's `[lane]` caption and a bundled effect's parameter caption, but its
+  keyframes stay stored under the name;
 - shortcut notation and keycaps (`Ctrl+Shift+Z`, `Space`), file format and codec names
   (`H.264`, `WAV`), and the jvid name.
 
@@ -133,6 +139,13 @@ Code shows the last group through `verbatim("H.264")`, which marks it as reviewe
 panics and jvid-cli output stay English so bug reports read the same everywhere. Errors from the
 operating system, FFmpeg and the TOML parser are shown inside a translated sentence but keep
 their own wording.
+
+Switching language redraws the interface, not what was already made from it. Names and text
+jvid puts into the project (a text preset's name and words, a solid's name, the Subtitles track)
+are written in the language in use at the time and from then on are project data like anything
+the user typed; undo and redo bring back that same text. Messages already on screen (error
+toasts, the error lines in Settings and Keyboard Shortcuts, the reason on a failed export in
+the queue) keep the language they were made in until they're replaced or go away.
 
 ## Adding a language
 
@@ -145,7 +158,7 @@ their own wording.
    `crates/suite-ui/src/i18n.rs` and `crates/suite-ui/examples/gallery.rs`.
 4. Add the language's plural rule to `plural_category` if it isn't English's one/other.
 5. Run the tests below, then look at the editor in the new language at 100% and 150% scaling
-   (the narrowest window is 960 × 600).
+   (the narrowest window is 960 × 600 points).
 
 A language whose script isn't Latin also needs a font; see the font policy below first.
 
@@ -156,7 +169,8 @@ A language whose script isn't Latin also needs a font; see the font policy below
 | `cargo test -p jvid-app --test i18n_guard` | no UI text bypasses the catalogs; every `tr!`/`trn!` key exists and gets its placeholders |
 | `cargo test -p jvid-app --lib i18n` | jvid-app catalogs match English; translations fit the fixed-width dropdowns; every character has a glyph |
 | `cargo test -p jvid-app --lib inspector::tests::spanish` | Inspector captions fit the label column |
-| `cargo test -p jvid-app --test i18n` | the editor, the export dialog and Settings in Spanish and back without a restart; the export dialog fits the narrowest window |
+| `cargo test -p jvid-app --test i18n` | the editor, a selected clip's Inspector, the bundled effects (bin, search, Add Effect, the Inspector) and keyframe lanes, the export dialog and Settings in Spanish and back without a restart; the export dialog fits the width of a window narrower than any the editor allows. The tests that open the whole editor run on Linux only, the one place the test can move its folders |
+| `cargo test -p jvid-app --lib -- shipped_examples lane_captions` | bundled effects translate only while their file is as shipped; English lane captions read as before |
 | `cargo test -p jvid-app --lib -- settings_file preferences` | the language setting saves and reads back, including older files |
 | `cargo test -p suite-ui --test i18n` | live switching, fallback, placeholders, plural rules, glyphs, the gallery in Spanish |
 | `cargo test -p suite-ui --test gallery gallery_catalogs_match` | gallery catalogs match English |
@@ -170,8 +184,12 @@ the library's unit tests always run in English, so the English snapshots don't c
 gallery with `syn` and fails on a string literal that would reach the screen untranslated:
 
 - any literal with letters passed to something that draws text (`label`, `button`,
-  `on_hover_text`, `RichText::new`, `Window::new`, `Dialog::new`, ..), directly or through
-  `format!`, `concat!`, `if`/`match` arms or helper calls;
+  `on_hover_text`, `RichText::new`, `Window::new`, `Dialog::new`, `painter.text`,
+  `WidgetInfo::labeled`, ..), directly or through `format!`, `concat!`, `if`/`match` arms or
+  helper calls, or held first by a `let`, a `for` over it, a const or static, or returned by
+  a function or method of the same file;
+- the body of a `macro_rules!` macro, checked as the code it expands to; a macro that draws
+  one of its arguments makes that argument drawn text wherever the macro is used;
 - prose (a literal with letters that isn't identifier-shaped like `settings.toml` or
   `JVID_LOG`) anywhere else: constants, arrays, struct fields, `Display` impls;
 - `{x:?}` in drawn text, which would show a Rust name.

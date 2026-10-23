@@ -182,9 +182,9 @@ impl Timeline {
 
 fn name(kind: TransitionKind) -> &'static str {
     match kind {
-        TransitionKind::Crossfade => tr!("action.crossfade"),
-        TransitionKind::DipToBlack => tr!("action.dip_to_black"),
-        TransitionKind::DipToWhite => tr!("action.dip_to_white"),
+        TransitionKind::Crossfade => tr!("timeline.crossfade"),
+        TransitionKind::DipToBlack => tr!("timeline.dip_to_black"),
+        TransitionKind::DipToWhite => tr!("timeline.dip_to_white"),
     }
 }
 

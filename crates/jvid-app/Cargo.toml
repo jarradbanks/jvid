@@ -34,6 +34,8 @@ suite-ui = { workspace = true, features = ["test-support"] }
 jvid-media = { workspace = true, features = ["test-support"] }
 # The translation guard in tests/i18n_guard.rs parses the UI sources.
 syn = { version = "2.0.119", features = ["full", "visit-mut"] }
+# Names the token enums syn hands the guard (already in the build through syn).
+proc-macro2 = { version = "1.0.107", default-features = false }
 
 [lints]
 workspace = true
