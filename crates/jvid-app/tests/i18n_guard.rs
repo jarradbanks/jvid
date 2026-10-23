@@ -9,8 +9,9 @@
 //! - **Any letters in a UI sink**: a literal passed to a method or constructor that draws
 //!   text (`label`, `on_hover_text`, `RichText::new`, `Dialog::new`, `painter.text`, ..), so
 //!   even a lowercase `ui.label("fps")` fails, as does `{x:?}`, which shows a Rust name. So
-//!   does a literal that reaches the sink through a `let`, a `for` over it, a const or static,
-//!   or the return value of a function or method defined in the same file.
+//!   does a literal that reaches the sink through a `let` or a `for` over it while in scope, a
+//!   const or static, or the return value of a function or method defined in the same file,
+//!   directly, through a binding or through other such helpers.
 //! - **Macros**: a `macro_rules!` body is checked as the code it expands to, and a macro that
 //!   draws one of its arguments makes that argument a sink wherever it's used.
 //! - **Keys and placeholders**: every `tr!`/`trn!` key exists in English and every
@@ -342,16 +343,16 @@ fn identifier_like(s: &str) -> bool {
 }
 
 /// What a file's items make of literals, by name, so a sink can see text that reaches it from
-/// elsewhere in the file. Gathered by a first pass.
+/// elsewhere in the file. Gathered by earlier passes, until one learns nothing new.
 ///
 /// shortcut: same-file only, as names alone can't tell modules' items apart; resolve `use`
 /// paths if text is found drawn from another module's const or helper.
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 struct Known {
     /// Consts and statics: the literals of their values.
-    consts: BTreeMap<String, Vec<String>>,
+    consts: BTreeMap<String, BTreeSet<String>>,
     /// Functions and methods: the literals they can return.
-    fns: BTreeMap<String, Vec<String>>,
+    fns: BTreeMap<String, BTreeSet<String>>,
     /// `macro_rules!` macros that draw one of their arguments.
     drawing: BTreeSet<String>,
 }
@@ -366,8 +367,10 @@ struct Guard<'a> {
     known: &'a Known,
     /// Gathered from this file for the next pass.
     found: Known,
-    /// The current function's `let` and `for` bindings and the literals they hold.
+    /// The `let` and `for` bindings in scope and the literals they hold.
     locals: BTreeMap<String, Vec<String>>,
+    /// What the current function's `return`s can return.
+    returned: Vec<String>,
     /// Inside a `macro_rules!` body: its `$` variables, and whether one was drawn.
     metavars: BTreeSet<String>,
     draws_metavar: bool,
@@ -396,17 +399,30 @@ impl Guard<'_> {
     }
 
     /// The literals with letters that `e` can evaluate to, as text flows: through branches,
-    /// arrays, `format!`/`concat!`/`vec!`, conversions and bindings.
+    /// arrays, `format!`/`concat!`/`vec!`, conversions, bindings and same-file helpers.
     fn values(&self, e: &Expr) -> Vec<String> {
         let mut out = Vec::new();
-        self.values_into(e, &mut out);
+        self.values_into(e, &self.locals, &mut out);
         out
     }
 
-    fn values_into(&self, e: &Expr, out: &mut Vec<String>) {
+    fn values_into(&self, e: &Expr, locals: &BTreeMap<String, Vec<String>>, out: &mut Vec<String>) {
+        // A block's value sees the block's own `let`s.
         let tail = |b: &syn::Block, out: &mut Vec<String>| {
+            let mut inner = locals.clone();
+            for s in &b.stmts {
+                if let syn::Stmt::Local(l) = s
+                    && let Some(name) = binding(l)
+                {
+                    let mut held = Vec::new();
+                    if let Some(init) = &l.init {
+                        self.values_into(&init.expr, &inner, &mut held);
+                    }
+                    inner.insert(name, held);
+                }
+            }
             if let Some(syn::Stmt::Expr(e, None)) = b.stmts.last() {
-                self.values_into(e, out);
+                self.values_into(e, &inner, out);
             }
         };
         match e {
@@ -421,29 +437,49 @@ impl Guard<'_> {
             }
             Expr::Path(p) => {
                 if let Some(name) = p.path.segments.last().map(|s| s.ident.to_string()) {
-                    let held = match self.locals.get(&name) {
-                        Some(held) => Some(held),
-                        None => self.known.consts.get(&name),
-                    };
-                    out.extend(held.into_iter().flatten().cloned());
+                    let consts = self.known.consts.get(&name);
+                    match locals.get(&name) {
+                        Some(held) => out.extend(held.iter().cloned()),
+                        None => out.extend(consts.into_iter().flatten().cloned()),
+                    }
                 }
             }
-            Expr::Array(a) => a.elems.iter().for_each(|e| self.values_into(e, out)),
-            Expr::Tuple(t) => t.elems.iter().for_each(|e| self.values_into(e, out)),
-            Expr::Paren(p) => self.values_into(&p.expr, out),
-            Expr::Group(g) => self.values_into(&g.expr, out),
-            Expr::Reference(r) => self.values_into(&r.expr, out),
-            Expr::Index(i) => self.values_into(&i.expr, out),
+            Expr::Array(a) => a
+                .elems
+                .iter()
+                .for_each(|e| self.values_into(e, locals, out)),
+            Expr::Tuple(t) => t
+                .elems
+                .iter()
+                .for_each(|e| self.values_into(e, locals, out)),
+            Expr::Paren(p) => self.values_into(&p.expr, locals, out),
+            Expr::Group(g) => self.values_into(&g.expr, locals, out),
+            Expr::Reference(r) => self.values_into(&r.expr, locals, out),
+            Expr::Index(i) => self.values_into(&i.expr, locals, out),
             Expr::Block(b) => tail(&b.block, out),
             Expr::If(i) => {
                 tail(&i.then_branch, out);
                 if let Some((_, e)) = &i.else_branch {
-                    self.values_into(e, out);
+                    self.values_into(e, locals, out);
                 }
             }
-            Expr::Match(m) => m.arms.iter().for_each(|a| self.values_into(&a.body, out)),
+            Expr::Match(m) => m
+                .arms
+                .iter()
+                .for_each(|a| self.values_into(&a.body, locals, out)),
             Expr::MethodCall(m) if CONVERSIONS.contains(&m.method.to_string().as_str()) => {
-                self.values_into(&m.receiver, out)
+                self.values_into(&m.receiver, locals, out)
+            }
+            Expr::MethodCall(m) => {
+                let returns = self.known.fns.get(&m.method.to_string());
+                out.extend(returns.into_iter().flatten().cloned());
+            }
+            Expr::Call(c) => {
+                let name = call_name(&c.func);
+                if !matches_name(EXEMPT_CALLS, &name) {
+                    let last = name.rsplit("::").next().unwrap_or_default();
+                    out.extend(self.known.fns.get(last).into_iter().flatten().cloned());
+                }
             }
             Expr::Macro(m) => {
                 let name = m.mac.path.segments.last().map(|s| s.ident.to_string());
@@ -452,7 +488,7 @@ impl Guard<'_> {
                         .mac
                         .parse_body_with(Punctuated::<Expr, Token![,]>::parse_terminated)
                 {
-                    args.iter().for_each(|e| self.values_into(e, out));
+                    args.iter().for_each(|e| self.values_into(e, locals, out));
                 }
             }
             _ => {}
@@ -460,7 +496,7 @@ impl Guard<'_> {
     }
 
     /// A literal held elsewhere, drawn here by `name`.
-    fn drawn_through(&mut self, name: &str, values: Vec<String>) {
+    fn drawn_through(&mut self, name: &str, values: impl IntoIterator<Item = String>) {
         for v in values {
             self.report(format!("{v:?} drawn untranslated through `{name}`"));
         }
@@ -472,16 +508,13 @@ impl Guard<'_> {
             return;
         }
         let outer = std::mem::take(&mut self.locals);
+        let outer_returned = std::mem::take(&mut self.returned);
         self.item.push(name.clone());
-        self.visit_block_mut(body);
-        let mut returned = Vec::new();
+        // Not `visit_block_mut`, which would close the body's scope before its tail is read.
+        visit_mut::visit_block_mut(self, body);
+        let mut returned = std::mem::replace(&mut self.returned, outer_returned);
         if let Some(syn::Stmt::Expr(e, None)) = body.stmts.last() {
-            self.values_into(e, &mut returned);
-        }
-        let mut returns = Returns(Vec::new());
-        returns.visit_block_mut(body);
-        for e in &returns.0 {
-            self.values_into(e, &mut returned);
+            self.values_into(e, &self.locals, &mut returned);
         }
         if !returned.is_empty() {
             self.found.fns.entry(name).or_default().extend(returned);
@@ -524,9 +557,11 @@ impl Guard<'_> {
     }
 
     fn exempt_item(&self, name: &str) -> bool {
+        // The list writes paths with `/`; on Windows the scanned ones have `\`.
+        let path = self.file.replace('\\', "/");
         EXEMPT_ITEMS
             .iter()
-            .any(|(file, item, _)| self.file.ends_with(file) && *item == name)
+            .any(|(file, item, _)| Path::new(&path).ends_with(file) && *item == name)
     }
 
     fn in_item(&mut self, name: String, attrs: &[Attribute], visit: impl FnOnce(&mut Self)) {
@@ -654,17 +689,6 @@ impl Guard<'_> {
     }
 }
 
-/// The `return` values of a function body, not counting nested closures or items.
-struct Returns(Vec<Expr>);
-
-impl VisitMut for Returns {
-    fn visit_expr_return_mut(&mut self, r: &mut syn::ExprReturn) {
-        self.0.extend(r.expr.as_deref().cloned());
-    }
-    fn visit_expr_closure_mut(&mut self, _: &mut syn::ExprClosure) {}
-    fn visit_item_mut(&mut self, _: &mut syn::Item) {}
-}
-
 /// A `macro_rules!` body as plain Rust: `$x` as `x` (added to `metavars`), `$crate` as
 /// `crate`, and a `$(..)sep*` repetition as one copy of what it repeats.
 fn transcribe(mut c: Cursor, metavars: &mut BTreeSet<String>) -> String {
@@ -716,6 +740,18 @@ fn transcribe(mut c: Cursor, metavars: &mut BTreeSet<String>) -> String {
         c = next;
     }
     out
+}
+
+/// The one name a `let` binds, when its pattern is a plain name.
+fn binding(l: &syn::Local) -> Option<String> {
+    let pat = match &l.pat {
+        syn::Pat::Type(t) => &*t.pat,
+        pat => pat,
+    };
+    match pat {
+        syn::Pat::Ident(i) => Some(i.ident.to_string()),
+        _ => None,
+    }
 }
 
 fn call_name(func: &Expr) -> String {
@@ -810,25 +846,30 @@ impl VisitMut for Guard<'_> {
         }
     }
 
+    /// A block's bindings end with it, and the outer ones they shadowed are back.
+    fn visit_block_mut(&mut self, b: &mut syn::Block) {
+        let outer = self.locals.clone();
+        visit_mut::visit_block_mut(self, b);
+        self.locals = outer;
+    }
+
     fn visit_local_mut(&mut self, l: &mut syn::Local) {
         visit_mut::visit_local_mut(self, l);
-        let pat = match &l.pat {
-            syn::Pat::Type(t) => &*t.pat,
-            pat => pat,
-        };
-        if let syn::Pat::Ident(i) = pat {
+        if let Some(name) = binding(l) {
             let values = l.init.as_ref().map_or(Vec::new(), |i| self.values(&i.expr));
-            self.locals.insert(i.ident.to_string(), values);
+            self.locals.insert(name, values);
         }
     }
 
     fn visit_expr_for_loop_mut(&mut self, f: &mut syn::ExprForLoop) {
         self.visit_expr_mut(&mut f.expr);
+        let outer = self.locals.clone();
         if let syn::Pat::Ident(i) = &*f.pat {
             let values = self.values(&f.expr);
             self.locals.insert(i.ident.to_string(), values);
         }
         self.visit_block_mut(&mut f.body);
+        self.locals = outer;
     }
 
     fn visit_stmt_macro_mut(&mut self, m: &mut syn::StmtMacro) {
@@ -895,21 +936,38 @@ impl VisitMut for Guard<'_> {
                     }
                 }
             }
-            // A UI call's closure draws its own widgets; the sink is only its direct text.
+            Expr::Return(r) => {
+                visit_mut::visit_expr_return_mut(self, r);
+                if let Some(e) = &r.expr {
+                    let values = self.values(e);
+                    self.returned.extend(values);
+                }
+            }
+            // A UI call's closure draws its own widgets; the sink is only its direct text. Its
+            // `return`s are its own, not the function's.
             Expr::Closure(c) => {
                 let outer = std::mem::take(&mut self.sink);
+                let returned = std::mem::take(&mut self.returned);
                 self.visit_expr_mut(&mut c.body);
                 self.sink = outer;
+                self.returned = returned;
             }
             _ => visit_mut::visit_expr_mut(self, e),
         }
     }
 }
 
-/// Every finding in one source file. A first pass learns what its items hold.
+/// Every finding in one source file. Earlier passes learn what its items hold, until one learns
+/// nothing new: a helper that returns another's text is known a pass after that one.
 fn check_source(file: &str, source: &str, catalog: &Catalog) -> Vec<String> {
-    let known = guard_pass(file, source, catalog, &Known::default()).1;
-    guard_pass(file, source, catalog, &known).0
+    let mut known = Known::default();
+    loop {
+        let (findings, found) = guard_pass(file, source, catalog, &known);
+        if found == known {
+            return findings;
+        }
+        known = found;
+    }
 }
 
 /// One file's findings, given what its items are `known` to hold, and what they hold.
@@ -932,6 +990,7 @@ fn guard_pass(file: &str, source: &str, catalog: &Catalog, known: &Known) -> (Ve
         known,
         found: Known::default(),
         locals: BTreeMap::new(),
+        returned: Vec::new(),
         metavars: BTreeSet::new(),
         draws_metavar: false,
     };
@@ -1009,6 +1068,42 @@ fn ui_text_goes_through_the_translation_layer() {
     );
 }
 
+/// An exempt item stays exempt whichever separator the scanned path uses, and only that item:
+/// Windows lists the files as `crates/jvid-app/src\autosave.rs`.
+#[test]
+fn exemptions_hold_with_either_path_separator() {
+    let cases = [
+        (
+            "jvid-app/src/autosave.rs",
+            r#"pub fn untitled() -> PathBuf { dir.join("Untitled.jvid") }"#,
+        ),
+        (
+            "jvid-app/src/keymap.rs",
+            r#"pub const ACTIONS: &[Action] = &[a("save", "Ctrl+S")];"#,
+        ),
+    ];
+    let catalog = &jvid_app::i18n::CATALOG;
+    for (file, exempt) in cases {
+        let source =
+            format!("{exempt}\nfn shown(ui: &mut egui::Ui) {{ ui.label(\"Leaked Label\"); }}");
+        let (dir, name) = file.rsplit_once('/').unwrap();
+        for path in [
+            format!("crates/{file}"),
+            format!("crates\\{}", file.replace('/', "\\")),
+            format!("crates/{dir}\\{name}"),
+        ] {
+            assert_eq!(
+                check_source(&path, &source, catalog),
+                [format!(
+                    "{path} `shown`: \"Leaked Label\" drawn untranslated"
+                )],
+            );
+        }
+        let elsewhere = check_source(r"crates\jvid-app\src\welcome.rs", &source, catalog);
+        assert_eq!(elsewhere.len(), 2, "{elsewhere:?}");
+    }
+}
+
 /// The guard itself: each bypass shape is caught, and the allowed shapes aren't.
 #[test]
 fn guard_catches_every_bypass_shape() {
@@ -1080,6 +1175,41 @@ fn guard_catches_every_bypass_shape() {
             draw!(ui, "macroarg");
             many!(ui, "repeated", "again");
         }
+        fn hint() -> &'static str { "nothing" }
+        fn wrapped() -> String { hint().to_owned() }
+        fn relayed() -> String { let s = wrapped(); s }
+        const ALIAS: &str = LOWER;
+        fn kept(x: bool) -> &'static str {
+            let s = "keptlocal";
+            if x { return s; }
+            if !x { let t = "keptinner"; return t; }
+            "keptlate"
+        }
+        fn scoped(ui: &mut egui::Ui, k: Kind, x: bool) {
+            let caption = hint();
+            ui.label(caption);
+            let relay = relayed().to_string();
+            ui.label(relay);
+            ui.label(wrapped());
+            let named = k.name();
+            ui.label(&named);
+            ui.label(ALIAS);
+            ui.label(kept(x));
+            let outer = "outerbinding";
+            {
+                let outer = tr!("known");
+                ui.label(outer);
+            }
+            ui.label(outer);
+            let looped = "loopbinding";
+            for looped in [tr!("known")] { ui.label(looped); }
+            ui.label(looped);
+            let held = "closurebinding";
+            ui.horizontal(|ui| { let held = tr!("known"); ui.label(held); });
+            ui.label(held);
+            let blocked = if x { let s = "blockvalue"; s } else { tr!("known") };
+            ui.label(blocked);
+        }
     "#;
     let findings = check_source("bypass.rs", bypasses, &CATALOG).join("\n");
     for caught in [
@@ -1137,6 +1267,18 @@ fn guard_catches_every_bypass_shape() {
         "\"macroarg\" drawn",
         "\"repeated\" drawn",
         "\"again\" drawn",
+        "\"nothing\" drawn untranslated through `caption`",
+        "\"nothing\" drawn untranslated through `relay`",
+        "\"nothing\" drawn untranslated through `wrapped()`",
+        "\"kinda\" drawn untranslated through `named`",
+        "\"lowerconst\" drawn untranslated through `ALIAS`",
+        "\"keptlocal\" drawn untranslated through `kept()`",
+        "\"keptinner\" drawn untranslated through `kept()`",
+        "\"keptlate\" drawn untranslated through `kept()`",
+        "\"outerbinding\" drawn untranslated through `outer`",
+        "\"loopbinding\" drawn untranslated through `looped`",
+        "\"closurebinding\" drawn untranslated through `held`",
+        "\"blockvalue\" drawn untranslated through `blocked`",
     ] {
         assert!(
             findings.contains(caught),
@@ -1186,6 +1328,34 @@ fn guard_catches_every_bypass_shape() {
             ui.label(verbatim(VERSION));
             salt!("panel");
         }
+        fn scoped(ui: &mut egui::Ui, dir: &Path, x: bool) {
+            {
+                let inner = tr!("known");
+                ui.label(inner);
+            }
+            let data = "panel_state";
+            {
+                let data = tr!("known");
+                ui.label(data);
+            }
+            storage.set_string(data, s);
+            let caption = tr!("known");
+            {
+                let caption = "inner_key";
+                storage.set_string(caption, s);
+            }
+            ui.label(caption);
+            for caption in ["loop_key"] { storage.remove(caption); }
+            ui.label(caption);
+            ui.horizontal(|ui| { let caption = "closure_key"; ui.push_id(caption, |_| {}); });
+            ui.label(caption);
+            let shown = translated();
+            ui.label(shown);
+            let picked = if x { let k = tr!("known"); k } else { translated() };
+            ui.label(picked);
+            let file = dir.join(file_stem().to_owned());
+        }
+        fn translated() -> String { tr!("known") }
         fn file_stem() -> &'static str { "autosave" }
         const VERSION: &str = "v1";
         macro_rules! salt { ($x:expr) => { egui::Id::new($x) }; }

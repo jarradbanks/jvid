@@ -347,8 +347,9 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
     assert!(has(&h, "Film grain") && has(&h, "Chromatic aberration"));
 }
 
-/// 960 physical px at 150 % display scaling, in points: narrower than the window gets, as its
-/// minimum (`with_min_inner_size([960.0, 600.0])` in app.rs) is in points at any scaling.
+/// 960 physical px at 150 % display scaling, in points: narrower than the minimum app.rs asks
+/// for (`with_min_inner_size([960.0, 600.0])`, in logical points). Whether each platform's window
+/// manager enforces that minimum isn't verified.
 const NARROWEST: f32 = 640.0;
 
 /// Labels of everything that reaches past the right edge of the narrowest window.

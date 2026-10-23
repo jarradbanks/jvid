@@ -158,7 +158,7 @@ the queue) keep the language they were made in until they're replaced or go away
    `crates/suite-ui/src/i18n.rs` and `crates/suite-ui/examples/gallery.rs`.
 4. Add the language's plural rule to `plural_category` if it isn't English's one/other.
 5. Run the tests below, then look at the editor in the new language at 100% and 150% scaling
-   (the narrowest window is 960 × 600 points).
+   (the editor asks for a minimum window of 960 × 600 points).
 
 A language whose script isn't Latin also needs a font; see the font policy below first.
 
@@ -169,7 +169,7 @@ A language whose script isn't Latin also needs a font; see the font policy below
 | `cargo test -p jvid-app --test i18n_guard` | no UI text bypasses the catalogs; every `tr!`/`trn!` key exists and gets its placeholders |
 | `cargo test -p jvid-app --lib i18n` | jvid-app catalogs match English; translations fit the fixed-width dropdowns; every character has a glyph |
 | `cargo test -p jvid-app --lib inspector::tests::spanish` | Inspector captions fit the label column |
-| `cargo test -p jvid-app --test i18n` | the editor, a selected clip's Inspector, the bundled effects (bin, search, Add Effect, the Inspector) and keyframe lanes, the export dialog and Settings in Spanish and back without a restart; the export dialog fits the width of a window narrower than any the editor allows. The tests that open the whole editor run on Linux only, the one place the test can move its folders |
+| `cargo test -p jvid-app --test i18n` | the editor, a selected clip's Inspector, the bundled effects (bin, search, Add Effect, the Inspector) and keyframe lanes, the export dialog and Settings in Spanish and back without a restart; the export dialog fits 640 points wide, narrower than the 960-point minimum the editor asks for (its height isn't tested). The tests that open the whole editor run on Linux only, the one place the test can move its folders |
 | `cargo test -p jvid-app --lib -- shipped_examples lane_captions` | bundled effects translate only while their file is as shipped; English lane captions read as before |
 | `cargo test -p jvid-app --lib -- settings_file preferences` | the language setting saves and reads back, including older files |
 | `cargo test -p suite-ui --test i18n` | live switching, fallback, placeholders, plural rules, glyphs, the gallery in Spanish |
