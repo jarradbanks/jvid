@@ -90,7 +90,10 @@ jobs:
       # Playback throughput (#32) only means anything optimised; Linux only to save CI minutes.
       - if: runner.os == 'Linux'
         shell: bash # pipefail, so the tee doesn't hide a failure
-        run: cargo test --release -p jvid-app --bin jvid-app -- playback::tests::two_layer --nocapture | tee perf.log
+        # The grep fails the gate if the test didn't run (the tests are in the lib, not the bin).
+        run: |
+          cargo test --release -p jvid-app --lib -- playback::tests::two_layer --nocapture | tee perf.log
+          grep -q 'PERF playback two-layer' perf.log
         env:
           JVID_GPU_TESTS: required
           JVID_TEST_MEDIA_REQUIRED: '1'
@@ -102,8 +105,8 @@ jobs:
         run: |
           status=0
           {
-            cargo test --release -p jvid-app --bin jvid-app -- perf_cold_start --nocapture
-            cargo test --release -p jvid-app --bin jvid-app -- seek_latency scrub_1080p30 long_recording five_hundred_clips --nocapture
+            cargo test --release -p jvid-app --lib -- perf_cold_start --nocapture
+            cargo test --release -p jvid-app --lib -- seek_latency scrub_1080p30 long_recording five_hundred_clips --nocapture
             cargo test --release -p jvid-media -p jvid-audio -- one_hour_query sixteen_tracks lossless_minute --nocapture
             cargo bench -p jvid-core --bench core -- --quick
           } 2>&1 | tee -a perf.log || status=1

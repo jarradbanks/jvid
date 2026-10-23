@@ -434,9 +434,9 @@ mod tests {
             return;
         };
         assert!(rtl, "Arabic runs right to left");
-        // Joining picks contextual forms: the same letter differs alone and joined.
+        // Joining picks contextual forms: the same letter differs alone and joined. How many
+        // glyphs lam-alef makes is up to the font (DejaVu: one ligature, Segoe UI: two).
         let (_, alone) = shape("س").unwrap();
-        assert_eq!(ids.len(), 3, "lam-alef forms one ligature: {ids:?}");
         assert!(
             !ids.contains(&alone[0]),
             "initial seen is not the isolated form"
