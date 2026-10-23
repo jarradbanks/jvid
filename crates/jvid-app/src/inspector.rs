@@ -1394,6 +1394,7 @@ fn masks_rows(
             problem: None,
             on: m.enabled,
             changed,
+            stack: true,
         };
         let on = !m.enabled;
         let cmd = match fx_head(ui, head, &mut open, i, n) {
