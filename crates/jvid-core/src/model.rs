@@ -2410,6 +2410,24 @@ mod tests {
     }
 
     #[test]
+    fn audio_fx_default_off_the_page_and_round_trip() {
+        let (mut s, _, a) = seq();
+        let mut track = s.track(a).unwrap().clone();
+        // Projects from before audio effects load with none, and saving leaves them out again.
+        let json = serde_json::to_string(&track).unwrap();
+        assert!(!json.contains("fx"), "{json}");
+        assert_eq!(serde_json::from_str::<Track>(&json).unwrap(), track);
+        track.fx.eq.mid = 6.0;
+        track.fx.compressor.enabled = false;
+        let json = serde_json::to_string(&track).unwrap();
+        assert_eq!(serde_json::from_str::<Track>(&json).unwrap(), track);
+        let mut st = track.settings();
+        st.fx.compressor.ratio = 4.0;
+        s.set_track(st.clone()).unwrap();
+        assert_eq!(s.track(a).unwrap().fx, st.fx);
+    }
+
+    #[test]
     fn ids_are_unique_and_stable() {
         let (mut s, v, _) = seq();
         let a = s.add_clip(v, clip(0, 10)).unwrap();

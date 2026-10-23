@@ -1222,7 +1222,7 @@ struct Knob {
     hi: f32,
     suffix: &'static str,
     decimals: usize,
-    /// The slider moves in octaves rather than hertz.
+    /// The slider moves by ratios (octaves, for hertz) rather than steps.
     log: bool,
 }
 
@@ -1241,7 +1241,7 @@ const fn hz(id: &'static str, lo: f32, hi: f32) -> Knob {
     Knob {
         decimals: 0,
         log: true,
-        ..knob(id, lo, hi, " Hz")
+        ..knob(id, lo, hi, verbatim(" Hz"))
     }
 }
 
@@ -1250,29 +1250,34 @@ const AUDIO_FX: [(&str, &[Knob]); 2] = [
     (
         "eq",
         &[
-            knob("eq_low", -24.0, 24.0, " dB"),
+            knob("eq_low", -24.0, 24.0, verbatim(" dB")),
             hz("eq_low_freq", 20.0, 1_000.0),
-            knob("eq_mid", -24.0, 24.0, " dB"),
+            knob("eq_mid", -24.0, 24.0, verbatim(" dB")),
             hz("eq_mid_freq", 100.0, 10_000.0),
             Knob {
                 decimals: 2,
+                log: true,
                 ..knob("eq_mid_q", 0.1, 10.0, "")
             },
-            knob("eq_high", -24.0, 24.0, " dB"),
+            knob("eq_high", -24.0, 24.0, verbatim(" dB")),
             hz("eq_high_freq", 1_000.0, 20_000.0),
         ],
     ),
     (
         "compressor",
         &[
-            knob("comp_threshold", -60.0, 0.0, " dB"),
+            knob("comp_threshold", -60.0, 0.0, verbatim(" dB")),
             knob("comp_ratio", 1.0, 20.0, ":1"),
-            knob("comp_attack", 0.1, 200.0, " ms"),
+            Knob {
+                log: true,
+                ..knob("comp_attack", 0.1, 200.0, verbatim(" ms"))
+            },
             Knob {
                 decimals: 0,
-                ..knob("comp_release", 5.0, 2_000.0, " ms")
+                log: true,
+                ..knob("comp_release", 5.0, 2_000.0, verbatim(" ms"))
             },
-            knob("comp_makeup", 0.0, 24.0, " dB"),
+            knob("comp_makeup", 0.0, 24.0, verbatim(" dB")),
         ],
     ),
 ];
@@ -2360,6 +2365,11 @@ mod tests {
 
     /// The inspector's `pane` over a real history, with one video clip selected.
     fn harness_on(pane: Pane) -> egui_kittest::Harness<'static, History> {
+        harness_of(TrackKind::Video, pane)
+    }
+
+    /// Like [`harness_on`], with the one clip on a track of `kind`.
+    fn harness_of(kind: TrackKind, pane: Pane) -> egui_kittest::Harness<'static, History> {
         use jvid_core::model::{NewClip, ProbeInfo};
         use jvid_core::time::FLICKS_PER_SECOND as S;
         let mut h = History::new(Project::default());
@@ -2374,7 +2384,7 @@ mod tests {
         )]));
         let asset = h.project().assets()[0].id;
         let _ = h.apply(Command::AddTrack {
-            kind: TrackKind::Video,
+            kind,
             name: "V1".into(),
         });
         let track = h.project().sequence().tracks()[0].id;
@@ -2677,6 +2687,42 @@ mod tests {
         assert!(scale(&h) > 1.0, "{}", scale(&h));
         assert!(h.state_mut().undo());
         assert_eq!(scale(&h), 1.0);
+    }
+
+    #[test]
+    fn audio_fx_edit_in_one_step_and_bypass() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness_of(TrackKind::Audio, Pane::Audio);
+        h.set_size(vec2(340.0, 900.0));
+        h.run();
+        let fx = |h: &egui_kittest::Harness<'_, History>| {
+            h.state().project().sequence().tracks()[0].clips()[0]
+                .transform
+                .audio_fx
+        };
+        let rect = h.get_by_role_and_label(Role::Slider, "Mid").rect();
+        let from = rect.center();
+        h.drag_at(from);
+        h.run();
+        for dx in [10.0, 20.0] {
+            h.hover_at(from + vec2(dx, 0.0));
+            h.run();
+        }
+        h.drop_at(from + vec2(20.0, 0.0));
+        h.run();
+        assert!(fx(&h).eq.mid > 0.0, "{:?}", fx(&h).eq);
+        assert!(h.state_mut().undo());
+        assert_eq!(fx(&h), AudioFx::default());
+        // EQ first, then Compressor.
+        h.get_all_by_label("Bypass").nth(1).unwrap().click();
+        h.run();
+        assert!(fx(&h).eq.enabled && !fx(&h).compressor.enabled);
+        assert_eq!(h.get_all_by_label("Turn On").count(), 1);
+        h.snapshot("inspector_audio_fx");
     }
 
     /// [`harness`] with Vignette then Film Grain on its clip, tall enough to show them.
