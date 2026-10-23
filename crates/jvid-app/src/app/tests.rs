@@ -315,9 +315,9 @@ fn snapshots() {
     }
 }
 
-/// A bin of five assets, the second used by two clips.
+/// A bin of five assets, the second used by two clips and the third HDR.
 fn bin_harness() -> Harness<'static, App> {
-    use jvid_core::model::{AssetId, NewClip, ProbeInfo, TrackKind};
+    use jvid_core::model::{AssetId, NewClip, ProbeInfo, StreamInfo, TrackKind, VideoInfo};
     use jvid_core::time::{FLICKS_PER_SECOND, Time};
     let mut h = harness([1280.0, 720.0], 1.0);
     let history = &mut h.state_mut().history;
@@ -335,7 +335,16 @@ fn bin_harness() -> Harness<'static, App> {
     let items = vec![
         ("/m/arena_01.mkv".into(), video(7471)),
         ("/m/clutch_round_3.mkv".into(), video(47)),
-        ("/m/push.mp4".into(), video(729)),
+        (
+            "/m/push.mp4".into(),
+            ProbeInfo {
+                streams: vec![StreamInfo::Video(VideoInfo {
+                    color_transfer: Some("smpte2084".into()),
+                    ..Default::default()
+                })],
+                ..video(729)
+            },
+        ),
         ("/m/music.flac".into(), audio),
         ("/m/finale.mkv".into(), video(93)),
     ];
@@ -660,9 +669,11 @@ fn program_draws_the_timeline_through_the_gpu() {
         link: None,
     };
     history.apply(Command::AddClip { track, clip }).unwrap();
+    // The decode, filmstrip and thumbnail workers repaint as their results land, so `run` can't
+    // settle while they're busy (it panicked on loaded CI): step until they've all finished.
     for _ in 0..500 {
-        h.run();
-        if h.state().preview.has_program_frame() {
+        h.step();
+        if h.state().preview.has_program_frame() && h.try_run().is_ok() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1069,6 +1080,32 @@ fn edit_menu_opens_preferences_and_the_project_menu_keeps_project_settings() {
     h.run();
     assert!(h.state().preferences.is_open());
     assert!(h.query_by_label("Language").is_some());
+}
+
+#[test]
+fn project_settings_turn_on_hdr_output() {
+    if !gpu() {
+        return;
+    }
+    let mut h = harness([1280.0, 720.0], 1.0);
+    h.get_by_label("Untitled").click();
+    h.run();
+    h.get_by_label("Project Settings…").click();
+    h.run();
+    // Without an HEVC encoder the checkbox is disabled and clicks do nothing.
+    h.state_mut().settings_dialog.hdr10 = false;
+    h.run();
+    h.get_by_label("HEVC 10-Bit PQ").click();
+    h.run();
+    assert!(!h.state().settings_dialog.draft.as_ref().unwrap().hdr_output);
+    h.state_mut().settings_dialog.hdr10 = true;
+    h.run();
+    h.get_by_label("HEVC 10-Bit PQ").click();
+    h.run();
+    h.snapshot("project_settings_hdr");
+    h.get_by_label("Apply").click();
+    h.run();
+    assert!(h.state().history.project().settings().hdr_output);
 }
 
 #[test]

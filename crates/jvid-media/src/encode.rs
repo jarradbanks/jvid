@@ -4,11 +4,13 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
+use ffmpeg_next::color::{Primaries, Range, Space, TransferCharacteristic};
 use ffmpeg_next::format::{self, Pixel, Sample, sample};
 use ffmpeg_next::software::scaling;
 use ffmpeg_next::{
     ChannelLayout, Dictionary, Error, Packet, Rational, codec, encoder, filter, frame,
 };
+use jvid_core::hdr::{BT709_TO_BT2020, REFERENCE_WHITE, nits_to_pq};
 use jvid_core::preset::{AudioCodec, Preset, VideoCodec};
 use jvid_core::time::Rate;
 
@@ -66,10 +68,11 @@ impl std::error::Error for EncodeError {}
 const H264_CODECS: &[&str] = &["libx264", "libopenh264", "mpeg4"];
 #[cfg(not(feature = "gpl-ffmpeg"))]
 const H264_CODECS: &[&str] = &["libopenh264", "mpeg4"];
-/// Software HEVC is x265 only, so a permissive build needs a hardware encoder for HEVC.
-#[cfg(feature = "gpl-ffmpeg")]
+/// Software HEVC is x265 only, so a permissive build needs a hardware encoder for HEVC. Tests
+/// try x265 too, so HDR export runs where FFmpeg has it.
+#[cfg(any(feature = "gpl-ffmpeg", test))]
 const HEVC_CODECS: &[&str] = &["libx265"];
-#[cfg(not(feature = "gpl-ffmpeg"))]
+#[cfg(not(any(feature = "gpl-ffmpeg", test)))]
 const HEVC_CODECS: &[&str] = &[];
 
 /// Hardware encoders, best first. They all take NV12 (VAAPI after an upload; see `hwenc`).
@@ -114,6 +117,7 @@ pub fn hardware() -> &'static [&'static str] {
                     (256, 256),
                     Rate::new(30, 1),
                     false,
+                    false,
                     &BTreeMap::new(),
                 )
                 .is_some()
@@ -131,12 +135,41 @@ fn candidates(
 ) -> Vec<(&'static str, Pixel)> {
     let (software, pixel, hw) = video_codec(codec);
     let use_hw = options.get("encoder").is_none_or(|e| e != "software");
+    // HDR10 is 10-bit: P010 into hardware, except VAAPI, whose upload pool is NV12.
+    let hdr = is_hdr10(codec, options);
+    let (hw_pixel, pixel) = if hdr {
+        (Pixel::P010LE, Pixel::YUV420P10LE)
+    } else {
+        (Pixel::NV12, pixel)
+    };
     hw.iter()
-        .filter(|n| use_hw && available.contains(n))
-        .map(|n| (*n, Pixel::NV12))
+        .filter(|n| use_hw && available.contains(n) && !(hdr && hwenc::is_vaapi(n)))
+        .map(|n| (*n, hw_pixel))
         .chain(software.iter().map(|n| (*n, pixel)))
         .collect()
 }
+
+/// Whether an HDR10 export has an encoder to try: x265 in this build, or a working hardware HEVC
+/// encoder other than VAAPI. Call `ffmpeg::init` first.
+pub fn hdr10_available() -> bool {
+    let pq = BTreeMap::from([("hdr".to_string(), "pq".to_string())]);
+    candidates(VideoCodec::Hevc, hardware(), &pq)
+        .iter()
+        .any(|(n, _)| encoder::find_by_name(n).is_some())
+}
+
+/// The preset asks for HDR10 (`hdr=pq`, set by `Preset::hdr`), which is HEVC only.
+fn is_hdr10(codec: VideoCodec, options: &BTreeMap<String, String>) -> bool {
+    codec == VideoCodec::Hevc && options.get("hdr").is_some_and(|v| v == "pq")
+}
+
+/// HDR10 export carries only the SDR composite (see [`Hdr10`]), so no pixel is brighter than
+/// reference white: MaxCLL and MaxFALL.
+const MAX_CLL: u32 = REFERENCE_WHITE as u32;
+
+/// x265's HDR10 SEI: the mastering display [`hwenc::hdr10_metadata`] gives hardware encoders.
+const X265_HDR10: &str = "master-display=G(13250,34500)B(7500,3000)R(34000,16000)\
+                          WP(15635,16450)L(10000000,1):max-cll=203,203";
 
 /// The preset's quality (`crf`, x264's 0–51 scale, default 20) as `name`'s own rate control.
 /// Encoders without a constant-quality mode get a bit rate that halves every 6 steps, like crf.
@@ -169,13 +202,15 @@ fn rate_control(
     }
 }
 
-/// Opens encoder `name` taking `pixel` frames, with the preset's options mapped onto it.
+/// Opens encoder `name` taking `pixel` frames, with the preset's options mapped onto it,
+/// tagged and configured for HDR10 when `hdr`.
 pub(crate) fn open_video(
     name: &str,
     pixel: Pixel,
     (width, height): (u32, u32),
     rate: Rate,
     global: bool,
+    hdr: bool,
     options: &BTreeMap<String, String>,
 ) -> Option<(ffmpeg_next::Codec, encoder::Video)> {
     let c = encoder::find_by_name(name)?;
@@ -196,6 +231,15 @@ pub(crate) fn open_video(
         e.set_format(pixel);
     }
     let mut opts = Dictionary::new();
+    if hdr {
+        e.set_color_primaries(Primaries::BT2020);
+        e.set_color_transfer_characteristic(TransferCharacteristic::SMPTE2084);
+        e.set_colorspace(Space::BT2020NCL);
+        e.set_color_range(Range::MPEG);
+        if name == "libx265" {
+            opts.set("x265-params", X265_HDR10);
+        }
+    }
     let software = HW_H264.iter().chain(HW_HEVC).all(|n| *n != name);
     if software {
         opts.set("preset", "veryfast");
@@ -256,6 +300,110 @@ enum Convert {
     /// shortcut: buffers the whole export in memory (~1.6 GB for 10 s of 1080p at 25 fps); switch
     /// to a two-pass or per-frame palette if long GIFs matter.
     Palette(filter::Graph),
+    /// HDR10: resized as RGBA first when the output size differs, then mapped on the CPU.
+    Pq(Option<scaling::Context>, Box<Hdr10>),
+}
+
+/// Maps the SDR composite into HDR10 (PQ, BT.2020, limited-range 10-bit) per BT.2408: BT.1886
+/// decode (gamma 2.4), SDR 100% at the 203 cd/m² reference white, BT.709 to BT.2020 primaries in
+/// linear light, PQ encode. Highlights stay at reference white: the compositor is 8-bit SDR.
+struct Hdr10 {
+    /// 8-bit code to linear light, 0–1.
+    linear: [f32; 256],
+    /// PQ signal at linear light `(i / LUT)²`: square-root steps keep the shadows fine.
+    pq: Vec<f32>,
+}
+
+const LUT: usize = 4095;
+
+impl Hdr10 {
+    fn new() -> Self {
+        Self {
+            linear: std::array::from_fn(|c| (c as f32 / 255.0).powf(2.4)),
+            pq: (0..=LUT)
+                .map(|i| nits_to_pq((i as f32 / LUT as f32).powi(2) * REFERENCE_WHITE))
+                .collect(),
+        }
+    }
+
+    /// One SDR pixel's PQ BT.2020 R'G'B'.
+    fn rgb(&self, px: &[u8]) -> [f32; 3] {
+        let l = [0, 1, 2].map(|c| self.linear[px[c] as usize]);
+        BT709_TO_BT2020.map(|m| {
+            let v = m[0] * l[0] + m[1] * l[1] + m[2] * l[2];
+            self.pq[(v.clamp(0.0, 1.0).sqrt() * LUT as f32 + 0.5) as usize]
+        })
+    }
+
+    /// `w`×`h` RGBA rows `stride` bytes apart as 10-bit codes: Y, then Cb and Cr at
+    /// `(w+1)/2 × (h+1)/2`, each chroma sample from its 2×2 block's mean R'G'B'.
+    fn planes(&self, rgba: &[u8], stride: usize, w: usize, h: usize) -> [Vec<u16>; 3] {
+        // BT.2020 non-constant luminance.
+        let (kr, kb) = (0.2627, 0.0593);
+        let luma = |[r, g, b]: [f32; 3]| kr * r + (1.0 - kr - kb) * g + kb * b;
+        // Codes are positive, so adding a half and truncating rounds; `round` is a libm call.
+        let code = |v: f32, scale: f32, zero: f32| (zero + scale * v + 0.5) as u16;
+        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+        // Chroma rows from `cy0` on, into their luma rows `y` and chroma rows `u` and `v`.
+        let band = |cy0: usize, y: &mut [u16], u: &mut [u16], v: &mut [u16]| {
+            for (cy, (u, v)) in (cy0..).zip(u.chunks_mut(cw).zip(v.chunks_mut(cw))) {
+                for cx in 0..cw {
+                    let mut sum = [0.0; 3];
+                    for (x, y0) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                        let (x, row) = ((2 * cx + x).min(w - 1), (2 * cy + y0).min(h - 1));
+                        let p = self.rgb(&rgba[row * stride + x * 4..]);
+                        y[(row - 2 * cy0) * w + x] = code(luma(p), 876.0, 64.0);
+                        sum = [0, 1, 2].map(|c| sum[c] + p[c] / 4.0);
+                    }
+                    let l = luma(sum);
+                    u[cx] = code((sum[2] - l) / (2.0 * (1.0 - kb)), 896.0, 512.0);
+                    v[cx] = code((sum[0] - l) / (2.0 * (1.0 - kr)), 896.0, 512.0);
+                }
+            }
+        };
+        let mut y = vec![0; w * h];
+        let (mut u, mut v) = (vec![0; cw * ch], vec![0; cw * ch]);
+        // One band per core: on one, 1080p takes ~30 ms a frame.
+        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let rows = ch.div_ceil(cores).max(1);
+        let (band, chroma) = (&band, rows * cw);
+        std::thread::scope(|s| {
+            let bands = y
+                .chunks_mut(2 * rows * w)
+                .zip(u.chunks_mut(chroma).zip(v.chunks_mut(chroma)));
+            for (i, (y, (u, v))) in bands.enumerate() {
+                s.spawn(move || band(i * rows, y, u, v));
+            }
+        });
+        [y, u, v]
+    }
+}
+
+/// Copies 10-bit `planes` into `f`, a yuv420p10le or p010le frame of their size.
+fn fill(f: &mut frame::Video, [y, u, v]: [Vec<u16>; 3]) {
+    let h = f.height() as usize;
+    // P010 keeps the 10 bits at the top of each sample and interleaves Cb and Cr.
+    let planes = if f.format() == Pixel::P010LE {
+        let uv = u
+            .iter()
+            .zip(&v)
+            .flat_map(|(a, b)| [a << 6, b << 6])
+            .collect();
+        vec![y.iter().map(|s| s << 6).collect(), uv]
+    } else {
+        vec![y, u, v]
+    };
+    for (i, p) in planes.iter().enumerate() {
+        let rows = if i == 0 { h } else { h.div_ceil(2) };
+        let (stride, row) = (f.stride(i), p.len() / rows);
+        let data = f.data_mut(i);
+        for (r, line) in p.chunks_exact(row).enumerate() {
+            let dst = data[r * stride..][..row * 2].as_chunks_mut::<2>().0;
+            for (d, s) in dst.iter_mut().zip(line) {
+                *d = s.to_le_bytes();
+            }
+        }
+    }
 }
 
 /// The GIF filter graph: `src`-sized RGBA in at `tb`, a `size` PAL8 frame out per frame.
@@ -331,6 +479,7 @@ impl Encoder {
             (u32, u32),
             Rate,
             bool,
+            bool,
             &BTreeMap<String, String>,
         ) -> Option<(ffmpeg_next::Codec, encoder::Video)>,
     ) -> Result<Self, Error> {
@@ -342,11 +491,19 @@ impl Encoder {
         let video = match preset.video {
             None => None,
             Some(vc) => {
+                let hdr = is_hdr10(vc, &preset.options);
                 let (name, pixel, codec, enc) = candidates(vc, available, &preset.options)
                     .into_iter()
                     .find_map(|(n, pixel)| {
-                        let (c, e) =
-                            open(n, pixel, (width, height), rate, global, &preset.options)?;
+                        let (c, e) = open(
+                            n,
+                            pixel,
+                            (width, height),
+                            rate,
+                            global,
+                            hdr,
+                            &preset.options,
+                        )?;
                         Some((n, pixel, c, e))
                     })
                     .ok_or(Error::EncoderNotFound)?;
@@ -356,23 +513,20 @@ impl Encoder {
                     enc,
                     time_base: frame_tb,
                 };
+                let flags = if (width, height) == src {
+                    scaling::Flags::POINT
+                } else {
+                    scaling::Flags::BICUBIC
+                };
+                let scale =
+                    |to| scaling::Context::get(Pixel::RGBA, src.0, src.1, to, width, height, flags);
                 let convert = if vc == VideoCodec::Gif {
                     Convert::Palette(palette_graph(src, (width, height), frame_tb)?)
+                } else if hdr {
+                    let resize = (src != (width, height)).then(|| scale(Pixel::RGBA));
+                    Convert::Pq(resize.transpose()?, Box::new(Hdr10::new()))
                 } else {
-                    let flags = if (width, height) == src {
-                        scaling::Flags::POINT
-                    } else {
-                        scaling::Flags::BICUBIC
-                    };
-                    Convert::Scale(scaling::Context::get(
-                        Pixel::RGBA,
-                        src.0,
-                        src.1,
-                        pixel,
-                        width,
-                        height,
-                        flags,
-                    )?)
+                    Convert::Scale(scale(pixel)?)
                 };
                 Some(Video {
                     stream,
@@ -459,6 +613,23 @@ impl Encoder {
             Convert::Palette(g) => {
                 g.get("in").expect("added").source().add(&src)?;
                 filtered(&mut self.out, stream, g)
+            }
+            Convert::Pq(resize, hdr10) => {
+                let mut resized = frame::Video::empty();
+                let rgba = match resize {
+                    Some(scaler) => {
+                        scaler.run(&src, &mut resized)?;
+                        &resized
+                    }
+                    None => &src,
+                };
+                let (w, h) = (rgba.width() as usize, rgba.height() as usize);
+                let planes = hdr10.planes(rgba.data(0), rgba.stride(0), w, h);
+                let mut out = frame::Video::new(stream.enc.format(), w as u32, h as u32);
+                fill(&mut out, planes);
+                hwenc::hdr10_metadata(&mut out, MAX_CLL);
+                out.set_pts(src.pts());
+                push_video(&mut self.out, stream, out, false, hwenc::upload)
             }
         }
     }
@@ -648,13 +819,13 @@ mod tests {
             Rate::new(30, 1),
             &small_preset(),
             &["h264_vaapi"],
-            |name, pixel, size, rate, global, options| {
+            |name, pixel, size, rate, global, hdr, options| {
                 if !hwenc::is_vaapi(name) {
-                    return open_video(name, pixel, size, rate, global, options);
+                    return open_video(name, pixel, size, rate, global, hdr, options);
                 }
                 // Use a real software codec context to inject the upload result on any host.
                 let (codec, encoder) =
-                    open_video("mpeg4", Pixel::YUV420P, size, rate, global, options)?;
+                    open_video("mpeg4", Pixel::YUV420P, size, rate, global, hdr, options)?;
                 ready_video(name, encoder, |_| {
                     probed = true;
                     assert_eq!(
@@ -736,6 +907,115 @@ mod tests {
             candidates(VideoCodec::H264, &hw, &opts(&[]))[0].1,
             Pixel::NV12
         );
+        // HDR10 is HEVC only, 10-bit, and skips VAAPI's NV12 pool.
+        let pq = opts(&[("hdr", "pq")]);
+        assert_eq!(
+            candidates(VideoCodec::Hevc, &["hevc_vaapi", "hevc_qsv"], &pq),
+            [("hevc_qsv", Pixel::P010LE), ("libx265", Pixel::YUV420P10LE)]
+        );
+        assert_eq!(candidates(VideoCodec::H264, &hw, &pq)[0].1, Pixel::NV12);
+    }
+
+    #[test]
+    fn sdr_maps_to_hdr10_at_reference_white() {
+        let hdr10 = Hdr10::new();
+        let code = |nits| 64 + (876.0 * nits_to_pq(nits)).round() as u16;
+        // 2×2 blocks: white, black, 50% grey (BT.1886: 0.5^2.4 of 203 cd/m²), and BT.709 red.
+        for (px, y, cb, cr) in [
+            ([255, 255, 255], code(REFERENCE_WHITE), 512, 512),
+            ([0, 0, 0], 64, 512, 512),
+            (
+                [128, 128, 128],
+                code((128f32 / 255.0).powf(2.4) * 203.0),
+                512,
+                512,
+            ),
+        ] {
+            let rgba: Vec<u8> = (0..4).flat_map(|_| [px[0], px[1], px[2], 255]).collect();
+            let [ys, u, v] = hdr10.planes(&rgba, 8, 2, 2);
+            for got in ys {
+                assert!(got.abs_diff(y) <= 1, "{px:?}: Y {got}, want {y}");
+            }
+            assert_eq!((u[0], v[0]), (cb, cr), "{px:?}");
+        }
+        // Red: Cr up, Cb down, inside the 10-bit legal range; 3×1 pads the odd column.
+        let [y, u, v] = hdr10.planes(&[255, 0, 0, 255].repeat(3), 12, 3, 1);
+        assert_eq!((y.len(), u.len()), (3, 2));
+        assert!(
+            v[0] > 512 && v[0] <= 960 && u[0] < 512 && u[0] >= 64,
+            "{u:?} {v:?}"
+        );
+        // Bands across cores: 37 rows of different greys land on their own rows.
+        let grey = |r: usize| (r * 7) as u8;
+        let rgba: Vec<u8> = (0..37 * 5).flat_map(|i| [grey(i / 5); 4]).collect();
+        let [y, ..] = hdr10.planes(&rgba, 20, 5, 37);
+        for r in 0..37 {
+            let [one, ..] = hdr10.planes(&[grey(r); 4], 4, 1, 1);
+            assert!(y[r * 5..][..5].iter().all(|c| *c == one[0]), "row {r}");
+        }
+    }
+
+    /// The export check from #86: HDR10 comes out HEVC 10-bit PQ BT.2020 with mastering
+    /// display and light level SEI. Skips without x265, unless `JVID_X265_TESTS=required`.
+    #[test]
+    fn hdr_export_probes_as_hevc_10bit_pq() {
+        crate::ffmpeg::init().unwrap();
+        let path = std::env::temp_dir().join(format!("jvid-hdr10-{}.mp4", std::process::id()));
+        let preset = Preset {
+            name: "HDR10".into(),
+            video: Some(VideoCodec::Hevc),
+            options: opts(&[("hdr", "pq"), ("encoder", "software")]),
+            ..small_preset()
+        };
+        let mut enc = match Encoder::create(&path, (64, 64), Rate::new(30, 1), &preset) {
+            Err(Error::EncoderNotFound) => {
+                // CI sets this where its FFmpeg has x265, so it can't pass by skipping.
+                assert!(
+                    !std::env::var("JVID_X265_TESTS").is_ok_and(|v| v == "required"),
+                    "JVID_X265_TESTS=required but this FFmpeg has no libx265"
+                );
+                eprintln!("skipping HDR export test: this FFmpeg has no libx265");
+                return;
+            }
+            r => r.unwrap(),
+        };
+        assert_eq!(enc.video_encoder(), Some("libx265"));
+        for _ in 0..5 {
+            enc.video(&[255; 64 * 64 * 4]).unwrap();
+        }
+        enc.finish().unwrap();
+        let info = crate::probe::probe(&path).unwrap();
+        let Some(jvid_core::model::StreamInfo::Video(v)) = info.streams.first() else {
+            panic!("no video: {info:?}");
+        };
+        assert_eq!(
+            (v.codec.as_str(), v.bit_depth, v.hdr()),
+            ("hevc", 10, Some(jvid_core::hdr::Hdr::Pq))
+        );
+        assert_eq!(v.color_primaries.as_deref(), Some("bt2020"));
+        // The SEI comes back as side data on decoded frames; white sits at reference white.
+        let mut input = format::input(&path).unwrap();
+        let stream = input
+            .streams()
+            .best(ffmpeg_next::media::Type::Video)
+            .unwrap();
+        let ctx = codec::Context::from_parameters(stream.parameters()).unwrap();
+        let mut dec = ctx.decoder().video().unwrap();
+        let mut f = frame::Video::empty();
+        for (_, p) in input.packets() {
+            dec.send_packet(&p).unwrap();
+            if dec.receive_frame(&mut f).is_ok() {
+                break;
+            }
+        }
+        drop(input);
+        std::fs::remove_file(&path).unwrap();
+        use ffmpeg_next::frame::side_data::Type;
+        assert!(f.side_data(Type::MasteringDisplayMetadata).is_some());
+        assert!(f.side_data(Type::ContentLightLevel).is_some());
+        let y = u16::from_le_bytes([f.data(0)[0], f.data(0)[1]]);
+        let want = 64 + (876.0 * nits_to_pq(REFERENCE_WHITE)).round() as u16;
+        assert!(y.abs_diff(want) <= 4, "white Y {y}, want {want}");
     }
 
     /// Without a render node (CI) VAAPI fails at the probe, so exports fall back; with one, it
@@ -745,7 +1025,15 @@ mod tests {
         crate::ffmpeg::init().unwrap();
         let rate = Rate::new(30, 1);
         for name in ["h264_vaapi", "hevc_vaapi"] {
-            let opened = open_video(name, Pixel::NV12, (256, 256), rate, false, &opts(&[]));
+            let opened = open_video(
+                name,
+                Pixel::NV12,
+                (256, 256),
+                rate,
+                false,
+                false,
+                &opts(&[]),
+            );
             assert_eq!(opened.is_some(), hardware().contains(&name), "{name}");
             if std::fs::read_dir("/dev/dri").is_err() {
                 assert!(opened.is_none(), "{name} without a render node");

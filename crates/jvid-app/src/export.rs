@@ -301,7 +301,12 @@ fn encode(
     if let Some(mode) = req.lossless {
         return lossless::run(project, req, mode, ctx);
     }
-    replay(req, ctx, |req| {
+    // HDR output is a project setting, so it applies to whichever preset was picked.
+    let mut req = req.clone();
+    if project.settings().hdr_output {
+        req.preset = req.preset.hdr();
+    }
+    replay(&req, ctx, |req| {
         encode_attempt(project, req, device, queue, ctx)
     })
 }
@@ -319,6 +324,10 @@ fn encode_attempt(
         return Err(tr!("export.empty_range").to_string().into());
     }
     jvid_media::ffmpeg::init().map_err(|e| e.to_string())?;
+    // Otherwise it fails as a bare "Encoder not found".
+    if req.preset.options.contains_key("hdr") && !jvid_media::encode::hdr10_available() {
+        return Err(tr!("export.hdr_no_encoder").to_string().into());
+    }
     let enc = Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
         .map_err(|e| tr!("export.create_error", path = req.path.display(), error = e))?;
     let partial = Partial(&req.path);
@@ -496,7 +505,7 @@ fn render(
     ctx: &Ctx,
 ) -> Result<(), AttemptError> {
     let (first, end) = frames(project, req);
-    let decoders = DecoderPool::default();
+    let decoders = DecoderPool::hdr();
     let mut audio = Audio::new(Box::new(blocking));
     // Audio-only presets never touch the GPU.
     let mut gpu = enc.has_video().then(|| {

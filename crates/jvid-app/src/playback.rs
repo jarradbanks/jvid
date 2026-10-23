@@ -495,11 +495,11 @@ impl Playback {
 
     /// Decodes project media from files, or from their proxies while `proxies` is on.
     pub fn from_proxies(budget: usize, proxies: Arc<Proxies>) -> Self {
-        let pool = Arc::new(DecoderPool::default());
+        let pool = Arc::new(DecoderPool::hdr());
         let quick_proxies = proxies.clone();
         // Its own pool, so the stand-in thread always finds its file open: opening a long MP4
         // reads an index of every frame, which alone can blow the seek budget.
-        let quick = DecoderPool::default();
+        let quick = DecoderPool::hdr();
         let mut pb = Self::new(
             Arc::new(move |p, t| {
                 pool.frame_at(&proxies.resolve(p), t)
@@ -848,6 +848,7 @@ impl Gpu {
                 planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
                 bt709: f.bt709,
                 full_range: f.full_range,
+                hdr: f.hdr,
             };
             preview.upload(device, queue, &yuv, scale);
         }

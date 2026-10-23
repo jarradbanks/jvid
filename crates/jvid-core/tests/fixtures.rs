@@ -37,6 +37,8 @@ fn fixtures_load_and_round_trip() {
             .iter()
             .all(|a| a.text.is_none() && !a.generated())
     );
+    // Saved before HDR output (#86).
+    assert!(!p.settings().hdr_output);
     let seq = p.sequence();
     assert_eq!(seq.tracks().len(), 2);
     assert_eq!(seq.markers()[0].name, "kill");

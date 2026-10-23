@@ -344,6 +344,7 @@ mod tests {
             ],
             bt709: false,
             full_range: false,
+            hdr: None,
         };
         let img = to_rgba(&f, 4);
         assert_eq!(img.get_pixel(0, 0).0, [255, 255, 255, 255]);

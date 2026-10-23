@@ -1,6 +1,7 @@
 //! VAAPI encoders take frames in GPU memory, so they get a hardware frame pool and each NV12
 //! frame is uploaded before encoding. The only `unsafe` for encode lives here: ffmpeg-next has no
-//! safe hwframe API (ADR 0001 amendment, issue #169).
+//! safe hwframe API (ADR 0001 amendment, issue #169), nor a way to fill frame side data, which
+//! hardware HEVC encoders read HDR10 metadata from.
 //!
 //! Ownership: the device ref lives in a static for the whole process. `attach` creates a frames
 //! context holding its own device ref and hands that one frames ref to the codec context, which
@@ -16,6 +17,7 @@ use ffmpeg_next::ffi::{
     av_frame_copy_props, av_hwdevice_ctx_create, av_hwframe_ctx_alloc, av_hwframe_ctx_init,
     av_hwframe_get_buffer, av_hwframe_transfer_data,
 };
+use ffmpeg_next::frame::side_data;
 use ffmpeg_next::{Error, codec, frame};
 
 /// True for encoders that need [`attach`] and [`upload`].
@@ -128,6 +130,29 @@ pub fn upload(ctx: &codec::Context, f: &frame::Video) -> Result<frame::Video, Er
     Ok(out)
 }
 
+/// Attaches HDR10 static metadata to `f`, which hardware encoders write as SEI: a P3 D65
+/// mastering display of 0.0001–1000 cd/m², and `max_cll` as both MaxCLL and MaxFALL.
+#[allow(unsafe_code)]
+pub fn hdr10_metadata(f: &mut frame::Video, max_cll: u32) {
+    // AVMasteringDisplayMetadata: R, G, B and white xy as rationals, min and max luminance, then
+    // has_primaries and has_luminance. AVContentLightMetadata: MaxCLL, MaxFALL.
+    let xy = |x, y| [x, 50_000, y, 50_000];
+    let mut mdcv = [xy(34_000, 16_000), xy(13_250, 34_500), xy(7_500, 3_000)].concat();
+    mdcv.extend(xy(15_635, 16_450));
+    mdcv.extend([1, 10_000, 1_000, 1, 1, 1]);
+    let bytes = |v: &[i32]| -> Vec<u8> { v.iter().flat_map(|n| n.to_ne_bytes()).collect() };
+    let cll = max_cll as i32;
+    for (kind, data) in [
+        (side_data::Type::MasteringDisplayMetadata, bytes(&mdcv)),
+        (side_data::Type::ContentLightLevel, bytes(&[cll, cll])),
+    ] {
+        if let Some(mut sd) = f.new_side_data(kind, data.len()) {
+            // SAFETY: FFmpeg just allocated `data.len()` bytes for this side data, which `f` owns.
+            unsafe { ptr::copy_nonoverlapping(data.as_ptr(), (*sd.as_mut_ptr()).data, data.len()) };
+        }
+    }
+}
+
 /// Proves that the opened pool can accept an actual NV12 frame before a muxer writes a header.
 /// The probe is never sent to the encoder, so it cannot affect output timestamps or references.
 pub(crate) fn probe_upload(ctx: &codec::Context, size: (u32, u32)) -> Result<(), Error> {
@@ -149,6 +174,23 @@ fn probe_upload_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hdr10_metadata_matches_the_libavutil_layout() {
+        let mut f = frame::Video::new(ffmpeg_next::format::Pixel::P010LE, 4, 4);
+        hdr10_metadata(&mut f, 203);
+        let ints = |t| -> Vec<i32> {
+            let sd = f.side_data(t).unwrap();
+            let (chunks, rest) = sd.data().as_chunks::<4>();
+            assert!(rest.is_empty());
+            chunks.iter().map(|c| i32::from_ne_bytes(*c)).collect()
+        };
+        let mdcv = ints(side_data::Type::MasteringDisplayMetadata);
+        // 10 rationals and 2 ints; max luminance is 1000/1 cd/m².
+        assert_eq!(mdcv.len(), 22);
+        assert_eq!(mdcv[18..], [1000, 1, 1, 1]);
+        assert_eq!(ints(side_data::Type::ContentLightLevel), [203, 203]);
+    }
 
     #[test]
     fn upload_without_a_pool_fails() {
