@@ -670,6 +670,63 @@ fn audio_only_wav_is_the_mix() {
     }
 }
 
+/// Acceptance (#85): a WAV export of a clip with EQ, on a compressed track, holds the samples the
+/// playback mixer makes from the same source in its own 512-frame blocks.
+#[test]
+fn export_with_audio_fx_matches_playback() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let mut h = History::new(project(&dir));
+    let seq = h.project().sequence();
+    let track = seq.tracks().iter().find(|t| t.kind == TrackKind::Audio);
+    let (track, clip) = (track.unwrap(), track.unwrap().clips()[0].clone());
+    let mut x = clip.transform.clone();
+    (x.audio_fx.eq.mid, x.audio_fx.eq.high) = (6.0, -4.0);
+    let mut s = track.settings();
+    (s.fx.compressor.ratio, s.fx.compressor.threshold) = (4.0, -24.0);
+    h.apply(Command::SetClipProps(vec![(clip.id, x, clip.keyframes)]))
+        .unwrap();
+    h.apply(Command::SetTrack(s)).unwrap();
+    let p = h.project().clone();
+    let path = out("fx.wav");
+    let req = Request {
+        path: path.clone(),
+        range: (secs(1), secs(3)),
+        preset: preset("Audio only (WAV)"),
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    run_now(&p, &req, false).unwrap();
+    let mut got = Vec::new();
+    let mut a = AudioDecoder::open(&path, 0).unwrap();
+    while let Some(c) = a.next_chunk().unwrap() {
+        got.extend(c.samples);
+    }
+    let mut audio = Audio::new(Box::new(blocking));
+    let (mut want, start) = (Vec::new(), sample(secs(1)));
+    while want.len() < got.len() {
+        let mut block = vec![0.0; 2 * 512];
+        let at = start + want.len() as i64 / 2;
+        audio.prime(
+            &p,
+            Time(at * FLICKS_PER_SECOND / jvid_audio::SAMPLE_RATE as i64),
+        );
+        audio.mix(&p, at, &mut block);
+        want.extend(block);
+    }
+    let d = |s: f32| (s as f64 * 32768.0).round() as i64;
+    let q = |s: f32| (s.clamp(-1.0, 1.0) as f64 * 32767.0) as i64;
+    let diff = got.iter().zip(&want).position(|(g, w)| d(*g) != q(*w));
+    assert_eq!(diff, None, "first differing sample");
+    assert!(
+        want.iter().any(|s| s.abs() > 0.02),
+        "the range has the tone"
+    );
+    std::fs::remove_file(&path).unwrap();
+}
+
 #[test]
 fn user_presets_skip_bad_files() {
     let dir = out("presets");

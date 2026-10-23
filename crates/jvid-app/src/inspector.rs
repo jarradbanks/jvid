@@ -6,7 +6,7 @@ use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
 use jvid_core::model::{
-    Blend, Clip, ClipId, Effect, MediaAsset, Project, Text, TrackKind, Transform,
+    AudioFx, Blend, Clip, ClipId, Effect, MediaAsset, Project, Text, TrackKind, Transform,
 };
 use jvid_core::time::Time;
 use suite_ui::theme::{self, icon};
@@ -653,6 +653,12 @@ pub fn show(
     {
         edit = Some(e);
     }
+    if pane == Pane::Audio && !audio.is_empty() {
+        let fxs: Vec<AudioFx> = audio.iter().map(|c| c.transform.audio_fx).collect();
+        if let Some((f, gesture)) = audio_fx(ui, &fxs) {
+            edit = Some((rewrite(audio, |_, x, _| f(&mut x.audio_fx)), gesture));
+        }
+    }
     // Speed sits with the picture, or with the sound when there's no picture.
     let speed = if clips.is_empty() {
         Pane::Audio
@@ -890,6 +896,7 @@ fn effects_rows(
             problem,
             on: e.enabled,
             changed,
+            stack: true,
         };
         let cmd = match fx_head(ui, head, &mut open, i, n) {
             Some(FxAction::Bypass) => Some(bypass(clips, i)),
@@ -935,6 +942,8 @@ struct FxHead<'a> {
     on: bool,
     /// Whether any parameter is off its default, which shows reset.
     changed: bool,
+    /// In the effect stack: dragging moves it, and More has Move and Remove.
+    stack: bool,
 }
 
 /// Block `i` of `n`'s header: collapse and bypass, the name, then reset and More in the row
@@ -942,8 +951,15 @@ struct FxHead<'a> {
 /// instead. Dragging it moves the block, see [`drop_block`].
 fn fx_head(ui: &mut Ui, head: FxHead, open: &mut bool, i: usize, n: usize) -> Option<FxAction> {
     let w = ui.available_width();
-    let (rect, drag) = ui.allocate_exact_size(vec2(w, size::CONTROL), Sense::drag());
-    drag.dnd_set_drag_payload(FxDrag(i));
+    let sense = if head.stack {
+        Sense::drag()
+    } else {
+        Sense::hover()
+    };
+    let (rect, drag) = ui.allocate_exact_size(vec2(w, size::CONTROL), sense);
+    if head.stack {
+        drag.dnd_set_drag_payload(FxDrag(i));
+    }
     if drag.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     }
@@ -995,6 +1011,9 @@ fn fx_head(ui: &mut Ui, head: FxHead, open: &mut bool, i: usize, n: usize) -> Op
             .clicked()
     {
         act = Some(FxAction::Reset);
+    }
+    if !head.stack {
+        return act;
     }
     let more = Button::icon(icon::ELLIPSIS, tr!("inspector.more")).small();
     let more = ui.put(slot(rect, 3.0), more);
@@ -1191,6 +1210,209 @@ fn speed_row(ui: &mut Ui, c: &Clip) -> Option<Edit> {
         };
         (cmd, Some(SPEED_GESTURE ^ c.id.0))
     })
+}
+
+/// Undo gesture for audio effect drags, xored with the setting and drag count.
+const AUDIO_FX_GESTURE: GestureKey = 0x6175_6678_0000; // "aufx"
+
+/// One audio effect setting: its id (`inspector.<id>` names it), bounds and units.
+struct Knob {
+    id: &'static str,
+    lo: f32,
+    hi: f32,
+    suffix: &'static str,
+    decimals: usize,
+    /// The slider moves in octaves rather than hertz.
+    log: bool,
+}
+
+const fn knob(id: &'static str, lo: f32, hi: f32, suffix: &'static str) -> Knob {
+    Knob {
+        id,
+        lo,
+        hi,
+        suffix,
+        decimals: 1,
+        log: false,
+    }
+}
+
+const fn hz(id: &'static str, lo: f32, hi: f32) -> Knob {
+    Knob {
+        decimals: 0,
+        log: true,
+        ..knob(id, lo, hi, " Hz")
+    }
+}
+
+/// The EQ then Compressor blocks, by id (`inspector.<id>` names them), in processing order.
+const AUDIO_FX: [(&str, &[Knob]); 2] = [
+    (
+        "eq",
+        &[
+            knob("eq_low", -24.0, 24.0, " dB"),
+            hz("eq_low_freq", 20.0, 1_000.0),
+            knob("eq_mid", -24.0, 24.0, " dB"),
+            hz("eq_mid_freq", 100.0, 10_000.0),
+            Knob {
+                decimals: 2,
+                ..knob("eq_mid_q", 0.1, 10.0, "")
+            },
+            knob("eq_high", -24.0, 24.0, " dB"),
+            hz("eq_high_freq", 1_000.0, 20_000.0),
+        ],
+    ),
+    (
+        "compressor",
+        &[
+            knob("comp_threshold", -60.0, 0.0, " dB"),
+            knob("comp_ratio", 1.0, 20.0, ":1"),
+            knob("comp_attack", 0.1, 200.0, " ms"),
+            Knob {
+                decimals: 0,
+                ..knob("comp_release", 5.0, 2_000.0, " ms")
+            },
+            knob("comp_makeup", 0.0, 24.0, " dB"),
+        ],
+    ),
+];
+
+fn knob_mut<'a>(fx: &'a mut AudioFx, id: &str) -> &'a mut f32 {
+    let (e, c) = (&mut fx.eq, &mut fx.compressor);
+    match id {
+        "eq_low" => &mut e.low,
+        "eq_low_freq" => &mut e.low_freq,
+        "eq_mid" => &mut e.mid,
+        "eq_mid_freq" => &mut e.mid_freq,
+        "eq_mid_q" => &mut e.mid_q,
+        "eq_high" => &mut e.high,
+        "eq_high_freq" => &mut e.high_freq,
+        "comp_threshold" => &mut c.threshold,
+        "comp_ratio" => &mut c.ratio,
+        "comp_attack" => &mut c.attack,
+        "comp_release" => &mut c.release,
+        _ => &mut c.makeup,
+    }
+}
+
+fn knob_value(mut fx: AudioFx, id: &str) -> f32 {
+    *knob_mut(&mut fx, id)
+}
+
+fn block_on<'a>(fx: &'a mut AudioFx, block: &str) -> &'a mut bool {
+    match block {
+        "eq" => &mut fx.eq.enabled,
+        _ => &mut fx.compressor.enabled,
+    }
+}
+
+/// Changes each of the clips' or track's effects the same way.
+pub(crate) type FxEdit = Box<dyn Fn(&mut AudioFx)>;
+
+/// The EQ and Compressor blocks for `fxs`, the selected audio clips' or a track's, showing the
+/// first one's settings. Returns the edit to make to each, with its undo gesture while dragging.
+pub(crate) fn audio_fx(ui: &mut Ui, fxs: &[AudioFx]) -> Option<(FxEdit, Option<GestureKey>)> {
+    let first = fxs[0];
+    let default = AudioFx::default();
+    let mut edit: Option<(FxEdit, Option<GestureKey>)> = None;
+    let drags = ui.id().with("audio fx drags");
+    for (b, (block, knobs)) in AUDIO_FX.iter().enumerate() {
+        if b > 0 {
+            let y = ui.cursor().top() - ui.spacing().item_spacing.y / 2.0;
+            let line = egui::Stroke::new(1.0 / ui.pixels_per_point(), color::BORDER);
+            ui.painter().hline(ui.max_rect().x_range(), y, line);
+        }
+        let on = *block_on(&mut first.clone(), block);
+        let off_default =
+            |fx: &AudioFx, k: &Knob| knob_value(*fx, k.id) != knob_value(default, k.id);
+        let changed = knobs
+            .iter()
+            .any(|k| fxs.iter().any(|fx| off_default(fx, k)));
+        let id = ui.id().with(("inspector audio fx", block));
+        let mut open = ui.data_mut(|d| *d.get_temp_mut_or(id, true));
+        let head = FxHead {
+            title: caption(block),
+            problem: None,
+            on,
+            changed,
+            stack: false,
+        };
+        match fx_head(ui, head, &mut open, b, AUDIO_FX.len()) {
+            Some(FxAction::Bypass) => {
+                let block = *block;
+                edit = Some((Box::new(move |fx| *block_on(fx, block) = !on), None));
+            }
+            Some(FxAction::Reset) => {
+                let ids: Vec<_> = knobs.iter().map(|k| k.id).collect();
+                let f = move |fx: &mut AudioFx| {
+                    for id in &ids {
+                        *knob_mut(fx, id) = knob_value(default, id);
+                    }
+                };
+                edit = Some((Box::new(f), None));
+            }
+            _ => {}
+        }
+        ui.data_mut(|d| d.insert_temp(id, open));
+        if !open {
+            continue;
+        }
+        // Bypassed: the settings stay, greyed out, until it's back on.
+        ui.add_enabled_ui(on, |ui| {
+            for (n, k) in knobs.iter().enumerate() {
+                let v = knob_value(first, k.id) as f64;
+                let mixed = fxs.iter().any(|fx| knob_value(*fx, k.id) as f64 != v);
+                let tools = Tools {
+                    reset: fxs
+                        .iter()
+                        .any(|fx| off_default(fx, k))
+                        .then_some(tr!("inspector.reset")),
+                    ..Tools::default()
+                };
+                let (lo, hi) = (k.lo as f64, k.hi as f64);
+                let (r, c) = prop_row(ui, caption(k.id), tools, |ui| {
+                    let mut field = v;
+                    let f = DragField::new(&mut field)
+                        .speed((hi - lo) / 200.0)
+                        .decimals(k.decimals)
+                        .suffix(k.suffix)
+                        .mixed(mixed)
+                        .range(lo..=hi)
+                        .width(64.0);
+                    let r = ui.add(f);
+                    let to = |x: f64| if k.log { x.log10() } else { x };
+                    let from = |x: f64| if k.log { 10f64.powf(x) } else { x };
+                    let mut slid = to(v);
+                    let s = Slider::new(&mut slid, to(lo)..=to(hi), caption(k.id))
+                        .centred(lo < 0.0 && hi > 0.0);
+                    let s = ui.add(s);
+                    match () {
+                        _ if r.changed() => Some((r, field)),
+                        _ if s.changed() => Some((s, from(slid))),
+                        _ => None,
+                    }
+                });
+                let slot = (b * 16 + n) as u64;
+                if let Some((r, v)) = r {
+                    if r.drag_started() {
+                        ui.data_mut(|d| *d.get_temp_mut_or(drags, 0u64) += 1);
+                    }
+                    let drag = ui.data(|d| d.get_temp(drags).unwrap_or(0u64));
+                    let gesture = r
+                        .dragged()
+                        .then_some(AUDIO_FX_GESTURE ^ (slot << 4) ^ (drag << 16));
+                    let (id, v) = (k.id, v.clamp(lo, hi) as f32);
+                    edit = Some((Box::new(move |fx| *knob_mut(fx, id) = v), gesture));
+                }
+                if c.reset {
+                    let id = k.id;
+                    let f = move |fx: &mut AudioFx| *knob_mut(fx, id) = knob_value(default, id);
+                    edit = Some((Box::new(f), None));
+                }
+            }
+        });
+    }
+    edit
 }
 
 /// A section head button.
@@ -1880,6 +2102,11 @@ mod tests {
             .iter()
             .flat_map(|(id, props)| std::iter::once(*id).chain(props.iter().map(|p| p.name)))
             .chain(["effects", "speed", "text"])
+            .chain(
+                AUDIO_FX
+                    .iter()
+                    .flat_map(|(id, knobs)| std::iter::once(*id).chain(knobs.iter().map(|k| k.id))),
+            )
             .chain(text_names());
         for id in ids {
             let key = format!("inspector.{id}");

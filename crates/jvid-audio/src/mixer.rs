@@ -4,7 +4,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::SAMPLE_RATE;
+use jvid_core::model::AudioFx;
+
+use crate::{Fx, SAMPLE_RATE};
 
 /// Gain changes glide linearly over this long.
 pub const RAMP_FRAMES: usize = SAMPLE_RATE as usize / 100;
@@ -18,6 +20,8 @@ pub struct Strip {
     pub pan: f32,
     pub muted: bool,
     pub solo: bool,
+    /// EQ and compressor, before volume and pan.
+    pub fx: AudioFx,
 }
 
 impl Default for Strip {
@@ -27,6 +31,7 @@ impl Default for Strip {
             pan: 0.0,
             muted: false,
             solo: false,
+            fx: AudioFx::default(),
         }
     }
 }
@@ -114,6 +119,9 @@ impl Ramp {
 pub struct Mixer {
     strips: Vec<Strip>,
     ramps: Vec<Ramp>,
+    fx: Vec<Fx>,
+    /// A track's input after its effects.
+    scratch: Vec<f32>,
     master: f32,
     master_ramp: Ramp,
     meters: Arc<Meters>,
@@ -124,6 +132,8 @@ impl Mixer {
         let mut m = Self {
             strips: vec![Strip::default(); tracks],
             ramps: Vec::new(),
+            fx: (0..tracks).map(|_| Fx::default()).collect(),
+            scratch: Vec::new(),
             master: 1.0,
             master_ramp: Ramp::new((1.0, 1.0)),
             meters: Arc::new(Meters {
@@ -166,8 +176,18 @@ impl Mixer {
     pub fn mix(&mut self, inputs: &[&[f32]], out: &mut [f32]) {
         assert_eq!(inputs.len(), self.ramps.len());
         out.fill(0.0);
-        for ((input, ramp), meter) in inputs.iter().zip(&mut self.ramps).zip(&self.meters.tracks) {
+        for (i, input) in inputs.iter().enumerate() {
             assert_eq!(input.len(), out.len());
+            let input = match self.strips[i].fx.is_default() {
+                true => input,
+                false => {
+                    self.scratch.clear();
+                    self.scratch.extend_from_slice(input);
+                    self.fx[i].process(&self.strips[i].fx, &mut self.scratch);
+                    &self.scratch[..]
+                }
+            };
+            let (ramp, meter) = (&mut self.ramps[i], &self.meters.tracks[i]);
             let peak = apply(ramp, input, out);
             Meters::raise(meter, peak);
         }

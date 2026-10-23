@@ -1388,6 +1388,7 @@ mod tests {
                     pan: -v / 2.0,
                     height: v * 80.0,
                     target: f[4],
+                    fx: Default::default(),
                 })
             }),
             (id.clone(), 0usize..4).prop_map(|(i, index)| Command::MoveTrack {

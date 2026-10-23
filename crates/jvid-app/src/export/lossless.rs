@@ -53,7 +53,7 @@ pub fn check(project: &Project, (start, end): (Time, Time)) -> Result<Vec<Cut>, 
             video_tracks += 1;
             video.extend(clips);
         } else {
-            if t.muted || t.solo || t.volume != 1.0 || t.pan != 0.0 {
+            if t.muted || t.solo || t.volume != 1.0 || t.pan != 0.0 || !t.fx.is_default() {
                 why.push(tr!("lossless.track_mix", track = t.name));
             }
             audio.extend(clips);
