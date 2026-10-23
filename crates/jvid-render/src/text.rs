@@ -434,6 +434,7 @@ mod tests {
             return;
         };
         assert!(rtl, "Arabic runs right to left");
+        assert!(!ids.is_empty(), "Arabic produces shaped glyphs");
         // Joining picks contextual forms: the same letter differs alone and joined. How many
         // glyphs lam-alef makes is up to the font (DejaVu: one ligature, Segoe UI: two).
         let (_, alone) = shape("س").unwrap();
