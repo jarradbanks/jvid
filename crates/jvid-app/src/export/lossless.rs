@@ -7,6 +7,7 @@ use jvid_jobs::Ctx;
 use jvid_media::remux::{self, Cut};
 
 use super::{Error, Partial, Request};
+use crate::i18n::tr;
 
 /// How a lossless export handles cut points.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,7 +26,7 @@ pub fn check(project: &Project, (start, end): (Time, Time)) -> Result<Vec<Cut>, 
     let name = |c: &Clip| {
         project
             .asset(c.asset)
-            .map_or("A clip".into(), |a| a.display_name())
+            .map_or(tr!("lossless.a_clip").into(), |a| a.display_name())
     };
     let tracks = || {
         seq.tracks()
@@ -53,28 +54,23 @@ pub fn check(project: &Project, (start, end): (Time, Time)) -> Result<Vec<Cut>, 
             video.extend(clips);
         } else {
             if t.muted || t.solo || t.volume != 1.0 || t.pan != 0.0 {
-                why.push(format!(
-                    "Track {} has a volume, pan, mute or solo change",
-                    t.name
-                ));
+                why.push(tr!("lossless.track_mix", track = t.name));
             }
             audio.extend(clips);
         }
     }
     if video_tracks > 1 {
-        why.push("Clips are stacked on more than one video track".into());
+        why.push(tr!("lossless.stacked").into());
     }
     video.sort_by_key(|c| c.start);
     for c in video.iter().chain(&audio) {
         let n = name(c);
         if project.asset(c.asset).is_none_or(|a| a.generated()) {
-            why.push(format!("{n} is a title or generated clip"));
+            why.push(tr!("lossless.generated", clip = n));
         } else if c.speed != 1.0 || c.reverse || c.freeze.is_some() {
-            why.push(format!("{n} has a speed change"));
+            why.push(tr!("lossless.speed", clip = n));
         } else if c.transform != Transform::default() || !c.keyframes.is_empty() {
-            why.push(format!(
-                "{n} has transforms, effects, fades or audio changes"
-            ));
+            why.push(tr!("lossless.changed", clip = n));
         }
     }
     // Copied video carries all its audio, so each video clip needs its own audio, as placed:
@@ -92,12 +88,12 @@ pub fn check(project: &Project, (start, end): (Time, Time)) -> Result<Vec<Cut>, 
             .map_or(0, |p| p.audio_streams);
         let each: Vec<_> = (0..streams).map(Some).collect();
         if got != each && !(streams == 1 && got == [None]) {
-            why.push(format!("{} has its audio removed or changed", name(c)));
+            why.push(tr!("lossless.audio_changed", clip = name(c)));
         }
     }
     for a in &audio {
         if !video.iter().any(|c| same_range(a, c)) {
-            why.push(format!("{} is audio not from the video under it", name(a)));
+            why.push(tr!("lossless.audio_elsewhere", clip = name(a)));
         }
     }
     let mut at = start;
@@ -108,7 +104,7 @@ pub fn check(project: &Project, (start, end): (Time, Time)) -> Result<Vec<Cut>, 
         at = at.max(c.end());
     }
     if video.is_empty() || at < end {
-        why.push("The range has gaps with no video".into());
+        why.push(tr!("lossless.gaps").into());
     }
     let formats: Vec<_> = video
         .iter()
@@ -116,11 +112,10 @@ pub fn check(project: &Project, (start, end): (Time, Time)) -> Result<Vec<Cut>, 
         .collect();
     for (n, p) in &formats {
         match (p, formats[0].1) {
-            (None, _) => why.push(format!("{n} hasn't been read yet")),
-            (Some(p), Some(first)) if format(p) != format(first) => why.push(format!(
-                "{n} is in a different format from {}",
-                formats[0].0
-            )),
+            (None, _) => why.push(tr!("lossless.unread", clip = n)),
+            (Some(p), Some(first)) if format(p) != format(first) => {
+                why.push(tr!("lossless.format", clip = n, first = formats[0].0))
+            }
             _ => {}
         }
     }
@@ -173,15 +168,12 @@ pub(super) fn run(
     let cuts = check(project, req.range).map_err(|why| why.join("; "))?;
     let ext = |p: &std::path::Path| p.extension().map(|e| e.to_ascii_lowercase());
     if ext(&req.path) != ext(&cuts[0].path) {
-        return Err(format!(
-            "lossless export keeps the source container: name the file .{}",
-            cuts[0]
-                .path
-                .extension()
-                .unwrap_or_default()
-                .to_string_lossy()
-        )
-        .into());
+        let ext = cuts[0]
+            .path
+            .extension()
+            .unwrap_or_default()
+            .to_string_lossy();
+        return Err(tr!("lossless.container", extension = ext).into());
     }
     jvid_media::ffmpeg::init().map_err(|e| e.to_string())?;
     let mut progress = |f| {
@@ -195,7 +187,8 @@ pub(super) fn run(
     // remux removes its own output on failure; from here a bad file is ours to remove.
     let partial = Partial(&req.path);
     ctx.set_progress(1.0);
-    let info = jvid_media::probe::probe(&req.path).map_err(|e| format!("output: {e}"))?;
+    let info = jvid_media::probe::probe(&req.path)
+        .map_err(|e| tr!("export.output_error", error = crate::import::describe(&e)))?;
     std::mem::forget(partial);
     Ok(info)
 }

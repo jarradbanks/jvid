@@ -5,14 +5,19 @@ use jvid_core::keyframe::Easing;
 use suite_ui::tokens::{color, space};
 use suite_ui::widgets::Segmented;
 
-const NAMES: [&str; 6] = [
-    "Linear",
-    "Ease In",
-    "Ease Out",
-    "Ease In/Out",
-    "Hold",
-    "Bezier",
-];
+use crate::i18n::tr;
+
+/// The presets' names, in [`index`] order.
+fn names() -> [&'static str; 6] {
+    [
+        tr!("easing.linear"),
+        tr!("easing.ease_in"),
+        tr!("easing.ease_out"),
+        tr!("easing.ease_in_out"),
+        tr!("easing.hold"),
+        tr!("easing.bezier"),
+    ]
+}
 
 /// The curve widget's side.
 const CURVE: f32 = 140.0;
@@ -63,7 +68,7 @@ fn drag(mut p: [f64; 4], h: usize, x: f64, y: f64) -> [f64; 4] {
 pub fn editor(ui: &mut Ui, easing: Easing) -> Option<(Easing, bool)> {
     let mut out = None;
     let mut i = index(easing);
-    if ui.add(Segmented::new(&mut i, &NAMES)).changed() && i != index(easing) {
+    if ui.add(Segmented::new(&mut i, &names())).changed() && i != index(easing) {
         out = Some((preset(i, easing), false));
     }
     ui.add_space(space::S8);

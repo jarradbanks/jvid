@@ -908,3 +908,18 @@ fn export_menu_cancels_one_or_all() {
     q.clear_finished();
     assert!(q.is_empty());
 }
+
+#[test]
+fn built_in_preset_names_are_their_english_catalog_names() {
+    let all = jvid_core::preset::builtin();
+    assert_eq!(all.len(), BUILT_IN_NAMES.len());
+    for (p, key) in all.iter().zip(BUILT_IN_NAMES) {
+        assert_eq!(crate::i18n::CATALOG.get_in("en", key), Some(&*p.name));
+        assert!(crate::i18n::CATALOG.get_in("es", key).is_some(), "{key}");
+    }
+    let mine = Preset {
+        name: "Mine".into(),
+        ..all[0].clone()
+    };
+    assert_eq!(preset_name(all.len(), &mine), "Mine");
+}

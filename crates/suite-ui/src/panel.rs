@@ -6,8 +6,10 @@ use egui::{
     CornerRadius, Rect, Sense, StrokeKind, Ui, UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
+use crate::i18n::CATALOG;
 use crate::theme::{self, hairline, icon};
 use crate::tokens::{color, radius, size, space};
+use crate::tr;
 use crate::widgets::{Button, focus_ring};
 
 /// What a panel's header shows.
@@ -243,7 +245,7 @@ fn tabs(
                 pos2(x, header.center().y - size::CONTROL / 2.0),
                 Vec2::splat(size::CONTROL),
             ),
-            Button::icon(icon::CHEVRON_DOWN, "More Tabs"),
+            Button::icon(icon::CHEVRON_DOWN, tr!(CATALOG, "panel.more_tabs")),
         );
         egui::Popup::menu(&r).show(|ui| {
             for (i, label) in labels.iter().enumerate().skip(shown) {

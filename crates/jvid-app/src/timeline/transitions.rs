@@ -5,9 +5,11 @@
 
 use egui::{CornerRadius, CursorIcon, Id, Painter, Rect, Sense, Stroke, Ui};
 use jvid_core::history::{Command, GestureKey};
-use jvid_core::model::{Clip, ClipId, Project, Transition, TransitionKind};
+use jvid_core::model::{Clip, ClipId, ModelError, Project, Transition, TransitionKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use suite_ui::tokens::color;
+
+use crate::i18n::tr;
 
 use super::{Edit, Timeline, View};
 
@@ -30,7 +32,10 @@ pub fn set(project: &Project, id: ClipId, x: Option<Transition>) -> Result<Comma
     let seq = project.sequence();
     let x = match x {
         Some(x) => {
-            let room = project.transition_room(id).map_err(|e| e.to_string())?;
+            let room = project.transition_room(id).map_err(|e| match e {
+                ModelError::NoHandles(_) => tr!("timeline.no_handles").to_owned(),
+                e => e.to_string(),
+            })?;
             Some(Transition {
                 duration: x.duration.clamp(Time(1), room),
                 ..x
@@ -89,7 +94,7 @@ impl Timeline {
             .find(|(a, _)| *a == id)
             .expect("a transition action");
         let target = self.transition_target(project);
-        let target = target.ok_or("no cut between two touching clips to put a transition on")?;
+        let target = target.ok_or(tr!("timeline.no_cut"))?;
         let x = Transition {
             kind: *kind,
             duration: DEFAULT,
@@ -166,7 +171,7 @@ impl Timeline {
                 }
             }
             ui.separator();
-            if ui.button("Remove Transition").clicked() {
+            if ui.button(tr!("timeline.remove_transition")).clicked() {
                 edit = set(project, clip.id, None).ok().map(|c| (c, None));
                 ui.close();
             }
@@ -177,9 +182,9 @@ impl Timeline {
 
 fn name(kind: TransitionKind) -> &'static str {
     match kind {
-        TransitionKind::Crossfade => "Crossfade",
-        TransitionKind::DipToBlack => "Dip to Black",
-        TransitionKind::DipToWhite => "Dip to White",
+        TransitionKind::Crossfade => tr!("timeline.crossfade"),
+        TransitionKind::DipToBlack => tr!("timeline.dip_to_black"),
+        TransitionKind::DipToWhite => tr!("timeline.dip_to_white"),
     }
 }
 

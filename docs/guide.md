@@ -22,7 +22,8 @@ A debug build works, but use `--release` for real footage: decoding and scrubbin
 The start screen offers **New project** (pick a frame size preset, or **Match source** to size the project from your footage), **Open project…**, your recent projects, and a drop zone for media.
 
 - **Import:** drag files onto the window, or click **Import media** in the Media panel. Files are probed in the background and land in the bin together as one undoable step.
-- **Save:** the project menu at the top left has New, Open, Save, Save as, Project settings and Keyboard shortcuts. Projects are plain JSON (`.jvid`).
+- **Save:** the project menu at the top left has New, Open, Save, Save as, Settings, Project settings and Keyboard shortcuts. Projects are plain JSON (`.jvid`).
+- **Language:** jvid follows your system language if it ships it (English and Spanish so far), otherwise English. Pick another in **Settings…** from the project menu; it switches at once and is remembered. See [translating.md](translating.md) to add one.
 - **Autosave:** jvid autosaves beside the project file (untitled projects go to the app's data folder). If an autosave is newer than the last save when you open a project, usually after a crash, jvid offers to restore it.
 - **Missing media:** if a source file has moved, the clip shows as offline. Right-click it in the bin and choose **Relink…**; other missing files in the same folder are found too.
 - **Panels:** Media, Source, Program, Timeline, Inspector and Effects. `Shift+1` to `Shift+7` focus them.

@@ -1,0 +1,14 @@
+# suite-ui strings, Spanish. Keep keys and {placeholders} in step with en.toml.
+
+[language]
+name = "Español"
+
+[panel]
+more_tabs = "Más pestañas"
+
+[input]
+search = "Buscar"
+
+[theme]
+error = "Tema {path}: {error}"
+bad_color = "`{value}` no es #RRGGBB"

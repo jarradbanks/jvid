@@ -35,6 +35,9 @@ pub struct Settings {
     pub theme: String,
     /// Decode H.264/HEVC on the GPU when a device opens; off forces software.
     pub hardware_decode: bool,
+    /// UI language: `system` follows the OS, or a language code such as `en` or `es`.
+    /// A language the app doesn't ship shows English.
+    pub language: String,
 }
 
 impl Default for Settings {
@@ -48,6 +51,7 @@ impl Default for Settings {
             still_duration_secs: DEFAULT_STILL_SECS,
             theme: "dark".into(),
             hardware_decode: true,
+            language: "system".into(),
         }
     }
 }
@@ -84,6 +88,7 @@ impl Settings {
                 }),
                 "theme" => set(&mut out.theme, &key, value, |v: &String| !v.is_empty()),
                 "hardware_decode" => set(&mut out.hardware_decode, &key, value, |_| true),
+                "language" => set(&mut out.language, &key, value, |v: &String| !v.is_empty()),
                 _ => tracing::warn!("settings: ignoring unknown key `{key}`"),
             }
         }
@@ -127,6 +132,32 @@ mod tests {
     }
 
     #[test]
+    fn language_defaults_to_system_and_keeps_any_code() {
+        // Files from before the setting existed follow the OS.
+        assert_eq!(
+            Settings::from_toml("theme = \"light\"").unwrap().language,
+            "system"
+        );
+        assert_eq!(
+            Settings::from_toml("language = \"es\"").unwrap().language,
+            "es"
+        );
+        // An unshipped code is kept, so the file round-trips; the app shows it in English.
+        assert_eq!(
+            Settings::from_toml("language = \"fr\"").unwrap().language,
+            "fr"
+        );
+        assert_eq!(
+            Settings::from_toml("language = \"\"").unwrap().language,
+            "system"
+        );
+        assert_eq!(
+            Settings::from_toml("language = 3").unwrap().language,
+            "system"
+        );
+    }
+
+    #[test]
     fn unknown_key_is_ignored() {
         let s = Settings::from_toml("frobnicate = 1\nautosave_secs = 30").unwrap();
         assert_eq!(s.autosave_secs, 30);
@@ -153,6 +184,7 @@ mod tests {
             still_duration_secs: 3,
             theme: "/home/me/mine.toml".into(),
             hardware_decode: false,
+            language: "es".into(),
         };
         assert_eq!(Settings::from_toml(&s.to_toml()).unwrap(), s);
         let d = Settings::default();

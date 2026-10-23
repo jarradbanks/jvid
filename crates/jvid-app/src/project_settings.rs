@@ -8,25 +8,28 @@ use suite_ui::theme;
 use suite_ui::tokens::{radius, space};
 use suite_ui::widgets::{Button, DragField, Dropdown};
 
+use crate::i18n::{Label, tr, trn, verbatim};
+
+/// Frame rates with the number shown for each.
 const RATES: [(&str, Rate); 8] = [
-    ("23.976 fps", Rate::new(24000, 1001)),
-    ("24 fps", Rate::new(24, 1)),
-    ("25 fps", Rate::new(25, 1)),
-    ("29.97 fps", Rate::new(30000, 1001)),
-    ("30 fps", Rate::new(30, 1)),
-    ("50 fps", Rate::new(50, 1)),
-    ("59.94 fps", Rate::new(60000, 1001)),
-    ("60 fps", Rate::new(60, 1)),
+    ("23.976", Rate::new(24000, 1001)),
+    ("24", Rate::new(24, 1)),
+    ("25", Rate::new(25, 1)),
+    ("29.97", Rate::new(30000, 1001)),
+    ("30", Rate::new(30, 1)),
+    ("50", Rate::new(50, 1)),
+    ("59.94", Rate::new(60000, 1001)),
+    ("60", Rate::new(60, 1)),
 ];
 
 /// Size presets; picking one sets width and height, editing either shows Custom.
-const SIZES: [(&str, Option<(u32, u32)>); 6] = [
-    ("Custom", None),
-    ("16:9 · 1080p", Some((1920, 1080))),
-    ("16:9 · 1440p", Some((2560, 1440))),
-    ("16:9 · 4K", Some((3840, 2160))),
-    ("9:16 · Vertical", Some((1080, 1920))),
-    ("1:1 · Square", Some((1080, 1080))),
+const SIZES: [(Label, Option<(u32, u32)>); 6] = [
+    (|| tr!("size.custom"), None),
+    (|| verbatim("16:9 · 1080p"), Some((1920, 1080))),
+    (|| verbatim("16:9 · 1440p"), Some((2560, 1440))),
+    (|| verbatim("16:9 · 4K"), Some((3840, 2160))),
+    (|| tr!("size.vertical"), Some((1080, 1920))),
+    (|| tr!("size.square"), Some((1080, 1080))),
 ];
 
 /// Edits in progress; `None` while the dialog is closed.
@@ -53,18 +56,18 @@ impl SettingsDialog {
             )
             .show(ui.ctx(), |ui| {
                 ui.set_width(360.0);
-                ui.label(egui::RichText::new("Project Settings").font(theme::headline()));
+                ui.label(egui::RichText::new(tr!("project.title")).font(theme::headline()));
                 ui.add_space(space::S8);
                 egui::Grid::new("project_settings_grid")
                     .spacing([space::S8, space::S8])
                     .show(ui, |ui| {
-                        ui.label("Size");
+                        ui.label(tr!("project.size"));
                         let mut size = SIZES
                             .iter()
                             .position(|(_, s)| *s == Some((draft.width, draft.height)))
                             .unwrap_or(0);
                         if ui
-                            .add(Dropdown::new(&mut size, &SIZES.map(|s| s.0)))
+                            .add(Dropdown::new(&mut size, &SIZES.map(|s| s.0())))
                             .changed()
                             && let Some((w, h)) = SIZES[size].1
                         {
@@ -72,9 +75,11 @@ impl SettingsDialog {
                         }
                         ui.end_row();
 
-                        ui.label("Resolution");
+                        ui.label(tr!("project.resolution"));
                         ui.horizontal(|ui| {
-                            for (v, suffix) in [(&mut draft.width, "w"), (&mut draft.height, "h")] {
+                            let (w, h) =
+                                (tr!("project.width_suffix"), tr!("project.height_suffix"));
+                            for (v, suffix) in [(&mut draft.width, w), (&mut draft.height, h)] {
                                 let mut f = *v as f64;
                                 ui.add(
                                     DragField::new(&mut f)
@@ -89,24 +94,28 @@ impl SettingsDialog {
                         });
                         ui.end_row();
 
-                        ui.label("Aspect");
+                        ui.label(tr!("project.aspect"));
                         ui.label(aspect(draft.width, draft.height));
                         ui.end_row();
 
-                        ui.label("Frame Rate");
+                        ui.label(tr!("project.frame_rate"));
                         let mut rate = RATES
                             .iter()
                             .position(|(_, r)| *r == draft.frame_rate)
                             .unwrap_or(4);
+                        let names = RATES.map(|r| tr!("unit.fps", rate = r.0));
                         if ui
-                            .add(Dropdown::new(&mut rate, &RATES.map(|r| r.0)))
+                            .add(Dropdown::new(
+                                &mut rate,
+                                &names.each_ref().map(String::as_str),
+                            ))
                             .changed()
                         {
                             draft.frame_rate = RATES[rate].1;
                         }
                         ui.end_row();
 
-                        ui.label("Background");
+                        ui.label(tr!("project.background"));
                         let [r, g, b, a] = draft.background;
                         let mut c = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
                         if ui.color_edit_button_srgba(&mut c).changed() {
@@ -127,13 +136,13 @@ impl SettingsDialog {
                 ui.add_space(space::S16);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = space::S8;
-                    if ui.add(Button::primary("Apply")).clicked() {
+                    if ui.add(Button::primary(tr!("project.apply"))).clicked() {
                         if draft != old {
                             command = Some(Command::SetSettings(draft.clone()));
                         }
                         ui.close();
                     }
-                    if ui.add(Button::secondary("Cancel")).clicked() {
+                    if ui.add(Button::secondary(tr!("prompt.cancel"))).clicked() {
                         ui.close();
                     }
                 });
@@ -162,28 +171,20 @@ fn refit_warning(old: &ProjectSettings, new: &ProjectSettings, clips: usize) -> 
     if clips == 0 {
         return None;
     }
-    let n = if clips == 1 {
-        "1 clip"
-    } else {
-        &format!("{clips} clips")
-    };
     let mut lines = Vec::new();
     if (old.width, old.height) != (new.width, new.height) {
-        let fit = if aspect(old.width, old.height) == aspect(new.width, new.height) {
-            "rescales to fill the new frame"
-        } else {
-            "refits to the new frame keeping its own aspect, so some gain letterbox or pillarbox bars"
-        };
-        lines.push(format!(
-            "Each of the {n} {fit}. Position offsets stay in pixels."
-        ));
+        lines.push(
+            if aspect(old.width, old.height) == aspect(new.width, new.height) {
+                trn!("project.rescale", clips)
+            } else {
+                trn!("project.refit", clips)
+            },
+        );
     }
     if old.frame_rate != new.frame_rate {
-        lines.push(format!(
-            "The {n} keep their times; edits may land between frames at the new rate."
-        ));
+        lines.push(trn!("project.retime", clips));
     }
-    (!lines.is_empty()).then(|| lines.join("\n") + "\nYou can undo this.")
+    (!lines.is_empty()).then(|| lines.join("\n") + "\n" + tr!("project.undo_note"))
 }
 
 #[cfg(test)]

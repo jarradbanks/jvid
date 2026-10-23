@@ -10,7 +10,9 @@ use std::time::SystemTime;
 use egui::{Color32, Context};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::i18n::CATALOG;
 use crate::tokens::color;
+use crate::tr;
 
 /// The colour tokens one theme sets.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -175,7 +177,12 @@ impl LiveTheme {
                 apply(ctx, &p);
                 None
             }
-            Err(e) => Some(format!("Theme {}: {e}", path.display())),
+            Err(e) => Some(tr!(
+                CATALOG,
+                "theme.error",
+                path = path.display(),
+                error = e
+            )),
         }
     }
 }
@@ -189,7 +196,8 @@ mod hex {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Color32, D::Error> {
         let s = String::deserialize(d)?;
-        parse(&s).ok_or_else(|| serde::de::Error::custom(format!("`{s}` is not #RRGGBB")))
+        parse(&s)
+            .ok_or_else(|| serde::de::Error::custom(tr!(CATALOG, "theme.bad_color", value = s)))
     }
 
     pub fn parse(s: &str) -> Option<Color32> {

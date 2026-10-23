@@ -5,6 +5,9 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use jvid_core::model::ProbeInfo;
 use jvid_jobs::{Pool, Priority};
+use jvid_media::probe::ProbeError;
+
+use crate::i18n::tr;
 
 pub type Probe = fn(&Path) -> Result<ProbeInfo, String>;
 
@@ -40,7 +43,7 @@ impl Importer {
 
     pub fn media() -> Self {
         Self::new(Pool::with_default_threads(), |p| {
-            jvid_media::probe::probe(p).map_err(|e| e.to_string())
+            jvid_media::probe::probe(p).map_err(|e| describe(&e))
         })
     }
 
@@ -73,13 +76,22 @@ impl Importer {
                 Ok(info) => self.done.push((path, info)),
                 Err(e) => out
                     .errors
-                    .push(format!("Couldn't import {}: {e}", name(&path))),
+                    .push(tr!("app.import_failed", name = name(&path), error = e)),
             }
         }
         if self.pending.is_empty() && !self.done.is_empty() {
             out.batch = Some(std::mem::take(&mut self.done));
         }
         out
+    }
+}
+
+/// Why a file isn't media, in the UI language; FFmpeg's own reason stays as it gives it.
+pub fn describe(e: &ProbeError) -> String {
+    match e {
+        ProbeError::Unreadable(e) => tr!("app.unreadable", error = e),
+        ProbeError::NoMedia => tr!("app.no_media").into(),
+        ProbeError::UnsupportedCodec(c) => tr!("app.unsupported_codec", codec = c),
     }
 }
 

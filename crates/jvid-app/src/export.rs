@@ -17,6 +17,7 @@ use jvid_media::decode::DecoderPool;
 use jvid_media::encode::{EncodeError, Encoder};
 use jvid_render::composite::Readback;
 
+use crate::i18n::tr;
 use crate::playback::{Audio, ClipAudio, Gpu, Pixels, Shown, generated, sample};
 
 /// What to export: `range` is a half-open timeline span, rounded out to whole output frames.
@@ -42,6 +43,29 @@ pub fn presets() -> Vec<Preset> {
     let mut all = jvid_core::preset::builtin();
     all.extend(dir.map(|d| user_presets(&d)).unwrap_or_default());
     all
+}
+
+/// Catalog keys for the names of `jvid_core::preset::builtin()`, in its order.
+const BUILT_IN_NAMES: [&str; 12] = [
+    "preset.highlight_1080",
+    "preset.highlight_1440",
+    "preset.screen",
+    "preset.youtube_1080",
+    "preset.youtube_4k",
+    "preset.shorts",
+    "preset.prores",
+    "preset.gif",
+    "preset.audio_wav",
+    "preset.audio_wav24",
+    "preset.audio_mp3",
+    "preset.audio_aac",
+];
+
+/// The name `presets()[i]` shows: a built-in's in the UI language, a user preset's as written.
+pub fn preset_name(i: usize, p: &Preset) -> &str {
+    BUILT_IN_NAMES
+        .get(i)
+        .map_or(&p.name, |k| crate::i18n::CATALOG.tr(k))
 }
 
 /// Every `*.toml` preset in `dir`, by file name; a file that doesn't parse is logged and skipped.
@@ -166,9 +190,7 @@ impl AttemptFiles {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
-        let name = destination
-            .file_name()
-            .ok_or("output path has no file name")?;
+        let name = destination.file_name().ok_or(tr!("export.no_file_name"))?;
         loop {
             let id = NEXT.fetch_add(1, Ordering::Relaxed);
             let dir = parent.join(format!(".jvid-export-{}-{id}", std::process::id()));
@@ -180,7 +202,7 @@ impl AttemptFiles {
                     });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(format!("couldn't create export attempt: {e}")),
+                Err(e) => return Err(tr!("export.attempt_error", error = e)),
             }
         }
     }
@@ -213,8 +235,9 @@ fn replay<T>(
         }
         match result {
             Ok(info) => {
-                std::fs::rename(&files.output, &req.path)
-                    .map_err(|e| format!("couldn't publish {}: {e}", req.path.display()))?;
+                std::fs::rename(&files.output, &req.path).map_err(|e| {
+                    tr!("export.publish_error", path = req.path.display(), error = e)
+                })?;
                 return Ok(info);
             }
             Err(AttemptError::Vaapi(error))
@@ -263,7 +286,8 @@ pub fn run(
     let info = encode(&project.without_subtitles(), req, device, queue, ctx)?;
     let srt = jvid_core::srt::write(&project.subtitle_cues(), req.range);
     let path = req.path.with_extension("srt");
-    std::fs::write(&path, srt).map_err(|e| format!("couldn't write {}: {e}", path.display()))?;
+    std::fs::write(&path, srt)
+        .map_err(|e| tr!("export.write_error", path = path.display(), error = e))?;
     Ok(info)
 }
 
@@ -292,11 +316,11 @@ fn encode_attempt(
     let s = project.settings();
     let (first, end) = frames(project, req);
     if end <= first {
-        return Err("the export range is empty".to_string().into());
+        return Err(tr!("export.empty_range").to_string().into());
     }
     jvid_media::ffmpeg::init().map_err(|e| e.to_string())?;
     let enc = Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
-        .map_err(|e| format!("couldn't create {}: {e}", req.path.display()))?;
+        .map_err(|e| tr!("export.create_error", path = req.path.display(), error = e))?;
     let partial = Partial(&req.path);
     let gain = match req.loudness.filter(|_| req.preset.audio.is_some()) {
         Some(target) => measure(project, req, ctx)?.map(|lufs| 10f64.powf((target - lufs) / 20.0)),
@@ -326,7 +350,9 @@ fn encode_attempt(
                 };
                 let enc =
                     Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
-                        .map_err(|e| format!("couldn't create {}: {e}", req.path.display()))?;
+                        .map_err(|e| {
+                            tr!("export.create_error", path = req.path.display(), error = e)
+                        })?;
                 render(project, &req, enc, limiter(), device, queue, ctx)?;
                 let size = std::fs::metadata(&req.path)
                     .map_err(|e| e.to_string())?
@@ -348,9 +374,7 @@ fn encode_attempt(
                 }
                 if pass == PASSES {
                     if under.is_none() {
-                        return Err(
-                            format!("couldn't get under the target size: {size} bytes").into()
-                        );
+                        return Err(tr!("export.over_target", size = size).into());
                     }
                     std::fs::rename(&best, &req.path).map_err(|e| e.to_string())?;
                     break;
@@ -409,12 +433,12 @@ fn sized(project: &Project, req: &Request) -> Result<Option<(u64, f64, u64)>, Er
     };
     let target = target
         .parse::<u64>()
-        .map_err(|_| format!("bad target size {target}"))?;
+        .map_err(|_| tr!("export.bad_target", target = target))?;
     let rate = rate(project, req);
     let (first, end) = frames(project, req);
     let secs = (rate.time_floor(end) - rate.time_floor(first)).0 as f64 / FLICKS_PER_SECOND as f64;
     let bits = target_bitrate(p, target, secs)
-        .ok_or_else(|| "the target size is too small even for the audio".to_string())?;
+        .ok_or_else(|| tr!("export.target_too_small").to_string())?;
     let audio = p.audio.map_or(0.0, dialog::audio_bitrate) * secs / 8.0;
     Ok(Some((target, audio, bits)))
 }
@@ -503,7 +527,13 @@ fn render(
             }
             let f = decoders
                 .frame_at(&asset.path, layer.source_time)
-                .map_err(|e| format!("decoding {}: {e}", asset.path.display()))?;
+                .map_err(|e| {
+                    tr!(
+                        "export.decode_error",
+                        path = asset.path.display(),
+                        error = e
+                    )
+                })?;
             layers.push((Pixels::Frame(Arc::new(f)), layer.transform));
         }
         if enc.has_video() {
@@ -557,33 +587,29 @@ fn render(
 }
 
 fn err(e: impl std::fmt::Display) -> String {
-    format!("encode: {e}")
+    tr!("export.encode_error", error = e)
 }
 
 /// Re-probes the written file: it must open, have the preset's streams, and last the range to
 /// within one frame.
 fn validate(project: &Project, req: &Request) -> Result<ProbeInfo, Error> {
-    let info = jvid_media::probe::probe(&req.path).map_err(|e| format!("output: {e}"))?;
+    let info = jvid_media::probe::probe(&req.path)
+        .map_err(|e| tr!("export.output_error", error = crate::import::describe(&e)))?;
     let rate = rate(project, req);
     let (first, end) = frames(project, req);
     let want = rate.time_floor(end) - rate.time_floor(first);
     let frame = rate.time_floor(1);
     let p = &req.preset;
     if info.width.is_some() != p.video.is_some() || (info.audio_streams > 0) != p.audio.is_some() {
-        return Err(
-            "output is missing its video or audio stream, or has an extra one"
-                .to_string()
-                .into(),
-        );
+        return Err(tr!("export.streams_wrong").to_string().into());
     }
     if (info.duration - want).0.abs() > frame.0 {
         let secs = |t: Time| t.0 as f64 / FLICKS_PER_SECOND as f64;
-        return Err(format!(
-            "output lasts {:.3}s, expected {:.3}s",
-            secs(info.duration),
-            secs(want)
-        )
-        .into());
+        let (got, want) = (
+            format!("{:.3}", secs(info.duration)),
+            format!("{:.3}", secs(want)),
+        );
+        return Err(tr!("export.duration_wrong", got = got, want = want).into());
     }
     Ok(info)
 }

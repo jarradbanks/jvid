@@ -2099,9 +2099,11 @@ dependencies = [
  "jvid-log",
  "jvid-media",
  "jvid-render",
+ "proc-macro2",
  "rfd",
  "serde",
  "suite-ui",
+ "syn 2.0.119",
  "toml",
  "tracing",
 ]
@@ -3855,6 +3857,7 @@ dependencies = [
  "egui_kittest",
  "serde",
  "suite-ui",
+ "sys-locale",
  "toml",
 ]
 

@@ -4,12 +4,25 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
 
-use jvid_core::file::{from_json, to_json};
+use jvid_core::file::{FileError, from_json, to_json};
 use jvid_core::model::Project;
+
+use crate::i18n::tr;
 
 pub fn load(path: &Path) -> io::Result<Project> {
     let s = fs::read_to_string(path)?;
-    from_json(&s, &std::path::absolute(dir_of(path))?, |p| p.exists()).map_err(io::Error::other)
+    from_json(&s, &std::path::absolute(dir_of(path))?, |p| p.exists())
+        .map_err(|e| io::Error::other(describe(&e)))
+}
+
+/// A file error in the UI language; jvid-core words it in English for logs.
+fn describe(e: &FileError) -> String {
+    match e {
+        FileError::Json(e) => tr!("file.invalid", error = e),
+        FileError::UnsupportedVersion(v) => tr!("file.newer", version = v),
+        FileError::MissingVersion => tr!("file.no_version").to_owned(),
+        FileError::InvalidRate => tr!("file.zero_rate").to_owned(),
+    }
 }
 
 /// Writes a temp file beside `path`, syncs it, then renames over `path`, so a

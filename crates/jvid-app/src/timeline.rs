@@ -18,7 +18,8 @@ use egui::{
 };
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::model::{
-    AssetId, Clip, ClipId, Edge, MediaAsset, Project, Sequence, Track, TrackId, TrackKind,
+    AssetId, Clip, ClipId, Edge, MediaAsset, ProbeInfo, Project, Sequence, StreamInfo, Track,
+    TrackId, TrackKind,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_jobs::Priority;
@@ -28,6 +29,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
 use suite_ui::widgets::{Button, TextInput};
 
+use crate::i18n::{tr, trn, verbatim};
 use crate::keymap::Keymap;
 use crate::media_bin::Caches;
 use crate::transport::Transport;
@@ -757,8 +759,7 @@ impl Timeline {
         if std::mem::take(&mut self.copied) {
             // Ctrl+V only reaches us as a paste event when the system clipboard has text.
             let n = self.clipboard.len();
-            ui.ctx()
-                .copy_text(format!("{n} jvid clip{}", if n == 1 { "" } else { "s" }));
+            ui.ctx().copy_text(trn!("timeline.copied", n));
         }
         self.sync(project);
         let rate = self.transport.rate;
@@ -902,7 +903,7 @@ impl Timeline {
             .context_menu(|ui| {
                 add_menu(ui, &mut edit);
                 ui.separator();
-                ui.checkbox(&mut self.linked_selection, "Linked Selection");
+                ui.checkbox(&mut self.linked_selection, tr!("timeline.linked_selection"));
             });
         let mut y = lanes.top() - self.vscroll;
         let mut lane_rects = Vec::new();
@@ -1060,7 +1061,10 @@ impl Timeline {
             vec2(headers.width() - 2.0 * space::S4, size::CONTROL),
         );
         if plus.bottom() <= lanes.bottom() {
-            let r = ui.put(plus, Button::ghost("Track").with_icon(icon::PLUS));
+            let r = ui.put(
+                plus,
+                Button::ghost(tr!("timeline.track")).with_icon(icon::PLUS),
+            );
             egui::Popup::menu(&r).show(|ui| add_menu(ui, &mut edit));
         }
         let moving = held.as_ref().map(|h| h.0.id).or(self.trim.map(|t| t.clip));
@@ -1127,7 +1131,7 @@ impl Timeline {
             painter.text(
                 lanes.center(),
                 Align2::CENTER_CENTER,
-                "Drag clips here to start editing",
+                tr!("timeline.empty"),
                 theme::body(),
                 color::INK_3,
             );
@@ -1213,7 +1217,7 @@ impl Timeline {
             let x = view.x(playhead).clamp(lanes.left(), lanes.right());
             self.zoom_by(z / self.zoom, view, x);
         }
-        r.on_hover_text("Zoom (= and -)");
+        r.on_hover_text(tr!("timeline.zoom_tooltip"));
 
         self.scrollbars(ui, &painter, lanes, content_h, id);
 
@@ -1481,15 +1485,16 @@ impl Timeline {
             ink,
         );
         target.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, track.target, "Target")
+            let name = tr!("timeline.target");
+            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, track.target, name)
         });
         if target.clicked() {
             edit = set(&|s| s.target = !s.target);
         }
         let target = target.on_hover_text(if track.target {
-            "Target for Insert and Overwrite"
+            tr!("timeline.target_on")
         } else {
-            "Make Target for Insert and Overwrite"
+            tr!("timeline.target_off")
         });
         if target.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
@@ -1497,14 +1502,37 @@ impl Timeline {
 
         // Toggles, right-aligned: lock, hide or mute, solo.
         let (hide_glyph, hide_on, hide_font, hide_tip) = match track.kind {
-            TrackKind::Video if track.hidden => (icon::EYE_OFF, true, theme::icon_font(), "Show"),
-            TrackKind::Video => (icon::EYE, false, theme::icon_font(), "Hide"),
-            TrackKind::Audio => ("M", track.muted, theme::body_strong(), "Mute"),
+            TrackKind::Video if track.hidden => (
+                icon::EYE_OFF,
+                true,
+                theme::icon_font(),
+                tr!("timeline.show"),
+            ),
+            TrackKind::Video => (icon::EYE, false, theme::icon_font(), tr!("timeline.hide")),
+            // M and S are mixer notation, kept like keycaps.
+            TrackKind::Audio => (
+                verbatim("M"),
+                track.muted,
+                theme::body_strong(),
+                tr!("timeline.mute"),
+            ),
         };
         let toggles = [
-            (icon::LOCK, track.locked, theme::icon_font(), "Lock", false),
+            (
+                icon::LOCK,
+                track.locked,
+                theme::icon_font(),
+                tr!("timeline.lock"),
+                false,
+            ),
             (hide_glyph, hide_on, hide_font, hide_tip, false),
-            ("S", track.solo, theme::body_strong(), "Solo", true),
+            (
+                verbatim("S"),
+                track.solo,
+                theme::body_strong(),
+                tr!("timeline.solo"),
+                true,
+            ),
         ];
         let step = size::SMALL_CONTROL + space::S4;
         let mut x = rect.right() - space::S8 - toggles.len() as f32 * step + space::S4;
@@ -1580,7 +1608,7 @@ impl Timeline {
         let same_kind: Vec<_> = tracks.iter().filter(|t| t.kind == track.kind).collect();
         let pos = same_kind.iter().position(|t| t.id == track.id).unwrap_or(0);
         body.context_menu(|ui| {
-            if ui.button("Rename").clicked() {
+            if ui.button(tr!("timeline.rename")).clicked() {
                 self.renaming = Some((track.id, track.name.clone()));
             }
             let mv = |index| {
@@ -1593,19 +1621,19 @@ impl Timeline {
                 ))
             };
             if ui
-                .add_enabled(pos > 0, egui::Button::new("Move Up"))
+                .add_enabled(pos > 0, egui::Button::new(tr!("timeline.move_up")))
                 .clicked()
             {
                 edit = mv(pos - 1);
             }
             let last = pos + 1 >= same_kind.len();
             if ui
-                .add_enabled(!last, egui::Button::new("Move Down"))
+                .add_enabled(!last, egui::Button::new(tr!("timeline.move_down")))
                 .clicked()
             {
                 edit = mv(pos + 1);
             }
-            let remove = egui::Button::new("Remove Track");
+            let remove = egui::Button::new(tr!("timeline.remove_track"));
             if ui.add_enabled(!track.locked, remove).clicked() {
                 edit = Some((Command::RemoveTrack(track.id), None));
             }
@@ -1678,17 +1706,22 @@ impl Timeline {
             }
         }
         let keyed = clip.keyframes.values().any(|k| !k.is_empty());
-        let mut name = asset.map_or("Missing Asset".into(), MediaAsset::display_name);
+        let mut name = asset.map_or(
+            tr!("timeline.missing_asset").into(),
+            MediaAsset::display_name,
+        );
         // A multi-stream file's audio clips say which stream they play.
         if let Some(p) = asset.and_then(|a| a.probe.as_ref())
             && kind == TrackKind::Audio
             && p.audio_streams > 1
         {
-            let stream = clip.stream.map_or("All Audio".into(), |n| p.audio_name(n));
+            let stream = clip
+                .stream
+                .map_or(tr!("timeline.all_audio").into(), |n| stream_name(p, n));
             name = format!("{name} · {stream}");
         }
         let name = if offline {
-            format!("{name}  Offline")
+            tr!("timeline.offline_clip", name = name)
         } else {
             name
         };
@@ -1781,9 +1814,31 @@ fn track_label(tracks: &[Track], index: usize) -> String {
     let t = &tracks[index];
     let same = |o: &&Track| o.kind == t.kind;
     match t.kind {
-        TrackKind::Video => format!("V{}", tracks[index..].iter().filter(same).count()),
-        TrackKind::Audio => format!("A{}", tracks[..=index].iter().filter(same).count()),
+        TrackKind::Video => tr!(
+            "timeline.video_track",
+            number = tracks[index..].iter().filter(same).count()
+        ),
+        TrackKind::Audio => tr!(
+            "timeline.audio_track",
+            number = tracks[..=index].iter().filter(same).count()
+        ),
     }
+}
+
+/// Audio stream `n`'s title from the file, else "Audio n" counting from 1 in the UI language.
+fn stream_name(p: &ProbeInfo, n: u32) -> String {
+    let title = p
+        .streams
+        .iter()
+        .filter_map(|s| match s {
+            StreamInfo::Audio(a) => Some(a.title.as_ref()),
+            _ => None,
+        })
+        .nth(n as usize)
+        .flatten();
+    title
+        .cloned()
+        .unwrap_or_else(|| tr!("timeline.audio_stream", number = n + 1))
 }
 
 /// A dragged height, snapped and clamped to the allowed range.
@@ -1793,8 +1848,8 @@ fn snap_height(h: f32) -> f32 {
 
 fn add_menu(ui: &mut Ui, edit: &mut Option<Edit>) {
     for (kind, label) in [
-        (TrackKind::Video, "Add Video Track"),
-        (TrackKind::Audio, "Add Audio Track"),
+        (TrackKind::Video, tr!("timeline.add_video_track")),
+        (TrackKind::Audio, tr!("timeline.add_audio_track")),
     ] {
         if ui.button(label).clicked() {
             let name = String::new();

@@ -291,7 +291,7 @@ fn header_holds_still_between_one_view_and_tabs() {
         let mut h = harness(size, ppp);
         let ctx = format!("{}x{} @{ppp}x", size[0], size[1]);
         let tabs = Shot::take(&mut h, ctx.clone());
-        h.state_mut().preview_views = &["Program"];
+        h.state_mut().preview_views = &["program"];
         h.run();
         let one = Shot::take(&mut h, ctx.clone());
         let (rt, ro) = (tabs.panel(Tab::Preview), one.panel(Tab::Preview));
