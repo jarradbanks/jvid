@@ -40,7 +40,8 @@ pub struct Preset {
     pub frame_rate: Option<Rate>,
     /// Encoder options (e.g. `crf`, `preset`, `tune`); encoders ignore ones they don't have.
     /// `width` scales to that width keeping the aspect ratio when `size` is `None`; GIF also
-    /// takes `loop` (0 forever, -1 once, n repeats).
+    /// takes `loop` (0 forever, -1 once, n repeats); `hdr = "pq"` makes HEVC HDR10 (see
+    /// [`Preset::hdr`]).
     #[serde(default)]
     pub options: BTreeMap<String, String>,
 }
@@ -48,6 +49,16 @@ pub struct Preset {
 impl Preset {
     pub fn from_toml(s: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(s)
+    }
+
+    /// This preset for a project with HDR output: H.264 and HEVC become HEVC 10-bit PQ BT.2020
+    /// (HDR10); ProRes, GIF and audio-only stay SDR.
+    pub fn hdr(mut self) -> Self {
+        if matches!(self.video, Some(VideoCodec::H264 | VideoCodec::Hevc)) {
+            self.video = Some(VideoCodec::Hevc);
+            self.options.insert("hdr".into(), "pq".into());
+        }
+        self
     }
 
     /// The output frame size for a `src`-sized project: `size`, else `src` scaled to the
@@ -234,5 +245,20 @@ mod tests {
         assert!(find("Shorts").aspect_warning((720, 1280)).is_none());
         assert!(find("Screen").aspect_warning((1000, 1)).is_none());
         assert!(find("Audio only (WAV)").aspect_warning((1, 1)).is_none());
+    }
+
+    #[test]
+    fn hdr_makes_h264_and_hevc_hdr10_only() {
+        let all = builtin();
+        let hl = all[0].clone().hdr();
+        assert_eq!(hl.video, Some(VideoCodec::Hevc));
+        assert_eq!(hl.options.get("hdr").map(String::as_str), Some("pq"));
+        assert_eq!(hl.options.get("crf"), all[0].options.get("crf"));
+        for p in all
+            .iter()
+            .filter(|p| !matches!(p.video, Some(VideoCodec::H264 | VideoCodec::Hevc)))
+        {
+            assert_eq!(&p.clone().hdr(), p, "{}", p.name);
+        }
     }
 }

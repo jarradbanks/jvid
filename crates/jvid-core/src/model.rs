@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::hdr::Hdr;
 use crate::keyframe::{Keyframe, Value};
 use crate::time::{Rate, Time};
 
@@ -34,6 +35,9 @@ pub struct ProjectSettings {
     pub sample_rate: u32,
     /// Straight RGBA.
     pub background: [u8; 4],
+    /// Export HEVC 10-bit PQ BT.2020 instead of SDR. Off in projects saved before it existed.
+    #[serde(default)]
+    pub hdr_output: bool,
 }
 
 impl Default for ProjectSettings {
@@ -44,6 +48,7 @@ impl Default for ProjectSettings {
             frame_rate: Rate::new(30, 1),
             sample_rate: 48_000,
             background: [0, 0, 0, 255],
+            hdr_output: false,
         }
     }
 }
@@ -77,6 +82,14 @@ impl ProbeInfo {
         });
         let title = titles.nth(n as usize).flatten();
         title.cloned().unwrap_or_else(|| format!("Audio {}", n + 1))
+    }
+
+    /// PQ or HLG when a video stream is HDR.
+    pub fn hdr(&self) -> Option<Hdr> {
+        self.streams.iter().find_map(|s| match s {
+            StreamInfo::Video(v) => v.hdr(),
+            _ => None,
+        })
     }
 }
 
@@ -116,6 +129,15 @@ pub struct VideoInfo {
     /// joins files whose hashes match. 0 in projects probed before it existed.
     #[serde(default)]
     pub params: u64,
+    /// Bits per sample, e.g. 8 or 10; 0 in projects probed before it existed.
+    #[serde(default)]
+    pub bit_depth: u32,
+}
+
+impl VideoInfo {
+    pub fn hdr(&self) -> Option<Hdr> {
+        Hdr::from_transfer(self.color_transfer.as_deref()?)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use ffmpeg_next::codec::{self, packet::side_data};
-use ffmpeg_next::format::{self, stream::Stream};
+use ffmpeg_next::format::{self, Pixel, stream::Stream};
 use ffmpeg_next::{Rational, media};
 use jvid_core::model::{AudioInfo, ProbeInfo, StreamInfo, VideoInfo};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
@@ -122,7 +122,23 @@ fn stream_info(stream: Stream) -> Result<StreamInfo, ProbeError> {
         color_transfer: name(v.color_transfer_characteristic().name()),
         color_range: name(v.color_range().name()),
         params: crate::remux::params_hash(&stream.parameters()),
+        bit_depth: bit_depth(v.format()),
     }))
+}
+
+/// Bits per sample, e.g. 8 for nv12 and 10 for yuv420p10le or p010le; 0 when unknown.
+fn bit_depth(p: Pixel) -> u32 {
+    let Some(d) = p.descriptor() else {
+        return 0;
+    };
+    // FFmpeg's bits per pixel counts luma and alpha once and each chroma sample once per `sub`
+    // pixels: bpp = depth × (n - 2 + 2 / sub).
+    let (n, sub) = (
+        d.nb_components() as u32,
+        1 << (d.log2_chroma_w() + d.log2_chroma_h()),
+    );
+    let samples = (n * sub).saturating_sub(2 * (sub - 1)).max(1);
+    d.bits_per_pixel().max(0) as u32 * sub / samples
 }
 
 /// `None` for 0/x, x/0 or negative rationals. Reduces, so 2/4 becomes 1/2.
@@ -182,6 +198,20 @@ mod tests {
         assert!(!is_vfr(None, r(30, 1)));
         assert_eq!(rate(Rational::new(2, 4)), r(1, 2));
         assert_eq!(rate(Rational::new(0, 1)), None);
+        for (p, bits) in [
+            (Pixel::YUV420P, 8),
+            (Pixel::NV12, 8),
+            (Pixel::YUVJ422P, 8),
+            (Pixel::RGBA, 8),
+            (Pixel::GRAY8, 8),
+            (Pixel::YUV420P10LE, 10),
+            (Pixel::P010LE, 10),
+            (Pixel::YUV422P10LE, 10),
+            (Pixel::YUV444P12LE, 12),
+            (Pixel::None, 0),
+        ] {
+            assert_eq!(bit_depth(p), bits, "{p:?}");
+        }
     }
 
     fn video(info: &ProbeInfo) -> &VideoInfo {
@@ -245,6 +275,8 @@ mod tests {
                     StreamInfo::Video(v) => {
                         assert_eq!(Some(v.codec.as_str()), codec, "{file}");
                         assert_eq!(v.vfr, file == "vfr-phone.mp4", "{file}");
+                        let bits = if file == "prores.mov" { 10 } else { 8 };
+                        assert_eq!(v.bit_depth, bits, "{file}");
                         if file != "rotated-phone.mp4" {
                             assert_eq!(v.rotation, 0, "{file}");
                         }
@@ -291,6 +323,21 @@ mod tests {
             })
             .collect();
         assert_eq!(titles, ["Game", "Mic", "Voice chat"]);
+    }
+
+    /// The probe check from #86: a generated PQ clip probes as PQ BT.2020 10-bit.
+    #[test]
+    fn probes_a_pq_clip() {
+        crate::ffmpeg::init().unwrap();
+        let path = std::env::temp_dir().join(format!("jvid-probe-pq-{}.mkv", std::process::id()));
+        crate::test_media::pq_clip(&path, &[26.0, 203.0]).unwrap();
+        let info = probe(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let v = video(&info);
+        assert_eq!(v.hdr(), Some(jvid_core::hdr::Hdr::Pq));
+        assert_eq!(v.color_transfer.as_deref(), Some("smpte2084"));
+        assert_eq!(v.color_primaries.as_deref(), Some("bt2020"));
+        assert_eq!(v.bit_depth, 10);
     }
 
     #[test]

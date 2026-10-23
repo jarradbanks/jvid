@@ -21,7 +21,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
 use suite_ui::widgets::{Button, Dropdown, TextInput};
 
-use crate::i18n::{tr, trn};
+use crate::i18n::{tr, trn, verbatim};
 use crate::preview::Preview;
 
 /// The bin's tabs, in order.
@@ -180,6 +180,11 @@ fn split_ext(name: &str) -> (&str, &str) {
         Some(i) if i > 0 => name.split_at(i),
         _ => (name, ""),
     }
+}
+
+/// PQ or HLG video, which previews tone-mapped.
+fn is_hdr(asset: &MediaAsset) -> bool {
+    asset.probe.as_ref().is_some_and(|p| p.hdr().is_some())
 }
 
 fn is_audio(asset: &MediaAsset) -> bool {
@@ -390,12 +395,16 @@ impl MediaBin {
             .filter(|p| !offline && thumb.contains(*p))
             .map(|p| (p.x - thumb.left()) / thumb.width());
         self.thumbs.paint(ui, thumb, a, offline, skim);
-        if let Some(d) = duration_label(a) {
-            let galley = p.layout_no_wrap(d, theme::small(), color::INK);
-            let badge = Rect::from_min_size(
-                thumb.right_bottom() - galley.size() - vec2(space::S8 + 2.0, space::S4 + 2.0),
-                galley.size() + vec2(space::S8, space::S4),
-            );
+        // Duration bottom right, HDR bottom left, 2px inside the thumbnail.
+        let badge = |text: String, left: bool| {
+            let galley = p.layout_no_wrap(text, theme::small(), color::INK);
+            let size = galley.size() + vec2(space::S8, space::S4);
+            let x = if left {
+                thumb.left() + 2.0
+            } else {
+                thumb.right() - 2.0 - size.x
+            };
+            let badge = Rect::from_min_size(pos2(x, thumb.bottom() - 2.0 - size.y), size);
             p.rect_filled(
                 badge,
                 CornerRadius::same(radius::SMALL),
@@ -406,6 +415,12 @@ impl MediaBin {
                 galley,
                 color::INK,
             );
+        };
+        if let Some(d) = duration_label(a) {
+            badge(d, false);
+        }
+        if is_hdr(a) {
+            badge(verbatim("HDR").into(), true);
         }
         let show_remove = self.shows_remove(ui, &r, a);
         if show_remove {
@@ -497,7 +512,8 @@ impl MediaBin {
         if show_remove {
             right = r.rect.right() - size::CONTROL - space::S4;
         }
-        if let Some(d) = duration_label(a) {
+        let hdr = is_hdr(a).then(|| verbatim("HDR").to_string());
+        for d in duration_label(a).into_iter().chain(hdr) {
             let g = p.layout_no_wrap(d, theme::body(), color::INK_3);
             right -= g.size().x;
             p.galley(

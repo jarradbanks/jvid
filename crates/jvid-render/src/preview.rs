@@ -1,6 +1,7 @@
 //! The preview viewport: YUV frames uploaded and converted to RGB on the GPU, then drawn
 //! fitted or zoomed inside the viewer.
 
+use jvid_core::hdr::Hdr;
 use wgpu::util::DeviceExt;
 
 /// A YUV 4:2:0 frame (I420): tight rows, chroma `(w+1)/2 × (h+1)/2`.
@@ -11,16 +12,23 @@ pub struct Yuv<'a> {
     /// BT.709 matrix when true, BT.601 when false.
     pub bt709: bool,
     pub full_range: bool,
+    /// PQ or HLG: samples are 10-bit little-endian `u16`s, the matrix is BT.2020, and the
+    /// preview is tone-mapped to SDR (see convert.wgsl).
+    pub hdr: Option<Hdr>,
 }
 
 /// The YUV→RGB affine transform as the shader takes it: `rgb[i] = dot(rows[i].xyz, yuv) + rows[i].w`,
 /// with 8-bit codes read as 0..1.
 pub fn yuv_to_rgb(bt709: bool, full_range: bool) -> [[f32; 4]; 3] {
-    let (kr, kb) = if bt709 {
-        (0.2126, 0.0722)
+    if bt709 {
+        matrix(0.2126, 0.0722, full_range)
     } else {
-        (0.299, 0.114)
-    };
+        matrix(0.299, 0.114, full_range)
+    }
+}
+
+/// [`yuv_to_rgb`] for luma weights `kr` and `kb`.
+fn matrix(kr: f32, kb: f32, full_range: bool) -> [[f32; 4]; 3] {
     let kg = 1.0 - kr - kb;
     // Y' = ys·y + yo and Cb, Cr = cs·c + co, from codes over 255.
     let (ys, yo, cs) = if full_range {
@@ -72,6 +80,9 @@ pub fn scaled(width: u32, height: u32, scale: u32) -> (u32, u32) {
 /// GPU state for one preview: the converted image and the pipelines that make and draw it.
 pub struct Preview {
     convert: wgpu::RenderPipeline,
+    /// [`Self::convert`] for PQ and HLG frames.
+    pq: wgpu::RenderPipeline,
+    hlg: wgpu::RenderPipeline,
     blit: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     /// Where the blit draws, in clip space; see [`to_clip`].
@@ -120,14 +131,19 @@ impl Preview {
                 cache: None,
             })
         };
-        Self {
-            convert: pipeline(
+        let convert = |fs| {
+            pipeline(
                 include_str!("convert.wgsl"),
                 "vs_full",
-                "fs_convert",
+                fs,
                 IMAGE_FORMAT,
                 false,
-            ),
+            )
+        };
+        Self {
+            convert: convert("fs_convert"),
+            pq: convert("fs_pq"),
+            hlg: convert("fs_hlg"),
             blit: pipeline(
                 include_str!("blit.wgsl"),
                 "vs_blit",
@@ -153,6 +169,11 @@ impl Preview {
     /// Uploads `frame` and converts it to RGB at 1/`scale` of its size, replacing the image.
     pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Yuv, scale: u32) {
         let (cw, ch) = (frame.width.div_ceil(2), frame.height.div_ceil(2));
+        // 10-bit samples go up as their two bytes; see `deep` in convert.wgsl.
+        let (format, bytes) = match frame.hdr {
+            Some(_) => (wgpu::TextureFormat::Rg8Unorm, 2),
+            None => (wgpu::TextureFormat::R8Unorm, 1),
+        };
         // shortcut: new plane textures per frame; keep them across frames once playback (#25) uploads 30+ a second.
         let planes: [_; 3] = std::array::from_fn(|i| {
             let (w, h) = if i == 0 {
@@ -161,20 +182,27 @@ impl Preview {
                 (cw, ch)
             };
             let p = frame.planes[i];
-            let tex = texture(device, w, h, wgpu::TextureFormat::R8Unorm, &[]);
+            let tex = texture(device, w, h, format, &[]);
             queue.write_texture(
                 tex.as_image_copy(),
                 p,
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(w),
+                    bytes_per_row: Some(w * bytes),
                     rows_per_image: None,
                 },
                 tex.size(),
             );
             tex.create_view(&Default::default())
         });
-        let rows = yuv_to_rgb(frame.bt709, frame.full_range);
+        let (rows, pipeline) = match frame.hdr {
+            None => (yuv_to_rgb(frame.bt709, frame.full_range), &self.convert),
+            // BT.2020 non-constant luminance.
+            Some(hdr) => (
+                matrix(0.2627, 0.0593, frame.full_range),
+                if hdr == Hdr::Pq { &self.pq } else { &self.hlg },
+            ),
+        };
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("yuv to rgb"),
             contents: &f32s(rows.as_flattened()),
@@ -185,7 +213,7 @@ impl Preview {
         let image = texture(device, w, h, IMAGE_FORMAT, &srgb_view);
         let convert = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
-            layout: &self.convert.get_bind_group_layout(0),
+            layout: &pipeline.get_bind_group_layout(0),
             entries: &[
                 entry(0, wgpu::BindingResource::TextureView(&planes[0])),
                 entry(1, wgpu::BindingResource::TextureView(&planes[1])),
@@ -207,7 +235,7 @@ impl Preview {
                 })],
                 ..Default::default()
             });
-            pass.set_pipeline(&self.convert);
+            pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &convert, &[]);
             pass.draw(0..3, 0..1);
         }

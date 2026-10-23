@@ -301,7 +301,12 @@ fn encode(
     if let Some(mode) = req.lossless {
         return lossless::run(project, req, mode, ctx);
     }
-    replay(req, ctx, |req| {
+    // HDR output is a project setting, so it applies to whichever preset was picked.
+    let mut req = req.clone();
+    if project.settings().hdr_output {
+        req.preset = req.preset.hdr();
+    }
+    replay(&req, ctx, |req| {
         encode_attempt(project, req, device, queue, ctx)
     })
 }
@@ -496,7 +501,7 @@ fn render(
     ctx: &Ctx,
 ) -> Result<(), AttemptError> {
     let (first, end) = frames(project, req);
-    let decoders = DecoderPool::default();
+    let decoders = DecoderPool::hdr();
     let mut audio = Audio::new(Box::new(blocking));
     // Audio-only presets never touch the GPU.
     let mut gpu = enc.has_video().then(|| {

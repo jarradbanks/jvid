@@ -135,7 +135,12 @@ impl ExportDialog {
 
                         ui.label(tr!("export.video"));
                         ui.horizontal(|ui| {
-                            ui.label(video_summary(preset, s.width, s.height, s.frame_rate));
+                            let shown = if s.hdr_output {
+                                &preset.clone().hdr()
+                            } else {
+                                preset
+                            };
+                            ui.label(video_summary(shown, s.width, s.height, s.frame_rate));
                             let name = preset_name(self.preset, preset);
                             if let Some(w) = aspect_warning(name, preset, (s.width, s.height)) {
                                 ui.label("⚠").on_hover_text(w);
@@ -553,6 +558,7 @@ fn video_summary(p: &Preset, w: u32, h: u32, rate: Rate) -> String {
     let fps = rate.num as f64 / rate.den as f64;
     let codec = match v {
         VideoCodec::H264 => verbatim("H.264"),
+        VideoCodec::Hevc if p.options.contains_key("hdr") => verbatim("HEVC HDR10"),
         VideoCodec::Hevc => verbatim("HEVC"),
         VideoCodec::ProRes => verbatim("ProRes"),
         VideoCodec::Gif => verbatim("GIF"),

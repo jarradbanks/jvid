@@ -6,7 +6,7 @@ use jvid_core::model::{Project, ProjectSettings};
 use jvid_core::time::Rate;
 use suite_ui::theme;
 use suite_ui::tokens::{radius, space};
-use suite_ui::widgets::{Button, DragField, Dropdown};
+use suite_ui::widgets::{Button, Checkbox, DragField, Dropdown};
 
 use crate::i18n::{Label, tr, trn, verbatim};
 
@@ -121,6 +121,11 @@ impl SettingsDialog {
                         if ui.color_edit_button_srgba(&mut c).changed() {
                             draft.background = c.to_srgba_unmultiplied();
                         }
+                        ui.end_row();
+
+                        ui.label(tr!("project.hdr_output"));
+                        ui.add(Checkbox::new(&mut draft.hdr_output, tr!("project.hdr10")))
+                            .on_hover_text(tr!("project.hdr_tooltip"));
                         ui.end_row();
                     });
                 let clips = project
@@ -237,6 +242,7 @@ mod tests {
             frame_rate: Rate::new(24, 1),
             sample_rate: 48_000,
             background: [255, 0, 0, 255],
+            hdr_output: true,
         };
         h.apply(Command::SetSettings(new.clone())).unwrap();
         assert_eq!(h.project().settings(), &new);

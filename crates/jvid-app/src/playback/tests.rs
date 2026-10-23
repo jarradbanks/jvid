@@ -50,6 +50,7 @@ fn tiny(t: Time) -> Frame {
         planes: [vec![0; 4], vec![0], vec![0]],
         bt709: true,
         full_range: false,
+        hdr: None,
     }
 }
 

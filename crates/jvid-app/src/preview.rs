@@ -206,7 +206,7 @@ impl Preview {
         }
         let (tx, rx) = channel();
         Self {
-            pool: Arc::default(),
+            pool: Arc::new(DecoderPool::hdr()),
             jobs: jvid_jobs::Pool::new(1),
             tx,
             rx,
@@ -278,6 +278,7 @@ impl Preview {
             planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
             bt709: f.bt709,
             full_range: f.full_range,
+            hdr: f.hdr,
         };
         rgb.upload(&rs.device, &rs.queue, &yuv, 1);
         let image = rgb.image().expect("uploaded");
@@ -1154,6 +1155,7 @@ impl CallbackTrait for Paint {
                     planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
                     bt709: f.bt709,
                     full_range: f.full_range,
+                    hdr: f.hdr,
                 };
                 gpu.preview.upload(device, queue, &yuv, self.scale);
             }

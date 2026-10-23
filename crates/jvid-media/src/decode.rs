@@ -8,6 +8,7 @@ use ffmpeg_next::color::{Range, Space};
 use ffmpeg_next::format::{self, Pixel};
 use ffmpeg_next::software::scaling;
 use ffmpeg_next::{Error, Rational, decoder, frame, media};
+use jvid_core::hdr::Hdr;
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use jvid_jobs::{Handle, Priority};
 
@@ -22,6 +23,9 @@ pub struct Frame {
     pub bt709: bool,
     /// Full (0–255) rather than limited (16–235) range.
     pub full_range: bool,
+    /// PQ or HLG from an HDR decoder: samples are 10-bit little-endian `u16`s and the matrix is
+    /// BT.2020, whatever `bt709` says.
+    pub hdr: Option<Hdr>,
 }
 
 /// One open file. Not shared: take one from a [`DecoderPool`] per request.
@@ -33,6 +37,7 @@ pub struct VideoDecoder {
     time_base: Rational,
     rotation: u32,
     hwaccel: Option<&'static str>,
+    hdr: bool,
     /// Last decoded frame at or before the previous target, and the one after it.
     cur: Option<frame::Video>,
     next: Option<frame::Video>,
@@ -43,6 +48,14 @@ impl VideoDecoder {
     /// Opens the best video stream of `path`. Call `ffmpeg::init` first.
     pub fn open(path: &Path) -> Result<Self, Error> {
         Self::open_with(path, true)
+    }
+
+    /// Like [`Self::open`], but PQ and HLG frames keep 10 bits (see [`Frame::hdr`]).
+    pub fn open_hdr(path: &Path) -> Result<Self, Error> {
+        Ok(Self {
+            hdr: true,
+            ..Self::open(path)?
+        })
     }
 
     /// Like [`Self::open`]; with `hw`, tries a hardware device and falls back to software if the
@@ -79,6 +92,7 @@ impl VideoDecoder {
             stream: stream.index(),
             time_base: stream.time_base(),
             rotation: crate::probe::rotation(&stream),
+            hdr: false,
             decoder,
             input,
             cur: None,
@@ -136,7 +150,10 @@ impl VideoDecoder {
         match f(self) {
             Err(e) if self.hwaccel.is_some() && e != Error::Eof => {
                 tracing::warn!(error = %e, path = %self.path.display(), "hw decode failed; using software");
-                *self = Self::open_with(&self.path, false)?;
+                *self = Self {
+                    hdr: self.hdr,
+                    ..Self::open_with(&self.path, false)?
+                };
                 f(self)
             }
             r => r,
@@ -158,7 +175,7 @@ impl VideoDecoder {
         } else {
             cur
         };
-        let mut frame = upright(&to_i420(cur)?, self.rotation);
+        let mut frame = upright(&to_i420(cur, self.hdr)?, self.rotation);
         frame.pts = time;
         Ok(frame)
     }
@@ -240,8 +257,16 @@ fn pts(f: &frame::Video) -> i64 {
     f.timestamp().or(f.pts()).unwrap_or(0)
 }
 
-fn to_i420(f: &frame::Video) -> Result<Frame, Error> {
+/// With `hdr`, PQ and HLG frames come out 10-bit; everything else is 8-bit.
+fn to_i420(f: &frame::Video, hdr: bool) -> Result<Frame, Error> {
     let (w, h) = (f.width(), f.height());
+    let hdr = hdr
+        .then(|| Hdr::from_transfer(f.color_transfer_characteristic().name()?))
+        .flatten();
+    let (want, bytes) = match hdr {
+        Some(_) => (Pixel::YUV420P10LE, 2),
+        None => (Pixel::YUV420P, 1),
+    };
     let converted;
     // Untagged: BT.709 for HD, BT.601 for SD, as players guess.
     let bt709 = match f.color_space() {
@@ -256,29 +281,21 @@ fn to_i420(f: &frame::Video) -> Result<Frame, Error> {
     );
     let full_range = f.color_range() == Range::JPEG && !jpeg;
     // yuvj420p is I420 already, just tagged full range.
-    let f = if matches!(f.format(), Pixel::YUV420P | Pixel::YUVJ420P) {
+    let f = if f.format() == want || hdr.is_none() && f.format() == Pixel::YUVJ420P {
         f
     } else {
         // shortcut: a scaler per frame (it isn't Send, so can't live in the pooled decoder);
         // cache one per decode call if non-4:2:0 sources (ProRes) show up hot in profiles.
-        let mut sws = scaling::Context::get(
-            f.format(),
-            w,
-            h,
-            Pixel::YUV420P,
-            w,
-            h,
-            scaling::Flags::POINT,
-        )?;
+        let mut sws = scaling::Context::get(f.format(), w, h, want, w, h, scaling::Flags::POINT)?;
         let mut out = frame::Video::empty();
         sws.run(f, &mut out)?;
         converted = out;
         &converted
     };
     let plane = |i: usize, pw: usize, ph: usize| {
-        let stride = f.stride(i);
+        let (stride, row) = (f.stride(i), pw * bytes);
         (0..ph)
-            .flat_map(|y| &f.data(i)[y * stride..y * stride + pw])
+            .flat_map(|y| &f.data(i)[y * stride..y * stride + row])
             .copied()
             .collect()
     };
@@ -294,6 +311,7 @@ fn to_i420(f: &frame::Video) -> Result<Frame, Error> {
         ],
         bt709,
         full_range,
+        hdr,
     })
 }
 
@@ -304,16 +322,9 @@ fn upright(f: &Frame, rotation: u32) -> Frame {
     }
     let (w, h) = (f.width as usize, f.height as usize);
     let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
-    let turn = |p: &[u8], w: usize, h: usize| -> Vec<u8> {
-        let (ow, oh) = if rotation == 180 { (w, h) } else { (h, w) };
-        (0..oh)
-            .flat_map(|y| (0..ow).map(move |x| (x, y)))
-            .map(|(x, y)| match rotation {
-                90 => p[(h - 1 - x) * w + y],
-                180 => p[(h - 1 - y) * w + (w - 1 - x)],
-                _ => p[x * w + (w - 1 - y)],
-            })
-            .collect()
+    let plane = |p: &[u8], w, h| match f.hdr {
+        Some(_) => turn(p.as_chunks::<2>().0, w, h, rotation).into_flattened(),
+        None => turn(p, w, h, rotation),
     };
     let (width, height) = if rotation == 180 {
         (f.width, f.height)
@@ -325,12 +336,25 @@ fn upright(f: &Frame, rotation: u32) -> Frame {
         width,
         height,
         planes: [
-            turn(&f.planes[0], w, h),
-            turn(&f.planes[1], cw, ch),
-            turn(&f.planes[2], cw, ch),
+            plane(&f.planes[0], w, h),
+            plane(&f.planes[1], cw, ch),
+            plane(&f.planes[2], cw, ch),
         ],
         ..*f
     }
+}
+
+/// Turns a `w`×`h` plane of samples clockwise by `rotation` degrees.
+fn turn<T: Copy>(p: &[T], w: usize, h: usize, rotation: u32) -> Vec<T> {
+    let (ow, oh) = if rotation == 180 { (w, h) } else { (h, w) };
+    (0..oh)
+        .flat_map(|y| (0..ow).map(move |x| (x, y)))
+        .map(|(x, y)| match rotation {
+            90 => p[(h - 1 - x) * w + y],
+            180 => p[(h - 1 - y) * w + (w - 1 - x)],
+            _ => p[x * w + (w - 1 - y)],
+        })
+        .collect()
 }
 
 // shortcut: fixed caps of 2 idle decoders per asset and 8 assets (LRU), so a long timeline doesn't
@@ -350,9 +374,18 @@ pub struct DecoderPool {
     /// Submitted requests by path and time.
     live: Mutex<HashMap<String, Request>>,
     seq: std::sync::atomic::AtomicU64,
+    hdr: bool,
 }
 
 impl DecoderPool {
+    /// A pool of [`VideoDecoder::open_hdr`] decoders, for preview and export.
+    pub fn hdr() -> Self {
+        Self {
+            hdr: true,
+            ..Self::default()
+        }
+    }
+
     /// Decodes on the calling thread with an idle decoder for `path`, opening one if none is free.
     pub fn frame_at(&self, path: &Path, t: Time) -> Result<Frame, Error> {
         self.with(path, |d| d.frame_at(t))
@@ -377,6 +410,7 @@ impl DecoderPool {
             .and_then(|(_, v)| v.pop());
         let mut dec = match idle {
             Some(d) => d,
+            None if self.hdr => VideoDecoder::open_hdr(path)?,
             None => VideoDecoder::open(path)?,
         };
         let frame = f(&mut dec);
@@ -455,6 +489,7 @@ mod tests {
             planes: [vec![1, 2, 3, 4], vec![5], vec![6]],
             bt709: true,
             full_range: false,
+            hdr: None,
         };
         assert_eq!(upright(&f, 90).planes[0], [3, 1, 4, 2]);
         assert_eq!(upright(&f, 180).planes[0], [4, 3, 2, 1]);
@@ -469,6 +504,35 @@ mod tests {
         assert_eq!((r.width, r.height), (2, 4));
         assert_eq!(r.planes[0], [4, 0, 5, 1, 6, 2, 7, 3]);
         assert_eq!(r.planes[1].len(), 2);
+        // 10-bit samples turn as pairs of bytes.
+        let deep = Frame {
+            planes: [vec![1, 10, 2, 20, 3, 30, 4, 40], vec![0; 2], vec![0; 2]],
+            hdr: Some(Hdr::Pq),
+            ..f
+        };
+        assert_eq!(upright(&deep, 90).planes[0], [3, 30, 1, 10, 4, 40, 2, 20]);
+    }
+
+    #[test]
+    fn hdr_decoders_keep_ten_bits() {
+        crate::ffmpeg::init().unwrap();
+        let path = std::env::temp_dir().join(format!("jvid-decode-pq-{}.mkv", std::process::id()));
+        crate::test_media::pq_clip(&path, &[26.0, 1000.0]).unwrap();
+        let deep = VideoDecoder::open_hdr(&path)
+            .unwrap()
+            .frame_at(Time(0))
+            .unwrap();
+        let sdr = DecoderPool::default().frame_at(&path, Time(0)).unwrap();
+        let pooled = DecoderPool::hdr().frame_at(&path, Time(0)).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!((deep.hdr, pooled.hdr), (Some(Hdr::Pq), Some(Hdr::Pq)));
+        let y = |x: usize| u16::from_le_bytes([deep.planes[0][2 * x], deep.planes[0][2 * x + 1]]);
+        let code = crate::test_media::pq_code;
+        assert_eq!((y(0), y(16)), (code(26.0), code(1000.0)));
+        assert_eq!(deep.planes[1][..2], 512u16.to_le_bytes());
+        assert_eq!(deep.planes[0].len(), 32 * 16 * 2);
+        // Other decoders (thumbnails, proxies) stay 8-bit.
+        assert_eq!((sdr.hdr, sdr.planes[0].len()), (None, 32 * 16));
     }
 
     /// Deterministic xorshift, so a failure reproduces.
