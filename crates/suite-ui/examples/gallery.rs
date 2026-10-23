@@ -6,8 +6,8 @@ use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{
-    Button, ButtonKind, Checkbox, DragField, Dropdown, SectionHeader, Segmented, State, TextInput,
-    Timecode,
+    Button, ButtonKind, Checkbox, DragField, Dropdown, KeyButton, Keyed, SectionHeader, Segmented,
+    Slider, State, TextInput, Timecode,
 };
 
 /// The gallery's demo labels; the widgets' own strings are in suite-ui's catalog.
@@ -44,6 +44,7 @@ pub struct Gallery {
     text: String,
     search: String,
     value: f64,
+    level: f64,
     choice: usize,
     segment: usize,
     checked: bool,
@@ -55,6 +56,7 @@ impl Gallery {
     pub fn new() -> Self {
         Self {
             open: true,
+            level: 0.5,
             frame: 30 * 72 + 8,
             ..Self::default()
         }
@@ -228,6 +230,34 @@ fn states(ui: &mut egui::Ui, g: &mut Gallery) {
             ui.add(Checkbox::new(&mut g.checked, tr!("demo.live")));
             ui.end_row();
 
+            ui.label(tr!("row.slider"));
+            for (_, s) in STATES {
+                ui.allocate_ui(egui::vec2(120.0, size::CONTROL), |ui| {
+                    ui.add(Slider::new(&mut g.level, 0.0..=1.0, tr!("demo.scale")).state(s));
+                });
+            }
+            ui.allocate_ui(egui::vec2(120.0, size::CONTROL), |ui| {
+                ui.add(Slider::new(&mut g.value, -100.0..=100.0, tr!("demo.scale")).centred(true));
+            });
+            ui.end_row();
+
+            ui.label(tr!("row.keyframe"));
+            for (_, s) in STATES {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    ui.add(Button::icon(icon::UNDO, tr!("demo.reset")).small().state(s));
+                    ui.add(KeyButton::previous(tr!("demo.previous")).state(s));
+                    ui.add(KeyButton::next(tr!("demo.next")).state(s));
+                    ui.add(KeyButton::diamond(Keyed::Static, tr!("demo.animate")).state(s));
+                });
+            }
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                ui.add(KeyButton::diamond(Keyed::Animated, tr!("demo.animate")));
+                ui.add(KeyButton::diamond(Keyed::Here, tr!("demo.animate")));
+            });
+            ui.end_row();
+
             ui.label(tr!("row.section"));
             for (_, s) in STATES {
                 ui.allocate_ui(egui::vec2(120.0, size::HEADER), |ui| {
@@ -251,6 +281,18 @@ fn inspector(ui: &mut egui::Ui, g: &mut Gallery) {
             );
             ui.add(DragField::new(&mut g.value).prefix(verbatim("X")));
             ui.add(DragField::new(&mut g.value).prefix(verbatim("Y")));
+        });
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = space::S4;
+            ui.allocate_ui_with_layout(
+                egui::vec2(size::INSPECTOR_LABEL, size::CONTROL),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| ui.label(egui::RichText::new(tr!("demo.scale")).color(color::INK_2)),
+            );
+            let mut pct = g.level * 400.0;
+            ui.add(DragField::new(&mut pct).suffix("%").width(64.0));
+            ui.add(Slider::new(&mut pct, 0.0..=400.0, tr!("demo.scale")));
+            g.level = pct / 400.0;
         });
     }
     ui.horizontal(|ui| {
