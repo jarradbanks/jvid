@@ -231,3 +231,40 @@ fn snapshots() {
         }
     }
 }
+
+#[test]
+fn popup_border_is_one_physical_pixel() {
+    if !common::gpu() {
+        return;
+    }
+    for ppp in SCALES {
+        let mut fresh = true;
+        let mut h = Harness::builder()
+            .with_size([120.0, 80.0])
+            .with_pixels_per_point(ppp)
+            .wgpu()
+            .build_ui(move |ui| {
+                if common::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                ui.painter()
+                    .rect_filled(ui.ctx().content_rect(), 0.0, color::GROUND);
+                // The frame egui's dropdown and chevron menus use.
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(80.0, 40.0));
+                });
+            });
+        h.run();
+        let img = h.render().expect("render");
+        let y = (30.0 * ppp) as u32;
+        // Left to right: Ground, the border, then Raised fill. Anything else is a blended second row.
+        let border: Vec<u32> = (0..img.width() / 2)
+            .filter(|&x| {
+                let p = img.get_pixel(x, y);
+                let c = Color32::from_rgb(p[0], p[1], p[2]);
+                !near(c, color::GROUND) && !near(c, color::RAISED)
+            })
+            .collect();
+        assert_eq!(border.len(), 1, "{ppp}x popup border columns {border:?}");
+    }
+}
