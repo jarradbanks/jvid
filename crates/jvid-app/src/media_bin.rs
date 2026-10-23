@@ -111,6 +111,8 @@ pub struct BinResponse {
     pub open: Option<AssetId>,
     /// Add this effect (by file stem) to the selected clips.
     pub apply_effect: Option<String>,
+    /// The Effects or Text tab opened, so their thumbnails want a fresh frame.
+    pub thumbs: bool,
 }
 
 /// A bottom bar like the Media tab's: a wide button, then a `side_w` one at the right.
@@ -214,6 +216,7 @@ impl MediaBin {
                     }
                 }
             });
+        out.thumbs = tab != self.tab && tab != 0;
         self.tab = tab;
         if let Some(id) = self.confirm_remove {
             out.command = out.command.or(self.remove_warning(ui, project, id));

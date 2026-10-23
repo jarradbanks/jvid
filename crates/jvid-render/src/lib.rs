@@ -6,3 +6,4 @@ pub mod lut;
 pub mod preview;
 pub mod solid;
 pub mod text;
+pub mod thumb;

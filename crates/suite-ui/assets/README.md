@@ -4,6 +4,7 @@
 | --- | --- | --- |
 | `Inter-Regular.ttf`, `Inter-Medium.ttf`, `Inter-SemiBold.ttf` | [Inter 4.1](https://github.com/rsms/inter/releases/tag/v4.1), `extras/ttf/` | SIL OFL 1.1, see `Inter-LICENSE.txt` |
 | `lucide-subset.ttf` | [lucide-static 0.460.0](https://www.npmjs.com/package/lucide-static/v/0.460.0), `font/lucide.ttf` | ISC, see `Lucide-LICENSE.txt` |
+| `docs/prototypes/v3/sample.jpg`, bundled by `jvid-render` (`thumb.rs`) as the thumbnail fallback frame | A 480×270 frame of the project owner's own footage, added in 0ff9086 | The owner's; ships under the repository license |
 
 egui can't switch OpenType features on, so tabular figures are frozen into Inter's default glyphs, and both fonts are subset to what the suite uses:
 
