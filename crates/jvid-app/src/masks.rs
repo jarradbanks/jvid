@@ -20,13 +20,23 @@ const HANDLE: f32 = 7.0;
 /// How near the first point a click closes the path being drawn.
 const CLOSE: f32 = 8.0;
 
+/// `c`'s image size upright, as frames decode; `None` for a solid or title, which have no
+/// probe and fill the frame.
+pub fn upright(project: &Project, c: &Clip) -> Option<[f32; 2]> {
+    let p = project.asset(c.asset)?.probe.as_ref()?;
+    let turned = p
+        .streams
+        .iter()
+        .any(|s| matches!(s, jvid_core::model::StreamInfo::Video(v) if v.rotation % 180 == 90));
+    let [w, h] = [p.width? as f32, p.height? as f32];
+    Some(if turned { [h, w] } else { [w, h] })
+}
+
 /// `c`'s image size fitted to the frame: the pixels its masks' points are in.
 pub fn fitted(project: &Project, c: &Clip) -> [f64; 2] {
     let st = project.settings();
     let size = [st.width as f32, st.height as f32];
-    let probe = project.asset(c.asset).and_then(|a| a.probe.as_ref());
-    // A solid or title has no probe and fills the frame.
-    let image = probe.and_then(|p| Some([p.width? as f32, p.height? as f32]));
+    let image = upright(project, c);
     let [_, _, w, h] =
         jvid_render::preview::place(image.unwrap_or(size), [0.0, 0.0, size[0], size[1]], None);
     [w as f64, h as f64]
@@ -112,7 +122,8 @@ fn dragged(
                 let fixed = c - s * size / 2.0;
                 let moved = c + s * size / 2.0 + d[a];
                 p[0][a] = (fixed + moved) / 2.0;
-                p[1][a] = (moved - fixed) * s;
+                // Past the opposite side the box flips rather than going negative.
+                p[1][a] = ((moved - fixed) * s).abs();
             }
         }
         Grab::Point { n, .. } if n % 3 == 0 && alt => {
@@ -160,7 +171,7 @@ fn handles(i: usize, m: &Mask) -> Vec<(Grab, [f64; 2])> {
 /// `m`'s outline in image points.
 fn outline(m: &Mask) -> Vec<[f64; 2]> {
     match m.shape {
-        MaskShape::Bezier => jvid_render::mask::flatten(&m.points)
+        MaskShape::Bezier => jvid_render::mask::flatten(&m.points, jvid_render::mask::STEPS)
             .into_iter()
             .map(|p| p.map(f64::from))
             .collect(),
@@ -316,8 +327,10 @@ fn pen_tool(
     let pressed = r.hovered() && ui.input(|i| i.pointer.primary_pressed());
     let at = ui.input(|i| i.pointer.interact_pos());
     let near_first = n >= 3 && at.is_some_and(|p| p.distance(to_screen(pen.points[0])) <= CLOSE);
-    let mut close = ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) && n >= 3;
-    if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+    // Keys go to a focused text field first, and Enter only closes a path of three points.
+    let free = ui.memory(|m| m.focused().is_none());
+    let mut close = free && n >= 3 && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter));
+    if free && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
         ui.data_mut(|d| d.remove::<Pen>(pen_id()));
         return None;
     }
@@ -346,7 +359,7 @@ fn pen_tool(
     let painter = ui.painter().with_clip_rect(clip);
     let line = Stroke::new(1.0, color::LIGHT_BLUE);
     if n >= 2 {
-        let path = jvid_render::mask::flatten(&pen.points);
+        let path = jvid_render::mask::flatten(&pen.points, jvid_render::mask::STEPS);
         let path = path
             .into_iter()
             .map(|p| to_screen(p.map(f64::from)))
@@ -408,6 +421,9 @@ mod tests {
         // The top-left corner in by (10, 5).
         let p = dragged(side([-1, -1]), &rect, [-50.0, -25.0], [-40.0, -20.0], false);
         assert_eq!(p, [[5.0, 2.5], [90.0, 45.0]]);
+        // The right edge dragged past the left flips the box instead of going negative.
+        let p = dragged(side([1, 0]), &rect, [50.0, 0.0], [-70.0, 0.0], false);
+        assert_eq!(p, [[-60.0, 0.0], [20.0, 50.0]]);
         let p = dragged(side([0, 0]), &rect, [0.0, 0.0], [3.0, 4.0], false);
         assert_eq!(p, [[3.0, 4.0], [100.0, 50.0]]);
 
@@ -497,8 +513,49 @@ mod tests {
         // The right edge's handle, at image x 480: screen 480 + 240.
         drag(&mut h, egui::pos2(720.0, 270.0), egui::pos2(780.0, 270.0));
         assert_eq!(masks(&h)[0].points, [[60.0, 0.0], [1080.0, 540.0]]);
+        // A second drag is a step of its own.
+        drag(&mut h, egui::pos2(780.0, 270.0), egui::pos2(800.0, 270.0));
+        assert_eq!(masks(&h)[0].points, [[80.0, 0.0], [1120.0, 540.0]]);
+        assert!(h.state_mut().undo());
+        assert_eq!(masks(&h)[0].points, [[60.0, 0.0], [1080.0, 540.0]]);
         assert!(h.state_mut().undo());
         assert_eq!(masks(&h), [rect]);
+    }
+
+    #[test]
+    fn an_edge_drag_with_only_size_keyed_keeps_the_centre_at_other_keys() {
+        use jvid_core::keyframe::{Easing, Keyframe, Value};
+        use jvid_core::time::FLICKS_PER_SECOND as S;
+        let rect = Mask::new(MaskShape::Rectangle, vec![[0.0, 0.0], [960.0, 540.0]]);
+        let mut h = harness(Some(rect), false);
+        let id = h.state().project().sequence().tracks()[0].clips()[0].id;
+        let c = h.state().project().sequence().clip(id).unwrap().1.clone();
+        let key = |time, v| Keyframe {
+            time: Time(time),
+            value: Value::Vec2(v),
+            easing: Easing::Linear,
+        };
+        let size = vec![key(0, [960.0, 540.0]), key(2 * S, [960.0, 540.0])];
+        let mut keys = c.keyframes.clone();
+        keys.insert(Mask::point(0, 1), size);
+        let cmd = Command::SetClipProps(vec![(id, c.transform.clone(), keys)]);
+        h.state_mut().apply(cmd).unwrap();
+        h.run();
+        drag(&mut h, egui::pos2(720.0, 270.0), egui::pos2(780.0, 270.0));
+        let c = h.state().project().sequence().clip(id).unwrap().1;
+        let centre: Vec<_> = c.keyframes[&Mask::point(0, 0)]
+            .iter()
+            .map(|k| (k.time.0, k.value))
+            .collect();
+        let v = Value::Vec2;
+        assert_eq!(
+            centre,
+            [
+                (0, v([0.0, 0.0])),
+                (S, v([60.0, 0.0])),
+                (2 * S, v([0.0, 0.0]))
+            ]
+        );
     }
 
     #[test]

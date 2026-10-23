@@ -12,12 +12,12 @@ const MAX_MASKS: usize = 8;
 const MAX_POINTS: usize = 512;
 /// Floats in the uniform: `info`, then 3 vec4s per mask, then 2 vertices per vec4.
 const FLOATS: usize = 4 + MAX_MASKS * 12 + MAX_POINTS * 2;
-/// Straight segments per curved bezier span.
-const STEPS: usize = 16;
+/// Straight segments per curved bezier span, at most.
+pub const STEPS: usize = 16;
 
-/// A closed bezier path (see [`Mask::points`]) as polygon vertices; straight spans add only
-/// their start.
-pub fn flatten(p: &[[f64; 2]]) -> Vec<[f32; 2]> {
+/// A closed bezier path (see [`Mask::points`]) as polygon vertices, `steps` per curved span;
+/// straight spans add only their start.
+pub fn flatten(p: &[[f64; 2]], steps: usize) -> Vec<[f32; 2]> {
     let n = p.len() / 3;
     let add = |a: [f64; 2], b: [f64; 2]| [a[0] + b[0], a[1] + b[1]];
     let mut out = Vec::new();
@@ -28,7 +28,7 @@ pub fn flatten(p: &[[f64; 2]]) -> Vec<[f32; 2]> {
         let (c1, c2) = (add(a, out_handle), add(b, in_handle));
         let steps = match out_handle == [0.0; 2] && in_handle == [0.0; 2] {
             true => 1,
-            false => STEPS,
+            false => steps,
         };
         for s in 0..steps {
             let t = s as f64 / steps as f64;
@@ -53,8 +53,14 @@ fn uniform(masks: &[Mask], fitted: [f32; 2], aa: f32) -> Option<Vec<f32>> {
         }
         let (shape, rect, first, count) = match (m.shape, &m.points[..]) {
             (MaskShape::Bezier, p) => {
-                let flat = flatten(p);
-                if flat.len() < 3 || points.len() + flat.len() > MAX_POINTS {
+                // A long path shares out what's left of the budget, less smooth but drawn.
+                let spans = p.len() / 3;
+                let left = MAX_POINTS - points.len();
+                if spans == 0 || spans > left {
+                    continue;
+                }
+                let flat = flatten(p, STEPS.min(left / spans));
+                if flat.len() < 3 {
                     continue;
                 }
                 let first = points.len();
@@ -163,7 +169,10 @@ impl Masker {
         let [_, _, fw, fh] = place(image, [0.0, 0.0, frame[0], frame[1]], None);
         let k = (fw * target[0] / frame[0] / image[0]).max(1.0);
         let (w, h) = ((image[0] * k).round() as u32, (image[1] * k).round() as u32);
-        let data = uniform(masks, [fw, fh], fw / w as f32)?;
+        // Fitted pixels per output pixel: the mask texture's, or the drawn frame's when that's
+        // coarser (a half-size preview, or a 4K clip in a 1080 project).
+        let aa = (fw / w as f32).max(frame[0] / target[0]);
+        let data = uniform(masks, [fw, fh], aa)?;
         if self.pool.len() <= slot {
             self.pool.resize_with(slot + 1, || None);
         }
@@ -277,10 +286,29 @@ mod tests {
         assert_eq!(u[at..at + 8], [0.0, 0.0, 10.0, 0.0, 10.0, 10.0, 0.0, 10.0]);
         // A curved span flattens into STEPS points that start at its vertex and stay on it.
         path[2] = [5.0, -5.0];
-        let flat = flatten(&path);
+        let flat = flatten(&path, STEPS);
         assert_eq!(flat.len(), 3 + STEPS);
         assert_eq!(flat[0], [0.0, 0.0]);
         assert_eq!(flat[STEPS], [10.0, 0.0]);
         assert!(flat[1..STEPS].iter().all(|p| p[1] < 0.0), "bulges up");
+    }
+
+    #[test]
+    fn a_path_past_the_vertex_budget_masks_with_fewer_steps() {
+        // 64 curved spans would flatten to 1024 vertices at full smoothness.
+        let path: Vec<[f64; 2]> = (0..64)
+            .flat_map(|k| {
+                let (sin, cos) = (k as f64 / 64.0 * std::f64::consts::TAU).sin_cos();
+                [
+                    [cos * 100.0, sin * 100.0],
+                    [sin * 5.0, -cos * 5.0],
+                    [-sin * 5.0, cos * 5.0],
+                ]
+            })
+            .collect();
+        let m = Mask::new(MaskShape::Bezier, path);
+        let u = uniform(&[m], [1920.0, 1080.0], 1.0).unwrap();
+        assert_eq!(u[2], 1.0, "the path still masks");
+        assert_eq!(u[4..7], [2.0, 0.0, (64 * (MAX_POINTS / 64)) as f32]);
     }
 }

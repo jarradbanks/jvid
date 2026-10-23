@@ -412,10 +412,27 @@ fn set_field(clips: &[&Clip], name: &str, i: usize, f: impl Fn(f64) -> f64, t: T
     })
 }
 
-/// Sets each of `names` to its value in `x` on every clip, keying animated ones at `t`.
+/// Sets each of `names` to its value in `x` on every clip, keying animated ones at `t`. Once
+/// a clip animates any of them it keys them all, a static one first at the others' key times
+/// with its old value, so a group such as a mask's centre and size moves together.
 pub fn set_props(clips: &[&Clip], names: &[&str], x: &Transform, t: Time) -> Command {
     rewrite(clips, |c, st, keys| {
+        let times: std::collections::BTreeSet<Time> = names
+            .iter()
+            .filter_map(|n| keys.get(*n))
+            .flatten()
+            .map(|k| k.time)
+            .collect();
         for name in names {
+            if !times.is_empty() && !animated(c, name) {
+                let v = value(c, name, t);
+                let seed = times.iter().map(|&time| Keyframe {
+                    time,
+                    value: v,
+                    easing: Easing::Linear,
+                });
+                keys.insert(name.to_string(), seed.collect());
+            }
             put(c, st, keys, name, t, get(x, name));
         }
     })
@@ -1228,7 +1245,6 @@ pub fn video_clips<'a>(project: &'a Project, ids: &HashSet<ClipId>) -> Vec<&'a C
     clips
 }
 
-/// Undo gesture for speed drags, xored with the clip id.
 /// A mask shape's name.
 fn shape_name(s: MaskShape) -> &'static str {
     match s {
@@ -1408,7 +1424,9 @@ fn masks_rows(
             {
                 edit = Some(e);
             }
-            for (k, p) in (first + 1..).zip(shape.iter().chain(&props)) {
+            // Shape rows take first + 1 and 2 (a Path row only 1), so props start at 3.
+            let rows = (first + 1..).zip(shape).chain((first + 3..).zip(&props));
+            for (k, p) in rows {
                 if let Some(e) = row(ui, clips, p, t, k, seek) {
                     edit = Some(e);
                 }
@@ -1509,6 +1527,7 @@ fn add_mask_menu(
     }
 }
 
+/// Undo gesture for speed drags, xored with the clip id.
 const SPEED_GESTURE: GestureKey = 0x7370_6565_6400; // "speed"
 
 /// Speed percentage, reverse and ripple for the first selected clip and its links.
@@ -2534,12 +2553,19 @@ mod tests {
         apply(&mut clips, |c| reset_mask(c, 0));
         assert_eq!(clips[0].transform.masks[0], ellipse);
         assert!(clips[0].keyframes.is_empty());
+        // Removing mask 0 renumbers mask 1's keys down.
+        let opacity = Mask::key(1, "opacity");
+        apply(&mut clips, |c| {
+            toggle_animate(c, &[opacity.as_str()], Time(0))
+        });
         apply(&mut clips, |c| {
             restack_masks(c, |o| {
                 o.remove(0);
             })
         });
         assert_eq!(clips[0].transform.masks, [rect]);
+        let keys: Vec<&String> = clips[0].keyframes.keys().collect();
+        assert_eq!(keys, ["mask0.opacity"]);
     }
 
     #[test]
@@ -3297,7 +3323,31 @@ mod tests {
         assert!(masks(&h)[0].invert);
         h.snapshot("inspector_masks");
         assert!(h.state_mut().undo());
+        assert_eq!(masks(&h), std::slice::from_ref(&ellipse));
+        // Mode and a Feather drag are a step each.
+        h.get_by_role_and_label(Role::ComboBox, "Add").click();
+        h.run();
+        h.get_by_role_and_label(Role::Button, "Subtract").click();
+        h.run();
+        assert_eq!(masks(&h)[0].mode, MaskMode::Subtract);
+        assert!(h.state_mut().undo());
+        h.run();
+        let rect = h.get_by_role_and_label(Role::Slider, "Feather").rect();
+        let from = egui::pos2(rect.left() + 2.0, rect.center().y);
+        h.hover_at(from);
+        h.run();
+        h.drag_at(from);
+        h.run();
+        for dx in [10.0, 20.0, 30.0] {
+            h.hover_at(from + vec2(dx, 0.0));
+            h.run();
+        }
+        h.drop_at(from + vec2(30.0, 0.0));
+        h.run();
+        assert!(masks(&h)[0].feather > 0.0);
+        assert!(h.state_mut().undo());
         assert_eq!(masks(&h), [ellipse]);
+        h.run();
         h.get_by_label("More").click();
         h.run();
         h.get_by_role_and_label(Role::Button, "Remove").click();
