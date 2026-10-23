@@ -87,6 +87,12 @@ pub enum Command {
         reverse: bool,
         ripple: bool,
     },
+    /// Ripple deletes each `(clip, start, end)` timeline span from its clip and linked clips
+    /// as one step, or with `speed` splits it out and plays it at that speed instead.
+    CutSpans {
+        spans: Vec<(ClipId, Time, Time)>,
+        speed: Option<f64>,
+    },
     /// Holds the frame shown at `at` for the rest of the clip.
     FreezeFrame {
         id: ClipId,
@@ -252,6 +258,10 @@ impl Command {
                 .iter()
                 .flat_map(|(id, ..)| s.linked(*id))
                 .find_map(|(t, _)| track(t)),
+            Self::CutSpans { spans, .. } => spans
+                .iter()
+                .flat_map(|(id, ..)| s.linked(*id))
+                .find_map(|(t, _)| track(t)),
             Self::RemoveClips { ids, .. }
             | Self::LinkClips { ids, .. }
             | Self::SetClipsEnabled { ids, .. }
@@ -372,6 +382,10 @@ impl Command {
             }
             Self::Split { ids, at } => {
                 s.split_at(&ids, at)?;
+                Created::Nothing
+            }
+            Self::CutSpans { spans, speed } => {
+                s.cut_spans(spans, speed)?;
                 Created::Nothing
             }
             Self::CloseGap { track, at } => {
@@ -1706,6 +1720,39 @@ mod tests {
             })
             .is_err()
         );
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+    }
+
+    #[test]
+    fn cut_spans_ripple_or_speed_up_in_one_step() {
+        let (mut h, f, [c, _], _) = cut_project();
+        let fr = |n: i64| Time(f.0 * n);
+        let before = h.project().clone();
+        let both = |v: Vec<(i64, i64, i64)>| vec![v.clone(), v];
+        // Given in any order; the linked audio follows.
+        let spans = vec![(c, fr(15), fr(20)), (c, fr(30), fr(35))];
+        h.apply(Command::CutSpans { spans, speed: None }).unwrap();
+        assert_eq!(
+            frames(&h, f),
+            both(vec![(5, 10, 20), (15, 25, 35), (25, 40, 50), (50, 60, 70)])
+        );
+        assert_eq!(h.project().sequence().duration(), fr(60));
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+
+        // Ten frames at 2x play in five, so everything after moves five earlier.
+        let spans = vec![(c, fr(15), fr(25))];
+        h.apply(Command::CutSpans {
+            spans,
+            speed: Some(2.0),
+        })
+        .unwrap();
+        assert_eq!(
+            frames(&h, f),
+            both(vec![(5, 10, 20), (15, 20, 30), (20, 30, 50), (55, 60, 70)])
+        );
+        assert_eq!(h.project().sequence().duration(), fr(65));
         assert!(h.undo());
         assert_eq!(h.project(), &before);
     }

@@ -40,6 +40,7 @@ mod keyframes;
 mod markers;
 pub mod menus;
 mod rubber;
+mod silence;
 mod transitions;
 
 /// The undo gesture a track-height drag coalesces under.
@@ -111,6 +112,8 @@ pub struct Timeline {
     pub notice: Option<String>,
     /// Keyframe lanes: expanded clips, picked keys and their clipboard.
     keys: keyframes::Keys,
+    /// The Detect Silence dialog, while open.
+    silence: Option<silence::Silence>,
 }
 
 /// Snap reach in points.
@@ -168,6 +171,7 @@ impl Default for Timeline {
             reveal: None,
             notice: None,
             keys: keyframes::Keys::default(),
+            silence: None,
         }
     }
 }
@@ -389,6 +393,9 @@ impl Timeline {
             "delete" | "ripple_delete" if self.selected.is_empty() && self.gap.is_some() => {
                 let (track, at) = self.gap.take().expect("checked");
                 self.pending = Some(Command::CloseGap { track, at });
+            }
+            "detect_silence" => {
+                self.silence = silence::Silence::open(project.sequence(), &self.selected);
             }
             "crossfade" | "dip_to_black" | "dip_to_white" => {
                 match self.transition_action(id, project) {
@@ -917,6 +924,13 @@ impl Timeline {
                 ui.separator();
                 ui.checkbox(&mut self.linked_selection, tr!("timeline.linked_selection"));
             });
+        let spans = self.silence_spans(project, ui.ctx());
+        // Each span on every clip it cuts, linked partners included, for the shading.
+        let shaded: Vec<_> = spans
+            .iter()
+            .flatten()
+            .flat_map(|&(id, a, b)| seq.linked(id).into_iter().map(move |(_, c)| (c.id, a, b)))
+            .collect();
         let mut y = lanes.top() - self.vscroll;
         let mut lane_rects = Vec::new();
         // The clip being dragged, its track, and its response.
@@ -960,6 +974,12 @@ impl Timeline {
                 self.paint_clip(
                     ui, &painter, r, lanes, view, clip, asset, track.kind, offline,
                 );
+                // What Detect Silence would take out sinks back toward the ground.
+                for &(_, a, b) in shaded.iter().filter(|s| s.0 == clip.id) {
+                    let x = view.x(a).max(r.left())..=view.x(b).min(r.right());
+                    let dim = color::GROUND.gamma_multiply(0.7);
+                    painter.rect_filled(Rect::from_x_y_ranges(x, r.y_range()), 0.0, dim);
+                }
                 if self.selected.contains(&clip.id) {
                     let corner = CornerRadius::same(radius::SMALL);
                     let stroke = Stroke::new(2.0, color::LIGHT_BLUE);
@@ -1260,11 +1280,45 @@ impl Timeline {
             );
             playhead_head(&painter, pos2(x + line / 2.0, ruler.top()));
         }
+        if let Some(s) = &mut self.silence {
+            let at = pos2(area.right() - space::S16, area.top() - space::S8);
+            let (cmd, open) = s.show(ui, at, spans.as_deref());
+            if !open {
+                self.silence = None;
+            }
+            edit = edit.or(cmd.map(|c| (c, None)));
+        }
         if let Some(id) = self.menu.take() {
             self.action(id, project);
             edit = edit.or(self.pending.take().map(|c| (c, None)));
         }
         edit
+    }
+
+    /// The open Detect Silence dialog's spans, loading the peaks it reads; `None` while it's
+    /// closed or they load.
+    fn silence_spans(
+        &mut self,
+        project: &Project,
+        ctx: &egui::Context,
+    ) -> Option<Vec<silence::Span>> {
+        let s = self.silence.as_ref()?;
+        let seq = project.sequence();
+        // shortcut: a merged clip reads its first stream, as its waveform draws.
+        let key = |c: &Clip| Some((project.asset(c.asset)?, c.stream.unwrap_or(0) as usize));
+        for &id in s.clips() {
+            if let Some((a, nth)) = seq.clip(id).and_then(|(_, c)| key(c)) {
+                self.media.pyramid(ctx, a, nth);
+            }
+        }
+        let media = &self.media;
+        // shortcut: rescans every clip's peaks each frame; cache by settings if hour-long
+        // recordings make the dialog lag.
+        s.spans(seq, &|c| {
+            let (a, nth) = key(c)?;
+            let p = media.peaks.get(&(a.path.clone(), nth))?.as_ref()?;
+            Some(p.finest())
+        })
     }
 
     /// The sequence time under the press origin, as the view stood when it was pressed.
@@ -2072,6 +2126,35 @@ impl Media {
         }
     }
 
+    /// The peaks of audio stream `nth` of `a`, starting to load them if they aren't yet.
+    fn pyramid(&mut self, ctx: &egui::Context, a: &MediaAsset, nth: usize) -> Option<&Pyramid> {
+        for (path, p) in self.peaks_done.lock().unwrap().drain(..) {
+            match p {
+                Some(p) => self.peaks.insert(path, Some(p)),
+                None => self.peaks.remove(&path),
+            };
+        }
+        let path = (a.path.clone(), nth);
+        if !self.peaks.contains_key(&path) {
+            let caches = self.caches.as_ref()?;
+            self.peaks.insert(path.clone(), None);
+            let (done, ctx, key) = (self.peaks_done.clone(), ctx.clone(), path.clone());
+            caches
+                .peaks
+                .submit(&caches.jobs, path.0.clone(), nth, move |r| match r {
+                    Ok(p) => {
+                        done.lock().unwrap().push((key.clone(), Some(p)));
+                        ctx.request_repaint();
+                    }
+                    Err(e) => {
+                        tracing::warn!("waveform for {}: {e}", key.0.display());
+                        done.lock().unwrap().push((key.clone(), None));
+                    }
+                });
+        }
+        self.peaks.get(&path)?.as_ref()
+    }
+
     /// One min/max line per point across `rect`, in a lighter tint of the clip colour.
     fn waveform(
         &mut self,
@@ -2083,34 +2166,8 @@ impl Media {
         nth: usize,
         source: &dyn Fn(f32) -> Time,
     ) {
-        for (path, p) in self.peaks_done.lock().unwrap().drain(..) {
-            match p {
-                Some(p) => self.peaks.insert(path, Some(p)),
-                None => self.peaks.remove(&path),
-            };
-        }
-        let pyramid = match self.peaks.get(&(a.path.clone(), nth)) {
-            Some(Some(p)) => p,
-            Some(None) => return,
-            None => {
-                let Some(caches) = &self.caches else { return };
-                let path = (a.path.clone(), nth);
-                self.peaks.insert(path.clone(), None);
-                let (done, ctx) = (self.peaks_done.clone(), ui.ctx().clone());
-                caches
-                    .peaks
-                    .submit(&caches.jobs, path.0.clone(), nth, move |r| match r {
-                        Ok(p) => {
-                            done.lock().unwrap().push((path.clone(), Some(p)));
-                            ctx.request_repaint();
-                        }
-                        Err(e) => {
-                            tracing::warn!("waveform for {}: {e}", path.0.display());
-                            done.lock().unwrap().push((path.clone(), None));
-                        }
-                    });
-                return;
-            }
+        let Some(pyramid) = self.pyramid(ui.ctx(), a, nth) else {
+            return;
         };
         let sample = |t: Time| {
             (t.0 as i128 * jvid_media::audio::SAMPLE_RATE as i128 / FLICKS_PER_SECOND as i128)

@@ -42,6 +42,11 @@ impl Pyramid {
         Self { levels }
     }
 
+    /// Peaks of [`BUCKET`] sample frames each, the full resolution scanned.
+    pub fn finest(&self) -> &[Peak] {
+        &self.levels[0]
+    }
+
     /// One peak per pixel for `width` pixels spanning sample frames `[start, end)`. Pixels past
     /// the end of the audio are `[0, 0]`.
     pub fn query(&self, start: i64, end: i64, width: usize) -> Vec<Peak> {

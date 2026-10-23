@@ -50,6 +50,7 @@ link = "Link/Unlink"
 enable = "Enable/Disable"
 reverse = "Reverse"
 freeze_frame = "Freeze Frame at Playhead"
+detect_silence = "Detect Silence…"
 crossfade = "Add Crossfade"
 dip_to_black = "Add Dip to Black"
 dip_to_white = "Add Dip to White"
@@ -420,6 +421,25 @@ add_audio_track = "Add Audio Track"
 crossfade = "Crossfade"
 dip_to_black = "Dip to Black"
 dip_to_white = "Dip to White"
+
+# Detect Silence (clip right-click menu): cut or speed up quiet stretches.
+[silence]
+title = "Detect Silence"
+threshold = "Threshold"
+min_len = "Minimum Length"
+padding = "Padding"
+speed = "Speed"
+reading = "Reading audio…"
+none = "No silence this quiet and long"
+found.one = "{count} region, {seconds} s in all"
+found.other = "{count} regions, {seconds} s in all"
+cut = "Cut"
+cut_tooltip = "Ripple delete every region"
+speed_up = "Speed Up"
+speed_up_tooltip = "Play every region at the speed above"
+# Unit suffixes after the Threshold and length fields.
+db_suffix = " dB"
+seconds_suffix = " s"
 
 # Zoom to region, drawn with Alt-drag on the preview.
 [zoom]
