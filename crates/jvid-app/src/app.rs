@@ -301,7 +301,6 @@ impl App {
                 (FileAction::Open, tr!("menu.open")),
                 (FileAction::Save, tr!("menu.save")),
                 (FileAction::SaveAs, tr!("menu.save_as")),
-                (FileAction::Preferences, tr!("menu.settings")),
                 (FileAction::Settings, tr!("menu.project_settings")),
                 (FileAction::Shortcuts, tr!("menu.shortcuts")),
             ] {
@@ -384,7 +383,7 @@ impl App {
         button.rect.right()
     }
 
-    /// The Edit menu, its left edge at `left`: each row runs its keymap action.
+    /// The Edit menu, its left edge at `left`: each row runs its keymap action, then Preferences.
     fn edit_menu(&mut self, ui: &mut Ui, left: f32) {
         let button = menu_button(ui, tr!("menu.edit"), left);
         let mut picked = None;
@@ -403,6 +402,10 @@ impl App {
                     picked = Some(id);
                 }
             }
+            ui.separator();
+            if ui.button(tr!("menu.preferences")).clicked() {
+                self.preferences.open();
+            }
         });
         if let Some(id) = picked {
             self.run_action(id, true);
@@ -419,7 +422,6 @@ impl App {
             FileAction::SaveAs => {
                 self.save(true);
             }
-            FileAction::Preferences => self.preferences.open(),
             FileAction::Settings => self.settings_dialog.open(self.history.project()),
             FileAction::Shortcuts => self.keymap_editor.open(),
         }
@@ -1067,7 +1069,6 @@ enum FileAction {
     Open,
     Save,
     SaveAs,
-    Preferences,
     Settings,
     Shortcuts,
 }
