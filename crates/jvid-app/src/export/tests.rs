@@ -87,6 +87,233 @@ fn run_now(p: &Project, req: &Request, cancel: bool) -> Result<ProbeInfo, Error>
     r
 }
 
+fn retry_request(name: &str) -> Request {
+    let mut p = preset("YouTube 1080p");
+    p.size = None;
+    p.audio = None;
+    Request {
+        path: out(name),
+        range: (Time(0), secs(1)),
+        preset: p,
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    }
+}
+
+fn with_context<T: Send + 'static>(work: impl FnOnce(&Ctx) -> T + Send + 'static) -> T {
+    let pool = Pool::new(1);
+    let (tx, rx) = channel();
+    let _handle = pool.submit("injected export", Priority::Interactive, move |ctx| {
+        tx.send(work(ctx)).ok();
+    });
+    rx.recv().unwrap()
+}
+
+#[test]
+fn in_progress_hardware_failure_replays_fresh_software_output() {
+    jvid_media::ffmpeg::init().unwrap();
+    let mut req = retry_request("retry-fresh.mkv");
+    req.preset.audio = Some(jvid_core::preset::AudioCodec::Aac);
+    let destination = req.path.clone();
+    let unrelated = req.path.with_extension("mkv.best");
+    std::fs::write(&destination, b"previous output").unwrap();
+    std::fs::write(&unrelated, b"not this attempt").unwrap();
+    let original_options = req.preset.options.clone();
+    let (result, paths) = with_context(move |ctx| {
+        let mut paths = Vec::new();
+        let result = replay(&req, ctx, |attempt| {
+            if let Some(previous) = paths.last() {
+                assert!(
+                    !Path::new(previous).exists(),
+                    "failed attempt already removed"
+                );
+            }
+            paths.push(attempt.path.clone());
+            assert_eq!(std::fs::read(&req.path).unwrap(), b"previous output");
+            if paths.len() == 2 {
+                assert_eq!(
+                    attempt.preset.options.get("encoder").map(String::as_str),
+                    Some("software")
+                );
+            }
+            // Use a real software encoder on every host; inject a VAAPI failure after frames
+            // were submitted. The second attempt must encode from frame zero into a fresh file.
+            let mut p = attempt.preset.clone();
+            p.options.insert("encoder".into(), "software".into());
+            let mut encoder =
+                Encoder::create(&attempt.path, (64, 64), Rate::new(30, 1), &p).unwrap();
+            for i in 0..10 {
+                encoder.video(&vec![(i * 20) as u8; 64 * 64 * 4])?;
+                encoder
+                    .audio(&vec![i as f32 / 20.0; 1600 * 2])
+                    .map_err(err)?;
+                if paths.len() == 1 && i == 3 {
+                    std::fs::write(
+                        attempt.path.with_extension("mkv.best"),
+                        b"saved partial pass",
+                    )
+                    .unwrap();
+                    return Err(EncodeError::Vaapi((-5).into()).into());
+                }
+            }
+            encoder.finish()?;
+            Ok(())
+        });
+        assert_eq!(
+            req.preset.options, original_options,
+            "request settings are unchanged"
+        );
+        (result, paths)
+    });
+    result.unwrap();
+    assert_eq!(paths.len(), 2);
+    for path in paths {
+        assert!(
+            !path.parent().unwrap().exists(),
+            "attempt directory cleaned up"
+        );
+    }
+    let info = jvid_media::probe::probe(&destination).unwrap();
+    assert_eq!((info.width, info.height), (Some(64), Some(64)));
+    assert_eq!((info.audio_streams, info.sample_rate), (1, Some(48_000)));
+    let rate = Rate::new(30, 1);
+    assert!((info.duration - rate.time_floor(10)).0.abs() <= rate.time_floor(1).0);
+    let mut decoder = VideoDecoder::open(&destination).unwrap();
+    let origin = decoder.frame_at(Time(0)).unwrap().pts;
+    let mut previous = None;
+    for i in 0..10 {
+        // MKV rounds timestamps to milliseconds and shifts video by AAC's priming delay.
+        let want = origin + rate.time_floor(i);
+        let frame = decoder
+            .frame_at(want + Time(FLICKS_PER_SECOND / 1000))
+            .unwrap();
+        assert!(
+            (frame.pts - want).0.abs() <= FLICKS_PER_SECOND / 1000,
+            "replayed frame {i}"
+        );
+        let value = frame.planes[0][0];
+        if let Some(previous) = previous {
+            assert!(value > previous, "replayed frame {i}");
+        }
+        previous = Some(value);
+    }
+    drop(decoder);
+    let mut audio = AudioDecoder::open(&destination, 0).unwrap();
+    let mut samples = 0;
+    while let Some(chunk) = audio.next_chunk().unwrap() {
+        samples += chunk.samples.len() / 2;
+    }
+    assert!(
+        (16_000..=18_048).contains(&samples),
+        "fresh audio samples: {samples}"
+    );
+    drop(audio);
+    assert_eq!(std::fs::read(&unrelated).unwrap(), b"not this attempt");
+    std::fs::remove_file(destination).unwrap();
+    std::fs::remove_file(unrelated).unwrap();
+}
+
+#[test]
+fn hardware_retry_is_bounded_and_unrelated_errors_do_not_retry() {
+    with_context(|ctx| {
+        for (label, failure, software, expected) in [
+            (
+                "hardware",
+                AttemptError::Vaapi(EncodeError::Vaapi((-5).into())),
+                false,
+                2,
+            ),
+            (
+                "software",
+                AttemptError::Vaapi(EncodeError::Vaapi((-5).into())),
+                true,
+                1,
+            ),
+            (
+                "cancelled",
+                AttemptError::Export(Error::Cancelled),
+                false,
+                1,
+            ),
+            (
+                "io",
+                AttemptError::from(EncodeError::Other((-5).into())),
+                false,
+                1,
+            ),
+            (
+                "render",
+                AttemptError::from("render failed".to_string()),
+                false,
+                1,
+            ),
+            (
+                "format",
+                AttemptError::from("invalid output format".to_string()),
+                false,
+                1,
+            ),
+        ] {
+            let mut req = retry_request(&format!("retry-{label}.mp4"));
+            if software {
+                req.preset
+                    .options
+                    .insert("encoder".into(), "software".into());
+            }
+            std::fs::write(&req.path, b"keep").unwrap();
+            let mut calls = 0;
+            let mut attempt_paths = Vec::new();
+            let result: Result<(), _> = replay(&req, ctx, |attempt| {
+                calls += 1;
+                attempt_paths.push(attempt.path.clone());
+                std::fs::write(&attempt.path, b"partial").unwrap();
+                Err(match &failure {
+                    AttemptError::Vaapi(e) => AttemptError::Vaapi(*e),
+                    AttemptError::Export(e) => AttemptError::Export(e.clone()),
+                })
+            });
+            assert!(result.is_err(), "{label}");
+            if label == "cancelled" {
+                assert_eq!(result, Err(Error::Cancelled));
+            }
+            assert_eq!(calls, expected, "{label}");
+            assert_eq!(std::fs::read(&req.path).unwrap(), b"keep", "{label}");
+            assert!(attempt_paths.iter().all(|p| !p.parent().unwrap().exists()));
+            std::fs::remove_file(&req.path).unwrap();
+        }
+    });
+}
+
+#[test]
+fn cancellation_during_hardware_failure_prevents_retry() {
+    let req = retry_request("retry-cancel-race.mp4");
+    std::fs::write(&req.path, b"keep").unwrap();
+    let destination = req.path.clone();
+    let pool = Pool::new(1);
+    let (ready_tx, ready_rx) = channel();
+    let (continue_tx, continue_rx) = channel();
+    let (done_tx, done_rx) = channel();
+    let handle = pool.submit("cancel hardware retry", Priority::Interactive, move |ctx| {
+        let mut calls = 0;
+        let result: Result<(), _> = replay(&req, ctx, |attempt| {
+            calls += 1;
+            assert_eq!(calls, 1);
+            std::fs::write(&attempt.path, b"partial").unwrap();
+            ready_tx.send(()).unwrap();
+            continue_rx.recv().unwrap();
+            Err(EncodeError::Vaapi((-5).into()).into())
+        });
+        done_tx.send((result, calls)).unwrap();
+    });
+    ready_rx.recv().unwrap();
+    handle.cancel();
+    continue_tx.send(()).unwrap();
+    assert_eq!(done_rx.recv().unwrap(), (Err(Error::Cancelled), 1));
+    assert_eq!(std::fs::read(&destination).unwrap(), b"keep");
+    std::fs::remove_file(destination).unwrap();
+}
+
 /// Exports 1 s to 2 s to each container: the output lasts the range, its first and last frames
 /// are timeline frames 30 and 59, and the tone starts within a frame of 0.5 s in.
 #[test]
@@ -233,7 +460,7 @@ fn cancelled_export_leaves_no_file() {
         return eprintln!("skipping export test: needs the corpus and a software adapter");
     };
     let path = out("cancel.mp4");
-    std::fs::write(&path, b"partial").unwrap();
+    let _ = std::fs::remove_file(&path);
     let req = Request {
         path: path.clone(),
         range: (Time(0), secs(10)),
@@ -244,6 +471,19 @@ fn cancelled_export_leaves_no_file() {
     };
     assert_eq!(run_now(&project(&dir), &req, true), Err(Error::Cancelled));
     assert!(!path.exists());
+}
+
+#[test]
+fn cancelled_export_preserves_existing_file() {
+    let Some(_) = device() else { return };
+    let req = retry_request("cancel-keep.mp4");
+    std::fs::write(&req.path, b"keep").unwrap();
+    assert_eq!(
+        run_now(&Project::default(), &req, true),
+        Err(Error::Cancelled)
+    );
+    assert_eq!(std::fs::read(&req.path).unwrap(), b"keep");
+    std::fs::remove_file(req.path).unwrap();
 }
 
 #[test]

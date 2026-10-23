@@ -62,7 +62,12 @@ fn device() -> Option<&'static Device> {
 /// Gives the unopened encoder `ctx` a pool of `width`×`height` NV12-backed VAAPI surfaces.
 /// Returns false (leaving `ctx` untouched) without a device or when the pool fails.
 #[allow(unsafe_code)]
-pub fn attach(ctx: &mut codec::Context, (width, height): (u32, u32)) -> bool {
+pub(crate) fn attach(ctx: &mut codec::Context, (width, height): (u32, u32)) -> bool {
+    // SAFETY: `ctx` is exclusively borrowed and live. Refuse to overwrite an existing owned
+    // reference, even before probing the device, so repeated calls cannot leak a frame pool.
+    if unsafe { !(*ctx.as_ptr()).hw_frames_ctx.is_null() } {
+        return false;
+    }
     let Some(device) = device() else {
         return false;
     };
@@ -123,6 +128,24 @@ pub fn upload(ctx: &codec::Context, f: &frame::Video) -> Result<frame::Video, Er
     Ok(out)
 }
 
+/// Proves that the opened pool can accept an actual NV12 frame before a muxer writes a header.
+/// The probe is never sent to the encoder, so it cannot affect output timestamps or references.
+pub(crate) fn probe_upload(ctx: &codec::Context, size: (u32, u32)) -> Result<(), Error> {
+    probe_upload_with(ctx, size, upload)
+}
+
+fn probe_upload_with(
+    ctx: &codec::Context,
+    (width, height): (u32, u32),
+    transfer: impl FnOnce(&codec::Context, &frame::Video) -> Result<frame::Video, Error>,
+) -> Result<(), Error> {
+    let mut nv12 = frame::Video::new(ffmpeg_next::format::Pixel::NV12, width, height);
+    // Initialise padding as well as pixels: no uninitialised host data is sent to the driver.
+    nv12.data_mut(0).fill(16);
+    nv12.data_mut(1).fill(128);
+    transfer(ctx, &nv12).map(drop)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,5 +157,36 @@ mod tests {
         let ctx = codec::Context::new_with_codec(c);
         let f = frame::Video::new(ffmpeg_next::format::Pixel::NV12, 4, 4);
         assert!(upload(&ctx, &f).is_err());
+    }
+
+    #[test]
+    fn startup_upload_failure_is_propagated() {
+        crate::ffmpeg::init().unwrap();
+        let ctx = codec::Context::new();
+        let result = probe_upload_with(&ctx, (64, 32), |_, f| {
+            assert_eq!(f.format(), ffmpeg_next::format::Pixel::NV12);
+            assert_eq!((f.width(), f.height()), (64, 32));
+            assert!(f.data(0).iter().all(|b| *b == 16));
+            assert!(f.data(1).iter().all(|b| *b == 128));
+            Err(Error::External)
+        });
+        assert_eq!(result, Err(Error::External));
+    }
+
+    #[test]
+    #[allow(unsafe_code)]
+    fn attach_preserves_an_existing_reference_without_a_device() {
+        let mut ctx = codec::Context::new();
+        // SAFETY: a fresh generic AVBufferRef is sufficient here: attach must reject it without
+        // accessing its data as a frame pool. Ownership passes to ctx, whose drop unrefs it.
+        let reference = unsafe { ffmpeg_next::ffi::av_buffer_alloc(1) };
+        assert!(!reference.is_null());
+        // SAFETY: ctx is exclusively borrowed and has no existing reference.
+        unsafe {
+            (*ctx.as_mut_ptr()).hw_frames_ctx = reference;
+        }
+        assert!(!attach(&mut ctx, (64, 64)));
+        // SAFETY: ctx still owns the live reference; read only, before ctx is dropped.
+        assert_eq!(unsafe { (*ctx.as_ptr()).hw_frames_ctx }, reference);
     }
 }
