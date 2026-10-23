@@ -117,6 +117,7 @@ pub fn hardware() -> &'static [&'static str] {
                     (256, 256),
                     Rate::new(30, 1),
                     false,
+                    false,
                     &BTreeMap::new(),
                 )
                 .is_some()
@@ -135,7 +136,7 @@ fn candidates(
     let (software, pixel, hw) = video_codec(codec);
     let use_hw = options.get("encoder").is_none_or(|e| e != "software");
     // HDR10 is 10-bit: P010 into hardware, except VAAPI, whose upload pool is NV12.
-    let hdr = codec == VideoCodec::Hevc && options.get("hdr").is_some_and(|v| v == "pq");
+    let hdr = is_hdr10(codec, options);
     let (hw_pixel, pixel) = if hdr {
         (Pixel::P010LE, Pixel::YUV420P10LE)
     } else {
@@ -148,9 +149,18 @@ fn candidates(
         .collect()
 }
 
-/// Only HDR10 candidates take 4:2:0 10-bit.
-fn is_hdr10(pixel: Pixel) -> bool {
-    matches!(pixel, Pixel::P010LE | Pixel::YUV420P10LE)
+/// Whether an HDR10 export has an encoder to try: x265 in this build, or a working hardware HEVC
+/// encoder other than VAAPI. Call `ffmpeg::init` first.
+pub fn hdr10_available() -> bool {
+    let pq = BTreeMap::from([("hdr".to_string(), "pq".to_string())]);
+    candidates(VideoCodec::Hevc, hardware(), &pq)
+        .iter()
+        .any(|(n, _)| encoder::find_by_name(n).is_some())
+}
+
+/// The preset asks for HDR10 (`hdr=pq`, set by `Preset::hdr`), which is HEVC only.
+fn is_hdr10(codec: VideoCodec, options: &BTreeMap<String, String>) -> bool {
+    codec == VideoCodec::Hevc && options.get("hdr").is_some_and(|v| v == "pq")
 }
 
 /// HDR10 export carries only the SDR composite (see [`Hdr10`]), so no pixel is brighter than
@@ -192,13 +202,15 @@ fn rate_control(
     }
 }
 
-/// Opens encoder `name` taking `pixel` frames, with the preset's options mapped onto it.
+/// Opens encoder `name` taking `pixel` frames, with the preset's options mapped onto it,
+/// tagged and configured for HDR10 when `hdr`.
 pub(crate) fn open_video(
     name: &str,
     pixel: Pixel,
     (width, height): (u32, u32),
     rate: Rate,
     global: bool,
+    hdr: bool,
     options: &BTreeMap<String, String>,
 ) -> Option<(ffmpeg_next::Codec, encoder::Video)> {
     let c = encoder::find_by_name(name)?;
@@ -219,7 +231,7 @@ pub(crate) fn open_video(
         e.set_format(pixel);
     }
     let mut opts = Dictionary::new();
-    if is_hdr10(pixel) {
+    if hdr {
         e.set_color_primaries(Primaries::BT2020);
         e.set_color_transfer_characteristic(TransferCharacteristic::SMPTE2084);
         e.set_colorspace(Space::BT2020NCL);
@@ -467,6 +479,7 @@ impl Encoder {
             (u32, u32),
             Rate,
             bool,
+            bool,
             &BTreeMap<String, String>,
         ) -> Option<(ffmpeg_next::Codec, encoder::Video)>,
     ) -> Result<Self, Error> {
@@ -478,11 +491,19 @@ impl Encoder {
         let video = match preset.video {
             None => None,
             Some(vc) => {
+                let hdr = is_hdr10(vc, &preset.options);
                 let (name, pixel, codec, enc) = candidates(vc, available, &preset.options)
                     .into_iter()
                     .find_map(|(n, pixel)| {
-                        let (c, e) =
-                            open(n, pixel, (width, height), rate, global, &preset.options)?;
+                        let (c, e) = open(
+                            n,
+                            pixel,
+                            (width, height),
+                            rate,
+                            global,
+                            hdr,
+                            &preset.options,
+                        )?;
                         Some((n, pixel, c, e))
                     })
                     .ok_or(Error::EncoderNotFound)?;
@@ -501,7 +522,7 @@ impl Encoder {
                     |to| scaling::Context::get(Pixel::RGBA, src.0, src.1, to, width, height, flags);
                 let convert = if vc == VideoCodec::Gif {
                     Convert::Palette(palette_graph(src, (width, height), frame_tb)?)
-                } else if is_hdr10(pixel) {
+                } else if hdr {
                     let resize = (src != (width, height)).then(|| scale(Pixel::RGBA));
                     Convert::Pq(resize.transpose()?, Box::new(Hdr10::new()))
                 } else {
@@ -798,13 +819,13 @@ mod tests {
             Rate::new(30, 1),
             &small_preset(),
             &["h264_vaapi"],
-            |name, pixel, size, rate, global, options| {
+            |name, pixel, size, rate, global, hdr, options| {
                 if !hwenc::is_vaapi(name) {
-                    return open_video(name, pixel, size, rate, global, options);
+                    return open_video(name, pixel, size, rate, global, hdr, options);
                 }
                 // Use a real software codec context to inject the upload result on any host.
                 let (codec, encoder) =
-                    open_video("mpeg4", Pixel::YUV420P, size, rate, global, options)?;
+                    open_video("mpeg4", Pixel::YUV420P, size, rate, global, hdr, options)?;
                 ready_video(name, encoder, |_| {
                     probed = true;
                     assert_eq!(
@@ -935,7 +956,7 @@ mod tests {
     }
 
     /// The export check from #86: HDR10 comes out HEVC 10-bit PQ BT.2020 with mastering
-    /// display and light level SEI. Skips without x265.
+    /// display and light level SEI. Skips without x265, unless `JVID_X265_TESTS=required`.
     #[test]
     fn hdr_export_probes_as_hevc_10bit_pq() {
         crate::ffmpeg::init().unwrap();
@@ -948,6 +969,11 @@ mod tests {
         };
         let mut enc = match Encoder::create(&path, (64, 64), Rate::new(30, 1), &preset) {
             Err(Error::EncoderNotFound) => {
+                // CI sets this where its FFmpeg has x265, so it can't pass by skipping.
+                assert!(
+                    !std::env::var("JVID_X265_TESTS").is_ok_and(|v| v == "required"),
+                    "JVID_X265_TESTS=required but this FFmpeg has no libx265"
+                );
                 eprintln!("skipping HDR export test: this FFmpeg has no libx265");
                 return;
             }
@@ -999,7 +1025,15 @@ mod tests {
         crate::ffmpeg::init().unwrap();
         let rate = Rate::new(30, 1);
         for name in ["h264_vaapi", "hevc_vaapi"] {
-            let opened = open_video(name, Pixel::NV12, (256, 256), rate, false, &opts(&[]));
+            let opened = open_video(
+                name,
+                Pixel::NV12,
+                (256, 256),
+                rate,
+                false,
+                false,
+                &opts(&[]),
+            );
             assert_eq!(opened.is_some(), hardware().contains(&name), "{name}");
             if std::fs::read_dir("/dev/dri").is_err() {
                 assert!(opened.is_none(), "{name} without a render node");

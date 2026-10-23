@@ -44,7 +44,8 @@ fn fs_convert(in: Out) -> @location(0) vec4<f32> {
 
 // HDR (PQ or HLG, BT.2020) tone-mapped to SDR BT.709.
 
-// A 10-bit sample arrives as its two bytes in an rg8 texel (filtering is linear, so it commutes).
+// A 10-bit sample arrives as its two bytes in an rg8 texel, sampled nearest: GPUs filter 8-bit
+// texels at 8-bit precision, which the high byte's ×256 would blow up.
 // Over 4 it reads as an 8-bit-scale code, which lines the 64-940 range up with 16-235.
 fn deep(t: vec4<f32>) -> f32 {
     return (t.r + t.g * 256.0) * 0.25;

@@ -324,6 +324,10 @@ fn encode_attempt(
         return Err(tr!("export.empty_range").to_string().into());
     }
     jvid_media::ffmpeg::init().map_err(|e| e.to_string())?;
+    // Otherwise it fails as a bare "Encoder not found".
+    if req.preset.options.contains_key("hdr") && !jvid_media::encode::hdr10_available() {
+        return Err(tr!("export.hdr_no_encoder").to_string().into());
+    }
     let enc = Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
         .map_err(|e| tr!("export.create_error", path = req.path.display(), error = e))?;
     let partial = Partial(&req.path);

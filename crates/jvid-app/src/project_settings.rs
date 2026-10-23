@@ -6,7 +6,7 @@ use jvid_core::model::{Project, ProjectSettings};
 use jvid_core::time::Rate;
 use suite_ui::theme;
 use suite_ui::tokens::{radius, space};
-use suite_ui::widgets::{Button, Checkbox, DragField, Dropdown};
+use suite_ui::widgets::{Button, Checkbox, DragField, Dropdown, State};
 
 use crate::i18n::{Label, tr, trn, verbatim};
 
@@ -35,12 +35,15 @@ const SIZES: [(Label, Option<(u32, u32)>); 6] = [
 /// Edits in progress; `None` while the dialog is closed.
 #[derive(Default)]
 pub struct SettingsDialog {
-    draft: Option<ProjectSettings>,
+    pub(crate) draft: Option<ProjectSettings>,
+    /// An HDR10 export would find an encoder; checked on open.
+    pub(crate) hdr10: bool,
 }
 
 impl SettingsDialog {
     pub fn open(&mut self, project: &Project) {
         self.draft = Some(project.settings().clone());
+        self.hdr10 = jvid_media::ffmpeg::init().is_ok() && jvid_media::encode::hdr10_available();
     }
 
     /// Shows the dialog while open; returns the edit when the user applies a change.
@@ -124,8 +127,17 @@ impl SettingsDialog {
                         ui.end_row();
 
                         ui.label(tr!("project.hdr_output"));
-                        ui.add(Checkbox::new(&mut draft.hdr_output, tr!("project.hdr10")))
-                            .on_hover_text(tr!("project.hdr_tooltip"));
+                        // Turning it off always works, so a project from another machine can.
+                        let state = if self.hdr10 || draft.hdr_output {
+                            State::Live
+                        } else {
+                            State::Disabled
+                        };
+                        ui.add(
+                            Checkbox::new(&mut draft.hdr_output, tr!("project.hdr10")).state(state),
+                        )
+                        .on_hover_text(tr!("project.hdr_tooltip"))
+                        .on_disabled_hover_text(tr!("project.hdr_no_encoder"));
                         ui.end_row();
                     });
                 let clips = project

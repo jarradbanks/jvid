@@ -85,6 +85,8 @@ pub struct Preview {
     hlg: wgpu::RenderPipeline,
     blit: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
+    /// For 10-bit planes, whose two bytes must not be filtered apart; see `deep` in convert.wgsl.
+    nearest: wgpu::Sampler,
     /// Where the blit draws, in clip space; see [`to_clip`].
     dst: wgpu::Buffer,
     image: Option<(wgpu::Texture, wgpu::BindGroup)>,
@@ -156,6 +158,7 @@ impl Preview {
                 min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             }),
+            nearest: device.create_sampler(&Default::default()),
             dst: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("preview dst"),
                 contents: &f32s(&[-1.0, 1.0, 1.0, -1.0]),
@@ -195,12 +198,17 @@ impl Preview {
             );
             tex.create_view(&Default::default())
         });
-        let (rows, pipeline) = match frame.hdr {
-            None => (yuv_to_rgb(frame.bt709, frame.full_range), &self.convert),
+        let (rows, pipeline, sampler) = match frame.hdr {
+            None => (
+                yuv_to_rgb(frame.bt709, frame.full_range),
+                &self.convert,
+                &self.sampler,
+            ),
             // BT.2020 non-constant luminance.
             Some(hdr) => (
                 matrix(0.2627, 0.0593, frame.full_range),
                 if hdr == Hdr::Pq { &self.pq } else { &self.hlg },
+                &self.nearest,
             ),
         };
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -218,7 +226,7 @@ impl Preview {
                 entry(0, wgpu::BindingResource::TextureView(&planes[0])),
                 entry(1, wgpu::BindingResource::TextureView(&planes[1])),
                 entry(2, wgpu::BindingResource::TextureView(&planes[2])),
-                entry(3, wgpu::BindingResource::Sampler(&self.sampler)),
+                entry(3, wgpu::BindingResource::Sampler(sampler)),
                 entry(4, uniform.as_entire_binding()),
             ],
         });

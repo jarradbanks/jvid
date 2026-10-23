@@ -325,19 +325,23 @@ mod tests {
         assert_eq!(titles, ["Game", "Mic", "Voice chat"]);
     }
 
-    /// The probe check from #86: a generated PQ clip probes as PQ BT.2020 10-bit.
+    /// The probe check from #86: generated PQ and HLG clips probe as BT.2020 10-bit.
     #[test]
     fn probes_a_pq_clip() {
+        use jvid_core::hdr::Hdr;
         crate::ffmpeg::init().unwrap();
-        let path = std::env::temp_dir().join(format!("jvid-probe-pq-{}.mkv", std::process::id()));
-        crate::test_media::pq_clip(&path, &[26.0, 203.0]).unwrap();
-        let info = probe(&path).unwrap();
-        std::fs::remove_file(&path).unwrap();
-        let v = video(&info);
-        assert_eq!(v.hdr(), Some(jvid_core::hdr::Hdr::Pq));
-        assert_eq!(v.color_transfer.as_deref(), Some("smpte2084"));
-        assert_eq!(v.color_primaries.as_deref(), Some("bt2020"));
-        assert_eq!(v.bit_depth, 10);
+        for (hdr, transfer) in [(Hdr::Pq, "smpte2084"), (Hdr::Hlg, "arib-std-b67")] {
+            let path =
+                std::env::temp_dir().join(format!("jvid-probe-{hdr:?}-{}.mkv", std::process::id()));
+            crate::test_media::hdr_clip(&path, hdr, &[[0.25; 3], [0.75; 3]]).unwrap();
+            let info = probe(&path).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            let v = video(&info);
+            assert_eq!(v.hdr(), Some(hdr));
+            assert_eq!(v.color_transfer.as_deref(), Some(transfer));
+            assert_eq!(v.color_primaries.as_deref(), Some("bt2020"));
+            assert_eq!(v.bit_depth, 10);
+        }
     }
 
     #[test]

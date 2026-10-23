@@ -544,7 +544,9 @@ fn smart_encoder(
     ]);
     let rate = Rate::new(tb.1 as u32, tb.0 as u32);
     SMART_ENCODER
-        .and_then(|n| crate::encode::open_video(n, Pixel::YUV420P, size, rate, global, &opts))
+        .and_then(|n| {
+            crate::encode::open_video(n, Pixel::YUV420P, size, rate, global, false, &opts)
+        })
         .map(|(_, e)| e)
         .ok_or_else(|| "smart render needs libx264, which this build doesn't use".into())
 }

@@ -95,6 +95,8 @@ jobs:
         env:
           JVID_GPU_TESTS: ${{ runner.os != 'macOS' && 'required' || '' }}
           JVID_TEST_MEDIA_REQUIRED: ${{ runner.os == 'Linux' && '1' || '' }}
+          # Ubuntu's and Homebrew's FFmpeg have libx265; the Windows LGPL build doesn't.
+          JVID_X265_TESTS: ${{ runner.os != 'Windows' && 'required' || '' }}
       # Snapshot diffs differ per driver, so keep them to see what failed.
       - if: failure()
         uses: actions/upload-artifact@v4

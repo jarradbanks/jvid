@@ -1090,6 +1090,14 @@ fn project_settings_turn_on_hdr_output() {
     h.run();
     h.get_by_label("Project Settings…").click();
     h.run();
+    // Without an HEVC encoder the checkbox is disabled and clicks do nothing.
+    h.state_mut().settings_dialog.hdr10 = false;
+    h.run();
+    h.get_by_label("HEVC 10-Bit PQ").click();
+    h.run();
+    assert!(!h.state().settings_dialog.draft.as_ref().unwrap().hdr_output);
+    h.state_mut().settings_dialog.hdr10 = true;
+    h.run();
     h.get_by_label("HEVC 10-Bit PQ").click();
     h.run();
     h.snapshot("project_settings_hdr");

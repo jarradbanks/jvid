@@ -2570,6 +2570,33 @@ mod tests {
     }
 
     #[test]
+    fn video_info_without_bit_depth_loads() {
+        let info = VideoInfo {
+            codec: "hevc".into(),
+            width: 1920,
+            height: 1080,
+            color_transfer: Some("smpte2084".into()),
+            bit_depth: 10,
+            ..Default::default()
+        };
+        let mut json = serde_json::to_value(&info).unwrap();
+        assert_eq!(
+            serde_json::from_value::<VideoInfo>(json.clone()).unwrap(),
+            info
+        );
+        // A probe saved before bit_depth existed.
+        json.as_object_mut().unwrap().remove("bit_depth").unwrap();
+        let old: VideoInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            old,
+            VideoInfo {
+                bit_depth: 0,
+                ..info
+            }
+        );
+    }
+
+    #[test]
     fn ids_are_unique_and_stable() {
         let (mut s, v, _) = seq();
         let a = s.add_clip(v, clip(0, 10)).unwrap();

@@ -517,7 +517,8 @@ mod tests {
     fn hdr_decoders_keep_ten_bits() {
         crate::ffmpeg::init().unwrap();
         let path = std::env::temp_dir().join(format!("jvid-decode-pq-{}.mkv", std::process::id()));
-        crate::test_media::pq_clip(&path, &[26.0, 1000.0]).unwrap();
+        let grey = crate::test_media::pq_grey;
+        crate::test_media::hdr_clip(&path, Hdr::Pq, &[grey(26.0), grey(1000.0)]).unwrap();
         let deep = VideoDecoder::open_hdr(&path)
             .unwrap()
             .frame_at(Time(0))
