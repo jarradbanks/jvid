@@ -280,6 +280,8 @@ mod tests {
                 .planes[0][0]
         };
         assert!(luma(&proxy).abs_diff(luma(&src)) < 4);
+        // Windows can't delete a file still open.
+        drop((key, exact));
         fs::remove_dir_all(&dir).unwrap();
     }
 }

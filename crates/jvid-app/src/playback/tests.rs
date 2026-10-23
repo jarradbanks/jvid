@@ -176,6 +176,9 @@ struct Seen {
 
 /// How far [`play`] lets its clock fall behind real time before it stops catching up.
 const STALL: Duration = Duration::from_millis(100);
+/// Most real time [`play`] waits out over a run: one stall of a loaded CI runner, but not
+/// playback work slow enough to keep it below real time.
+const GRACE: Duration = Duration::from_secs(1);
 
 /// Plays `pb` from its playhead as the app would: first parked until the frame there is shown and
 /// decode-ahead is idle, then playing until the clock reaches `until` samples or play stops, with
@@ -191,7 +194,7 @@ fn play(pb: &mut Playback, p: &Project, until: u64, mut each: impl FnMut(&Shown)
         std::thread::sleep(Duration::from_millis(1));
     }
     pb.transport.toggle(out.clock());
-    let mut start = Instant::now();
+    let (mut start, mut grace) = (Instant::now(), GRACE);
     while out.clock() < until && pb.transport.speed() != 0 {
         let shown = pb.tick(p, &mut out);
         if let Some(s) = &shown {
@@ -210,11 +213,10 @@ fn play(pb: &mut Playback, p: &Project, until: u64, mut each: impl FnMut(&Shown)
         let due = Duration::from_secs_f64(out.clock() as f64 / SAMPLE_RATE as f64);
         // Oversleeping is caught up, so the clock keeps real time. A longer stall (the process
         // descheduled on a loaded CI runner) is mostly waited out, as a device would, rather
-        // than pulled in a burst no decoder could keep up with.
-        let late = start.elapsed().saturating_sub(due);
-        if late > STALL {
-            start += late - STALL;
-        }
+        // than pulled in a burst no decoder could keep up with, until GRACE is spent.
+        let forgive = start.elapsed().saturating_sub(due + STALL).min(grace);
+        start += forgive;
+        grace -= forgive;
         std::thread::sleep(due.saturating_sub(start.elapsed()));
     }
     seen
@@ -442,10 +444,12 @@ fn two_layer_1080p30_plays_in_real_time() {
     for draw in [false, true] {
         let mut pb = Playback::from_files(DEFAULT_BUDGET);
         let mut composite = Duration::ZERO;
+        let mut span = [None; 2];
         let seen = play(&mut pb, p, u64::MAX, |s| {
             if s.index >= 300 {
                 return;
             }
+            span[(s.index != 1) as usize] = Some(Instant::now());
             assert_eq!(s.layers.len(), 2);
             for (f, _) in &s.layers {
                 let f = frame_of(f);
@@ -475,9 +479,17 @@ fn two_layer_1080p30_plays_in_real_time() {
         } else {
             // Frame 0 was shown parked.
             assert_eq!(shown, (1..300).collect::<Vec<_>>(), "decode dropped frames");
+            // In real time: the harness may wait out a stall, but no more than its GRACE.
+            let [Some(first), Some(last)] = span else {
+                unreachable!()
+            };
+            let fps = 298.0 / (last - first).as_secs_f64();
+            let budget = 298.0 / (298.0 / 30.0 + (STALL + GRACE).as_secs_f64());
             println!(
-                "PERF playback two-layer 1080p30: 30 fps, 300/300 frames shown (budget 30 fps)"
+                "PERF playback two-layer 1080p30: {fps:.1} fps, 300/300 frames shown \
+                 (budget 30 fps, at least {budget:.1})"
             );
+            assert!(fps >= budget, "{fps:.1} fps");
         }
     }
 }

@@ -609,6 +609,7 @@ mod tests {
         assert_eq!((info.width, info.height), (Some(854), Some(480)));
         let mut dec = crate::decode::VideoDecoder::open(&path).unwrap();
         let f = dec.frame_at(jvid_core::time::Time(0)).unwrap();
+        drop(dec); // Windows can't delete a file still open.
         std::fs::remove_file(&path).unwrap();
         let (lo, span) = if f.full_range {
             (0.0, 255.0)
