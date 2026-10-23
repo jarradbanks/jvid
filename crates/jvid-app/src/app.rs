@@ -1181,6 +1181,9 @@ impl TabViewer for Viewer<'_> {
             }
             self.relink = r.relink;
             self.open = r.open;
+            if r.thumbs {
+                self.preview.refresh_thumb();
+            }
             return;
         }
         let source_tab = self.preview_views.get(*self.preview_active) == Some(&"source");

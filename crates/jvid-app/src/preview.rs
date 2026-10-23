@@ -18,6 +18,7 @@ use jvid_jobs::Priority;
 use jvid_media::decode::{DecoderPool, Frame};
 use jvid_media::proxy::{self, Proxies};
 use jvid_render::preview::{self as render, Yuv};
+use jvid_render::thumb::Thumbs;
 use jvid_render::{solid, text};
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
@@ -114,6 +115,19 @@ pub const PROGRAM_ACTIONS: &[&str] = &[
     "audio_scrub",
 ];
 
+/// The 160×90 frame effect and text thumbnails draw on: see [`Preview::thumb_frame`].
+#[derive(Default)]
+struct Thumb {
+    /// Its egui texture; `None` without wgpu.
+    id: Option<egui::TextureId>,
+    /// The program generation it shows; `None` for the bundled fallback.
+    from: Option<u64>,
+    /// The Effects or Text tab opened: refresh once the playhead settles, even if unchanged.
+    wanted: bool,
+    /// Copy the Program frame into it as it's next drawn.
+    copy: bool,
+}
+
 /// The clip open in the Source tab.
 struct Player {
     asset: AssetId,
@@ -164,11 +178,13 @@ pub struct Preview {
     proxied: HashSet<PathBuf>,
     /// Project sources [`proxy::suggested`] says want a proxy.
     suggested: usize,
+    thumb: Thumb,
 }
 
 impl Preview {
     /// Puts the GPU half in egui-wgpu's callback resources; without wgpu the viewer stays empty.
     pub fn new(render_state: Option<&egui_wgpu::RenderState>) -> Self {
+        let mut thumb = Thumb::default();
         if let Some(rs) = render_state {
             let preview = render::Preview::new(&rs.device, rs.target_format);
             let gpu = Gpu {
@@ -177,8 +193,12 @@ impl Preview {
                 program: playback::Gpu::new(&rs.device),
                 program_view: render::Preview::new(&rs.device, rs.target_format),
                 program_drawn: None,
+                thumbs: Thumbs::new(&rs.device, &rs.queue),
             };
-            rs.renderer.write().callback_resources.insert(gpu);
+            let mut r = rs.renderer.write();
+            let view = gpu.thumbs.frame().create_view(&Default::default());
+            thumb.id = Some(r.register_native_texture(&rs.device, &view, wgpu::FilterMode::Linear));
+            r.callback_resources.insert(gpu);
         }
         let (tx, rx) = channel();
         Self {
@@ -208,6 +228,7 @@ impl Preview {
             proxy_jobs: jvid_jobs::Pool::new(1),
             proxied: HashSet::new(),
             suggested: 0,
+            thumb,
         }
     }
 
@@ -469,13 +490,17 @@ impl Preview {
                 .stop(self.output.as_ref().map_or(0, Output::clock));
         }
         // An empty sequence leaves the viewer empty, like a Source tab with nothing open.
-        if trim.is_some() || project.sequence().duration() == Time(0) {
+        let empty = project.sequence().duration() == Time(0);
+        if trim.is_some() || empty {
+            // A trim is a drag.
+            self.update_thumb(empty, trim.is_some());
             self.show(ui, trim, offline, None, None);
             return None;
         }
         self.proxy_sources(project);
         let dragging = ui.input(|i| i.pointer.primary_down());
         let follow = self.sync_program(project, playhead, dragging);
+        self.update_thumb(false, dragging);
         if self.program.transport.speed() != 0 {
             ui.ctx().request_repaint();
         }
@@ -559,6 +584,75 @@ impl Preview {
             playhead
         };
         playing.then_some(self.program_head)
+    }
+
+    /// Refreshes the thumbnail frame once the playhead settles on a frame it doesn't show yet,
+    /// or after [`Preview::refresh_thumb`]; never while playing or scrubbing. Nothing at the
+    /// playhead shows the fallback; otherwise the Program frame is copied as it's drawn.
+    /// Returns whether it refreshed.
+    fn update_thumb(&mut self, empty: bool, dragging: bool) -> bool {
+        let shown = self.program_shown.as_ref().filter(|_| !empty);
+        let playing = self.program.transport.speed() != 0;
+        if playing || dragging || shown.is_some_and(|s| !s.exact) {
+            return false;
+        }
+        let from = shown
+            .filter(|s| !s.layers.is_empty())
+            .map(|_| self.program_gen);
+        let wanted = std::mem::take(&mut self.thumb.wanted);
+        if from == self.thumb.from && !wanted {
+            return false;
+        }
+        (self.thumb.from, self.thumb.copy) = (from, from.is_some());
+        if from.is_none() {
+            self.with_thumbs(|t, d, q| t.set_fallback(d, q));
+        }
+        true
+    }
+
+    /// The Effects or Text tab opened: refresh the thumbnail frame once the playhead settles.
+    pub fn refresh_thumb(&mut self) {
+        self.thumb.wanted = true;
+    }
+
+    /// The thumbnail frame as an egui texture, and its [`Thumbs::generation`]; `None` without
+    /// wgpu. The Program frame is copied in as it's drawn, so a change shows the frame after.
+    // shortcut: unused until the Effects (#235) and Text (#236) tabs draw thumbnails; drop the allow then.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn thumb_frame(&self) -> Option<(egui::TextureId, u64)> {
+        Some((self.thumb.id?, self.with_thumbs(|t, _, _| t.generation)?))
+    }
+
+    /// Draws a thumbnail with `f`, such as [`Thumbs::effect`] or [`Thumbs::text`], into egui
+    /// texture `id` (or a new one) and returns it; `None` without wgpu.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn draw_thumb(
+        &self,
+        id: Option<egui::TextureId>,
+        f: impl FnOnce(&mut Thumbs, &wgpu::Device, &wgpu::Queue) -> wgpu::Texture,
+    ) -> Option<egui::TextureId> {
+        let tex = self.with_thumbs(f)?;
+        let rs = self.render_state.as_ref()?;
+        let view = tex.create_view(&Default::default());
+        let (mut r, filter) = (rs.renderer.write(), wgpu::FilterMode::Linear);
+        Some(match id {
+            Some(id) => {
+                r.update_egui_texture_from_wgpu_texture(&rs.device, &view, filter, id);
+                id
+            }
+            None => r.register_native_texture(&rs.device, &view, filter),
+        })
+    }
+
+    /// Runs `f` on the thumbnail renderer; `None` without wgpu.
+    fn with_thumbs<R>(
+        &self,
+        f: impl FnOnce(&mut Thumbs, &wgpu::Device, &wgpu::Queue) -> R,
+    ) -> Option<R> {
+        let rs = self.render_state.as_ref()?;
+        let mut r = rs.renderer.write();
+        let gpu = r.callback_resources.get_mut::<Gpu>()?;
+        Some(f(&mut gpu.thumbs, &rs.device, &rs.queue))
     }
 
     /// Where the project frame sits in the viewer `ui` draws into, at the current zoom.
@@ -704,6 +798,7 @@ impl Preview {
                         // Source and program counters overlap; the source flag keeps them apart.
                         generation: (g, scale, source),
                         clip,
+                        thumb: !source && std::mem::take(&mut self.thumb.copy),
                     },
                 ),
                 (_, _, Some(f)) => egui_wgpu::Callback::new_paint_callback(
@@ -927,6 +1022,7 @@ struct Gpu {
     program_view: render::Preview,
     /// The program generation and preview scale last composited.
     program_drawn: Option<(u64, u32, bool)>,
+    thumbs: Thumbs,
 }
 
 /// The Program tab's draw. Composites only when the frame or preview scale changed.
@@ -935,6 +1031,8 @@ struct ProgramPaint {
     settings: ProjectSettings,
     generation: (u64, u32, bool),
     clip: [f32; 4],
+    /// Copy the frame into the thumbnail frame too.
+    thumb: bool,
 }
 
 impl CallbackTrait for ProgramPaint {
@@ -954,6 +1052,11 @@ impl CallbackTrait for ProgramPaint {
                     .program
                     .draw(device, queue, &self.settings, scale, &self.shown);
                 gpu.program_view.show_image(device, tex.clone());
+            }
+            if self.thumb
+                && let Some(img) = gpu.program_view.image()
+            {
+                gpu.thumbs.set_frame(device, queue, img);
             }
             gpu.program_view.set_dst(queue, self.clip);
         }
@@ -1168,6 +1271,110 @@ mod program_tests {
         h.apply(Command::SetText { id, text }).unwrap();
         p.sync_program(h.project(), Time(0), false);
         assert_eq!(p.program_gen, before + 1, "a text edit recomposites");
+    }
+
+    #[test]
+    fn thumbnails_wait_for_playback_and_scrubbing_to_stop() {
+        let mut h = History::new(Project::default());
+        let red = add_solid(&mut h, [1.0, 0.0, 0.0, 1.0], Time(0));
+        // A gap from 1 s to 2 s.
+        add_solid(&mut h, [0.0, 0.0, 1.0, 1.0], Time(FLICKS_PER_SECOND * 2));
+        let mut p = Preview::new(None);
+        // Settled on a frame: one copy, then nothing until something changes.
+        p.sync_program(h.project(), Time(0), false);
+        assert!(p.update_thumb(false, false));
+        assert_eq!((p.thumb.from, p.thumb.copy), (Some(p.program_gen), true));
+        p.thumb.copy = false;
+        assert!(!p.update_thumb(false, false));
+        // The Effects tab is open; playing or scrubbing through new frames does no thumbnail work.
+        p.refresh_thumb();
+        p.program.transport.toggle(0);
+        let half = Transform {
+            opacity: 0.5,
+            ..Transform::default()
+        };
+        let props = Command::SetClipProps(vec![(red, half, Default::default())]);
+        h.apply(props).unwrap();
+        p.sync_program(h.project(), Time(0), false);
+        assert!(!p.update_thumb(false, false));
+        p.program.transport.stop(0);
+        p.sync_program(h.project(), Time(FLICKS_PER_SECOND / 2), true);
+        assert!(!p.update_thumb(false, true));
+        assert!(!p.thumb.copy);
+        // Released: the frame it settled on.
+        assert!(p.update_thumb(false, false));
+        assert_eq!((p.thumb.from, p.thumb.copy), (Some(p.program_gen), true));
+        // Reopening the tab refreshes even an unchanged frame.
+        p.refresh_thumb();
+        assert!(p.update_thumb(false, false));
+        // Nothing at the playhead, or nothing on the timeline: the fallback.
+        p.sync_program(h.project(), Time(FLICKS_PER_SECOND * 3 / 2), false);
+        assert!(p.update_thumb(false, false));
+        assert_eq!(p.thumb.from, None);
+        assert!(!p.update_thumb(true, false), "already the fallback");
+    }
+
+    /// The Program tab of `history`, at its start, in an app with wgpu.
+    struct Program {
+        preview: Preview,
+        history: History,
+        fresh: bool,
+    }
+
+    impl eframe::App for Program {
+        fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+            if suite_ui::test_support::install_theme(ui, &mut self.fresh) {
+                return;
+            }
+            let project = self.history.project();
+            self.preview.show_program(ui, project, Time(0), None, false);
+        }
+    }
+
+    #[test]
+    fn the_thumbnail_frame_is_the_fallback_then_the_program_frame() {
+        use jvid_render::composite::read_back;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([640.0, 360.0])
+            .wgpu()
+            .build_eframe(|cc| Program {
+                preview: Preview::new(cc.wgpu_render_state.as_ref()),
+                history: History::new(Project::default()),
+                fresh: true,
+            });
+        let frame = |h: &egui_kittest::Harness<'_, Program>| {
+            h.state()
+                .preview
+                .with_thumbs(|t, d, q| read_back(d, q, t.frame()))
+                .unwrap()
+        };
+        h.run();
+        h.render().unwrap();
+        let (d, q) = h.state().preview.gpu().unwrap();
+        let fallback = read_back(&d, &q, Thumbs::new(&d, &q).frame());
+        assert_eq!(frame(&h), fallback, "an empty project shows the fallback");
+        let (id, g) = h.state().preview.thumb_frame().expect("an egui texture");
+        add_solid(&mut h.state_mut().history, [1.0, 0.0, 0.0, 1.0], Time(0));
+        h.run();
+        h.render().unwrap();
+        assert!(frame(&h).chunks(4).all(|p| p == [255, 0, 0, 255]));
+        assert_eq!(h.state().preview.thumb_frame(), Some((id, g + 1)));
+        // A drawn thumbnail gets its own egui texture, kept on redraw.
+        let effect = jvid_core::model::Effect {
+            shader: "none".into(),
+            params: Default::default(),
+        };
+        let draw = |id| {
+            h.state()
+                .preview
+                .draw_thumb(id, |t, d, q| t.effect(d, q, &effect))
+        };
+        let mine = draw(None).unwrap();
+        assert_ne!(mine, id);
+        assert_eq!(draw(Some(mine)), Some(mine));
     }
 
     #[test]
