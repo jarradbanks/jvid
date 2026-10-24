@@ -118,6 +118,33 @@ impl ExportDialog {
         }
     }
 
+    /// What Add to Queue would give for Highlights in the chosen format, without showing the
+    /// dialog: Show Me's highlights export. Files are named by the template beside `open`'s.
+    pub fn highlights(&mut self, seq: &Sequence, name: &str) -> Vec<Request> {
+        self.open(seq, name);
+        self.range = None;
+        let preset = &self.presets[self.preset];
+        let dir = self.path.parent().unwrap_or(std::path::Path::new(""));
+        let chosen = chosen(seq, &self.skipped);
+        let reqs = chosen.iter().enumerate().map(|(i, m)| {
+            let file = file_name(&self.template, &self.name, m, i + 1);
+            Request {
+                path: dir.join(format!("{file}.{}", preset.extension)),
+                range: highlight(m, self.pad(), seq.duration()),
+                preset: preset.clone(),
+                loudness: self.loudness,
+                lossless: None,
+                sidecar: self.sidecar,
+            }
+        });
+        reqs.collect()
+    }
+
+    /// Before and After, the padding around a point marker's highlight.
+    pub fn pad(&self) -> (Time, Time) {
+        (seconds(self.before), seconds(self.after))
+    }
+
     /// Shows the dialog while open; returns the request when the user clicks Export or Add to
     /// Queue, with `true` for Export; Highlights gives one request per chosen marker.
     ///
@@ -984,6 +1011,25 @@ mod tests {
             ..point.clone()
         };
         assert_eq!(highlight(&nine, pad, seq.duration()), (secs(0), secs(10)));
+        // Show Me's export: one request per chosen marker, as Add to Queue gives.
+        let mut d = ExportDialog {
+            presets: jvid_core::preset::builtin(),
+            skipped: skip,
+            ..Default::default()
+        };
+        let reqs = d.highlights(seq, "Trip");
+        let got: Vec<_> = reqs.iter().map(|r| (r.path.clone(), r.range)).collect();
+        let want: Vec<_> = (left.iter().enumerate())
+            .map(|(i, m)| {
+                let file = format!("{}.mp4", file_name(TEMPLATE, "Trip", m, i + 1));
+                (
+                    d.path.with_file_name(file),
+                    highlight(m, pad, seq.duration()),
+                )
+            })
+            .collect();
+        assert_eq!(got, want);
+        assert_eq!(d.range, None, "the dialog stays shut");
     }
 
     #[test]

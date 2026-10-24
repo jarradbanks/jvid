@@ -25,6 +25,7 @@ use crate::timeline::Timeline;
 
 mod audio;
 mod colour;
+mod markers;
 mod masks;
 
 /// One lesson. Its `id` is the progress key in `settings.toml`.
@@ -69,6 +70,7 @@ pub const LESSONS: &[Lesson] = &[
     colour::COLOUR,
     GREEN_SCREEN,
     SCREEN,
+    markers::MARKERS,
 ];
 
 /// The sample the tour edits.
