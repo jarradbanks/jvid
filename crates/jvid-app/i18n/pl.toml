@@ -822,3 +822,7 @@ green_screen_background = "Przeciągnij {file} na oś czasu, na ścieżkę pod k
 green_screen_key = "Zaznacz klip z green screenem i wybierz Kluczowanie kolorem z menu Dodaj efekt."
 green_screen_tune = "Zwiększaj Tolerancja, aż zieleń zniknie, a potem dostosuj Miękkość krawędzi i Tłumienie przebarwień."
 green_screen_mask = "Wybierz Prostokąt z menu Dodaj maskę i dopasuj go tak, by odciąć tablicę po prawej."
+screen = "Popraw nagranie ekranu"
+screen_silence = "Zaznacz klip, naciśnij {key}, aby otworzyć Wykryj ciszę, i kliknij Wytnij."
+screen_zoom = "Zaznacz klip i zwiększ Skalę w Inspektorze, aby przybliżyć wpisywany tekst."
+screen_callout = "Przeciągnij tytuł z karty Tekst na oś czasu nad klipem jako objaśnienie."

@@ -811,3 +811,7 @@ green_screen_background = "Trascina {file} sulla timeline, sulla traccia sotto l
 green_screen_key = "Seleziona la clip con green screen, poi scegli Chroma key da Aggiungi effetto."
 green_screen_tune = "Alza Tolleranza finché il verde sparisce, poi regola Morbidezza bordi e Soppressione dispersione."
 green_screen_mask = "Scegli Rettangolo da Aggiungi maschera e adattalo per tagliare il pannello a destra."
+screen = "Sistema una registrazione dello schermo"
+screen_silence = "Seleziona la clip, premi {key} per Rileva silenzio, poi fai clic su Taglia."
+screen_zoom = "Seleziona la clip, poi aumenta Scala nell'Inspector per ingrandire il testo digitato."
+screen_callout = "Trascina un titolo da Testo sulla timeline sopra la clip come richiamo."

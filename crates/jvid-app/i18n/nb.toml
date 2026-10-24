@@ -800,3 +800,7 @@ green_screen_background = "Dra {file} til tidslinjen, på sporet under greenscre
 green_screen_key = "Velg greenscreen-klippet, og velg Chroma key under Legg til effekt."
 green_screen_tune = "Øk Toleranse til det grønne er borte, og juster deretter Kantmykhet og Søldemping."
 green_screen_mask = "Velg Rektangel under Legg til maske, og tilpass det så platen til høyre kuttes bort."
+screen = "Rydd opp i et skjermopptak"
+screen_silence = "Velg klippet, trykk {key} for Finn stillhet, og klikk på Klipp bort."
+screen_zoom = "Velg klippet, og øk Skala i Inspektør for å zoome inn på skrivingen."
+screen_callout = "Dra en tittel fra Tekst til tidslinjen over klippet som en forklaring."

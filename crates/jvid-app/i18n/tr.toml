@@ -803,3 +803,7 @@ green_screen_background = "{file} dosyasını Zaman Çizelgesi'nde yeşil perde 
 green_screen_key = "Yeşil perde klibini seçin, ardından Efekt Ekle'den Chroma Key'i seçin."
 green_screen_tune = "Yeşil gidene kadar Tolerans'ı artırın, ardından Kenar Yumuşaklığı ve Taşma Bastırma'yı ayarlayın."
 green_screen_mask = "Maske Ekle'den Dikdörtgen'i seçin ve sağdaki panoyu kesecek şekilde ayarlayın."
+screen = "Ekran Kaydını Düzenleyin"
+screen_silence = "Klibi seçin, Sessizliği Algıla için {key} tuşuna basın ve Kes'e tıklayın."
+screen_zoom = "Klibi seçin ve yazılanı yakınlaştırmak için Denetçi'de Ölçek'i artırın."
+screen_callout = "Metin'den bir başlığı açıklama olarak klibin üstüne, Zaman Çizelgesi'ne sürükleyin."

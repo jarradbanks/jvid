@@ -811,3 +811,7 @@ green_screen_background = "Arrossegueu {file} a la línia de temps, a la pista s
 green_screen_key = "Seleccioneu el clip de croma i trieu Clau de croma a Afegeix un efecte."
 green_screen_tune = "Pugeu Tolerància fins que desaparegui el verd i ajusteu Suavitat de la vora i Supressió del vessament."
 green_screen_mask = "Trieu Rectangle a Afegeix una màscara i ajusteu-lo per retallar el tauler de la dreta."
+screen = "Poliu un enregistrament de pantalla"
+screen_silence = "Seleccioneu el clip, premeu {key} per obrir Detecta els silencis i feu clic a Talla."
+screen_zoom = "Seleccioneu el clip i augmenteu Escala a l'Inspector per apropar-vos al text escrit."
+screen_callout = "Arrossegueu un títol de Text a la línia de temps sobre el clip com a anotació."

@@ -800,3 +800,7 @@ green_screen_background = "Ziehen Sie {file} auf die Timeline, auf die Spur unte
 green_screen_key = "Wählen Sie den Greenscreen-Clip aus und dann Chroma-Key unter Effekt hinzufügen."
 green_screen_tune = "Erhöhen Sie Toleranz, bis das Grün weg ist, und passen Sie dann Kantenweichheit und Spill-Unterdrückung an."
 green_screen_mask = "Wählen Sie Rechteck unter Maske hinzufügen und passen Sie es so an, dass die Tafel rechts wegfällt."
+screen = "Eine Bildschirmaufnahme aufräumen"
+screen_silence = "Wählen Sie den Clip aus, drücken Sie {key} für Stille erkennen und klicken Sie auf Schneiden."
+screen_zoom = "Wählen Sie den Clip aus und erhöhen Sie im Inspektor die Skalierung, um auf die Eingabe zu zoomen."
+screen_callout = "Ziehen Sie einen Titel aus Text als Hinweis über dem Clip auf die Timeline."

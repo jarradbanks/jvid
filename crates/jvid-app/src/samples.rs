@@ -33,7 +33,7 @@ pub const CLIPS: &[(&str, &[u8])] = &[
 const LICENSES: &str = include_str!("../assets/samples/LICENSES.toml");
 
 /// Bump when a clip changes, so installs write the new set beside the old instead of mixing them.
-const VERSION: &str = "v1";
+const VERSION: &str = "v2";
 
 /// One clip's entry in `LICENSES.toml`.
 #[derive(Deserialize)]

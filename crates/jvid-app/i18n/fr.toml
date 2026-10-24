@@ -822,3 +822,7 @@ green_screen_background = "Faites glisser {file} sur la timeline, sur la piste s
 green_screen_key = "Sélectionnez le plan sur fond vert, puis choisissez Incrustation chromatique dans Ajouter un effet."
 green_screen_tune = "Augmentez Tolérance jusqu’à ce que le vert disparaisse, puis réglez Douceur des bords et Suppression du débordement."
 green_screen_mask = "Choisissez Rectangle dans Ajouter un masque et ajustez-le pour couper le panneau à droite."
+screen = "Nettoyer un enregistrement d'écran"
+screen_silence = "Sélectionnez le plan, appuyez sur {key} pour Détecter les silences, puis cliquez sur Couper."
+screen_zoom = "Sélectionnez le plan, puis augmentez Échelle dans l'Inspecteur pour zoomer sur la saisie."
+screen_callout = "Faites glisser un titre de Texte sur la timeline au-dessus du plan pour en faire une bulle."

@@ -889,3 +889,10 @@ green_screen_background = "Drag {file} onto the Timeline, on the track under the
 green_screen_key = "Select the green-screen clip, then pick Chroma Key from Add Effect."
 green_screen_tune = "Raise Tolerance until the green is gone, then adjust Edge Softness and Spill Suppression."
 green_screen_mask = "Pick Rectangle from Add Mask and fit it to cut off the board on the right."
+# Tidy a Screen Recording: cut the sample's dead air with Detect Silence, zoom in with Scale,
+# add a title as a callout. Detect Silence, Cut, Scale, Inspector, Text and Timeline are the
+# names the editor shows for them; {key} is a shortcut.
+screen = "Tidy a Screen Recording"
+screen_silence = "Select the clip, press {key} for Detect Silence, then click Cut."
+screen_zoom = "Select the clip, then raise Scale in the Inspector to zoom in on the typing."
+screen_callout = "Drag a title from Text onto the Timeline above your clip as a callout."

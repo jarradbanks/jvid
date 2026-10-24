@@ -815,3 +815,7 @@ green_screen_background = "Sleep {file} naar de tijdlijn, op het spoor onder de 
 green_screen_key = "Selecteer de green-screenclip en kies Chromakey bij Effect toevoegen."
 green_screen_tune = "Verhoog Tolerantie tot het groen weg is en stel daarna Randzachtheid en Spill-onderdrukking bij."
 green_screen_mask = "Kies Rechthoek bij Masker toevoegen en pas het aan zodat het bord rechts wegvalt."
+screen = "Een schermopname opschonen"
+screen_silence = "Selecteer de clip, druk op {key} voor Stilte detecteren en klik op Knippen."
+screen_zoom = "Selecteer de clip en verhoog Schaal in de Inspector om in te zoomen op het typen."
+screen_callout = "Sleep een titel uit Tekst naar de tijdlijn boven je clip als toelichting."

@@ -815,3 +815,7 @@ green_screen_background = "Arraste {file} para a linha do tempo, na trilha abaix
 green_screen_key = "Selecione o clipe de tela verde e escolha Chroma key em Adicionar efeito."
 green_screen_tune = "Aumente Tolerância até o verde sumir e depois ajuste Suavidade da borda e Supressão de vazamento."
 green_screen_mask = "Escolha Retângulo em Adicionar máscara e ajuste-o para cortar o painel à direita."
+screen = "Arrume uma gravação de tela"
+screen_silence = "Selecione o clipe, pressione {key} para Detectar silêncio e clique em Cortar."
+screen_zoom = "Selecione o clipe e aumente Escala no Inspetor para aproximar o texto digitado."
+screen_callout = "Arraste um título de Texto para a linha do tempo acima do clipe como destaque."

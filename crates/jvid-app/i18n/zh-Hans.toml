@@ -833,3 +833,7 @@ green_screen_background = "将 {file} 拖到时间线上绿幕片段下方的轨
 green_screen_key = "选中绿幕片段，然后从“添加效果”中选择“色度键”。"
 green_screen_tune = "调高“容差”直到绿色消失，再调整“边缘柔化”和“溢色抑制”。"
 green_screen_mask = "从“添加蒙版”中选择“矩形”，调整它以裁掉右侧的板子。"
+screen = "整理屏幕录制"
+screen_silence = "选中片段，按 {key} 打开“检测静音”，然后点击“剪除”。"
+screen_zoom = "选中片段，然后在检查器中调大“缩放”，放大正在输入的部分。"
+screen_callout = "把“文本”中的一个标题拖到时间线上片段的上方，作为标注。"
