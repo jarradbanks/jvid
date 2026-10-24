@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Korean. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "기본"
+hover = "호버"
+focus = "포커스 표시"
+pressed = "누름"
+disabled = "비활성화"
+loading_error = "로드 중 / 오류"
+
+[panel]
+widgets = "위젯"
+effects = "효과"
+text = "텍스트"
+add = "추가"
+more = "더 보기"
+inspector = "인스펙터"
+source = "소스"
+program = "프로그램"
+audio = "오디오"
+markers = "마커"
+history = "작업 내역"
+captions = "캡션"
+overflow = "64px보다 좁은 탭은 갈매기형 메뉴로 이동합니다."
+type_and_colour = "글자와 색상"
+
+[row]
+primary = "기본"
+secondary = "보조"
+ghost = "고스트"
+destructive = "위험"
+icon = "아이콘"
+input = "입력"
+search = "검색"
+numeric = "숫자"
+dropdown = "드롭다운"
+colour = "색상"
+segmented = "세그먼트"
+checkbox = "확인란"
+section = "섹션"
+slider = "슬라이더"
+keyframe = "키프레임"
+
+[demo]
+delete = "삭제"
+export = "내보내기"
+width_prefix = "너비"
+min_error = "2 이상이어야 합니다"
+full = "전체"
+fit = "맞춤"
+fill = "채우기"
+snap = "스냅"
+live = "실시간"
+transform = "변형"
+position = "위치"
+scale = "스케일"
+reset = "재설정"
+previous = "이전 키프레임"
+next = "다음 키프레임"
+animate = "애니메이션"
+plus_second = "+1초"
+
+[type]
+display = "디스플레이 22"
+headline = "헤드라인 16"
+title = "제목 14"
+body_strong = "본문 굵게 12"
+body = "본문 12 · 0123456789 흔들림 없음"
+small = "작게 10 · 단축키 힌트"
+
+[clip]
+video = "비디오"
+title = "타이틀"
+still = "스틸 이미지"
+audio = "오디오"
