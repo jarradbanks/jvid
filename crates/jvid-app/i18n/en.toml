@@ -840,3 +840,18 @@ tour_marks = "Press {mark_in} to set an In point, then {mark_out} further on for
 tour_cut = "Press {key} to split out the section between In and Out and delete it."
 tour_title = "Click a title in Text, then drag it onto the Timeline above your clip."
 tour_export = "Click Export, then Export again to save your video."
+# Masks: spotlight the subject by darkening a copy under a masked one, then key the mask to
+# follow them. Inspector labels (Color, Exposure, Add Mask, Ellipse, Feather, Invert, Mode,
+# Subtract, Position) are the names the Inspector shows. {key} is a shortcut.
+masks = "Masks"
+masks_select = "Click the clip on the timeline to select it."
+masks_duplicate = "Press {key}, then drag the copy onto the track above, over the original."
+masks_darken = "Select the lower copy and drag Exposure under Color below -1."
+masks_add = "Select the top copy and choose Add Mask > Ellipse in the Inspector."
+masks_place = "Drag the mask's handles until it covers the dashed outline."
+masks_feather = "Drag Feather past 50 to soften the mask's edge."
+masks_invert = "Tick Invert, then set Mode to Subtract, and watch the spotlight flip each time."
+masks_key = "Click the diamond beside the mask's Position to add a key."
+masks_playhead = "Move the playhead near the end of the clip."
+masks_follow = "Drag the mask over the dashed outline again to add a second key."
+masks_play = "Press {key} to watch the mask follow the subject."

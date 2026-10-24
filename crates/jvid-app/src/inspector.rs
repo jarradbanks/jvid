@@ -451,7 +451,7 @@ fn all_keyed(clips: &[&Clip], names: &[&str], t: Time) -> bool {
 
 /// Animates `names` from their values at `t`, or, if any clip animates one, stops
 /// animating them and keeps the values at `t`.
-fn toggle_animate(clips: &[&Clip], names: &[&str], t: Time) -> Command {
+pub fn toggle_animate(clips: &[&Clip], names: &[&str], t: Time) -> Command {
     let on = any_animated(clips, names);
     rewrite(clips, |c, x, keys| {
         for name in names {
