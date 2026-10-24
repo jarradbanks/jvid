@@ -936,9 +936,11 @@ impl Timeline {
             self.press_scroll = (self.scroll, self.vscroll);
         }
         // Drags that began in the lanes, and bin drags over the timeline, scroll at the
-        // edges; ruler and playhead scrubs scroll themselves.
+        // edges; ruler and playhead scrubs scroll themselves, and a refused drag stays put.
         let scrubbing = scrub.is_pointer_button_down_on() || drag.dragged();
-        let ours = ui.ctx().dragged_id().is_some()
+        let refused = self.holding.is_some_and(|c| locked(seq, c));
+        let ours = !refused
+            && ui.ctx().dragged_id().is_some()
             && ui
                 .input(|i| i.pointer.press_origin())
                 .is_some_and(|o| lanes.contains(o));
@@ -3670,6 +3672,29 @@ mod tests {
         h.drop_at(at + vec2(-20.0, 0.0));
         h.run();
         assert_eq!(h.state().1.project(), &before);
+    }
+
+    /// A refused drag held at the edge leaves the view where it was.
+    #[test]
+    fn a_refused_drag_at_the_edge_doesnt_scroll() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(locked_v1());
+        let x = size::TRACK_HEADER + 20.0;
+        let y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        h.hover_at(pos2(x, y));
+        h.run();
+        h.drag_at(pos2(x, y));
+        h.run();
+        h.hover_at(pos2(995.0, y));
+        for _ in 0..4 {
+            h.step();
+        }
+        assert_eq!(h.state().0.scroll, 0.0);
+        h.drop_at(pos2(995.0, y));
+        h.run();
     }
 
     #[test]
