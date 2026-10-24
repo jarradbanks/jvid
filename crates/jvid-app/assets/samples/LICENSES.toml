@@ -35,7 +35,7 @@ changes = "Frames 101 to 220, sRGB, darkened and warmed for the colour lesson, s
 [[clip]]
 file = "screen-recording.mp4"
 title = "Terminal session with a pause"
-source = "Made for jvid by scripts/gen-samples (FFmpeg drawtext)"
+source = "Made for jvid by scripts/gen-samples (FFmpeg drawtext, room tone and key clicks from aevalsrc)"
 author = "jvid contributors"
 licence = "CC0 1.0"
 licence_url = "https://creativecommons.org/publicdomain/zero/1.0/"
@@ -59,3 +59,11 @@ licence = "Public domain"
 licence_url = "https://librivox.org/pages/public-domain/"
 credit = "The Gettysburg Address read by John Greenman, LibriVox, public domain"
 changes = "23.1 s to 32.4 s, mono, AAC"
+
+[[clip]]
+file = "look.cube"
+title = "Teal and Orange, a 9-point 3D LUT"
+source = "Made for jvid: an S-curve, teal shadows and warm highlights"
+author = "jvid contributors"
+licence = "CC0 1.0"
+licence_url = "https://creativecommons.org/publicdomain/zero/1.0/"

@@ -11,8 +11,9 @@ use egui::{
     vec2,
 };
 use jvid_core::history::{Command, History};
-use jvid_core::model::{AssetId, Project};
-use jvid_core::time::Time;
+use jvid_core::keyframe::{Easing, Keyframe, Value};
+use jvid_core::model::{AssetId, Project, TrackKind};
+use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use suite_ui::theme;
 use suite_ui::tokens::{color, radius, space};
 use suite_ui::widgets::{Button, State};
@@ -23,6 +24,8 @@ use crate::import::Importer;
 use crate::timeline::Timeline;
 
 mod audio;
+mod colour;
+mod markers;
 mod masks;
 
 /// One lesson. Its `id` is the progress key in `settings.toml`.
@@ -54,9 +57,21 @@ pub struct Step {
     /// A target ellipse, its centre and size in project pixels from the frame's centre,
     /// drawn dashed on the Program view while the step shows.
     pub ghost: Option<[[f64; 2]; 2]>,
+    /// More anchors left undimmed beside `anchor`, such as a scope to read while editing in
+    /// the Inspector.
+    pub also: &'static [&'static str],
 }
 
-pub const LESSONS: &[Lesson] = &[TOUR, masks::MASKS, audio::AUDIO];
+pub const LESSONS: &[Lesson] = &[
+    TOUR,
+    masks::MASKS,
+    audio::AUDIO,
+    KEYFRAMES,
+    colour::COLOUR,
+    GREEN_SCREEN,
+    SCREEN,
+    markers::MARKERS,
+];
 
 /// The sample the tour edits.
 const TOUR_CLIP: &str = "subject.mp4";
@@ -79,7 +94,7 @@ const TOUR: Lesson = Lesson {
                     file = verbatim(TOUR_CLIP)
                 )
             },
-            done: |a| tour_clip(a).is_some(),
+            done: |a| clip_named(a, TOUR_CLIP).is_some(),
             show_me: |a| match sample(TOUR_CLIP) {
                 Ok(path) => a.import([path]),
                 Err(e) => a.error(tr!(
@@ -90,6 +105,7 @@ const TOUR: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "timeline",
@@ -97,7 +113,7 @@ const TOUR: Lesson = Lesson {
             done: |a| first_clip(a).is_some(),
             show_me: |a| {
                 let project = a.history.project();
-                let Some(asset) = tour_clip(a) else {
+                let Some(asset) = clip_named(a, TOUR_CLIP) else {
                     return;
                 };
                 if let Some(p) = project.placement(asset.id, Time(0), false, None, false) {
@@ -106,6 +122,7 @@ const TOUR: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "preview",
@@ -128,6 +145,7 @@ const TOUR: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "timeline",
@@ -147,11 +165,12 @@ const TOUR: Lesson = Lesson {
             show_me: mark,
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "timeline",
             text: |a| tr!("tutorial.tour_cut", key = a.keymap.shortcut("extract")),
-            done: shortened,
+            done: |a| shortened(a, TOUR_CLIP),
             show_me: |a| {
                 let seq = a.history.project().sequence();
                 if seq.in_point().is_none() || seq.out_point().is_none() {
@@ -161,37 +180,16 @@ const TOUR: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "bin.titles",
             text: |_| tr!("tutorial.tour_title").into(),
-            done: |a| {
-                let project = a.history.project();
-                let tracks = project.sequence().tracks().iter();
-                let mut clips = tracks.flat_map(|t| t.clips());
-                clips.any(|c| project.asset(c.asset).is_some_and(|x| x.text.is_some()))
-            },
-            show_me: |a| {
-                use jvid_core::history::Created;
-                let [(name, _, text), ..] = crate::media_bin::presets();
-                let name = name.into();
-                let Ok(Created::Asset(title)) = a.history.apply(Command::AddText { name, text })
-                else {
-                    return;
-                };
-                // Above the clip, as dropping it over the top track does.
-                let (kind, name) = (jvid_core::model::TrackKind::Video, String::new());
-                let Ok(Created::Track(track)) = a.history.apply(Command::AddTrack { kind, name })
-                else {
-                    return;
-                };
-                let project = a.history.project();
-                if let Some(p) = project.placement(title, Time(0), false, Some(track), false) {
-                    apply(a, Command::Place(p));
-                }
-            },
+            done: has_title,
+            show_me: add_title,
             reveal: Some(|a| a.bin.tab = 2),
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "export",
@@ -209,14 +207,383 @@ const TOUR: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
     ],
 };
 
-/// The tour's sample in the project, once imported.
-fn tour_clip(app: &App) -> Option<&jvid_core::model::MediaAsset> {
+/// The screen recording lesson's sample.
+const SCREEN_CLIP: &str = "screen-recording.mp4";
+
+/// The sample's dead air in seconds, as `scripts/gen-samples` makes it.
+const DEAD_AIR: (f64, f64) = (2.4, 7.0);
+
+/// Where the typing sits in the 1280x720 sample, for the zoom.
+const TYPING: [f64; 2] = [400.0, 180.0];
+
+/// Tidies a screen recording: cut its dead air, zoom in on the typing, add a callout.
+const SCREEN: Lesson = Lesson {
+    id: "screen_recording",
+    title: || tr!("tutorial.screen"),
+    minutes: 5,
+    media: &[SCREEN_CLIP],
+    setup: |a| {
+        let project = a.history.project();
+        let Some(asset) = clip_named(a, SCREEN_CLIP) else {
+            return;
+        };
+        if let Some(p) = project.placement(asset.id, Time(0), false, None, false) {
+            apply(a, Command::Place(p));
+        }
+    },
+    steps: &[
+        Step {
+            anchor: "timeline",
+            text: |a| {
+                tr!(
+                    "tutorial.screen_silence",
+                    key = a.keymap.shortcut("detect_silence")
+                )
+            },
+            done: |a| shortened(a, SCREEN_CLIP),
+            show_me: |a| {
+                let Some(asset) = clip_named(a, SCREEN_CLIP).map(|x| x.id) else {
+                    return;
+                };
+                let seq = a.history.project().sequence();
+                let audio = seq.tracks().iter().filter(|t| t.kind == TrackKind::Audio);
+                let Some(c) = audio.flat_map(|t| t.clips()).find(|c| c.asset == asset) else {
+                    return;
+                };
+                // The span Detect Silence finds at its defaults: the dead air less 0.15 s padding.
+                let at = |s: f64| c.timeline_at(Time((s * FLICKS_PER_SECOND as f64) as i64));
+                let span = (c.id, at(DEAD_AIR.0 + 0.15), at(DEAD_AIR.1 - 0.15));
+                let id = c.id;
+                a.timeline.select_clip(seq, id);
+                let spans = vec![span];
+                apply(a, Command::CutSpans { spans, speed: None });
+            },
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.screen_zoom").into(),
+            done: zoomed,
+            show_me: |a| {
+                let Some(asset) = clip_named(a, SCREEN_CLIP).map(|x| x.id) else {
+                    return;
+                };
+                let project = a.history.project();
+                let (w, h) = (project.settings().width, project.settings().height);
+                let seq = project.sequence();
+                let video = seq.tracks().iter().filter(|t| t.kind == TrackKind::Video);
+                let clips: Vec<_> = video
+                    .flat_map(|t| t.clips())
+                    .filter(|c| c.asset == asset)
+                    .collect();
+                let Some(first) = clips.first().map(|c| c.id) else {
+                    return;
+                };
+                // The fitted image fills the frame, so the anchor is in frame pixels.
+                let anchor = [
+                    (TYPING[0] / 1280.0 - 0.5) * w as f64,
+                    (TYPING[1] / 720.0 - 0.5) * h as f64,
+                ];
+                let edits = clips
+                    .iter()
+                    .map(|c| {
+                        let mut x = c.transform.clone();
+                        (x.scale, x.anchor) = ([1.6; 2], anchor);
+                        (c.id, x, c.keyframes.clone())
+                    })
+                    .collect();
+                a.timeline.select_clip(seq, first);
+                apply(a, Command::SetClipProps(edits));
+            },
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+        Step {
+            anchor: "bin.titles",
+            text: |_| tr!("tutorial.screen_callout").into(),
+            done: has_title,
+            show_me: add_title,
+            reveal: Some(|a| a.bin.tab = 2),
+            ghost: None,
+            also: &[],
+        },
+    ],
+};
+
+/// Sample `name` in the project, once imported.
+fn clip_named<'a>(app: &'a App, name: &str) -> Option<&'a jvid_core::model::MediaAsset> {
     let assets = app.history.project().assets();
-    assets.iter().find(|a| a.path.ends_with(TOUR_CLIP))
+    assets.iter().find(|a| a.path.ends_with(name))
+}
+
+/// The green-screen lesson's samples: the clip to key and the background it goes over.
+const KEYED: &str = "green-screen.mp4";
+const BACKGROUND: &str = "subject.mp4";
+/// The bundled effect the lesson adds, by file stem.
+const CHROMA_KEY: &str = "chroma_key";
+
+/// Keys the green-screen sample over a background: background under it, Chroma Key, tune
+/// it, then mask off the board the key misses.
+const GREEN_SCREEN: Lesson = Lesson {
+    id: "green_screen",
+    title: || tr!("tutorial.green_screen"),
+    minutes: 5,
+    media: &[KEYED, BACKGROUND],
+    // The green-screen clip on the top of two video tracks, with the one under it empty. A new
+    // video track goes on top.
+    setup: |a| {
+        use jvid_core::history::Created;
+        let mut track = None;
+        for _ in 0..2 {
+            let (kind, name) = (jvid_core::model::TrackKind::Video, String::new());
+            if let Ok(Created::Track(t)) = a.history.apply(Command::AddTrack { kind, name }) {
+                track = Some(t);
+            }
+        }
+        let project = a.history.project();
+        let Some(keyed) = clip_named(a, KEYED) else {
+            return;
+        };
+        if let Some(p) = project.placement(keyed.id, Time(0), false, track, false) {
+            apply(a, Command::Place(p));
+        }
+    },
+    steps: &[
+        Step {
+            anchor: "timeline",
+            text: |_| {
+                tr!(
+                    "tutorial.green_screen_background",
+                    file = verbatim(BACKGROUND)
+                )
+            },
+            done: |a| {
+                let Some((under, _)) = keyed_clip(a) else {
+                    return false;
+                };
+                let Some(bg) = clip_named(a, BACKGROUND) else {
+                    return false;
+                };
+                let tracks = a.history.project().sequence().tracks();
+                let mut below = tracks[under + 1..].iter();
+                below.any(|t| {
+                    t.kind == jvid_core::model::TrackKind::Video
+                        && t.clips().iter().any(|c| c.asset == bg.id)
+                })
+            },
+            show_me: |a| {
+                let (Some((at, _)), Some(bg)) = (keyed_clip(a), clip_named(a, BACKGROUND)) else {
+                    return;
+                };
+                let project = a.history.project();
+                let tracks = project.sequence().tracks();
+                let below = tracks[at + 1..]
+                    .iter()
+                    .find(|t| t.kind == jvid_core::model::TrackKind::Video);
+                let Some(below) = below.map(|t| t.id) else {
+                    return;
+                };
+                if let Some(p) = project.placement(bg.id, Time(0), false, Some(below), false) {
+                    apply(a, Command::Place(p));
+                }
+            },
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.green_screen_key").into(),
+            done: |a| key_index(a).is_some(),
+            show_me: |a| {
+                if let Some((_, id)) = keyed_clip(a) {
+                    a.timeline.select_clip(a.history.project().sequence(), id);
+                }
+                add_key(a);
+            },
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.green_screen_tune").into(),
+            done: |a| {
+                let (Some(i), Some(shader)) = (key_index(a), chroma_key()) else {
+                    return false;
+                };
+                let Some((_, id)) = keyed_clip(a) else {
+                    return false;
+                };
+                let Some((_, c)) = a.history.project().sequence().clip(id) else {
+                    return false;
+                };
+                let params = &c.transform.effects[i].params;
+                let tuned = |name: &str| {
+                    let default = shader.params.iter().find(|p| p.name == name);
+                    params.get(name).copied() != default.map(|p| p.default)
+                };
+                ["tolerance", "edge_softness", "spill_suppression"]
+                    .into_iter()
+                    .all(tuned)
+            },
+            show_me: |a| {
+                if key_index(a).is_none() {
+                    add_key(a);
+                }
+                let Some(i) = key_index(a) else {
+                    return;
+                };
+                // Clears the green screen while the board on the right still shows through.
+                edit_keyed(a, |_, x| {
+                    let params = &mut x.effects[i].params;
+                    params.insert("tolerance".into(), 0.8);
+                    params.insert("edge_softness".into(), 0.15);
+                    params.insert("spill_suppression".into(), 0.7);
+                });
+            },
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.green_screen_mask").into(),
+            done: |a| {
+                let Some((_, id)) = keyed_clip(a) else {
+                    return false;
+                };
+                let seq = a.history.project().sequence();
+                seq.clip(id)
+                    .is_some_and(|(_, c)| c.transform.masks.iter().any(|m| m.enabled))
+            },
+            show_me: |a| {
+                use jvid_core::model::{Mask, MaskShape};
+                // Keeps the left 65% of the frame, which ends just before the board.
+                edit_keyed(a, |[w, h], x| {
+                    let points = vec![[-0.2 * w, 0.0], [0.7 * w, 1.1 * h]];
+                    x.masks.push(Mask::new(MaskShape::Rectangle, points));
+                });
+            },
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+    ],
+};
+
+/// The topmost green-screen clip: its track's index and its id.
+fn keyed_clip(app: &App) -> Option<(usize, jvid_core::model::ClipId)> {
+    let keyed = clip_named(app, KEYED)?.id;
+    let tracks = app.history.project().sequence().tracks().iter();
+    tracks.enumerate().find_map(|(i, t)| {
+        let c = t.clips().iter().find(|c| c.asset == keyed)?;
+        Some((i, c.id))
+    })
+}
+
+/// Chroma Key as shipped, for its parameters' defaults.
+fn chroma_key() -> Option<jvid_render::effect::Shader> {
+    let file = format!("{CHROMA_KEY}.wgsl");
+    let (_, src) = jvid_render::effect::BUNDLED
+        .iter()
+        .find(|(f, _)| *f == file)?;
+    jvid_render::effect::parse(src).ok()
+}
+
+/// Where Chroma Key is in the green-screen clip's effects.
+fn key_index(app: &App) -> Option<usize> {
+    let (_, id) = keyed_clip(app)?;
+    let (_, c) = app.history.project().sequence().clip(id)?;
+    c.transform
+        .effects
+        .iter()
+        .position(|e| e.shader == CHROMA_KEY)
+}
+
+/// Adds Chroma Key with its defaults to the green-screen clip, as Add Effect does.
+fn add_key(app: &mut App) {
+    let Some(shader) = chroma_key() else {
+        return;
+    };
+    edit_keyed(app, |_, x| {
+        x.effects.push(jvid_core::model::Effect {
+            shader: CHROMA_KEY.into(),
+            params: shader
+                .params
+                .iter()
+                .map(|p| (p.name.clone(), p.default))
+                .collect(),
+            enabled: true,
+        })
+    });
+}
+
+/// Changes the green-screen clip's transform as one undoable step; `f` also gets the clip's
+/// fitted image size, which mask points are in.
+fn edit_keyed(app: &mut App, f: impl FnOnce([f64; 2], &mut jvid_core::model::Transform)) {
+    let Some((_, id)) = keyed_clip(app) else {
+        return;
+    };
+    let project = app.history.project();
+    let Some((_, c)) = project.sequence().clip(id) else {
+        return;
+    };
+    let mut x = c.transform.clone();
+    f(crate::masks::fitted(project, c), &mut x);
+    let keys = c.keyframes.clone();
+    apply(app, Command::SetClipProps(vec![(id, x, keys)]));
+}
+
+/// Whether some clip of the screen recording is scaled up at either end, keyframed or not.
+fn zoomed(app: &App) -> bool {
+    let Some(asset) = clip_named(app, SCREEN_CLIP).map(|x| x.id) else {
+        return false;
+    };
+    let seq = app.history.project().sequence();
+    let mut clips = seq.tracks().iter().flat_map(|t| t.clips());
+    clips.any(|c| {
+        let ends = [c.start, c.end() - Time(1)];
+        c.asset == asset
+            && ends
+                .iter()
+                .any(|&t| c.transform_at(t).scale.iter().any(|&s| s > 1.0))
+    })
+}
+
+/// Whether a title is on the timeline.
+fn has_title(app: &App) -> bool {
+    let project = app.history.project();
+    let tracks = project.sequence().tracks().iter();
+    let mut clips = tracks.flat_map(|t| t.clips());
+    clips.any(|c| project.asset(c.asset).is_some_and(|x| x.text.is_some()))
+}
+
+/// Adds the first title preset at the start, on a new track above the rest, as dropping it
+/// over the top track does.
+fn add_title(app: &mut App) {
+    use jvid_core::history::Created;
+    let [(name, _, text), ..] = crate::media_bin::presets();
+    let name = name.into();
+    let Ok(Created::Asset(title)) = app.history.apply(Command::AddText { name, text }) else {
+        return;
+    };
+    let (kind, name) = (TrackKind::Video, String::new());
+    let Ok(Created::Track(track)) = app.history.apply(Command::AddTrack { kind, name }) else {
+        return;
+    };
+    let project = app.history.project();
+    if let Some(p) = project.placement(title, Time(0), false, Some(track), false) {
+        apply(app, Command::Place(p));
+    }
 }
 
 /// Sets In and Out around the middle third of the timeline, playhead on Out, as I and O do.
@@ -233,9 +600,9 @@ fn mark(app: &mut App) {
     app.timeline.seek(out_point);
 }
 
-/// Whether a section of the tour's clip is gone from some track, however it was cut out.
-fn shortened(app: &App) -> bool {
-    let Some(asset) = tour_clip(app) else {
+/// Whether a section of sample `name` is gone from some track, however it was cut out.
+fn shortened(app: &App, name: &str) -> bool {
+    let Some(asset) = clip_named(app, name) else {
         return false;
     };
     let full = asset.probe.as_ref().map_or(0, |p| p.duration.0);
@@ -244,6 +611,168 @@ fn shortened(app: &App) -> bool {
         let kept: i64 = clips.map(|c| c.duration().0).sum();
         kept > 0 && kept < full
     })
+}
+
+/// Animates a title in: keys, moving between them, easing, the graph editor and playback.
+const KEYFRAMES: Lesson = Lesson {
+    id: "keyframes",
+    title: || tr!("tutorial.keys"),
+    minutes: 5,
+    media: &[],
+    setup: |a| {
+        let [(name, _, text), ..] = crate::media_bin::presets();
+        let name = name.into();
+        apply(a, Command::AddText { name, text });
+        let project = a.history.project();
+        let Some(asset) = project.assets().last() else {
+            return;
+        };
+        if let Some(p) = project.placement(asset.id, Time(0), false, None, false) {
+            apply(a, Command::Place(p));
+        }
+        if let Some(id) = first_clip(a) {
+            a.timeline.select_clip(a.history.project().sequence(), id);
+        }
+        a.timeline.seek(Time(0));
+    },
+    steps: &[
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.keys_add").into(),
+            done: |a| {
+                title(a).is_some_and(|c| {
+                    let n = |p| c.keyframes.get(p).map_or(0, Vec::len);
+                    n("position") >= 2 && n("opacity") >= 2
+                })
+            },
+            show_me: |a| {
+                let Some(c) = title(a) else { return };
+                let (start, second) = (c.source_at(c.start), c.source_at(c.start + SECOND));
+                let x = &c.transform;
+                let [px, py] = x.position;
+                let key = |time, value| Keyframe {
+                    time,
+                    value,
+                    easing: Easing::Linear,
+                };
+                let mut keys = c.keyframes.clone();
+                // Rises 100 px into place as it fades in.
+                keys.insert(
+                    "position".into(),
+                    vec![
+                        key(start, Value::Vec2([px, py + 100.0])),
+                        key(second, Value::Vec2([px, py])),
+                    ],
+                );
+                keys.insert(
+                    "opacity".into(),
+                    vec![
+                        key(start, Value::Scalar(0.0)),
+                        key(second, Value::Scalar(x.opacity)),
+                    ],
+                );
+                let at = c.start + SECOND;
+                apply(a, Command::SetClipProps(vec![(c.id, x.clone(), keys)]));
+                a.timeline.seek(at);
+            },
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.keys_previous").into(),
+            done: |a| first_key(a).is_some_and(|t| a.timeline.playhead() == t),
+            show_me: |a| {
+                if let Some(t) = first_key(a) {
+                    a.timeline.seek(t);
+                }
+            },
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.keys_ease").into(),
+            done: |a| {
+                let eased = |e| e != Easing::Linear;
+                title_keys(a).any(|k| eased(k.easing))
+            },
+            show_me: |a| ease_first(a, Easing::EaseOut),
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+        Step {
+            anchor: "timeline",
+            text: |_| tr!("tutorial.keys_graph").into(),
+            done: |a| {
+                let custom = |e| matches!(e, Easing::Bezier(_));
+                a.timeline.graph_open() && title_keys(a).any(|k| custom(k.easing))
+            },
+            show_me: |a| {
+                if let Some(id) = first_clip(a) {
+                    a.timeline.open_graph(id);
+                }
+                // A steeper ease out than the preset, as dragging its first handle left gives.
+                ease_first(a, Easing::Bezier([0.0, 0.0, 0.2, 1.0]));
+            },
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+        Step {
+            anchor: "preview",
+            text: |a| tr!("tutorial.keys_play", key = a.keymap.shortcut("play_stop")),
+            done: |a| a.preview.playing(),
+            show_me: |a| {
+                if let Some(t) = first_key(a) {
+                    a.timeline.seek(t);
+                }
+                a.preview_active = 1;
+                a.preview.program_action("play_stop");
+            },
+            reveal: None,
+            ghost: None,
+            also: &[],
+        },
+    ],
+};
+
+const SECOND: Time = Time(jvid_core::time::FLICKS_PER_SECOND);
+
+/// The keyframes lesson's title clip.
+fn title(app: &App) -> Option<&jvid_core::model::Clip> {
+    let id = first_clip(app)?;
+    app.history.project().sequence().clip(id).map(|(_, c)| c)
+}
+
+/// The title's position and opacity keys.
+fn title_keys(app: &App) -> impl Iterator<Item = &Keyframe> {
+    let keys = title(app).map(|c| &c.keyframes);
+    let lane = move |p| keys.and_then(|k| k.get(p)).into_iter().flatten();
+    lane("position").chain(lane("opacity"))
+}
+
+/// The timeline time of the title's first position key.
+fn first_key(app: &App) -> Option<Time> {
+    let c = title(app)?;
+    let k = c.keyframes.get("position")?.first()?;
+    Some(c.timeline_at(k.time))
+}
+
+/// Sets the easing of the title's first position and opacity keys, where it animates in.
+fn ease_first(app: &mut App, e: Easing) {
+    let Some(c) = title(app) else { return };
+    let mut keys = c.keyframes.clone();
+    for p in ["position", "opacity"] {
+        if let Some(k) = keys.get_mut(p).and_then(|k| k.first_mut()) {
+            k.easing = e;
+        }
+    }
+    let cmd = Command::SetClipProps(vec![(c.id, c.transform.clone(), keys)]);
+    apply(app, cmd);
 }
 
 /// Sample clip `name`'s path, written out first if needed.
@@ -267,7 +796,8 @@ fn first_clip(app: &App) -> Option<jvid_core::model::ClipId> {
 /// Turned on by a running lesson, so [`anchor`] records nothing otherwise.
 const RUNNING: &str = "lesson_running";
 
-fn running(ctx: &egui::Context) -> bool {
+/// Whether a lesson runs.
+pub(crate) fn running(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp(Id::new(RUNNING)).unwrap_or(false))
 }
 
@@ -426,6 +956,10 @@ impl App {
             return;
         };
         self.leave_project();
+        // The lesson's playback would run on into the user's timeline.
+        if self.preview.playing() {
+            self.preview.program_action("shuttle_stop");
+        }
         let s = run.stash;
         self.history = s.history;
         self.path = s.path;
@@ -515,7 +1049,9 @@ impl App {
             }
         }
         if let Some(t) = target {
-            dim(ctx, t);
+            let also = step.map_or(&[][..], |s| s.also);
+            let more = also.iter().filter_map(|a| anchor_rect(ctx, a));
+            dim(ctx, &[t].into_iter().chain(more).collect::<Vec<_>>());
         }
         let text = step.map_or_else(|| tr!("tutorial.complete").into(), |s| (s.text)(self));
         let modal = ctx.memory(|m| m.top_modal_layer().is_some());
@@ -610,25 +1146,54 @@ const DIM: Order = Order::Background;
 
 /// Dims the window around `target`, outlined in Light Blue. Painted only, so every click
 /// still reaches the editor.
-fn dim(ctx: &egui::Context, target: Rect) {
+fn dim(ctx: &egui::Context, targets: &[Rect]) {
     let screen = ctx.content_rect();
-    let hole = target.expand(space::S4).intersect(screen);
+    let holes: Vec<Rect> = targets
+        .iter()
+        .map(|t| t.expand(space::S4).intersect(screen))
+        .collect();
     let painter = ctx.layer_painter(LayerId::new(DIM, Id::new("lesson_dim")));
     let shade = color::ground().gamma_multiply(0.8);
-    for r in [
-        Rect::from_min_max(screen.min, pos2(screen.max.x, hole.top())),
-        Rect::from_min_max(pos2(screen.min.x, hole.bottom()), screen.max),
-        Rect::from_min_max(pos2(screen.min.x, hole.top()), hole.left_bottom()),
-        Rect::from_min_max(hole.right_top(), pos2(screen.max.x, hole.bottom())),
-    ] {
+    for r in shaded(screen, &holes) {
         painter.rect_filled(r, 0, shade);
     }
-    painter.rect_stroke(
-        hole,
-        CornerRadius::same(radius::PANEL),
-        Stroke::new(2.0, color::light_blue()),
-        egui::StrokeKind::Inside,
-    );
+    for &hole in &holes {
+        painter.rect_stroke(
+            hole,
+            CornerRadius::same(radius::PANEL),
+            Stroke::new(2.0, color::light_blue()),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+/// `screen` less `holes`, as rects: in each band between hole edges, the gaps between the
+/// holes crossing it.
+fn shaded(screen: Rect, holes: &[Rect]) -> Vec<Rect> {
+    let edges = holes.iter().flat_map(|h| [h.top(), h.bottom()]);
+    let mut ys: Vec<f32> = edges.chain([screen.top(), screen.bottom()]).collect();
+    ys.sort_by(f32::total_cmp);
+    ys.dedup();
+    let mut out = Vec::new();
+    for band in ys.windows(2) {
+        let (top, bottom) = (band[0], band[1]);
+        let crossing = holes
+            .iter()
+            .filter(|h| h.top() <= top && h.bottom() >= bottom);
+        let mut spans: Vec<_> = crossing.map(|h| h.x_range()).collect();
+        spans.sort_by(|a, b| a.min.total_cmp(&b.min));
+        let mut x = screen.left();
+        for s in spans
+            .into_iter()
+            .chain([egui::Rangef::point(screen.right())])
+        {
+            if s.min > x {
+                out.push(Rect::from_min_max(pos2(x, top), pos2(s.min, bottom)));
+            }
+            x = x.max(s.max);
+        }
+    }
+    out
 }
 
 const CARD_W: f32 = 320.0;
@@ -788,6 +1353,7 @@ mod tests {
                 },
                 reveal: Some(|a| a.bin.tab = 2),
                 ghost: None,
+                also: &[],
             },
             Step {
                 anchor: "timeline",
@@ -804,6 +1370,7 @@ mod tests {
                 },
                 reveal: None,
                 ghost: None,
+                also: &[],
             },
             Step {
                 anchor: "timeline",
@@ -816,6 +1383,7 @@ mod tests {
                 },
                 reveal: None,
                 ghost: None,
+                also: &[],
             },
             Step {
                 anchor: "inspector",
@@ -838,6 +1406,7 @@ mod tests {
                 },
                 reveal: None,
                 ghost: None,
+                also: &[],
             },
         ],
     };
@@ -862,6 +1431,7 @@ mod tests {
                 show_me: |_| {},
                 reveal: None,
                 ghost: None,
+                also: &[],
             },
             Step {
                 anchor: "nowhere",
@@ -870,13 +1440,14 @@ mod tests {
                 show_me: |_| {},
                 reveal: None,
                 ghost: None,
+                also: &[],
             },
         ],
     };
 
     /// Runs frames until the sandbox's media has imported and the card has caught up.
-    /// Importing and exporting repaint until they finish, so frames run without waiting for
-    /// the UI to go idle.
+    /// Importing, exporting and playback repaint until they finish, so frames run without
+    /// waiting for the UI to go idle.
     fn settle(h: &mut Harness<'_, App>) {
         for _ in 0..500 {
             h.run_ok();
@@ -920,19 +1491,29 @@ mod tests {
                 let at = h.state().lesson.as_ref().map(|r| r.step);
                 assert_eq!(at, Some(i), "{}: on step {i}", lesson.id);
                 // A renamed or removed control fails here instead of in the lesson.
-                let at = drawn(&h, step.anchor);
-                assert!(
-                    at.is_some(),
-                    "{} step {i}: `{}` never drawn",
-                    lesson.id,
-                    step.anchor
-                );
+                for anchor in [step.anchor].iter().chain(step.also) {
+                    assert!(
+                        drawn(&h, anchor).is_some(),
+                        "{} step {i}: `{anchor}` never drawn",
+                        lesson.id,
+                    );
+                }
                 // A take needs a microphone, so the run skips it.
                 if step.anchor == "record" {
                     click(&mut h, tr!("tutorial.skip_step"));
                     continue;
                 }
-                click(&mut h, tr!("tutorial.show_me"));
+                h.get_by_label(tr!("tutorial.show_me")).click();
+                // Each frame renders, as in the app: the scopes count a rendered frame, so a
+                // step reading them passes a few frames on.
+                for _ in 0..100 {
+                    h.step();
+                    h.render().unwrap();
+                    if (step.done)(h.state()) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
                 assert!(
                     (step.done)(h.state()),
                     "{} step {i}: Show Me didn't pass",
@@ -945,6 +1526,7 @@ mod tests {
             assert!(h.state().tutorials_done.iter().any(|d| d == lesson.id));
             click(&mut h, tr!("tutorial.exit"));
             assert!(h.state().lesson.is_none());
+            assert!(!h.state().preview.playing(), "{}: still playing", lesson.id);
         }
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1001,6 +1583,23 @@ mod tests {
         h.run();
         assert!(crate::settings_file::load_from(&path).tour_offered);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_custom_curve_waits_for_the_graph_editor() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&KEYFRAMES);
+        settle(&mut h);
+        click(&mut h, tr!("tutorial.show_me"));
+        click(&mut h, tr!("tutorial.show_me"));
+        // Custom in the diamond's easing menu passes the easing step but not the graph step.
+        ease_first(h.state_mut(), Easing::Bezier([0.1, 0.0, 0.3, 1.0]));
+        settle(&mut h);
+        assert_eq!(step(&h), Some(3));
+        let id = first_clip(h.state()).unwrap();
+        h.state_mut().timeline.open_graph(id);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(4));
     }
 
     #[test]
@@ -1267,6 +1866,30 @@ mod tests {
     }
 
     #[test]
+    fn a_background_over_the_green_screen_isnt_under_it() {
+        use jvid_core::history::Created;
+        let mut h = harness();
+        h.state_mut().start_lesson(&GREEN_SCREEN);
+        settle(&mut h);
+        let a = h.state_mut();
+        let under = GREEN_SCREEN.steps[0].done;
+        assert!(!under(a));
+        let (kind, name) = (jvid_core::model::TrackKind::Video, String::new());
+        let Ok(Created::Track(top)) = a.history.apply(Command::AddTrack { kind, name }) else {
+            panic!("no track");
+        };
+        let bg = clip_named(a, BACKGROUND).unwrap().id;
+        let p = a
+            .history
+            .project()
+            .placement(bg, Time(0), false, Some(top), false);
+        apply(a, Command::Place(p.unwrap()));
+        assert!(!under(a), "a background above the key passed");
+        (GREEN_SCREEN.steps[0].show_me)(a);
+        assert!(under(a));
+    }
+
+    #[test]
     fn a_sample_that_cant_be_found_starts_nothing() {
         const BROKEN: Lesson = Lesson {
             media: &["not-a-sample.mp4"],
@@ -1325,6 +1948,7 @@ mod tests {
                 show_me: |_| {},
                 reveal: None,
                 ghost: Some([[10.0, 20.0], [300.0, 400.0]]),
+                also: &[],
             }],
             ..PREPARED
         };
@@ -1350,8 +1974,52 @@ mod tests {
         assert!(h.ctx.data(|d| d.get_temp::<Anchors>(Id::NULL)).is_none());
     }
 
+    /// Show Me cuts `DEAD_AIR` without waiting on peaks, so it has to be what Detect Silence
+    /// finds in the sample at its defaults.
+    #[test]
+    fn dead_air_is_what_detect_silence_finds_in_the_sample() {
+        use jvid_media::audio::SAMPLE_RATE;
+        let dir = tmp("peaks");
+        let path = sample(SCREEN_CLIP).unwrap();
+        let peaks = jvid_media::waveforms::Cache::new(dir.clone(), 1 << 20)
+            .load(&path, 0)
+            .unwrap();
+        let rate = SAMPLE_RATE as f64;
+        let n = |secs: f64| (secs * rate) as i64;
+        let found = jvid_media::silence::detect(peaks.finest(), -40.0, n(1.0), n(0.15));
+        let [(a, b)] = found[..] else {
+            panic!("{found:?}")
+        };
+        let frame = 1.0 / 30.0;
+        assert!((a as f64 / rate - (DEAD_AIR.0 + 0.15)).abs() < frame, "{a}");
+        assert!((b as f64 / rate - (DEAD_AIR.1 - 0.15)).abs() < frame, "{b}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn the_dim_stays_under_windows() {
         assert!(DIM < Order::Middle);
+    }
+
+    #[test]
+    fn the_dim_shades_everything_but_each_hole() {
+        let screen = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0));
+        let a = Rect::from_min_max(pos2(10.0, 10.0), pos2(30.0, 60.0));
+        let b = Rect::from_min_max(pos2(50.0, 40.0), pos2(90.0, 80.0));
+        let shade = shaded(screen, &[a, b]);
+        let area: f32 = shade.iter().map(|r| r.area()).sum();
+        assert_eq!(area, screen.area() - a.area() - b.area());
+        let shaded_at = |p| shade.iter().any(|r| r.contains(p));
+        for p in [pos2(20.0, 30.0), pos2(70.0, 50.0), pos2(70.0, 70.0)] {
+            assert!(!shaded_at(p), "{p:?} in a hole");
+        }
+        for p in [
+            pos2(5.0, 5.0),
+            pos2(40.0, 50.0),
+            pos2(20.0, 70.0),
+            pos2(95.0, 95.0),
+        ] {
+            assert!(shaded_at(p), "{p:?} not shaded");
+        }
     }
 }

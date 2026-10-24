@@ -26,12 +26,14 @@ pub const CLIPS: &[(&str, &[u8])] = &[
     ),
     ("music.m4a", include_bytes!("../assets/samples/music.m4a")),
     ("voice.m4a", include_bytes!("../assets/samples/voice.m4a")),
+    // Not a clip: the colour lesson's look.
+    ("look.cube", include_bytes!("../assets/samples/look.cube")),
 ];
 
 const LICENSES: &str = include_str!("../assets/samples/LICENSES.toml");
 
 /// Bump when a clip changes, so installs write the new set beside the old instead of mixing them.
-const VERSION: &str = "v1";
+const VERSION: &str = "v2";
 
 /// One clip's entry in `LICENSES.toml`.
 #[derive(Deserialize)]
@@ -118,6 +120,11 @@ mod tests {
         let mut total = 0;
         for &(name, bytes) in CLIPS {
             total += bytes.len();
+            if name.ends_with(".cube") {
+                let text = std::str::from_utf8(bytes).unwrap();
+                jvid_render::lut::parse(text).unwrap_or_else(|e| panic!("{name}: {e}"));
+                continue;
+            }
             let path = path_in(&dir, name).unwrap().unwrap();
             let info = jvid_media::probe::probe(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(
