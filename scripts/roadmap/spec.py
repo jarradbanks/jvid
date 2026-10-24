@@ -1800,3 +1800,20 @@ I("fast-tests", "Faster test suite: slim the slow export tests", None, ["export"
          "Requested by the owner on 2026-10-25 to cut CI time"],
   ac=["No CI test runs over 30 s, and each of the three still fails when the behaviour it guards breaks",
       "The jvid-app lib tests take at most half as long as before"])
+
+I("windows-playback-hang", "Windows: playback retry test hangs intermittently", None, ["timeline"], "S", [], labels=["later"],
+  summary="playback::tests::failed_decodes_retry_and_relink_redecodes hung for 65 minutes on windows-latest and passed on a rerun.",
+  scope=["CI run 40115784502 (PR #361): jvid-app lib test playback::tests::failed_decodes_retry_and_relink_redecodes printed 'running for over 60 seconds' at 17:26 UTC and was still running at 18:29 UTC, when it was cancelled. The rerun of the same commit passed. Find the wait that can block forever (a channel recv, join or condvar with no timeout) and fix the race, or show it is test-only and fix the test",
+         "Add a timeout to the test so a hang fails in seconds rather than burning the job"],
+  ac=["The test passes 50 times in a row on Windows (a loop in CI or locally), and a forced hang fails within 30 s"])
+
+I("whisper-cancel", "Speech-to-text: Cancel stops whisper promptly", None, ["transcribe"], "S", ["transcribe"], labels=["later"],
+  summary="After Cancel, the jvid-whisper thread runs on for one encoder pass (3.8-8 s measured in #361).",
+  scope=["Use whisper's abort callback so Cancel stops between encoder steps, not after the next pass",
+         "Return the detected language from a transcription job"],
+  ac=["The jvid-whisper thread exits within 1 s of Cancel (the ignored model test asserts it)"])
+
+I("track-volume", "Track Volume control on the audio track header", None, ["timeline", "ui"], "S", ["mixer"], labels=["later"],
+  summary="TrackSettings.volume exists but has no UI; the audio lesson (#341) had to use clip Volume.",
+  scope=["A compact Volume control on each audio track header, undoable and saved, reusing the house slider"],
+  ac=["Changing a track's Volume changes the mix of every clip on it, and undo restores it (test)"])
