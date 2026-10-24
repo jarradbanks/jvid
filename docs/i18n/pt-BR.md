@@ -47,7 +47,7 @@ note says which was picked and why. Use the one word everywhere the term appears
 | Roll | rolagem | Edição de rolagem | Roll | Premiere's. Not in jvid's strings yet. |
 | Slip | deslizamento | Deslizamento ("edições de deslizamento") | Slip | Adobe's help says "deslizamento"; some shortcut lists call Premiere's slip tool "Escorregar". Not in jvid's strings yet. |
 | Split | dividir | Dividir | Dividir | "Dividir no indicador de reprodução". |
-| Snapping | encaixe | Ajuste / snap (label unconfirmed) | Encaixe | Resolve's; Premiere's pt-BR label couldn't be confirmed. |
+| Snapping | encaixe | Encaixar ("Encaixar na linha do tempo") | Encaixe | Both agree. |
 | Link | vincular / desvincular | Vincular, Seleção vinculada | Vincular, Seleção vinculada | |
 | Lock | bloquear | Bloquear faixa | Bloquear trilha | |
 | Mute | silenciar | Silenciar faixa | Mudo | Premiere's verb, matching the other track toggles. |
@@ -75,14 +75,20 @@ note says which was picked and why. Use the one word everywhere the term appears
 Other recurring words:
 
 - **Cut** (clipboard) is "Recortar", as Windows and macOS say; **Crop** is "Cortar", Premiere's
-  name for its Crop effect; a cut point between two clips is a "corte".
+  name for its Crop effect (so the crop lanes are "Cortar esquerda", "Cortar topo"…); a cut
+  point between two clips is a "corte".
 - **Overwrite** is "Sobrescrever" (Resolve), not Premiere's "Substituir", which pt-BR apps also
   use for Replace.
 - **Razor** is "Lâmina" ("Ferramenta Lâmina"), as in Premiere.
-- **Crossfade** is "Fusão cruzada"; **Dip to Black/White** is "Fade para preto/branco", the
-  wording Brazilian editors use; Premiere's own transition names weren't confirmed.
+- **Crossfade** is "Dissolução cruzada", the name Brazilian Premiere material uses; **Dip to
+  Black/White** is "Fade para preto/branco", the wording Brazilian editors use; Premiere's own
+  name for the dip wasn't confirmed.
 - **Bypass** (an effect switched off, settings kept) is "Desligar", paired with "Ligar".
-- **Threshold** is "Limiar" in both Detect Silence and the compressor.
+- **Threshold** is "Limiar" in both Detect Silence and the compressor. The compressor's
+  **Ratio** is "Proporção" and **Release** "Relaxamento", as in Audacity's pt-BR catalog.
+- **Reverse** (play backwards) is "Inverter"; "Reverter" reads as Revert.
+- **Lift** is "Elevar", paired with "Extrair".
+- **Burn in** (subtitles) is "Gravar no vídeo"; "Embutir" would suggest an embedded track.
 
 ## Sources checked
 
@@ -106,9 +112,14 @@ Other recurring words:
   ("Inspetor", "visualizador de origem").
 - Resolve shortcut lists in pt-BR: [videohero.com.br](https://videohero.com.br/atalhos-davinci)
   ("encaixe", "aparar").
+- Adobe's pt-BR help [Encaixar clipes](https://helpx.adobe.com/br/premiere/desktop/edit-projects/change-clip-sequence/snap-clips.html)
+  ("Encaixar na linha do tempo").
+- Shipped pt-BR catalogs of [Audacity 3.7.3](https://raw.githubusercontent.com/audacity/audacity/release-3.7.3/locale/pt_BR.po)
+  and [Kdenlive](https://raw.githubusercontent.com/KDE/kdenlive/master/po/pt_BR/kdenlive.po)
+  ("Proporção", "Relaxamento", "Inverter").
 - Adobe Media Encoder in pt-BR: [Tonka3D](https://www.tonka3d.com.br/blog/adobe-media-encoder/)
   ("fila", "predefinição", "taxa de bits").
 
-Not confirmed from a source: Premiere's pt-BR label for the snapping toggle, and Final Cut Pro's
+Not confirmed from a source: Premiere's pt-BR label for subtitle burn-in, and Final Cut Pro's
 pt-BR terms (Apple's pt-BR user guide is still published in English). These are worth a check
 by a native speaker with the localized apps open.
