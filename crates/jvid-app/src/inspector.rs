@@ -13,8 +13,8 @@ use jvid_core::time::Time;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{
-    Button, Checkbox, ColorField, DragField, Dropdown, KeyButton, Keyed, SectionHeader, Segmented,
-    Slider, TextInput,
+    Button, Checkbox, ColorField, DragField, Dropdown, KeyButton, Keyed, MenuRow, SectionHeader,
+    Segmented, Slider, TextInput,
 };
 
 use crate::i18n::{CATALOG, Label, tr, verbatim};
@@ -2701,40 +2701,45 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     st.at = st.at.min(matches.len().saturating_sub(1));
     let mut pick = matches.get(st.at).copied();
     let mut clicked = false;
-    let menu = egui::Area::new(id.with("menu"))
-        .order(egui::Order::Foreground)
-        .fixed_pos(r.rect.left_bottom() + vec2(0.0, space::S4))
-        .show(ui.ctx(), |ui| {
-            egui::Frame::menu(ui.style()).show(ui, |ui| {
-                ui.set_width(r.rect.width().max(160.0));
-                let q = ui.add(
-                    egui::TextEdit::singleline(&mut st.query)
-                        .hint_text(tr!("inspector.search_fonts")),
-                );
-                q.request_focus();
-                if q.changed() {
-                    st.at = 0;
-                }
-                egui::ScrollArea::vertical()
-                    .max_height(200.0)
-                    .show(ui, |ui| {
-                        for (i, f) in matches.iter().enumerate() {
-                            let r = ui.selectable_label(i == st.at, *f);
-                            if down || up {
-                                if i == st.at {
-                                    r.scroll_to_me(None);
-                                }
-                            } else if r.hovered() {
-                                pick = Some(*f);
+    // Like a Dropdown's menu: as wide as the field and inside the Inspector.
+    let bounds = ui.clip_rect().intersect(ui.ctx().content_rect());
+    let row = size::CONTROL + ui.spacing().item_spacing.y;
+    let wanted = (matches.len() as f32).min(8.0) * row + row;
+    let (align, max_height) = suite_ui::widgets::menu_place(r.rect, bounds, wanted);
+    let menu = egui::Popup::menu(&r)
+        .id(id.with("menu"))
+        .open(true)
+        .width(r.rect.width())
+        .align(align)
+        .align_alternatives(&[])
+        .show(|ui| {
+            let search = TextInput::search(&mut st.query)
+                .hint(tr!("inspector.search_fonts"))
+                .width(ui.available_width());
+            let q = ui.add(search);
+            q.request_focus();
+            if q.changed() {
+                st.at = 0;
+            }
+            egui::ScrollArea::vertical()
+                .max_height((max_height - row).clamp(size::CONTROL, 8.0 * row))
+                .show(ui, |ui| {
+                    for (i, f) in matches.iter().enumerate() {
+                        let r = ui.add(MenuRow::new(f, *f == st.before).lit(i == st.at));
+                        if down || up {
+                            if i == st.at {
+                                r.scroll_to_me(None);
                             }
-                            if r.clicked() {
-                                (pick, clicked) = (Some(*f), true);
-                            }
+                        } else if r.hovered() {
+                            pick = Some(*f);
                         }
-                    });
-            });
+                        if r.clicked() {
+                            (pick, clicked) = (Some(*f), true);
+                        }
+                    }
+                });
         });
-    st.area = menu.response.rect;
+    st.area = menu.map_or(egui::Rect::NOTHING, |m| m.response.rect);
     let next = if esc || (away && !clicked) {
         st.before.clone()
     } else {
@@ -4663,6 +4668,41 @@ mod tests {
         );
         h.run();
         h
+    }
+
+    /// In a short Inspector the font menu opens upward and scrolls, rather than running off it.
+    #[test]
+    fn the_font_menu_fits_inside_the_inspector() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let list: Vec<String> = (1..=30).map(|i| format!("Family {i}")).collect();
+        let panel = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(240.0, 320.0));
+        let mut fresh = true;
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([240.0, 480.0])
+            .build_ui_state(
+                move |ui, f: &mut String| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    ui.set_clip_rect(panel);
+                    ui.add_space(240.0);
+                    font_field(ui, f, &list);
+                },
+                "Family 3".to_owned(),
+            );
+        h.run();
+        h.get_by_label("Family 3").click();
+        h.run();
+        h.run();
+        let menu = h
+            .ctx
+            .memory(|m| m.area_rect(egui::Id::new("inspector font").with("menu")));
+        let menu = menu.expect("the menu is open");
+        assert!(panel.contains_rect(menu), "{menu:?}");
+        h.snapshot("inspector_font_menu");
     }
 
     #[test]

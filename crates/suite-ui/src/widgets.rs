@@ -710,7 +710,7 @@ fn paint_left(ui: &Ui, x: f32, y: f32, galley: Arc<Galley>, color: Color32) {
 
 /// Where a dropdown's menu opens, and its tallest scroll height: below the field unless
 /// there's more room above, never past `bounds`, and `MARGIN` short of its edge.
-fn menu_place(field: Rect, bounds: Rect, wanted: f32) -> (RectAlign, f32) {
+pub fn menu_place(field: Rect, bounds: Rect, wanted: f32) -> (RectAlign, f32) {
     const MARGIN: f32 = space::S8;
     let below = bounds.bottom() - field.bottom() - MARGIN;
     let above = field.top() - bounds.top() - MARGIN;
@@ -837,14 +837,27 @@ impl Widget for Dropdown<'_> {
 }
 
 /// A 24px menu row: Body Ink text with a 6px-radius Border-colour hover fill.
-struct MenuRow<'a> {
+#[must_use = "add it with `ui.add(..)`"]
+pub struct MenuRow<'a> {
     label: &'a str,
     checked: bool,
+    lit: bool,
 }
 
 impl<'a> MenuRow<'a> {
-    fn new(label: &'a str, checked: bool) -> Self {
-        Self { label, checked }
+    /// `checked` puts a check at the row's end.
+    pub fn new(label: &'a str, checked: bool) -> Self {
+        Self {
+            label,
+            checked,
+            lit: false,
+        }
+    }
+
+    /// Shows the hover fill without the pointer, such as for the row the arrow keys reached.
+    pub fn lit(mut self, lit: bool) -> Self {
+        self.lit = lit;
+        self
     }
 }
 
@@ -855,7 +868,7 @@ impl Widget for MenuRow<'_> {
         response.widget_info(|| {
             WidgetInfo::selected(WidgetType::SelectableLabel, true, self.checked, self.label)
         });
-        if response.hovered() || response.has_focus() {
+        if self.lit || response.hovered() || response.has_focus() {
             ui.painter()
                 .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::border());
         }
