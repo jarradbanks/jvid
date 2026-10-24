@@ -652,8 +652,8 @@ fn every_builtin_preset_exports() {
         let name = preset.name.clone();
         let req = Request {
             path: path.clone(),
-            // Not much shorter: MP3 pads to 1152-sample frames, past validate's one-frame slack.
-            range: (secs(1), secs(1) + Time(FLICKS_PER_SECOND / 3)),
+            // Short enough that MP3's frame padding (#380) would overrun validate's one frame.
+            range: (secs(1), secs(1) + Time(FLICKS_PER_SECOND / 10)),
             preset,
             loudness: None,
             lossless: None,

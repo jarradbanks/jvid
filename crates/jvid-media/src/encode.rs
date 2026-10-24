@@ -1103,6 +1103,28 @@ mod tests {
         assert!(info.width.is_some());
     }
 
+    /// #380: an MP3 lasts the samples pushed in, not its whole 1152-sample frames with the
+    /// encoder delay and padding (up to ~45 ms more).
+    #[test]
+    fn mp3_lasts_its_samples() {
+        crate::ffmpeg::init().unwrap();
+        let preset = jvid_core::preset::builtin()
+            .into_iter()
+            .find(|p| p.audio == Some(AudioCodec::Mp3))
+            .unwrap();
+        let path = std::env::temp_dir().join(format!("jvid-mp3-{}.mp3", std::process::id()));
+        for n in [1_600, 4_800, 7_000, 96_007] {
+            let mut enc = Encoder::create(&path, (64, 64), Rate::new(30, 1), &preset).unwrap();
+            enc.audio(&vec![0.1; n * 2]).unwrap();
+            enc.finish().unwrap();
+            let got = crate::probe::probe(&path).unwrap().duration.0;
+            let flicks = jvid_core::time::FLICKS_PER_SECOND;
+            let want = n as i64 * flicks / SAMPLE_RATE as i64;
+            assert!((got - want).abs() < flicks / 1000, "{n}: {got} vs {want}");
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+
     /// The acceptance test from #60: 5 s of a grey ramp (plus a moving box so frames differ)
     /// through the GIF preset comes out 480p with no visible banding: averaged over 9 px, every
     /// pixel of the ramp is within 3 levels of the source, where the old 3-3-2 palette missed by ~11.
