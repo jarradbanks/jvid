@@ -922,7 +922,8 @@ mod tests {
         assert_eq!(h.project(), &before, "one step");
         let bad = Command::Batch(vec![add_clip(t, 0), Command::RemoveClip(ClipId(999))]);
         assert!(h.apply(bad).is_err());
-        assert_eq!(h.project(), &before, "the first command is rolled back");
+        // The bad batch's AddClip applies before RemoveClip fails, then rolls back with it.
+        assert_eq!(h.project(), &before, "the AddClip stayed");
     }
 
     #[test]

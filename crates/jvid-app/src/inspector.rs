@@ -2427,8 +2427,8 @@ fn row(
     key_clicks(clips, &names, c, t, index, seek).or(edit)
 }
 
-/// What a row's keyframe tools did to `names`: the arrows seek to the next key either side,
-/// the diamond animates or keys them, and right-clicking it edits their easing.
+/// What a row's keyframe diamond did to `names`: clicking it animates or keys them, and
+/// right-clicking it opens their easing, Previous and Next Keyframe and Stop Animating.
 fn key_clicks(
     clips: &[&Clip],
     names: &[&str],
@@ -2445,7 +2445,7 @@ fn key_clicks(
 }
 
 /// [`key_clicks`] with the diamond's commands: `animate` starts or stops animating, `key`
-/// adds or removes the keyframe at the playhead. With `nav` the menu has the arrows too.
+/// adds or removes the keyframe at the playhead.
 #[allow(clippy::too_many_arguments)]
 fn key_menu(
     clips: &[&Clip],
