@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Czech. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Výchozí"
+hover = "Najetí"
+focus = "Viditelné zaměření"
+pressed = "Stisknuto"
+disabled = "Zakázáno"
+loading_error = "Načítání / chyba"
+
+[panel]
+widgets = "Ovládací prvky"
+effects = "Efekty"
+text = "Text"
+add = "Přidat"
+more = "Další"
+inspector = "Inspektor"
+source = "Zdroj"
+program = "Program"
+audio = "Zvuk"
+markers = "Značky"
+history = "Historie"
+captions = "Popisky"
+overflow = "Karty užší než 64 px se přesunou do nabídky se šipkou."
+type_and_colour = "Písmo a barva"
+
+[row]
+primary = "Primární"
+secondary = "Sekundární"
+ghost = "Průhledné"
+destructive = "Destruktivní"
+icon = "Ikona"
+input = "Vstup"
+search = "Hledání"
+numeric = "Číselné"
+dropdown = "Rozevírací seznam"
+colour = "Barva"
+segmented = "Segmentované"
+checkbox = "Zaškrtávací pole"
+section = "Sekce"
+slider = "Posuvník"
+keyframe = "Klíčový snímek"
+
+[demo]
+delete = "Odstranit"
+export = "Exportovat"
+width_prefix = "Š"
+min_error = "Musí být alespoň 2"
+full = "Plné"
+fit = "Přizpůsobit"
+fill = "Vyplnit"
+snap = "Přichytit"
+live = "Živě"
+transform = "Transformace"
+position = "Pozice"
+scale = "Měřítko"
+reset = "Obnovit"
+previous = "Předchozí klíčový snímek"
+next = "Další klíčový snímek"
+animate = "Animovat"
+plus_second = "+1 s"
+
+[type]
+display = "Titulní 22"
+headline = "Nadpis 16"
+title = "Titulek 14"
+body_strong = "Tučný text 12"
+body = "Text 12 · 0123456789 se nehýbe"
+small = "Malý 10 · nápověda ke zkratce"
+
+[clip]
+video = "Video"
+title = "Titulek"
+still = "Obrázek"
+audio = "Zvuk"
