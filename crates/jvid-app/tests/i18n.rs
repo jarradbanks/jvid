@@ -39,6 +39,7 @@ fn switch(code: &str) -> Switched {
 
 impl Drop for Switched {
     fn drop(&mut self) {
+        i18n::set_pseudo(false);
         i18n::set_language("en");
     }
 }
@@ -118,15 +119,12 @@ const ES: [&str; 6] = [
 ];
 
 /// A new project with one title clip, selected, made the way a user makes one: the bin's preset
-/// dragged onto the timeline. Run in the language `labels` are in (see [`ES`]); `wgpu` lets it
-/// render snapshots.
-fn titled_project(wgpu: bool, labels: [&str; 6]) -> Harness<'static, App> {
+/// dragged onto the timeline. Run in the language `labels` are in (see [`ES`]).
+fn titled_project(labels: [&str; 6]) -> Harness<'static, App> {
     let [new, text, title, track, edit, select_all] = labels;
-    let mut b = Harness::builder().with_size([1280.0, 720.0]);
-    if wgpu {
-        b = b.wgpu();
-    }
-    let mut h = b.build_eframe(|cc| App::new(cc, &Default::default()));
+    let mut h = Harness::builder()
+        .with_size([1280.0, 720.0])
+        .build_eframe(|cc| App::new(cc, &Default::default()));
     h.run();
     h.get_by_label(new).click();
     h.run();
@@ -157,7 +155,7 @@ fn selected_clip_inspector_switches_live() {
         return;
     }
     let _es = switch("es");
-    let mut h = titled_project(false, ES);
+    let mut h = titled_project(ES);
     let spanish = [
         "Fuente",
         "Contorno",
@@ -300,7 +298,7 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
         return;
     }
     let _es = switch("es");
-    let mut h = titled_project(false, ES);
+    let mut h = titled_project(ES);
     click_rightmost(&mut h, "Efectos");
     h.get_by_label("Añadir efecto").scroll_to_me();
     h.run();
@@ -512,53 +510,128 @@ fn settings_picker_switches_at_once_and_saves() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// A new project's editor in Russian at 1280×720, rendered, for the snapshots below.
-fn russian_editor() -> Harness<'static, App> {
-    let mut h = Harness::builder()
-        .with_size([1280.0, 720.0])
-        .wgpu()
-        .build_eframe(|cc| App::new(cc, &Default::default()));
-    h.run();
-    h.get_by_label("Новый проект").click();
-    h.run();
-    h
+/// Every text drawn in the last frame that runs past its clip rect sideways without an ellipsis,
+/// or into another text. Text cut off at a scroll area's top or bottom scrolls into view.
+fn clashes(h: &Harness<'_, impl Sized>) -> Vec<String> {
+    struct Text {
+        text: String,
+        ink: egui::Rect,
+        clip: egui::Rect,
+        elided: bool,
+    }
+    fn walk(shape: &egui::Shape, clip: egui::Rect, out: &mut Vec<Text>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, out)),
+            egui::Shape::Text(t) => {
+                let ink = t.galley.mesh_bounds.translate(t.pos.to_vec2());
+                if t.angle == 0.0 && ink.is_positive() && ink.intersects(clip) {
+                    out.push(Text {
+                        text: t.galley.text().to_owned(),
+                        ink,
+                        clip,
+                        elided: t.galley.elided,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    for c in &h.output().shapes {
+        walk(&c.shape, c.clip_rect, &mut texts);
+    }
+    // Where each widget named by its text sits, to catch text spilling out of its own widget.
+    let mut widgets: std::collections::HashMap<String, Vec<egui::Rect>> = Default::default();
+    for n in h.query_all_by(|n| n.label().is_some()) {
+        let label = n.accesskit_node().label().unwrap_or_default();
+        widgets.entry(label).or_default().push(n.rect());
+    }
+    let mut out = Vec::new();
+    for (i, a) in texts.iter().enumerate() {
+        let sideways = a.ink.left() < a.clip.left() - 0.5 || a.ink.right() > a.clip.right() + 0.5;
+        if sideways && !a.elided {
+            out.push(format!("{:?} clipped at {:?}", a.text, a.clip));
+        }
+        // Only a widget the text touches: a caption shares its name with the field beside it.
+        let ink = a.ink.intersect(a.clip);
+        let mine = widgets
+            .get(&a.text)
+            .into_iter()
+            .flatten()
+            .filter(|r| r.intersects(ink));
+        let fits = |r: &egui::Rect| r.left() - 1.0 <= ink.left() && ink.right() <= r.right() + 1.0;
+        if mine.clone().next().is_some() && !mine.clone().any(fits) {
+            out.push(format!("{:?} runs outside its widget", a.text));
+        }
+        for b in &texts[i + 1..] {
+            let both = a.ink.intersect(a.clip).intersect(b.ink.intersect(b.clip));
+            if both.width() > 1.0 && both.height() > 1.0 {
+                out.push(format!("{:?} overlaps {:?}", a.text, b.text));
+            }
+        }
+    }
+    out
 }
 
+/// The editor's English text padded about 40%, as a long translation runs (see
+/// [`i18n::set_pseudo`]); English again when dropped.
+fn pseudo() -> Switched {
+    let s = switch("en");
+    i18n::set_pseudo(true);
+    s
+}
+
+fn en(key: &'static str) -> &'static str {
+    jvid_app::i18n::CATALOG.tr(key)
+}
+
+/// The editor at its default 1280×720 with a title selected, each Inspector tab in turn, then
+/// Preferences: no text clipped without an ellipsis or drawn over another.
 #[test]
-fn editor_snapshot_in_russian() {
-    if !isolated() || !suite_ui::test_support::gpu() {
+fn long_text_fits_the_editor_and_preferences() {
+    if !isolated() {
         return;
     }
-    let _ru = switch("ru");
-    let mut h = russian_editor();
-    assert!(has(&h, "Выберите клип, чтобы увидеть его свойства"));
-    h.snapshot("editor_ru");
-}
-
-#[test]
-fn preferences_snapshot_in_russian() {
-    if !isolated() || !suite_ui::test_support::gpu() {
-        return;
+    let _p = pseudo();
+    let select_all = format!("{} Ctrl+A", en("action.select_all"));
+    let labels = [
+        en("action.new_project"),
+        en("bin.text"),
+        en("bin.title"),
+        en("timeline.track"),
+        en("menu.edit"),
+        &select_all,
+    ];
+    let mut h = titled_project(labels);
+    // The Text tab's title thumbnails are drawn in system fonts, which differ between machines.
+    click_leftmost(&mut h, en("panel.media"));
+    let mut found = Vec::new();
+    for tab in ["inspector.text", "inspector.video", "inspector.effects"] {
+        click_rightmost(&mut h, en(tab));
+        found.extend(clashes(&h).into_iter().map(|c| format!("{tab}: {c}")));
     }
-    let _ru = switch("ru");
-    let mut h = russian_editor();
-    h.get_by_label("Правка").click();
+    h.get_by_label(en("menu.edit")).click();
     h.run();
-    h.get_by_label("Настройки…").click();
+    h.get_by_label(en("menu.preferences")).click();
     h.run();
-    assert!(has(&h, "Настройки") && has(&h, "Язык"));
-    h.snapshot("preferences_ru");
+    for section in ["settings.general", "settings.audio"] {
+        // The sidebar's row, before the section's own heading.
+        h.get_all_by_label(en(section)).next().unwrap().click();
+        h.run();
+        found.extend(clashes(&h).into_iter().map(|c| format!("{section}: {c}")));
+    }
+    assert_eq!(found, Vec::<String>::new());
 }
 
-/// The Export dialog in French at the narrowest width: its longest labels, and a snapshot.
+/// The Export dialog at the narrowest window and the Render Queue at half the default one.
 #[test]
-fn export_dialog_fits_in_french() {
-    let _fr = switch("fr");
+fn long_text_fits_export_dialog_and_render_queue() {
+    let _p = pseudo();
     let project = jvid_core::model::Project::default();
     let mut dialog = ExportDialog::default();
-    // A fixed folder, not the working directory, so the snapshot matches on every machine.
-    dialog.set_path("/exports/Projet.mp4".into());
-    dialog.open(project.sequence(), "Projet");
+    // A fixed folder, not the working directory, so the result matches on every machine.
+    dialog.set_path("/exports/Project.mp4".into());
+    dialog.open(project.sequence(), "Project");
     let mut fresh = true;
     let mut h = Harness::builder()
         .with_size([NARROWEST, 720.0])
@@ -571,109 +644,45 @@ fn export_dialog_fits_in_french() {
             dialog,
         );
     h.run();
-    assert_eq!(spills(&h), Vec::<String>::new());
-    for label in ["Ajouter à la file d'attente", "De l'entrée à la sortie"] {
-        assert!(has(&h, label), "no {label:?}");
-    }
-    if suite_ui::test_support::gpu() {
-        h.snapshot("export_dialog_fr");
-    }
-}
+    let mut found: Vec<String> = clashes(&h)
+        .into_iter()
+        .map(|c| format!("export: {c}"))
+        .collect();
 
-/// The editor and Preferences in French at 1280×720, to read for clipped or overlapping labels.
-#[test]
-fn editor_and_preferences_snapshot_in_french() {
-    if !isolated() {
-        return;
-    }
-    let _fr = switch("fr");
-    if !suite_ui::test_support::gpu() {
-        return;
-    }
-    let labels = [
-        "Nouveau projet",
-        "Texte",
-        "Titre",
-        "Piste",
-        "Édition",
-        "Tout sélectionner Ctrl+A",
-    ];
-    let mut h = titled_project(true, labels);
-    // The Video tab holds the Inspector's longest captions.
-    click_rightmost(&mut h, "Vidéo");
-    assert!(has(&h, "Échelle") && has(&h, "Opacité"));
-    // The Text tab's title thumbnails use system fonts, which differ between machines.
-    click_leftmost(&mut h, "Médias");
-    let mut results = egui_kittest::SnapshotResults::new();
-    results.add(h.try_snapshot("editor_fr"));
-    h.get_by_label("Édition").click();
-    h.run();
-    h.get_by_label("Préférences…").click();
-    h.run();
-    assert!(has(&h, "Préférences") && has(&h, "Langue"));
-    results.add(h.try_snapshot("preferences_fr"));
-}
-
-/// The Export dialog in German at the narrowest width: its longest labels, and a snapshot.
-#[test]
-fn export_dialog_fits_in_german() {
-    let _de = switch("de");
-    let project = jvid_core::model::Project::default();
-    let mut dialog = ExportDialog::default();
-    // A fixed folder, not the working directory, so the snapshot matches on every machine.
-    dialog.set_path("/exports/Projekt.mp4".into());
-    dialog.open(project.sequence(), "Projekt");
-    let mut fresh = true;
-    let mut h = Harness::builder()
-        .with_size([NARROWEST, 720.0])
-        .build_ui_state(
-            move |ui, d: &mut ExportDialog| {
-                if !install_theme(ui, &mut fresh) {
-                    d.show(ui, &project, &HashSet::new());
-                }
+    use jvid_app::export::queue::{Row, Status, panel};
+    let row = |name: &str, status| Row {
+        path: format!("/exports/{name}").into(),
+        preset: "YouTube 1080p".into(),
+        duration: jvid_core::time::Time(154 * jvid_core::time::FLICKS_PER_SECOND),
+        size: matches!(status, Status::Done).then_some(186_400_000),
+        status,
+    };
+    let rows = vec![
+        row("Intro Cut.mp4", Status::Done),
+        row("Broken Take.mp4", Status::Failed("Disk full".into())),
+        row("Old Draft.mp4", Status::Cancelled),
+        row(
+            "Main Edit.mp4",
+            Status::Rendering {
+                progress: 0.42,
+                left: Some(95.0),
             },
-            dialog,
-        );
-    h.run();
-    assert_eq!(spills(&h), Vec::<String>::new());
-    for label in ["Zur Renderliste", "In bis Out"] {
-        assert!(has(&h, label), "no {label:?}");
-    }
-    if suite_ui::test_support::gpu() {
-        h.snapshot("export_dialog_de");
-    }
-}
-
-/// The editor and Preferences in German at 1280×720, to read for clipped or overlapping labels.
-#[test]
-fn editor_and_preferences_snapshot_in_german() {
-    if !isolated() {
-        return;
-    }
-    let _de = switch("de");
-    if !suite_ui::test_support::gpu() {
-        return;
-    }
-    let labels = [
-        "Neues Projekt",
-        "Text",
-        "Titel",
-        "Spur",
-        "Bearbeiten",
-        "Alles auswählen Ctrl+A",
+        ),
+        row("Outro.mp4", Status::Waiting),
     ];
-    let mut h = titled_project(true, labels);
-    // The Video tab holds the Inspector's longest captions.
-    click_rightmost(&mut h, "Video");
-    assert!(has(&h, "Skalierung") && has(&h, "Deckkraft"));
-    // The Text tab's title thumbnails use system fonts, which differ between machines.
-    click_leftmost(&mut h, "Medien");
-    let mut results = egui_kittest::SnapshotResults::new();
-    results.add(h.try_snapshot("editor_de"));
-    h.get_by_label("Bearbeiten").click();
-    h.run();
-    h.get_by_label("Einstellungen…").click();
-    h.run();
-    assert!(has(&h, "Sprache") && has(&h, "Design"));
-    results.add(h.try_snapshot("preferences_de"));
+    for confirm in [false, true] {
+        let rows = rows.clone();
+        let mut fresh = true;
+        let mut h = Harness::builder()
+            .with_size([NARROWEST, 280.0])
+            .build_ui(move |ui| {
+                if !install_theme(ui, &mut fresh) {
+                    panel(ui, &rows, confirm, true);
+                }
+            });
+        h.run();
+        let tag = if confirm { "queue confirm" } else { "queue" };
+        found.extend(clashes(&h).into_iter().map(|c| format!("{tag}: {c}")));
+    }
+    assert_eq!(found, Vec::<String>::new());
 }
