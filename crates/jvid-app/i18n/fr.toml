@@ -771,6 +771,12 @@ chroma_key_key_hue = "Teinte de la clé"
 chroma_key_tolerance = "Tolérance"
 chroma_key_edge_softness = "Douceur des bords"
 chroma_key_spill_suppression = "Suppression du débordement"
+gaussian_blur = "Flou gaussien"
+gaussian_blur_about = "Floute jusqu'à `radius` pixels en gardant l'alpha, pour qu'un clip masqué ne soit flou que dans son masque."
+gaussian_blur_radius = "Rayon"
+pixelate = "Pixellisation"
+pixelate_about = "Affiche l'image en carrés de `block` pixels en gardant l'alpha, pour qu'un clip masqué ne soit pixellisé que dans son masque."
+pixelate_block = "Bloc"
 
 [tutorial]
 minutes = "{count} min"

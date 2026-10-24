@@ -771,6 +771,12 @@ chroma_key_key_hue = "Barwa klucza"
 chroma_key_tolerance = "Tolerancja"
 chroma_key_edge_softness = "Miękkość krawędzi"
 chroma_key_spill_suppression = "Tłumienie przebarwień"
+gaussian_blur = "Rozmycie gaussowskie"
+gaussian_blur_about = "Rozmywa o maksymalnie `radius` pikseli i zachowuje alfę, więc klip z maską rozmywa się tylko wewnątrz maski."
+gaussian_blur_radius = "Promień"
+pixelate = "Pikselizacja"
+pixelate_about = "Pokazuje obraz w kwadratach po `block` pikseli i zachowuje alfę, więc klip z maską pikselizuje się tylko wewnątrz maski."
+pixelate_block = "Blok"
 
 [tutorial]
 minutes = "{count} min"

@@ -752,6 +752,12 @@ chroma_key_key_hue = "Anahtar Renk Tonu"
 chroma_key_tolerance = "Tolerans"
 chroma_key_edge_softness = "Kenar Yumuşaklığı"
 chroma_key_spill_suppression = "Taşma Bastırma"
+gaussian_blur = "Gauss Bulanıklığı"
+gaussian_blur_about = "`radius` piksele kadar bulanıklaştırır ve alfayı korur; maskeli bir klip yalnızca maskenin içinde bulanıklaşır."
+gaussian_blur_radius = "Yarıçap"
+pixelate = "Pikselleştir"
+pixelate_about = "Görüntüyü `block` piksellik karelerle gösterir ve alfayı korur; maskeli bir klip yalnızca maskenin içinde pikselleşir."
+pixelate_block = "Blok"
 
 [tutorial]
 minutes = "{count} dk"

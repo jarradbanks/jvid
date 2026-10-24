@@ -749,6 +749,12 @@ chroma_key_key_hue = "Nyckelnyans"
 chroma_key_tolerance = "Tolerans"
 chroma_key_edge_softness = "Kantmjukhet"
 chroma_key_spill_suppression = "Spilldämpning"
+gaussian_blur = "Gaussisk oskärpa"
+gaussian_blur_about = "Gör oskarpt med upp till `radius` pixlar och behåller alfa, så ett maskerat klipp bara blir oskarpt inom masken."
+gaussian_blur_radius = "Radie"
+pixelate = "Pixla"
+pixelate_about = "Visar bilden i rutor om `block` pixlar och behåller alfa, så ett maskerat klipp bara pixlas inom masken."
+pixelate_block = "Block"
 
 [tutorial]
 minutes = "{count} min"

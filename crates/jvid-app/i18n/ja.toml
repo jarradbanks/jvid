@@ -751,6 +751,12 @@ chroma_key_key_hue = "キーの色相"
 chroma_key_tolerance = "許容値"
 chroma_key_edge_softness = "エッジのソフトネス"
 chroma_key_spill_suppression = "スピル除去"
+gaussian_blur = "ガウスぼかし"
+gaussian_blur_about = "最大 `radius` ピクセルぼかし、アルファを保つので、マスクしたクリップはマスク内だけがぼけます。"
+gaussian_blur_radius = "半径"
+pixelate = "モザイク"
+pixelate_about = "画像を `block` ピクセルの正方形で表示し、アルファを保つので、マスクしたクリップはマスク内だけがモザイクになります。"
+pixelate_block = "ブロック"
 
 [tutorial]
 minutes = "{count}分"

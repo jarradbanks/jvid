@@ -1,12 +1,17 @@
 # Writing effects
 
 An effect is one `.wgsl` file in the effects folder (`effects/` in jvid's config directory;
-the bin's Effects tab has a button that opens it). jvid creates the folder with three examples
-the first time it runs: vignette, chromatic aberration and film grain. Read those next to this.
+the bin's Effects tab has a button that opens it). jvid creates the folder with its examples
+the first time it runs: vignette, chromatic aberration, film grain, chroma key, gaussian blur and
+pixelate. Read those next to this.
 
 New and edited files are picked up within a second while jvid runs; no restart. Deleting the
-whole folder brings the three examples back on the next check. An export uses the effects as they
+whole folder brings the examples back on the next check. An export uses the effects as they
 were when it started; edits made during it show in the next one.
+
+To hide one region (an email, a key, a face), put a copy of the clip on the track above, mask
+the copy to the region and add Gaussian Blur or Pixelate to it. Both keep the clip's alpha, so
+pixels outside the mask stay as they were.
 
 ## The file
 
