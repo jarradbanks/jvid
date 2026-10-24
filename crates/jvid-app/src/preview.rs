@@ -134,6 +134,8 @@ struct Thumb {
 struct Player {
     asset: AssetId,
     path: PathBuf,
+    /// Has a video stream to decode; an unprobed asset is assumed to.
+    video: bool,
     transport: Transport,
     audio: AudioSource,
 }
@@ -311,6 +313,7 @@ impl Preview {
         self.player = Some(Player {
             asset: id,
             path: a.path.clone(),
+            video: a.probe.as_ref().is_none_or(|p| p.width.is_some()),
             transport: Transport::new(probe.duration, rate),
             audio: AudioSource::open(&a.path, probe.audio_streams > 0),
         });
@@ -451,9 +454,10 @@ impl Preview {
                 self.show(ui, None, false, Some(&row), program)?
             }
             None => {
-                let path = p.path.clone();
+                let (path, video) = (p.path.clone(), p.video);
                 let offline = missing.contains(&path);
-                self.show(ui, Some((&path, row.position)), offline, Some(&row), None)?
+                let source = Some((path.as_path(), row.position, video));
+                self.show(ui, source, offline, Some(&row), None)?
             }
         };
         self.source_action(action, project)
@@ -484,14 +488,14 @@ impl Preview {
     }
 
     /// The Program tab: the timeline composited at `playhead`, or `trim` (the source frame at a
-    /// dragged clip edge) instead, with the transport row. Returns where the playhead moved to
-    /// while playing or from a transport button.
+    /// dragged clip edge, and whether it has video to decode) instead, with the transport row.
+    /// Returns where the playhead moved to while playing or from a transport button.
     pub fn show_program(
         &mut self,
         ui: &mut Ui,
         project: &Project,
         playhead: Time,
-        trim: Option<(&Path, Time)>,
+        trim: Option<(&Path, Time, bool)>,
         offline: bool,
     ) -> Option<Time> {
         if let Some(p) = &mut self.player
@@ -719,30 +723,30 @@ impl Preview {
         Rect::from_min_size(pos2(x, y), vec2(w, h))
     }
 
-    /// Draws `source` at a time, decoding it first if it changed; an `offline` source shows a
-    /// placeholder instead. With `program`, draws the composited timeline frame instead, or
+    /// Draws `source` at a time, decoding it first if it changed and has video; an `offline`
+    /// source shows a placeholder instead. With `program`, draws the composited timeline frame instead, or
     /// with its flag set, the generated asset open in the Source tab.
     /// Returns a transport button's action id when one was clicked.
     fn show(
         &mut self,
         ui: &mut Ui,
-        source: Option<(&Path, Time)>,
+        source: Option<(&Path, Time, bool)>,
         offline: bool,
         row: Option<&SourceRow>,
         program: Option<(&ProjectSettings, bool)>,
     ) -> Option<&'static str> {
         // Only the timeline's own row records.
         let records = matches!(program, Some((_, false)));
-        let path = source.map(|(p, _)| p);
+        let path = source.map(|(p, ..)| p);
         if self.source.as_deref() != path {
             self.source = path.map(Path::to_path_buf);
             (self.frame, self.error, self.requested) = (None, None, None);
         }
         if offline {
-            // Decodes again once it's back.
-            (self.frame, self.requested) = (None, None);
+            // Decodes (and warns) again once it's back.
+            (self.frame, self.error, self.requested) = (None, None, None);
         }
-        if let Some((path, t)) = source
+        if let Some((path, t, true)) = source
             && !offline
             && self.requested != Some(t)
             && !self.pending
@@ -776,7 +780,10 @@ impl Preview {
                     self.generation += 1;
                 }
                 Err(e) => {
-                    tracing::warn!("preview decode of {} failed: {e}", path.display());
+                    // Once per source, not once per frame asked for.
+                    if self.error.is_none() {
+                        tracing::warn!("preview decode of {} failed: {e}", path.display());
+                    }
                     self.error = Some(e);
                 }
             }
@@ -1657,5 +1664,102 @@ mod program_tests {
         let (asset, shown) = p.source_shown.as_ref().expect("drawn");
         assert_eq!(asset.id, id);
         assert!(matches!(shown.layers[..], [(Pixels::Text(_), _)]));
+    }
+
+    /// The Source tab with `probe` imported at a path that doesn't exist, scrubbed across 20
+    /// frames, each left to settle. Returns the preview and every log line written.
+    fn scrub_source(probe: jvid_core::model::ProbeInfo) -> (Preview, String) {
+        use std::sync::{Arc, Mutex};
+        #[derive(Clone, Default)]
+        struct Log(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Log {
+            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(b);
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let log = Log::default();
+        let writer = log.clone();
+        let sub = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .finish();
+        let mut h = History::new(Project::default());
+        h.apply(Command::Import(vec![(
+            "/nonexistent/Voiceover 2.wav".into(),
+            probe,
+        )]))
+        .unwrap();
+        let mut p = Preview::new(None);
+        p.open(h.project(), h.project().assets()[0].id);
+        let project = h.project().clone();
+        let mut fresh = true;
+        // Building the harness runs frames too, so it's inside the capture.
+        let p = tracing::subscriber::with_default(sub, || {
+            let mut harness = egui_kittest::Harness::builder()
+                .with_size([640.0, 360.0])
+                .build_ui_state(
+                    move |ui, p: &mut Preview| {
+                        if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                            return;
+                        }
+                        p.show_source(ui, &project, &HashSet::new());
+                    },
+                    p,
+                );
+            for i in 0..20 {
+                let t = Time(i * FLICKS_PER_SECOND / 10);
+                let player = harness.state_mut().player.as_mut().unwrap();
+                player.transport.seek(t, 0);
+                harness.run();
+                for _ in 0..500 {
+                    if !harness.state().pending {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    harness.run();
+                }
+            }
+            harness.into_state()
+        });
+        let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        (p, text)
+    }
+
+    #[test]
+    fn an_audio_only_source_never_asks_for_a_video_frame() {
+        let (p, log) = scrub_source(jvid_core::model::ProbeInfo {
+            duration: Time(3 * FLICKS_PER_SECOND),
+            audio_streams: 1,
+            ..Default::default()
+        });
+        assert_eq!(
+            (p.requested, p.pending),
+            (None, false),
+            "no decode submitted"
+        );
+        assert!(
+            p.frame.is_none() && p.error.is_none(),
+            "no frame and no error text"
+        );
+        assert!(!log.contains("preview decode"), "{log}");
+    }
+
+    #[test]
+    fn a_failing_video_source_warns_once() {
+        let (p, log) = scrub_source(jvid_core::model::ProbeInfo {
+            duration: Time(3 * FLICKS_PER_SECOND),
+            width: Some(1920),
+            height: Some(1080),
+            ..Default::default()
+        });
+        assert!(p.error.is_some(), "the decode failed");
+        assert!(
+            p.requested.is_some_and(|t| t.0 > 0),
+            "it kept asking as it scrubbed"
+        );
+        assert_eq!(log.matches("preview decode of").count(), 1, "{log}");
     }
 }

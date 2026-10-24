@@ -36,6 +36,8 @@ jvid-media = { workspace = true, features = ["test-support"] }
 syn = { version = "2.0.119", features = ["full", "visit-mut"] }
 # Names the token enums syn hands the guard (already in the build through syn).
 proc-macro2 = { version = "1.0.107", default-features = false }
+# Captures the preview's warnings in tests; already in the build through jvid-log.
+tracing-subscriber = "0.3"
 
 [lints]
 workspace = true
