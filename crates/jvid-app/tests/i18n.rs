@@ -556,6 +556,8 @@ fn export_dialog_fits_in_french() {
     let _fr = switch("fr");
     let project = jvid_core::model::Project::default();
     let mut dialog = ExportDialog::default();
+    // A fixed folder, not the working directory, so the snapshot matches on every machine.
+    dialog.set_path("/exports/Projet.mp4".into());
     dialog.open(project.sequence(), "Projet");
     let mut fresh = true;
     let mut h = Harness::builder()
@@ -600,6 +602,8 @@ fn editor_and_preferences_snapshot_in_french() {
     // The Video tab holds the Inspector's longest captions.
     click_rightmost(&mut h, "Vidéo");
     assert!(has(&h, "Échelle") && has(&h, "Opacité"));
+    // The Text tab's title thumbnails use system fonts, which differ between machines.
+    click_leftmost(&mut h, "Médias");
     let mut results = egui_kittest::SnapshotResults::new();
     results.add(h.try_snapshot("editor_fr"));
     h.get_by_label("Édition").click();
