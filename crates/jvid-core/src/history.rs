@@ -227,6 +227,8 @@ pub enum Command {
         in_point: Option<Time>,
         out_point: Option<Time>,
     },
+    /// Applies each command in turn as one step; if one fails, none do.
+    Batch(Vec<Command>),
 }
 
 /// The id a command created, if any.
@@ -323,6 +325,7 @@ impl Command {
             | Self::RenameAsset { .. }
             | Self::RelinkAssets(_)
             | Self::SetAssetInOut { .. } => None,
+            Self::Batch(cmds) => cmds.iter().find_map(|c| c.locked(p)),
         }
     }
 
@@ -343,6 +346,16 @@ impl Command {
         }
         let s = &mut p.sequence;
         Ok(match self {
+            Self::Batch(cmds) => {
+                let before = p.clone();
+                for c in cmds {
+                    if let Err(e) = c.apply(p) {
+                        *p = before;
+                        return Err(e);
+                    }
+                }
+                Created::Nothing
+            }
             Self::AddTrack { kind, name } => Created::Track(s.add_track(kind, name)),
             Self::RemoveTrack(id) => {
                 s.remove_track(id)?;
@@ -895,6 +908,21 @@ mod tests {
                 link: None,
             },
         }
+    }
+
+    #[test]
+    fn a_batch_is_one_undo_step_and_all_or_nothing() {
+        let mut h = History::new(Project::default());
+        let t = track(&mut h);
+        let before = h.project().clone();
+        h.apply(Command::Batch(vec![add_clip(t, 0), add_clip(t, 20)]))
+            .unwrap();
+        assert_eq!(h.project().sequence().tracks()[0].clips().len(), 2);
+        assert!(h.undo());
+        assert_eq!(h.project(), &before, "one step");
+        let bad = Command::Batch(vec![add_clip(t, 0), Command::RemoveClip(ClipId(999))]);
+        assert!(h.apply(bad).is_err());
+        assert_eq!(h.project(), &before, "the first command is rolled back");
     }
 
     #[test]
