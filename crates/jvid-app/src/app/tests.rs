@@ -1373,11 +1373,11 @@ fn a_selected_title_puts_text_video_and_effects_tabs_in_the_inspector_header() {
         return;
     }
     let (mut h, _, _) = title_harness();
-    // The bin has its own Text and Effects tabs.
+    // The bin has its own Text and Effects tabs, and the Text tab a Text section.
     let tabs = |name| h.query_all_by_label(name).count();
     assert_eq!(
         ["Text", "Video", "Audio", "Effects"].map(tabs),
-        [2, 1, 0, 2]
+        [3, 1, 0, 2]
     );
     let s = Shot::take(&mut h, "title".into());
     let (preview, inspector) = (s.panel(Tab::Preview), s.panel(Tab::Inspector));
