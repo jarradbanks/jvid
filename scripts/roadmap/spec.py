@@ -1351,28 +1351,29 @@ I("silence-detect", "Silence detection to cut dead air", None, ["media", "timeli
 I("prefs-redesign", "Preferences redesign: sections and dropdowns that fit", None, ["ui", "suite-ui"], "M", labels=["later"],
   summary="The Preferences dialog is a small box whose Input Device list spills past it and over Done. Redesign it with the impeccable skill, starting from an HTML mockup like the v3 Inspector one.",
   scope=[
-      "First commit an HTML mockup at `docs/prototypes/v3/preferences.html` (DESIGN.md tokens, the owner's Title Case labels), then build the dialog to match it",
-      "Group settings into labelled sections (General: Language, and Theme once it exists; Audio: Input Device), each with its helper text under the field it explains",
+      "Build option A of `docs/prototypes/v4/preferences.html` (owner's pick): a sidebar of sections (General: Language, Theme; Audio: Input Device) beside the selected section's fields",
+      "No helper text under fields (owner: drop lines like Applies Right Away or Records Voiceovers); labels alone. Error messages stay",
       "Dropdown popups never extend past the dialog or the window: in suite-ui's dropdown, cap the popup to the available space, truncate long items with an ellipsis and show the full name on hover. Every dropdown in the app gets this",
       "The dialog is sized for its content, scrolls if the window is too small, and nothing covers Done",
   ],
   ac=["With input devices whose names are longer than the field, the open list stays inside the window, truncates and shows each full name on hover",
       "The dialog matches the mockup at the minimum window size (kittest snapshot)",
       "Language and Input Device still apply live and persist"],
-  refs=[f"[DESIGN.md]({DESIGN})", MOCK3])
+  refs=[f"[DESIGN.md]({DESIGN})", f"[Preferences mockup, option A]({PROTO}/v4/preferences.html)"])
 
 I("theme-picker", "Theme picker in Preferences", None, ["ui", "suite-ui"], "S", ["prefs-redesign"], labels=["later"],
   summary="Themes work (built-in Dark, Light and High Contrast, TOML files, live reload), but only by editing the settings file. Add them to Preferences with a few good defaults.",
   scope=[
-      "A Theme dropdown in Preferences > General listing the built-ins and any TOML themes in the themes folder, with Dark as the default",
+      "Theme swatch cards in Preferences > General (option A of `docs/prototypes/v4/preferences.html`), one per built-in and per TOML theme in the themes folder, each labelled with its name only; Dark is the default",
       "Choosing one applies live with no restart and persists to the `theme` setting",
       "Ship two more bundled defaults (for example a warmer dark and a softer light) as TOML files that also serve as templates for custom themes",
-      "An Open Themes Folder button; a broken theme file shows its error under the dropdown and falls back to Dark",
+      "An Open Themes Folder button with no hint text beside it; a broken theme file shows its error on its card and falls back to Dark",
       "Check every panel in Light and High Contrast and fix any colour that ignores the palette",
   ],
   ac=["Switching to Light recolours the whole editor at once and survives a restart",
       "A valid TOML theme dropped into the themes folder appears in the list",
-      "kittest snapshots of the editor in Light and High Contrast"])
+      "kittest snapshots of the editor in Light and High Contrast"],
+  refs=[f"[Preferences mockup, option A]({PROTO}/v4/preferences.html)"])
 
 I("text-inspector-polish", "Text tab layout cleanup", None, ["ui"], "M", labels=["later"],
   summary="The Text tab is a ragged list: a narrow one-line text box, Size and Weight sharing a row, an unlabelled Left/Center/Right row, and colour swatches that render as odd half-checker squares. Bring it up to the Inspector row standard.",
