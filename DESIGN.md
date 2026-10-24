@@ -162,7 +162,7 @@ These specs are for the first `suite-ui` build. The next `/impeccable document` 
 ### Panels, headers and tabs
 - **Panel:** Panel fill, 1px Border, 8px radius. A panel with keyboard focus swaps its border to Blue, because focus decides what shortcuts do.
 - **Header:** a 32px row with a Border divider at its bottom.
-- **Tabs:** a panel's tabs fill its header. The group runs from 4px in on the left to the header actions, or to 4px from the right edge, and the tabs share that width equally, 4px apart, up to 160px each. A wide panel such as the preview keeps its tabs at 160px, left-aligned. Each tab is a 24px pill centred vertically in the header (4px above and below), with its Body Strong label centred in the pill. Active: Ink text on Raised. Inactive: Ink 3, turning Ink 2 on hover. Tabs that would shrink below 64px move into a chevron menu at the end of the group.
+- **Tabs:** a panel's tabs fill its header. The group runs from 4px in on the left to the header actions, or to 4px from the right edge, and the tabs share that width equally, 4px apart, up to 160px each. Side panels (Media, Inspector) drop the cap and share the full width. A wide panel such as the preview keeps its tabs at 160px, left-aligned. Each tab is a 24px pill centred vertically in the header (4px above and below), with its Body Strong label centred in the pill. Active: Ink text on Raised. Inactive: Ink 3, turning Ink 2 on hover. Tabs that would shrink below 64px move into a chevron menu at the end of the group.
 - **Actions:** 24px icon buttons at the right, 4px apart.
 
 ### Buttons

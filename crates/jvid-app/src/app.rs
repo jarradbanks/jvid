@@ -1513,7 +1513,7 @@ impl TabViewer for Viewer<'_> {
             let panel = if panes.is_empty() {
                 Panel::titled(tab.title())
             } else {
-                Panel::tabbed(&labels, &mut active)
+                Panel::tabbed(&labels, &mut active).wide(true)
             };
             // The new tab shows next frame; the click already repaints.
             panel.focused(focused).show(ui, |ui| {
