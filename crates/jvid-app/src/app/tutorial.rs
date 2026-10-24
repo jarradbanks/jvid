@@ -22,6 +22,8 @@ use crate::i18n::{tr, verbatim};
 use crate::import::Importer;
 use crate::timeline::Timeline;
 
+mod masks;
+
 /// One lesson. Its `id` is the progress key in `settings.toml`.
 pub struct Lesson {
     pub id: &'static str,
@@ -53,7 +55,7 @@ pub struct Step {
     pub ghost: Option<[[f64; 2]; 2]>,
 }
 
-pub const LESSONS: &[Lesson] = &[TOUR];
+pub const LESSONS: &[Lesson] = &[TOUR, masks::MASKS];
 
 /// The sample the tour edits.
 const TOUR_CLIP: &str = "subject.mp4";
@@ -298,7 +300,7 @@ pub fn anchor_rect(ctx: &egui::Context, name: &str) -> Option<Rect> {
 /// The current step's [`Step::ghost`], for [`ghost`] to draw.
 const GHOST: &str = "lesson_ghost";
 
-/// Draws the current step's [`Step::ghost`] dashed over `frame`, the Program view's
+/// Draws the current step's [`Step::ghost`] as a dashed Ink line over `frame`, the Program view's
 /// on-screen project rect, `width` project pixels wide.
 pub fn ghost(ui: &egui::Ui, frame: Rect, width: u32) {
     let ctx = ui.ctx();
@@ -316,7 +318,8 @@ pub fn ghost(ui: &egui::Ui, frame: Rect, width: u32) {
             frame.center() + vec2(p[0] as f32, p[1] as f32) * s
         })
         .collect();
-    let line = Stroke::new(2.0, color::light_blue());
+    // Ink, so it reads apart from the mask's own Light Blue outline.
+    let line = Stroke::new(1.0, color::ink());
     let dashes = egui::Shape::dashed_line(&points, line, space::S8, space::S4);
     ui.painter().with_clip_rect(frame).extend(dashes);
 }
