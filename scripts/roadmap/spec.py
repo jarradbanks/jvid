@@ -1500,21 +1500,22 @@ I("ci-cross-os-green-2", "Main CI: Windows record test file lock, macOS slow-dec
 
 # Translation wave 1 (owner, 2026-10-24): Extended Latin + Cyrillic, Nordic + Catalan, CJK; each language
 # gets an independent review pass before merge.
-I("i18n-wave1-foundation", "Translation wave 1 foundation: 12 languages, plural rules, fonts", None, ["suite-ui", "ui", "docs"], "M", labels=["later"],
-  summary="Register the wave-1 languages so each translation lands as its own catalog files without touching shared code: pl, cs, tr, ru, uk, sv, da, nb, ca, ja, zh-Hans, ko.",
+I("i18n-wave1-foundation", "Translation wave 1 foundation: 17 languages, plural rules, fonts", None, ["suite-ui", "ui", "docs"], "M", labels=["later"],
+  summary="Register the wave-1 languages so each translation lands as its own catalog files without touching shared code: fr, de, it, pt-BR, nl, pl, cs, tr, ru, uk, sv, da, nb, ca, ja, zh-Hans, ko.",
   scope=[
-      "LANGUAGES, the Settings picker and every Catalog::new([..]) list the 12 codes; each gets stub <code>.toml catalogs (only language.name, in the language's own name) so missing keys fall back to English until its translation merges",
-      "plural_category gains the CLDR cardinal rule for each code (pl, cs, ru, uk: one/few/many/other; tr, sv, da, nb, ca: one/other plus any CLDR many; ja, zh, ko: other only), with a test per rule at 0, 1, 2, 5, 11, 12, 21, 22, 25, 101, 111",
+      "LANGUAGES, the Settings picker and every Catalog::new([..]) list the 17 codes; each gets stub <code>.toml catalogs (only language.name, in the language's own name) so missing keys fall back to English until its translation merges",
+      "plural_category gains the CLDR cardinal rule for each code (pl, cs, ru, uk: one/few/many/other; fr, it, pt-BR, ca: one/many/other; de, nl, tr, sv, da, nb: one/other; ja, zh, ko: other only), with a test per rule at 0, 1, 2, 5, 11, 12, 21, 22, 25, 101, 111",
       "The Inter subset widens to Latin Extended-A and Cyrillic (crates/suite-ui/assets/README.md pyftsubset command updated)",
       "CJK: one Noto Sans CJK face per language (JP, SC, KR; Regular only, used for every weight; OFL), subset by a checked-in script to the characters that language's catalogs use, installed as Inter's fallback only while that language is active (Han glyph shapes differ per language). Budget: at most 600 KB per CJK language",
       "docs/translating.md: the font policy records the owner's CJK size decision and the subset script; docs/i18n/glossary.md lists about 40 core editing terms (Timeline, Clip, Track, Keyframe, Render Queue, Inspector, Program, Source, Proxy, Trim, Ripple, ...) each with a one-line meaning, for every language's glossary to translate",
   ],
-  ac=["Each of the 12 codes appears in the picker under its own name and falls back to English text without errors",
+  ac=["Each of the 17 codes appears in the picker under its own name and falls back to English text without errors",
       "Plural tests cover every new rule; every_character_has_a_glyph passes for Polish and Russian sample strings",
       "Switching to Japanese and back loads and unloads the JP face, and the binary grows by less than 200 KB before any CJK catalog is translated"],
   refs=["[docs/translating.md](https://github.com/jarradbanks/jvid/blob/main/docs/translating.md)", "[CLDR plural rules](https://www.unicode.org/cldr/charts/latest/supplemental/language_plural_rules.html)"])
 
-for code, name in [("pl", "Polish"), ("cs", "Czech"), ("tr", "Turkish"), ("ru", "Russian"), ("uk", "Ukrainian"),
+for code, name in [("fr", "French"), ("de", "German"), ("it", "Italian"), ("pt-BR", "Portuguese (Brazil)"), ("nl", "Dutch"),
+                   ("pl", "Polish"), ("cs", "Czech"), ("tr", "Turkish"), ("ru", "Russian"), ("uk", "Ukrainian"),
                    ("sv", "Swedish"), ("da", "Danish"), ("nb", "Norwegian Bokmål"), ("ca", "Catalan"),
                    ("ja", "Japanese"), ("zh-Hans", "Chinese (Simplified)"), ("ko", "Korean")]:
     cjk = code in ("ja", "zh-Hans", "ko")

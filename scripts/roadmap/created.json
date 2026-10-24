@@ -596,6 +596,26 @@
     "i18n-ko": {
       "number": 291,
       "id": 6009740922
+    },
+    "i18n-fr": {
+      "number": 292,
+      "id": 6009787835
+    },
+    "i18n-de": {
+      "number": 293,
+      "id": 6009788218
+    },
+    "i18n-it": {
+      "number": 294,
+      "id": 6009788491
+    },
+    "i18n-pt-br": {
+      "number": 295,
+      "id": 6009788767
+    },
+    "i18n-nl": {
+      "number": 296,
+      "id": 6009789098
     }
   },
   "links": [
@@ -1449,6 +1469,26 @@
     ],
     [
       "i18n-ko",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-fr",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-de",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-it",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-pt-br",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-nl",
       "i18n-wave1-foundation"
     ]
   ]
