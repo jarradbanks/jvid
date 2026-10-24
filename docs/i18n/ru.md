@@ -21,7 +21,8 @@ jvid follows and why. See [Translating jvid](../translating.md).
 - **Fixed widths**: where a full word can't fit its fixed width, it is shortened with a period
   as Russian UIs do ("Непрозр.", "Насыщ.", "Темпер.", "Выравн." in the Inspector's 72-point
   label column; "Полн." in the preview quality menu; "Вертик." on the size card). Keyframe
-  lanes have room and keep the full word ("непрозрачность").
+  lanes have room, keep the full word and start with a capital like every other label
+  ("Непрозрачность", "Обрезка слева", "Микс LUT").
 - **Dates**: day before month, CLDR's abbreviated genitive months ("24 окт.", "24 окт. 2026 г.").
 - **Plurals**: `one` (1, 21, 101…), `few` (2–4, 22–24…), `many` (0, 5–20, 11–14…), and `other`
   (fractions, required) written as the genitive singular, the same as `few`.
@@ -36,7 +37,7 @@ jvid follows and why. See [Translating jvid](../translating.md).
 | Clip | клип | Клип | Клип | Same everywhere. |
 | Track | дорожка | Дорожка | Дорожка | Same everywhere. |
 | Timeline | таймлайн | Таймлайн | Временная шкала | Premiere's Russian help says «Временная шкала»; Resolve and Russian editors in general say «таймлайн». jvid follows Resolve: it is one word, which matters on tabs and in long action names, and «временная шкала» would make every timeline action two words longer. |
-| Playhead | указатель воспроизведения; «указатель» where the context is the timeline | Указатель воспроизведения | Индикатор текущего времени | Premiere's «индикатор текущего времени» is long and names the time readout as much as the line; jvid follows Resolve. |
+| Playhead | указатель воспроизведения; «указатель» where the context is the timeline | Указатель воспроизведения | Курсор воспроизведения (formerly «индикатор текущего времени») | Adobe's current help says «курсор воспроизведения»; jvid keeps Resolve's «указатель», which reads the same and was already used throughout. |
 | Source | источник | Источник | Монитор источника | Same word; jvid's panel is just «Источник». |
 | Program | программа | Таймлайн (viewer) | Монитор программы | Resolve calls this viewer after the timeline; jvid follows Premiere, whose «программа» is the term for this viewer. |
 | Viewer | монитор | Вьюер, окно просмотра | Монитор | Resolve's «вьюер» is a loan word; Premiere's «монитор» is the established Russian term. |
@@ -85,6 +86,10 @@ Adobe's Russian help confirms «Временная шкала», «Монито�
 ([source monitor](https://helpx.adobe.com/ru/premiere/desktop/get-started/source-and-program-monitor-adjustments/set-in-and-out-points-in-the-source-monitor.html),
 [snap clips](https://helpx.adobe.com/ru/premiere/desktop/edit-projects/change-clip-sequence/snap-clips.html))
 and «стиль» for presets ([custom presets](https://helpx.adobe.com/ru/premiere/desktop/render-and-export/export-files/create-and-save-custom-presets.html)).
+It also calls the playhead «курсор воспроизведения, который ранее назывался индикатором
+текущего времени или CTI» ([sequences](https://helpx.adobe.com/ru/premiere-pro/using/creating-changing-sequences.html)).
+«Уменьшение движения» is the Russian macOS and iOS name of the Reduce Motion setting
+([iphones.ru](https://www.iphones.ru/iNotes/7-sposobov-uskorit-animaciyu-na-mac-04-02-2019)).
 Russian Resolve material says «Медиа-пул» ([ichip.ru](https://ichip.ru/sovety/videoredaktor-davinci-resolve-bazovaya-informaciya-dlya-nachinayushhikh-272502)).
 Adobe's help pages refuse automated fetching and Blackmagic's `/ru/` product pages are in
 English, so the remaining Resolve and Premiere labels in the table come from the localized
