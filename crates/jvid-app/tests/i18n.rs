@@ -497,3 +497,41 @@ fn settings_picker_switches_at_once_and_saves() {
     assert_eq!(i18n::language(), i18n::system_language());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A new project's editor in Russian at 1280×720, rendered, for the snapshots below.
+fn russian_editor() -> Harness<'static, App> {
+    let mut h = Harness::builder()
+        .with_size([1280.0, 720.0])
+        .wgpu()
+        .build_eframe(|cc| App::new(cc, &Default::default()));
+    h.run();
+    h.get_by_label("Новый проект").click();
+    h.run();
+    h
+}
+
+#[test]
+fn editor_snapshot_in_russian() {
+    if !isolated() || !suite_ui::test_support::gpu() {
+        return;
+    }
+    let _ru = switch("ru");
+    let mut h = russian_editor();
+    assert!(has(&h, "Выберите клип, чтобы увидеть его свойства"));
+    h.snapshot("editor_ru");
+}
+
+#[test]
+fn preferences_snapshot_in_russian() {
+    if !isolated() || !suite_ui::test_support::gpu() {
+        return;
+    }
+    let _ru = switch("ru");
+    let mut h = russian_editor();
+    h.get_by_label("Правка").click();
+    h.run();
+    h.get_by_label("Настройки…").click();
+    h.run();
+    assert!(has(&h, "Настройки") && has(&h, "Язык"));
+    h.snapshot("preferences_ru");
+}

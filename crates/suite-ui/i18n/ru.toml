@@ -1,5 +1,22 @@
 # suite-ui strings, Russian. Keep keys and {placeholders} in step with en.toml.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+# Russian labels use sentence case, not English Title Case. Terms follow docs/i18n/ru.md.
 
 [language]
 name = "Русский"
+
+[panel]
+more_tabs = "Другие вкладки"
+
+[input]
+search = "Поиск"
+
+[color]
+none = "Нет"
+
+[theme]
+error = "Тема {path}: {error}"
+bad_color = "`{value}` не в формате #RRGGBB"
+at = "строка {line}, столбец {column}: {error}"
+dark = "Тёмная"
+light = "Светлая"
+high_contrast = "Контрастная"
