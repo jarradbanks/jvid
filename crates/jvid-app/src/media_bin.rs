@@ -19,7 +19,7 @@ use jvid_media::waveforms;
 use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Dropdown, TextInput};
+use suite_ui::widgets::{Button, Dropdown, TextInput, fit_text};
 
 use crate::i18n::{tr, trn, verbatim};
 use crate::preview::Preview;
@@ -590,12 +590,7 @@ impl MediaBin {
             ui.painter().galley(pos, g, color::ink_3());
             return;
         }
-        let mut job = egui::text::LayoutJob::single_section(
-            a.display_name(),
-            egui::TextFormat::simple(theme::body(), ink),
-        );
-        job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width().max(0.0));
-        let galley = ui.painter().layout_job(job);
+        let galley = fit_text(ui, &a.display_name(), theme::body(), ink, rect.width());
         let pos = pos2(rect.left(), rect.center().y - galley.size().y / 2.0);
         ui.painter().galley(pos, galley, ink);
     }
