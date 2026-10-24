@@ -1116,13 +1116,19 @@ impl Timeline {
                 if let Some(e) = self.trim_handles(ui, project, view, clip, r) {
                     edit = Some(e);
                 }
-                if let Some(e) = self.fade_handles(ui, &painter, view, clip, r, id) {
+                let fixed = locked(seq, clip.id);
+                if let Some(e) = self.fade_handles(ui, &painter, view, clip, r, id, fixed) {
                     edit = Some(e);
                 }
                 if let Some(e) = self.transition_block(ui, &painter, project, view, clip, r) {
                     edit = Some(e);
                 }
-                self.key_toggle(ui, &painter, view, clip, r, id);
+                // A locked clip's keys can't change, so its lanes and their toggle go.
+                if fixed {
+                    self.keys.collapse(clip.id);
+                } else {
+                    self.key_toggle(ui, &painter, view, clip, r, id);
+                }
                 if self.keys.expanded.contains(&clip.id) {
                     let under =
                         Rect::from_x_y_ranges(r.x_range(), r.bottom() + 2.0..=lane.bottom());
@@ -3610,6 +3616,60 @@ mod tests {
         v1.locked = true;
         h.apply(Command::SetTrack(v1)).unwrap();
         h.project().clone()
+    }
+
+    /// A locked clip keeps its fade line but loses the fade handles and its keyframe lanes.
+    #[test]
+    fn a_locked_clip_shows_no_fade_or_keyframe_handles() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        // Fade and key V1's clip, then lock V1: a locked track refuses both edits.
+        let mut p = History::new(project(2));
+        let c = p.project().sequence().tracks()[0].clips()[0].clone();
+        let mut x = c.transform.clone();
+        x.fade_in = Time(S);
+        let props = Command::SetClipProps(vec![(c.id, x, c.keyframes.clone())]);
+        let key = jvid_core::keyframe::Keyframe {
+            time: Time(0),
+            value: jvid_core::keyframe::Value::Scalar(1.0),
+            easing: jvid_core::keyframe::Easing::Linear,
+        };
+        let param = "opacity".into();
+        let mut v1 = p.project().sequence().tracks()[0].settings();
+        v1.locked = true;
+        for cmd in [
+            props,
+            Command::AddKeyframe {
+                id: c.id,
+                param,
+                key,
+            },
+            Command::SetTrack(v1),
+        ] {
+            p.apply(cmd).unwrap();
+        }
+        let mut h = harness(p.project().clone());
+        h.state_mut().0.selected.insert(c.id);
+        h.run();
+        assert!(!h.state().0.keys.expanded.contains(&c.id), "no lanes");
+        let before = h.state().1.project().clone();
+        // V1's clip sits 2px into the lane under the ruler.
+        let top = 8.0 + size::RULER + 2.0;
+        let view = h.state().0.view(8.0 + size::TRACK_HEADER);
+        // The fade-in handle: a 7px square on the clip's top edge at the fade's end.
+        let at = pos2(view.x(c.start + Time(S)), top + 3.5);
+        h.hover_at(at);
+        h.run();
+        let cursor = h.output().platform_output.cursor_icon;
+        assert_ne!(cursor, CursorIcon::ResizeHorizontal, "no fade handle");
+        h.drag_at(at);
+        h.run();
+        h.hover_at(at + vec2(-20.0, 0.0));
+        h.run();
+        h.drop_at(at + vec2(-20.0, 0.0));
+        h.run();
+        assert_eq!(h.state().1.project(), &before);
     }
 
     #[test]

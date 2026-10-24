@@ -251,6 +251,12 @@ impl Keys {
             .collect();
     }
 
+    /// Closes `clip`'s lanes, such as when its track locks.
+    pub(super) fn collapse(&mut self, clip: ClipId) {
+        self.expanded.remove(&clip);
+        self.auto.remove(&clip);
+    }
+
     /// Extra height under `track`'s clips for its tallest expanded clip.
     pub fn extra(&self, track: &Track) -> f32 {
         let open = track

@@ -33,7 +33,9 @@ fn toggle(c: &Clip) -> Command {
 }
 
 impl Timeline {
-    /// Draws and edits `clip`'s fade handles inside `r`, its rect on screen.
+    /// Draws and edits `clip`'s fade handles inside `r`, its rect on screen; a `locked` clip
+    /// shows its fades without handles.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn fade_handles(
         &mut self,
         ui: &Ui,
@@ -42,6 +44,7 @@ impl Timeline {
         clip: &Clip,
         r: Rect,
         id: Id,
+        locked: bool,
     ) -> Option<Edit> {
         // Too narrow for two handles and the trim zones.
         if r.width() < 4.0 * S {
@@ -65,6 +68,9 @@ impl Timeline {
                     [corner, pos2(at, r.top())],
                     Stroke::new(1.5, color::amber()),
                 );
+            }
+            if locked {
+                continue;
             }
             let h = Rect::from_center_size(pos2(at, r.top() + S / 2.0), vec2(S, S));
             let resp = ui.interact(h, id.with(("fade", clip.id, out)), Sense::click_and_drag());
