@@ -832,3 +832,11 @@ tour_marks = "Press {mark_in} to set an In point, then {mark_out} further on for
 tour_cut = "Press {key} to split out the section between In and Out and delete it."
 tour_title = "Click a title in Text, then drag it onto the Timeline above your clip."
 tour_export = "Click Export, then Export again to save your video."
+# Green Screen: key the green-screen sample over a background, then mask off what the key
+# misses. Timeline, Add Effect, Chroma Key, Tolerance, Edge Softness, Spill Suppression, Add Mask
+# and Rectangle are the names the editor shows for them; {file} is the background's file name.
+green_screen = "Green Screen"
+green_screen_background = "Drag {file} onto the Timeline, on the track under the green-screen clip."
+green_screen_key = "Select the green-screen clip, then pick Chroma Key from Add Effect."
+green_screen_tune = "Raise Tolerance until the green is gone, then adjust Edge Softness and Spill Suppression."
+green_screen_mask = "Pick Rectangle from Add Mask and fit it to cut off the board on the right."

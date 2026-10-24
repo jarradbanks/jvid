@@ -50,7 +50,7 @@ pub struct Step {
     pub reveal: Option<fn(&mut App)>,
 }
 
-pub const LESSONS: &[Lesson] = &[TOUR];
+pub const LESSONS: &[Lesson] = &[TOUR, GREEN_SCREEN];
 
 /// The sample the tour edits.
 const TOUR_CLIP: &str = "subject.mp4";
@@ -202,8 +202,224 @@ const TOUR: Lesson = Lesson {
 
 /// The tour's sample in the project, once imported.
 fn tour_clip(app: &App) -> Option<&jvid_core::model::MediaAsset> {
+    asset(app, TOUR_CLIP)
+}
+
+/// Sample `name` in the project, once imported.
+fn asset<'a>(app: &'a App, name: &str) -> Option<&'a jvid_core::model::MediaAsset> {
     let assets = app.history.project().assets();
-    assets.iter().find(|a| a.path.ends_with(TOUR_CLIP))
+    assets.iter().find(|a| a.path.ends_with(name))
+}
+
+/// The green-screen lesson's samples: the clip to key and the background it goes over.
+const KEYED: &str = "green-screen.mp4";
+const BACKGROUND: &str = "subject.mp4";
+/// The bundled effect the lesson adds, by file stem.
+const CHROMA_KEY: &str = "chroma_key";
+
+/// Keys the green-screen sample over a background: background under it, Chroma Key, tune
+/// it, then mask off the board the key misses.
+const GREEN_SCREEN: Lesson = Lesson {
+    id: "green_screen",
+    title: || tr!("tutorial.green_screen"),
+    minutes: 5,
+    media: &[KEYED, BACKGROUND],
+    // The green-screen clip on the top of two video tracks, with the one under it empty. A new
+    // video track goes on top.
+    setup: |a| {
+        use jvid_core::history::Created;
+        let mut track = None;
+        for _ in 0..2 {
+            let (kind, name) = (jvid_core::model::TrackKind::Video, String::new());
+            if let Ok(Created::Track(t)) = a.history.apply(Command::AddTrack { kind, name }) {
+                track = Some(t);
+            }
+        }
+        let project = a.history.project();
+        let Some(keyed) = asset(a, KEYED) else {
+            return;
+        };
+        if let Some(p) = project.placement(keyed.id, Time(0), false, track, false) {
+            apply(a, Command::Place(p));
+        }
+    },
+    steps: &[
+        Step {
+            anchor: "timeline",
+            text: |_| {
+                tr!(
+                    "tutorial.green_screen_background",
+                    file = verbatim(BACKGROUND)
+                )
+            },
+            done: |a| {
+                let Some((under, _)) = keyed_clip(a) else {
+                    return false;
+                };
+                let Some(bg) = asset(a, BACKGROUND) else {
+                    return false;
+                };
+                let tracks = a.history.project().sequence().tracks();
+                let mut below = tracks[under + 1..].iter();
+                below.any(|t| {
+                    t.kind == jvid_core::model::TrackKind::Video
+                        && t.clips().iter().any(|c| c.asset == bg.id)
+                })
+            },
+            show_me: |a| {
+                let (Some((at, _)), Some(bg)) = (keyed_clip(a), asset(a, BACKGROUND)) else {
+                    return;
+                };
+                let project = a.history.project();
+                let tracks = project.sequence().tracks();
+                let below = tracks[at + 1..]
+                    .iter()
+                    .find(|t| t.kind == jvid_core::model::TrackKind::Video);
+                let Some(below) = below.map(|t| t.id) else {
+                    return;
+                };
+                if let Some(p) = project.placement(bg.id, Time(0), false, Some(below), false) {
+                    apply(a, Command::Place(p));
+                }
+            },
+            reveal: None,
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.green_screen_key").into(),
+            done: |a| key_index(a).is_some(),
+            show_me: |a| {
+                if let Some((_, id)) = keyed_clip(a) {
+                    a.timeline.select_clip(a.history.project().sequence(), id);
+                }
+                add_key(a);
+            },
+            reveal: None,
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.green_screen_tune").into(),
+            done: |a| {
+                let (Some(i), Some(shader)) = (key_index(a), chroma_key()) else {
+                    return false;
+                };
+                let Some((_, id)) = keyed_clip(a) else {
+                    return false;
+                };
+                let Some((_, c)) = a.history.project().sequence().clip(id) else {
+                    return false;
+                };
+                let params = &c.transform.effects[i].params;
+                let tuned = |name: &str| {
+                    let default = shader.params.iter().find(|p| p.name == name);
+                    params.get(name).copied() != default.map(|p| p.default)
+                };
+                ["tolerance", "edge_softness", "spill_suppression"]
+                    .into_iter()
+                    .all(tuned)
+            },
+            show_me: |a| {
+                if key_index(a).is_none() {
+                    add_key(a);
+                }
+                let Some(i) = key_index(a) else {
+                    return;
+                };
+                // Clears the green screen while the board on the right still shows through.
+                edit_keyed(a, |_, x| {
+                    let params = &mut x.effects[i].params;
+                    params.insert("tolerance".into(), 0.8);
+                    params.insert("edge_softness".into(), 0.15);
+                    params.insert("spill_suppression".into(), 0.7);
+                });
+            },
+            reveal: None,
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.green_screen_mask").into(),
+            done: |a| {
+                let Some((_, id)) = keyed_clip(a) else {
+                    return false;
+                };
+                let seq = a.history.project().sequence();
+                seq.clip(id)
+                    .is_some_and(|(_, c)| c.transform.masks.iter().any(|m| m.enabled))
+            },
+            show_me: |a| {
+                use jvid_core::model::{Mask, MaskShape};
+                // Keeps the left 65% of the frame, which ends just before the board.
+                edit_keyed(a, |[w, h], x| {
+                    let points = vec![[-0.2 * w, 0.0], [0.7 * w, 1.1 * h]];
+                    x.masks.push(Mask::new(MaskShape::Rectangle, points));
+                });
+            },
+            reveal: None,
+        },
+    ],
+};
+
+/// The topmost green-screen clip: its track's index and its id.
+fn keyed_clip(app: &App) -> Option<(usize, jvid_core::model::ClipId)> {
+    let keyed = asset(app, KEYED)?.id;
+    let tracks = app.history.project().sequence().tracks().iter();
+    tracks.enumerate().find_map(|(i, t)| {
+        let c = t.clips().iter().find(|c| c.asset == keyed)?;
+        Some((i, c.id))
+    })
+}
+
+/// Chroma Key as shipped, for its parameters' defaults.
+fn chroma_key() -> Option<jvid_render::effect::Shader> {
+    let file = format!("{CHROMA_KEY}.wgsl");
+    let (_, src) = jvid_render::effect::BUNDLED
+        .iter()
+        .find(|(f, _)| *f == file)?;
+    jvid_render::effect::parse(src).ok()
+}
+
+/// Where Chroma Key is in the green-screen clip's effects.
+fn key_index(app: &App) -> Option<usize> {
+    let (_, id) = keyed_clip(app)?;
+    let (_, c) = app.history.project().sequence().clip(id)?;
+    c.transform
+        .effects
+        .iter()
+        .position(|e| e.shader == CHROMA_KEY)
+}
+
+/// Adds Chroma Key with its defaults to the green-screen clip, as Add Effect does.
+fn add_key(app: &mut App) {
+    let Some(shader) = chroma_key() else {
+        return;
+    };
+    edit_keyed(app, |_, x| {
+        x.effects.push(jvid_core::model::Effect {
+            shader: CHROMA_KEY.into(),
+            params: shader
+                .params
+                .iter()
+                .map(|p| (p.name.clone(), p.default))
+                .collect(),
+            enabled: true,
+        })
+    });
+}
+
+/// Changes the green-screen clip's transform as one undoable step; `f` also gets the clip's
+/// fitted image size, which mask points are in.
+fn edit_keyed(app: &mut App, f: impl FnOnce([f64; 2], &mut jvid_core::model::Transform)) {
+    let Some((_, id)) = keyed_clip(app) else {
+        return;
+    };
+    let project = app.history.project();
+    let Some((_, c)) = project.sequence().clip(id) else {
+        return;
+    };
+    let mut x = c.transform.clone();
+    f(crate::masks::fitted(project, c), &mut x);
+    let keys = c.keyframes.clone();
+    apply(app, Command::SetClipProps(vec![(id, x, keys)]));
 }
 
 /// Sets In and Out around the middle third of the timeline, playhead on Out, as I and O do.
@@ -1165,6 +1381,30 @@ mod tests {
         assert!(!warned(&h));
         click(&mut h, tr!("tutorial.skip_step"));
         assert!(warned(&h), "the missing `nowhere` anchor is logged");
+    }
+
+    #[test]
+    fn a_background_over_the_green_screen_isnt_under_it() {
+        use jvid_core::history::Created;
+        let mut h = harness();
+        h.state_mut().start_lesson(&GREEN_SCREEN);
+        settle(&mut h);
+        let a = h.state_mut();
+        let under = GREEN_SCREEN.steps[0].done;
+        assert!(!under(a));
+        let (kind, name) = (jvid_core::model::TrackKind::Video, String::new());
+        let Ok(Created::Track(top)) = a.history.apply(Command::AddTrack { kind, name }) else {
+            panic!("no track");
+        };
+        let bg = asset(a, BACKGROUND).unwrap().id;
+        let p = a
+            .history
+            .project()
+            .placement(bg, Time(0), false, Some(top), false);
+        apply(a, Command::Place(p.unwrap()));
+        assert!(!under(a), "a background above the key passed");
+        (GREEN_SCREEN.steps[0].show_me)(a);
+        assert!(under(a));
     }
 
     #[test]
