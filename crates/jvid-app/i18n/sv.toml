@@ -767,3 +767,7 @@ tour_marks = "Tryck på {mark_in} för en inpunkt och lite längre fram på {mar
 tour_cut = "Tryck på {key} för att klippa ut avsnittet mellan in- och utpunkt och ta bort det."
 tour_title = "Klicka på en titel under Text och dra den till tidslinjen ovanför klippet."
 tour_export = "Klicka på Exportera och sedan på Exportera igen för att spara videon."
+screen = "Snygga till en skärminspelning"
+screen_silence = "Markera klippet, tryck på {key} för Hitta tystnad och klicka på Klipp bort."
+screen_zoom = "Markera klippet och höj Skala i Inspektör för att zooma in på skrivandet."
+screen_callout = "Dra en titel från Text till tidslinjen ovanför klippet som en förklaring."

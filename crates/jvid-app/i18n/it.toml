@@ -778,3 +778,7 @@ tour_marks = "Premi {mark_in} per l'attacco e, più avanti, {mark_out} per lo st
 tour_cut = "Premi {key} per tagliare il tratto tra attacco e stacco ed eliminarlo."
 tour_title = "Fai clic su un titolo in Testo, poi trascinalo sulla timeline sopra la clip."
 tour_export = "Fai clic su Esporta e poi di nuovo su Esporta per salvare il video."
+screen = "Sistema una registrazione dello schermo"
+screen_silence = "Seleziona la clip, premi {key} per Rileva silenzio, poi fai clic su Taglia."
+screen_zoom = "Seleziona la clip, poi aumenta Scala nell'Inspector per ingrandire il testo digitato."
+screen_callout = "Trascina un titolo da Testo sulla timeline sopra la clip come richiamo."

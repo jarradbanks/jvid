@@ -783,3 +783,7 @@ tour_marks = "Stiskněte {mark_in} pro počáteční bod a o kus dál {mark_out}
 tour_cut = "Stiskem {key} vystřihnete a odstraníte úsek mezi počátečním a koncovým bodem."
 tour_title = "Klikněte na titulek na kartě Text a přetáhněte ho na časovou osu nad klip."
 tour_export = "Klikněte na Exportovat a pak znovu na Exportovat, tím video uložíte."
+screen = "Úprava záznamu obrazovky"
+screen_silence = "Vyberte klip, stiskněte {key} pro Rozpoznat ticho a klikněte na Vystřihnout."
+screen_zoom = "Vyberte klip a v Inspektoru zvyšte Měřítko, abyste přiblížili psaný text."
+screen_callout = "Přetáhněte titulek z karty Text na časovou osu nad klip jako popisek."

@@ -770,3 +770,7 @@ tour_marks = "Giriş için {mark_in}, biraz ileride çıkış için {mark_out} t
 tour_cut = "Giriş ile çıkış arasındaki bölümü kesip silmek için {key} tuşuna basın."
 tour_title = "Metin'den bir başlığa tıklayın ve klibin üstüne, Zaman Çizelgesi'ne sürükleyin."
 tour_export = "Dışa Aktar'a, ardından videoyu kaydetmek için yeniden Dışa Aktar'a tıklayın."
+screen = "Ekran Kaydını Düzenleyin"
+screen_silence = "Klibi seçin, Sessizliği Algıla için {key} tuşuna basın ve Kes'e tıklayın."
+screen_zoom = "Klibi seçin ve yazılanı yakınlaştırmak için Denetçi'de Ölçek'i artırın."
+screen_callout = "Metin'den bir başlığı açıklama olarak klibin üstüne, Zaman Çizelgesi'ne sürükleyin."

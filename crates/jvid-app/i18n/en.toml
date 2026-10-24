@@ -840,3 +840,10 @@ tour_marks = "Press {mark_in} to set an In point, then {mark_out} further on for
 tour_cut = "Press {key} to split out the section between In and Out and delete it."
 tour_title = "Click a title in Text, then drag it onto the Timeline above your clip."
 tour_export = "Click Export, then Export again to save your video."
+# Tidy a Screen Recording: cut the sample's dead air with Detect Silence, zoom in with Scale,
+# add a title as a callout. Detect Silence, Cut, Scale, Inspector, Text and Timeline are the
+# names the editor shows for them; {key} is a shortcut.
+screen = "Tidy a Screen Recording"
+screen_silence = "Select the clip, press {key} for Detect Silence, then click Cut."
+screen_zoom = "Select the clip, then raise Scale in the Inspector to zoom in on the typing."
+screen_callout = "Drag a title from Text onto the Timeline above your clip as a callout."

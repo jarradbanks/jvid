@@ -782,3 +782,7 @@ tour_marks = "Druk op {mark_in} voor het inpunt en verderop op {mark_out} voor h
 tour_cut = "Druk op {key} om het stuk tussen in- en uitpunt eruit te knippen en te verwijderen."
 tour_title = "Klik op een titel onder Tekst en sleep die naar de tijdlijn boven je clip."
 tour_export = "Klik op Exporteren en daarna nog eens op Exporteren om je video op te slaan."
+screen = "Een schermopname opschonen"
+screen_silence = "Selecteer de clip, druk op {key} voor Stilte detecteren en klik op Knippen."
+screen_zoom = "Selecteer de clip en verhoog Schaal in de Inspector om in te zoomen op het typen."
+screen_callout = "Sleep een titel uit Tekst naar de tijdlijn boven je clip als toelichting."

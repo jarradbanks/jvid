@@ -767,3 +767,7 @@ tour_marks = "Trykk {mark_in} for å sette inn-punkt og litt senere {mark_out} f
 tour_cut = "Trykk {key} for å klippe ut delen mellom inn og ut og slette den."
 tour_title = "Klikk på en tittel under Tekst, og dra den til tidslinjen over klippet."
 tour_export = "Klikk på Eksporter og deretter Eksporter igjen for å lagre videoen."
+screen = "Rydd opp i et skjermopptak"
+screen_silence = "Velg klippet, trykk {key} for Finn stillhet, og klikk på Klipp bort."
+screen_zoom = "Velg klippet, og øk Skala i Inspektør for å zoome inn på skrivingen."
+screen_callout = "Dra en tittel fra Tekst til tidslinjen over klippet som en forklaring."

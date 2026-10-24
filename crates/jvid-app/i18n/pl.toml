@@ -789,3 +789,7 @@ tour_marks = "Naciśnij {mark_in}, aby ustawić punkt wejścia, a dalej {mark_ou
 tour_cut = "Naciśnij {key}, aby wyciąć fragment między punktami wejścia i wyjścia i go usunąć."
 tour_title = "Kliknij tytuł na karcie Tekst i przeciągnij go na oś czasu nad klipem."
 tour_export = "Kliknij Eksportuj, a potem ponownie Eksportuj, aby zapisać wideo."
+screen = "Popraw nagranie ekranu"
+screen_silence = "Zaznacz klip, naciśnij {key}, aby otworzyć Wykryj ciszę, i kliknij Wytnij."
+screen_zoom = "Zaznacz klip i zwiększ Skalę w Inspektorze, aby przybliżyć wpisywany tekst."
+screen_callout = "Przeciągnij tytuł z karty Tekst na oś czasu nad klipem jako objaśnienie."

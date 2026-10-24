@@ -11,8 +11,8 @@ use egui::{
     vec2,
 };
 use jvid_core::history::{Command, History};
-use jvid_core::model::{AssetId, Project};
-use jvid_core::time::Time;
+use jvid_core::model::{AssetId, Project, TrackKind};
+use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use suite_ui::theme;
 use suite_ui::tokens::{color, radius, space};
 use suite_ui::widgets::{Button, State};
@@ -50,7 +50,7 @@ pub struct Step {
     pub reveal: Option<fn(&mut App)>,
 }
 
-pub const LESSONS: &[Lesson] = &[TOUR];
+pub const LESSONS: &[Lesson] = &[TOUR, SCREEN];
 
 /// The sample the tour edits.
 const TOUR_CLIP: &str = "subject.mp4";
@@ -73,7 +73,7 @@ const TOUR: Lesson = Lesson {
                     file = verbatim(TOUR_CLIP)
                 )
             },
-            done: |a| tour_clip(a).is_some(),
+            done: |a| clip_named(a, TOUR_CLIP).is_some(),
             show_me: |a| match sample(TOUR_CLIP) {
                 Ok(path) => a.import([path]),
                 Err(e) => a.error(tr!(
@@ -90,7 +90,7 @@ const TOUR: Lesson = Lesson {
             done: |a| first_clip(a).is_some(),
             show_me: |a| {
                 let project = a.history.project();
-                let Some(asset) = tour_clip(a) else {
+                let Some(asset) = clip_named(a, TOUR_CLIP) else {
                     return;
                 };
                 if let Some(p) = project.placement(asset.id, Time(0), false, None, false) {
@@ -141,7 +141,7 @@ const TOUR: Lesson = Lesson {
         Step {
             anchor: "timeline",
             text: |a| tr!("tutorial.tour_cut", key = a.keymap.shortcut("extract")),
-            done: shortened,
+            done: |a| shortened(a, TOUR_CLIP),
             show_me: |a| {
                 let seq = a.history.project().sequence();
                 if seq.in_point().is_none() || seq.out_point().is_none() {
@@ -154,31 +154,8 @@ const TOUR: Lesson = Lesson {
         Step {
             anchor: "bin.titles",
             text: |_| tr!("tutorial.tour_title").into(),
-            done: |a| {
-                let project = a.history.project();
-                let tracks = project.sequence().tracks().iter();
-                let mut clips = tracks.flat_map(|t| t.clips());
-                clips.any(|c| project.asset(c.asset).is_some_and(|x| x.text.is_some()))
-            },
-            show_me: |a| {
-                use jvid_core::history::Created;
-                let [(name, _, text), ..] = crate::media_bin::presets();
-                let name = name.into();
-                let Ok(Created::Asset(title)) = a.history.apply(Command::AddText { name, text })
-                else {
-                    return;
-                };
-                // Above the clip, as dropping it over the top track does.
-                let (kind, name) = (jvid_core::model::TrackKind::Video, String::new());
-                let Ok(Created::Track(track)) = a.history.apply(Command::AddTrack { kind, name })
-                else {
-                    return;
-                };
-                let project = a.history.project();
-                if let Some(p) = project.placement(title, Time(0), false, Some(track), false) {
-                    apply(a, Command::Place(p));
-                }
-            },
+            done: has_title,
+            show_me: add_title,
             reveal: Some(|a| a.bin.tab = 2),
         },
         Step {
@@ -200,10 +177,153 @@ const TOUR: Lesson = Lesson {
     ],
 };
 
-/// The tour's sample in the project, once imported.
-fn tour_clip(app: &App) -> Option<&jvid_core::model::MediaAsset> {
+/// The screen recording lesson's sample.
+const SCREEN_CLIP: &str = "screen-recording.mp4";
+
+/// The sample's dead air in seconds, as `scripts/gen-samples` makes it.
+const DEAD_AIR: (f64, f64) = (2.4, 7.0);
+
+/// Where the typing sits in the 1280x720 sample, for the zoom.
+const TYPING: [f64; 2] = [400.0, 180.0];
+
+/// Tidies a screen recording: cut its dead air, zoom in on the typing, add a callout.
+const SCREEN: Lesson = Lesson {
+    id: "screen_recording",
+    title: || tr!("tutorial.screen"),
+    minutes: 5,
+    media: &[SCREEN_CLIP],
+    setup: |a| {
+        let project = a.history.project();
+        let Some(asset) = clip_named(a, SCREEN_CLIP) else {
+            return;
+        };
+        if let Some(p) = project.placement(asset.id, Time(0), false, None, false) {
+            apply(a, Command::Place(p));
+        }
+    },
+    steps: &[
+        Step {
+            anchor: "timeline",
+            text: |a| {
+                tr!(
+                    "tutorial.screen_silence",
+                    key = a.keymap.shortcut("detect_silence")
+                )
+            },
+            done: |a| shortened(a, SCREEN_CLIP),
+            show_me: |a| {
+                let Some(asset) = clip_named(a, SCREEN_CLIP).map(|x| x.id) else {
+                    return;
+                };
+                let seq = a.history.project().sequence();
+                let audio = seq.tracks().iter().filter(|t| t.kind == TrackKind::Audio);
+                let Some(c) = audio.flat_map(|t| t.clips()).find(|c| c.asset == asset) else {
+                    return;
+                };
+                // The span Detect Silence finds at its defaults: the dead air less 0.15 s padding.
+                let at = |s: f64| c.timeline_at(Time((s * FLICKS_PER_SECOND as f64) as i64));
+                let span = (c.id, at(DEAD_AIR.0 + 0.15), at(DEAD_AIR.1 - 0.15));
+                let id = c.id;
+                a.timeline.select_clip(seq, id);
+                let spans = vec![span];
+                apply(a, Command::CutSpans { spans, speed: None });
+            },
+            reveal: None,
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.screen_zoom").into(),
+            done: zoomed,
+            show_me: |a| {
+                let Some(asset) = clip_named(a, SCREEN_CLIP).map(|x| x.id) else {
+                    return;
+                };
+                let project = a.history.project();
+                let (w, h) = (project.settings().width, project.settings().height);
+                let seq = project.sequence();
+                let video = seq.tracks().iter().filter(|t| t.kind == TrackKind::Video);
+                let clips: Vec<_> = video
+                    .flat_map(|t| t.clips())
+                    .filter(|c| c.asset == asset)
+                    .collect();
+                let Some(first) = clips.first().map(|c| c.id) else {
+                    return;
+                };
+                // The fitted image fills the frame, so the anchor is in frame pixels.
+                let anchor = [
+                    (TYPING[0] / 1280.0 - 0.5) * w as f64,
+                    (TYPING[1] / 720.0 - 0.5) * h as f64,
+                ];
+                let edits = clips
+                    .iter()
+                    .map(|c| {
+                        let mut x = c.transform.clone();
+                        (x.scale, x.anchor) = ([1.6; 2], anchor);
+                        (c.id, x, c.keyframes.clone())
+                    })
+                    .collect();
+                a.timeline.select_clip(seq, first);
+                apply(a, Command::SetClipProps(edits));
+            },
+            reveal: None,
+        },
+        Step {
+            anchor: "bin.titles",
+            text: |_| tr!("tutorial.screen_callout").into(),
+            done: has_title,
+            show_me: add_title,
+            reveal: Some(|a| a.bin.tab = 2),
+        },
+    ],
+};
+
+/// Sample `name` in the project, once imported.
+fn clip_named<'a>(app: &'a App, name: &str) -> Option<&'a jvid_core::model::MediaAsset> {
     let assets = app.history.project().assets();
-    assets.iter().find(|a| a.path.ends_with(TOUR_CLIP))
+    assets.iter().find(|a| a.path.ends_with(name))
+}
+
+/// Whether some clip of the screen recording is scaled up at either end, keyframed or not.
+fn zoomed(app: &App) -> bool {
+    let Some(asset) = clip_named(app, SCREEN_CLIP).map(|x| x.id) else {
+        return false;
+    };
+    let seq = app.history.project().sequence();
+    let mut clips = seq.tracks().iter().flat_map(|t| t.clips());
+    clips.any(|c| {
+        let ends = [c.start, c.end() - Time(1)];
+        c.asset == asset
+            && ends
+                .iter()
+                .any(|&t| c.transform_at(t).scale.iter().any(|&s| s > 1.0))
+    })
+}
+
+/// Whether a title is on the timeline.
+fn has_title(app: &App) -> bool {
+    let project = app.history.project();
+    let tracks = project.sequence().tracks().iter();
+    let mut clips = tracks.flat_map(|t| t.clips());
+    clips.any(|c| project.asset(c.asset).is_some_and(|x| x.text.is_some()))
+}
+
+/// Adds the first title preset at the start, on a new track above the rest, as dropping it
+/// over the top track does.
+fn add_title(app: &mut App) {
+    use jvid_core::history::Created;
+    let [(name, _, text), ..] = crate::media_bin::presets();
+    let name = name.into();
+    let Ok(Created::Asset(title)) = app.history.apply(Command::AddText { name, text }) else {
+        return;
+    };
+    let (kind, name) = (TrackKind::Video, String::new());
+    let Ok(Created::Track(track)) = app.history.apply(Command::AddTrack { kind, name }) else {
+        return;
+    };
+    let project = app.history.project();
+    if let Some(p) = project.placement(title, Time(0), false, Some(track), false) {
+        apply(app, Command::Place(p));
+    }
 }
 
 /// Sets In and Out around the middle third of the timeline, playhead on Out, as I and O do.
@@ -220,9 +340,9 @@ fn mark(app: &mut App) {
     app.timeline.seek(out_point);
 }
 
-/// Whether a section of the tour's clip is gone from some track, however it was cut out.
-fn shortened(app: &App) -> bool {
-    let Some(asset) = tour_clip(app) else {
+/// Whether a section of sample `name` is gone from some track, however it was cut out.
+fn shortened(app: &App, name: &str) -> bool {
+    let Some(asset) = clip_named(app, name) else {
         return false;
     };
     let full = asset.probe.as_ref().map_or(0, |p| p.duration.0);
@@ -1220,6 +1340,28 @@ mod tests {
     fn no_anchors_are_recorded_without_a_lesson() {
         let h = harness();
         assert!(h.ctx.data(|d| d.get_temp::<Anchors>(Id::NULL)).is_none());
+    }
+
+    /// Show Me cuts `DEAD_AIR` without waiting on peaks, so it has to be what Detect Silence
+    /// finds in the sample at its defaults.
+    #[test]
+    fn dead_air_is_what_detect_silence_finds_in_the_sample() {
+        use jvid_media::audio::SAMPLE_RATE;
+        let dir = tmp("peaks");
+        let path = sample(SCREEN_CLIP).unwrap();
+        let peaks = jvid_media::waveforms::Cache::new(dir.clone(), 1 << 20)
+            .load(&path, 0)
+            .unwrap();
+        let rate = SAMPLE_RATE as f64;
+        let n = |secs: f64| (secs * rate) as i64;
+        let found = jvid_media::silence::detect(peaks.finest(), -40.0, n(1.0), n(0.15));
+        let [(a, b)] = found[..] else {
+            panic!("{found:?}")
+        };
+        let frame = 1.0 / 30.0;
+        assert!((a as f64 / rate - (DEAD_AIR.0 + 0.15)).abs() < frame, "{a}");
+        assert!((b as f64 / rate - (DEAD_AIR.1 - 0.15)).abs() < frame, "{b}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

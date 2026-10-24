@@ -789,3 +789,7 @@ tour_marks = "Appuyez sur {mark_in} pour marquer l'entrée, puis plus loin sur {
 tour_cut = "Appuyez sur {key} pour couper le passage entre l'entrée et la sortie et le supprimer."
 tour_title = "Cliquez sur un titre dans Texte, puis faites-le glisser sur la timeline au-dessus du plan."
 tour_export = "Cliquez sur Exporter, puis de nouveau sur Exporter pour enregistrer la vidéo."
+screen = "Nettoyer un enregistrement d'écran"
+screen_silence = "Sélectionnez le plan, appuyez sur {key} pour Détecter les silences, puis cliquez sur Couper."
+screen_zoom = "Sélectionnez le plan, puis augmentez Échelle dans l'Inspecteur pour zoomer sur la saisie."
+screen_callout = "Faites glisser un titre de Texte sur la timeline au-dessus du plan pour en faire une bulle."

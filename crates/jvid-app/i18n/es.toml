@@ -781,3 +781,7 @@ tour_marks = "Pulsa {mark_in} para marcar la entrada y, más adelante, {mark_out
 tour_cut = "Pulsa {key} para cortar el tramo entre la entrada y la salida y eliminarlo."
 tour_title = "Haz clic en un título de Texto y arrástralo a la línea de tiempo, encima del clip."
 tour_export = "Haz clic en Exportar y de nuevo en Exportar para guardar el vídeo."
+screen = "Pule una grabación de pantalla"
+screen_silence = "Selecciona el clip, pulsa {key} para Detectar silencio y haz clic en Cortar."
+screen_zoom = "Selecciona el clip y sube Escala en el Inspector para acercarte al texto escrito."
+screen_callout = "Arrastra un título de Texto a la línea de tiempo, encima del clip, como llamada."
