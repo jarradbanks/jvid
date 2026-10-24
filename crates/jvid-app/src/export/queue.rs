@@ -572,15 +572,25 @@ pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<
                 let (yes, no) = (tr!("export.cancel_all"), tr!("export.keep_exporting"));
                 let question = trn!("export.cancel_confirm", live);
                 let labels = pair(yes, no) <= room;
+                let asks = pair(yes, no) + space::S4 + text_w(&question, theme::body()) <= room;
+                // Without room for the question, each button's tooltip asks it.
+                let tip = |r: egui::Response, name: &str| {
+                    r.on_hover_ui(|ui| {
+                        if !asks {
+                            ui.label(&question);
+                        }
+                        ui.label(name);
+                    })
+                };
                 let b = head_button(yes, icon::BAN, true, labels);
-                if ui.add(b).on_hover_text(yes).clicked() {
+                if tip(ui.add(b), yes).clicked() {
                     action = Some(Action::ConfirmCancelAll);
                 }
                 let b = head_button(no, icon::PLAY, false, labels);
-                if ui.add(b).on_hover_text(no).clicked() {
+                if tip(ui.add(b), no).clicked() {
                     action = Some(Action::KeepExporting);
                 }
-                if pair(yes, no) + space::S4 + text_w(&question, theme::body()) <= room {
+                if asks {
                     ui.label(RichText::new(question).color(color::ink()));
                 }
                 return;
@@ -1017,6 +1027,31 @@ mod tests {
         shot("render_queue_icons_confirm", [300.0, 200.0], |ui| {
             panel(ui, &rows(), true, true);
         });
+    }
+
+    /// The question the narrow confirm row drops is in its buttons' tooltips.
+    #[test]
+    fn narrow_confirm_asks_its_question_on_hover() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut fresh = true;
+        let mut h = Harness::builder()
+            .with_size([300.0, 200.0])
+            .build_ui(move |ui| {
+                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    panel(ui, &rows(), true, true);
+                }
+            });
+        h.run_steps(2);
+        let question = trn!("export.cancel_confirm", 3);
+        assert!(h.query_by_label(&question).is_none(), "no room for it");
+        h.get_by_label(tr!("export.keep_exporting")).hover();
+        for _ in 0..40 {
+            h.step();
+        }
+        assert!(h.query_by_label(&question).is_some(), "not in the tooltip");
     }
 
     #[test]
