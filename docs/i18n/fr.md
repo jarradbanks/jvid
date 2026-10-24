@@ -26,7 +26,7 @@ disagree. See [Translating jvid](../translating.md).
 | Out point | point de sortie | point de sortie | point de sortie | Short labels say Sortie. |
 | Range | plage | plage | plage | |
 | Trim | rogner | trim, raccord fin | raccord | Resolve keeps English and Final Cut Pro says élagage; rogner is the verb both Resolve's French guide and French Premiere tutorials use for it. |
-| Ripple | propagation (raccorder) | Ripple | propagation, raccorder | Resolve keeps English (Supprimer et Ripple); Premiere's Supprimer et raccorder and Modification par propagation are French. |
+| Ripple | propagation (raccorder) | Ripple | propagation, raccorder | Resolve keeps English (Supprimer et Ripple); Premiere's Supprimer et raccorder and Modification par propagation are French. Ripple trims say Rogner … avec propagation, since Premiere users read raccorder as trim. |
 | Roll | modification compensée | Roll | modification compensée | Premiere's French term; Resolve and Final Cut Pro keep Roll. |
 | Slip | glissement | coulissement | glissement | Premiere and Final Cut Pro agree. |
 | Split | scinder | scinder | ajouter un montage | Resolve's verb, the clearer of the two. |

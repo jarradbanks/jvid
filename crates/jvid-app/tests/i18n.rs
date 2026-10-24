@@ -550,6 +550,34 @@ fn preferences_snapshot_in_russian() {
     h.snapshot("preferences_ru");
 }
 
+/// The Export dialog in French at the narrowest width: its longest labels, and a snapshot.
+#[test]
+fn export_dialog_fits_in_french() {
+    let _fr = switch("fr");
+    let project = jvid_core::model::Project::default();
+    let mut dialog = ExportDialog::default();
+    dialog.open(project.sequence(), "Projet");
+    let mut fresh = true;
+    let mut h = Harness::builder()
+        .with_size([NARROWEST, 720.0])
+        .build_ui_state(
+            move |ui, d: &mut ExportDialog| {
+                if !install_theme(ui, &mut fresh) {
+                    d.show(ui, &project, &HashSet::new());
+                }
+            },
+            dialog,
+        );
+    h.run();
+    assert_eq!(spills(&h), Vec::<String>::new());
+    for label in ["Ajouter à la file d'attente", "De l'entrée à la sortie"] {
+        assert!(has(&h, label), "no {label:?}");
+    }
+    if suite_ui::test_support::gpu() {
+        h.snapshot("export_dialog_fr");
+    }
+}
+
 /// The editor and Preferences in French at 1280×720, to read for clipped or overlapping labels.
 #[test]
 fn editor_and_preferences_snapshot_in_french() {
