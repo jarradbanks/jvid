@@ -740,6 +740,14 @@
     "marker-popup-style": {
       "number": 353,
       "id": 6014746203
+    },
+    "lesson-subtitles": {
+      "number": 357,
+      "id": 6015019451
+    },
+    "lesson-markers": {
+      "number": 358,
+      "id": 6015020089
     }
   },
   "links": [
@@ -1838,6 +1846,42 @@
     [
       "marker-popup-style",
       "hold-m-range"
+    ],
+    [
+      "lesson-subtitles",
+      "tutorial-engine"
+    ],
+    [
+      "lesson-subtitles",
+      "tutorial-samples"
+    ],
+    [
+      "lesson-subtitles",
+      "auto-subtitles"
+    ],
+    [
+      "lesson-subtitles",
+      "text-edit"
+    ],
+    [
+      "lesson-markers",
+      "tutorial-engine"
+    ],
+    [
+      "lesson-markers",
+      "tutorial-samples"
+    ],
+    [
+      "lesson-markers",
+      "highlight-points"
+    ],
+    [
+      "lesson-markers",
+      "hold-m-range"
+    ],
+    [
+      "lesson-markers",
+      "marker-popup-style"
     ]
   ]
 }

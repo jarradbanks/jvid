@@ -508,6 +508,8 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#351](https://github.com/jarradbanks/jvid/issues/351) **Blur and Pixelate effects** — Hide emails, keys and faces in recordings.
 - [#352](https://github.com/jarradbanks/jvid/issues/352) **Reframe for Shorts** — Turn a 16:9 edit into a vertical Short, panning the crop to follow the action.
 - [#353](https://github.com/jarradbanks/jvid/issues/353) **Marker popup: house widgets and layout** — The marker popup gets the same cleanup the Inspector got (owner request).
+- [#357](https://github.com/jarradbanks/jvid/issues/357) **Lesson: subtitles and edit by text** — Make subtitles from speech, fix them, then cut the video by editing its transcript.
+- [#358](https://github.com/jarradbanks/jvid/issues/358) **Lesson: markers and highlights** — Mark moments while you watch, then export them as highlight clips.
 
 ---
 

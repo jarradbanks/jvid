@@ -1781,3 +1781,14 @@ I("marker-popup-style", "Marker popup: house widgets and layout", None, ["timeli
   ],
   ac=["An egui_kittest snapshot of the popup",
       "Typing into Name and Note still works, and each edit gesture is one undo step"])
+
+I("lesson-subtitles", "Lesson: subtitles and edit by text", None, ["ui"], "S", ["tutorial-engine", "tutorial-samples", "auto-subtitles", "text-edit"], labels=["later"],
+  summary="Make subtitles from speech, fix them, then cut the video by editing its transcript.",
+  scope=["Steps: Generate Subtitles on the voice sample, fix a misheard word, restyle the subtitles, then delete a phrase in the transcript and see the cut appear on the timeline",
+         "With no speech model installed, the first step is the normal model download prompt; the lesson can be skipped offline"],
+  ac=["The Show Me run passes in egui_kittest with a fake transcriber"])
+
+I("lesson-markers", "Lesson: markers and highlights", None, ["ui"], "S", ["tutorial-engine", "tutorial-samples", "highlight-points", "hold-m-range", "marker-popup-style"], labels=["later"],
+  summary="Mark moments while you watch, then export them as highlight clips.",
+  scope=["Steps: tap M on moments while playing, hold M to mark a range, jump between markers with Shift+M and Ctrl+Shift+M, right-click a marker to name and colour it, export Highlights with Before and After padding"],
+  ac=["The Show Me run passes in egui_kittest"])
