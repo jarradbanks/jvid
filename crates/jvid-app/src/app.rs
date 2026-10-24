@@ -502,24 +502,14 @@ impl App {
     /// have gone unseen during a long render.
     fn export_button(&mut self, ui: &mut Ui) {
         if !self.queue.is_empty() {
-            let glyph = if self.queue.failed_unseen {
-                icon::CIRCLE_ALERT
+            let button = if self.queue.failed_unseen {
+                Button::icon(icon::CIRCLE_ALERT, tr!("export.queue")).ink(color::red())
             } else {
-                icon::CHEVRON_DOWN
+                Button::icon(icon::CHEVRON_DOWN, tr!("export.queue"))
             };
             let r = ui
-                .add(Button::icon(glyph, tr!("export.queue")))
+                .add(button)
                 .on_hover_text(trn!("export.queue_pending", self.queue.pending()));
-            if self.queue.failed_unseen {
-                let at = r.rect.center();
-                ui.painter().text(
-                    at,
-                    Align2::CENTER_CENTER,
-                    icon::CIRCLE_ALERT,
-                    theme::icon_font(),
-                    color::red(),
-                );
-            }
             let shortcut = self.keymap.shortcut("export");
             let mut action = None;
             egui::Popup::menu(&r)

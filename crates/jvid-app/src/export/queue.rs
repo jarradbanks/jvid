@@ -37,6 +37,13 @@ struct Job {
     size: Option<u64>,
 }
 
+impl Job {
+    /// Not over and not cancelled; a cancelled job may still be winding down.
+    fn live(&self) -> bool {
+        self.result.is_none() && !self.handle.is_cancelled()
+    }
+}
+
 /// One job as the menu and the panel show it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
@@ -93,7 +100,7 @@ pub struct Queue {
     jobs: Vec<Job>,
     /// Cancel All was clicked with more than one job live and waits for a confirm.
     confirm_all: bool,
-    /// A job failed since the menu was last opened.
+    /// A job failed since the menu or the panel was last shown.
     pub failed_unseen: bool,
 }
 
@@ -147,7 +154,7 @@ impl Queue {
             ended.push((j.path.clone(), r.clone()));
             j.result = Some(r);
         }
-        if let Some(j) = self.jobs.iter_mut().find(|j| j.result.is_none()) {
+        if let Some(j) = self.jobs.iter_mut().find(|j| j.live()) {
             j.started.get_or_insert_with(Instant::now);
         }
         ended
@@ -155,13 +162,13 @@ impl Queue {
 
     /// Progress of the job running now, if any; the export pool runs one job at a time, in order.
     pub fn running(&self) -> Option<f32> {
-        let mut live = self.jobs.iter().filter(|j| j.result.is_none());
+        let mut live = self.jobs.iter().filter(|j| j.live());
         live.next().map(|j| j.handle.progress())
     }
 
-    /// Jobs not yet over.
+    /// Jobs not yet over or cancelled.
     pub fn pending(&self) -> usize {
-        self.jobs.iter().filter(|j| j.result.is_none()).count()
+        self.jobs.iter().filter(|j| j.live()).count()
     }
 
     /// Cancels job `i` if it isn't over yet.
@@ -179,6 +186,7 @@ impl Queue {
     /// Drops jobs that are over.
     pub fn clear_finished(&mut self) {
         self.jobs.retain(|j| j.result.is_none());
+        self.failed_unseen = false;
     }
 
     pub fn is_empty(&self) -> bool {
@@ -187,7 +195,7 @@ impl Queue {
 
     /// Every job, oldest first; only the first live one renders.
     pub fn rows(&self) -> Vec<Row> {
-        let running = self.jobs.iter().position(|j| j.result.is_none());
+        let running = self.jobs.iter().position(|j| j.live());
         let rows = self.jobs.iter().enumerate().map(|(i, j)| {
             let status = match &j.result {
                 None if Some(i) == running => {
@@ -198,6 +206,7 @@ impl Queue {
                         left: time_left(elapsed, progress),
                     }
                 }
+                None if j.handle.is_cancelled() => Status::Cancelled,
                 None => Status::Waiting,
                 Some(Ok(())) => Status::Done,
                 Some(Err(Error::Cancelled)) => Status::Cancelled,
@@ -240,6 +249,7 @@ impl Queue {
 
     /// The Render Queue dock panel.
     pub fn panel(&mut self, ui: &mut Ui, focused: bool) -> Option<Action> {
+        self.failed_unseen = false;
         let a = panel(ui, &self.rows(), self.confirm_all, focused);
         a.inspect(|a| self.apply(*a))
     }
@@ -536,7 +546,11 @@ pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<
     let right = header.right() - space::S8 - size::CONTROL - space::S8;
     let title_w = ui
         .painter()
-        .layout_no_wrap(tr!("export.queue").into(), theme::body_strong(), color::ink())
+        .layout_no_wrap(
+            tr!("export.queue").into(),
+            theme::body_strong(),
+            color::ink(),
+        )
         .size()
         .x;
     let left = header.left() + space::INSET + title_w + space::S12;
@@ -551,6 +565,8 @@ pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<
             .max_rect(area)
             .layout(Layout::right_to_left(Align::Center)),
         |ui| {
+            // shortcut: too narrow, the buttons clip instead of dropping; measure them if that bites.
+            ui.set_clip_rect(area.intersect(ui.clip_rect()));
             ui.spacing_mut().item_spacing.x = space::S4;
             if confirm {
                 if ui
@@ -762,7 +778,8 @@ fn look(s: &Status) -> (&'static str, Color32, &'static str) {
 /// A neutral progress bar: Ink on Border Strong, never Blue.
 fn bar(ui: &Ui, rect: Rect, progress: f32) {
     let corner = CornerRadius::same((rect.height() / 2.0) as u8);
-    ui.painter().rect_filled(rect, corner, color::border_strong());
+    ui.painter()
+        .rect_filled(rect, corner, color::border_strong());
     let done = rect.with_max_x(rect.left() + rect.width() * progress.clamp(0.0, 1.0));
     ui.painter().rect_filled(done, corner, color::ink());
 }

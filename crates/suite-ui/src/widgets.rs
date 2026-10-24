@@ -128,6 +128,7 @@ pub struct Button<'a> {
     min_width: f32,
     min_height: f32,
     small: bool,
+    ink: Option<Color32>,
 }
 
 impl<'a> Button<'a> {
@@ -143,6 +144,7 @@ impl<'a> Button<'a> {
             min_width: 0.0,
             min_height: 0.0,
             small: false,
+            ink: None,
         }
     }
 
@@ -200,6 +202,12 @@ impl<'a> Button<'a> {
     /// Widens the button to at least `width`, centring its content.
     pub fn width(mut self, width: f32) -> Self {
         self.min_width = width;
+        self
+    }
+
+    /// Draws the label and icon in `ink` while enabled, such as Red for an alert.
+    pub fn ink(mut self, ink: Color32) -> Self {
+        self.ink = Some(ink);
         self
     }
 
@@ -303,6 +311,7 @@ impl Widget for Button<'_> {
                 }
             }
         };
+        let ink = self.ink.filter(|_| !l.disabled).unwrap_or(ink);
         let corner = if self.small {
             radius::SMALL
         } else {

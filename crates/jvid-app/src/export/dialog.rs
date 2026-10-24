@@ -767,7 +767,7 @@ fn format_size(bytes: u64) -> String {
 mod tests {
     use super::*;
     use jvid_core::history::{Command, Created, History};
-    use jvid_core::model::{NewClip, TrackKind};
+    use jvid_core::model::{NewClip, ProjectSettings, TrackKind};
 
     fn secs(s: i64) -> Time {
         Time(s * FLICKS_PER_SECOND)
@@ -889,18 +889,47 @@ mod tests {
         );
     }
 
-    /// Option A at the smallest supported window: Format, Range and Output in one column, the
-    /// aspect warning under Video, Lossless off with its reason, Estimated Size by Export.
-    #[test]
-    fn export_dialog_960x600() {
-        if !suite_ui::test_support::gpu() {
-            return;
+    /// The mockup's scenario: a 2560×1440 60 fps project with In set, a subtitle track and three
+    /// ranged markers, on the 9:16 Shorts preset so the aspect warning shows.
+    fn scenario() -> (Project, ExportDialog) {
+        let (mut h, _) = marked();
+        let settings = ProjectSettings {
+            width: 2560,
+            height: 1440,
+            frame_rate: Rate::new(60, 1),
+            ..h.project().settings().clone()
+        };
+        h.apply(Command::SetSettings(settings)).unwrap();
+        let cue = jvid_core::srt::Cue {
+            start: secs(1),
+            end: secs(3),
+            text: "Hello".into(),
+        };
+        let (name, cues, style) = ("Subtitles".into(), vec![cue], Default::default());
+        h.apply(Command::ImportSubtitles { name, cues, style })
+            .unwrap();
+        for (t, name) in [(1, "Opening"), (4, "Ridge Line"), (7, "Summit")] {
+            let (time, duration, name) = (secs(t), secs(2), name.into());
+            h.apply(Command::AddMarker {
+                time,
+                duration,
+                name,
+            })
+            .unwrap();
         }
-        let (h, _) = marked();
         let project = h.project().clone();
         let mut dialog = ExportDialog::default();
+        dialog.preset = dialog
+            .presets
+            .iter()
+            .position(|p| p.name.starts_with("Shorts"))
+            .unwrap();
         dialog.open(project.sequence(), "Project");
         dialog.path = "/exports/Project.mp4".into();
+        (project, dialog)
+    }
+
+    fn snapshot(name: &str, project: Project, dialog: ExportDialog) {
         let mut fresh = true;
         let mut harness = egui_kittest::Harness::builder()
             .with_size([960.0, 600.0])
@@ -913,6 +942,29 @@ mod tests {
                 dialog,
             );
         harness.run_steps(2);
-        harness.snapshot("export_dialog");
+        harness.snapshot(name);
+    }
+
+    /// Option A at the smallest supported window: Format, Range and Output in one column, the
+    /// aspect warning under Video, the Subtitles control, Lossless off with its reason, Estimated
+    /// Size by Export.
+    #[test]
+    fn export_dialog_960x600() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let (project, dialog) = scenario();
+        snapshot("export_dialog", project, dialog);
+    }
+
+    /// Highlights lists the markers; the body scrolls and the footer stays pinned.
+    #[test]
+    fn export_dialog_highlights_960x600() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let (project, mut dialog) = scenario();
+        dialog.range = Some(Range::Highlights);
+        snapshot("export_dialog_highlights", project, dialog);
     }
 }
