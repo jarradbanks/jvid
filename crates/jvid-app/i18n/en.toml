@@ -863,3 +863,12 @@ audio_levels = "Select the music clip and lower its Volume in the Inspector."
 audio_duck = "{key}+click the music's volume line twice, then drag the second point down."
 audio_eq = "Select the voice clip and drag a band of its EQ in the Inspector."
 audio_record = "Press {key} to record a voiceover, then press it again to stop."
+# Keyframes and Easing, a lesson that animates a title in. Position, Opacity, Previous
+# Keyframe, Ease Out and Open Graph Editor are the names the editor shows for them.
+keys = "Keyframes and Easing"
+keys_add = "Key the title's Position and Opacity at its start and one second in."
+keys_previous = "Right-click the Position diamond and choose Previous Keyframe."
+keys_ease = "Right-click the Position diamond and choose Ease Out."
+keys_graph = "Right-click the keyframe lanes, choose Open Graph Editor and drag a handle."
+# {key} is the Play shortcut, such as Space.
+keys_play = "Press {key} to play the title in."

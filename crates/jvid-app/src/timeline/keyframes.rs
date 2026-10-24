@@ -266,6 +266,16 @@ impl Keys {
 }
 
 impl Timeline {
+    /// Whether the curve graph editor is open.
+    pub fn graph_open(&self) -> bool {
+        self.keys.graph.is_some()
+    }
+
+    /// Opens the curve graph editor on `clip`, as the lanes' right-click menu does.
+    pub fn open_graph(&mut self, clip: ClipId) {
+        self.keys.graph = Some(super::graph::Graph::new(clip));
+    }
+
     /// Delete, copy, cut and paste for keys; false leaves the action to clips.
     pub(super) fn key_action(&mut self, id: &str, seq: &Sequence) -> bool {
         let here = self.playhead();
