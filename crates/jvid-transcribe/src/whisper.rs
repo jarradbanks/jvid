@@ -16,11 +16,17 @@ use crate::{Error, Options, Transcriber, Word};
 /// Whisper reports times in centiseconds.
 const FLICKS_PER_CS: i64 = jvid_core::time::FLICKS_PER_SECOND / 100;
 
-/// A loaded whisper.cpp model; one can serve several jobs.
+/// A loaded whisper.cpp model; one can serve several jobs. On Cancel a job returns within a second,
+/// but whisper.cpp only checks for it between compute graphs, so the CPU and the job's working
+/// memory are freed at the next graph boundary: up to one encoder pass later.
+///
+/// Words are split on spaces, so languages written without them (Chinese, Japanese) come back as
+/// sentence-long "words".
 pub struct Whisper(WhisperContext);
 
 impl Whisper {
-    /// Loads a ggml model file such as one from [`crate::models::Model::path`].
+    /// Loads a ggml model file such as one from [`crate::models::Model::path`]. It reads the whole
+    /// file and can take seconds, so load it on the job pool, not the UI thread.
     pub fn load(model: &Path) -> Result<Self, Error> {
         whisper_rs::install_logging_hooks();
         WhisperContext::new_with_params(model, WhisperContextParameters::default())
@@ -79,6 +85,10 @@ fn full(
     p.set_print_progress(false);
     p.set_print_realtime(false);
     p.set_print_timestamps(false);
+    // No "[BLANK_AUDIO]" or "(music)" as words; fillers like "um" are speech and stay.
+    p.set_suppress_nst(true);
+    // whisper-rs 0.16 leaks these boxed callbacks (each holding a Ctx clone) and the language and
+    // prompt strings on every call: a few bytes per transcription.
     let c = ctx.clone();
     p.set_progress_callback_safe(move |pct: i32| c.set_progress(pct as f32 / 100.0));
     let c = ctx.clone();

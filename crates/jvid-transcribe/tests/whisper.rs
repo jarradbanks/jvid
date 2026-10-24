@@ -2,22 +2,24 @@
 //! `cargo test -p jvid-transcribe -- --ignored`
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 use std::time::{Duration, Instant};
 
 use jvid_jobs::Pool;
 use jvid_transcribe::models::{self, Model};
 use jvid_transcribe::{Options, Source, Whisper, Word};
 
-/// The public-domain JFK sample from whisper.cpp, as Opus so it also goes through FFmpeg decode.
+/// The public-domain JFK sample from whisper.cpp, as Opus so it also goes through FFmpeg decode:
+/// <https://github.com/ggml-org/whisper.cpp/blob/master/samples/jfk.wav>
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/jfk.opus")
 }
 
-fn whisper(jobs: &Pool) -> Arc<Whisper> {
-    // Tests run in parallel; only one downloads.
-    static DOWNLOAD: Mutex<()> = Mutex::new(());
-    let _one = DOWNLOAD.lock().unwrap_or_else(|e| e.into_inner());
+/// The base model, and a guard that keeps these tests apart: only one downloads, and the cancel
+/// test counts whisper threads.
+fn whisper(jobs: &Pool) -> (MutexGuard<'static, ()>, Arc<Whisper>) {
+    static ONE: Mutex<()> = Mutex::new(());
+    let one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     jvid_media::ffmpeg::init().unwrap();
     let dir = models::dir().unwrap();
     if !Model::Base.is_downloaded(&dir) {
@@ -25,7 +27,10 @@ fn whisper(jobs: &Pool) -> Arc<Whisper> {
         Model::Base.download(jobs, &dir, move |r| tx.send(r).unwrap());
         rx.recv_timeout(Duration::from_secs(600)).unwrap().unwrap();
     }
-    Arc::new(Whisper::load(&Model::Base.path(&dir)).unwrap())
+    (
+        one,
+        Arc::new(Whisper::load(&Model::Base.path(&dir)).unwrap()),
+    )
 }
 
 fn source() -> Source {
@@ -41,7 +46,7 @@ fn source() -> Source {
 #[ignore = "downloads a model"]
 fn jfk_transcribes_with_base_model() {
     let jobs = Pool::new(2);
-    let engine = whisper(&jobs);
+    let (_one, engine) = whisper(&jobs);
     let (tx, rx) = mpsc::channel();
     let opts = Options {
         language: Some("en".into()),
@@ -75,12 +80,22 @@ fn jfk_transcribes_with_base_model() {
 #[ignore = "downloads a model"]
 fn cancel_stops_whisper_within_a_second() {
     let jobs = Pool::new(2);
-    let engine = whisper(&jobs);
+    let (_one, engine) = whisper(&jobs);
     let h = jvid_transcribe::submit(&jobs, engine, source(), Options::default(), |_| {
         panic!("done is not called after cancel")
     });
-    // Decoding the fixture takes milliseconds; give whisper a moment to be mid-encode.
-    std::thread::sleep(Duration::from_millis(300));
+    // Decoding the fixture takes milliseconds; cancel once whisper is running. Its progress stays
+    // at 0 through a clip this short, so watch for its thread.
+    let start = Instant::now();
+    while !cfg!(target_os = "linux") && start.elapsed() < Duration::from_millis(300)
+        || cfg!(target_os = "linux") && whisper_threads() == 0
+    {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "whisper never started"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert!(!h.is_finished(), "finished before it could be cancelled");
     let at = Instant::now();
     h.cancel();
@@ -89,4 +104,28 @@ fn cancel_stops_whisper_within_a_second() {
         std::thread::sleep(Duration::from_millis(5));
     }
     eprintln!("cancelled in {:?}", at.elapsed());
+    // Whisper itself stops at its next graph boundary, up to one encoder pass later: about 8 s for
+    // base on a 6-core box at load 15.
+    if cfg!(target_os = "linux") {
+        while whisper_threads() > 0 {
+            assert!(
+                at.elapsed() < Duration::from_secs(30),
+                "whisper still running"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        eprintln!("whisper's thread gone in {:?}", at.elapsed());
+    }
+}
+
+/// Live `jvid-whisper` threads in this process (Linux only).
+fn whisper_threads() -> usize {
+    std::fs::read_dir("/proc/self/task")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|t| {
+            std::fs::read_to_string(t.path().join("comm")).is_ok_and(|c| c.trim() == "jvid-whisper")
+        })
+        .count()
 }

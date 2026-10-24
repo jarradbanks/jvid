@@ -3,6 +3,9 @@
 use std::fs::{self, File};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use jvid_jobs::{Ctx, Handle, Pool, Priority};
 use sha2::{Digest, Sha256};
@@ -63,7 +66,7 @@ impl Model {
     }
 
     pub fn is_downloaded(self, dir: &Path) -> bool {
-        self.path(dir).is_file()
+        fs::metadata(self.path(dir)).is_ok_and(|m| m.is_file() && m.len() == self.size())
     }
 
     /// Downloads into `dir` on `jobs` with progress, then hands `done` the model's path. Cancel
@@ -74,11 +77,13 @@ impl Model {
         dir: &Path,
         done: impl FnOnce(Result<PathBuf, Error>) + Send + 'static,
     ) -> Handle {
+        static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| agent(true));
         let dest = self.path(dir);
+        let (_, size, sha256) = self.file();
         jobs.submit(
             format!("model:{}", dest.display()),
             Priority::Interactive,
-            move |ctx| match download(&self.url(), self.file().2, &dest, ctx) {
+            move |ctx| match download(&AGENT, &self.url(), size, sha256, &dest, ctx) {
                 Err(Error::Cancelled) => {}
                 r => done(r.map(|()| dest)),
             },
@@ -86,15 +91,40 @@ impl Model {
     }
 }
 
-/// `<data folder>/models`, or `None` if the platform has no data folder.
+/// `<local data folder>/models`, or `None` if the platform has no data folder. Local, so hundreds
+/// of MB don't roam with a Windows profile.
 pub fn dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "jvid").map(|d| d.data_dir().join("models"))
+    directories::ProjectDirs::from("", "", "jvid").map(|d| d.data_local_dir().join("models"))
 }
 
-/// Fetches `url` to `dest` through a `.part` file that only becomes `dest` once its hash matches.
-fn download(url: &str, sha256: &str, dest: &Path, ctx: &Ctx) -> Result<(), Error> {
-    let part = dest.with_extension("part");
-    let r = fetch(url, sha256, &part, ctx)
+/// Every network wait is bounded, so a stalled download fails and sees Cancel within 30 s.
+fn agent(https_only: bool) -> ureq::Agent {
+    let t = Some(Duration::from_secs(30));
+    ureq::Agent::config_builder()
+        .https_only(https_only)
+        .timeout_connect(t)
+        .timeout_recv_response(t)
+        .timeout_per_read(t)
+        .build()
+        .into()
+}
+
+/// Fetches `url` (`size` bytes) to `dest` through a `.part` file that only becomes `dest` once its
+/// hash matches. Each download has its own `.part`, so a cancelled one still finishing can't
+/// delete its retry's.
+fn download(
+    agent: &ureq::Agent,
+    url: &str,
+    size: u64,
+    sha256: &str,
+    dest: &Path,
+    ctx: &Ctx,
+) -> Result<(), Error> {
+    static N: AtomicU64 = AtomicU64::new(0);
+    let ours = format!("part-{}-", std::process::id());
+    remove_parts(dest, &ours);
+    let part = dest.with_extension(format!("{ours}{}", N.fetch_add(1, Ordering::Relaxed)));
+    let r = fetch(agent, url, size, sha256, &part, ctx)
         .and_then(|()| fs::rename(&part, dest).map_err(|e| Error::Failed(e.to_string())));
     if r.is_err() {
         let _ = fs::remove_file(&part);
@@ -102,10 +132,35 @@ fn download(url: &str, sha256: &str, dest: &Path, ctx: &Ctx) -> Result<(), Error
     r
 }
 
-fn fetch(url: &str, sha256: &str, part: &Path, ctx: &Ctx) -> Result<(), Error> {
+/// Removes `.part` files of `dest` left by earlier runs that crashed, keeping this process's
+/// (`ours` prefix), which may still be in use.
+fn remove_parts(dest: &Path, ours: &str) {
+    let (Some(dir), Some(stem)) = (dest.parent(), dest.file_stem()) else {
+        return;
+    };
+    for p in fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+    {
+        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if p.file_stem() == Some(stem) && ext.starts_with("part-") && !ext.starts_with(ours) {
+            let _ = fs::remove_file(p);
+        }
+    }
+}
+
+fn fetch(
+    agent: &ureq::Agent,
+    url: &str,
+    size: u64,
+    sha256: &str,
+    part: &Path,
+    ctx: &Ctx,
+) -> Result<(), Error> {
     let failed = |e: &dyn std::fmt::Display| Error::Failed(format!("{url}: {e}"));
-    let res = ureq::get(url).call().map_err(|e| failed(&e))?;
-    let total = res.body().content_length();
+    let res = agent.get(url).call().map_err(|e| failed(&e))?;
     let mut body = res.into_body().into_reader();
     if let Some(d) = part.parent() {
         fs::create_dir_all(d).map_err(|e| failed(&e))?;
@@ -122,12 +177,17 @@ fn fetch(url: &str, sha256: &str, part: &Path, ctx: &Ctx) -> Result<(), Error> {
         if n == 0 {
             break;
         }
+        got += n as u64;
+        // Stops a misbehaving server filling the disk before the hash could catch it.
+        if got > size {
+            return Err(failed(&format!("more than the expected {size} bytes")));
+        }
         hash.update(&buf[..n]);
         file.write_all(&buf[..n]).map_err(|e| failed(&e))?;
-        got += n as u64;
-        if let Some(t) = total {
-            ctx.set_progress(got as f32 / t as f32);
-        }
+        ctx.set_progress(got as f32 / size as f32);
+    }
+    if got != size {
+        return Err(failed(&format!("got {got} of {size} bytes")));
     }
     // On disk before the rename, so a crash can't leave a short file under the model's name.
     file.into_inner()
@@ -143,14 +203,14 @@ fn fetch(url: &str, sha256: &str, part: &Path, ctx: &Ctx) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
     use std::sync::mpsc;
     use std::time::Duration;
 
     use super::*;
 
-    /// Serves `body` over HTTP to one request; returns its URL.
-    fn serve(body: &'static [u8]) -> String {
+    /// Answers one HTTP request with `reply`; returns its URL.
+    fn serve(reply: impl FnOnce(TcpStream) + Send + 'static) -> String {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/model.bin", l.local_addr().unwrap());
         std::thread::spawn(move || {
@@ -160,47 +220,142 @@ mod tests {
             while r.read_line(&mut line).unwrap() > 2 {
                 line.clear();
             }
-            let mut s = s;
-            write!(
-                s,
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            )
-            .unwrap();
-            s.write_all(body).unwrap();
+            reply(s);
         });
         url
     }
 
-    fn get(url: String, sha256: &str, dest: PathBuf) -> Result<(), Error> {
-        let jobs = Pool::new(1);
+    fn head(s: &mut TcpStream, len: usize) {
+        write!(
+            s,
+            "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+    }
+
+    /// Serves `body` whole.
+    fn serve_body(body: &'static [u8]) -> String {
+        serve(move |mut s| {
+            head(&mut s, body.len());
+            // The client may hang up early, on a body over its size.
+            let _ = s.write_all(body);
+        })
+    }
+
+    fn start(
+        jobs: &Pool,
+        url: String,
+        size: u64,
+        sha256: &str,
+        dest: PathBuf,
+    ) -> mpsc::Receiver<Result<(), Error>> {
         let (tx, rx) = mpsc::channel();
         let sha256 = sha256.to_owned();
-        jobs.submit("dl", Priority::Interactive, move |ctx| {
-            tx.send(download(&url, &sha256, &dest, ctx)).unwrap();
+        jobs.submit(url.clone(), Priority::Interactive, move |ctx| {
+            tx.send(download(&agent(false), &url, size, &sha256, &dest, ctx))
+                .unwrap();
         });
+        rx
+    }
+
+    fn get(url: String, size: u64, sha256: &str, dest: PathBuf) -> Result<(), Error> {
+        let jobs = Pool::new(1);
+        let rx = start(&jobs, url, size, sha256, dest);
         rx.recv_timeout(Duration::from_secs(10)).unwrap()
+    }
+
+    fn tmp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("jvid-models-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// `.part` files in `dir`.
+    fn parts(dir: &Path) -> Vec<PathBuf> {
+        fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().unwrap().to_str().unwrap().starts_with("part"))
+            .collect()
+    }
+
+    const BODY: &[u8] = b"hello model";
+
+    fn sha() -> String {
+        format!("{:x}", Sha256::digest(BODY))
     }
 
     #[test]
     fn checked_download_lands_and_corrupt_one_is_rejected() {
-        let dir = std::env::temp_dir().join(format!("jvid-models-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
+        let dir = tmp("check");
         let dest = Model::Base.path(&dir);
-        let sha = format!("{:x}", Sha256::digest(b"hello model"));
 
-        get(serve(b"hello model"), &sha, dest.clone()).unwrap();
-        assert_eq!(fs::read(&dest).unwrap(), b"hello model");
-        assert!(Model::Base.is_downloaded(&dir));
+        get(serve_body(BODY), 11, &sha(), dest.clone()).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), BODY);
+        // Not the base model's size, so not taken for it.
+        assert!(!Model::Base.is_downloaded(&dir));
         fs::remove_file(&dest).unwrap();
 
         // Acceptance: a corrupt download is rejected and leaves nothing behind.
         assert_eq!(
-            get(serve(b"hello modem"), &sha, dest.clone()),
+            get(serve_body(b"hello modem"), 11, &sha(), dest.clone()),
             Err(Error::Corrupt)
         );
-        assert!(!dest.exists() && !dest.with_extension("part").exists());
-        assert!(!Model::Base.is_downloaded(&dir));
+        assert!(!dest.exists() && parts(&dir).is_empty());
+    }
+
+    #[test]
+    fn download_stops_at_the_expected_size() {
+        let dir = tmp("size");
+        let dest = Model::Base.path(&dir);
+        let failed = |r| match r {
+            Err(Error::Failed(e)) => e,
+            r => panic!("{r:?}"),
+        };
+        let e = failed(get(serve_body(BODY), 5, &sha(), dest.clone()));
+        assert!(e.contains("more than the expected 5 bytes"), "{e}");
+        let e = failed(get(serve_body(BODY), 20, &sha(), dest.clone()));
+        assert!(e.contains("got 11 of 20 bytes"), "{e}");
+        assert!(!dest.exists() && parts(&dir).is_empty());
+    }
+
+    #[test]
+    fn a_failing_download_leaves_a_concurrent_one_of_the_same_model_alone() {
+        let dir = tmp("race");
+        let dest = Model::Base.path(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // Left by a run that crashed: pid 1 is never this test.
+        let stale = dest.with_extension("part-1-0");
+        fs::write(&stale, b"hello").unwrap();
+
+        // B sends half its body, then waits until A has failed.
+        let (go, wait) = mpsc::channel::<()>();
+        let b_url = serve(move |mut s| {
+            head(&mut s, BODY.len());
+            s.write_all(&BODY[..5]).unwrap();
+            wait.recv().unwrap();
+            s.write_all(&BODY[5..]).unwrap();
+        });
+        let jobs = Pool::new(2);
+        let b = start(&jobs, b_url, 11, &sha(), dest.clone());
+        while parts(&dir).iter().all(|p| *p == stale) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!stale.exists(), "a crashed run's .part is cleared");
+
+        // A, a retry of the same model, is cut off mid-body and removes its .part.
+        let a_url = serve(|mut s| {
+            head(&mut s, BODY.len());
+            s.write_all(&BODY[..3]).unwrap();
+        });
+        let a = start(&jobs, a_url, 11, &sha(), dest.clone());
+        let a = a.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(matches!(a, Err(Error::Failed(_))), "{a:?}");
+
+        go.send(()).unwrap();
+        assert_eq!(b.recv_timeout(Duration::from_secs(10)).unwrap(), Ok(()));
+        assert_eq!(fs::read(&dest).unwrap(), BODY);
+        assert!(parts(&dir).is_empty());
     }
 
     #[test]

@@ -1,0 +1,4 @@
+[env]
+# whisper.cpp (whisper-rs-sys) defaults to -march=native, which crashes on older CPUs and lets
+# CI caches carry one runner's CPU flags to another. OFF builds the x86-64-v3 baseline.
+GGML_NATIVE = "OFF"

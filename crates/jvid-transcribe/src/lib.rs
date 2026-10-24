@@ -62,7 +62,8 @@ impl std::error::Error for Error {}
 /// Speech to words, so jobs and tests can swap whisper for a fake.
 pub trait Transcriber: Send + Sync {
     /// Words in `audio` (mono at [`SPEECH_RATE`]), timed from its start. Reports progress to `ctx`
-    /// and returns [`Error::Cancelled`] within a second of it being cancelled.
+    /// and returns [`Error::Cancelled`] within a second of it being cancelled; [`Whisper`] frees
+    /// the CPU later, at whisper.cpp's next compute-graph boundary.
     fn transcribe(&self, audio: Vec<f32>, opts: &Options, ctx: &Ctx) -> Result<Vec<Word>, Error>;
 }
 
@@ -84,11 +85,15 @@ pub fn submit(
     opts: Options,
     done: impl FnOnce(Result<Vec<Word>, Error>) + Send + 'static,
 ) -> Handle {
+    // Same audio with other options or another model is another job: the pool hands a duplicate
+    // the live job's handle and drops its `done`.
     let key = format!(
-        "transcribe:{}:{}:{:?}",
+        "transcribe:{}:{}:{:?}:{:?}:{:p}",
         source.path.display(),
         source.nth,
-        source.range
+        source.range,
+        opts,
+        Arc::as_ptr(&engine) as *const ()
     );
     jobs.submit(key, Priority::Interactive, move |ctx| {
         match run(&*engine, &source, &opts, ctx) {
@@ -117,8 +122,8 @@ fn run(
     };
     let offset = Rate::new(SAMPLE_RATE, 1).time_floor(s.range.start.max(0));
     for w in &mut words {
-        w.start = offset + to_source(w.start, &spans);
-        w.end = offset + to_source(w.end, &spans);
+        let (start, end) = to_source(w.start, w.end, &spans);
+        (w.start, w.end) = (offset + start, offset + end);
     }
     ctx.set_progress(1.0);
     Ok(words)
@@ -129,6 +134,10 @@ fn run(
 const SILENCE_DB: f32 = -45.0;
 const MIN_SILENCE: i64 = 2 * SPEECH_RATE as i64;
 const PAD: i64 = SPEECH_RATE as i64 / 4;
+const _: () = assert!(
+    PAD % BUCKET != 0,
+    "skip_silence tells a leading cut by a == PAD"
+);
 
 /// `audio` with long silences spliced out, and where each kept span starts: `(in the result, in
 /// audio)`, both as [`Time`] from the start.
@@ -166,10 +175,16 @@ fn skip_silence(audio: &[f32]) -> (Vec<f32>, Vec<(Time, Time)>) {
     (speech, spans)
 }
 
-/// Maps a time in spliced speech back to the audio it came from.
-fn to_source(t: Time, spans: &[(Time, Time)]) -> Time {
-    let i = spans.partition_point(|s| s.0 <= t).saturating_sub(1);
-    spans.get(i).map_or(t, |&(at, src)| src + (t - at))
+/// Maps a word's times in spliced speech back to the audio it came from, through the kept span
+/// holding its start. Whisper often stretches a word's end to the next word's start, which can be
+/// past a cut; clamping it to the span keeps the removed silence out of the word.
+fn to_source(start: Time, end: Time, spans: &[(Time, Time)]) -> (Time, Time) {
+    let i = spans.partition_point(|s| s.0 <= start).saturating_sub(1);
+    let Some(&(at, src)) = spans.get(i) else {
+        return (start, end);
+    };
+    let len = spans.get(i + 1).map_or(Time(i64::MAX), |n| n.0 - at);
+    (src + (start - at), src + (end - at).min(len))
 }
 
 #[cfg(test)]
@@ -207,12 +222,34 @@ mod tests {
         assert_eq!(spans.len(), 2, "{spans:?}");
         assert_eq!(spans[0], (Time(0), Time(0)));
         // Before the cut maps to itself; after it, shifted by the cut.
-        assert_eq!(to_source(secs(0.5), &spans), secs(0.5));
+        let at = |t| to_source(t, t, &spans).0;
+        assert_eq!(at(secs(0.5)), secs(0.5));
         let shift = spans[1].1 - spans[1].0;
         assert!((shift.0 - secs(cut as f64 / S as f64).0).abs() < secs(0.02).0);
+        assert_eq!(at(spans[1].0 + secs(0.1)), spans[1].1 + secs(0.1));
+        // Exactly at the splice is the far side; a flick before it is the near side.
+        assert_eq!(at(spans[1].0), spans[1].1);
+        assert_eq!(at(spans[1].0 - Time(1)), spans[1].0 - Time(1));
+    }
+
+    #[test]
+    fn a_word_ending_past_a_splice_ends_at_its_own_span() {
+        // Spans: speech 0–1 s is source 0–1 s, speech from 1 s is source from 4 s.
+        let spans = [(Time(0), Time(0)), (secs(1.0), secs(4.0))];
+        let edge = secs(1.0);
+        // Ends at or past the splice clamp to the end of the word's span, not across the cut.
+        assert_eq!(to_source(secs(0.8), edge, &spans), (secs(0.8), edge));
+        assert_eq!(to_source(secs(0.8), secs(1.3), &spans), (secs(0.8), edge));
         assert_eq!(
-            to_source(spans[1].0 + secs(0.1), &spans),
-            spans[1].1 + secs(0.1)
+            to_source(secs(0.8), edge - Time(1), &spans),
+            (secs(0.8), edge - Time(1))
+        );
+        // A word starting at the splice belongs to the far side, start and end.
+        assert_eq!(to_source(edge, secs(1.3), &spans), (secs(4.0), secs(4.3)));
+        // The last span has no end to clamp to.
+        assert_eq!(
+            to_source(secs(2.0), secs(9.0), &spans),
+            (secs(5.0), secs(12.0))
         );
     }
 
@@ -222,7 +259,7 @@ mod tests {
         let (speech, spans) = skip_silence(&audio);
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].0, Time(0));
-        assert_eq!(to_source(Time(0), &spans), spans[0].1);
+        assert_eq!(to_source(Time(0), Time(0), &spans).0, spans[0].1);
         assert!(speech.len() < 2 * S);
         assert!(skip_silence(&vec![0.0; 3 * S]).0.is_empty());
         // Too short to hold a silence, even the length of a pad.
@@ -341,6 +378,44 @@ mod tests {
         assert!((starts[1] - 2.0).abs() < 0.02, "{starts:?}");
         // The third second of speech starts 0.75 s past the cut's far edge.
         assert!((starts[2] - 5.5).abs() < 0.05, "{starts:?}");
+    }
+
+    #[test]
+    fn same_audio_with_other_options_or_engine_is_its_own_job() {
+        jvid_media::ffmpeg::init().unwrap();
+        let path = wav(&tmp("dedupe"));
+        let jobs = Pool::new(1);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let source = Source {
+            path,
+            nth: 0,
+            range: 0..i64::MAX,
+        };
+        let engine: Arc<dyn Transcriber> = Arc::new(Fake { slow: false });
+        let runs = [
+            (engine.clone(), "plain"),
+            (engine, "um"),
+            (Arc::new(Fake { slow: false }) as Arc<dyn Transcriber>, "um"),
+        ];
+        // Submitted back to back on one worker, so each is still live as the next arrives.
+        for (i, (engine, prompt)) in runs.into_iter().enumerate() {
+            let opts = Options {
+                initial_prompt: Some(prompt.into()),
+                ..Options::default()
+            };
+            let tx = tx.clone();
+            submit(&jobs, engine, source.clone(), opts, move |r| {
+                tx.send((i, r.unwrap()[0].text.clone())).unwrap();
+            });
+        }
+        let mut got: Vec<_> = (0..3)
+            .map(|_| rx.recv_timeout(Duration::from_secs(10)).unwrap())
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            [(0, "plain".into()), (1, "um".into()), (2, "um".into())]
+        );
     }
 
     /// Acceptance: Cancel stops within a second.
