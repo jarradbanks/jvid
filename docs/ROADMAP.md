@@ -457,6 +457,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#264](https://github.com/jarradbanks/jvid/issues/264) **Locked tracks: no drag ghost for clips that can't move** — Dragging a clip on a locked track draws the full move ghost, then nothing moves.
 - [#265](https://github.com/jarradbanks/jvid/issues/265) **Record button in the transport bar** — Voiceover only starts by arming a track in its header and pressing Shift+R, which nothing on screen explains. Add a Record button next to the play controls, as other editors have.
 - [#266](https://github.com/jarradbanks/jvid/issues/266) **Impeccable polish pass on the remaining panels** — Bring every panel not covered by the issues above to the same finish, using the impeccable skill's critique and audit.
+- [#274](https://github.com/jarradbanks/jvid/issues/274) **Main CI green on Windows and macOS** — Main's full matrix fails off Linux: three kittest snapshots differ on Windows WARP (bin_effects_hover, editor_light, preferences), and macOS playback::tests::loop_wraps_without_dropping_frames is timing-flaky. PRs only run Ubuntu, so it goes unseen.
 
 ---
 
