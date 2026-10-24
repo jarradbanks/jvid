@@ -1,5 +1,22 @@
 # suite-ui strings, Catalan. Keep keys and {placeholders} in step with en.toml.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
 
 [language]
 name = "Català"
+
+[panel]
+more_tabs = "Més pestanyes"
+
+[input]
+search = "Cerca"
+
+[color]
+# A fully transparent colour.
+none = "Cap"
+
+[theme]
+error = "Tema {path}: {error}"
+bad_color = "`{value}` no és #RRGGBB"
+at = "línia {line}, columna {column}: {error}"
+dark = "Fosc"
+light = "Clar"
+high_contrast = "Contrast alt"
