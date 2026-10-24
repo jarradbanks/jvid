@@ -1460,14 +1460,23 @@ I("record-transport", "Record button in the transport bar", None, ["ui", "audio"
   ac=["With no armed track, one click records into a new audio track and Stop places the clip",
       "The button and Shift+R drive the same recording state"])
 
-I("polish-pass", "Impeccable polish pass on the remaining panels", None, ["ui"], "M", ["prefs-redesign", "text-inspector-polish", "export-polish", "transport-align"], labels=["later"],
+I("polish-pass", "Impeccable polish pass on the remaining panels", None, ["ui", "suite-ui", "docs"], "L", ["prefs-redesign", "text-inspector-polish", "export-polish", "transport-align"], labels=["later"],
   summary="Bring every panel not covered by the issues above to the same finish, using the impeccable skill's critique and audit.",
   scope=[
       "Critique the title bar, media bin, Source and Program headers, timeline toolbar, track headers, keyframe lanes, context menus, toasts and the welcome screen against DESIGN.md, and fix the material findings",
       "Known items: keyframe lane names are lowercase (anchor, crop bottom, scale) and must be Title Case; a lane's name overlaps the keyframe line at its left edge; the Arm for Recording tooltip covers + Track",
+      "Follow-ups folded in from #268-#273 (owner, 2026-10-24): Export dialog Loudness and Target Size, Project Settings and Inspector Font move onto suite-ui Dropdown with .bounds(); the EQ preset dropdown shows Custom greyed and keeps it out of the menu",
+      "Inspector: the two-slot tool column (Reset, diamond) from the Text tab applies to every Inspector tab, so slider widths no longer change when Reset appears; Reset on an animated property is one undo step; the Speed row's Reverse checkbox is not clipped at 288 px; colour swatches get a border on Light",
+      "Graphic EQ: hovering a band and pressing Up/Down nudges it 0.5 dB (Shift 0.1 dB)",
+      "Render Queue panel header measures its buttons and drops labels to icons instead of clipping them",
+      "Timeline: the New Track slot respects reduced motion; locked clips also hide fade and keyframe handles; a refused drag near the edge doesn't auto-scroll",
+      "suite-ui Button centres icon glyphs by their ink, app-wide; the gallery gains ColorField",
+      "DESIGN.md documents the themes folder and the ink_2/ink_4 tokens",
       "List any finding too big for this issue as a follow-up in the PR",
   ],
   ac=["Keyframe lane names show in Title Case and never overlap their lane's line",
+      "Every Inspector tab's sliders keep their width whether or not Reset shows (kittest snapshot)",
+      "No dropdown in Export, Project Settings or the Inspector Font field overflows its popup (kittest)",
       "The PR lists each finding with a before and after screenshot"],
   refs=[f"[DESIGN.md]({DESIGN})"])
 
