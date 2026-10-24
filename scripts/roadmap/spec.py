@@ -1817,3 +1817,46 @@ I("track-volume", "Track Volume control on the audio track header", None, ["time
   summary="TrackSettings.volume exists but has no UI; the audio lesson (#341) had to use clip Volume.",
   scope=["A compact Volume control on each audio track header, undoable and saved, reusing the house slider"],
   ac=["Changing a track's Volume changes the mix of every clip on it, and undo restores it (test)"])
+
+I("tour-polish", "Tutorials: back to Welcome on exit, per-lesson baselines", None, ["ui"], "S", ["tutorial-engine"], labels=["later"],
+  summary="Follow-ups from #335 (PR #362).",
+  scope=["Exiting a tour started from the Welcome screen returns to Welcome",
+         "Checks such as \"an export is queued\" compare against state captured when the lesson starts, so earlier state can't pass a step"],
+  ac=["Exit from a Welcome-started tour shows Welcome again (test)",
+      "An export queued before the lesson doesn't complete the export step (test)"])
+
+I("export-drop-panic", "Render: no BufferAsyncError panic when an export is dropped mid-frame", None, ["render"], "S", [], labels=["later"],
+  summary="From #338 (PR #365): dropping the app mid-export panics a job thread in composite.rs copy_out with BufferAsyncError. Tests still pass, but it's a panic on a real code path (quit during export).",
+  scope=["copy_out handles a failed or abandoned buffer map as an error, not a panic"],
+  ac=["A test that drops the renderer mid-export shows no panic in its output and the job ends with an error or cancel"])
+
+I("mp3-range-padding", "Export: MP3 audio stops within a frame of the range end", None, ["export"], "S", [], labels=["later"],
+  summary="From #360 (PR #366): MP3 encoder padding can run up to about 40 ms past a short export range, while validate allows one frame.",
+  scope=["Trim or account for MP3 encoder delay and padding so the output duration matches the range"],
+  ac=["A short-range MP3 export ends within one video frame of the range (test)"])
+
+I("seek-test-speed", "Tests: slim the random-seek corpus test", None, ["media", "infra"], "S", ["fast-tests"], labels=["later"],
+  summary="From #360 (PR #366): decode::tests::random_seeks_match_ffmpeg_pts_across_the_corpus takes about 30 s under parallel load.",
+  scope=["Cut the seek count or corpus subset the way #360 slimmed the other slow tests, keeping one seek per codec and container"],
+  ac=["The test runs under 5 s on CI and still covers every corpus codec"])
+
+I("third-party-notices", "Ship third-party licence notices", None, ["infra", "ui"], "S", ["transcribe"], labels=["later"],
+  summary="From #342 (PR #361): whisper.cpp (MIT) and webpki-roots (CDLA-Permissive-2.0 section 3.1) need their licence text shipped once jvid-app links jvid-transcribe. The repo has no notices mechanism.",
+  scope=["Generate a notices file from cargo metadata (and the bundled samples' LICENSES.toml), bundle it, and show it from About"],
+  ac=["The notices file lists every linked crate's licence and the whisper.cpp and webpki-roots texts (test)",
+      "About opens the notices"])
+
+I("hide-region", "Hide Region: one click to blur part of a clip", None, ["ui"], "S", ["privacy-blur"], labels=["later"],
+  summary="From #351 (PR #374): hiding a region today takes duplicate clip, add mask, add Blur.",
+  scope=["A Hide Region action that duplicates the clip above itself, adds a rectangle mask and Blur, and selects the mask for placing"],
+  ac=["Hide Region is one undo step and blurs only inside the mask (test)"])
+
+I("separable-blur", "Blur: separable two-pass blur for large radii", None, ["render"], "S", ["privacy-blur"], labels=["later"],
+  summary="From #351 (PR #374): the single 7x7 pass leaves visible steps at big radii, which can leak detail when blurring faces or text.",
+  scope=["Two-pass (horizontal then vertical) Gaussian with enough taps for the maximum radius"],
+  ac=["At maximum radius a 1 px detail is no longer distinguishable (render test with a threshold)"])
+
+I("effect-masks", "Per-effect masks", None, ["render", "ui"], "M", ["privacy-blur"], labels=["later"],
+  summary="From #351 (PR #374): limit an effect to a mask region without duplicating the clip.",
+  scope=["An effect can reference one of the clip's masks; the effect only applies inside it"],
+  ac=["An effect limited to a mask leaves pixels outside it unchanged (render test)", "Old projects load unchanged"])

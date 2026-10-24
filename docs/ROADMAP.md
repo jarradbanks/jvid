@@ -514,6 +514,14 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#371](https://github.com/jarradbanks/jvid/issues/371) **Windows: playback retry test hangs intermittently** — playback::tests::failed_decodes_retry_and_relink_redecodes hung for 65 minutes on windows-latest and passed on a rerun.
 - [#372](https://github.com/jarradbanks/jvid/issues/372) **Speech-to-text: Cancel stops whisper promptly** — After Cancel, the jvid-whisper thread runs on for one encoder pass (3.8-8 s measured in #361).
 - [#373](https://github.com/jarradbanks/jvid/issues/373) **Track Volume control on the audio track header** — TrackSettings.volume exists but has no UI; the audio lesson (#341) had to use clip Volume.
+- [#378](https://github.com/jarradbanks/jvid/issues/378) **Tutorials: back to Welcome on exit, per-lesson baselines** — Follow-ups from #335 (PR #362).
+- [#379](https://github.com/jarradbanks/jvid/issues/379) **Render: no BufferAsyncError panic when an export is dropped mid-frame** — From #338 (PR #365): dropping the app mid-export panics a job thread in composite.rs copy_out with BufferAsyncError. Tests still pass, but it's a panic on a real code path (quit during export).
+- [#380](https://github.com/jarradbanks/jvid/issues/380) **Export: MP3 audio stops within a frame of the range end** — From #360 (PR #366): MP3 encoder padding can run up to about 40 ms past a short export range, while validate allows one frame.
+- [#381](https://github.com/jarradbanks/jvid/issues/381) **Tests: slim the random-seek corpus test** — From #360 (PR #366): decode::tests::random_seeks_match_ffmpeg_pts_across_the_corpus takes about 30 s under parallel load.
+- [#382](https://github.com/jarradbanks/jvid/issues/382) **Ship third-party licence notices** — From #342 (PR #361): whisper.cpp (MIT) and webpki-roots (CDLA-Permissive-2.0 section 3.1) need their licence text shipped once jvid-app links jvid-transcribe. The repo has no notices mechanism.
+- [#383](https://github.com/jarradbanks/jvid/issues/383) **Hide Region: one click to blur part of a clip** — From #351 (PR #374): hiding a region today takes duplicate clip, add mask, add Blur.
+- [#384](https://github.com/jarradbanks/jvid/issues/384) **Blur: separable two-pass blur for large radii** — From #351 (PR #374): the single 7x7 pass leaves visible steps at big radii, which can leak detail when blurring faces or text.
+- [#385](https://github.com/jarradbanks/jvid/issues/385) **Per-effect masks** — From #351 (PR #374): limit an effect to a mask region without duplicating the clip.
 
 ---
 
