@@ -120,10 +120,6 @@ mod tests {
     #[test]
     fn every_character_has_a_glyph() {
         let missing = suite_ui::test_support::missing_glyphs(&CATALOG);
-        // Inter is subset to Latin-1 (see suite-ui/assets/README.md), so the `≈` before
-        // estimated sizes has shown `?` since before translation. Drop this once it's added.
-        let (known, other): (Vec<_>, Vec<_>) = missing.iter().partition(|m| m.ends_with("'≈'"));
-        assert_eq!(other, Vec::<&String>::new());
-        assert!(!known.is_empty(), "≈ draws now; remove the exception");
+        assert_eq!(missing, Vec::<String>::new());
     }
 }

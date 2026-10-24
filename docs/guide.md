@@ -82,9 +82,9 @@ drops out of the Program monitor and exports until you turn it back on. To write
 
 Click **Export** in the header. The dialog opens on In to Out when you've marked a range, otherwise the whole timeline.
 
-- **Presets:** Highlight 1080p60, Highlight 1440p60, Screen recording (sharp text), YouTube 1080p, YouTube 4K, Shorts/Reels 9:16 and ProRes master. jvid warns when a preset's aspect ratio doesn't match the project.
+- **Presets:** Highlight 1080p60, Highlight 1440p60, Screen Recording (Sharp Text), YouTube 1080p, YouTube 4K, Shorts/Reels 9:16 and ProRes Master. jvid warns when a preset's aspect ratio doesn't match the project.
 - Pick the video and audio codecs, loudness target and output file, and check the estimated size.
-- Exports run in the **Render Queue** while you keep editing. Cancel, remove, or **Show in Folder** when done.
+- Exports run in the **Render Queue** while you keep editing. The menu beside **Export** shows the running export and the last few results; **Show Render Queue** opens the full list as a panel beside the Timeline, with **Cancel**, **Reveal**, **Cancel All** and **Clear Finished**.
 
 **Export frame** (`Ctrl+Shift+E`) saves the current Program frame as a PNG.
 

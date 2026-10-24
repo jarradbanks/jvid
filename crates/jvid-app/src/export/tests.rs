@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
 
 use jvid_core::history::{Command, Created, History};
 use jvid_core::model::{NewClip, TrackKind};
@@ -630,7 +631,7 @@ fn screen_recording_keeps_text_sharp() {
     let req = Request {
         path: path.clone(),
         range: (secs(1), secs(2)),
-        preset: preset("Screen recording (sharp text)"),
+        preset: preset("Screen Recording (Sharp Text)"),
         loudness: None,
         lossless: None,
         sidecar: false,
@@ -663,7 +664,7 @@ fn export_hits_loudness_target() {
     let (Some(dir), Some(_)) = (corpus(), device()) else {
         return eprintln!("skipping export test: needs the corpus and a software adapter");
     };
-    for (name, target) in [("Audio only (WAV)", -14.0), ("Audio only (AAC)", -23.0)] {
+    for (name, target) in [("Audio Only (WAV)", -14.0), ("Audio Only (AAC)", -23.0)] {
         let p = preset(name);
         let path = out(&format!("loud.{}", p.extension));
         let req = Request {
@@ -699,7 +700,7 @@ fn audio_only_wav_is_the_mix() {
         return eprintln!("skipping export test: needs the corpus and a software adapter");
     };
     let p = project(&dir);
-    for (name, bits) in [("Audio only (WAV)", 16), ("Audio only (WAV 24-bit)", 24)] {
+    for (name, bits) in [("Audio Only (WAV)", 16), ("Audio Only (WAV 24-bit)", 24)] {
         let path = out(&format!("mix{bits}.wav"));
         let req = Request {
             path: path.clone(),
@@ -761,7 +762,7 @@ fn export_with_audio_fx_matches_playback() {
     let req = Request {
         path: path.clone(),
         range: (secs(1), secs(3)),
-        preset: preset("Audio only (WAV)"),
+        preset: preset("Audio Only (WAV)"),
         loudness: None,
         lossless: None,
         sidecar: false,
@@ -830,10 +831,8 @@ fn editing_after_queueing_doesnt_change_the_export() {
         sidecar: false,
     };
     let mut q = queue::Queue::default();
-    assert!(q.push(
-        path.clone(),
-        submit(&pool, h.project().clone(), req.clone(), gpu)
-    ));
+    let job = submit(&pool, h.project().clone(), req.clone(), gpu);
+    assert!(q.push(path.clone(), "YouTube 1080p".into(), secs(1), job));
     assert!(!q.writing(&out("other.mp4")) && q.writing(&path));
     let video = h.project().sequence().tracks()[0].clips()[0].id;
     h.apply(Command::RemoveClip(video)).unwrap();
@@ -852,26 +851,47 @@ fn editing_after_queueing_doesnt_change_the_export() {
     std::fs::remove_file(&path).unwrap();
 }
 
-/// Cancelling a job before it starts reports it cancelled, not crashed.
-#[test]
-fn queue_reports_cancelled_waiting_job() {
+/// A queue of `names` behind a busy job that runs until the returned sender sends.
+fn blocked_queue(names: &[&str]) -> (Pool, Sender<()>, queue::Queue, Vec<Handle>) {
     let pool = Pool::new(1);
     let (go, wait) = channel::<()>();
     pool.submit("busy", Priority::Interactive, move |_| {
         let _ = wait.recv();
     });
-    let (tx, rx) = channel::<Result<ProbeInfo, Error>>();
-    let h = pool.submit("job", Priority::Interactive, move |_| drop(tx));
     let mut q = queue::Queue::default();
-    assert!(q.push("a.mp4".into(), (h.clone(), rx)));
+    let mut handles = Vec::new();
+    for &name in names {
+        let (tx, rx) = channel::<Result<ProbeInfo, Error>>();
+        let h = pool.submit(name, Priority::Interactive, move |_| drop(tx));
+        handles.push(h.clone());
+        assert!(q.push(name.into(), "P".into(), secs(1), (h, rx)));
+    }
+    (pool, go, q, handles)
+}
+
+/// Cancelling a job before it starts shows it cancelled at once, and then reports it cancelled,
+/// not crashed.
+#[test]
+fn queue_reports_cancelled_waiting_job() {
+    let (_pool, go, mut q, h) = blocked_queue(&["a.mp4", "b.mp4"]);
     assert_eq!(q.running(), Some(0.0));
-    h.cancel();
+    h[1].cancel();
+    let status: Vec<_> = q.rows().into_iter().map(|r| r.status).collect();
+    assert!(matches!(status[0], queue::Status::Rendering { .. }));
+    assert_eq!(status[1], queue::Status::Cancelled);
+    assert_eq!(q.pending(), 1);
+    h[0].cancel();
+    assert_eq!((q.running(), q.pending()), (None, 0));
     go.send(()).unwrap();
-    while !h.is_finished() {
+    while !h.iter().all(|h| h.is_finished()) {
         std::thread::yield_now();
     }
-    assert_eq!(q.poll(), vec![("a.mp4".into(), Err(Error::Cancelled))]);
-    assert_eq!((q.running(), q.pending()), (None, 0));
+    let cancelled = Err(Error::Cancelled);
+    let ended = vec![
+        ("a.mp4".into(), cancelled.clone()),
+        ("b.mp4".into(), cancelled),
+    ];
+    assert_eq!(q.poll(), ended);
 }
 
 /// Target-size exports land under the target and within 3% of it, across corpus sources of
@@ -968,31 +988,20 @@ fn lossless_copies_the_marked_cut() {
     assert_eq!(info.duration, secs(3));
 }
 
-/// Two queued exports both show in the Export menu, each with a right-aligned Cancel; Cancel on
-/// one leaves the other, and Cancel All (confirmed, as two are live) stops both.
+/// Two queued exports both show in the Render Queue, each with Cancel in the same column; Cancel
+/// All asks first while both are live, Cancel on one leaves the other, and Cancel All then stops
+/// the last without asking.
 #[test]
 fn export_menu_cancels_one_or_all() {
     use egui_kittest::kittest::Queryable;
-    let pool = Pool::new(1);
-    let (go, wait) = channel::<()>();
-    pool.submit("busy", Priority::Interactive, move |_| {
-        let _ = wait.recv();
-    });
-    let mut q = queue::Queue::default();
-    let mut handles = Vec::new();
-    for name in ["a.mp4", "b.mp4"] {
-        let (tx, rx) = channel::<Result<ProbeInfo, Error>>();
-        let h = pool.submit(name, Priority::Interactive, move |_| drop(tx));
-        handles.push(h.clone());
-        assert!(q.push(name.into(), (h, rx)));
-    }
+    let (_pool, go, q, handles) = blocked_queue(&["a.mp4", "b.mp4"]);
     let mut fresh = true;
     let mut harness = egui_kittest::Harness::builder()
-        .with_size([480.0, 200.0])
+        .with_size([960.0, 240.0])
         .build_ui_state(
             move |ui, q: &mut queue::Queue| {
                 if !suite_ui::test_support::install_theme(ui, &mut fresh) {
-                    q.menu(ui);
+                    q.panel(ui, true);
                 }
             },
             q,
@@ -1005,21 +1014,21 @@ fn export_menu_cancels_one_or_all() {
         .map(|n| n.rect().max.x)
         .collect();
     assert_eq!(rights.len(), 2);
-    let all = harness.get_by_label("Cancel All").rect();
-    assert!(
-        rights[0] == rights[1] && rights[0] > all.max.x,
-        "{rights:?}"
-    );
+    assert_eq!(rights[0], rights[1]);
+
+    harness.get_by_label("Cancel All").click();
+    harness.run();
+    harness.get_by_label("Cancel 2 Exports?");
+    harness.get_by_label("Keep Exporting").click();
+    harness.run();
+    assert!(handles.iter().all(|h| !h.is_cancelled()));
 
     harness.get_all_by_label("Cancel").next().unwrap().click();
     harness.run();
     assert!(handles[0].is_cancelled() && !handles[1].is_cancelled());
+    harness.get_by_label("Cancelled");
+    assert_eq!(harness.get_all_by_label("Cancel").count(), 1);
 
-    // Both still count as live until the pool skips them, so Cancel All asks first.
-    harness.get_by_label("Cancel All").click();
-    harness.run();
-    assert!(!handles[1].is_cancelled());
-    harness.get_by_label("Cancel 2 Exports?");
     harness.get_by_label("Cancel All").click();
     harness.run();
     assert!(handles.iter().all(|h| h.is_cancelled()));
@@ -1032,6 +1041,78 @@ fn export_menu_cancels_one_or_all() {
     assert_eq!(q.poll().len(), 2);
     q.clear_finished();
     assert!(q.is_empty());
+}
+
+/// The menu's rows act: Show Render Queue, Cancel All behind its confirm, then Clear Finished.
+#[test]
+fn export_menu_rows_act() {
+    use egui_kittest::kittest::Queryable;
+    let (_pool, go, q, handles) = blocked_queue(&["a.mp4", "b.mp4"]);
+    let mut fresh = true;
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size([320.0, 300.0])
+        .build_ui_state(
+            move |ui, (q, a): &mut (queue::Queue, Option<queue::Action>)| {
+                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    *a = q.menu(ui, "Ctrl+E").or(*a);
+                }
+            },
+            (q, None),
+        );
+    harness.run_steps(2);
+    harness.get_by_label("Show Render Queue").click();
+    harness.run();
+    assert_eq!(harness.state().1, Some(queue::Action::Show));
+
+    harness.get_by_label("Cancel All").click();
+    harness.run();
+    harness.get_by_label("Cancel 2 Exports?");
+    harness.get_by_label("Cancel All").click();
+    harness.run();
+    assert!(handles.iter().all(|h| h.is_cancelled()));
+
+    go.send(()).unwrap();
+    while !handles.iter().all(|h| h.is_finished()) {
+        std::thread::yield_now();
+    }
+    assert_eq!(harness.state_mut().0.poll().len(), 2);
+    harness.run();
+    harness.get_by_label("Clear Finished").click();
+    harness.run();
+    assert!(harness.state().0.is_empty());
+}
+
+/// A failed job shows its error on hover, and seeing it in the panel clears the alert.
+#[test]
+fn failed_job_shows_its_error_on_hover() {
+    use egui_kittest::kittest::Queryable;
+    let pool = Pool::new(1);
+    let (tx, rx) = channel::<Result<ProbeInfo, Error>>();
+    let h = pool.submit("job", Priority::Interactive, move |_| drop(tx));
+    let mut q = queue::Queue::default();
+    assert!(q.push("a.mp4".into(), "P".into(), secs(1), (h.clone(), rx)));
+    while !h.is_finished() {
+        std::thread::yield_now();
+    }
+    assert_eq!(q.poll().len(), 1);
+    assert!(q.failed_unseen);
+    let mut fresh = true;
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size([960.0, 240.0])
+        .build_ui_state(
+            move |ui, q: &mut queue::Queue| {
+                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    q.panel(ui, true);
+                }
+            },
+            q,
+        );
+    harness.run_steps(2);
+    assert!(!harness.state().failed_unseen);
+    let chip = harness.get_by_label("Failed").rect();
+    harness.hover_at(egui::pos2(chip.left() - 24.0, chip.center().y));
+    harness.run_steps(40);
+    harness.get_by_label_contains("Export failed: the export crashed");
 }
 
 #[test]

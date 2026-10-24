@@ -101,7 +101,7 @@ Premiere-style marking, used for playback, editing, and export.
 
 ### Export
 
-- Presets: Highlight 1080p60, Highlight 1440p60, Screen recording (sharp text), YouTube 1080p, YouTube 4K, Shorts/Reels 9:16, ProRes master, GIF, audio only (WAV, MP3, AAC)
+- Presets: Highlight 1080p60, Highlight 1440p60, Screen Recording (Sharp Text), YouTube 1080p, YouTube 4K, Shorts/Reels 9:16, ProRes Master, GIF, audio only (WAV, MP3, AAC)
 - Range: entire timeline, in to out, selected clips
 - **Lossless fast export:** when a range contains only cuts, copy the original video instead of re-encoding it. Cuts snap to keyframes, or a smart render re-encodes just the frames around each cut. The dialog says when lossless isn't available and why.
 - **Export to a target file size:** a two-pass encode sized to fit an upload limit (10, 25, 50, 100 or 500 MB, or custom)

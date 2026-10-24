@@ -68,6 +68,12 @@ pub fn preset_name(i: usize, p: &Preset) -> &str {
         .map_or(&p.name, |k| crate::i18n::CATALOG.tr(k))
 }
 
+/// The name `p` shows, where `p` is one of `presets`, perhaps with options added since.
+pub fn shown_name<'a>(presets: &'a [Preset], p: &'a Preset) -> &'a str {
+    let i = presets.iter().position(|q| q.name == p.name);
+    i.map_or(&p.name, |i| preset_name(i, &presets[i]))
+}
+
 /// Every `*.toml` preset in `dir`, by file name; a file that doesn't parse is logged and skipped.
 fn user_presets(dir: &Path) -> Vec<Preset> {
     let Ok(entries) = std::fs::read_dir(dir) else {

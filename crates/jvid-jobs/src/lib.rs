@@ -177,6 +177,11 @@ impl Pool {
         self.shared.wake.notify_one();
         Handle(state)
     }
+
+    /// No job is queued or running.
+    pub fn is_idle(&self) -> bool {
+        self.shared.lock().live.is_empty()
+    }
 }
 
 impl Drop for Pool {
@@ -258,6 +263,19 @@ mod tests {
         });
         started_rx.recv().unwrap();
         (h, tx)
+    }
+
+    #[test]
+    fn idle_only_once_running_and_queued_jobs_finish() {
+        let pool = Pool::new(1);
+        assert!(pool.is_idle());
+        let (blocker, tx) = block(&pool);
+        let queued = pool.submit("queued", Priority::Preview, |_| {});
+        assert!(!pool.is_idle());
+        tx.send(()).unwrap();
+        wait(&blocker);
+        wait(&queued);
+        assert!(pool.is_idle());
     }
 
     #[test]

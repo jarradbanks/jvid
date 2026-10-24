@@ -48,6 +48,11 @@ pub mod icon {
     pub const ALIGN_LEFT: &str = "\u{E041}";
     pub const ALIGN_CENTER: &str = "\u{E03C}";
     pub const ALIGN_RIGHT: &str = "\u{E042}";
+    pub const CLOCK: &str = "\u{E08B}";
+    pub const BAN: &str = "\u{E055}";
+    pub const CIRCLE_CHECK: &str = "\u{E226}";
+    pub const LOADER: &str = "\u{E10E}";
+    pub const PANEL_BOTTOM: &str = "\u{E431}";
 }
 
 /// Inter Medium (500), for Body Strong, buttons, tabs and the timecode.
