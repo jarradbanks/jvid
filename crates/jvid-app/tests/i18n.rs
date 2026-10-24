@@ -613,3 +613,67 @@ fn editor_and_preferences_snapshot_in_french() {
     assert!(has(&h, "Préférences") && has(&h, "Langue"));
     results.add(h.try_snapshot("preferences_fr"));
 }
+
+/// The Export dialog in German at the narrowest width: its longest labels, and a snapshot.
+#[test]
+fn export_dialog_fits_in_german() {
+    let _de = switch("de");
+    let project = jvid_core::model::Project::default();
+    let mut dialog = ExportDialog::default();
+    // A fixed folder, not the working directory, so the snapshot matches on every machine.
+    dialog.set_path("/exports/Projekt.mp4".into());
+    dialog.open(project.sequence(), "Projekt");
+    let mut fresh = true;
+    let mut h = Harness::builder()
+        .with_size([NARROWEST, 720.0])
+        .build_ui_state(
+            move |ui, d: &mut ExportDialog| {
+                if !install_theme(ui, &mut fresh) {
+                    d.show(ui, &project, &HashSet::new());
+                }
+            },
+            dialog,
+        );
+    h.run();
+    assert_eq!(spills(&h), Vec::<String>::new());
+    for label in ["Zur Renderliste", "In bis Out"] {
+        assert!(has(&h, label), "no {label:?}");
+    }
+    if suite_ui::test_support::gpu() {
+        h.snapshot("export_dialog_de");
+    }
+}
+
+/// The editor and Preferences in German at 1280×720, to read for clipped or overlapping labels.
+#[test]
+fn editor_and_preferences_snapshot_in_german() {
+    if !isolated() {
+        return;
+    }
+    let _de = switch("de");
+    if !suite_ui::test_support::gpu() {
+        return;
+    }
+    let labels = [
+        "Neues Projekt",
+        "Text",
+        "Titel",
+        "Spur",
+        "Bearbeiten",
+        "Alles auswählen Ctrl+A",
+    ];
+    let mut h = titled_project(true, labels);
+    // The Video tab holds the Inspector's longest captions.
+    click_rightmost(&mut h, "Video");
+    assert!(has(&h, "Skalierung") && has(&h, "Deckkraft"));
+    // The Text tab's title thumbnails use system fonts, which differ between machines.
+    click_leftmost(&mut h, "Medien");
+    let mut results = egui_kittest::SnapshotResults::new();
+    results.add(h.try_snapshot("editor_de"));
+    h.get_by_label("Bearbeiten").click();
+    h.run();
+    h.get_by_label("Einstellungen…").click();
+    h.run();
+    assert!(has(&h, "Sprache") && has(&h, "Design"));
+    results.add(h.try_snapshot("preferences_de"));
+}
