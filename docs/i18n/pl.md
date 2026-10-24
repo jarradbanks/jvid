@@ -36,8 +36,8 @@ then the next source wins and the row says why.
 | Term | Polish | Notes |
 | --- | --- | --- |
 | Project | projekt | All sources. |
-| Media | media | BMD "pula multimediów", Kdenlive "Multimedia". "Multimedia" was the first choice but is cut off ("Multime…") on the bin's first tab at 1280×720, so the panel, its tab and the prose use **media**, the everyday Polish editing word ("zaimportuj media"). The adjective stays "multimedialny" ("plik multimedialny"). |
-| Bin | panel Media | BMD says **kosz**, Kdenlive **pojemnik**. In Polish Windows "Kosz" is the Recycle Bin, and next to "Usuń" it reads as the trash; jvid's bin panel is titled Media anyway, so it's named by that title: "Pokaż w panelu Media". |
+| Media | multimedia | BMD "pula multimediów", Kdenlive "Multimedia". The panel, its tab and the prose use **multimedia** ("Upuść tu multimedia", "Eksportuj multimedia"); the adjective is "multimedialny" ("plik multimedialny"). |
+| Bin | panel Media | BMD says **kosz**, Kdenlive **pojemnik**. In Polish Windows "Kosz" is the Recycle Bin, and next to "Usuń" it reads as the trash; jvid's bin panel is titled Multimedia anyway, so it's named by that title: "Pokaż w panelu Multimedia". |
 | Clip | klip | BMD, Shotcut. Kdenlive's "wycinek" is its own. |
 | Track | ścieżka | All sources. Because "ścieżka" is taken, a mask's path is **krzywa**. |
 | Timeline | oś czasu | All sources. |
@@ -92,8 +92,9 @@ then the next source wins and the row says why.
   are nouns or participles ("Przyciąganie", "Odtwarzanie w pętli").
 - An effect's bypass is "Wyłącz", the pair of its "Włącz".
 - Blend modes follow Photoshop's Polish UI (Normalny, Pomnóż, Nakładka, Ciemniej, Jaśniej,
-  Różnica), except Screen: Photoshop's "Mnożenie odwrotne" doesn't fit the 132-point blend
-  dropdown, so it's GIMP's and Shotcut's **Ekran**.
+  Różnica, Mnożenie odwrotne for Screen).
+- Wording is never shortened or abbreviated to fit a layout; text that overflows is a layout
+  bug, fixed in the UI (#310).
 - Quotation marks are „…”. The decimal point stays a point, because code formats numbers.
 - Plurals use `one` (1), `few` (2–4, 22–24, ..) and `many` (0, 5–21, 25–31, ..); `other`
   repeats `many`. Phrases like "każdy z {count} klipów" are genitive plural for every count
