@@ -804,6 +804,12 @@ impl Timeline {
         t
     }
 
+    /// No filmstrip, waveform or thumbnail job is queued or running on the shared pool.
+    #[cfg(test)]
+    pub fn jobs_idle(&self) -> bool {
+        self.media.caches.as_ref().is_none_or(|c| c.jobs.is_idle())
+    }
+
     fn view(&self, left: f32) -> View {
         View {
             left,

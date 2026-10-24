@@ -723,10 +723,14 @@ fn program_draws_the_timeline_through_the_gpu() {
     };
     history.apply(Command::AddClip { track, clip }).unwrap();
     // The decode, filmstrip and thumbnail workers repaint as their results land, so `run` can't
-    // settle while they're busy (it panicked on loaded CI): step until they've all finished.
+    // settle while they're busy (it panicked on loaded CI): step until they've all finished. A
+    // quiet `try_run` alone can fall between two results, so the job pool must be empty too.
     for _ in 0..500 {
         h.step();
-        if h.state().preview.has_program_frame() && h.try_run().is_ok() {
+        if h.state().preview.has_program_frame()
+            && h.try_run().is_ok()
+            && h.state().timeline.jobs_idle()
+        {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));

@@ -977,7 +977,12 @@ impl Widget for Segmented<'_> {
             let on = i == *self.selected;
             let name = self.names.map_or(*option, |n| n[i]);
             seg_response.widget_info(|| {
-                WidgetInfo::selected(WidgetType::RadioButton, !disabled && off.is_none(), on, name)
+                WidgetInfo::selected(
+                    WidgetType::RadioButton,
+                    !disabled && off.is_none(),
+                    on,
+                    name,
+                )
             });
             let tip = off
                 .or(self.tips.get(i).copied().flatten())
