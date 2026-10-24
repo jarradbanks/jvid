@@ -55,6 +55,17 @@ term appears; see [Translating jvid](../translating.md).
 | Voiceover | ボイスオーバー | ボイスオーバー | ボイスオーバー | |
 | Undo / Redo | 元に戻す / やり直し | 元に戻す / やり直し | 取り消し / やり直し | Resolve's pair is also Windows' standard Edit menu. |
 
+## Other terms
+
+Not glossary terms, but fixed by a Japanese editor's interface:
+
+| English | 日本語 | Note |
+| --- | --- | --- |
+| Dip to Black / Dip to White | 暗転 / ホワイトアウト | Premiere Pro's names (ビデオトランジション › ディゾルブ). Adding one is 暗転を追加. |
+| LUT Mix | LUT ミックス | The Inspector caption and the keyframe lane both. |
+| Stop Animating | アニメーションを解除 | It removes the property's keyframes; 停止 would read as pausing playback. |
+| Hold (easing) | 停止 | After Effects' 停止したキーフレーム. |
+
 ## Conventions
 
 - **Buttons and menu items** are nouns or noun phrases, as on Windows and macOS: 保存, 削除,
@@ -65,7 +76,9 @@ term appears; see [Translating jvid](../translating.md).
 - **Error details** shown after "Couldn't …:" are plain-form fragments (読み取れるメディアファイルではありません
   is the exception where a full sentence reads better), joined with a full-width colon (：).
 - **Punctuation**: full-width 、。？：「」 in Japanese text; English and ASCII stay half-width.
-  A name the user gave is quoted 「{name}」. The ellipsis … stays as the English has it.
+  A name the user gave (a project, clip, file or effect name) is quoted 「{name}」; a `{path}`
+  stays bare. The ellipsis … stays as the English has it. Parentheses are half-width with a
+  leading space (やり直し (代替)), except the blend modes, which keep Photoshop's 比較（暗）/ 比較（明）.
 - **Spaces**: a half-width space separates a `{placeholder}` or Latin word from Japanese text
   when it would otherwise run together (`{count} 個のクリップ`, `{path} を開けませんでした`).
 - **Counters**: clips 個, exports 件, regions 箇所, sources 個; Japanese has only the `other`
@@ -87,5 +100,7 @@ term appears; see [Translating jvid](../translating.md).
   エフェクトコントロール): https://helpx.adobe.com/jp/premiere/desktop/render-and-export/render-sequences-for-playback/play-back-in-a-continuous-loop.html
 - Premiere Japanese command names (前の編集点を再生ヘッドまでリップルトリミング, リップル削除):
   https://soho-biyori.com/premiere-pro-cut-shortcut and https://ks-llc.co.jp/media/premiere-pro-cut-ripple-delete/
+- Premiere 暗転 / ホワイトアウト / クロスディゾルブ (Adobe Japan):
+  https://www.adobe.com/jp/creativecloud/roc/blog/video/dissolve.html
 - Premiere オーディオトラックミキサー and ボイスオーバー録音:
   https://helpx.adobe.com/jp/premiere/desktop/add-audio-effects/apply-audio-effects/copy-and-move-effects-in-audio-track-mixer.html
