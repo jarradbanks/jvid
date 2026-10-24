@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Japanese. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "デフォルト"
+hover = "ホバー"
+focus = "フォーカス表示"
+pressed = "押下"
+disabled = "無効"
+loading_error = "読み込み中 / エラー"
+
+[panel]
+widgets = "ウィジェット"
+effects = "エフェクト"
+text = "テキスト"
+add = "追加"
+more = "その他"
+inspector = "インスペクタ"
+source = "ソース"
+program = "プログラム"
+audio = "オーディオ"
+markers = "マーカー"
+history = "履歴"
+captions = "キャプション"
+overflow = "64px 未満のタブはシェブロンメニューに移動します。"
+type_and_colour = "文字と色"
+
+[row]
+primary = "プライマリ"
+secondary = "セカンダリ"
+ghost = "ゴースト"
+destructive = "破壊的"
+icon = "アイコン"
+input = "入力"
+search = "検索"
+numeric = "数値"
+dropdown = "ドロップダウン"
+colour = "カラー"
+segmented = "セグメント"
+checkbox = "チェックボックス"
+section = "セクション"
+slider = "スライダー"
+keyframe = "キーフレーム"
+
+[demo]
+delete = "削除"
+export = "書き出し"
+width_prefix = "幅"
+min_error = "2 以上にしてください"
+full = "フル"
+fit = "フィット"
+fill = "フィル"
+snap = "スナップ"
+live = "ライブ"
+transform = "トランスフォーム"
+position = "位置"
+scale = "スケール"
+reset = "リセット"
+previous = "前のキーフレーム"
+next = "次のキーフレーム"
+animate = "アニメーション"
+plus_second = "+1 秒"
+
+[type]
+display = "ディスプレイ 22"
+headline = "見出し 16"
+title = "タイトル 14"
+body_strong = "本文 強調 12"
+body = "本文 12 · 0123456789 は揃ったまま"
+small = "小 10 · ショートカットのヒント"
+
+[clip]
+video = "ビデオ"
+title = "タイトル"
+still = "静止画"
+audio = "オーディオ"
