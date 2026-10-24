@@ -126,6 +126,8 @@ shortcuts = "Klavye Kısayolları…"
 file = "Dosya"
 edit = "Düzen"
 open_recent = "Son Açılanlar"
+help = "Yardım"
+about = "jvid Hakkında…"
 
 [export]
 queue = "Render Kuyruğu"
@@ -242,6 +244,10 @@ restore_button = "Geri Yükle"
 discard = "At"
 error = "Hata"
 ok = "Tamam"
+
+[about]
+version = "Sürüm {version}"
+samples = "Örnek Medya"
 
 [settings]
 title = "Tercihler"

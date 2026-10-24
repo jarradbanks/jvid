@@ -124,6 +124,8 @@ shortcuts = "Сочетания клавиш…"
 file = "Файл"
 edit = "Правка"
 open_recent = "Открыть недавние"
+help = "Справка"
+about = "О программе jvid…"
 
 [export]
 queue = "Очередь рендеринга"
@@ -244,6 +246,10 @@ restore_button = "Восстановить"
 discard = "Отбросить"
 error = "Ошибка"
 ok = "ОК"
+
+[about]
+version = "Версия {version}"
+samples = "Примеры медиафайлов"
 
 [settings]
 title = "Настройки"

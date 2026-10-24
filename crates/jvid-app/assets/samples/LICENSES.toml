@@ -1,0 +1,61 @@
+# Sources and licences of the tutorial sample clips, one [[clip]] per file. Read by
+# crates/jvid-app/src/samples.rs: About lists each `credit`, and a test fails if a CC BY clip
+# has none. scripts/gen-samples rebuilds the clips from these sources.
+
+[[clip]]
+file = "subject.mp4"
+title = "Tears of Steel, raw plate 05_2a (Celia close-up)"
+source = "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/05_2a/linear_hd/"
+author = "Blender Foundation"
+licence = "CC BY 3.0"
+licence_url = "https://creativecommons.org/licenses/by/3.0/"
+credit = "Tears of Steel footage: (CC) Blender Foundation | mango.blender.org, CC BY 3.0"
+changes = "Frames 101 to 220, sRGB, scaled to 1280x720, H.264"
+
+[[clip]]
+file = "green-screen.mp4"
+title = "Tears of Steel, raw plate 08_3a (green screen)"
+source = "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/08_3a/linear_hd/"
+author = "Blender Foundation"
+licence = "CC BY 3.0"
+licence_url = "https://creativecommons.org/licenses/by/3.0/"
+credit = "Tears of Steel footage: (CC) Blender Foundation | mango.blender.org, CC BY 3.0"
+changes = "Frames 101 to 220, sRGB, scaled to 1280x720, H.264"
+
+[[clip]]
+file = "dark-warm.mp4"
+title = "Tears of Steel, raw plate 05_3c (Thom close-up)"
+source = "https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr/05_3c/linear_hd/"
+author = "Blender Foundation"
+licence = "CC BY 3.0"
+licence_url = "https://creativecommons.org/licenses/by/3.0/"
+credit = "Tears of Steel footage: (CC) Blender Foundation | mango.blender.org, CC BY 3.0"
+changes = "Frames 101 to 220, sRGB, darkened and warmed for the colour lesson, scaled to 1280x720, H.264"
+
+[[clip]]
+file = "screen-recording.mp4"
+title = "Terminal session with a pause"
+source = "Made for jvid by scripts/gen-samples (FFmpeg drawtext)"
+author = "jvid contributors"
+licence = "CC0 1.0"
+licence_url = "https://creativecommons.org/publicdomain/zero/1.0/"
+
+[[clip]]
+file = "music.m4a"
+title = "Erik Satie, Gymnopédie No. 1 (first 10 s)"
+source = "https://commons.wikimedia.org/wiki/File:Erik_Satie_-_gymnopedies_-_la_1_ere._lent_et_douloureux.ogg"
+author = "Robin Alciatore, via Musopen"
+licence = "Public domain"
+licence_url = "https://commons.wikimedia.org/wiki/Template:PD-author"
+credit = "Gymnopédie No. 1 played by Robin Alciatore, Musopen, public domain"
+changes = "2 s to 12 s, faded out, AAC"
+
+[[clip]]
+file = "voice.m4a"
+title = "Abraham Lincoln, The Gettysburg Address (opening line)"
+source = "https://archive.org/details/gettysburg_johng_librivox"
+author = "John Greenman, LibriVox"
+licence = "Public domain"
+licence_url = "https://librivox.org/pages/public-domain/"
+credit = "The Gettysburg Address read by John Greenman, LibriVox, public domain"
+changes = "23.1 s to 32.4 s, mono, AAC"

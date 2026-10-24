@@ -124,6 +124,8 @@ shortcuts = "Klávesové zkratky…"
 file = "Soubor"
 edit = "Úpravy"
 open_recent = "Otevřít nedávné"
+help = "Nápověda"
+about = "O aplikaci jvid…"
 
 [export]
 queue = "Fronta renderování"
@@ -242,6 +244,10 @@ restore_button = "Obnovit"
 discard = "Zahodit"
 error = "Chyba"
 ok = "OK"
+
+[about]
+version = "Verze {version}"
+samples = "Ukázková média"
 
 [settings]
 title = "Předvolby"

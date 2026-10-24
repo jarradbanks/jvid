@@ -132,6 +132,8 @@ shortcuts = "Keyboard Shortcuts…"
 file = "File"
 edit = "Edit"
 open_recent = "Open Recent"
+help = "Help"
+about = "About jvid…"
 
 # Exporting: the Export button, its dialog and the render queue.
 [export]
@@ -254,6 +256,11 @@ restore_button = "Restore"
 discard = "Discard"
 error = "Error"
 ok = "OK"
+
+# Help > About: the app version, then the credits of the tutorial sample clips.
+[about]
+version = "Version {version}"
+samples = "Sample Media"
 
 # The app settings dialog (the project menu in the title bar > Settings…).
 [settings]

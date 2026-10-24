@@ -123,6 +123,8 @@ shortcuts = "Atajos de teclado…"
 file = "Archivo"
 edit = "Edición"
 open_recent = "Abrir reciente"
+help = "Ayuda"
+about = "Acerca de jvid…"
 
 [export]
 queue = "Cola de renderizado"
@@ -240,6 +242,10 @@ restore_button = "Restaurar"
 discard = "Descartar"
 error = "Error"
 ok = "Aceptar"
+
+[about]
+version = "Versión {version}"
+samples = "Medios de ejemplo"
 
 [settings]
 title = "Preferencias"

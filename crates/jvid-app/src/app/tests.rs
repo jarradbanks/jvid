@@ -1173,6 +1173,27 @@ fn edit_menu_opens_preferences_and_the_project_menu_keeps_project_settings() {
 }
 
 #[test]
+fn help_menu_about_credits_the_sample_media() {
+    let mut h = plain_harness();
+    h.state_mut().on_welcome = false;
+    h.run();
+    h.get_by_label("Help").click();
+    h.run();
+    h.get_by_label("About jvid…").click();
+    h.run();
+    assert!(h.query_by_label_contains("Sample Media").is_some());
+    for credit in crate::samples::credits() {
+        assert!(
+            h.query_by_label_contains(&credit).is_some(),
+            "About is missing {credit}"
+        );
+    }
+    h.get_by_label("OK").click();
+    h.run();
+    assert!(h.state().prompts.is_empty());
+}
+
+#[test]
 fn project_settings_turn_on_hdr_output() {
     if !gpu() {
         return;

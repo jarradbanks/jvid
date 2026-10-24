@@ -124,6 +124,8 @@ shortcuts = "Dreceres de teclat…"
 file = "Fitxer"
 edit = "Edita"
 open_recent = "Obre un recent"
+help = "Ajuda"
+about = "Quant a jvid…"
 
 [export]
 queue = "Cua de renderització"
@@ -241,6 +243,10 @@ restore_button = "Restaura"
 discard = "Descarta"
 error = "Error"
 ok = "D'acord"
+
+[about]
+version = "Versió {version}"
+samples = "Mitjans de mostra"
 
 [settings]
 title = "Preferències"

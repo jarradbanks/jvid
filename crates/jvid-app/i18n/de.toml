@@ -124,6 +124,8 @@ shortcuts = "Tastaturbefehle…"
 file = "Datei"
 edit = "Bearbeiten"
 open_recent = "Zuletzt geöffnet"
+help = "Hilfe"
+about = "Über jvid…"
 
 [export]
 queue = "Renderliste"
@@ -240,6 +242,10 @@ restore_button = "Wiederherstellen"
 discard = "Verwerfen"
 error = "Fehler"
 ok = "OK"
+
+[about]
+version = "Version {version}"
+samples = "Beispielmedien"
 
 [settings]
 title = "Einstellungen"

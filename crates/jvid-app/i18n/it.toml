@@ -124,6 +124,8 @@ shortcuts = "Scelte rapide da tastiera…"
 file = "File"
 edit = "Modifica"
 open_recent = "Apri recente"
+help = "Aiuto"
+about = "Informazioni su jvid…"
 
 [export]
 queue = "Coda di rendering"
@@ -242,6 +244,10 @@ restore_button = "Ripristina"
 discard = "Scarta"
 error = "Errore"
 ok = "OK"
+
+[about]
+version = "Versione {version}"
+samples = "Media di esempio"
 
 [settings]
 title = "Preferenze"

@@ -127,6 +127,8 @@ shortcuts = "Sneltoetsen…"
 file = "Bestand"
 edit = "Bewerken"
 open_recent = "Recent geopend"
+help = "Help"
+about = "Over jvid…"
 
 [export]
 queue = "Renderwachtrij"
@@ -244,6 +246,10 @@ restore_button = "Herstellen"
 discard = "Verwerpen"
 error = "Fout"
 ok = "OK"
+
+[about]
+version = "Versie {version}"
+samples = "Voorbeeldmedia"
 
 [settings]
 title = "Voorkeuren"
