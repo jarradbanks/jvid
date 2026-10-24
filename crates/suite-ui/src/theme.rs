@@ -1,12 +1,13 @@
 //! Fonts, icons and the egui `Style`/`Visuals` for the suite.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use egui::{
     Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Shadow, Stroke,
     Style, TextStyle, Visuals,
 };
 
+use crate::i18n;
 use crate::themes::{self, Palette};
 use crate::tokens::{font, radius, size, space};
 
@@ -98,10 +99,30 @@ pub fn icon_font() -> FontId {
     FontId::new(size::ICON, FontFamily::Name("icons".into()))
 }
 
-/// Inter (tabular figures frozen in) for every family, with the icon subset as fallback.
-pub fn fonts() -> FontDefinitions {
+/// Each CJK language's Noto Sans CJK Regular, subset to its catalogs by
+/// `assets/subset-cjk.py` and used for every weight. Loaded only while its language is active,
+/// because each language draws Han characters its own way.
+pub const CJK_FACES: [(&str, &[u8]); 3] = [
+    ("ja", include_bytes!("../assets/NotoSansCJK-ja.otf")),
+    (
+        "zh-Hans",
+        include_bytes!("../assets/NotoSansCJK-zh-Hans.otf"),
+    ),
+    ("ko", include_bytes!("../assets/NotoSansCJK-ko.otf")),
+];
+
+/// The font data name of `lang`'s CJK face.
+pub fn cjk_face(lang: &str) -> String {
+    format!("noto-cjk-{lang}")
+}
+
+/// Inter (tabular figures frozen in) for every family, then `lang`'s CJK face if it has one,
+/// the CJK language names (the Settings picker shows them in every language) and the icon
+/// subset as fallbacks.
+pub fn fonts(lang: &str) -> FontDefinitions {
     let mut fonts = FontDefinitions::empty();
-    let faces: [(&str, &'static [u8]); 4] = [
+    let cjk = CJK_FACES.iter().find(|(l, _)| *l == lang);
+    let faces: [(&str, &'static [u8]); 5] = [
         ("inter", include_bytes!("../assets/Inter-Regular.ttf")),
         ("inter-medium", include_bytes!("../assets/Inter-Medium.ttf")),
         (
@@ -109,12 +130,26 @@ pub fn fonts() -> FontDefinitions {
             include_bytes!("../assets/Inter-SemiBold.ttf"),
         ),
         ("lucide", include_bytes!("../assets/lucide-subset.ttf")),
+        (
+            "cjk-names",
+            include_bytes!("../assets/NotoSansCJK-names.otf"),
+        ),
     ];
     for (name, bytes) in faces {
         fonts
             .font_data
             .insert(name.into(), Arc::new(FontData::from_static(bytes)));
     }
+    if let Some((l, bytes)) = cjk {
+        fonts
+            .font_data
+            .insert(cjk_face(l), Arc::new(FontData::from_static(bytes)));
+    }
+    let fallbacks: Vec<String> = cjk
+        .map(|(l, _)| cjk_face(l))
+        .into_iter()
+        .chain(["cjk-names".into(), "lucide".into()])
+        .collect();
     let families = [
         (FontFamily::Proportional, "inter"),
         (FontFamily::Monospace, "inter"),
@@ -123,9 +158,8 @@ pub fn fonts() -> FontDefinitions {
         (FontFamily::Name("icons".into()), "lucide"),
     ];
     for (family, face) in families {
-        fonts
-            .families
-            .insert(family, vec![face.into(), "lucide".into()]);
+        let chain = std::iter::once(face.to_owned()).chain(fallbacks.iter().cloned());
+        fonts.families.insert(family, chain.collect());
     }
     fonts
 }
@@ -234,9 +268,22 @@ pub fn visuals_with(p: &Palette) -> Visuals {
 
 /// Installs the suite's fonts and style on `ctx`. Call once at startup.
 pub fn install(ctx: &Context) {
-    ctx.set_fonts(fonts());
+    ctx.set_fonts(fonts(i18n::language()));
     ctx.set_global_style(style());
     ctx.on_begin_pass("hairlines", Arc::new(|ui| sync_hairlines(ui.ctx())));
+    // A language switch swaps the CJK face; the new fonts draw from the next pass.
+    let shown = Mutex::new(i18n::language());
+    ctx.on_begin_pass(
+        "language fonts",
+        Arc::new(move |ui| {
+            let mut shown = shown.lock().unwrap_or_else(|e| e.into_inner());
+            if *shown != i18n::language() {
+                *shown = i18n::language();
+                ui.ctx().set_fonts(fonts(*shown));
+                ui.ctx().request_repaint();
+            }
+        }),
+    );
 }
 
 /// egui draws its own borders (popups, menus, separators) at 1pt, which is 1.5 physical

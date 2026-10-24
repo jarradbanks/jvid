@@ -14,6 +14,23 @@ use suite_ui::widgets::{
 pub static CATALOG: Catalog = Catalog::new([
     include_str!("../i18n/gallery/en.toml"),
     include_str!("../i18n/gallery/es.toml"),
+    include_str!("../i18n/gallery/fr.toml"),
+    include_str!("../i18n/gallery/de.toml"),
+    include_str!("../i18n/gallery/it.toml"),
+    include_str!("../i18n/gallery/pt-BR.toml"),
+    include_str!("../i18n/gallery/nl.toml"),
+    include_str!("../i18n/gallery/pl.toml"),
+    include_str!("../i18n/gallery/cs.toml"),
+    include_str!("../i18n/gallery/tr.toml"),
+    include_str!("../i18n/gallery/ru.toml"),
+    include_str!("../i18n/gallery/uk.toml"),
+    include_str!("../i18n/gallery/sv.toml"),
+    include_str!("../i18n/gallery/da.toml"),
+    include_str!("../i18n/gallery/nb.toml"),
+    include_str!("../i18n/gallery/ca.toml"),
+    include_str!("../i18n/gallery/ja.toml"),
+    include_str!("../i18n/gallery/zh-Hans.toml"),
+    include_str!("../i18n/gallery/ko.toml"),
 ]);
 
 macro_rules! tr {

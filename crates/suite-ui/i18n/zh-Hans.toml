@@ -1,0 +1,5 @@
+# suite-ui strings, Chinese (Simplified). Keep keys and {placeholders} in step with en.toml.
+# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[language]
+name = "简体中文"

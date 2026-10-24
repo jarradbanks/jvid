@@ -148,8 +148,8 @@ mod tests {
         );
         // An unshipped code is kept, so the file round-trips; the app shows it in English.
         assert_eq!(
-            Settings::from_toml("language = \"fr\"").unwrap().language,
-            "fr"
+            Settings::from_toml("language = \"eo\"").unwrap().language,
+            "eo"
         );
         assert_eq!(
             Settings::from_toml("language = \"\"").unwrap().language,

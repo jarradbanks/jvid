@@ -11,8 +11,12 @@ use std::fmt::Display;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Shipped languages by BCP 47 primary subtag. English is first: the fallback and the source.
-pub const LANGUAGES: [&str; 2] = ["en", "es"];
+/// Shipped languages by BCP 47 code: the primary subtag, but for Brazilian Portuguese and
+/// Simplified Chinese. English is first: the fallback and the source.
+pub const LANGUAGES: [&str; 19] = [
+    "en", "es", "fr", "de", "it", "pt-BR", "nl", "pl", "cs", "tr", "ru", "uk", "sv", "da", "nb",
+    "ca", "ja", "zh-Hans", "ko",
+];
 
 /// The `language` setting that follows the operating system.
 pub const SYSTEM: &str = "system";
@@ -32,10 +36,20 @@ pub fn set_language(code: &str) {
 
 /// The shipped language for a locale such as `es-MX`, `es_ES.UTF-8` or `EN`, if any.
 pub fn supported(locale: &str) -> Option<&'static str> {
-    let primary = locale
-        .split(['-', '_', '.', '@'])
-        .next()?
-        .to_ascii_lowercase();
+    // `es_ES.UTF-8@euro`: the encoding and modifier say nothing about the language.
+    let lower = locale.split(['.', '@']).next()?.to_ascii_lowercase();
+    let mut tags = lower.split(['-', '_']);
+    let primary = match tags.next()? {
+        // Chinese is Simplified unless the locale says Traditional or a region that writes it.
+        "zh" if tags.any(|t| matches!(t, "hant" | "tw" | "hk" | "mo")) => return None,
+        "zh" => "zh-Hans",
+        // Only Brazilian Portuguese ships; Portugal's (and Africa's) spelling differs.
+        "pt" if tags.next().is_some_and(|t| t != "br") => return None,
+        "pt" => "pt-BR",
+        // `no` is Norwegian as a whole, which writes Bokmål by default.
+        "no" => "nb",
+        p => p,
+    };
     LANGUAGES.into_iter().find(|l| *l == primary)
 }
 
@@ -135,7 +149,11 @@ impl Catalog {
             }
         }
         for lang in &LANGUAGES[1..] {
-            for key in self.keys(english) {
+            for key in self
+                .keys(english)
+                .into_iter()
+                .filter(|_| !self.is_stub(lang))
+            {
                 if self.get_in(lang, key).is_none() {
                     out.push(format!("{lang}: `{key}` is missing"));
                 }
@@ -165,6 +183,12 @@ impl Catalog {
 
     fn tr_in<'a>(&'a self, lang: &str, key: &'a str) -> &'a str {
         self.get_in(lang, key).unwrap_or(key)
+    }
+
+    /// Whether `lang` is registered but not translated yet: its source holds no key but
+    /// `language.name`, so everything else shows in English and parity checks skip it.
+    pub fn is_stub(&self, lang: &str) -> bool {
+        self.keys(lang).iter().all(|k| *k == "language.name")
     }
 
     /// Every key of `lang`'s source, sorted.
@@ -203,7 +227,7 @@ impl Catalog {
         interpolate(self.tr(key), args)
     }
 
-    /// The plural form of `key` for `count`: `key.one`, `key.many` or `key.other` by the
+    /// The plural form of `key` for `count`: `key.one`, `key.few`, `key.many` or `key.other` by the
     /// language's rule, falling back to `other`, then to English. `{count}` is `count`.
     pub fn plural(&self, key: &str, count: u64, args: &[(&str, &dyn Display)]) -> String {
         let form = |lang: &str| {
@@ -220,14 +244,30 @@ impl Catalog {
 }
 
 /// The suffixes of a key's plural forms, one per CLDR category a shipped language uses.
-const PLURAL_FORMS: [&str; 3] = [".one", ".many", ".other"];
+const PLURAL_FORMS: [&str; 4] = [".one", ".few", ".many", ".other"];
 
-/// The CLDR cardinal category of a whole number in a shipped language: `one`, `many` or `other`.
+/// The CLDR cardinal category of a whole number in a shipped language: `one`, `few`, `many`
+/// or `other`. From the CLDR chart's integer conditions (`v = 0`), linked in docs/translating.md.
 pub fn plural_category(lang: &str, n: u64) -> &'static str {
-    match (lang, n) {
-        (_, 1) => "one",
-        // Spanish: "1 millón de clips" takes "de"; CLDR calls that form `many`.
-        ("es", n) if n != 0 && n % 1_000_000 == 0 => "many",
+    let (i10, i100) = (n % 10, n % 100);
+    match lang {
+        "ja" | "zh-Hans" | "ko" => "other",
+        "pl" | "ru" | "uk" => match (i10, i100) {
+            (1, _) if n == 1 || (lang != "pl" && i100 != 11) => "one",
+            (2..=4, _) if !(12..=14).contains(&i100) => "few",
+            _ => "many",
+        },
+        "cs" => match n {
+            1 => "one",
+            2..=4 => "few",
+            // Czech `many` is for fractions only.
+            _ => "other",
+        },
+        // French and Brazilian Portuguese say "0 clip" like "1 clip".
+        "fr" | "pt-BR" if n == 0 => "one",
+        _ if n == 1 => "one",
+        // "1 millón de clips" takes "de"; CLDR calls that form `many`.
+        "es" | "fr" | "it" | "pt-BR" | "ca" if n != 0 && n.is_multiple_of(1_000_000) => "many",
         _ => "other",
     }
 }
@@ -313,6 +353,23 @@ pub type Label = fn() -> &'static str;
 pub static CATALOG: Catalog = Catalog::new([
     include_str!("../i18n/en.toml"),
     include_str!("../i18n/es.toml"),
+    include_str!("../i18n/fr.toml"),
+    include_str!("../i18n/de.toml"),
+    include_str!("../i18n/it.toml"),
+    include_str!("../i18n/pt-BR.toml"),
+    include_str!("../i18n/nl.toml"),
+    include_str!("../i18n/pl.toml"),
+    include_str!("../i18n/cs.toml"),
+    include_str!("../i18n/tr.toml"),
+    include_str!("../i18n/ru.toml"),
+    include_str!("../i18n/uk.toml"),
+    include_str!("../i18n/sv.toml"),
+    include_str!("../i18n/da.toml"),
+    include_str!("../i18n/nb.toml"),
+    include_str!("../i18n/ca.toml"),
+    include_str!("../i18n/ja.toml"),
+    include_str!("../i18n/zh-Hans.toml"),
+    include_str!("../i18n/ko.toml"),
 ]);
 
 /// Looks up a key in a crate's [`Catalog`]: `tr!(CATALOG, "key")` gives `&str`;
@@ -357,15 +414,32 @@ mod tests {
             ("ES", Some("es")),
             ("en-US", Some("en")),
             ("en_GB@euro", Some("en")),
-            ("fr-FR", None),
+            ("pl_PL.UTF-8", Some("pl")),
+            ("fr_CA", Some("fr")),
+            ("pt", Some("pt-BR")),
+            ("pt-BR", Some("pt-BR")),
+            ("pt_BR.UTF-8", Some("pt-BR")),
+            ("pt.UTF-8", Some("pt-BR")),
+            ("pt-PT", None),
+            ("nb-NO", Some("nb")),
+            ("no_NO", Some("nb")),
+            ("zh", Some("zh-Hans")),
+            ("zh-CN", Some("zh-Hans")),
+            ("zh_CN.UTF-8", Some("zh-Hans")),
+            ("zh-Hans-CN", Some("zh-Hans")),
+            ("zh-Hant", None),
+            ("zh-TW", None),
+            ("zh_HK", None),
+            ("ja-JP", Some("ja")),
+            ("tlh-001", None),
             ("C", None),
             ("POSIX", None),
             ("", None),
         ] {
             assert_eq!(supported(locale), want, "{locale:?}");
         }
-        assert_eq!(negotiate(["fr-FR", "es-AR", "en-US"]), "es");
-        assert_eq!(negotiate(["de-DE", "C"]), "en");
+        assert_eq!(negotiate(["pt-PT", "es-AR", "en-US"]), "es");
+        assert_eq!(negotiate(["eo", "C"]), "en");
         assert_eq!(negotiate(Vec::<String>::new()), "en");
     }
 
@@ -376,11 +450,39 @@ mod tests {
         assert_eq!(resolve(" es "), "es");
         // A hand-edited locale finds its language; an unknown one is English, not System.
         assert_eq!(resolve("es-MX"), "es");
-        assert_eq!(resolve("fr"), "en");
+        assert_eq!(resolve("eo"), "en");
         assert_eq!(resolve("klingon"), "en");
         assert_eq!(resolve(SYSTEM), system_language());
         assert_eq!(resolve(""), system_language());
         assert!(LANGUAGES.contains(&system_language()));
+    }
+
+    #[test]
+    fn wave_one_plural_rules_match_cldr() {
+        const AT: [u64; 11] = [0, 1, 2, 5, 11, 12, 21, 22, 25, 101, 111];
+        let (o, f, m, x) = ("one", "few", "many", "other");
+        for (langs, want) in [
+            (&["pl"][..], [m, o, f, m, m, m, m, f, m, m, m]),
+            (&["ru", "uk"], [m, o, f, m, m, m, o, f, m, o, m]),
+            (&["cs"], [x, o, f, x, x, x, x, x, x, x, x]),
+            (&["fr", "pt-BR"], [o, o, x, x, x, x, x, x, x, x, x]),
+            (
+                &["it", "ca", "de", "nl", "tr", "sv", "da", "nb"],
+                [x, o, x, x, x, x, x, x, x, x, x],
+            ),
+            (&["ja", "zh-Hans", "ko"], [x; 11]),
+        ] {
+            for lang in langs {
+                let got = AT.map(|n| plural_category(lang, n));
+                assert_eq!(got, want, "{lang} at {AT:?}");
+            }
+        }
+        // These, like Spanish, give exact millions their own form.
+        for lang in ["fr", "it", "pt-BR", "ca"] {
+            assert_eq!(plural_category(lang, 2_000_000), "many", "{lang}");
+            assert_eq!(plural_category(lang, 2_000_001), "other", "{lang}");
+        }
+        assert_eq!(plural_category("de", 2_000_000), "other");
     }
 
     #[test]
@@ -416,10 +518,18 @@ mod tests {
         assert_eq!(placeholders("{b} {a} {b} {} {not a name}"), ["a", "b"]);
     }
 
-    static TEST: Catalog = Catalog::new([
+    /// English and Spanish sources; the other languages are empty.
+    const fn en_es(en: &'static str, es: &'static str) -> [&'static str; LANGUAGES.len()] {
+        let mut s = [""; LANGUAGES.len()];
+        s[0] = en;
+        s[1] = es;
+        s
+    }
+
+    static TEST: Catalog = Catalog::new(en_es(
         "plain = \"Plain\"\nonly_en = \"English only\"\n[clips]\none = \"{count} clip\"\nother = \"{count} clips\"\n",
         "plain = \"Llano\"\n[clips]\none = \"{count} clip\"\nother = \"{count} clips\"\nmany = \"{count} de clips\"\n",
-    ]);
+    ));
 
     // Switching the language is global, so the tests that do it live in tests/i18n.rs,
     // their own process; these read a fixed language.
@@ -429,6 +539,7 @@ mod tests {
         assert_eq!(TEST.get_in("es", "plain"), Some("Llano"));
         assert_eq!(TEST.get_in("es", "only_en"), None);
         assert_eq!(TEST.get_in("fr", "plain"), None);
+        assert!(TEST.is_stub("pl") && !TEST.is_stub("es"));
         assert_eq!(TEST.get_in("es", "clips.many"), Some("{count} de clips"));
         assert_eq!(
             TEST.keys("en"),
@@ -440,10 +551,10 @@ mod tests {
     #[test]
     fn mismatches_name_each_way_a_translation_drifts() {
         assert_eq!(TEST.mismatches(), ["es: `only_en` is missing"]);
-        let bad = Catalog::new([
+        let bad = Catalog::new(en_es(
             "a = \"{name} and {n}\"\nb = \"B\"\n[x]\none = \"{count} x in {place}\"\nother = \"{count} xs in {place}\"\n",
             "a = \"{name} y {m}\"\nc = \"C\"\n[x]\none = \"{count} x\"\nother = \"{count} xs\"\n[y]\none = \"y\"\n",
-        ]);
+        ));
         assert_eq!(
             bad.mismatches(),
             [
@@ -466,7 +577,7 @@ mod tests {
 
     #[test]
     fn non_text_values_are_reported_not_loaded() {
-        let bad = Catalog::new(["n = 3", "[a]\nb = \"ok\""]);
+        let bad = Catalog::new(en_es("n = 3", "[a]\nb = \"ok\""));
         assert_eq!(bad.errors(), ["en: `n` is a integer, not text"]);
         assert_eq!(bad.get_in("en", "n"), None);
         assert_eq!(bad.get_in("es", "a.b"), Some("ok"));

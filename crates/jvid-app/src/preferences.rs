@@ -496,14 +496,15 @@ mod tests {
 
     #[test]
     fn picker_rows_map_to_settings_and_back() {
-        assert_eq!(options()[1..], ["English", "Español"]);
+        assert_eq!(options()[1..3], ["English", "Español"]);
+        assert_eq!(options().len(), 1 + LANGUAGES.len());
         for row in 0..options().len() {
             assert_eq!(choice(setting(row)), row);
         }
         // An older file with no setting, or one this build doesn't ship, still has a row.
         assert_eq!(choice(""), 0);
         assert_eq!(choice("es-MX"), 2);
-        assert_eq!(choice("fr"), 1);
+        assert_eq!(choice("eo"), 1);
     }
 
     #[test]
