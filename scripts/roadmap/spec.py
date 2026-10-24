@@ -1529,3 +1529,9 @@ for code, name in [("fr", "French"), ("de", "German"), ("it", "Italian"), ("pt-B
       ac=["i18n_guard, the plural tests and every_character_has_a_glyph pass with the language active",
           "kittest snapshots of the editor and Preferences in the language at 1280x720 show no clipped or overlapping labels",
           "An independent review pass (back-translation plus glossary check) is recorded in the PR and its findings fixed"])
+
+I("ci-playback-stepped", "Playback tests: no wall-clock waits left", None, ["infra"], "S", labels=["later"],
+  summary="#275 and #277 made two playback tests stepped; others still poll with Instant::now() and fail under CI load, e.g. failed_decodes_retry_and_relink_redecodes ('never shown with 1 layers', PR #297 run 40068128664).",
+  scope=["Move every remaining wall-clock wait in crates/jvid-app/src/playback/tests.rs onto the stepped Fake clock pattern from #275/#277, or an explicit completion signal; no retries or longer timeouts"],
+  ac=["grep finds no Instant::now()-based polling left in playback tests, or each remaining use is justified in a comment",
+      "Each converted test still fails under a mutation of the behaviour it covers"])

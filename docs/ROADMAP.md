@@ -477,6 +477,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#289](https://github.com/jarradbanks/jvid/issues/289) **Translate jvid into Japanese** — Fill the Japanese (ja) catalogs registered by the wave-1 foundation, accurately and consistently with what Japanese-speaking editors see in DaVinci Resolve and Premiere Pro.
 - [#290](https://github.com/jarradbanks/jvid/issues/290) **Translate jvid into Chinese (Simplified)** — Fill the Chinese (Simplified) (zh-Hans) catalogs registered by the wave-1 foundation, accurately and consistently with what Chinese (Simplified)-speaking editors see in DaVinci Resolve and Premiere Pro.
 - [#291](https://github.com/jarradbanks/jvid/issues/291) **Translate jvid into Korean** — Fill the Korean (ko) catalogs registered by the wave-1 foundation, accurately and consistently with what Korean-speaking editors see in DaVinci Resolve and Premiere Pro.
+- [#298](https://github.com/jarradbanks/jvid/issues/298) **Playback tests: no wall-clock waits left** — #275 and #277 made two playback tests stepped; others still poll with Instant::now() and fail under CI load, e.g. failed_decodes_retry_and_relink_redecodes ('never shown with 1 layers', PR #297 run 40068128664).
 
 ---
 
