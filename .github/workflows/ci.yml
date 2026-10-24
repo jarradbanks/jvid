@@ -8,6 +8,11 @@ on:
       - 'docs/i18n/**'
   push:
     branches: [main]
+    # Roadmap, issue-spec and docs-only commits build nothing; skip all three OSes for them.
+    paths-ignore:
+      - 'docs/**'
+      - 'scripts/roadmap/**'
+      - '*.md'
   workflow_dispatch:
 
 concurrency:
