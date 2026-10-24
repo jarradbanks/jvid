@@ -1055,6 +1055,39 @@ fn menu_actions_reach_the_timeline_from_any_panel_and_undo_is_an_action() {
 }
 
 #[test]
+fn inspector_tabs_fill_the_header() {
+    use jvid_core::time::Time;
+    if !gpu() {
+        return;
+    }
+    let ends = |h: &mut Harness<'_, App>, last: &str| {
+        let panel = Shot::take(h, "inspector".into()).panel(Tab::Inspector);
+        let right = h
+            .query_all_by_label(last)
+            .map(|n| n.rect())
+            .find(|r| panel.contains_rect(*r) && r.top() < panel.top() + size::HEADER)
+            .unwrap()
+            .right();
+        assert!(
+            (panel.right() - space::S4 - right).abs() <= 1.0,
+            "{right} vs {panel:?}"
+        );
+    };
+    // Wide enough that 160px tabs would stop short.
+    // Video, Effects.
+    let mut h = harness([1920.0, 1080.0], 1.0);
+    let clip = crate::playback::tests::add_solid(&mut h.state_mut().history, [1.0; 4], Time(0));
+    let app = h.state_mut();
+    app.timeline
+        .select_clip(app.history.project().sequence(), clip);
+    h.run();
+    ends(&mut h, "Effects");
+    // Text, Video, Effects.
+    let (mut h, _, _) = title_harness_sized([1920.0, 1080.0]);
+    ends(&mut h, "Effects");
+}
+
+#[test]
 fn inspector_scrolls_to_its_last_field_in_a_small_window() {
     use jvid_core::time::Time;
     if !gpu() {
@@ -1373,11 +1406,17 @@ fn effect_rows_show_each_effect_and_hover_only_fills() {
 
 /// A selected title in a 1280x720 app, its clip id and the Program frame's center.
 fn title_harness() -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
+    title_harness_sized([1280.0, 720.0])
+}
+
+fn title_harness_sized(
+    size: [f32; 2],
+) -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
     use jvid_core::history::Created;
     use jvid_core::model::{NewClip, Text, TrackKind};
     use jvid_core::time::{FLICKS_PER_SECOND, Time};
     // Steps short enough for two clicks to make a double-click.
-    let mut h = builder([1280.0, 720.0], 1.0)
+    let mut h = builder(size, 1.0)
         .with_step_dt(0.05)
         .wgpu()
         .build_eframe(|cc| App::new(cc, &Default::default()));
