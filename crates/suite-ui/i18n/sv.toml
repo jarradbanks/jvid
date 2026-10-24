@@ -1,5 +1,21 @@
 # suite-ui strings, Swedish. Keep keys and {placeholders} in step with en.toml.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
 
 [language]
 name = "Svenska"
+
+[panel]
+more_tabs = "Fler flikar"
+
+[input]
+search = "Sök"
+
+[color]
+none = "Ingen"
+
+[theme]
+error = "Tema {path}: {error}"
+bad_color = "`{value}` är inte #RRGGBB"
+at = "rad {line}, kolumn {column}: {error}"
+dark = "Mörkt"
+light = "Ljust"
+high_contrast = "Hög kontrast"
