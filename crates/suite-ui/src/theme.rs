@@ -42,6 +42,9 @@ pub mod icon {
     pub const ZOOM_OUT: &str = "\u{E1B7}";
     pub const SCAN: &str = "\u{E257}";
     pub const SPLIT: &str = "\u{E4EE}";
+    pub const SLIDERS: &str = "\u{E29A}";
+    pub const MIC: &str = "\u{E11C}";
+    pub const FOLDER: &str = "\u{E0DC}";
 }
 
 /// Inter Medium (500), for Body Strong, buttons, tabs and the timecode.

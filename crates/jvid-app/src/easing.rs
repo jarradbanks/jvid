@@ -88,7 +88,7 @@ pub fn editor(ui: &mut Ui, easing: Easing) -> Option<(Easing, bool)> {
     painter.rect_stroke(
         inner,
         2.0,
-        Stroke::new(1.0, color::INK_3),
+        Stroke::new(1.0, color::ink_3()),
         egui::StrokeKind::Inside,
     );
     let curve: Vec<Pos2> = (0..=48)
@@ -97,11 +97,11 @@ pub fn editor(ui: &mut Ui, easing: Easing) -> Option<(Easing, bool)> {
             to(t, shown.apply(t))
         })
         .collect();
-    painter.add(Shape::line(curve, Stroke::new(2.0, color::LIGHT_BLUE)));
+    painter.add(Shape::line(curve, Stroke::new(2.0, color::light_blue())));
     if let Some(p) = points(shown) {
         for h in 0..2 {
             let (anchor, handle) = (to(h as f64, h as f64), to(p[2 * h], p[2 * h + 1]));
-            painter.line_segment([anchor, handle], Stroke::new(1.0, color::INK_2));
+            painter.line_segment([anchor, handle], Stroke::new(1.0, color::ink_2()));
             let id = ui.id().with(("easing handle", h));
             let r = ui.interact(
                 Rect::from_center_size(handle, vec2(12.0, 12.0)),
@@ -110,9 +110,9 @@ pub fn editor(ui: &mut Ui, easing: Easing) -> Option<(Easing, bool)> {
             );
             let r = r.on_hover_cursor(egui::CursorIcon::Grab);
             let fill = if r.hovered() || r.dragged() {
-                color::INK
+                color::ink()
             } else {
-                color::LIGHT_BLUE
+                color::light_blue()
             };
             painter.circle_filled(handle, 4.0, fill);
             if let Some(at) = r.interact_pointer_pos().filter(|_| r.dragged()) {

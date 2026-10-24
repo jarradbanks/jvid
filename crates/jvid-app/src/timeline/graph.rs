@@ -243,8 +243,8 @@ impl Timeline {
         let legend = Rect::from_x_y_ranges(area.left()..=left, ruler.bottom()..=area.bottom());
         let plot = Rect::from_x_y_ranges(left..=area.right(), ruler.bottom()..=area.bottom());
         let painter = ui.painter_at(area);
-        painter.rect_filled(area, 0.0, color::PANEL);
-        painter.rect_filled(plot, 0.0, color::FIELD);
+        painter.rect_filled(area, 0.0, color::panel());
+        painter.rect_filled(plot, 0.0, color::field());
 
         // Corner cell: the title, then Frame All and Close at the right.
         let mut open = true;
@@ -253,7 +253,7 @@ impl Timeline {
             Align2::LEFT_CENTER,
             tr!("timeline.graph_editor"),
             theme::body_strong(),
-            color::INK,
+            color::ink(),
         );
         let button = |i: f32| {
             let right = corner.right() - space::S8 - i * (size::CONTROL + space::S4);
@@ -310,7 +310,7 @@ impl Timeline {
             rp.rect_filled(
                 Rect::from_x_y_ranges(x..=x + line, ruler.bottom() - h..=ruler.bottom()),
                 0.0,
-                color::BORDER_STRONG,
+                color::border_strong(),
             );
             if f % major == 0 {
                 rp.text(
@@ -318,7 +318,7 @@ impl Timeline {
                     Align2::LEFT_TOP,
                     format_timecode(f as u64, rate),
                     theme::small(),
-                    color::INK_3,
+                    color::ink_3(),
                 );
             }
             f += minor;
@@ -329,7 +329,7 @@ impl Timeline {
             pp.rect_filled(
                 Rect::from_x_y_ranges(x..=x + line, plot.y_range()),
                 0.0,
-                color::BORDER_STRONG,
+                color::border_strong(),
             );
         }
         for n in [0.0, 1.0] {
@@ -337,7 +337,7 @@ impl Timeline {
             pp.rect_filled(
                 Rect::from_x_y_ranges(plot.x_range(), y..=y + line),
                 0.0,
-                color::BORDER,
+                color::border(),
             );
         }
         let head = self.playhead();
@@ -346,18 +346,18 @@ impl Timeline {
             pp.rect_filled(
                 Rect::from_x_y_ranges(x..=x + line, plot.y_range()),
                 0.0,
-                color::LIGHT_BLUE,
+                color::light_blue(),
             );
         }
         painter.rect_filled(
             Rect::from_x_y_ranges(area.x_range(), ruler.bottom() - line..=ruler.bottom()),
             0.0,
-            color::BORDER,
+            color::border(),
         );
         painter.rect_filled(
             Rect::from_x_y_ranges(left - line..=left, area.y_range()),
             0.0,
-            color::BORDER,
+            color::border(),
         );
 
         let curves = curves(clip);
@@ -384,7 +384,7 @@ impl Timeline {
                 Align2::LEFT_CENTER,
                 label(clip, curve),
                 theme::body(),
-                color::INK_2,
+                color::ink_2(),
             );
 
             // Sampled every 2pt, so holds and overshoot draw as they play.
@@ -429,7 +429,7 @@ impl Timeline {
                         xa + p[2 * h] as f32 * (xb - xa),
                         g.y(plot, na + p[2 * h + 1] * (nb - na)),
                     );
-                    pp.line_segment([anchor, at], Stroke::new(1.0, color::INK_3));
+                    pp.line_segment([anchor, at], Stroke::new(1.0, color::ink_3()));
                     let r = ui
                         .interact(
                             Rect::from_center_size(at, vec2(HIT, HIT)),
@@ -438,9 +438,9 @@ impl Timeline {
                         )
                         .on_hover_cursor(egui::CursorIcon::Grab);
                     let fill = if r.hovered() || r.dragged() {
-                        color::INK
+                        color::ink()
                     } else {
-                        color::INK_2
+                        color::ink_2()
                     };
                     pp.circle_filled(at, 4.0, fill);
                     if r.dragged()
@@ -495,7 +495,11 @@ impl Timeline {
                 diamond(
                     &pp,
                     c,
-                    if on { color::LIGHT_BLUE } else { color::INK },
+                    if on {
+                        color::light_blue()
+                    } else {
+                        color::ink()
+                    },
                     true,
                 );
                 if r.hovered() || r.dragged() {
@@ -504,7 +508,7 @@ impl Timeline {
                         Align2::LEFT_BOTTOM,
                         format!("{v:.3}"),
                         theme::small(),
-                        color::INK,
+                        color::ink(),
                     );
                 }
                 if r.clicked() || r.drag_started() {
@@ -564,11 +568,11 @@ impl Timeline {
                 let hit = centers.into_iter().filter(|(_, c)| band.contains(*c));
                 self.keys.selected.extend(hit.map(|h| h.0));
             } else {
-                pp.rect_filled(band, 0.0, color::BLUE.gamma_multiply(0.15));
+                pp.rect_filled(band, 0.0, color::blue().gamma_multiply(0.15));
                 pp.rect_stroke(
                     band,
                     0.0,
-                    Stroke::new(1.0, color::LIGHT_BLUE),
+                    Stroke::new(1.0, color::light_blue()),
                     egui::StrokeKind::Inside,
                 );
             }

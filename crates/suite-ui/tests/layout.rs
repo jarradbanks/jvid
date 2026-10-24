@@ -33,7 +33,7 @@ fn harness(ppp: f32, mode: Mode, focused: bool) -> Harness<'static> {
                 return;
             }
             ui.painter()
-                .rect_filled(ui.ctx().content_rect(), 0.0, color::GROUND);
+                .rect_filled(ui.ctx().content_rect(), 0.0, color::ground());
             let rect = egui::Rect::from_min_size(egui::pos2(ORIGIN, ORIGIN), egui::vec2(W, H));
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 let panel = match mode {
@@ -83,7 +83,7 @@ impl Shot {
         let mut runs: Vec<(u32, u32)> = Vec::new();
         for (i, (x, y)) in points.enumerate() {
             let c = self.at(x, y);
-            if near(c, color::GROUND) || near(c, color::PANEL) {
+            if near(c, color::ground()) || near(c, color::panel()) {
                 continue;
             }
             match runs.last_mut() {
@@ -140,9 +140,13 @@ fn hairlines_are_one_physical_pixel() {
                 let across = s.line_runs((0..s.width).map(|x| (x, y)));
                 let right = s.px(ORIGIN + W) - 1;
                 assert_eq!(across, vec![(top, 1), (right, 1)], "{ctx}");
-                let border = if focused { color::BLUE } else { color::BORDER };
+                let border = if focused {
+                    color::blue()
+                } else {
+                    color::border()
+                };
                 assert!(near(s.at(x, top), border), "{ctx}");
-                assert!(near(s.at(x, divider), color::BORDER), "{ctx}");
+                assert!(near(s.at(x, divider), color::border()), "{ctx}");
             }
         }
     }
@@ -201,7 +205,7 @@ fn tabs_start_four_in_with_centred_labels() {
         let y = s.px(ORIGIN + size::HEADER / 2.0);
         // The active pill is Raised; find where it starts and ends on the header's centre row.
         let raised: Vec<u32> = (0..s.width)
-            .filter(|&x| near(s.at(x, y), color::RAISED))
+            .filter(|&x| near(s.at(x, y), color::raised()))
             .collect();
         let (x0, x1) = (raised[0], *raised.last().unwrap());
         assert_eq!(x0, s.px(ORIGIN + space::S4), "{ppp}x pill start");
@@ -248,7 +252,7 @@ fn popup_border_is_one_physical_pixel() {
                     return;
                 }
                 ui.painter()
-                    .rect_filled(ui.ctx().content_rect(), 0.0, color::GROUND);
+                    .rect_filled(ui.ctx().content_rect(), 0.0, color::ground());
                 // The frame egui's dropdown and chevron menus use.
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_min_size(egui::vec2(80.0, 40.0));
@@ -262,7 +266,7 @@ fn popup_border_is_one_physical_pixel() {
             .filter(|&x| {
                 let p = img.get_pixel(x, y);
                 let c = Color32::from_rgb(p[0], p[1], p[2]);
-                !near(c, color::GROUND) && !near(c, color::RAISED)
+                !near(c, color::ground()) && !near(c, color::raised())
             })
             .collect();
         assert_eq!(border.len(), 1, "{ppp}x popup border columns {border:?}");

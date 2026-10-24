@@ -657,7 +657,7 @@ pub fn show(
     let gutter = ui.spacing().scroll.allocated_width() + space::S4;
     ui.set_max_width(ui.available_width() - gutter);
     let Some(pane) = pane else {
-        ui.label(egui::RichText::new(tr!("inspector.empty")).color(color::INK_3));
+        ui.label(egui::RichText::new(tr!("inspector.empty")).color(color::ink_3()));
         return (None, None);
     };
     let (clips, audio, shared, same) = (&sel.clips, &sel.audio, sel.shared, sel.same);
@@ -899,7 +899,7 @@ fn effects_rows(
     };
     let effects = &clips[0].transform.effects;
     if clips.iter().any(|c| stack(c) != stack(clips[0])) {
-        ui.label(egui::RichText::new(tr!("inspector.mixed_effects")).color(color::INK_3));
+        ui.label(egui::RichText::new(tr!("inspector.mixed_effects")).color(color::ink_3()));
         return None;
     }
     let lib: Vec<(String, crate::effects::Entry, bool)> = crate::effects::with(|l| {
@@ -915,7 +915,7 @@ fn effects_rows(
         gaps.push(ui.cursor().top());
         if i > 0 {
             let y = ui.cursor().top() - ui.spacing().item_spacing.y / 2.0;
-            let line = egui::Stroke::new(1.0 / ui.pixels_per_point(), color::BORDER);
+            let line = egui::Stroke::new(1.0 / ui.pixels_per_point(), color::border());
             ui.painter().hline(ui.max_rect().x_range(), y, line);
         }
         let found = lib.iter().find(|(k, ..)| *k == e.shader);
@@ -1056,13 +1056,17 @@ fn fx_head(ui: &mut Ui, head: FxHead, open: &mut bool, i: usize, n: usize) -> Op
     if ui.put(left(1.0), eye).clicked() {
         act = Some(FxAction::Bypass);
     }
-    let ink = if head.on { color::INK } else { color::INK_3 };
+    let ink = if head.on {
+        color::ink()
+    } else {
+        color::ink_3()
+    };
     let mut job = egui::text::LayoutJob::default();
     let format = |font, color| egui::TextFormat::simple(font, color);
     job.append(head.title, 0.0, format(theme::body_strong(), ink));
     if head.problem.is_some() {
         let pass = tr!("inspector.passthrough");
-        job.append(pass, space::S4, format(theme::body(), color::RED));
+        job.append(pass, space::S4, format(theme::body(), color::red()));
     }
     let x = left(2.0).left() + space::S4;
     let text = Rect::from_x_y_ranges(x..=rect.right() - TOOLS - space::S4, rect.y_range());
@@ -1122,7 +1126,7 @@ fn drop_block(ui: &mut Ui, clips: &[&Clip], gaps: &[f32]) -> Option<Edit> {
         return None;
     }
     let y = gaps[to] - ui.spacing().item_spacing.y / 2.0;
-    let line = egui::Stroke::new(2.0, color::LIGHT_BLUE);
+    let line = egui::Stroke::new(2.0, color::light_blue());
     ui.painter().hline(area.x_range(), y, line);
     let dropped = ui.input(|i| i.pointer.any_released());
     dropped.then(|| (restack(clips, |o| move_to(o, from, to)), None))
@@ -1155,7 +1159,7 @@ fn add_menu(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
                 .filter(|r| r.error.is_none() && !r.disabled)
                 .collect();
             if rows.is_empty() {
-                ui.label(egui::RichText::new(tr!("bin.fx_no_match")).color(color::INK_3));
+                ui.label(egui::RichText::new(tr!("bin.fx_no_match")).color(color::ink_3()));
             }
             if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 pick = rows.first().map(|r| r.stem.clone());
@@ -1189,7 +1193,7 @@ fn menu_entry(ui: &mut Ui, row: &crate::effects::Row) -> egui::Response {
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &row.name));
     if r.hovered() || r.has_focus() {
         let corner = suite_ui::tokens::radius::CONTROL;
-        ui.painter().rect_filled(rect, corner, color::BORDER);
+        ui.painter().rect_filled(rect, corner, color::border());
     }
     let thumb = Rect::from_min_size(
         pos2(rect.left() + space::S4, rect.center().y - THUMB.y / 2.0),
@@ -1200,14 +1204,14 @@ fn menu_entry(ui: &mut Ui, row: &crate::effects::Row) -> egui::Response {
     let width = rect.right() - space::S8 - left;
     let name = ui
         .painter()
-        .layout(row.name.clone(), theme::body(), color::INK, width);
-    let about = crate::effects::about(row, width, 1, color::INK_3);
+        .layout(row.name.clone(), theme::body(), color::ink(), width);
+    let about = crate::effects::about(row, width, 1, color::ink_3());
     let about = ui.fonts_mut(|f| f.layout_job(about));
     let top = rect.center().y - (name.size().y + about.size().y) / 2.0;
     ui.painter()
-        .galley(pos2(left, top), name.clone(), color::INK);
+        .galley(pos2(left, top), name.clone(), color::ink());
     let at = pos2(left, top + name.size().y);
-    ui.painter().galley(at, about, color::INK_3);
+    ui.painter().galley(at, about, color::ink_3());
     r
 }
 
@@ -1330,7 +1334,7 @@ fn masks_rows(
             .collect::<Vec<_>>()
     };
     if clips.iter().any(|c| shapes(c) != shapes(clips[0])) {
-        ui.label(egui::RichText::new(tr!("inspector.mixed_masks")).color(color::INK_3));
+        ui.label(egui::RichText::new(tr!("inspector.mixed_masks")).color(color::ink_3()));
         return None;
     }
     let masks = &clips[0].transform.masks;
@@ -1339,7 +1343,7 @@ fn masks_rows(
     for (i, m) in masks.iter().enumerate() {
         if i > 0 {
             let y = ui.cursor().top() - ui.spacing().item_spacing.y / 2.0;
-            let line = egui::Stroke::new(1.0 / ui.pixels_per_point(), color::BORDER);
+            let line = egui::Stroke::new(1.0 / ui.pixels_per_point(), color::border());
             ui.painter().hline(ui.max_rect().x_range(), y, line);
         }
         let names = [0, 1, 2, 3].map(|j| match j {
@@ -1490,7 +1494,7 @@ fn path_row(
     };
     let points = tr!("inspector.mask_points", n = n / 3);
     let (_, c) = prop_row(ui, label, tools, |ui| {
-        ui.label(egui::RichText::new(points).color(color::INK_3))
+        ui.label(egui::RichText::new(points).color(color::ink_3()))
     });
     key_clicks(clips, &names, c, t, index, seek)
 }
@@ -1778,7 +1782,7 @@ pub(crate) fn audio_fx(ui: &mut Ui, fxs: &[AudioFx]) -> Option<(FxEdit, Option<G
     for (b, (block, knobs)) in AUDIO_FX.iter().enumerate() {
         if b > 0 {
             let y = ui.cursor().top() - ui.spacing().item_spacing.y / 2.0;
-            let line = egui::Stroke::new(1.0 / ui.pixels_per_point(), color::BORDER);
+            let line = egui::Stroke::new(1.0 / ui.pixels_per_point(), color::border());
             ui.painter().hline(ui.max_rect().x_range(), y, line);
         }
         let on = *block_on(&mut first.clone(), block);
@@ -1980,7 +1984,7 @@ fn prop_row<R>(
     row.spacing_mut().item_spacing.x = space::S4;
     row.allocate_ui_with_layout(vec2(size::INSPECTOR_LABEL, size::CONTROL), layout, |ui| {
         ui.set_min_width(size::INSPECTOR_LABEL);
-        ui.label(egui::RichText::new(label).color(color::INK_2))
+        ui.label(egui::RichText::new(label).color(color::ink_2()))
     });
     let w = rect.right() - TOOLS - space::S4 - row.cursor().left();
     let inner = row
@@ -2925,7 +2929,7 @@ mod tests {
                     if suite_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
-                    ui.painter().rect_filled(ui.max_rect(), 0.0, color::PANEL);
+                    ui.painter().rect_filled(ui.max_rect(), 0.0, color::panel());
                     let sel = Selection::new(h.project(), &HashSet::from([id]), None);
                     let (edit, _) = show(ui, &sel, Some(pane), Time(S));
                     match edit {

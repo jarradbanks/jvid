@@ -278,7 +278,7 @@ impl MediaBin {
         // 88 fits English; a longer translation widens it rather than spilling out.
         let text_w = ui
             .painter()
-            .layout_no_wrap(solid_label.into(), theme::body_strong(), color::INK)
+            .layout_no_wrap(solid_label.into(), theme::body_strong(), color::ink())
             .size()
             .x;
         let solid_w = (2.0 * space::S12 + text_w).ceil().max(88.0);
@@ -312,7 +312,7 @@ impl MediaBin {
                     (false, true) => tr!("bin.empty"),
                     (false, false) => tr!("bin.no_match"),
                 };
-                ui.label(egui::RichText::new(msg).color(color::INK_3));
+                ui.label(egui::RichText::new(msg).color(color::ink_3()));
                 return;
             }
             egui::ScrollArea::vertical()
@@ -344,7 +344,7 @@ impl MediaBin {
                     }
                 });
             if importing {
-                ui.label(egui::RichText::new(tr!("bin.importing")).color(color::INK_3));
+                ui.label(egui::RichText::new(tr!("bin.importing")).color(color::ink_3()));
             }
         });
         self.drag_preview(ui, project, missing);
@@ -370,7 +370,7 @@ impl MediaBin {
                     .paint(ui, thumb, a, missing.contains(&a.path), None);
                 let name = Rect::from_min_size(thumb.left_bottom(), vec2(w, ROW));
                 ui.allocate_rect(name, Sense::hover());
-                self.name(ui, name, a, color::INK);
+                self.name(ui, name, a, color::ink());
             });
     }
 
@@ -397,7 +397,7 @@ impl MediaBin {
         self.thumbs.paint(ui, thumb, a, offline, skim);
         // Duration bottom right, HDR bottom left, 2px inside the thumbnail.
         let badge = |text: String, left: bool| {
-            let galley = p.layout_no_wrap(text, theme::small(), color::INK);
+            let galley = p.layout_no_wrap(text, theme::small(), color::ink());
             let size = galley.size() + vec2(space::S8, space::S4);
             let x = if left {
                 thumb.left() + 2.0
@@ -408,12 +408,12 @@ impl MediaBin {
             p.rect_filled(
                 badge,
                 CornerRadius::same(radius::SMALL),
-                color::GROUND.gamma_multiply(0.8),
+                color::ground().gamma_multiply(0.8),
             );
             p.galley(
                 badge.min + vec2(space::S4, space::S4 / 2.0),
                 galley,
-                color::INK,
+                color::ink(),
             );
         };
         if let Some(d) = duration_label(a) {
@@ -434,7 +434,7 @@ impl MediaBin {
             p.rect_filled(
                 btn,
                 CornerRadius::same(radius::CONTROL),
-                color::GROUND.gamma_multiply(0.8),
+                color::ground().gamma_multiply(0.8),
             );
         }
         let selected = self.selected == Some(a.id);
@@ -442,14 +442,14 @@ impl MediaBin {
             p.rect_stroke(
                 thumb,
                 corner,
-                egui::Stroke::new(2.0, color::LIGHT_BLUE),
+                egui::Stroke::new(2.0, color::light_blue()),
                 StrokeKind::Inside,
             );
         } else if r.hovered() {
             p.rect_stroke(
                 thumb,
                 corner,
-                egui::Stroke::new(1.0, color::BORDER_STRONG),
+                egui::Stroke::new(1.0, color::border_strong()),
                 StrokeKind::Inside,
             );
         }
@@ -459,11 +459,11 @@ impl MediaBin {
                 Align2::CENTER_TOP,
                 tr!("bin.offline"),
                 theme::small(),
-                color::INK_2,
+                color::ink_2(),
             );
         }
         let name = Rect::from_x_y_ranges(r.rect.x_range(), thumb.bottom()..=r.rect.bottom());
-        self.name(ui, name, a, color::INK_2);
+        self.name(ui, name, a, color::ink_2());
         if show_remove {
             let btn = pos2(
                 thumb.right() - size::CONTROL - space::S4,
@@ -486,9 +486,9 @@ impl MediaBin {
         let p = ui.painter();
         let corner = CornerRadius::same(radius::CONTROL);
         if self.selected == Some(a.id) {
-            p.rect_filled(r.rect, corner, color::BLUE.gamma_multiply(0.2));
+            p.rect_filled(r.rect, corner, color::blue().gamma_multiply(0.2));
         } else if r.hovered() {
-            p.rect_filled(r.rect, corner, color::RAISED);
+            p.rect_filled(r.rect, corner, color::raised());
         }
         // The type badge: one of the clip colours, the only place they show in the bin.
         let kind = if is_audio(a) {
@@ -514,17 +514,17 @@ impl MediaBin {
         }
         let hdr = is_hdr(a).then(|| verbatim("HDR").to_string());
         for d in duration_label(a).into_iter().chain(hdr) {
-            let g = p.layout_no_wrap(d, theme::body(), color::INK_3);
+            let g = p.layout_no_wrap(d, theme::body(), color::ink_3());
             right -= g.size().x;
             p.galley(
                 pos2(right, r.rect.center().y - g.size().y / 2.0),
                 g,
-                color::INK_3,
+                color::ink_3(),
             );
             right -= space::S8;
         }
         let name = Rect::from_x_y_ranges(thumb.right() + space::S8..=right, r.rect.y_range());
-        self.name(ui, name, a, color::INK);
+        self.name(ui, name, a, color::ink());
         if show_remove {
             let btn = pos2(r.rect.right() - size::CONTROL, r.rect.top());
             self.remove_button(ui, btn, a, project, out);
@@ -576,7 +576,7 @@ impl MediaBin {
             let ext = split_ext(&name).1;
             let g = ui
                 .painter()
-                .layout_no_wrap(ext.to_owned(), theme::body(), color::INK_3);
+                .layout_no_wrap(ext.to_owned(), theme::body(), color::ink_3());
             let w = (rect.width() - g.size().x - space::S4).max(0.0);
             let field = Rect::from_min_size(
                 pos2(rect.left(), rect.center().y - size::CONTROL / 2.0),
@@ -589,7 +589,7 @@ impl MediaBin {
                 field.right() + space::S4,
                 rect.center().y - g.size().y / 2.0,
             );
-            ui.painter().galley(pos, g, color::INK_3);
+            ui.painter().galley(pos, g, color::ink_3());
             return;
         }
         let mut job = egui::text::LayoutJob::single_section(
@@ -755,14 +755,14 @@ impl Thumbs {
     /// `skim` is the hover position across the tile, 0 to 1, which swaps in a filmstrip frame.
     fn paint(&mut self, ui: &Ui, rect: Rect, asset: &MediaAsset, offline: bool, skim: Option<f32>) {
         let p = ui.painter();
-        p.rect_filled(rect, CornerRadius::same(radius::CONTROL), color::RAISED);
+        p.rect_filled(rect, CornerRadius::same(radius::CONTROL), color::raised());
         if offline {
             p.text(
                 rect.center(),
                 Align2::CENTER_CENTER,
                 icon::CIRCLE_ALERT,
                 theme::icon_font(),
-                color::RED,
+                color::red(),
             );
             return;
         }
@@ -772,7 +772,7 @@ impl Thumbs {
                 Align2::CENTER_CENTER,
                 icon::AUDIO,
                 theme::icon_font(),
-                color::INK_3,
+                color::ink_3(),
             );
             return;
         }
@@ -792,7 +792,7 @@ impl Thumbs {
                 let y = rect.center().y + (i as f32 - 1.0) * 2.0 * h - h / 2.0;
                 for (from, to) in [(a, b), (c, d)].into_iter().filter(|(f, t)| t > f) {
                     let bar = Rect::from_x_y_ranges(left + from * w..=left + to * w, y..=y + h);
-                    p.rect_filled(bar, CornerRadius::same(1), color::INK_3);
+                    p.rect_filled(bar, CornerRadius::same(1), color::ink_3());
                 }
             }
             return;
@@ -919,8 +919,8 @@ fn text_presets(
         .into_iter()
         .zip(tiles)
         .map(|((name, about, text), tex)| {
-            let n = p.layout(name.into(), theme::body_strong(), color::INK, inner);
-            let a = p.layout(about.into(), theme::body(), color::INK_3, inner);
+            let n = p.layout(name.into(), theme::body_strong(), color::ink(), inner);
+            let a = p.layout(about.into(), theme::body(), color::ink_3(), inner);
             (name, text, tex, n, a)
         })
         .collect();
@@ -943,7 +943,11 @@ fn text_presets(
                         });
                         let p = ui.painter();
                         if r.hovered() {
-                            p.rect_filled(rect, CornerRadius::same(radius::CONTROL), color::RAISED);
+                            p.rect_filled(
+                                rect,
+                                CornerRadius::same(radius::CONTROL),
+                                color::raised(),
+                            );
                         }
                         let thumb = Rect::from_min_size(
                             rect.min + vec2(space::S4, space::S4),
@@ -961,8 +965,8 @@ fn text_presets(
                             }
                         }
                         let at = thumb.left_bottom() + vec2(0.0, space::S4);
-                        p.galley(at, n.clone(), color::INK);
-                        p.galley(at + vec2(0.0, n.size().y), a.clone(), color::INK_3);
+                        p.galley(at, n.clone(), color::ink());
+                        p.galley(at + vec2(0.0, n.size().y), a.clone(), color::ink_3());
                         if r.has_focus() {
                             p.add(suite_ui::widgets::focus_ring(rect, radius::CONTROL));
                         }
@@ -1010,9 +1014,9 @@ fn put_over(ui: &mut Ui, rect: Rect, w: impl egui::Widget) -> egui::Response {
 fn fx_name(ui: &Ui, row: &crate::effects::Row, width: f32) -> std::sync::Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::default();
     let ink = if row.disabled {
-        color::INK_3
+        color::ink_3()
     } else {
-        color::INK
+        color::ink()
     };
     job.append(
         &row.name,
@@ -1020,8 +1024,8 @@ fn fx_name(ui: &Ui, row: &crate::effects::Row, width: f32) -> std::sync::Arc<egu
         egui::TextFormat::simple(theme::body_strong(), ink),
     );
     let tag = match (&row.error, row.disabled) {
-        (Some(_), _) => Some((tr!("bin.fx_error"), color::RED)),
-        (None, true) => Some((tr!("bin.fx_disabled"), color::INK_3)),
+        (Some(_), _) => Some((tr!("bin.fx_error"), color::red())),
+        (None, true) => Some((tr!("bin.fx_disabled"), color::ink_3())),
         _ => None,
     };
     if let Some((tag, ink)) = tag {
@@ -1076,7 +1080,7 @@ impl MediaBin {
                 } else {
                     tr!("bin.fx_no_match")
                 };
-                ui.label(egui::RichText::new(hint).color(color::INK_3));
+                ui.label(egui::RichText::new(hint).color(color::ink_3()));
                 return;
             }
             let (bundled, mine): (Vec<_>, Vec<_>) = rows.iter().partition(|r| r.bundled);
@@ -1101,7 +1105,7 @@ impl MediaBin {
                             Align2::LEFT_CENTER,
                             title,
                             theme::body_strong(),
-                            color::INK_3,
+                            color::ink_3(),
                         );
                         if self.fx_grid {
                             self.effect_tiles(ui, &rows, dir.as_deref(), out);
@@ -1115,7 +1119,7 @@ impl MediaBin {
                     ui.label(
                         egui::RichText::new(tr!("bin.fx_hint"))
                             .small()
-                            .color(color::INK_3),
+                            .color(color::ink_3()),
                     );
                 });
         });
@@ -1154,23 +1158,23 @@ impl MediaBin {
                 file = format_args!("{}.wgsl", row.stem)
             );
             let mut job =
-                egui::text::LayoutJob::simple(msg, theme::body(), color::RED, text.width());
+                egui::text::LayoutJob::simple(msg, theme::body(), color::red(), text.width());
             job.wrap.max_rows = 2;
             job
         } else {
             let ink = if row.error.is_some() {
-                color::RED
+                color::red()
             } else {
-                color::INK_3
+                color::ink_3()
             };
             crate::effects::about(row, text.width(), 2, ink)
         };
         let about = ui.fonts_mut(|f| f.layout_job(about));
         let top = text.center().y - (name.size().y + 2.0 + 2.0 * 16.0) / 2.0;
         let p = ui.painter();
-        p.galley(pos2(text.left(), top), name.clone(), color::INK);
+        p.galley(pos2(text.left(), top), name.clone(), color::ink());
         let below = pos2(text.left(), top + name.size().y + 2.0);
-        p.galley(below, about.clone(), color::INK_3);
+        p.galley(below, about.clone(), color::ink_3());
         // A compiler message can run long; descriptions are clamped to two lines, as drawn.
         let r = match &row.error {
             Some(e) if about.elided && !confirming => r.on_hover_text(e),
@@ -1239,12 +1243,12 @@ impl MediaBin {
                     crate::effects::paint_thumb(ui, thumb, row);
                     let name = fx_name(ui, row, thumb_w);
                     let at = pos2(thumb.left(), thumb.bottom() + 6.0);
-                    ui.painter().galley(at, name, color::INK);
+                    ui.painter().galley(at, name, color::ink());
                     // Tiles show no description, so it's the tooltip.
                     let ink = if row.error.is_some() {
-                        color::RED
+                        color::red()
                     } else {
-                        color::INK
+                        color::ink()
                     };
                     let r = r.on_hover_ui(|ui| {
                         ui.label(crate::effects::about(row, 320.0, 8, ink));
@@ -1255,7 +1259,8 @@ impl MediaBin {
                             thumb.right_top() + vec2(-space::S4 - size::CONTROL, space::S4),
                             Vec2::splat(size::CONTROL),
                         );
-                        ui.painter().rect_filled(at, radius::CONTROL, color::PANEL);
+                        ui.painter()
+                            .rect_filled(at, radius::CONTROL, color::panel());
                         let apply = Button::icon(icon::PLUS, tr!("bin.fx_apply_selected"))
                             .state(self.apply_state(row));
                         if put_over(ui, at, apply).clicked() {
@@ -1272,9 +1277,9 @@ impl MediaBin {
     fn fx_fill(&self, ui: &Ui, rect: Rect, row: &crate::effects::Row) {
         let selected = self.fx_selected.as_deref() == Some(row.stem.as_str());
         let fill = if selected {
-            color::BLUE.gamma_multiply(0.2)
+            color::blue().gamma_multiply(0.2)
         } else if ui.rect_contains_pointer(rect) {
-            color::RAISED
+            color::raised()
         } else {
             return;
         };

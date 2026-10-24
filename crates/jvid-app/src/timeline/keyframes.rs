@@ -326,7 +326,7 @@ impl Timeline {
         diamond(
             painter,
             c,
-            if open { color::AMBER } else { color::INK_2 },
+            if open { color::amber() } else { color::ink_2() },
             open,
         );
         if resp.clicked() && !self.keys.expanded.remove(&clip.id) {
@@ -347,7 +347,7 @@ impl Timeline {
                     vec2(-3.0, 0.0),
                 ];
                 let pts = pts.map(|d| pos2(x, y) + d).to_vec();
-                painter.add(Shape::convex_polygon(pts, color::INK, Stroke::NONE));
+                painter.add(Shape::convex_polygon(pts, color::ink(), Stroke::NONE));
             }
         }
     }
@@ -366,7 +366,7 @@ impl Timeline {
     ) -> Option<Edit> {
         let id = id.with(("kf", clip.id));
         let painter = painter.with_clip_rect(area.intersect(painter.clip_rect()));
-        painter.rect_filled(area, 0.0, color::RAISED);
+        painter.rect_filled(area, 0.0, color::raised());
         let bg = ui.interact(area, id, Sense::click_and_drag());
         let tl = |s: Time| clip.timeline_at(s);
         let mods = ui.input(|i| i.modifiers);
@@ -382,11 +382,11 @@ impl Timeline {
                 Align2::LEFT_CENTER,
                 caption(clip, name),
                 theme::small(),
-                color::INK_3,
+                color::ink_3(),
             );
             if let (Some(a), Some(b)) = (keys.first(), keys.last()) {
                 let (a, b) = (view.x(tl(a.time)), view.x(tl(b.time)));
-                painter.line_segment([pos2(a, y), pos2(b, y)], Stroke::new(1.0, color::INK_4));
+                painter.line_segment([pos2(a, y), pos2(b, y)], Stroke::new(1.0, color::ink_4()));
             }
             let on_times: Vec<Time> = picked(&self.keys.selected, clip)
                 .filter(|s| s.0 == name)
@@ -413,7 +413,7 @@ impl Timeline {
                 diamond(
                     &painter,
                     c,
-                    if on { color::AMBER } else { color::INK_2 },
+                    if on { color::amber() } else { color::ink_2() },
                     true,
                 );
                 if r.clicked() || r.drag_started() || r.secondary_clicked() {
@@ -500,11 +500,11 @@ impl Timeline {
                 let hit = centers.into_iter().filter(|(_, c)| band.contains(*c));
                 self.keys.selected.extend(hit.map(|h| h.0));
             } else {
-                painter.rect_filled(band, 0.0, color::BLUE.gamma_multiply(0.15));
+                painter.rect_filled(band, 0.0, color::blue().gamma_multiply(0.15));
                 painter.rect_stroke(
                     band,
                     0.0,
-                    Stroke::new(1.0, color::LIGHT_BLUE),
+                    Stroke::new(1.0, color::light_blue()),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -524,7 +524,7 @@ pub(super) fn diamond(painter: &Painter, c: egui::Pos2, fill: egui::Color32, sol
         painter.add(Shape::convex_polygon(
             pts,
             fill,
-            Stroke::new(1.0, color::FIELD),
+            Stroke::new(1.0, color::field()),
         ));
     } else {
         painter.add(Shape::closed_line(pts, Stroke::new(1.0, fill)));

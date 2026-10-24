@@ -88,7 +88,7 @@ pub fn clear(ctx: &egui::Context) {
 
 /// `count` of `full` as a trace brightness: square root, so sparse values still show.
 fn trace(count: u32, full: f32) -> Color32 {
-    color::INK.gamma_multiply((count as f32 / full.max(1.0)).sqrt().min(1.0))
+    color::ink().gamma_multiply((count as f32 / full.max(1.0)).sqrt().min(1.0))
 }
 
 /// The waveform (luma up, 255 at the top), vectorscope and histogram as images.
@@ -146,7 +146,7 @@ pub fn show(ui: &mut Ui) {
             Align2::CENTER_CENTER,
             empty,
             theme::body(),
-            color::INK_3,
+            color::ink_3(),
         );
         return;
     };
@@ -159,7 +159,7 @@ pub fn show(ui: &mut Ui) {
         vec2(side, side),
     );
     let hist_r = Rect::from_min_size(pos2(rect.left(), vector_r.bottom() + gap), wave_r.size());
-    let line = theme::hairline(ui.ctx(), color::INK.gamma_multiply(0.15));
+    let line = theme::hairline(ui.ctx(), color::ink().gamma_multiply(0.15));
     let uv = Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0));
     let scopes = [
         (wave_r, &wave, tr!("bin.scope_waveform")),
@@ -171,7 +171,7 @@ pub fn show(ui: &mut Ui) {
         p.image(tex.id(), r, uv, Color32::WHITE);
         // Left-aligned with the others, so the vectorscope's sits beside its square.
         let at = pos2(rect.left(), r.top()) + vec2(space::S4, space::S4);
-        p.text(at, Align2::LEFT_TOP, label, theme::small(), color::INK_3);
+        p.text(at, Align2::LEFT_TOP, label, theme::small(), color::ink_3());
     }
     // Waveform graticule: 0, 25, 50, 75 and 100% luma.
     for i in 0..=4 {
@@ -188,7 +188,7 @@ pub fn show(ui: &mut Ui) {
         let (x, y) = vector_at(rgb);
         let at = vector_r.min + vec2(x as f32 + 0.5, y as f32 + 0.5) * cell;
         let target = Rect::from_center_size(at, vec2(6.0, 6.0));
-        let stroke = theme::hairline(ui.ctx(), color::INK_3);
+        let stroke = theme::hairline(ui.ctx(), color::ink_3());
         p.rect_stroke(target, 0.0, stroke, egui::StrokeKind::Middle);
     }
 }
@@ -237,10 +237,10 @@ mod tests {
         let [wave, vector, hist] = images(&jvid_render::scope::analyze(&red, 16));
         // Red's luma, 54, is row 255 - 54 from the top; the trace is full brightness there.
         assert_eq!(wave.size, [16, 256]);
-        assert_eq!(wave.pixels[(255 - 54) * 16 + 3], color::INK);
+        assert_eq!(wave.pixels[(255 - 54) * 16 + 3], color::ink());
         assert_eq!(wave.pixels[(255 - 200) * 16 + 3], Color32::TRANSPARENT);
         let (x, y) = vector_at([255, 0, 0]);
-        assert_eq!(vector.pixels[y * VECTOR + x], color::INK);
+        assert_eq!(vector.pixels[y * VECTOR + x], color::ink());
         // Red's column full height in red, black's G and B column in green and blue.
         let top = |x: usize| hist.pixels[x];
         assert_eq!(top(255), Color32::from_rgb(200, 0, 0));

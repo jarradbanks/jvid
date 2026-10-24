@@ -89,14 +89,14 @@ impl<'a> Panel<'a> {
         let response = ui.allocate_rect(rect, Sense::hover());
         let corner = CornerRadius::same(radius::PANEL);
         let painter = ui.painter().clone();
-        painter.rect_filled(rect, corner, color::PANEL);
+        painter.rect_filled(rect, corner, color::panel());
 
         let header = Rect::from_min_size(rect.min, vec2(rect.width(), size::HEADER));
         let line = 1.0 / ppp;
         painter.rect_filled(
             Rect::from_x_y_ranges(rect.x_range(), header.bottom() - line..=header.bottom()),
             0.0,
-            color::BORDER,
+            color::border(),
         );
 
         let mut action = None;
@@ -117,12 +117,12 @@ impl<'a> Panel<'a> {
 
         match self.header {
             Header::Title(title) => {
-                let galley = painter.layout_job(elided(title, header.width(), color::INK));
+                let galley = painter.layout_job(elided(title, header.width(), color::ink()));
                 let pos = pos2(
                     header.left() + space::INSET,
                     header.center().y - galley.size().y / 2.0,
                 );
-                painter.galley(pos.round_to_pixels(ppp), galley, color::INK);
+                painter.galley(pos.round_to_pixels(ppp), galley, color::ink());
             }
             Header::Tabs { labels, active } => {
                 let right = if self.actions.is_empty() {
@@ -154,9 +154,9 @@ impl<'a> Panel<'a> {
         let inner = content(&mut child);
 
         let border = if self.focused {
-            color::BLUE
+            color::blue()
         } else {
-            color::BORDER
+            color::border()
         };
         painter.rect_stroke(rect, corner, hairline(ui.ctx(), border), StrokeKind::Inside);
         PanelResponse {
@@ -214,18 +214,18 @@ fn tabs(
             *active = i;
         }
         let fill = if on {
-            color::RAISED
+            color::raised()
         } else {
             egui::Color32::TRANSPARENT
         };
         ui.painter()
             .rect_filled(pill, CornerRadius::same(radius::CONTROL), fill);
         let ink = if on {
-            color::INK
+            color::ink()
         } else if r.hovered() {
-            color::INK_2
+            color::ink_2()
         } else {
-            color::INK_3
+            color::ink_3()
         };
         let galley = ui
             .painter()

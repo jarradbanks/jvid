@@ -12,6 +12,11 @@ pub fn path() -> Option<PathBuf> {
     directories::ProjectDirs::from("", "", "jvid").map(|d| d.config_dir().join("settings.toml"))
 }
 
+/// `<platform config dir>/themes`, where theme `.toml` files go.
+pub fn themes_dir() -> Option<PathBuf> {
+    directories::ProjectDirs::from("", "", "jvid").map(|d| d.config_dir().join("themes"))
+}
+
 /// Never fails: a missing, unreadable or malformed file gives defaults.
 pub fn load() -> Settings {
     path().map_or_else(Settings::default, |p| load_from(&p))

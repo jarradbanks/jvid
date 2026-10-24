@@ -112,7 +112,7 @@ impl Welcome {
 
         egui::Panel::bottom("welcome_footer")
             .exact_size(size::HEADER)
-            .frame(Frame::NONE.fill(color::GROUND))
+            .frame(Frame::NONE.fill(color::ground()))
             .show_separator_line(false)
             .show(ui, |ui| {
                 let r = ui
@@ -125,7 +125,7 @@ impl Welcome {
                     Align2::LEFT_CENTER,
                     version,
                     theme::small(),
-                    color::INK_3,
+                    color::ink_3(),
                 );
                 let (new, open) = if cfg!(target_os = "macos") {
                     (verbatim("⌘N"), verbatim("⌘O"))
@@ -138,17 +138,19 @@ impl Welcome {
                     Align2::RIGHT_CENTER,
                     hint,
                     theme::small(),
-                    color::INK_3,
+                    color::ink_3(),
                 );
             });
 
         let gutter = space::GUTTER as i8;
-        let outer = Frame::NONE.fill(color::GROUND).inner_margin(egui::Margin {
-            left: gutter,
-            right: gutter,
-            top: gutter,
-            bottom: 0,
-        });
+        let outer = Frame::NONE
+            .fill(color::ground())
+            .inner_margin(egui::Margin {
+                left: gutter,
+                right: gutter,
+                top: gutter,
+                bottom: 0,
+            });
         egui::Panel::right("welcome_recent")
             .exact_size(320.0)
             .resizable(false)
@@ -204,7 +206,7 @@ impl Welcome {
             Align2::CENTER_CENTER,
             verbatim("jvid"),
             theme::display(),
-            color::INK,
+            color::ink(),
         );
 
         ui.add_space(space::S8);
@@ -266,9 +268,9 @@ impl Welcome {
             zone,
             radius::DIALOG as f32,
             if hovered {
-                color::LIGHT_BLUE
+                color::light_blue()
             } else {
-                color::BORDER_STRONG
+                color::border_strong()
             },
         );
         let p = ui.painter();
@@ -277,14 +279,14 @@ impl Welcome {
             Align2::CENTER_CENTER,
             icon::PLUS,
             theme::icon_font(),
-            color::INK_2,
+            color::ink_2(),
         );
         p.text(
             zone.center() + vec2(0.0, 12.0),
             Align2::CENTER_CENTER,
             tr!("welcome.drop"),
             theme::body(),
-            color::INK_2,
+            color::ink_2(),
         );
         let r = r.on_hover_text(tr!("welcome.drop_tooltip"));
         r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, tr!("action.import")));
@@ -302,7 +304,7 @@ impl Welcome {
             Align2::LEFT_TOP,
             tr!("welcome.recent"),
             theme::title(),
-            color::INK,
+            color::ink(),
         );
         let mut y = r.top() + 20.0 + space::S12;
         if self.recent.is_empty() {
@@ -310,9 +312,9 @@ impl Welcome {
             let text = tr!("welcome.recent_empty").to_owned();
             let galley = ui
                 .painter()
-                .layout(text, theme::body(), color::INK_3, r.width());
+                .layout(text, theme::body(), color::ink_3(), r.width());
             ui.painter()
-                .galley(egui::pos2(r.left(), y), galley, color::INK_3);
+                .galley(egui::pos2(r.left(), y), galley, color::ink_3());
             return None;
         }
         let now = now();
@@ -330,7 +332,7 @@ impl Welcome {
             resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
             let p = ui.painter();
             if resp.hovered() {
-                p.rect_filled(row, CornerRadius::same(radius::CONTROL), color::RAISED);
+                p.rect_filled(row, CornerRadius::same(radius::CONTROL), color::raised());
             }
             let thumb =
                 Rect::from_min_size(row.min + vec2(4.0, 4.0), vec2(48.0 * 16.0 / 9.0, 48.0));
@@ -342,14 +344,14 @@ impl Welcome {
                 Align2::LEFT_BOTTOM,
                 &name,
                 theme::body_strong(),
-                color::INK,
+                color::ink(),
             );
             p.text(
                 egui::pos2(x, row.center().y + 2.0),
                 Align2::LEFT_TOP,
                 relative_date(now, entry.opened),
                 theme::body(),
-                color::INK_3,
+                color::ink_3(),
             );
             let resp = resp.on_hover_text(entry.path.display().to_string());
             if resp.clicked() {
@@ -363,8 +365,8 @@ impl Welcome {
 
 fn card_frame() -> Frame {
     Frame::NONE
-        .fill(color::PANEL)
-        .stroke(Stroke::new(1.0, color::BORDER))
+        .fill(color::panel())
+        .stroke(Stroke::new(1.0, color::border()))
         .corner_radius(radius::PANEL)
         .inner_margin(space::S12 as i8)
 }
@@ -381,16 +383,16 @@ fn preset_card(
     let p = ui.painter();
     let corner = CornerRadius::same(radius::DIALOG);
     let fill = if r.hovered() {
-        color::RAISED
+        color::raised()
     } else {
-        color::PANEL
+        color::panel()
     };
     let (stroke, width) = if selected {
-        (color::LIGHT_BLUE, 2.0)
+        (color::light_blue(), 2.0)
     } else if r.hovered() {
-        (color::BORDER_STRONG, 1.0)
+        (color::border_strong(), 1.0)
     } else {
-        (color::BORDER, 1.0)
+        (color::border(), 1.0)
     };
     p.rect(
         rect,
@@ -407,7 +409,7 @@ fn preset_card(
             p.rect_stroke(
                 frame,
                 2.0,
-                Stroke::new(1.5, color::INK_2),
+                Stroke::new(1.5, color::ink_2()),
                 StrokeKind::Inside,
             );
         }
@@ -417,7 +419,7 @@ fn preset_card(
                 ui,
                 Rect::from_center_size(centre, vec2(36.0, 24.0)),
                 2.0,
-                color::INK_2,
+                color::ink_2(),
             );
         }
     }
@@ -426,7 +428,11 @@ fn preset_card(
         Align2::CENTER_BOTTOM,
         label,
         theme::body(),
-        if selected { color::INK } else { color::INK_2 },
+        if selected {
+            color::ink()
+        } else {
+            color::ink_2()
+        },
     );
     if r.has_focus() {
         ui.painter()
@@ -540,7 +546,7 @@ struct Posters {
 impl Posters {
     fn paint(&mut self, ui: &Ui, rect: Rect, poster: Option<&(PathBuf, Time)>) {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::RAISED);
+            .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::raised());
         let Some((path, duration)) = poster else {
             return;
         };

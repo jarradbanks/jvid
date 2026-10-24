@@ -61,7 +61,10 @@ impl Timeline {
                 .clamp(r.left() + S / 2.0, r.right() - S / 2.0);
             if len > Time(0) {
                 let corner = pos2(edge.clamp(r.left(), r.right()), r.bottom());
-                painter.line_segment([corner, pos2(at, r.top())], Stroke::new(1.5, color::AMBER));
+                painter.line_segment(
+                    [corner, pos2(at, r.top())],
+                    Stroke::new(1.5, color::amber()),
+                );
             }
             let h = Rect::from_center_size(pos2(at, r.top() + S / 2.0), vec2(S, S));
             let resp = ui.interact(h, id.with(("fade", clip.id, out)), Sense::click_and_drag());
@@ -69,7 +72,7 @@ impl Timeline {
             if hot {
                 ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
             }
-            painter.rect_filled(h, 1.0, if hot { color::AMBER } else { color::BORDER });
+            painter.rect_filled(h, 1.0, if hot { color::amber() } else { color::border() });
             if resp.double_clicked() {
                 edit = Some((toggle(clip), None));
             }

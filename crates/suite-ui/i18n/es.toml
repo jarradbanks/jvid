@@ -12,3 +12,7 @@ search = "Buscar"
 [theme]
 error = "Tema {path}: {error}"
 bad_color = "`{value}` no es #RRGGBB"
+at = "línea {line}, columna {column}: {error}"
+dark = "Oscuro"
+light = "Claro"
+high_contrast = "Alto contraste"

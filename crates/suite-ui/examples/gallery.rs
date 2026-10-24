@@ -80,7 +80,7 @@ const STATES: [(i18n::Label, State); 5] = [
 /// The whole gallery, also rendered by the snapshot test.
 pub fn gallery(ui: &mut egui::Ui, g: &mut Gallery) {
     ui.painter()
-        .rect_filled(ui.ctx().content_rect(), 0.0, color::GROUND);
+        .rect_filled(ui.ctx().content_rect(), 0.0, color::ground());
     let area = ui.ctx().content_rect().shrink(space::GUTTER);
     ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
         ui.horizontal_top(|ui| {
@@ -137,9 +137,9 @@ fn states(ui: &mut egui::Ui, g: &mut Gallery) {
         .show(ui, |ui| {
             ui.label("");
             for (name, _) in STATES {
-                ui.label(egui::RichText::new(name()).color(color::INK_3));
+                ui.label(egui::RichText::new(name()).color(color::ink_3()));
             }
-            ui.label(egui::RichText::new(tr!("state.loading_error")).color(color::INK_3));
+            ui.label(egui::RichText::new(tr!("state.loading_error")).color(color::ink_3()));
             ui.end_row();
 
             for kind in [
@@ -277,7 +277,7 @@ fn inspector(ui: &mut egui::Ui, g: &mut Gallery) {
             ui.allocate_ui_with_layout(
                 egui::vec2(size::INSPECTOR_LABEL, size::CONTROL),
                 egui::Layout::left_to_right(egui::Align::Center),
-                |ui| ui.label(egui::RichText::new(tr!("demo.position")).color(color::INK_2)),
+                |ui| ui.label(egui::RichText::new(tr!("demo.position")).color(color::ink_2())),
             );
             ui.add(DragField::new(&mut g.value).prefix(verbatim("X")));
             ui.add(DragField::new(&mut g.value).prefix(verbatim("Y")));
@@ -287,7 +287,7 @@ fn inspector(ui: &mut egui::Ui, g: &mut Gallery) {
             ui.allocate_ui_with_layout(
                 egui::vec2(size::INSPECTOR_LABEL, size::CONTROL),
                 egui::Layout::left_to_right(egui::Align::Center),
-                |ui| ui.label(egui::RichText::new(tr!("demo.scale")).color(color::INK_2)),
+                |ui| ui.label(egui::RichText::new(tr!("demo.scale")).color(color::ink_2())),
             );
             let mut pct = g.level * 400.0;
             ui.add(DragField::new(&mut pct).suffix("%").width(64.0));
@@ -313,7 +313,7 @@ fn type_and_colour(ui: &mut egui::Ui) {
     ui.label(
         egui::RichText::new(tr!("type.small"))
             .font(theme::small())
-            .color(color::INK_3),
+            .color(color::ink_3()),
     );
     ui.add_space(space::S8);
     ui.horizontal_wrapped(|ui| {
@@ -333,7 +333,7 @@ fn type_and_colour(ui: &mut egui::Ui) {
                     ui.label(
                         egui::RichText::new(name)
                             .font(theme::body_strong())
-                            .color(color::INK),
+                            .color(color::ink()),
                     );
                 });
         }

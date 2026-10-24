@@ -309,7 +309,7 @@ pub fn about(row: &Row, width: f32, rows: usize, ink: egui::Color32) -> egui::te
                     job.append(
                         &self::param(&row.stem, row.shipped, s),
                         0.0,
-                        format(color::INK_2),
+                        format(color::ink_2()),
                     );
                 } else {
                     job.append(s, 0.0, format(ink));
@@ -345,7 +345,7 @@ pub fn paint_thumb(ui: &egui::Ui, rect: egui::Rect, row: &Row) {
             egui::Align2::CENTER_CENTER,
             suite_ui::theme::icon::CIRCLE_ALERT,
             suite_ui::theme::icon_font(),
-            color::RED,
+            color::red(),
         );
     }
 }

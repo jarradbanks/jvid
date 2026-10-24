@@ -3,8 +3,12 @@
 //! one of them, which the gallery uses to show every state at once.
 
 use egui::emath::GuiRounding as _;
+use std::sync::Arc;
+
+use egui::emath::RectAlign;
+use egui::text::{LayoutJob, TextWrapping};
 use egui::{
-    Align2, Color32, CornerRadius, FontId, Id, Key, Rect, Response, Sense, Shape, Stroke,
+    Align2, Color32, CornerRadius, FontId, Galley, Id, Key, Rect, Response, Sense, Shape, Stroke,
     StrokeKind, TextEdit, Ui, Vec2, Widget, WidgetInfo, WidgetType, pos2, vec2,
 };
 
@@ -65,7 +69,7 @@ pub fn focus_ring(rect: Rect, corner: u8) -> Shape {
     Shape::rect_stroke(
         rect.expand(3.0),
         CornerRadius::same(corner + 2),
-        Stroke::new(2.0, color::LIGHT_BLUE.gamma_multiply(0.6)),
+        Stroke::new(2.0, color::light_blue().gamma_multiply(0.6)),
         StrokeKind::Inside,
     )
 }
@@ -250,50 +254,50 @@ impl Widget for Button<'_> {
             let fill = if self.kind == ButtonKind::Ghost {
                 Color32::TRANSPARENT
             } else {
-                color::RAISED
+                color::raised()
             };
-            (fill, color::INK_4, None)
+            (fill, color::ink_4(), None)
         } else {
             match self.kind {
                 ButtonKind::Primary => {
                     let fill = if l.pressed {
                         color::BLUE_PRESSED
                     } else {
-                        hover_fade(ui, response.id, l.hover, color::BLUE, color::BLUE_HOVER)
+                        hover_fade(ui, response.id, l.hover, color::blue(), color::BLUE_HOVER)
                     };
                     (fill, color::WHITE, None)
                 }
                 ButtonKind::Secondary | ButtonKind::Destructive => {
                     let ink = if self.kind == ButtonKind::Destructive {
-                        color::RED
+                        color::red()
                     } else {
-                        color::INK
+                        color::ink()
                     };
                     let fill = if l.pressed {
-                        color::BORDER
+                        color::border()
                     } else {
-                        color::RAISED
+                        color::raised()
                     };
                     let stroke = hover_fade(
                         ui,
                         response.id,
                         l.hover || l.pressed,
-                        color::BORDER,
-                        color::BORDER_STRONG,
+                        color::border(),
+                        color::border_strong(),
                     );
                     (fill, ink, Some(stroke))
                 }
                 ButtonKind::Ghost => {
                     let lit = l.hover || self.on;
                     let fill = if l.pressed {
-                        color::BORDER
+                        color::border()
                     } else {
-                        hover_fade(ui, response.id, lit, Color32::TRANSPARENT, color::RAISED)
+                        hover_fade(ui, response.id, lit, Color32::TRANSPARENT, color::raised())
                     };
                     let ink = if lit || l.pressed {
-                        color::INK
+                        color::ink()
                     } else {
-                        color::INK_2
+                        color::ink_2()
                     };
                     (fill, ink, None)
                 }
@@ -356,18 +360,18 @@ fn field_frame(ui: &Ui, rect: Rect, l: Look, error: bool) -> Shape {
     let mut shapes = vec![Shape::rect_filled(
         rect,
         CornerRadius::same(radius::CONTROL),
-        color::FIELD,
+        color::field(),
     )];
     let stroke = if l.disabled {
         None
     } else if error {
-        Some(color::RED)
+        Some(color::red())
     } else if l.focus {
-        Some(color::BLUE)
+        Some(color::blue())
     } else if l.hover || l.pressed {
-        Some(color::BORDER_STRONG)
+        Some(color::border_strong())
     } else {
-        Some(color::BORDER)
+        Some(color::border())
     };
     shapes.extend(stroke.map(|c| border(ui, rect, radius::CONTROL, c)));
     if l.focus && !l.disabled {
@@ -387,7 +391,7 @@ fn paint_prefix(ui: &Ui, rect: Rect, prefix: Option<&str>, glyph: Option<&str>) 
             Align2::CENTER_CENTER,
             glyph,
             theme::icon_font(),
-            color::INK_3,
+            color::ink_3(),
         );
         x += size::ICON + space::S4;
     }
@@ -397,7 +401,7 @@ fn paint_prefix(ui: &Ui, rect: Rect, prefix: Option<&str>, glyph: Option<&str>) 
             Align2::LEFT_CENTER,
             prefix,
             theme::body(),
-            color::INK_3,
+            color::ink_3(),
         );
         x = r.right() + space::S8;
     }
@@ -410,7 +414,7 @@ fn error_line(ui: &mut Ui, error: Option<&str>) {
         ui.label(
             egui::RichText::new(message)
                 .font(theme::body())
-                .color(color::RED),
+                .color(color::red()),
         );
     }
 }
@@ -488,7 +492,11 @@ impl Widget for TextInput<'_> {
             let x = paint_prefix(ui, rect, self.prefix, self.glyph);
             let inner = Rect::from_x_y_ranges(x..=rect.right() - space::S8, rect.y_range());
             let disabled = self.state == State::Disabled || !ui.is_enabled();
-            let ink = if disabled { color::INK_4 } else { color::INK };
+            let ink = if disabled {
+                color::ink_4()
+            } else {
+                color::ink()
+            };
             let edit = ui.add_enabled_ui(!disabled, |ui| {
                 let row = ui.fonts_mut(|f| f.row_height(&theme::body()));
                 let edit_rect = Rect::from_center_size(inner.center(), vec2(inner.width(), row));
@@ -620,7 +628,7 @@ impl Widget for DragField<'_> {
                     .frame(egui::Frame::NONE)
                     .margin(0)
                     .font(theme::body())
-                    .text_color(color::INK),
+                    .text_color(color::ink()),
             );
             if !edit.has_focus() && !edit.lost_focus() {
                 edit.request_focus();
@@ -651,7 +659,11 @@ impl Widget for DragField<'_> {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
             }
             let disabled = self.state == State::Disabled || !response.enabled();
-            let ink = if disabled { color::INK_4 } else { color::INK };
+            let ink = if disabled {
+                color::ink_4()
+            } else {
+                color::ink()
+            };
             let text = match self.mixed {
                 true => "\u{2014}".to_owned(),
                 false => format!("{:.*}{}", self.decimals, self.value, self.suffix),
@@ -674,13 +686,44 @@ impl Widget for DragField<'_> {
     }
 }
 
-/// A field with a chevron that opens a menu of options.
+/// One line of `text` cut to `width` with an ellipsis; check `elided` to know it was.
+pub fn fit_text(ui: &Ui, text: &str, font: FontId, color: Color32, width: f32) -> Arc<Galley> {
+    let mut job = LayoutJob::simple_singleline(text.to_owned(), font, color);
+    job.wrap = TextWrapping::truncate_at_width(width.max(0.0));
+    ui.fonts_mut(|f| f.layout_job(job))
+}
+
+/// Paints `galley` left-aligned at `x`, centred on `y`.
+fn paint_left(ui: &Ui, x: f32, y: f32, galley: Arc<Galley>, color: Color32) {
+    let pos = pos2(x, y - galley.size().y / 2.0);
+    ui.painter().galley(pos, galley, color);
+}
+
+/// Where a dropdown's menu opens, and its tallest scroll height: below the field unless
+/// there's more room above, never past `bounds`, and `MARGIN` short of its edge.
+fn menu_place(field: Rect, bounds: Rect, wanted: f32) -> (RectAlign, f32) {
+    const MARGIN: f32 = space::S8;
+    let below = bounds.bottom() - field.bottom() - MARGIN;
+    let above = field.top() - bounds.top() - MARGIN;
+    // The menu's frame takes its margin off both ends.
+    let frame = 2.0 * space::S4;
+    if wanted + frame <= below || below >= above {
+        (RectAlign::BOTTOM_START, below - frame)
+    } else {
+        (RectAlign::TOP_START, above - frame)
+    }
+}
+
+/// A field with a chevron that opens a menu of options. The menu is as wide as the field,
+/// stays inside the window (or [`Dropdown::bounds`]) and scrolls past that; a name too long
+/// for the field or a row ends in an ellipsis and shows in full on hover.
 #[must_use = "add it with `ui.add(..)`"]
 pub struct Dropdown<'a> {
     selected: &'a mut usize,
     options: &'a [&'a str],
     width: f32,
     state: State,
+    bounds: Option<Rect>,
 }
 
 impl<'a> Dropdown<'a> {
@@ -690,6 +733,7 @@ impl<'a> Dropdown<'a> {
             options,
             width: 120.0,
             state: State::Live,
+            bounds: None,
         }
     }
 
@@ -700,6 +744,13 @@ impl<'a> Dropdown<'a> {
 
     pub fn state(mut self, state: State) -> Self {
         self.state = state;
+        self
+    }
+
+    /// Keeps the open menu inside `rect` as well as the window, such as a dialog's body so it
+    /// never covers the dialog's buttons.
+    pub fn bounds(mut self, rect: Rect) -> Self {
+        self.bounds = Some(rect);
         self
     }
 }
@@ -716,34 +767,52 @@ impl Widget for Dropdown<'_> {
         response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, current));
         let l = look(&response, self.state);
         ui.painter().add(field_frame(ui, rect, l, false));
-        let ink = if l.disabled { color::INK_4 } else { color::INK };
-        let chevron = if l.disabled {
-            color::INK_4
+        let ink = if l.disabled {
+            color::ink_4()
         } else {
-            color::INK_2
+            color::ink()
         };
+        let chevron = if l.disabled {
+            color::ink_4()
+        } else {
+            color::ink_2()
+        };
+        let chevron_x = rect.right() - space::S4 - size::ICON / 2.0;
+        let room = chevron_x - size::ICON / 2.0 - space::S4 - (rect.left() + space::S8);
+        let text = fit_text(ui, current, theme::body(), ink, room);
+        let elided = text.elided;
+        paint_left(ui, rect.left() + space::S8, rect.center().y, text, ink);
         ui.painter().text(
-            pos2(rect.left() + space::S8, rect.center().y),
-            Align2::LEFT_CENTER,
-            current,
-            theme::body(),
-            ink,
-        );
-        ui.painter().text(
-            pos2(rect.right() - space::S4 - size::ICON / 2.0, rect.center().y),
+            pos2(chevron_x, rect.center().y),
             Align2::CENTER_CENTER,
             icon::CHEVRON_DOWN,
             theme::icon_font(),
             chevron,
         );
-        egui::Popup::menu(&response).width(self.width).show(|ui| {
-            for (i, option) in self.options.iter().enumerate() {
-                if ui.add(MenuRow::new(option, i == *self.selected)).clicked() {
-                    *self.selected = i;
-                    response.mark_changed();
-                }
-            }
-        });
+        let screen = ui.ctx().content_rect();
+        let bounds = self.bounds.map_or(screen, |b| b.intersect(screen));
+        let row = size::CONTROL + ui.spacing().item_spacing.y;
+        let (align, max_height) = menu_place(rect, bounds, self.options.len() as f32 * row);
+        let popup = egui::Popup::menu(&response)
+            .width(rect.width())
+            .align(align)
+            .align_alternatives(&[])
+            .show(|ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(max_height.max(size::CONTROL))
+                    .show(ui, |ui| {
+                        for (i, option) in self.options.iter().enumerate() {
+                            let r = ui.add(MenuRow::new(option, i == *self.selected));
+                            if r.clicked() {
+                                *self.selected = i;
+                                response.mark_changed();
+                            }
+                        }
+                    });
+            });
+        if elided && popup.is_none() {
+            response = response.on_hover_text(current);
+        }
         response
     }
 }
@@ -769,23 +838,30 @@ impl Widget for MenuRow<'_> {
         });
         if response.hovered() || response.has_focus() {
             ui.painter()
-                .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::BORDER);
+                .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::border());
         }
-        ui.painter().text(
-            pos2(rect.left() + space::S8, rect.center().y),
-            Align2::LEFT_CENTER,
-            self.label,
-            theme::body(),
-            color::INK,
+        let check_x = rect.right() - space::S4 - size::ICON / 2.0;
+        let room = check_x - size::ICON / 2.0 - space::S4 - (rect.left() + space::S8);
+        let text = fit_text(ui, self.label, theme::body(), color::ink(), room);
+        let elided = text.elided;
+        paint_left(
+            ui,
+            rect.left() + space::S8,
+            rect.center().y,
+            text,
+            color::ink(),
         );
         if self.checked {
             ui.painter().text(
-                pos2(rect.right() - space::S4 - size::ICON / 2.0, rect.center().y),
+                pos2(check_x, rect.center().y),
                 Align2::CENTER_CENTER,
                 icon::CHECK,
                 theme::icon_font(),
-                color::INK_2,
+                color::ink_2(),
             );
+        }
+        if elided {
+            return response.on_hover_text(self.label);
         }
         response
     }
@@ -829,10 +905,10 @@ impl Widget for Segmented<'_> {
             allocate(ui, vec2(total, size::CONTROL), self.state, Sense::hover());
         let disabled = self.state == State::Disabled || !ui.is_enabled();
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::FIELD);
+            .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::field());
         if !disabled {
             ui.painter()
-                .add(border(ui, rect, radius::CONTROL, color::BORDER));
+                .add(border(ui, rect, radius::CONTROL, color::border()));
         }
         let first_unselected = (0..self.options.len()).find(|i| i != self.selected);
         let mut x = rect.left() + pad;
@@ -869,19 +945,19 @@ impl Widget for Segmented<'_> {
                 ..l
             };
             let fill = if on && !l.disabled {
-                color::RAISED
+                color::raised()
             } else if l.pressed {
-                color::BORDER
+                color::border()
             } else {
                 Color32::TRANSPARENT
             };
             ui.painter()
                 .rect_filled(seg, CornerRadius::same(radius::SMALL), fill);
             let ink = match () {
-                _ if l.disabled => color::INK_4,
-                _ if on || l.pressed => color::INK,
-                _ if l.hover => color::INK_2,
-                _ => color::INK_3,
+                _ if l.disabled => color::ink_4(),
+                _ if on || l.pressed => color::ink(),
+                _ if l.hover => color::ink_2(),
+                _ => color::ink_3(),
             };
             ui.painter().text(
                 seg.center(),
@@ -952,28 +1028,28 @@ impl Widget for Checkbox<'_> {
             } else if l.hover {
                 color::BLUE_HOVER
             } else {
-                color::BLUE
+                color::blue()
             };
             ui.painter().rect_filled(check, corner, fill);
         } else {
             let fill = if l.disabled {
-                color::RAISED
+                color::raised()
             } else {
-                color::FIELD
+                color::field()
             };
             ui.painter().rect_filled(check, corner, fill);
             let stroke = if l.disabled {
-                color::BORDER
+                color::border()
             } else if l.hover || l.pressed {
-                color::BORDER_STRONG
+                color::border_strong()
             } else {
-                color::BORDER
+                color::border()
             };
             ui.painter().add(border(ui, check, radius::SMALL, stroke));
         }
         if *self.checked {
             let ink = if l.disabled {
-                color::INK_4
+                color::ink_4()
             } else {
                 color::WHITE
             };
@@ -985,7 +1061,11 @@ impl Widget for Checkbox<'_> {
                 ink,
             );
         }
-        let ink = if l.disabled { color::INK_4 } else { color::INK };
+        let ink = if l.disabled {
+            color::ink_4()
+        } else {
+            color::ink()
+        };
         ui.painter().text(
             pos2(check.right() + space::S8, rect.center().y),
             Align2::LEFT_CENTER,
@@ -1073,22 +1153,22 @@ impl Widget for KeyButton<'_> {
         });
         let l = look(&response, self.state);
         let fill = if l.pressed {
-            color::BORDER
+            color::border()
         } else {
             hover_fade(
                 ui,
                 response.id,
                 l.hover,
                 Color32::TRANSPARENT,
-                color::RAISED,
+                color::raised(),
             )
         };
         ui.painter()
             .rect_filled(rect, CornerRadius::same(radius::SMALL), fill);
         let ink = match () {
-            _ if l.disabled => color::INK_4,
-            _ if l.hover || l.pressed => color::INK,
-            _ => color::INK_3,
+            _ if l.disabled => color::ink_4(),
+            _ if l.hover || l.pressed => color::ink(),
+            _ => color::ink_3(),
         };
         // The timeline's diamond size, so a row's key matches its lane.
         let (c, h) = (rect.center(), 5.0);
@@ -1101,10 +1181,10 @@ impl Widget for KeyButton<'_> {
                     c + vec2(-h, 0.0),
                 ];
                 let (fill, line) = match keyed {
-                    _ if l.disabled => (Color32::TRANSPARENT, color::INK_4),
+                    _ if l.disabled => (Color32::TRANSPARENT, color::ink_4()),
                     Keyed::Static => (Color32::TRANSPARENT, ink),
-                    Keyed::Animated => (Color32::TRANSPARENT, color::LIGHT_BLUE),
-                    Keyed::Here => (color::LIGHT_BLUE, color::LIGHT_BLUE),
+                    Keyed::Animated => (Color32::TRANSPARENT, color::light_blue()),
+                    Keyed::Here => (color::light_blue(), color::light_blue()),
                 };
                 Shape::convex_polygon(points, fill, Stroke::new(1.0, line))
             }
@@ -1209,25 +1289,25 @@ impl Widget for Slider<'_> {
             painter.rect_filled(
                 Rect::from_x_y_ranges(a - line / 2.0..=a + line / 2.0, y - 5.0..=y + 5.0),
                 0.0,
-                color::BORDER_STRONG,
+                color::border_strong(),
             );
         }
         let bar = |x: egui::Rangef| Rect::from_x_y_ranges(x, y - 1.0..=y + 1.0);
-        painter.rect_filled(bar(track), 0.0, color::BORDER_STRONG);
+        painter.rect_filled(bar(track), 0.0, color::border_strong());
         if !l.disabled {
             painter.rect_filled(
                 bar(egui::Rangef::new(a.min(b), a.max(b))),
                 0.0,
-                color::INK_3,
+                color::ink_3(),
             );
         }
         let thumb = Rect::from_center_size(pos2(b, y), vec2(6.0, 14.0))
             .round_to_pixels(ui.pixels_per_point());
         let ink = if l.disabled {
-            color::INK_4
+            color::ink_4()
         } else {
             let lit = l.hover || l.pressed || response.dragged();
-            hover_fade(ui, response.id, lit, color::INK_2, color::INK)
+            hover_fade(ui, response.id, lit, color::ink_2(), color::ink())
         };
         ui.painter()
             .rect_filled(thumb, CornerRadius::same(radius::SMALL), ink);
@@ -1278,9 +1358,9 @@ impl Widget for SectionHeader<'_> {
             .widget_info(|| WidgetInfo::selected(WidgetType::Button, true, *self.open, self.title));
         let l = look(&response, self.state);
         let (ink, chevron_ink) = match () {
-            _ if l.disabled => (color::INK_4, color::INK_4),
-            _ if l.hover || l.pressed => (color::INK, color::INK),
-            _ => (color::INK, color::INK_2),
+            _ if l.disabled => (color::ink_4(), color::ink_4()),
+            _ if l.hover || l.pressed => (color::ink(), color::ink()),
+            _ => (color::ink(), color::ink_2()),
         };
         let glyph = if *self.open {
             icon::CHEVRON_DOWN
@@ -1306,7 +1386,7 @@ impl Widget for SectionHeader<'_> {
         ui.painter().rect_filled(
             Rect::from_x_y_ranges(rect.x_range(), rect.bottom() - line..=rect.bottom()),
             0.0,
-            color::BORDER,
+            color::border(),
         );
         if l.focus {
             ui.painter()
@@ -1365,7 +1445,7 @@ impl Widget for Timecode {
             egui::Label::new(
                 egui::RichText::new(timecode(self.frame, self.fps))
                     .font(font)
-                    .color(color::INK),
+                    .color(color::ink()),
             )
             .selectable(false),
         )
@@ -1374,7 +1454,27 @@ impl Widget for Timecode {
 
 #[cfg(test)]
 mod tests {
-    use super::timecode;
+    use super::{RectAlign, menu_place, timecode};
+    use egui::{Rect, pos2};
+
+    #[test]
+    fn menus_open_toward_the_room_and_stop_at_the_bounds() {
+        let bounds = Rect::from_min_max(pos2(0.0, 0.0), pos2(400.0, 500.0));
+        let field = |y: f32| Rect::from_min_max(pos2(10.0, y), pos2(200.0, y + 28.0));
+        // A short list fits below.
+        assert_eq!(
+            menu_place(field(100.0), bounds, 100.0).0,
+            RectAlign::BOTTOM_START
+        );
+        // A long one near the bottom flips up and is capped to the room there.
+        let (align, h) = menu_place(field(400.0), bounds, 1000.0);
+        assert_eq!(align, RectAlign::TOP_START);
+        assert!(h < 400.0 - 8.0, "{h}");
+        // With more room below it stays below, capped.
+        let (align, h) = menu_place(field(50.0), bounds, 1000.0);
+        assert_eq!(align, RectAlign::BOTTOM_START);
+        assert!(50.0 + 28.0 + h < 500.0, "{h}");
+    }
 
     #[test]
     fn timecode_formats() {
