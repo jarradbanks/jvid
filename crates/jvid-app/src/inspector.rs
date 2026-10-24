@@ -1839,18 +1839,15 @@ fn preset_row(ui: &mut Ui, fxs: &[AudioFx], block: &str) -> Option<usize> {
     let n = names.len();
     let at = preset_of(fxs[0], block)
         .filter(|at| fxs.iter().all(|fx| preset_of(*fx, block) == Some(*at)));
-    let mut options: Vec<&str> = names.iter().map(String::as_str).collect();
-    // shortcut: Custom is the dropdown's last option and picking it does nothing; leaving it
-    // out of the menu and greying it needs suite-ui's Dropdown (#257's).
-    let mut i = at.unwrap_or_else(|| {
-        options.push(tr!("inspector.custom"));
-        n
-    });
+    let options: Vec<&str> = names.iter().map(String::as_str).collect();
+    // Custom, past the presets, shows greyed and isn't in the menu.
+    let mut i = at.unwrap_or(n);
     let tools = Tools::default();
     let (changed, _) = prop_row(ui, tr!("inspector.preset"), tools, |ui| {
         // It has no tools, so it takes their slots too.
         let w = ui.available_width() + TOOLS + space::S4;
-        ui.add(Dropdown::new(&mut i, &options).width(w)).changed()
+        let d = Dropdown::new(&mut i, &options).placeholder(tr!("inspector.custom"));
+        ui.add(d.width(w)).changed()
     });
     (changed && i < n && Some(i) != at).then_some(i)
 }
@@ -4005,7 +4002,14 @@ mod tests {
         let eq = fx(&h).eq;
         assert!(eq.bands[5] > 0.0 && eq.bands[5] % 0.5 == 0.0, "{eq:?}");
         assert_eq!(eq.bands.iter().filter(|b| **b != 0.0).count(), 1);
-        h.get_by_role_and_label(Role::ComboBox, "Custom");
+        // Custom shows in the field but isn't a choice in the menu.
+        h.get_by_role_and_label(Role::ComboBox, "Custom").click();
+        h.run();
+        assert_eq!(h.query_all_by_label("Custom").count(), 1, "the field alone");
+        assert!(h.query_by_label("Podcast").is_some(), "the menu is open");
+        h.snapshot("inspector_eq_custom");
+        h.key_press(egui::Key::Escape);
+        h.run();
         assert!(h.state_mut().undo());
         assert_eq!(fx(&h), AudioFx::default());
         h.run();

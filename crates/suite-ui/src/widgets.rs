@@ -733,6 +733,7 @@ pub struct Dropdown<'a> {
     width: f32,
     state: State,
     bounds: Option<Rect>,
+    placeholder: &'a str,
 }
 
 impl<'a> Dropdown<'a> {
@@ -743,7 +744,15 @@ impl<'a> Dropdown<'a> {
             width: 120.0,
             state: State::Live,
             bounds: None,
+            placeholder: "",
         }
+    }
+
+    /// What the field shows, in Ink 2, while `selected` is past the options, such as "Custom"
+    /// for a value no preset matches. It isn't in the menu.
+    pub fn placeholder(mut self, text: &'a str) -> Self {
+        self.placeholder = text;
+        self
     }
 
     pub fn width(mut self, width: f32) -> Self {
@@ -772,14 +781,15 @@ impl Widget for Dropdown<'_> {
             self.state,
             Sense::click(),
         );
-        let current = self.options.get(*self.selected).copied().unwrap_or("");
+        let picked = self.options.get(*self.selected).copied();
+        let current = picked.unwrap_or(self.placeholder);
         response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, current));
         let l = look(&response, self.state);
         ui.painter().add(field_frame(ui, rect, l, false));
-        let ink = if l.disabled {
-            color::ink_4()
-        } else {
-            color::ink()
+        let ink = match () {
+            _ if l.disabled => color::ink_4(),
+            _ if picked.is_none() => color::ink_2(),
+            _ => color::ink(),
         };
         let chevron = if l.disabled {
             color::ink_4()
