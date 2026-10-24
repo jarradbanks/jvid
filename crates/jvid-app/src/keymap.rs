@@ -241,11 +241,13 @@ impl Keymap {
     }
 
     /// Ids of actions whose shortcut was pressed this frame, first match per key press.
-    /// None while a text field has focus.
+    /// None while a text field has focus; no Up or Down while any widget has it, such as a
+    /// hovered EQ band.
     pub fn pressed(&self, ctx: &egui::Context, timeline_focused: bool) -> Vec<&'static str> {
         if ctx.text_edit_focused() {
             return Vec::new();
         }
+        let focused = ctx.memory(|m| m.focused().is_some());
         let mut out = Vec::new();
         for e in ctx.input(|i| i.events.clone()) {
             // egui-winit turns these presses into clipboard events instead of key events;
@@ -275,6 +277,9 @@ impl Keymap {
             else {
                 continue;
             };
+            if focused && matches!(key, Key::ArrowUp | Key::ArrowDown) {
+                continue;
+            }
             let hit = ACTIONS.iter().zip(&self.bindings).find(|(a, b)| {
                 b.is_some_and(|b| {
                     // Physical too: Shift+1 arrives as `!` on most layouts.

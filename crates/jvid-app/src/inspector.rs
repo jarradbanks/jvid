@@ -1952,6 +1952,15 @@ fn slider_bank(ui: &mut Ui, eq: &Equalizer) -> Option<(usize, f32, egui::Respons
         );
         let id = ui.id().with(("eq band", k));
         let r = ui.interact(column, id, Sense::click_and_drag());
+        // Focus keeps the keymap's Up and Down off the playhead while the band takes them;
+        // focus the hover gave goes when the pointer leaves, Tab's stays.
+        let lent = id.with("hover focus");
+        if r.hovered() && !r.has_focus() && !ui.ctx().text_edit_focused() {
+            r.request_focus();
+            ui.data_mut(|d| d.insert_temp(lent, true));
+        } else if !r.hovered() && ui.data_mut(|d| d.remove_temp::<bool>(lent).is_some()) {
+            r.surrender_focus();
+        }
         let v = eq.bands[k];
         r.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), v as f64, *name));
         let step = if ui.input(|i| i.modifiers.shift) {
