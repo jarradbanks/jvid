@@ -1548,3 +1548,12 @@ I("ui-long-text", "UI handles long translated text", None, ["ui", "suite-ui"], "
          "Delete the per-language editor/preferences/export_dialog snapshot tests and PNGs in crates/jvid-app/tests; the pseudo-locale test replaces them"],
   ac=["The pseudo-locale test passes and fails if one truncation is removed",
       "No per-language snapshot PNGs remain; cargo test --workspace passes"])
+I("readme-preview", "README: real UI preview video and current pitch", None, ["docs"], "M", labels=["later"],
+  summary="Owner, 2026-10-24: the README still leads with the AI-generated prototype and 'first tool in a planned suite'. Replace both with a short, professional, minimal motion preview made from the real UI, and copy that matches what jvid does today.",
+  scope=["A reproducible preview reel rendered from the real app (egui_kittest + wgpu, as the snapshot tests do): a scripted 15-25 s seamless loop of a real edit (clips on the timeline, playback in the viewer, a trim, a title, export), with eased motion and a drawn cursor; no text callouts or effects beyond the UI itself",
+         "One command regenerates it (an example or ignored test plus a script that runs ffmpeg); footage is downloaded at build time from a CC-BY/CC0 source, never committed, and credited in the README",
+         "docs/media/preview.webp (animated, autoplays inline on GitHub) and docs/media/preview.mp4, each small enough to keep the repo lean",
+         "README rewrite: lead with the preview, drop the 'first tool in a planned suite' line, the prototype image and the stale status note; describe what ships now, keep Building, Workspace, Contributing and License"],
+  ac=["The README shows the animated preview at the top on github.com and no prototype image",
+      "Re-running the documented command regenerates both files from a clean checkout",
+      "Every claim in the README matches a merged feature"])

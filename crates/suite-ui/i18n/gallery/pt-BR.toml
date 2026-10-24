@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Portuguese (Brazil). Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Padrão"
+hover = "Ao passar"
+focus = "Foco visível"
+pressed = "Pressionado"
+disabled = "Desativado"
+loading_error = "Carregando / Erro"
+
+[panel]
+widgets = "Widgets"
+effects = "Efeitos"
+text = "Texto"
+add = "Adicionar"
+more = "Mais"
+inspector = "Inspetor"
+source = "Origem"
+program = "Programa"
+audio = "Áudio"
+markers = "Marcadores"
+history = "Histórico"
+captions = "Legendas"
+overflow = "Abas com menos de 64px vão para o menu da seta."
+type_and_colour = "Tipografia e cor"
+
+[row]
+primary = "Primário"
+secondary = "Secundário"
+ghost = "Fantasma"
+destructive = "Destrutivo"
+icon = "Ícone"
+input = "Entrada"
+search = "Pesquisa"
+numeric = "Numérico"
+dropdown = "Lista suspensa"
+colour = "Cor"
+segmented = "Segmentado"
+checkbox = "Caixa de seleção"
+section = "Seção"
+slider = "Controle deslizante"
+keyframe = "Quadro-chave"
+
+[demo]
+delete = "Excluir"
+export = "Exportar"
+width_prefix = "L"
+min_error = "Deve ser pelo menos 2"
+full = "Total"
+fit = "Ajustar"
+fill = "Preencher"
+snap = "Encaixe"
+live = "Ao vivo"
+transform = "Transformar"
+position = "Posição"
+scale = "Escala"
+reset = "Redefinir"
+previous = "Quadro-chave anterior"
+next = "Próximo quadro-chave"
+animate = "Animar"
+plus_second = "+1s"
+
+[type]
+display = "Display 22"
+headline = "Manchete 16"
+title = "Título 14"
+body_strong = "Corpo forte 12"
+body = "Corpo 12 · 0123456789 fica parado"
+small = "Pequeno 10 · dica de atalho"
+
+[clip]
+video = "Vídeo"
+title = "Título"
+still = "Imagem fixa"
+audio = "Áudio"

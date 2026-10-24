@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Shipped languages by BCP 47 code: the primary subtag, but for Brazilian Portuguese and
 /// Simplified Chinese. English is first: the fallback and the source.
@@ -32,6 +32,20 @@ pub fn language() -> &'static str {
 pub fn set_language(code: &str) {
     let i = LANGUAGES.iter().position(|l| *l == code).unwrap_or(0);
     CURRENT.store(i, Ordering::Relaxed);
+}
+
+static PSEUDO: AtomicBool = AtomicBool::new(false);
+
+/// Pads every English text by about 40%, as long translations run, so layout tests can check
+/// that each spot copes. For tests: it shows only while English is the language.
+pub fn set_pseudo(on: bool) {
+    PSEUDO.store(on, Ordering::Relaxed);
+}
+
+/// `text` about 40% longer, with no space to break at, as a long German compound would be.
+fn pad(text: &str) -> String {
+    let n = (text.chars().count() * 2).div_ceil(5);
+    format!("{text}{}", "x".repeat(n))
 }
 
 /// The shipped language for a locale such as `es-MX`, `es_ES.UTF-8` or `EN`, if any.
@@ -86,6 +100,8 @@ pub struct Catalog {
     /// TOML sources in [`LANGUAGES`] order.
     sources: [&'static str; LANGUAGES.len()],
     tables: OnceLock<Vec<HashMap<String, String>>>,
+    /// English padded, for [`set_pseudo`].
+    pseudo: OnceLock<HashMap<String, String>>,
 }
 
 impl Catalog {
@@ -93,6 +109,7 @@ impl Catalog {
         Self {
             sources,
             tables: OnceLock::new(),
+            pseudo: OnceLock::new(),
         }
     }
 
@@ -203,6 +220,12 @@ impl Catalog {
 
     fn table(&self, lang: &str) -> Option<&HashMap<String, String>> {
         let i = LANGUAGES.iter().position(|l| *l == lang)?;
+        if i == 0 && PSEUDO.load(Ordering::Relaxed) {
+            return Some(self.pseudo.get_or_init(|| {
+                let en = &self.tables()[0];
+                en.iter().map(|(k, v)| (k.clone(), pad(v))).collect()
+            }));
+        }
         self.tables().get(i)
     }
 
@@ -404,6 +427,13 @@ macro_rules! trn {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pseudo_pads_about_forty_percent() {
+        assert_eq!(pad("Save"), "Savexx");
+        assert_eq!(pad("Add {n} clips"), "Add {n} clipsxxxxxx");
+        assert_eq!(pad(""), "");
+    }
 
     #[test]
     fn locales_normalize_to_shipped_languages() {
