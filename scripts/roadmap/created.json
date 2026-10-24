@@ -736,6 +736,10 @@
     "reframe": {
       "number": 352,
       "id": 6014722261
+    },
+    "marker-popup-style": {
+      "number": 353,
+      "id": 6014746203
     }
   },
   "links": [
@@ -1830,6 +1834,10 @@
     [
       "reframe",
       "project-settings"
+    ],
+    [
+      "marker-popup-style",
+      "hold-m-range"
     ]
   ]
 }

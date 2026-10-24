@@ -507,6 +507,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#350](https://github.com/jarradbanks/jvid/issues/350) **Secondary grading and grade compare** — Grade only one colour range, and compare before and after.
 - [#351](https://github.com/jarradbanks/jvid/issues/351) **Blur and Pixelate effects** — Hide emails, keys and faces in recordings.
 - [#352](https://github.com/jarradbanks/jvid/issues/352) **Reframe for Shorts** — Turn a 16:9 edit into a vertical Short, panning the crop to follow the action.
+- [#353](https://github.com/jarradbanks/jvid/issues/353) **Marker popup: house widgets and layout** — The marker popup gets the same cleanup the Inspector got (owner request).
 
 ---
 

@@ -1772,3 +1772,12 @@ I("reframe", "Reframe for Shorts", None, ["core", "ui"], "M", ["transform", "key
   ac=["A 16:9 clip in the 9:16 copy fills the frame with no bars (render test)",
       "The original project is unchanged",
       "Dragging the box at two times makes two position keys, and one undo removes each"])
+
+I("marker-popup-style", "Marker popup: house widgets and layout", None, ["timeline", "ui"], "S", ["hold-m-range"], labels=["later"],
+  summary="The marker popup gets the same cleanup the Inspector got (owner request).",
+  scope=[
+      "Name uses suite-ui TextInput and Note a matching multi-line field; the colour row is built like the Inspector's clip-colour swatches (selected ring, focusable, accessible colour names); Delete Marker is a destructive Button",
+      "DESIGN.md spacing and a fixed popup width; Title Case labels; no hint or helper text",
+  ],
+  ac=["An egui_kittest snapshot of the popup",
+      "Typing into Name and Note still works, and each edit gesture is one undo step"])
