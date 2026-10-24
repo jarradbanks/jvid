@@ -1564,3 +1564,9 @@ I("i18n-wave1-leftovers", "Translation leftovers found in wave 1", None, ["ui", 
          "The ', ' list join near crates/jvid-app/src/timeline.rs:1770 is ASCII; use a catalog separator so ja/zh-Hans/ko get theirs"],
   ac=["A title preset in ja renders its glyphs, not boxes, with no system CJK font installed (test with the bundled faces only)",
       "grep finds no user-visible unit, colon join or list separator built in code for these spots"])
+I("preview-audio-only", "Preview stops decoding video from audio-only files", None, ["ui"], "S", labels=["later"],
+  summary="Owner, 2026-10-24, Windows: 246 'preview decode of D:\\fishing\\media\\Voiceover 2.wav failed: Stream not found' warnings in one two-minute session. The audio played fine; the preview asks the decode pool for a video frame from a WAV on every new time (crates/jvid-app/src/preview.rs around line 745) and logs each failure.",
+  scope=["The preview never submits a video decode for a source with no video stream (use the probed media info); it shows what it already shows for audio-only media",
+         "A decode failure for a source is logged once until the source or its file changes, not once per requested time"],
+  ac=["A test with an audio-only source plays or scrubs across many times and submits no video decode",
+      "A failing video source logs its warning once per source, shown by a test"])
