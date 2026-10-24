@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Norwegian Bokmål. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Standard"
+hover = "Peker over"
+focus = "Synlig fokus"
+pressed = "Trykket"
+disabled = "Deaktivert"
+loading_error = "Laster / Feil"
+
+[panel]
+widgets = "Kontroller"
+effects = "Effekter"
+text = "Tekst"
+add = "Legg til"
+more = "Mer"
+inspector = "Inspektør"
+source = "Kilde"
+program = "Program"
+audio = "Lyd"
+markers = "Markører"
+history = "Historikk"
+captions = "Bildetekster"
+overflow = "Faner smalere enn 64 px flyttes til vinkelmenyen."
+type_and_colour = "Skrift og farge"
+
+[row]
+primary = "Primær"
+secondary = "Sekundær"
+ghost = "Spøkelse"
+destructive = "Destruktiv"
+icon = "Ikon"
+input = "Inndata"
+search = "Søk"
+numeric = "Numerisk"
+dropdown = "Rullegardin"
+colour = "Farge"
+segmented = "Segmentert"
+checkbox = "Avmerkingsboks"
+section = "Seksjon"
+slider = "Glidebryter"
+keyframe = "Nøkkelbilde"
+
+[demo]
+delete = "Slett"
+export = "Eksporter"
+width_prefix = "B"
+min_error = "Må være minst 2"
+full = "Full"
+fit = "Tilpass"
+fill = "Fyll"
+snap = "Fest"
+live = "Direkte"
+transform = "Transformering"
+position = "Posisjon"
+scale = "Skala"
+reset = "Tilbakestill"
+previous = "Forrige nøkkelbilde"
+next = "Neste nøkkelbilde"
+animate = "Animer"
+plus_second = "+1 s"
+
+[type]
+display = "Display 22"
+headline = "Overskrift 16"
+title = "Tittel 14"
+body_strong = "Brødtekst halvfet 12"
+body = "Brødtekst 12 · 0123456789 står stille"
+small = "Liten 10 · hurtigtasthint"
+
+[clip]
+video = "Video"
+title = "Tittel"
+still = "Stillbilde"
+audio = "Lyd"

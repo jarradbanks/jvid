@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Polish. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Domyślny"
+hover = "Najechanie"
+focus = "Widoczny fokus"
+pressed = "Wciśnięty"
+disabled = "Wyłączony"
+loading_error = "Wczytywanie / błąd"
+
+[panel]
+widgets = "Kontrolki"
+effects = "Efekty"
+text = "Tekst"
+add = "Dodaj"
+more = "Więcej"
+inspector = "Inspektor"
+source = "Źródło"
+program = "Program"
+audio = "Audio"
+markers = "Znaczniki"
+history = "Historia"
+captions = "Podpisy"
+overflow = "Karty węższe niż 64 px trafiają do menu ze strzałką."
+type_and_colour = "Typografia i kolor"
+
+[row]
+primary = "Główny"
+secondary = "Drugorzędny"
+ghost = "Przezroczysty"
+destructive = "Destrukcyjny"
+icon = "Ikona"
+input = "Pole tekstowe"
+search = "Wyszukiwanie"
+numeric = "Liczba"
+dropdown = "Lista rozwijana"
+colour = "Kolor"
+segmented = "Segmenty"
+checkbox = "Pole wyboru"
+section = "Sekcja"
+slider = "Suwak"
+keyframe = "Klatka kluczowa"
+
+[demo]
+delete = "Usuń"
+export = "Eksportuj"
+width_prefix = "S"
+min_error = "Co najmniej 2"
+full = "Pełna"
+fit = "Dopasuj"
+fill = "Wypełnij"
+snap = "Przyciąganie"
+live = "Na żywo"
+transform = "Transformacja"
+position = "Pozycja"
+scale = "Skala"
+reset = "Resetuj"
+previous = "Poprzednia klatka kluczowa"
+next = "Następna klatka kluczowa"
+animate = "Animuj"
+plus_second = "+1 s"
+
+[type]
+display = "Display 22"
+headline = "Nagłówek 16"
+title = "Tytuł 14"
+body_strong = "Tekst pogrubiony 12"
+body = "Tekst 12 · 0123456789 stoi w miejscu"
+small = "Mały 10 · podpowiedź skrótu"
+
+[clip]
+video = "Wideo"
+title = "Tytuł"
+still = "Obraz"
+audio = "Audio"

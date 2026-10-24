@@ -1,2 +1,75 @@
-# The suite-ui gallery example's demo labels, Catalan. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+# The suite-ui gallery example's demo labels, Catalan.
+
+[state]
+default = "Normal"
+hover = "En passar-hi per sobre"
+focus = "Focus visible"
+pressed = "Premut"
+disabled = "Inhabilitat"
+loading_error = "S'està carregant / Error"
+
+[panel]
+widgets = "Controls"
+effects = "Efectes"
+text = "Text"
+add = "Afegeix"
+more = "Més"
+inspector = "Inspector"
+source = "Origen"
+program = "Programa"
+audio = "Àudio"
+markers = "Marcadors"
+history = "Historial"
+captions = "Subtítols"
+overflow = "Les pestanyes de menys de 64 px passen al menú desplegable."
+type_and_colour = "Tipografia i color"
+
+[row]
+primary = "Principal"
+secondary = "Secundari"
+ghost = "Fantasma"
+destructive = "Destructiu"
+icon = "Icona"
+input = "Entrada"
+search = "Cerca"
+numeric = "Numèric"
+dropdown = "Desplegable"
+colour = "Color"
+segmented = "Segmentat"
+checkbox = "Casella de selecció"
+section = "Secció"
+slider = "Control lliscant"
+keyframe = "Fotograma clau"
+
+[demo]
+delete = "Suprimeix"
+export = "Exporta"
+width_prefix = "A"
+min_error = "Ha de ser com a mínim 2"
+full = "Completa"
+fit = "Ajusta"
+fill = "Omple"
+snap = "Ajust magnètic"
+live = "En directe"
+transform = "Transformació"
+position = "Posició"
+scale = "Escala"
+reset = "Restableix"
+previous = "Fotograma clau anterior"
+next = "Fotograma clau següent"
+animate = "Anima"
+plus_second = "+1 s"
+
+[type]
+display = "Portada 22"
+headline = "Titular 16"
+title = "Títol 14"
+body_strong = "Cos destacat 12"
+body = "Cos 12 · 0123456789 no es mou"
+small = "Petit 10 · indicació de drecera"
+
+[clip]
+video = "Vídeo"
+title = "Títol"
+still = "Imatge fixa"
+audio = "Àudio"
