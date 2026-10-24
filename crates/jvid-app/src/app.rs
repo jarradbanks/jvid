@@ -32,6 +32,7 @@ use eframe::egui_wgpu::wgpu;
 mod reel;
 #[cfg(test)]
 mod tests;
+pub(crate) mod tutorial;
 
 const DOCK_KEY: &str = "dock";
 const RECENT_KEY: &str = "recent";
@@ -56,6 +57,17 @@ impl Tab {
             Tab::Inspector => tr!("panel.inspector"),
             Tab::Timeline => tr!("panel.timeline"),
             Tab::RenderQueue => tr!("export.queue"),
+        }
+    }
+
+    /// The panel's [`tutorial::anchor`].
+    fn anchor(self) -> &'static str {
+        match self {
+            Tab::Media => "media",
+            Tab::Preview => "preview",
+            Tab::Inspector => "inspector",
+            Tab::Timeline => "timeline",
+            Tab::RenderQueue => "render_queue",
         }
     }
 }
@@ -134,6 +146,12 @@ pub struct App {
     prompts: Vec<Prompt>,
     /// The user chose to quit; the next close request goes through.
     closing: bool,
+    /// The lesson running, in its own sandbox project.
+    lesson: Option<tutorial::Run>,
+    /// The `tutorials_done` setting: ids of the lessons finished.
+    tutorials_done: Vec<String>,
+    /// Where `settings.toml` is saved; `None` saves nothing.
+    settings_path: Option<PathBuf>,
 }
 
 /// A question or error shown in an in-app [`Dialog`].
@@ -177,6 +195,8 @@ impl App {
         app.language = settings.language.clone();
         app.input_device = settings.input_device.clone();
         app.reduce_motion = settings.reduce_motion;
+        app.tutorials_done = settings.tutorials_done.clone();
+        app.settings_path = crate::settings_file::path();
         crate::preferences::reduce_motion(&cc.egui_ctx, settings.reduce_motion);
         if let Some(auto) = autosave::untitled().as_deref().and_then(autosave::newer) {
             app.prompts.push(Prompt::Restore { path: None, auto });
@@ -243,6 +263,9 @@ impl App {
             queue: Default::default(),
             prompts: Vec::new(),
             closing: false,
+            lesson: None,
+            tutorials_done: Vec::new(),
+            settings_path: None,
         }
     }
 
@@ -458,6 +481,7 @@ impl App {
     fn help_menu(&mut self, ui: &mut Ui, left: f32) {
         let button = menu_button(ui, tr!("menu.help"), left);
         egui::Popup::menu(&button).show(|ui| {
+            self.tutorials_menu(ui);
             if ui.button(tr!("menu.about")).clicked() {
                 self.prompts.push(Prompt::About);
             }
@@ -952,12 +976,18 @@ impl App {
         }
     }
 
+    /// `None` in a lesson, so the sandbox never overwrites the untitled project's autosave.
     fn autosave_target(&self) -> Option<PathBuf> {
+        if self.lesson.is_some() {
+            return None;
+        }
         self.path.clone().or_else(autosave::untitled)
     }
 
     /// Runs `then` now if the project is clean, else once the user saves or discards it.
     fn discard_then(&mut self, then: Then) {
+        // The question is about the user's project, not the lesson's.
+        self.end_lesson();
         if self.history.is_dirty() {
             self.prompts.push(Prompt::Discard(then));
         } else {
@@ -1088,6 +1118,9 @@ impl eframe::App for App {
         if let Some(e) = self.theme.poll(&ctx) {
             let until = ctx.input(|i| i.time) + TOAST_SECS;
             self.toasts.push((e, until));
+        }
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.end_lesson();
         }
         if ctx.input(|i| i.viewport().close_requested()) && !self.closing && self.history.is_dirty()
         {
@@ -1298,6 +1331,7 @@ impl eframe::App for App {
             }
         });
 
+        self.lesson_frame(&ctx);
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             drop_overlay(&ctx);
         }
@@ -1421,6 +1455,7 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
+        tutorial::anchor(ui.ctx(), tab.anchor(), ui.max_rect());
         let focused = self.focused == Some(*tab);
         if *tab == Tab::Media {
             self.bin.text_thumbs(self.preview, self.project);

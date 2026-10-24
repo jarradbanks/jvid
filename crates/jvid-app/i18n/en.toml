@@ -134,6 +134,7 @@ edit = "Edit"
 open_recent = "Open Recent"
 help = "Help"
 about = "About jvid…"
+tutorials = "Tutorials"
 
 # Exporting: the Export button, its dialog and the render queue.
 [export]
@@ -803,3 +804,26 @@ chroma_key_key_hue = "Key Hue"
 chroma_key_tolerance = "Tolerance"
 chroma_key_edge_softness = "Edge Softness"
 chroma_key_spill_suppression = "Spill Suppression"
+
+# The lesson step card and Help > Tutorials.
+[tutorial]
+# Help > Tutorials: a lesson's length; {count} is minutes.
+minutes = "{count} min"
+# The step card: {n} is the step shown, {total} the lesson's steps.
+step = "Step {n} of {total}"
+show_me = "Show Me"
+back = "Back"
+skip_step = "Skip Step"
+exit = "Exit"
+keep_project = "Keep Project"
+# The step card once the last step is done.
+complete = "Lesson complete."
+# Editor Basics, a short lesson that adds a title, places it, selects it and edits it.
+# Title, Media and Inspector are the names the editor shows for them.
+basics = "Editor Basics"
+basics_add = "Click Title to add a title to the project."
+basics_place = "Drag the title from the Media tab onto the timeline."
+basics_select = "Click the clip on the timeline to select it."
+basics_edit = "Change the title's text in the Inspector."
+# The text Show Me types into the title.
+basics_text = "My First Edit"

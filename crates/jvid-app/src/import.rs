@@ -47,6 +47,11 @@ impl Importer {
         })
     }
 
+    /// An importer with its own queue and the same probe, for another project.
+    pub fn sibling(&self) -> Self {
+        Self::new(Pool::with_default_threads(), self.probe)
+    }
+
     pub fn is_busy(&self) -> bool {
         !self.pending.is_empty()
     }
