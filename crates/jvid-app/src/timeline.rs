@@ -20,7 +20,7 @@ use egui::{
 use jvid_core::history::{Command, GestureKey, History};
 use jvid_core::model::{
     AssetId, Clip, ClipId, Edge, MediaAsset, ModelError, Placement, ProbeInfo, Project, Sequence,
-    SequenceId, StreamInfo, Track, TrackId, TrackKind,
+    SequenceId, StreamInfo, Track, TrackId, TrackKind, Transform,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_jobs::Priority;
@@ -80,6 +80,8 @@ pub struct Timeline {
     linked_selection: bool,
     /// Copied clips with the tracks they came from.
     clipboard: Vec<(TrackId, Clip)>,
+    /// Copy Grade's grade, from a video clip at the playhead.
+    grade: Option<Transform>,
     /// An edit from a keymap action, handed out by the next `show`.
     pending: Option<Command>,
     /// Where M went down; its release adds the marker.
@@ -177,6 +179,7 @@ impl Default for Timeline {
             selected: HashSet::new(),
             linked_selection: true,
             clipboard: Vec::new(),
+            grade: None,
             pending: None,
             marker_hold: None,
             seek_after: None,
@@ -452,8 +455,14 @@ impl Timeline {
                 }
             }
             "nest" => {}
+            "copy_grade" => {
+                let seq = project.sequence();
+                if let Some(c) = self.video_chosen(seq).first() {
+                    self.grade = Some(c.transform_at(self.playhead()));
+                }
+            }
             "copy" | "cut" | "paste" | "duplicate" | "delete" | "ripple_delete" | "link"
-            | "enable" | "reverse" | "freeze_frame" => {
+            | "enable" | "reverse" | "freeze_frame" | "paste_grade" => {
                 self.pending = self.clip_action(id, project.sequence());
             }
             _ => return false,
@@ -493,6 +502,13 @@ impl Timeline {
             in_point: i,
             out_point: o,
         })
+    }
+
+    /// The selected clips on video tracks, top track first.
+    fn video_chosen<'a>(&self, seq: &'a Sequence) -> Vec<&'a Clip> {
+        let video = seq.tracks().iter().filter(|t| t.kind == TrackKind::Video);
+        let clips = video.flat_map(|t| t.clips());
+        clips.filter(|c| self.selected.contains(&c.id)).collect()
     }
 
     /// The edit for a selection or clipboard action, if it changes anything.
@@ -552,6 +568,25 @@ impl Timeline {
                     reverse: !c.reverse,
                     ripple: false,
                 }
+            }
+            // Every chosen video clip gets the grade, static, in one undo step.
+            "paste_grade" => {
+                let g = self.grade.as_ref()?;
+                let video = self.video_chosen(seq);
+                (!video.is_empty()).then_some(())?;
+                Command::SetClipProps(
+                    video
+                        .iter()
+                        .map(|c| {
+                            let (mut x, mut keys) = (c.transform.clone(), c.keyframes.clone());
+                            x.paste_grade(g);
+                            for name in Transform::GRADE_KEYS {
+                                keys.remove(name);
+                            }
+                            (c.id, x, keys)
+                        })
+                        .collect(),
+                )
             }
             // The chosen clip under the playhead, video first.
             "freeze_frame" => {
@@ -2619,6 +2654,53 @@ mod tests {
         let c = seq(&h).clip(v).unwrap().1.clone();
         assert!(!c.reverse && c.freeze.is_none());
         assert_eq!(seq(&h).tracks()[0].clips().len(), 1);
+    }
+
+    #[test]
+    fn paste_grade_onto_several_clips_is_one_undo_step() {
+        use jvid_core::keyframe::{Easing, Keyframe, Value};
+        use std::collections::BTreeMap;
+        let mut h = History::new(project(6));
+        let mut t = Timeline::default();
+        t.sync(h.project());
+        let seq = |h: &History| h.project().sequence().clone();
+        let v: Vec<Clip> = seq(&h).tracks()[0].clips().to_vec();
+        let audio = seq(&h).tracks()[1].clips()[0].id;
+        // Grade the first clip; the second has an exposure key the paste must replace.
+        let mut graded = v[0].transform.clone();
+        graded.exposure = 1.0;
+        graded.wheels.lift.master = 0.4;
+        let key = Keyframe {
+            time: v[1].source_in,
+            value: Value::Scalar(-2.0),
+            easing: Easing::Linear,
+        };
+        let keyed = BTreeMap::from([("exposure".to_string(), vec![key])]);
+        h.apply(Command::SetClipProps(vec![
+            (v[0].id, graded.clone(), v[0].keyframes.clone()),
+            (v[1].id, v[1].transform.clone(), keyed),
+        ]))
+        .unwrap();
+        assert!(!t.can("copy_grade", &seq(&h)) && !t.can("paste_grade", &seq(&h)));
+        t.selected = HashSet::from([v[0].id]);
+        assert!(t.action("copy_grade", h.project()));
+        t.selected = HashSet::from([v[1].id, v[2].id, audio]);
+        assert!(t.can("paste_grade", &seq(&h)));
+        let before = h.project().clone();
+        let cmd = t.clip_action("paste_grade", &seq(&h)).unwrap();
+        h.apply(cmd).unwrap();
+        for id in [v[1].id, v[2].id] {
+            let c = seq(&h).clip(id).unwrap().1.clone();
+            assert_eq!(
+                (c.transform.exposure, c.transform.wheels),
+                (1.0, graded.wheels)
+            );
+            assert!(c.keyframes.is_empty(), "the pasted grade is static");
+        }
+        let a = seq(&h).clip(audio).unwrap().1.clone();
+        assert_eq!(a.transform.exposure, 0.0, "audio clips have no grade");
+        h.undo();
+        assert_eq!(h.project(), &before, "one undo puts every clip back");
     }
 
     #[test]

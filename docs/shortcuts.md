@@ -86,6 +86,8 @@ Work while the timeline has focus.
 | Enable/Disable | `Shift+E` |
 | Reverse | `Ctrl+R` |
 | Freeze Frame at Playhead | `Shift+F` |
+| Copy Grade | `Ctrl+Alt+C` |
+| Paste Grade | `Ctrl+Alt+V` |
 | Detect Silence… | `Ctrl+Alt+S` |
 | Nest | `Alt+N` |
 | Add Crossfade | `Ctrl+D` |

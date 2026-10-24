@@ -1560,6 +1560,155 @@ impl Widget for Slider<'_> {
     }
 }
 
+/// A colour wheel for grading: a puck in a recessed Field disc with a 1px Border edge and a
+/// muted hue rim, BT.709 Cb across and Cr up so it reads like the vectorscope. Drag or click to
+/// place the puck, double-click to centre it, arrow keys nudge it 2% of the radius. `value` is
+/// the puck in the unit disc, y up.
+#[must_use = "add it with `ui.add(..)`"]
+pub struct ColorWheel<'a> {
+    value: &'a mut [f64; 2],
+    diameter: f32,
+    name: &'a str,
+    state: State,
+}
+
+impl<'a> ColorWheel<'a> {
+    /// `name` is for screen readers.
+    pub fn new(value: &'a mut [f64; 2], diameter: f32, name: &'a str) -> Self {
+        Self {
+            value,
+            diameter,
+            name,
+            state: State::Live,
+        }
+    }
+
+    pub fn state(mut self, state: State) -> Self {
+        self.state = state;
+        self
+    }
+}
+
+/// Where in the unit disc (y up) a pointer `d` from the centre puts the puck, `travel` the
+/// radius it moves in.
+fn wheel_value(d: Vec2, travel: f32) -> [f64; 2] {
+    let v = vec2(d.x, -d.y) / travel;
+    let v = v / v.length().max(1.0);
+    [v.x as f64, v.y as f64]
+}
+
+/// The rim's hue at `angle` from the Cb axis towards Cr: a zero-luma shift off mid grey.
+fn wheel_hue(angle: f32) -> Color32 {
+    let (cr, cb) = (0.12 * angle.sin(), 0.12 * angle.cos());
+    let c = |v: f32| ((0.5 + v).clamp(0.0, 1.0) * 255.0) as u8;
+    Color32::from_rgb(
+        c(1.5748 * cr),
+        c(-0.1873 * cb - 0.4681 * cr),
+        c(1.8556 * cb),
+    )
+}
+
+impl Widget for ColorWheel<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let (rect, mut response) = allocate(
+            ui,
+            Vec2::splat(self.diameter),
+            self.state,
+            Sense::click_and_drag(),
+        );
+        let c = rect.center();
+        let r = rect.width() / 2.0;
+        // The puck stays inside the rim.
+        let travel = r - 6.0;
+        if response.double_clicked() {
+            *self.value = [0.0; 2];
+            response.mark_changed();
+        } else if (response.dragged() || response.clicked())
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            let v = wheel_value(p - c, travel);
+            if v != *self.value {
+                *self.value = v;
+                response.mark_changed();
+            }
+        }
+        if response.has_focus() {
+            let (x, y) = ui.input(|i| {
+                let k = |a, b| f64::from(i32::from(i.key_pressed(a)) - i32::from(i.key_pressed(b)));
+                (
+                    k(Key::ArrowRight, Key::ArrowLeft),
+                    k(Key::ArrowUp, Key::ArrowDown),
+                )
+            });
+            if x != 0.0 || y != 0.0 {
+                let [vx, vy] = *self.value;
+                let to = vec2((vx + 0.02 * x) as f32, -(vy + 0.02 * y) as f32);
+                *self.value = wheel_value(to, 1.0);
+                response.mark_changed();
+            }
+        }
+        response.widget_info(|| {
+            WidgetInfo::labeled(WidgetType::Slider, self.state != State::Disabled, self.name)
+        });
+        let l = look(&response, self.state);
+        let painter = ui.painter();
+        painter.circle_filled(c, r, color::field());
+        // The hue rim, faded when disabled.
+        let rim = r - 2.5;
+        let n = 48;
+        let at = |i: usize| {
+            let a = i as f32 / n as f32 * std::f32::consts::TAU;
+            (a, c + vec2(a.cos(), -a.sin()) * rim)
+        };
+        let fade = if l.disabled { 0.3 } else { 0.8 };
+        for i in 0..n {
+            let ((a, p0), (_, p1)) = (at(i), at(i + 1));
+            // Opaque, so the segments' overlaps don't bead.
+            let hue =
+                color::field().lerp_to_gamma(wheel_hue(a + std::f32::consts::PI / n as f32), fade);
+            painter.line_segment([p0, p1], Stroke::new(2.0, hue));
+        }
+        let edge = hover_fade(
+            ui,
+            response.id,
+            l.hover || response.dragged(),
+            color::border(),
+            color::border_strong(),
+        );
+        painter.circle_stroke(c, r - 0.5, hairline(ui.ctx(), edge));
+        // Centre tick.
+        let tick = hairline(ui.ctx(), color::border_strong());
+        painter.hline(c.x - 3.0..=c.x + 3.0, c.y, tick);
+        painter.vline(c.x, c.y - 3.0..=c.y + 3.0, tick);
+        let [vx, vy] = *self.value;
+        let puck = c + vec2(vx as f32, -vy as f32) * travel;
+        if *self.value != [0.0; 2] {
+            painter.line_segment([c, puck], hairline(ui.ctx(), color::ink_3()));
+        }
+        let ink = if l.disabled {
+            color::ink_4()
+        } else {
+            let lit = l.hover || l.pressed || response.dragged();
+            hover_fade(
+                ui,
+                response.id.with("puck"),
+                lit,
+                color::ink_2(),
+                color::ink(),
+            )
+        };
+        painter.circle(puck, 4.0, ink, Stroke::new(1.0, color::field()));
+        if l.focus {
+            painter.circle_stroke(
+                c,
+                r + 2.0,
+                Stroke::new(2.0, color::light_blue().gamma_multiply(0.6)),
+            );
+        }
+        response
+    }
+}
+
 /// A colour: a 24px swatch with a Border Strong edge and a checkerboard behind it only when
 /// it isn't opaque, then its hex in a field, with the alpha after it when that fits, or None
 /// once fully transparent. Clicking either opens egui's picker under it. Takes the width left
@@ -1854,8 +2003,21 @@ impl Widget for Timecode {
 
 #[cfg(test)]
 mod tests {
-    use super::{RectAlign, menu_place, timecode};
-    use egui::{Rect, pos2};
+    use super::{RectAlign, menu_place, timecode, wheel_hue, wheel_value};
+    use egui::{Rect, pos2, vec2};
+
+    #[test]
+    fn wheel_puck_follows_the_pointer_inside_the_disc_with_y_up() {
+        assert_eq!(wheel_value(vec2(10.0, -10.0), 20.0), [0.5, 0.5]);
+        // Past the rim it stays on it, in the same direction.
+        let [x, y] = wheel_value(vec2(0.0, 80.0), 20.0);
+        assert!(x.abs() < 1e-6 && (y + 1.0).abs() < 1e-6);
+        // Up is Cr, towards red; right is Cb, towards blue.
+        let up = wheel_hue(std::f32::consts::FRAC_PI_2);
+        assert!(up.r() > up.b());
+        let right = wheel_hue(0.0);
+        assert!(right.b() > right.r());
+    }
 
     #[test]
     fn menus_open_toward_the_room_and_stop_at_the_bounds() {

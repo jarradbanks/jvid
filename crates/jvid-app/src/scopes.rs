@@ -25,6 +25,10 @@ const TARGETS: [[u8; 3]; 6] = [
     [255, 0, 255],
 ];
 
+/// The skin-tone line's angle from the Cb axis towards Cr, in radians: the NTSC I axis (123° on
+/// a U/V scope) on this BT.709 grid, between red and yellow, where faces of every complexion fall.
+const SKIN: f32 = 130.5 * std::f32::consts::PI / 180.0;
+
 /// The scopes' textures live in egui memory under this, so the bin needn't hold them.
 pub(crate) fn id() -> egui::Id {
     egui::Id::new("scopes")
@@ -183,6 +187,8 @@ pub fn show(ui: &mut Ui) {
     p.circle_stroke(c, side / 2.0 * 0.5 / RANGE, line);
     p.hline(vector_r.x_range(), c.y, line);
     p.vline(c.x, vector_r.y_range(), line);
+    let skin = vec2(SKIN.cos(), -SKIN.sin()) * side / 2.0;
+    p.line_segment([c, c + skin], theme::hairline(ui.ctx(), color::ink_3()));
     let cell = side / VECTOR as f32;
     for rgb in TARGETS {
         let (x, y) = vector_at(rgb);
@@ -229,6 +235,26 @@ mod tests {
         // Stopping between throttled copies catches up on the frame it stopped on.
         assert!(!s.due(3, 0.03, true, false));
         assert!(s.due(3, 0.04, false, false));
+    }
+
+    #[test]
+    fn skin_tones_land_on_the_skin_line() {
+        // Light to dark complexions.
+        for rgb in [
+            [241, 194, 167],
+            [224, 172, 140],
+            [198, 134, 66],
+            [141, 85, 36],
+        ] {
+            let (x, y) = vector_at(rgb);
+            let mid = (VECTOR / 2) as f32;
+            let angle = (mid - y as f32).atan2(x as f32 - mid);
+            assert!(
+                (angle - SKIN).abs() < 15f32.to_radians(),
+                "{rgb:?} at {}°",
+                angle.to_degrees()
+            );
+        }
     }
 
     #[test]

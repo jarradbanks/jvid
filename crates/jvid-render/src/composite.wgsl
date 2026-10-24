@@ -16,6 +16,8 @@ struct Params {
     // grade2.z is the LUT's intensity (0 without one) and grade2.w its size.
     grade: vec4<f32>,
     grade2: vec4<f32>,
+    // Lift, gamma, gain and offset per channel (jvid_core::model::Wheel::rgb) in xyz.
+    wheels: array<vec4<f32>, 4>,
 }
 
 @group(0) @binding(0) var image: texture_2d<f32>;
@@ -61,6 +63,11 @@ fn adjusted(c: vec3<f32>) -> vec3<f32> {
     let luma = dot(l, vec3<f32>(0.2126, 0.7152, 0.0722));
     l = max(mix(vec3<f32>(luma), l, 1.0 + g.z), vec3<f32>(0.0));
     l = 0.18 * pow(l / 0.18, vec3<f32>(1.0 + g.y));
+    // Offset shifts everything, lift raises black and pins white, gain scales, gamma bends mids.
+    let w = params.wheels;
+    l += 0.1 * w[3].xyz;
+    l = max(l + 0.25 * w[0].xyz * (1.0 - l), vec3<f32>(0.0));
+    l = pow(l * exp2(w[2].xyz), exp2(-w[1].xyz));
     return to_srgb(clamp(l, vec3<f32>(0.0), vec3<f32>(1.0)));
 }
 

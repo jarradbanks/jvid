@@ -7,14 +7,14 @@ use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value};
 use jvid_core::model::{
     AudioFx, Blend, Clip, ClipId, Compressor, Effect, Equalizer, Mask, MaskMode, MaskShape,
-    MediaAsset, Project, Text, TrackKind, Transform,
+    MediaAsset, Project, Text, TrackKind, Transform, Wheels,
 };
 use jvid_core::time::Time;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{
-    Button, Checkbox, ColorField, DragField, Dropdown, KeyButton, Keyed, MenuRow, SectionHeader,
-    Segmented, Slider, TextInput, fit_text, paint_fit,
+    Button, Checkbox, ColorField, ColorWheel, DragField, Dropdown, KeyButton, Keyed, MenuRow,
+    SectionHeader, Segmented, Slider, TextInput, fit_text, paint_fit,
 };
 
 use crate::i18n::{CATALOG, Label, tr, verbatim};
@@ -239,6 +239,13 @@ fn get(x: &Transform, name: &str) -> Value {
             }
         };
     }
+    let mut wheels = x.wheels;
+    if let Some((w, master)) = wheels.param(name) {
+        return match master {
+            true => Value::Scalar(w.master),
+            false => Value::Vec2(w.color),
+        };
+    }
     let crop = |i: usize| Value::Scalar(x.crop[i]);
     match name {
         "position" => Value::Vec2(x.position),
@@ -283,6 +290,15 @@ fn set(x: &mut Transform, name: &str, v: Value) {
             }
             _ => {}
         }
+        return;
+    }
+    if let Some((w, master)) = x.wheels.param(name) {
+        match v {
+            Value::Scalar(v) if master => w.master = v,
+            Value::Vec2(v) if !master => w.color = v,
+            _ => {}
+        }
+        *w = w.clamped();
         return;
     }
     match (name, v) {
@@ -717,6 +733,12 @@ pub fn show(
             edit = Some(e);
         }
     }
+    if pane == Pane::Video
+        && !clips.is_empty()
+        && let Some(e) = wheels_rows(ui, clips, t, &mut index, &mut seek)
+    {
+        edit = Some(e);
+    }
     if pane == Pane::Effects
         && let Some(e) = effects_rows(ui, clips, t, &mut index, &mut seek)
     {
@@ -755,6 +777,125 @@ pub fn show(
         edit = Some(e);
     }
     (edit, seek)
+}
+
+/// The Color Wheels section: Lift, Gamma, Gain and Offset, each a wheel beside its master.
+fn wheels_rows(
+    ui: &mut Ui,
+    clips: &[&Clip],
+    t: Time,
+    index: &mut u64,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
+    let names = Wheels::KEYS;
+    let changed =
+        any_animated(clips, &names) || clips.iter().any(|c| !c.transform_at(t).wheels.is_default());
+    let (open, head) = section(ui, "wheels", Some(changed));
+    let mut edit = match head {
+        Some(Head::Reset) => Some((reset(clips, &names), None)),
+        Some(Head::Key) => Some((key_all(clips, &names, t), None)),
+        None => None,
+    };
+    for (i, name) in Wheels::NAMES.into_iter().enumerate() {
+        *index += 1;
+        if open && let Some(e) = wheel_row(ui, clips, [name, names[2 * i + 1]], t, *index, seek) {
+            edit = Some(e);
+        }
+    }
+    edit
+}
+
+/// One wheel's row: its colour wheel, then its master as a field and slider, with reset and a
+/// diamond covering both. Shows the first clip's values; an edit sets every clip to them.
+fn wheel_row(
+    ui: &mut Ui,
+    clips: &[&Clip],
+    names: [&str; 2],
+    t: Time,
+    index: u64,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
+    let [wheel, master] = names;
+    let label = caption(wheel);
+    let anim = any_animated(clips, &names);
+    let keyed = match () {
+        _ if !anim => Keyed::Static,
+        _ if all_keyed(clips, &names, t) => Keyed::Here,
+        _ => Keyed::Animated,
+    };
+    let key = match keyed {
+        Keyed::Static => tr!("inspector.animate", name = label),
+        _ => tr!("inspector.key_here").to_owned(),
+    };
+    let off = clips.iter().any(|c| {
+        value(c, wheel, t) != Value::Vec2([0.0; 2]) || value(c, master, t) != Value::Scalar(0.0)
+    });
+    let tools = Tools {
+        reset: (anim || off).then_some(tr!("inspector.reset")),
+        key: Some((keyed, &key)),
+    };
+    let mut edit = None;
+    let (_, c) = prop_rows(ui, label, tools, 2, |ui| {
+        // Each drag is its own undo step, as in `row`.
+        let drags = ui.id().with("inspector drags");
+        let mut put = |ui: &Ui, r: &egui::Response, cmd: Command, slot: u64| {
+            if r.drag_started() {
+                ui.data_mut(|d| *d.get_temp_mut_or(drags, 0u64) += 1);
+            }
+            let drag = ui.data(|d| d.get_temp(drags).unwrap_or(0u64));
+            let key = GESTURE ^ (index << 4 | slot) ^ (drag << 16);
+            edit = Some((cmd, r.dragged().then_some(key)));
+        };
+        let h = ui.available_height();
+        let mut color = match value(clips[0], wheel, t) {
+            Value::Vec2(v) => v,
+            _ => [0.0; 2],
+        };
+        let r = ui.add(ColorWheel::new(&mut color, h, label));
+        if r.changed() {
+            let v = Value::Vec2(color);
+            put(
+                ui,
+                &r,
+                rewrite(clips, |c, x, keys| self::put(c, x, keys, wheel, t, v)),
+                0,
+            );
+        }
+        let values: Vec<f64> = clips
+            .iter()
+            .map(|c| fields(value(c, master, t))[0])
+            .collect();
+        let mixed = values.iter().any(|v| *v != values[0]);
+        let mut shown = values[0] * 100.0;
+        // Beside the wheel, the field over the slider; the row's wrap layout would push them
+        // to the next line.
+        let max = ui.max_rect();
+        let rest =
+            Rect::from_x_y_ranges(r.rect.right() + space::S4..=max.right(), r.rect.y_range());
+        let ui = &mut ui.new_child(
+            UiBuilder::new()
+                .max_rect(rest)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        ui.spacing_mut().item_spacing.y = space::S4;
+        let f = DragField::new(&mut shown)
+            .decimals(0)
+            .mixed(mixed)
+            .range(-100.0..=100.0)
+            .width(rest.width());
+        let field = ui.add(f);
+        let slider = ui.add(Slider::new(&mut shown, -100.0..=100.0, label).centred(true));
+        for (r, slot) in [(field, 1), (slider, 2)] {
+            if r.changed() {
+                let v = shown / 100.0;
+                put(ui, &r, set_field(clips, master, 0, |_| v, t), slot);
+            }
+        }
+    });
+    if c.reset {
+        edit = Some((reset(clips, &names), None));
+    }
+    key_clicks(clips, &names, c, t, index, seek).or(edit)
 }
 
 /// Blend mode names, in [`Blend::ALL`] order.
