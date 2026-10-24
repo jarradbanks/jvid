@@ -251,6 +251,7 @@ impl MediaBin {
                 0 => self.media(ui, project, importing, missing, &mut out),
                 1 => self.effects_tab(ui, &mut out),
                 2 => {
+                    crate::app::tutorial::anchor(ui.ctx(), "bin.titles", ui.max_rect());
                     if let Some(dragged) = text_presets(ui, &self.text_tiles, &mut out) {
                         self.new_text = Some((project.assets().len(), dragged));
                     }
@@ -886,7 +887,7 @@ fn letterbox(ui: &Ui, rect: Rect, tex: &TextureHandle) {
 
 /// The Text tab's presets in `Text::presets` order: name, one line on what it makes, and
 /// its style with the text a new one starts with.
-fn presets() -> [(&'static str, &'static str, Text); 3] {
+pub(crate) fn presets() -> [(&'static str, &'static str, Text); 3] {
     let shown = [
         (
             tr!("bin.title"),

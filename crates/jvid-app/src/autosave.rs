@@ -94,6 +94,19 @@ impl Default for Autosave {
 }
 
 impl Autosave {
+    /// Writes `history` to `target` now if it has unsaved edits, before autosave stops
+    /// watching it.
+    pub fn flush(&mut self, history: &History, target: &Path) {
+        if !history.is_dirty() {
+            return;
+        }
+        let _w = self.writing.lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(e) = write(history.project(), target) {
+            tracing::warn!("autosave to {} failed: {e}", target.display());
+        }
+        self.pending_since = None;
+    }
+
     /// Call every frame with the open project's autosave target; `now` in seconds. Returns how
     /// long until the next autosave is due, for a repaint.
     pub fn tick(&mut self, history: &History, target: Option<&Path>, now: f64) -> Option<Duration> {

@@ -32,6 +32,7 @@ use eframe::egui_wgpu::wgpu;
 mod reel;
 #[cfg(test)]
 mod tests;
+pub(crate) mod tutorial;
 
 const DOCK_KEY: &str = "dock";
 const RECENT_KEY: &str = "recent";
@@ -56,6 +57,17 @@ impl Tab {
             Tab::Inspector => tr!("panel.inspector"),
             Tab::Timeline => tr!("panel.timeline"),
             Tab::RenderQueue => tr!("export.queue"),
+        }
+    }
+
+    /// The panel's [`tutorial::anchor`].
+    fn anchor(self) -> &'static str {
+        match self {
+            Tab::Media => "media",
+            Tab::Preview => "preview",
+            Tab::Inspector => "inspector",
+            Tab::Timeline => "timeline",
+            Tab::RenderQueue => "render_queue",
         }
     }
 }
@@ -134,6 +146,14 @@ pub struct App {
     prompts: Vec<Prompt>,
     /// The user chose to quit; the next close request goes through.
     closing: bool,
+    /// The lesson running, in its own sandbox project.
+    lesson: Option<tutorial::Run>,
+    /// The `tutorials_done` setting: ids of the lessons finished.
+    tutorials_done: Vec<String>,
+    /// Where `settings.toml` is saved; `None` saves nothing.
+    settings_path: Option<PathBuf>,
+    /// Where the untitled project autosaves; see [`autosave::untitled`].
+    untitled: Option<PathBuf>,
 }
 
 /// A question or error shown in an in-app [`Dialog`].
@@ -177,8 +197,11 @@ impl App {
         app.language = settings.language.clone();
         app.input_device = settings.input_device.clone();
         app.reduce_motion = settings.reduce_motion;
+        app.tutorials_done = settings.tutorials_done.clone();
+        app.settings_path = crate::settings_file::path();
+        app.untitled = autosave::untitled();
         crate::preferences::reduce_motion(&cc.egui_ctx, settings.reduce_motion);
-        if let Some(auto) = autosave::untitled().as_deref().and_then(autosave::newer) {
+        if let Some(auto) = app.untitled.as_deref().and_then(autosave::newer) {
             app.prompts.push(Prompt::Restore { path: None, auto });
         }
         app
@@ -243,6 +266,10 @@ impl App {
             queue: Default::default(),
             prompts: Vec::new(),
             closing: false,
+            lesson: None,
+            tutorials_done: Vec::new(),
+            settings_path: None,
+            untitled: None,
         }
     }
 
@@ -458,6 +485,7 @@ impl App {
     fn help_menu(&mut self, ui: &mut Ui, left: f32) {
         let button = menu_button(ui, tr!("menu.help"), left);
         egui::Popup::menu(&button).show(|ui| {
+            self.tutorials_menu(ui);
             if ui.button(tr!("menu.about")).clicked() {
                 self.prompts.push(Prompt::About);
             }
@@ -467,6 +495,12 @@ impl App {
     fn file_action(&mut self, action: FileAction) {
         match action {
             FileAction::New => self.discard_then(Then::New),
+            // In a lesson the dialog comes first, so cancelling it leaves the lesson running.
+            FileAction::Open if self.lesson.is_some() => {
+                if let Some(path) = project_dialog().pick_file() {
+                    self.discard_then(Then::Recent(path));
+                }
+            }
             FileAction::Open => self.discard_then(Then::Open),
             FileAction::Save => {
                 self.save(false);
@@ -497,13 +531,20 @@ impl App {
                 p
             }
         };
+        self.save_to(path)
+    }
+
+    /// Saves the project to `path`, which becomes its path. Returns false if the save failed.
+    fn save_to(&mut self, path: PathBuf) -> bool {
         match project_file::save(self.history.project(), &path) {
             Ok(()) => {
                 self.history.mark_saved();
+                // A lesson's sandbox is untitled too, but the untitled autosave is the user's.
                 if self.path.is_none()
-                    && let Some(p) = autosave::untitled()
+                    && self.lesson.is_none()
+                    && let Some(p) = &self.untitled
                 {
-                    autosave::clear(&p);
+                    autosave::clear(p);
                 }
                 welcome::remember(
                     &mut self.welcome.recent,
@@ -952,12 +993,18 @@ impl App {
         }
     }
 
+    /// `None` in a lesson, so the sandbox never overwrites the untitled project's autosave.
     fn autosave_target(&self) -> Option<PathBuf> {
-        self.path.clone().or_else(autosave::untitled)
+        if self.lesson.is_some() {
+            return None;
+        }
+        self.path.clone().or_else(|| self.untitled.clone())
     }
 
     /// Runs `then` now if the project is clean, else once the user saves or discards it.
     fn discard_then(&mut self, then: Then) {
+        // The question is about the user's project, not the lesson's.
+        self.end_lesson();
         if self.history.is_dirty() {
             self.prompts.push(Prompt::Discard(then));
         } else {
@@ -1073,8 +1120,8 @@ impl App {
                 Err(e) => self.error(tr!("app.restore_failed", path = auto.display(), error = e)),
             },
             (Prompt::Restore { path: None, .. }, _) => {
-                if let Some(p) = autosave::untitled() {
-                    autosave::clear(&p);
+                if let Some(p) = &self.untitled {
+                    autosave::clear(p);
                 }
             }
             _ => {}
@@ -1089,6 +1136,10 @@ impl eframe::App for App {
             let until = ctx.input(|i| i.time) + TOAST_SECS;
             self.toasts.push((e, until));
         }
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.end_lesson();
+        }
+        self.lesson_keys(&ctx);
         if ctx.input(|i| i.viewport().close_requested()) && !self.closing && self.history.is_dirty()
         {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
@@ -1298,6 +1349,7 @@ impl eframe::App for App {
             }
         });
 
+        self.lesson_frame(&ctx);
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             drop_overlay(&ctx);
         }
@@ -1421,6 +1473,7 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
+        tutorial::anchor(ui.ctx(), tab.anchor(), ui.max_rect());
         let focused = self.focused == Some(*tab);
         if *tab == Tab::Media {
             self.bin.text_thumbs(self.preview, self.project);

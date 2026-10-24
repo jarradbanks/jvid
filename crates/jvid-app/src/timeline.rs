@@ -807,6 +807,13 @@ impl Timeline {
         t
     }
 
+    /// An empty timeline on the same caches, for another project.
+    pub fn sibling(&self) -> Self {
+        let mut t = Self::default();
+        t.media.caches = self.media.caches.clone();
+        t
+    }
+
     /// No filmstrip, waveform or thumbnail job is queued or running on the shared pool.
     #[cfg(test)]
     pub fn jobs_idle(&self) -> bool {

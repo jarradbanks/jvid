@@ -42,6 +42,8 @@ pub struct Settings {
     pub input_device: String,
     /// Turns the UI's animations off, such as hover fades and the timeline's New Track slot.
     pub reduce_motion: bool,
+    /// Ids of the lessons finished in Help > Tutorials.
+    pub tutorials_done: Vec<String>,
 }
 
 impl Default for Settings {
@@ -58,6 +60,7 @@ impl Default for Settings {
             language: "system".into(),
             input_device: String::new(),
             reduce_motion: false,
+            tutorials_done: Vec::new(),
         }
     }
 }
@@ -97,6 +100,7 @@ impl Settings {
                 "language" => set(&mut out.language, &key, value, |v: &String| !v.is_empty()),
                 "input_device" => set(&mut out.input_device, &key, value, |_| true),
                 "reduce_motion" => set(&mut out.reduce_motion, &key, value, |_| true),
+                "tutorials_done" => set(&mut out.tutorials_done, &key, value, |_| true),
                 _ => tracing::warn!("settings: ignoring unknown key `{key}`"),
             }
         }
@@ -195,6 +199,7 @@ mod tests {
             language: "es".into(),
             input_device: "USB Mic".into(),
             reduce_motion: true,
+            tutorials_done: vec!["basics".into()],
         };
         assert_eq!(Settings::from_toml(&s.to_toml()).unwrap(), s);
         let d = Settings::default();
