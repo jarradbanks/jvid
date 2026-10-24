@@ -34,6 +34,8 @@ pages' wording.
 | Roll | rotazione | Roll | modifica con rotazione | Premiere's term; jvid only names it in docs. |
 | Slip | scorrimento | Slip | scorrimento | Premiere's Strumento Scorrimento; Kdenlive says scivolamento. |
 | Split | dividere | taglio (blade) | aggiungi modifica | Dividi alla testina says what happens; Premiere's Aggiungi modifica reads like a different command. |
+| Edit point | punto di montaggio | edit point | punto di modifica | One phrase for "edit" in every action (Vai al punto di montaggio precedente, Rifila con increspatura il punto di montaggio precedente fino alla testina); taglio stays the plain cut between two clips. |
+| Nest | nidificare | compound clip | nidifica | Premiere's Nidifica and Nidifica sequenza sorgente; a nested sequence is a sequenza nidificata. |
 | Snapping | aggancio | aggancio | Aggancia nella timeline | Premiere's toggle; Kdenlive's bordi magnetici is the outlier. |
 | Link | collegare | collegare | collega/scollega | Linked Selection is Selezione collegata. |
 | Lock | bloccare | bloccare | blocca traccia | |
@@ -90,3 +92,12 @@ pages' wording.
   Rapporto d'aspetto, Sottotitoli, Forma d'onda, Inserisci, Sovrascrivi, Estrai.
 - Not confirmed against a live page (Adobe's Italian shortcut list refuses scripted fetches):
   Premiere's Elimina con increspatura, Strumento Scorrimento and Shuttle a sinistra/destra.
+  Rechecked by web search during review (October 2026): still no Adobe page for Elimina con
+  increspatura, the playback resolution Intera or the easing labels (Premiere's Andamento in
+  entrata/uscita, if that is its wording, stays unconfirmed, so jvid keeps Entrata/Uscita
+  graduale). Strumento taglierina matches Italian Premiere tutorials. Adobe's Italian overlay
+  help says aree di sicurezza, so Safe Areas stays Aree di sicurezza.
+- Nidifica: Adobe's Italian [Modificare sequenze caricate nel monitor
+  Sorgente](https://helpx.adobe.com/it/premiere-pro/using/edit-sequences-loaded-source-monitor.html)
+  (Nidifica sequenza sorgente). Attiva/Disattiva animazione: Italian Premiere tutorials, which
+  is why Stop Animating, which clears every keyframe, reads Disattiva animazione.
