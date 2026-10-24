@@ -1400,18 +1400,19 @@ I("transport-align", "Transport bar: vertical centring check", None, ["ui"], "S"
   ac=["The layout check passes and fails if an item is moved 2 px",
       "The bar looks centred at 100% and 150% UI scale"])
 
-I("export-polish", "Export dialog and queue menu visual upgrade", None, ["ui", "export"], "M", labels=["later"],
-  summary="The Export button's queue menu is a bare list (file name, Done, Reveal, then New Export, Cancel All and Clear Finished as text buttons), and the Export dialog needs the same impeccable polish.",
+I("export-polish", "Export dialog and Render Queue visual upgrade", None, ["ui", "export"], "L", labels=["later"],
+  summary="The Export button's queue menu is a bare list (file name, Done, Reveal, then New Export, Cancel All and Clear Finished as text buttons), and the Export dialog needs the same impeccable polish. Owner picked queue option C and dialog option A of the v4 export mockup.",
   scope=[
-      "HTML mockup first at `docs/prototypes/v3/export.html`, then build to match",
-      "Queue rows: file name, preset and duration or size as a second line, a progress bar with percent and time left while running, a status chip with icon (Waiting, Rendering, Done, Failed, Cancelled), and Reveal and Cancel as icon buttons in fixed columns",
-      "An empty state; the footer with New Export as the primary action and the rest secondary, disabled states clearly disabled",
-      "An Export dialog pass for hierarchy, spacing and grouping with the impeccable skill, with no behaviour change",
+      "Queue: option C of `docs/prototypes/v4/export.html`. The Export button menu becomes a 300px summary (overall progress, the last few results, New Export) with Show Render Queue, which opens a dockable Render Queue tab beside Timeline",
+      "Render Queue panel rows: file name, preset and duration or size, a progress bar with percent and time left while running, a status chip with icon (Waiting, Rendering, Done, Failed, Cancelled), and Reveal and Cancel as icon buttons in fixed columns; Cancel All and Clear Finished in its header; an empty state",
+      "Export dialog: option A of the same page (Format, Range and Output groups in one column, the Inspector row standard, segmented controls for Range, Subtitles and Lossless, warnings under their row, Estimated Size beside Export, the body scrolls and the footer stays put)",
+      "Follow the page's States and Decisions sections (Job stores preset name, duration and file size; time left from elapsed time and progress, shown from 5%; a neutral progress bar)",
   ],
-  ac=["A running export shows live progress and time left in the menu; a failed one shows its error on hover",
+  ac=["A running export shows overall progress in the menu and live progress and time left in the Render Queue panel; a failed one shows its error on hover",
+      "The Render Queue tab docks, closes and reopens from Show Render Queue, and its layout persists",
       "Rows don't shift as jobs change state (kittest snapshot of each state)",
-      "The Export dialog matches the mockup"],
-  refs=[f"[DESIGN.md]({DESIGN})"])
+      "The Export dialog matches option A at 960x600 (kittest snapshot)"],
+  refs=[f"[Export mockup: queue C, dialog A]({PROTO}/v4/export.html)", f"[DESIGN.md]({DESIGN})"])
 
 I("drop-new-track-above", "Drop above the top track to create a track there", None, ["ui", "timeline"], "S", labels=["later"],
   summary="Making a new track for a title or solid means dragging it into the empty space below every track, though it usually belongs on top. Open a slot above the top track while dragging there.",
