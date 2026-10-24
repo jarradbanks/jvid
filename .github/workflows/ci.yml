@@ -8,15 +8,19 @@ on:
       - 'docs/i18n/**'
   push:
     branches: [main]
-    # Roadmap, issue-spec and docs-only commits build nothing; skip all three OSes for them.
+    # Roadmap, issue-spec and docs-only commits build nothing; skip them.
     paths-ignore:
       - 'docs/**'
       - 'scripts/roadmap/**'
       - '*.md'
+  # Windows and macOS run nightly (and on demand) instead of on every merge.
+  schedule:
+    - cron: '0 17 * * *'
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Per event, so a merge to main never cancels the nightly run.
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -29,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         # Private repo: macOS bills 10x and Windows 2x, so PRs run Linux only; main and manual runs get all three.
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') }}
+        os: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
