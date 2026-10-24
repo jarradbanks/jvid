@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Swedish. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Standard"
+hover = "Hovring"
+focus = "Synligt fokus"
+pressed = "Nedtryckt"
+disabled = "Inaktiverad"
+loading_error = "Läser in / fel"
+
+[panel]
+widgets = "Komponenter"
+effects = "Effekter"
+text = "Text"
+add = "Lägg till"
+more = "Mer"
+inspector = "Inspektör"
+source = "Källa"
+program = "Program"
+audio = "Ljud"
+markers = "Markörer"
+history = "Historik"
+captions = "Bildtexter"
+overflow = "Flikar smalare än 64 px flyttas till menyn bakom vinkelpilen."
+type_and_colour = "Text och färg"
+
+[row]
+primary = "Primär"
+secondary = "Sekundär"
+ghost = "Spöke"
+destructive = "Destruktiv"
+icon = "Ikon"
+input = "Inmatning"
+search = "Sök"
+numeric = "Numerisk"
+dropdown = "Listruta"
+colour = "Färg"
+segmented = "Segmenterad"
+checkbox = "Kryssruta"
+section = "Sektion"
+slider = "Skjutreglage"
+keyframe = "Nyckelbildruta"
+
+[demo]
+delete = "Ta bort"
+export = "Exportera"
+width_prefix = "B"
+min_error = "Måste vara minst 2"
+full = "Full"
+fit = "Anpassa"
+fill = "Fyll"
+snap = "Fäst"
+live = "Live"
+transform = "Transformering"
+position = "Position"
+scale = "Skala"
+reset = "Återställ"
+previous = "Föregående nyckelbildruta"
+next = "Nästa nyckelbildruta"
+animate = "Animera"
+plus_second = "+1 s"
+
+[type]
+display = "Display 22"
+headline = "Rubrik 16"
+title = "Titel 14"
+body_strong = "Brödtext fet 12"
+body = "Brödtext 12 · 0123456789 står still"
+small = "Liten 10 · kortkommandotips"
+
+[clip]
+video = "Video"
+title = "Titel"
+still = "Stillbild"
+audio = "Ljud"
