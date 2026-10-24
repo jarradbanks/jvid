@@ -550,13 +550,11 @@ impl MediaBin {
         out: &mut BinResponse,
     ) {
         let rect = Rect::from_min_size(min, vec2(size::CONTROL, size::CONTROL));
-        // A stable id keeps keyboard focus on the button across frames.
+        // Over the tile, so the grid's next tile doesn't move up to the button. A stable id
+        // keeps keyboard focus on it across frames.
         let b = ui
-            .scope_builder(
-                UiBuilder::new().max_rect(rect).id_salt(("remove", a.id)),
-                |ui| ui.add(Button::icon(icon::X, tr!("bin.remove"))),
-            )
-            .inner;
+            .new_child(UiBuilder::new().max_rect(rect).id_salt(("remove", a.id)))
+            .add(Button::icon(icon::X, tr!("bin.remove")));
         if b.has_focus() {
             self.remove_focus = Some(a.id);
         } else if self.remove_focus == Some(a.id) {
@@ -583,7 +581,7 @@ impl MediaBin {
                 vec2(w, size::CONTROL),
             );
             self.rename_field = Some(field);
-            let r = ui.put(field, TextInput::new(text).width(w));
+            let r = put_over(ui, field, TextInput::new(text).width(w));
             r.request_focus();
             let pos = pos2(
                 field.right() + space::S4,
@@ -1547,6 +1545,53 @@ mod tests {
         }
         assert!(matches!(thumbs.strips.get(&clip), Some(Some(v)) if v.len() == 10));
         assert_eq!(grabs.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn hovering_a_tile_leaves_the_next_one_where_it_was() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut history = jvid_core::history::History::new(Project::default());
+        let probe = |secs| ProbeInfo {
+            duration: Time(secs * FLICKS_PER_SECOND),
+            width: Some(1920),
+            height: Some(1080),
+            ..Default::default()
+        };
+        let items = vec![
+            ("/m/a.mkv".into(), probe(10)),
+            ("/m/b.mkv".into(), probe(20)),
+        ];
+        history.apply(Command::Import(items)).unwrap();
+        let mut fresh = true;
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([320.0, 300.0])
+            .wgpu()
+            .build_ui_state(
+                move |ui, (bin, project): &mut (MediaBin, Project)| {
+                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        bin.show(ui, project, false, false, &HashSet::new());
+                    }
+                },
+                (MediaBin::default(), history.project().clone()),
+            );
+        h.run();
+        // The second tile's left edge, below the remove button and above the badges.
+        let second = |h: &mut egui_kittest::Harness<'_, (MediaBin, Project)>| {
+            let img = h.render().expect("render");
+            let y = 125;
+            let fill = |x| img.get_pixel(x, y).0[..3] == color::raised().to_array()[..3];
+            let first_end = (0..320).skip_while(|&x| !fill(x)).find(|&x| !fill(x));
+            (first_end.unwrap()..320).find(|&x| fill(x))
+        };
+        let rest = second(&mut h);
+        // On the first tile's name, clear of the skim line across its thumbnail.
+        h.hover_at(pos2(60.0, 180.0));
+        h.run();
+        use egui_kittest::kittest::Queryable;
+        assert!(h.query_by_label(tr!("bin.remove")).is_some());
+        assert_eq!(second(&mut h), rest);
     }
 
     /// The reported 0:00 WAV: probe truncated durations and the label floored them.
