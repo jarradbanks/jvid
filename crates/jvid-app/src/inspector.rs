@@ -6,8 +6,8 @@ use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value};
 use jvid_core::model::{
-    AudioFx, Blend, Clip, ClipId, Effect, Mask, MaskMode, MaskShape, MediaAsset, Project, Text,
-    TrackKind, Transform,
+    AudioFx, Blend, Clip, ClipId, Compressor, Effect, Equalizer, Mask, MaskMode, MaskShape,
+    MediaAsset, Project, Text, TrackKind, Transform,
 };
 use jvid_core::time::Time;
 use suite_ui::theme::{self, icon};
@@ -1698,31 +1698,16 @@ const fn knob(id: &'static str, lo: f32, hi: f32, suffix: &'static str) -> Knob 
     }
 }
 
-const fn hz(id: &'static str, lo: f32, hi: f32) -> Knob {
-    Knob {
-        decimals: 0,
-        log: true,
-        ..knob(id, lo, hi, verbatim(" Hz"))
-    }
-}
-
 /// The EQ then Compressor blocks, by id (`inspector.<id>` names them), in processing order.
 const AUDIO_FX: [(&str, &[Knob]); 2] = [
     (
         "eq",
-        &[
-            knob("eq_low", -24.0, 24.0, verbatim(" dB")),
-            hz("eq_low_freq", 20.0, 1_000.0),
-            knob("eq_mid", -24.0, 24.0, verbatim(" dB")),
-            hz("eq_mid_freq", 100.0, 10_000.0),
-            Knob {
-                decimals: 2,
-                log: true,
-                ..knob("eq_mid_q", 0.1, 10.0, "")
-            },
-            knob("eq_high", -24.0, 24.0, verbatim(" dB")),
-            hz("eq_high_freq", 1_000.0, 20_000.0),
-        ],
+        &[knob(
+            "eq_post_gain",
+            -Equalizer::RANGE,
+            Equalizer::RANGE,
+            verbatim(" dB"),
+        )],
     ),
     (
         "compressor",
@@ -1746,13 +1731,7 @@ const AUDIO_FX: [(&str, &[Knob]); 2] = [
 fn knob_mut<'a>(fx: &'a mut AudioFx, id: &str) -> &'a mut f32 {
     let (e, c) = (&mut fx.eq, &mut fx.compressor);
     match id {
-        "eq_low" => &mut e.low,
-        "eq_low_freq" => &mut e.low_freq,
-        "eq_mid" => &mut e.mid,
-        "eq_mid_freq" => &mut e.mid_freq,
-        "eq_mid_q" => &mut e.mid_q,
-        "eq_high" => &mut e.high,
-        "eq_high_freq" => &mut e.high_freq,
+        "eq_post_gain" => &mut e.post_gain,
         "comp_threshold" => &mut c.threshold,
         "comp_ratio" => &mut c.ratio,
         "comp_attack" => &mut c.attack,
@@ -1770,6 +1749,296 @@ fn block_on<'a>(fx: &'a mut AudioFx, block: &str) -> &'a mut bool {
         "eq" => &mut fx.eq.enabled,
         _ => &mut fx.compressor.enabled,
     }
+}
+
+/// The EQ presets (`inspector.eq_preset_<id>` names them): the bands from 31 Hz up, then
+/// Post-Gain.
+// shortcut: the #263 mockup's placeholder values, tune them by ear before a release.
+const EQ_PRESETS: [(&str, [f32; 10], f32); 8] = [
+    ("flat", [0.0; 10], 0.0),
+    ("voice", [-12., -8., -3., 0., -1., 1., 3., 4., 2., 0.], 0.0),
+    (
+        "podcast",
+        [-15., -9., -2., 2., 0., -1., 2., 3., 1., -1.],
+        0.0,
+    ),
+    ("bass_boost", [6., 6., 4., 2., 0., 0., 0., 0., 0., 0.], -3.0),
+    (
+        "bass_cut",
+        [-8., -6., -4., -2., 0., 0., 0., 0., 0., 0.],
+        0.0,
+    ),
+    (
+        "treble_boost",
+        [0., 0., 0., 0., 0., 1., 2., 4., 6., 6.],
+        -2.0,
+    ),
+    (
+        "low_cut",
+        [-15., -15., -6., -1., 0., 0., 0., 0., 0., 0.],
+        0.0,
+    ),
+    ("loudness", [6., 4., 1., 0., -1., -1., 0., 2., 4., 5.], -3.0),
+];
+
+/// The Compressor presets (`inspector.comp_preset_<id>`): threshold, ratio, attack, release and
+/// makeup. None is the default, which leaves the sound alone.
+const COMP_PRESETS: [(&str, [f32; 5]); 5] = [
+    ("none", [-20.0, 1.0, 10.0, 100.0, 0.0]),
+    ("gentle", [-18.0, 2.0, 20.0, 200.0, 2.0]),
+    ("voice", [-22.0, 3.0, 5.0, 120.0, 4.0]),
+    ("broadcast", [-26.0, 4.0, 2.0, 80.0, 6.0]),
+    ("limiter", [-3.0, 20.0, 0.1, 50.0, 0.0]),
+];
+
+fn comp_knobs(c: &mut Compressor) -> [&mut f32; 5] {
+    [
+        &mut c.threshold,
+        &mut c.ratio,
+        &mut c.attack,
+        &mut c.release,
+        &mut c.makeup,
+    ]
+}
+
+/// The block's preset `fx` matches exactly, by index.
+fn preset_of(fx: AudioFx, block: &str) -> Option<usize> {
+    let (eq, mut c) = (fx.eq, fx.compressor);
+    match block {
+        "eq" => EQ_PRESETS
+            .iter()
+            .position(|(_, b, post)| eq.bands == *b && eq.post_gain == *post),
+        _ => COMP_PRESETS
+            .iter()
+            .position(|(_, k)| comp_knobs(&mut c).map(|v| *v) == *k),
+    }
+}
+
+/// Sets the block to preset `n`, leaving it on or bypassed.
+fn set_preset(fx: &mut AudioFx, block: &str, n: usize) {
+    match block {
+        "eq" => (fx.eq.bands, fx.eq.post_gain) = (EQ_PRESETS[n].1, EQ_PRESETS[n].2),
+        _ => {
+            for (v, p) in comp_knobs(&mut fx.compressor)
+                .into_iter()
+                .zip(COMP_PRESETS[n].1)
+            {
+                *v = p;
+            }
+        }
+    }
+}
+
+/// A Preset row showing the preset every one of `fxs` matches, otherwise Custom. Returns the
+/// preset picked.
+fn preset_row(ui: &mut Ui, fxs: &[AudioFx], block: &str) -> Option<usize> {
+    let names: Vec<_> = match block {
+        "eq" => EQ_PRESETS
+            .iter()
+            .map(|p| caption_of("eq_preset_", p.0))
+            .collect(),
+        _ => COMP_PRESETS
+            .iter()
+            .map(|p| caption_of("comp_preset_", p.0))
+            .collect(),
+    };
+    let n = names.len();
+    let at = preset_of(fxs[0], block)
+        .filter(|at| fxs.iter().all(|fx| preset_of(*fx, block) == Some(*at)));
+    let mut options: Vec<&str> = names.iter().map(String::as_str).collect();
+    // shortcut: Custom is the dropdown's last option and picking it does nothing; leaving it
+    // out of the menu and greying it needs suite-ui's Dropdown (#257's).
+    let mut i = at.unwrap_or_else(|| {
+        options.push(tr!("inspector.custom"));
+        n
+    });
+    let tools = Tools::default();
+    let (changed, _) = prop_row(ui, tr!("inspector.preset"), tools, |ui| {
+        // It has no tools, so it takes their slots too.
+        let w = ui.available_width() + TOOLS + space::S4;
+        ui.add(Dropdown::new(&mut i, &options).width(w)).changed()
+    });
+    (changed && i < n && Some(i) != at).then_some(i)
+}
+
+fn caption_of(prefix: &str, id: &str) -> String {
+    caption(&format!("{prefix}{id}")).to_owned()
+}
+
+/// Each band's frequency, as the Slider Bank labels it, and its accessible name.
+const BANDS: [(&str, &str); 10] = [
+    (verbatim("31"), verbatim("31 Hz")),
+    (verbatim("62"), verbatim("62 Hz")),
+    (verbatim("125"), verbatim("125 Hz")),
+    (verbatim("250"), verbatim("250 Hz")),
+    (verbatim("500"), verbatim("500 Hz")),
+    (verbatim("1K"), verbatim("1 kHz")),
+    (verbatim("2K"), verbatim("2 kHz")),
+    (verbatim("4K"), verbatim("4 kHz")),
+    (verbatim("8K"), verbatim("8 kHz")),
+    (verbatim("16K"), verbatim("16 kHz")),
+];
+
+/// A gain in dB as the Slider Bank reads it: "0", "+6", "−1.5".
+fn db_readout(v: f32) -> String {
+    let sign = if v > 0.0 { "+" } else { "\u{2212}" };
+    match v {
+        0.0 => "0".to_owned(),
+        _ if v.fract() == 0.0 => format!("{sign}{}", v.abs()),
+        _ => format!("{sign}{:.1}", v.abs()),
+    }
+}
+
+/// The Slider Bank (#263 option A): a column per band, its dB above and its frequency below,
+/// over the response curve and a ±15 dB grid. Pressing or dragging a column sets its band to
+/// the pointer in 0.5 dB steps, 0.1 with Shift; double-click resets it; a focused band takes Up
+/// and Down. Returns the band, its new gain and the response that set it.
+fn slider_bank(ui: &mut Ui, eq: &Equalizer) -> Option<(usize, f32, egui::Response)> {
+    use egui::emath::GuiRounding as _;
+    let (w, ppp) = (ui.available_width(), ui.pixels_per_point());
+    let (rect, _) = ui.allocate_exact_size(vec2(w, 146.0), Sense::hover());
+    let plot = Rect::from_min_size(rect.min + vec2(0.0, 16.0), vec2(w, 112.0));
+    let range = Equalizer::RANGE;
+    let y_of = |v: f32| {
+        let v = v.clamp(-range - 1.0, range + 1.0);
+        plot.top() + 8.0 + (range - v) / (2.0 * range) * (plot.height() - 16.0)
+    };
+    let painter = ui.painter().clone();
+    let line = theme::hairline(ui.ctx(), color::border());
+    painter.rect(plot, 4.0, color::field(), line, egui::StrokeKind::Inside);
+    for v in [12.0, 6.0, -6.0, -12.0, 0.0] {
+        let ink = if v == 0.0 {
+            color::border_strong()
+        } else {
+            color::border()
+        };
+        let y = y_of(v).round_to_pixel_center(ppp);
+        painter.hline(
+            plot.x_range().shrink(1.0),
+            y,
+            theme::hairline(ui.ctx(), ink),
+        );
+    }
+    // The real response, so the curve shows what plays: band k's centre sits mid-column.
+    let col = w / 10.0;
+    let zero = y_of(0.0);
+    let curve: Vec<_> = (0..=(w / 2.0) as usize)
+        .map(|n| {
+            let x = (plot.left() + 1.0 + n as f32 * 2.0).min(plot.right() - 1.0);
+            let hz = 1_000.0 * 2f64.powf(((x - plot.left()) / col) as f64 - 5.5);
+            pos2(
+                x,
+                y_of(eq.response(hz, jvid_audio::SAMPLE_RATE as f64) as f32),
+            )
+        })
+        .collect();
+    let mut area = egui::Mesh::default();
+    let fill = color::ink().gamma_multiply(0.05);
+    for (n, p) in curve.iter().enumerate() {
+        area.colored_vertex(*p, fill);
+        area.colored_vertex(pos2(p.x, zero), fill);
+        if n > 0 {
+            let i = 2 * n as u32;
+            area.add_triangle(i - 2, i - 1, i);
+            area.add_triangle(i - 1, i, i + 1);
+        }
+    }
+    painter.add(area);
+    painter.add(egui::Shape::line(
+        curve,
+        egui::Stroke::new(1.5, color::ink_3()),
+    ));
+
+    let mut out = None;
+    let medium = egui::FontId::new(theme::small().size, theme::medium());
+    for (k, (label, name)) in BANDS.iter().enumerate() {
+        let column = Rect::from_x_y_ranges(
+            rect.left() + col * k as f32..=rect.left() + col * (k + 1) as f32,
+            rect.y_range(),
+        );
+        let id = ui.id().with(("eq band", k));
+        let r = ui.interact(column, id, Sense::click_and_drag());
+        let v = eq.bands[k];
+        r.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), v as f64, *name));
+        let step = if ui.input(|i| i.modifiers.shift) {
+            0.1
+        } else {
+            0.5
+        };
+        let snap = |v: f32| ((v / step).round() * step).clamp(-range, range);
+        let keys = ui.input(|i| {
+            i32::from(i.key_pressed(egui::Key::ArrowUp))
+                - i32::from(i.key_pressed(egui::Key::ArrowDown))
+        });
+        let to = if r.double_clicked() {
+            Some(0.0)
+        } else if (r.clicked() || r.dragged())
+            && let Some(p) = r.interact_pointer_pos()
+        {
+            let t = (p.y - plot.top() - 8.0) / (plot.height() - 16.0);
+            Some(snap(range - t * 2.0 * range))
+        } else if r.has_focus() && keys != 0 {
+            Some(snap(v + keys as f32 * step))
+        } else {
+            None
+        };
+        let (hover, drag) = (r.hovered() || r.has_focus(), r.dragged());
+        let x = column.center().x.round_to_pixel_center(ppp);
+        if hover || drag {
+            let bg = if drag {
+                color::light_blue().gamma_multiply(0.08)
+            } else {
+                color::ink().gamma_multiply(0.04)
+            };
+            let cell =
+                Rect::from_x_y_ranges(column.x_range().shrink(1.0), plot.y_range().shrink(1.0));
+            painter.rect_filled(cell, 3.0, bg);
+        }
+        let track = egui::Rangef::new(plot.top() + 8.0, plot.bottom() - 8.0);
+        painter.vline(x, track, egui::Stroke::new(2.0, color::border_strong()));
+        let lit = if drag {
+            color::light_blue()
+        } else {
+            color::ink_3()
+        };
+        if v != 0.0 {
+            painter.vline(
+                x,
+                egui::Rangef::new(zero, y_of(v)),
+                egui::Stroke::new(2.0, lit),
+            );
+        }
+        let thumb = Rect::from_center_size(pos2(x, y_of(v)), vec2(14.0, 6.0)).round_to_pixels(ppp);
+        let ink = match () {
+            _ if drag => color::light_blue(),
+            _ if hover => color::ink(),
+            _ => color::ink_2(),
+        };
+        painter.rect_filled(thumb, 2.0, ink);
+        if r.has_focus() {
+            painter.add(suite_ui::widgets::focus_ring(thumb, 2));
+        }
+        let (font, ink) = match () {
+            _ if drag => (medium.clone(), color::light_blue()),
+            _ if v == 0.0 => (theme::small(), color::ink_3()),
+            _ => (theme::small(), color::ink_2()),
+        };
+        let top = pos2(x, rect.top() + 7.0);
+        painter.text(top, egui::Align2::CENTER_CENTER, db_readout(v), font, ink);
+        let ink = if drag { color::ink() } else { color::ink_3() };
+        let bottom = pos2(x, rect.bottom() - 7.0);
+        painter.text(
+            bottom,
+            egui::Align2::CENTER_CENTER,
+            *label,
+            theme::small(),
+            ink,
+        );
+        if let Some(to) = to.filter(|to| *to != v) {
+            out = Some((k, to, r));
+        }
+    }
+    out
 }
 
 /// Changes each of the clips' or track's effects the same way.
@@ -1791,9 +2060,11 @@ pub(crate) fn audio_fx(ui: &mut Ui, fxs: &[AudioFx]) -> Option<(FxEdit, Option<G
         let on = *block_on(&mut first.clone(), block);
         let off_default =
             |fx: &AudioFx, k: &Knob| knob_value(*fx, k.id) != knob_value(default, k.id);
+        let bands_off = |fx: &AudioFx| *block == "eq" && fx.eq.bands != default.eq.bands;
         let changed = knobs
             .iter()
-            .any(|k| fxs.iter().any(|fx| off_default(fx, k)));
+            .any(|k| fxs.iter().any(|fx| off_default(fx, k)))
+            || fxs.iter().any(bands_off);
         let id = ui.id().with(("inspector audio fx", block));
         let mut open = ui.data_mut(|d| *d.get_temp_mut_or(id, true));
         let head = FxHead {
@@ -1810,9 +2081,13 @@ pub(crate) fn audio_fx(ui: &mut Ui, fxs: &[AudioFx]) -> Option<(FxEdit, Option<G
             }
             Some(FxAction::Reset) => {
                 let ids: Vec<_> = knobs.iter().map(|k| k.id).collect();
+                let eq = *block == "eq";
                 let f = move |fx: &mut AudioFx| {
                     for id in &ids {
                         *knob_mut(fx, id) = knob_value(default, id);
+                    }
+                    if eq {
+                        fx.eq.bands = default.eq.bands;
                     }
                 };
                 edit = Some((Box::new(f), None));
@@ -1825,6 +2100,26 @@ pub(crate) fn audio_fx(ui: &mut Ui, fxs: &[AudioFx]) -> Option<(FxEdit, Option<G
         }
         // Bypassed: the settings stay, greyed out, until it's back on.
         ui.add_enabled_ui(on, |ui| {
+            if let Some(n) = preset_row(ui, fxs, block) {
+                let block = *block;
+                edit = Some((Box::new(move |fx| set_preset(fx, block, n)), None));
+            }
+            if *block == "eq" {
+                ui.add_space(space::S4);
+                if let Some((k, v, r)) = slider_bank(ui, &first.eq) {
+                    if r.drag_started() {
+                        ui.data_mut(|d| *d.get_temp_mut_or(drags, 0u64) += 1);
+                    }
+                    // Clicks share their band's gesture until the next drag, so the click a
+                    // double-click starts with and its reset are one step.
+                    let drag = ui.data(|d| d.get_temp(drags).unwrap_or(0u64));
+                    let slot = 0x80 + k as u64;
+                    let gesture = (r.clicked() || r.dragged())
+                        .then_some(AUDIO_FX_GESTURE ^ (slot << 4) ^ (drag << 16));
+                    edit = Some((Box::new(move |fx| fx.eq.bands[k] = v), gesture));
+                }
+                ui.add_space(space::S4);
+            }
             for (n, k) in knobs.iter().enumerate() {
                 let v = knob_value(first, k.id) as f64;
                 let mixed = fxs.iter().any(|fx| knob_value(*fx, k.id) as f64 != v);
@@ -3583,6 +3878,8 @@ mod tests {
         assert_eq!(scale(&h), 1.0);
     }
 
+    /// #263: a band drag, a preset and a double-click reset are one undo step each; Custom shows
+    /// once the settings match no preset.
     #[test]
     fn audio_fx_edit_in_one_step_and_bypass() {
         use egui::accesskit::Role;
@@ -3591,32 +3888,81 @@ mod tests {
             return;
         }
         let mut h = harness_of(TrackKind::Audio, Pane::Audio);
-        h.set_size(vec2(340.0, 900.0));
+        // A 288px Inspector's content.
+        h.set_size(vec2(264.0, 640.0));
         h.run();
         let fx = |h: &egui_kittest::Harness<'_, History>| {
             h.state().project().sequence().tracks()[0].clips()[0]
                 .transform
                 .audio_fx
         };
-        let rect = h.get_by_role_and_label(Role::Slider, "Mid").rect();
-        let from = rect.center();
+        let from = h
+            .get_by_role_and_label(Role::Slider, "1 kHz")
+            .rect()
+            .center();
         h.drag_at(from);
         h.run();
-        for dx in [10.0, 20.0] {
-            h.hover_at(from + vec2(dx, 0.0));
+        for dy in [10.0, 20.0] {
+            h.hover_at(from - vec2(0.0, dy));
             h.run();
         }
-        h.drop_at(from + vec2(20.0, 0.0));
+        h.drop_at(from - vec2(0.0, 20.0));
         h.run();
-        assert!(fx(&h).eq.mid > 0.0, "{:?}", fx(&h).eq);
+        let eq = fx(&h).eq;
+        assert!(eq.bands[5] > 0.0 && eq.bands[5] % 0.5 == 0.0, "{eq:?}");
+        assert_eq!(eq.bands.iter().filter(|b| **b != 0.0).count(), 1);
+        h.get_by_role_and_label(Role::ComboBox, "Custom");
         assert!(h.state_mut().undo());
         assert_eq!(fx(&h), AudioFx::default());
+        h.run();
+        // Each preset is one step, keeping the block on.
+        for (combo, pick) in [("Flat", "Podcast"), ("None", "Voice")] {
+            h.get_by_role_and_label(Role::ComboBox, combo).click();
+            h.run();
+            h.get_by_role_and_label(Role::Button, pick).click();
+            h.run();
+        }
+        assert_eq!(fx(&h).eq.bands, EQ_PRESETS[2].1);
+        assert_eq!(fx(&h).compressor.ratio, 3.0);
+        assert!(h.state_mut().undo());
+        assert_eq!(fx(&h).eq.bands, EQ_PRESETS[2].1);
+        assert_eq!(fx(&h).compressor, AudioFx::default().compressor);
+        assert!(h.state_mut().redo());
+        h.run();
+        h.get_by_role_and_label(Role::ComboBox, "Voice");
+        h.remove_cursor();
+        h.run();
+        h.snapshot("inspector_audio_fx_288");
+        h.set_size(vec2(216.0, 640.0));
+        h.run();
+        h.snapshot("inspector_audio_fx_240");
+        // Double-clicking 31 Hz resets it alone. The harness steps 0.25 s per event.
+        h.ctx
+            .options_mut(|o| o.input_options.max_double_click_delay = 1.0);
+        let at = h
+            .get_by_role_and_label(Role::Slider, "31 Hz")
+            .rect()
+            .center();
+        h.hover_at(at);
+        for pressed in [true, false, true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run();
+        let eq = fx(&h).eq;
+        assert_eq!(eq.bands[0], 0.0);
+        assert_eq!(eq.bands[1..], EQ_PRESETS[2].1[1..]);
+        assert!(h.state_mut().undo());
+        assert_eq!(fx(&h).eq.bands, EQ_PRESETS[2].1);
         // EQ first, then Compressor.
         h.get_all_by_label("Bypass").nth(1).unwrap().click();
         h.run();
         assert!(fx(&h).eq.enabled && !fx(&h).compressor.enabled);
         assert_eq!(h.get_all_by_label("Turn On").count(), 1);
-        h.snapshot("inspector_audio_fx");
     }
 
     /// [`harness`] with Vignette then Film Grain on its clip, tall enough to show them.

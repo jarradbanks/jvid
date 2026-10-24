@@ -71,6 +71,8 @@ pub struct Timeline {
     media: Media,
     /// The track being renamed and the name typed so far.
     renaming: Option<(TrackId, String)>,
+    /// The track whose Audio Effects popover is open.
+    fx_popover: Option<TrackId>,
     /// Where the dragged clip would land; the press origin is gone by the release frame.
     drag_to: Option<(TrackId, Time)>,
     selected: HashSet<ClipId>,
@@ -168,6 +170,7 @@ impl Default for Timeline {
             press_scroll: (0.0, 0.0),
             media: Media::default(),
             renaming: None,
+            fx_popover: None,
             drag_to: None,
             selected: HashSet::new(),
             linked_selection: true,
@@ -1622,6 +1625,76 @@ impl Timeline {
     }
 
     /// One track's header: ID, name or rename field, toggles, menu and height grip.
+    /// `track`'s Audio Effects beside its `header`, open until its close button, Escape or a
+    /// click outside it.
+    fn fx_popover(&mut self, ui: &Ui, header: Rect, track: &Track, label: &str) -> Option<Edit> {
+        let id = ui.id().with(("fx popover", track.id));
+        // Picking from its Preset menu clicks outside it, so that click mustn't close it.
+        let menu = egui::Popup::is_any_open(ui.ctx());
+        let area = ui.data(|d| d.get_temp::<Rect>(id)).unwrap_or(Rect::NOTHING);
+        let away = ui.input(|i| {
+            i.pointer.any_pressed() && i.pointer.press_origin().is_some_and(|p| !area.contains(p))
+        });
+        let mut open = !(away && !menu);
+        let mut edit = None;
+        let frame = egui::Frame::popup(ui.style()).inner_margin(egui::Margin {
+            left: 12,
+            right: 12,
+            top: 0,
+            bottom: 4,
+        });
+        let shown = egui::Popup::new(id, ui.ctx().clone(), header, ui.layer_id())
+            .open_bool(&mut open)
+            .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+            .align(egui::RectAlign::RIGHT_START)
+            .gap(space::S4)
+            .frame(frame)
+            .show(|ui| {
+                ui.set_width(320.0 - 24.0);
+                let (row, _) = ui
+                    .allocate_exact_size(vec2(ui.available_width(), size::HEADER), Sense::hover());
+                let p = ui.painter();
+                let title = p.text(
+                    pos2(row.left(), row.center().y),
+                    Align2::LEFT_CENTER,
+                    tr!("timeline.audio_effects"),
+                    theme::body_strong(),
+                    color::ink(),
+                );
+                let sub = match track.name.as_str() {
+                    "" => label.to_owned(),
+                    name if name == label => label.to_owned(),
+                    name => format!("{label} {name}"),
+                };
+                let at = pos2(title.right() + 6.0, row.center().y);
+                p.text(at, Align2::LEFT_CENTER, sub, theme::body(), color::ink_3());
+                let x = Rect::from_center_size(
+                    pos2(
+                        row.right() + space::S4 - size::CONTROL / 2.0,
+                        row.center().y,
+                    ),
+                    vec2(size::CONTROL, size::CONTROL),
+                );
+                let close = ui.put(
+                    x,
+                    Button::icon(icon::X, tr!("timeline.close_audio_effects")),
+                );
+                if let Some((f, gesture)) = crate::inspector::audio_fx(ui, &[track.fx]) {
+                    let mut s = track.settings();
+                    f(&mut s.fx);
+                    edit = Some((Command::SetTrack(s), gesture.map(|g| g ^ track.id.0)));
+                }
+                close.clicked()
+            });
+        if let Some(r) = &shown {
+            ui.data_mut(|d| d.insert_temp(id, r.response.rect));
+        }
+        if !open || shown.is_some_and(|r| r.inner) {
+            self.fx_popover = None;
+        }
+        edit
+    }
+
     fn header(
         &mut self,
         ui: &mut Ui,
@@ -1871,15 +1944,9 @@ impl Timeline {
             if ui.button(tr!("timeline.rename")).clicked() {
                 self.renaming = Some((track.id, track.name.clone()));
             }
-            if track.kind == TrackKind::Audio {
-                ui.menu_button(tr!("timeline.audio_effects"), |ui| {
-                    ui.set_width(320.0);
-                    if let Some((f, gesture)) = crate::inspector::audio_fx(ui, &[track.fx]) {
-                        let mut s = track.settings();
-                        f(&mut s.fx);
-                        edit = Some((Command::SetTrack(s), gesture.map(|g| g ^ track.id.0)));
-                    }
-                });
+            if track.kind == TrackKind::Audio && ui.button(tr!("timeline.audio_effects")).clicked()
+            {
+                self.fx_popover = Some(track.id);
             }
             let mv = |index| {
                 Some((
@@ -1910,6 +1977,10 @@ impl Timeline {
             ui.separator();
             add_menu(ui, &mut edit);
         });
+
+        if self.fx_popover == Some(track.id) {
+            edit = self.fx_popover(ui, rect, track, &label).or(edit);
+        }
 
         // Height grip along the bottom edge.
         let grip = Rect::from_x_y_ranges(rect.x_range(), rect.bottom() - 3.0..=rect.bottom() + 2.0);
@@ -2916,6 +2987,57 @@ mod tests {
         let mut h = harness(header_states());
         h.run();
         results.add(h.try_snapshot("timeline_headers"));
+    }
+
+    /// #263: a track's Audio Effects open in a popover beside its header, which stays open
+    /// through a preset pick and closes on a click outside.
+    #[test]
+    fn audio_effects_popover() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(2));
+        h.set_size(vec2(1000.0, 560.0));
+        h.run();
+        let a1 = h.get_all_by_label("Target").nth(1).unwrap().rect();
+        // A1's header, between its Target and Arm for Recording.
+        let at = a1.right_center() + vec2(10.0, 0.0);
+        h.hover_at(at);
+        h.run();
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run();
+        }
+        assert!(h.query_by_label("Rename").is_some(), "no menu at {at:?}");
+        h.get_by_role_and_label(Role::Button, "Audio Effects")
+            .click();
+        h.run();
+        h.get_by_role_and_label(Role::ComboBox, "Flat").click();
+        h.run();
+        h.get_by_role_and_label(Role::Button, "Voice").click();
+        h.run();
+        let fx = |h: &egui_kittest::Harness<'_, (Timeline, History)>| {
+            h.state().1.project().sequence().tracks()[1].fx
+        };
+        assert_eq!(fx(&h).eq.bands[0], -12.0);
+        h.remove_cursor();
+        h.run();
+        h.snapshot("timeline_audio_fx_popover");
+        h.hover_at(pos2(990.0, 550.0));
+        h.run();
+        h.drag_at(pos2(990.0, 550.0));
+        h.drop_at(pos2(990.0, 550.0));
+        h.run();
+        assert!(h.query_by_label("Close Audio Effects").is_none());
+        assert!(h.state_mut().1.undo());
+        assert_eq!(fx(&h), jvid_core::model::AudioFx::default());
     }
 
     /// Two video tracks and an audio one, with every header state on somewhere.

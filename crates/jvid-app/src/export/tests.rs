@@ -750,7 +750,7 @@ fn export_with_audio_fx_matches_playback() {
     let track = seq.tracks().iter().find(|t| t.kind == TrackKind::Audio);
     let (track, clip) = (track.unwrap(), track.unwrap().clips()[0].clone());
     let mut x = clip.transform.clone();
-    (x.audio_fx.eq.mid, x.audio_fx.eq.high) = (6.0, -4.0);
+    (x.audio_fx.eq.bands[5], x.audio_fx.eq.bands[8]) = (6.0, -4.0);
     let mut s = track.settings();
     (s.fx.compressor.ratio, s.fx.compressor.threshold) = (4.0, -24.0);
     h.apply(Command::SetClipProps(vec![(clip.id, x, clip.keyframes)]))
