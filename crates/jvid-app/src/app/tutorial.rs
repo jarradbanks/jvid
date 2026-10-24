@@ -283,6 +283,10 @@ impl App {
             return;
         };
         self.leave_project();
+        // The lesson's playback would run on into the user's timeline.
+        if self.preview.playing() {
+            self.preview.program_action("shuttle_stop");
+        }
         let s = run.stash;
         self.history = s.history;
         self.path = s.path;
