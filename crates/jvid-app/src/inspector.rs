@@ -805,13 +805,21 @@ fn lut_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
         let mut edit = None;
         let clear = size::CONTROL + space::S4;
         let w = ui.available_width() - if current.is_some() { clear } else { 0.0 };
-        if ui.add(Button::secondary(&name).width(w)).clicked()
-            && let Some(path) = rfd::FileDialog::new()
+        if ui.add(Button::secondary(&name).width(w)).clicked() {
+            let mut dialog = rfd::FileDialog::new()
                 .set_title(tr!("inspector.choose_lut"))
-                .add_filter(tr!("inspector.cube_filter"), &["cube"])
-                .pick_file()
-        {
-            edit = Some((set_lut(clips, Some(path.to_string_lossy().into())), None));
+                .add_filter(tr!("inspector.cube_filter"), &["cube"]);
+            // A lesson's sample look sits in the app data folder, where no one would look.
+            if crate::app::tutorial::running(ui.ctx()) {
+                match crate::samples::dir() {
+                    Ok(Some(dir)) => dialog = dialog.set_directory(dir),
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!("couldn't write the sample clips: {e}"),
+                }
+            }
+            if let Some(path) = dialog.pick_file() {
+                edit = Some((set_lut(clips, Some(path.to_string_lossy().into())), None));
+            }
         }
         let clear = Button::icon(icon::X, tr!("inspector.clear"));
         if current.is_some() && ui.add(clear).clicked() {

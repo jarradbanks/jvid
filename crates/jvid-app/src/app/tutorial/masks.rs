@@ -47,6 +47,7 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "timeline",
@@ -76,6 +77,7 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "inspector",
@@ -91,6 +93,7 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "inspector",
@@ -111,6 +114,7 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "preview",
@@ -119,6 +123,7 @@ pub const MASKS: Lesson = Lesson {
             show_me: |a| edit_mask(a, |m| m.points = START.to_vec()),
             reveal: None,
             ghost: Some(START),
+            also: &[],
         },
         Step {
             anchor: "inspector",
@@ -127,6 +132,7 @@ pub const MASKS: Lesson = Lesson {
             show_me: |a| edit_mask(a, |m| m.feather = SOFT * 2.0),
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "inspector",
@@ -141,6 +147,7 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "inspector",
@@ -155,6 +162,7 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "timeline",
@@ -173,6 +181,7 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "preview",
@@ -192,6 +201,7 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: Some(END),
+            also: &[],
         },
         Step {
             anchor: "preview",
@@ -205,6 +215,7 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
     ],
 };

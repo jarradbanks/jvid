@@ -66,6 +66,7 @@ pub const AUDIO: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "timeline",
@@ -95,6 +96,7 @@ pub const AUDIO: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         Step {
             anchor: "inspector",
@@ -116,6 +118,7 @@ pub const AUDIO: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
+            also: &[],
         },
         // Needs a microphone, so the Show Me test skips it; without one the user skips it too.
         Step {
@@ -133,6 +136,7 @@ pub const AUDIO: Lesson = Lesson {
             },
             reveal: Some(|a| a.preview_active = 1),
             ghost: None,
+            also: &[],
         },
     ],
 };

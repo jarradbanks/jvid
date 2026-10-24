@@ -135,11 +135,18 @@ fn images(a: &Analysis) -> [ColorImage; 3] {
     ]
 }
 
+/// Each scope's [`crate::app::tutorial::anchor`].
+const ANCHORS: [&str; 3] = ["scope.waveform", "scope.vectorscope", "scope.histogram"];
+
 /// The tab: the waveform, vectorscope and histogram stacked, each on Viewer black.
 pub fn show(ui: &mut Ui) {
     let rect = ui.max_rect();
     let p = ui.painter().clone();
     let Some([wave, vector, hist]) = ui.data(|d| d.get_temp::<[TextureHandle; 3]>(id())) else {
+        // Until the first count lands, a lesson points at the whole tab.
+        for name in ANCHORS {
+            crate::app::tutorial::anchor(ui.ctx(), name, rect);
+        }
         let empty = tr!("bin.scopes_empty");
         p.text(
             rect.center(),
@@ -166,7 +173,8 @@ pub fn show(ui: &mut Ui) {
         (vector_r, &vector, tr!("bin.scope_vectorscope")),
         (hist_r, &hist, tr!("bin.scope_histogram")),
     ];
-    for (r, tex, label) in scopes {
+    for ((r, tex, label), name) in scopes.into_iter().zip(ANCHORS) {
+        crate::app::tutorial::anchor(ui.ctx(), name, r);
         p.rect_filled(r, radius::SMALL, color::VIEWER);
         p.image(tex.id(), r, uv, Color32::WHITE);
         // Left-aligned with the others, so the vectorscope's sits beside its square.

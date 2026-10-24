@@ -872,3 +872,12 @@ keys_ease = "Right-click the Position diamond and choose Ease Out."
 keys_graph = "Right-click the keyframe lanes, choose Open Graph Editor and drag a handle."
 # {key} is the Play shortcut, such as Space.
 keys_play = "Press {key} to play the title in."
+# Color and Scopes: brighten and neutralise a dark, too-warm shot by reading the Scopes tab,
+# then apply a look. Exposure, Temperature, Tint, LUT, LUT Mix, Waveform, Vectorscope and
+# Histogram are the names the editor shows; {none} is the LUT button's label before one is
+# chosen and {file} the look's file name.
+color = "Color and Scopes"
+color_exposure = "Raise Exposure until the Waveform's top nears 100%, but stop before it flattens there."
+color_balance = "Lower Temperature and nudge Tint until the grays gather in the Vectorscope's center."
+color_histogram = "Fine-tune Temperature and Tint until the tops of red, green and blue line up in the Histogram."
+color_look = "Click {none} beside LUT, open {file}, then lower LUT Mix to compare before and after."
