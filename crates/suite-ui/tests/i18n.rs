@@ -28,10 +28,10 @@ impl Drop for Switched {
     }
 }
 
-static TEST: Catalog = Catalog::new([
+static TEST: Catalog = Catalog::new(suite_ui::test_support::en_es(
     "greet = \"Hi {name}\"\nonly_en = \"English only\"\n[clips]\none = \"{count} clip\"\nother = \"{count} clips\"\n[tracks]\none = \"{count} track\"\nother = \"{count} tracks\"\n",
     "greet = \"Hola {name}\"\n[clips]\none = \"{count} clip\"\nother = \"{count} clips\"\nmany = \"{count} de clips\"\n[tracks]\none = \"{count} pista\"\nother = \"{count} pistas\"\n",
-]);
+));
 
 #[test]
 fn every_character_has_a_glyph() {
@@ -60,7 +60,7 @@ fn widget_strings_follow_a_live_switch() {
 
 #[test]
 fn unsupported_languages_show_english() {
-    let _fr = switch("fr");
+    let _eo = switch("eo");
     assert_eq!(i18n::language(), "en");
     assert_eq!(CATALOG.tr("input.search"), "Search");
     i18n::set_language("es-MX");
@@ -119,4 +119,100 @@ fn gallery_switches_language_without_a_restart() {
         assert!(harness.query_by_label(label).is_some(), "no {label:?}");
     }
     assert!(harness.query_by_label("Más pestañas").is_none());
+}
+
+#[test]
+fn every_language_is_listed_by_its_own_name_and_falls_back_to_english() {
+    let names = [
+        "English",
+        "Español",
+        "Français",
+        "Deutsch",
+        "Italiano",
+        "Português (Brasil)",
+        "Nederlands",
+        "Polski",
+        "Čeština",
+        "Türkçe",
+        "Русский",
+        "Українська",
+        "Svenska",
+        "Dansk",
+        "Norsk bokmål",
+        "Català",
+        "日本語",
+        "简体中文",
+        "한국어",
+    ];
+    assert_eq!(i18n::LANGUAGES.map(i18n::autonym), names);
+    assert_eq!(CATALOG.errors(), Vec::<String>::new());
+    let _guard = switch("en");
+    for lang in i18n::LANGUAGES {
+        i18n::set_language(lang);
+        assert_eq!(i18n::language(), lang);
+        if CATALOG.is_stub(lang) {
+            assert_eq!(CATALOG.tr("input.search"), "Search", "{lang}");
+        }
+    }
+}
+
+#[test]
+fn polish_russian_and_their_neighbours_have_glyphs() {
+    let samples = [
+        ("pl", "Zażółć gęślą jaźń. ŻÓŁW ĄĘĆŃŚŹ „cytat”"),
+        ("cs", "Příliš žluťoučký kůň úpěl ďábelské ódy. ŘŠČŽŮĚŤĎŇ"),
+        ("tr", "Pijamalı hasta yağız şoföre çabucak güvendi. İĞŞÇÖÜ"),
+        (
+            "ru",
+            "Съешь же ещё этих мягких французских булок, да выпей чаю. ЁЖ «Ъ»",
+        ),
+        (
+            "uk",
+            "Чуєш їх, доцю, га? Кумедна ж ти, прощайся без ґольфів! ҐЄІЇ’",
+        ),
+        ("fr", "Œuvre cœur « déjà » à l’été"),
+        ("ca", "Col·lecció l’àvia"),
+    ];
+    let mut sources = [""; i18n::LANGUAGES.len()];
+    for (lang, text) in samples {
+        let i = i18n::LANGUAGES.iter().position(|l| *l == lang).unwrap();
+        sources[i] = Box::leak(format!("sample = {text:?}").into_boxed_str());
+    }
+    // Every language name, which the picker shows in English too.
+    let names = i18n::LANGUAGES.map(i18n::autonym).join(" ");
+    sources[0] = Box::leak(format!("names = {names:?}").into_boxed_str());
+    let catalog = Catalog::new(sources);
+    assert_eq!(catalog.errors(), Vec::<String>::new());
+    assert_eq!(common::missing_glyphs(&catalog), Vec::<String>::new());
+}
+
+#[test]
+fn japanese_loads_its_face_only_while_active() {
+    let _en = switch("en");
+    let ctx = egui::Context::default();
+    suite_ui::theme::install(&ctx);
+    let ja = suite_ui::theme::cjk_face("ja");
+    // A switch shows from the next pass, so run two.
+    let loaded = |ctx: &egui::Context| {
+        for _ in 0..2 {
+            ctx.run_ui(Default::default(), |_| {})
+                .textures_delta
+                .clear();
+        }
+        ctx.fonts(|f| f.definitions().font_data.contains_key(&ja))
+    };
+    assert!(!loaded(&ctx));
+    i18n::set_language("ja");
+    assert!(loaded(&ctx));
+    i18n::set_language("ko");
+    assert!(!loaded(&ctx));
+    i18n::set_language("en");
+    assert!(!loaded(&ctx));
+}
+
+#[test]
+fn cjk_faces_stay_within_budget() {
+    for (lang, face) in suite_ui::theme::CJK_FACES {
+        assert!(face.len() <= 600_000, "{lang} is {} bytes", face.len());
+    }
 }

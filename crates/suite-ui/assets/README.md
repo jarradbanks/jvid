@@ -3,16 +3,17 @@
 | File | Source | License |
 | --- | --- | --- |
 | `Inter-Regular.ttf`, `Inter-Medium.ttf`, `Inter-SemiBold.ttf` | [Inter 4.1](https://github.com/rsms/inter/releases/tag/v4.1), `extras/ttf/` | SIL OFL 1.1, see `Inter-LICENSE.txt` |
+| `NotoSansCJK-ja.otf`, `NotoSansCJK-zh-Hans.otf`, `NotoSansCJK-ko.otf`, `NotoSansCJK-names.otf` | [Noto Sans CJK 2.004](https://github.com/notofonts/noto-cjk/tree/Sans2.004/Sans/OTF), the JP, SC and KR Regular faces, subset by `subset-cjk.py` | SIL OFL 1.1, see `NotoSansCJK-LICENSE.txt` |
 | `lucide-subset.ttf` | [lucide-static 0.460.0](https://www.npmjs.com/package/lucide-static/v/0.460.0), `font/lucide.ttf` | ISC, see `Lucide-LICENSE.txt` |
 | `docs/prototypes/v3/sample.jpg`, bundled by `jvid-render` (`thumb.rs`) as the thumbnail fallback frame | A 480×270 frame of the project owner's own footage, added in 0ff9086 | The owner's; ships under the repository license |
 
-egui can't switch OpenType features on, so tabular figures are frozen into Inter's default glyphs, and both fonts are subset to what the suite uses:
+egui can't switch OpenType features on, so tabular figures are frozen into Inter's default glyphs, and both fonts are subset to what the suite uses. Inter keeps Basic Latin, Latin-1, Latin Extended-A (Polish, Czech, Turkish, ..), basic Cyrillic plus Ukrainian Ґ, and the dashes, quotes and symbols the catalogs use:
 
 ```sh
 pip install fonttools opentype-feature-freezer
 for w in Regular Medium SemiBold; do
   pyftfeatfreeze -f tnum Inter-$w.ttf frozen-$w.ttf
-  pyftsubset frozen-$w.ttf --unicodes="U+0020-007E,U+00A0-00FF,U+2013-2014,U+2018-201D,U+2022,U+2026,U+2212,U+00D7" \
+  pyftsubset frozen-$w.ttf --unicodes="U+0020-007E,U+00A0-017F,U+0400-045F,U+0490-0491,U+2013-2014,U+2018-201E,U+2022,U+2026,U+2212" \
     --layout-features='kern,liga,calt' --no-hinting --output-file=Inter-$w.ttf
 done
 # chevron-down, chevron-right, search, check, x, plus, ellipsis, circle-alert, undo-2, redo-2,
@@ -24,3 +25,12 @@ pyftsubset lucide.ttf --unicodes="U+E071,U+E073,U+E155,U+E070,U+E1B2,U+E141,U+E0
 ```
 
 To add an icon, look up its code point in lucide-static's `font/info.json`, add it to the last command, and add a constant to `icon` in `src/theme.rs`.
+
+The CJK faces hold only the characters their language's catalogs use, so they're rebuilt whenever a Japanese, Chinese or Korean catalog changes. `subset-cjk.py` downloads the pinned source faces into `~/.cache/jvid-fonts` the first time (about 16 MB each), subsets them and fails if a face passes the 600 KB budget:
+
+```sh
+pip install fonttools
+python3 crates/suite-ui/assets/subset-cjk.py ja        # or zh-Hans, ko; no argument does all three
+```
+
+`NotoSansCJK-names.otf` is just 日本語, 简体中文 and 한국어, which the Settings picker shows in every language; the script rebuilds it each run.

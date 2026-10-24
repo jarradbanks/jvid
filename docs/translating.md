@@ -1,7 +1,12 @@
 # Translating jvid
 
-jvid ships in English and Spanish. Every built-in string the editor shows comes from a
-catalog, so adding a language means adding catalog files, not editing code.
+jvid ships in English and Spanish, and registers 17 more languages whose translations land one
+at a time: French, German, Italian, Brazilian Portuguese, Dutch, Polish, Czech, Turkish,
+Russian, Ukrainian, Swedish, Danish, Norwegian Bokmål, Catalan, Japanese, Simplified Chinese
+and Korean. Every built-in string the editor shows comes from a catalog, so translating a
+language means filling its catalog files, not editing code. The terms an editor sees most are
+in the [glossary](i18n/glossary.md); each language keeps its translation of it in
+`docs/i18n/<code>.md`.
 
 ## Where the strings live
 
@@ -23,9 +28,9 @@ the title bar, then Settings…) writes:
 | `language` | Shows |
 | --- | --- |
 | missing, empty or `system` | the operating system's preferred language, if jvid ships it, else English |
-| `en`, `es` | that language, whatever the system says |
-| a regional code such as `es-MX` | its language (`es`) |
-| anything else (`fr`) | English; the value is kept, so a later build that ships it picks it up |
+| a code from `LANGUAGES` (`en`, `es`, `pt-BR`, `zh-Hans`, ..) | that language, whatever the system says |
+| a regional code such as `es-MX` | its language (`es`); `pt` and `pt-BR` are Brazilian Portuguese, `zh`, `zh-CN` and `zh-Hans-*` Simplified Chinese, `no` Bokmål |
+| anything else (`eo`, `pt-PT`, `zh-TW`) | English; the value is kept, so a later build that ships it picks it up |
 
 A pick in Settings applies on the next frame, no restart, and saves at once. Saving changes only
 the `language` value in `settings.toml`; comments and every other setting stay as written. A
@@ -33,7 +38,8 @@ settings file that isn't valid TOML is left alone and the dialog says so.
 
 The system language comes from [`sys-locale`](https://crates.io/crates/sys-locale): the user's
 preferred UI languages on Windows and macOS, and `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` then `LANG`
-on Linux. The first one jvid ships wins. To try Spanish without changing settings:
+on Linux. The first one jvid ships wins. A registered language whose catalogs aren't translated
+yet is picked like any other and shows in English. To try Spanish without changing settings:
 
 ```sh
 LANGUAGE=es cargo run -p jvid-app                      # with language = "system"
@@ -106,14 +112,33 @@ trn!("timeline.copied", clips.len())
 | `many` | (unused) | exact millions: "1000000 **de** clips" |
 | `other` | everything else, including 0 | everything else, including 0 |
 
-`other` is required; a missing `one` or `many` falls back to it. In Spanish, give a group a
+Each language uses the forms of its rule in the
+[CLDR chart](https://www.unicode.org/cldr/charts/latest/supplemental/language_plural_rules.html)
+(only whole numbers occur, so the fraction conditions don't apply):
+
+| Languages | Forms, for whole numbers |
+| --- | --- |
+| en, de, nl, tr, sv, da, nb | `one` 1; `other` |
+| es, it, ca | `one` 1; `many` exact millions; `other` |
+| fr, pt-BR | `one` 0 and 1; `many` exact millions; `other` |
+| pl | `one` 1; `few` ending 2–4 but not 12–14; `many` the rest |
+| ru, uk | `one` ending 1 but not 11; `few` ending 2–4 but not 12–14; `many` the rest |
+| cs | `one` 1; `few` 2–4; `other` |
+| ja, zh-Hans, ko | `other` only |
+
+`other` is required, even where the rule never picks it (Polish, Russian, Ukrainian), and a
+missing `one`, `few` or `many` falls back to it. In Spanish, give a group a
 `many` form whenever `{count}` comes straight before a noun. A form may leave `{count}` out
 (`bin.remove_body.one` says "1 clip" in words). The rules live in `plural_category` in
-`crates/suite-ui/src/i18n.rs`, the one place to change for a language with other forms.
+`crates/suite-ui/src/i18n.rs`, the one place to change for a language with other forms, tested
+by `wave_one_plural_rules_match_cldr`.
 
 ## Fallback
 
-A key missing from a language shows the English text. A key missing from English shows the key
+A key missing from a language shows the English text. A catalog that holds no key but
+`language.name` is a stub, a language registered before its translation: the parity tests skip
+it, so the stubs can merge before any translation does. Once a catalog has any other key it must
+have every key. A key missing from English shows the key
 itself (`export.add_to_queue`), which is readable and easy to search for. A catalog file that
 doesn't parse falls back to English as a whole. None of these panic; the tests below fail
 instead.
@@ -147,6 +172,13 @@ the user typed; undo and redo bring back that same text. Messages already on scr
 toasts, the error lines in Settings and Keyboard Shortcuts, the reason on a failed export in
 the queue) keep the language they were made in until they're replaced or go away.
 
+## Translating a registered language
+
+The languages above already have stub catalogs: `language.name` in `crates/suite-ui/i18n/<code>.toml`
+and nothing else. Copy each `en.toml`'s keys into the three `<code>.toml` files and translate
+them, keeping `language.name` as it is. For Japanese, Chinese or Korean, then re-run the CJK subset
+script (below) and commit its new face. No code changes.
+
 ## Adding a language
 
 1. Add its code to `LANGUAGES` in `crates/suite-ui/src/i18n.rs`. The Settings picker lists
@@ -172,7 +204,8 @@ A language whose script isn't Latin also needs a font; see the font policy below
 | `cargo test -p jvid-app --test i18n` | the editor, a selected clip's Inspector, the bundled effects (bin, search, Add Effect, the Inspector) and keyframe lanes, the export dialog and Settings in Spanish and back without a restart; the export dialog fits 640 points wide, narrower than the 960-point minimum the editor asks for (its height isn't tested). The tests that open the whole editor run on Linux only, the one place the test can move its folders |
 | `cargo test -p jvid-app --lib -- shipped_examples lane_captions` | bundled effects translate only while their file is as shipped; English lane captions read as before |
 | `cargo test -p jvid-app --lib -- settings_file preferences` | the language setting saves and reads back, including older files |
-| `cargo test -p suite-ui --test i18n` | live switching, fallback, placeholders, plural rules, glyphs, the gallery in Spanish |
+| `cargo test -p suite-ui --test i18n` | live switching, fallback, every language listed by its own name, placeholders, plural rules, glyphs (with Polish, Russian and other samples), the Japanese face loading only while Japanese is shown, the CJK size budget, the gallery in Spanish |
+| `cargo test -p suite-ui --lib i18n` | locale matching, each language's CLDR plural rule at 0, 1, 2, 5, 11, 12, 21, 22, 25, 101 and 111 |
 | `cargo test -p suite-ui --test gallery gallery_catalogs_match` | gallery catalogs match English |
 
 The tests that switch language sit in their own test binaries because the language is global;
@@ -205,17 +238,22 @@ particular string through.
 jvid draws every glyph from fonts it bundles, so a language can only use characters those fonts
 have. There is no fallback to system fonts.
 
-- **Latin**: the three Inter weights are subset to Basic Latin, Latin-1 Supplement and a few
-  punctuation marks (see `crates/suite-ui/assets/README.md`), about 27 KB each. That covers
-  Spanish completely (á é í ó ú ü ñ ¿ ¡ « ») and most of French, German, Italian, Portuguese,
-  Catalan, Dutch and the Nordic languages. Languages that need Latin Extended-A (Polish, Czech,
-  Turkish, Romanian, ..) need the subset widened: re-run the README's `pyftsubset` with the extra
-  ranges, on the order of 15 KB more per weight.
-- **CJK**: not supported, by policy. A Chinese, Japanese or Korean font is megabytes per weight
-  even subset to common characters (a full Noto Sans CJK weight is over 15 MB), against the
-  ~80 KB the three Inter weights take together. jvid doesn't download fonts at run time either:
-  it works offline and makes no network requests it doesn't need. A CJK translation needs an
-  agreed size budget and a bundled fallback face first.
+- **Latin and Cyrillic**: the three Inter weights are subset to Basic Latin, Latin-1 Supplement,
+  Latin Extended-A, basic Cyrillic with Ukrainian Ґ, and a few punctuation marks (see
+  `crates/suite-ui/assets/README.md`), about 43 KB each. That covers every wave-1 Latin and
+  Cyrillic language, including Polish „quotes”. Romanian's ș ț (Latin Extended-B) and Serbian or
+  Kazakh extras are outside it: widen the README's `pyftsubset` ranges for those.
+- **CJK**: one Noto Sans CJK Regular face per language (JP, SC, KR), used for every weight, within
+  a budget the owner set: **at most 600 KB per CJK language**. A full face is over 15 MB, so each
+  is subset to just the characters its language's catalogs use, by
+  `crates/suite-ui/assets/subset-cjk.py`; re-run it after every change to a `ja`, `zh-Hans` or `ko`
+  catalog and commit the face it writes. It fails past the budget, and so does
+  `cjk_faces_stay_within_budget`. A language's face is Inter's fallback only while that language
+  is shown, because Japanese, Chinese and Korean draw some of the same Han characters differently;
+  a 3 KB face of just 日本語, 简体中文 and 한국어 is always loaded for the language picker. The
+  script downloads the source faces on the developer's machine; jvid itself never downloads fonts:
+  it works offline and makes no network requests it doesn't need. User text (clip names,
+  subtitles) in characters a catalog doesn't use still shows as boxes.
 - **Right-to-left scripts** (Arabic, Hebrew) need shaping and bidirectional layout, which egui
   doesn't do yet.
 

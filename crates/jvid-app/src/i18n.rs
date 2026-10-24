@@ -6,6 +6,23 @@ pub use suite_ui::i18n::{Label, verbatim};
 pub static CATALOG: suite_ui::i18n::Catalog = suite_ui::i18n::Catalog::new([
     include_str!("../i18n/en.toml"),
     include_str!("../i18n/es.toml"),
+    include_str!("../i18n/fr.toml"),
+    include_str!("../i18n/de.toml"),
+    include_str!("../i18n/it.toml"),
+    include_str!("../i18n/pt-BR.toml"),
+    include_str!("../i18n/nl.toml"),
+    include_str!("../i18n/pl.toml"),
+    include_str!("../i18n/cs.toml"),
+    include_str!("../i18n/tr.toml"),
+    include_str!("../i18n/ru.toml"),
+    include_str!("../i18n/uk.toml"),
+    include_str!("../i18n/sv.toml"),
+    include_str!("../i18n/da.toml"),
+    include_str!("../i18n/nb.toml"),
+    include_str!("../i18n/ca.toml"),
+    include_str!("../i18n/ja.toml"),
+    include_str!("../i18n/zh-Hans.toml"),
+    include_str!("../i18n/ko.toml"),
 ]);
 
 /// `tr!("section.key")` is the current language's text; `tr!("key", name = value)` fills
@@ -94,18 +111,20 @@ mod tests {
             }
         };
         for lang in suite_ui::i18n::LANGUAGES {
+            // A key a language doesn't have yet shows, and is measured, in English.
+            let text = |k: &str| CATALOG.get_in(lang, k).or(CATALOG.get_in("en", k)).unwrap();
             for (prefix, room) in fixed {
                 let keys: Vec<&str> = CATALOG
-                    .keys(lang)
+                    .keys("en")
                     .into_iter()
                     .filter(|k| k.starts_with(prefix))
                     .collect();
                 assert!(!keys.is_empty(), "{prefix}");
-                let texts: Vec<&str> = keys.iter().flat_map(|k| CATALOG.get_in(lang, k)).collect();
+                let texts: Vec<&str> = keys.iter().map(|k| text(k)).collect();
                 check(lang, &texts, room);
             }
             // Settings: System (its language), then each language's own name.
-            let system = CATALOG.get_in(lang, "settings.system").unwrap();
+            let system = text("settings.system");
             let rows: Vec<String> = suite_ui::i18n::LANGUAGES
                 .iter()
                 .map(|l| suite_ui::i18n::autonym(l))

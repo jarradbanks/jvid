@@ -47,42 +47,55 @@ pub fn install_theme(ui: &egui::Ui, fresh: &mut bool) -> bool {
     false
 }
 
-/// Each character of `catalog`'s text, in every language, that the theme's fonts can't draw
-/// (egui shows its replacement glyph instead), as `lang key: 'c'`.
+/// Each character of `catalog`'s text, in every language and drawn with that language's fonts,
+/// that the theme can't draw (egui shows its replacement glyph instead), as `lang key: 'c'`.
 pub fn missing_glyphs(catalog: &crate::i18n::Catalog) -> Vec<String> {
     use crate::theme;
-    let ctx = egui::Context::default();
-    theme::install(&ctx);
     let mut out = Vec::new();
-    // The theme's fonts load on the first pass.
-    for _ in 0..2 {
-        let mut pass = ctx.run_ui(Default::default(), |ui| {
-            // egui's `has_glyph` says no to everything when the main face also holds the
-            // replacement glyph, so compare against what a code point no font has draws as.
-            let uv = |c: char, font: &egui::FontId| {
-                let g = ui
-                    .painter()
-                    .layout_no_wrap(c.into(), font.clone(), egui::Color32::WHITE);
-                g.rows[0].glyphs[0].uv_rect
-            };
-            out.clear();
-            for font in [theme::body(), theme::body_strong(), theme::title()] {
-                let none = uv('\u{10FFFD}', &font);
-                for lang in crate::i18n::LANGUAGES {
+    for lang in crate::i18n::LANGUAGES {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(theme::fonts(lang));
+        let mut found = Vec::new();
+        // The fonts load on the first pass.
+        for _ in 0..2 {
+            let mut pass = ctx.run_ui(Default::default(), |ui| {
+                // egui's `has_glyph` says no to everything when the main face also holds the
+                // replacement glyph, so compare against what a code point no font has draws as.
+                let uv = |c: char, font: &egui::FontId| {
+                    let g =
+                        ui.painter()
+                            .layout_no_wrap(c.into(), font.clone(), egui::Color32::WHITE);
+                    g.rows[0].glyphs[0].uv_rect
+                };
+                found.clear();
+                for font in [theme::body(), theme::body_strong(), theme::title()] {
+                    let none = uv('\u{10FFFD}', &font);
                     for key in catalog.keys(lang) {
                         let text = catalog.get_in(lang, key).unwrap_or_default();
                         for c in text.chars().filter(|c| !c.is_whitespace() && *c != '?') {
                             if uv(c, &font) == none {
-                                out.push(format!("{lang} {key}: {c:?}"));
+                                found.push(format!("{lang} {key}: {c:?}"));
                             }
                         }
                     }
                 }
-            }
-        });
-        pass.textures_delta.clear();
+            });
+            pass.textures_delta.clear();
+        }
+        out.extend(found);
     }
     out.sort();
     out.dedup();
     out
+}
+
+/// Test catalog sources: English and Spanish as given, every other language empty.
+pub const fn en_es(
+    en: &'static str,
+    es: &'static str,
+) -> [&'static str; crate::i18n::LANGUAGES.len()] {
+    let mut s = [""; crate::i18n::LANGUAGES.len()];
+    s[0] = en;
+    s[1] = es;
+    s
 }

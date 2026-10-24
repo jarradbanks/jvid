@@ -332,7 +332,8 @@ fn has_debug(s: &str) -> bool {
         .any(|(spec, _)| spec.ends_with('?'))
 }
 
-/// Identifier-shaped text: file names, extensions, keys, MIME types, env var names.
+/// Identifier-shaped text: file names, extensions, keys, MIME types, env var names, language
+/// tags (`pt-BR`, `zh-Hans`).
 fn identifier_like(s: &str) -> bool {
     let lower = s.chars().all(|c| {
         c.is_ascii_lowercase() || c.is_ascii_digit() || "_-./:+#%@=?&*,()[]$\\".contains(c)
@@ -340,7 +341,13 @@ fn identifier_like(s: &str) -> bool {
     let screaming = s.contains('_')
         && s.chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
-    lower || screaming
+    let mut tags = s.split('-');
+    let language = tags
+        .next()
+        .is_some_and(|p| (2..=3).contains(&p.len()) && p.chars().all(|c| c.is_ascii_lowercase()))
+        && s.contains('-')
+        && tags.all(|t| (2..=4).contains(&t.len()) && t.chars().all(|c| c.is_ascii_alphanumeric()));
+    lower || screaming || language
 }
 
 /// What a file's items make of literals, by name, so a sink can see text that reaches it from
@@ -1108,10 +1115,10 @@ fn exemptions_hold_with_either_path_separator() {
 /// The guard itself: each bypass shape is caught, and the allowed shapes aren't.
 #[test]
 fn guard_catches_every_bypass_shape() {
-    static CATALOG: Catalog = Catalog::new([
+    static CATALOG: Catalog = Catalog::new(suite_ui::test_support::en_es(
         "known = \"Known\"\nnamed = \"Hi {name}\"\n[clips]\none = \"{count} clip\"\nother = \"{count} clips\"\n",
         "known = \"Conocido\"\nnamed = \"Hola {name} {extra}\"\n[clips]\none = \"{count} clip\"\nother = \"{count} clips\"\n",
-    ]);
+    ));
     let bypasses = r#"
         const HINT: &str = "Drop files here";
         fn ui(ui: &mut egui::Ui, n: usize, x: bool) {
@@ -1291,6 +1298,7 @@ fn guard_catches_every_bypass_shape() {
         //! Doc comments are fine.
         const FILE: &str = "settings.toml";
         const ENV: &str = "JVID_TEST_MEDIA";
+        const TAGS: [&str; 2] = ["pt-BR", "zh-Hans"];
         fn ui(ui: &mut egui::Ui, n: usize, path: &Path) {
             ui.label(tr!("known"));
             ui.label(tr!("named", name = path.display(), extra = n));

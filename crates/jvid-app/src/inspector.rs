@@ -3229,7 +3229,10 @@ mod tests {
             );
         for id in ids {
             let key = format!("inspector.{id}");
-            for lang in suite_ui::i18n::LANGUAGES {
+            for lang in suite_ui::i18n::LANGUAGES
+                .iter()
+                .filter(|l| !CATALOG.is_stub(l))
+            {
                 assert!(CATALOG.get_in(lang, &key).is_some(), "{lang} lacks {key}");
             }
         }
