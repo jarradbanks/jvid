@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Ukrainian. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Звичайний"
+hover = "Наведення"
+focus = "Видимий фокус"
+pressed = "Натискання"
+disabled = "Вимкнено"
+loading_error = "Завантаження / помилка"
+
+[panel]
+widgets = "Віджети"
+effects = "Ефекти"
+text = "Текст"
+add = "Додати"
+more = "Більше"
+inspector = "Інспектор"
+source = "Джерело"
+program = "Програма"
+audio = "Аудіо"
+markers = "Маркери"
+history = "Історія"
+captions = "Підписи"
+overflow = "Вкладки, вужчі за 64 пкс, переходять у меню зі стрілкою."
+type_and_colour = "Шрифти й кольори"
+
+[row]
+primary = "Основна"
+secondary = "Другорядна"
+ghost = "Прозора"
+destructive = "Небезпечна"
+icon = "Значок"
+input = "Поле введення"
+search = "Пошук"
+numeric = "Число"
+dropdown = "Розкривний список"
+colour = "Колір"
+segmented = "Сегменти"
+checkbox = "Прапорець"
+section = "Розділ"
+slider = "Повзунок"
+keyframe = "Ключовий кадр"
+
+[demo]
+delete = "Видалити"
+export = "Експорт"
+width_prefix = "Ш"
+min_error = "Щонайменше 2"
+full = "Повний"
+fit = "Умістити"
+fill = "Заповнити"
+snap = "Прив’язка"
+live = "Наживо"
+transform = "Трансформування"
+position = "Положення"
+scale = "Масштаб"
+reset = "Скинути"
+previous = "Попередній ключовий кадр"
+next = "Наступний ключовий кадр"
+animate = "Анімувати"
+plus_second = "+1 с"
+
+[type]
+display = "Дисплейний 22"
+headline = "Заголовок 16"
+title = "Назва 14"
+body_strong = "Основний жирний 12"
+body = "Основний 12 · 0123456789 стоять на місці"
+small = "Дрібний 10 · підказка сполучення"
+
+[clip]
+video = "Відео"
+title = "Титр"
+still = "Кадр"
+audio = "Аудіо"
