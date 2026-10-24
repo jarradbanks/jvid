@@ -6,38 +6,47 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use egui::{Align, Align2, CornerRadius, Id, LayerId, Layout, Order, Rect, Stroke, pos2, vec2};
+use egui::{
+    Align, Align2, CornerRadius, Id, Key, LayerId, Layout, Modifiers, Order, Rect, Stroke, pos2,
+    vec2,
+};
 use jvid_core::history::{Command, History};
-use jvid_core::model::Project;
+use jvid_core::model::{AssetId, Project};
 use jvid_core::time::Time;
 use suite_ui::theme;
 use suite_ui::tokens::{color, radius, space};
 use suite_ui::widgets::{Button, State};
 
-use super::App;
+use super::{App, Tab};
 use crate::i18n::tr;
 use crate::import::Importer;
+use crate::timeline::Timeline;
 
 /// One lesson. Its `id` is the progress key in `settings.toml`.
 pub struct Lesson {
     pub id: &'static str,
     pub title: fn() -> &'static str,
     pub minutes: u32,
-    /// The sample media the sandbox project imports.
-    pub media: fn() -> Vec<PathBuf>,
+    /// The sample clips the sandbox project imports, by file name.
+    pub media: &'static [&'static str],
+    /// Prepares the starting project once `media` has imported. It can't be undone.
+    pub setup: fn(&mut App),
     pub steps: &'static [Step],
 }
 
 pub struct Step {
     /// The [`anchor`] the step points at.
     pub anchor: &'static str,
-    /// The instruction, one or two short sentences.
-    pub text: fn() -> &'static str,
-    /// The step is done.
+    /// The instruction, one or two short sentences. Shortcuts come from `app.keymap`, so a
+    /// remapped key reads right.
+    pub text: fn(&App) -> String,
+    /// Whether the step's goal holds in the project or UI. Checked every frame; once it passes,
+    /// the lesson moves on.
     pub done: fn(&App) -> bool,
     /// Does the step the way the user would.
     pub show_me: fn(&mut App),
-    /// Brings the anchor into view when it isn't drawn, such as by switching tabs.
+    /// Brings the anchor into view when it isn't drawn, such as by switching tabs. The Render
+    /// Queue reveals itself.
     pub reveal: Option<fn(&mut App)>,
 }
 
@@ -48,11 +57,12 @@ const BASICS: Lesson = Lesson {
     id: "basics",
     title: || tr!("tutorial.basics"),
     minutes: 1,
-    media: Vec::new,
+    media: &[],
+    setup: |_| {},
     steps: &[
         Step {
             anchor: "bin.titles",
-            text: || tr!("tutorial.basics_add"),
+            text: |_| tr!("tutorial.basics_add").into(),
             done: |a| {
                 a.history
                     .project()
@@ -64,14 +74,15 @@ const BASICS: Lesson = Lesson {
                 let [(name, _, text), ..] = crate::media_bin::presets();
                 let name = name.into();
                 apply(a, Command::AddText { name, text });
-                // Where clicking a preset leaves the bin.
-                a.bin.tab = 0;
+                // Where clicking a preset leaves the bin: the new title selected on the Media tab.
+                a.bin.selected = a.history.project().assets().last().map(|a| a.id);
+                (a.bin.tab, a.bin.query) = (0, String::new());
             },
             reveal: Some(|a| a.bin.tab = 2),
         },
         Step {
             anchor: "timeline",
-            text: || tr!("tutorial.basics_place"),
+            text: |_| tr!("tutorial.basics_place").into(),
             done: |a| first_clip(a).is_some(),
             show_me: |a| {
                 let project = a.history.project();
@@ -86,7 +97,7 @@ const BASICS: Lesson = Lesson {
         },
         Step {
             anchor: "timeline",
-            text: || tr!("tutorial.basics_select"),
+            text: |_| tr!("tutorial.basics_select").into(),
             done: |a| !a.timeline.selected().is_empty(),
             show_me: |a| {
                 if let Some(id) = first_clip(a) {
@@ -97,7 +108,7 @@ const BASICS: Lesson = Lesson {
         },
         Step {
             anchor: "inspector",
-            text: || tr!("tutorial.basics_edit"),
+            text: |_| tr!("tutorial.basics_edit").into(),
             done: |a| {
                 let preset = &crate::media_bin::presets()[0].2.content;
                 let texts = a.history.project().assets().iter();
@@ -119,6 +130,13 @@ const BASICS: Lesson = Lesson {
     ],
 };
 
+/// Sample clip `name`'s path, written out first if needed.
+// shortcut: no clips until #355 adds `crate::samples`; then this returns
+// `crate::samples::path(name)?.ok_or_else(...)`.
+fn sample(_name: &str) -> std::io::Result<PathBuf> {
+    Err(std::io::ErrorKind::NotFound.into())
+}
+
 fn apply(app: &mut App, c: Command) {
     if let Err(e) = app.history.apply(c) {
         tracing::warn!("lesson edit failed: {e}");
@@ -132,8 +150,18 @@ fn first_clip(app: &App) -> Option<jvid_core::model::ClipId> {
         .find_map(|t| t.clips().first().map(|c| c.id))
 }
 
+/// Turned on by a running lesson, so [`anchor`] records nothing otherwise.
+const RUNNING: &str = "lesson_running";
+
+fn running(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp(Id::new(RUNNING)).unwrap_or(false))
+}
+
 /// Records where anchor `name` was drawn this frame, for a lesson step that points at it.
 pub fn anchor(ctx: &egui::Context, name: &'static str, rect: Rect) {
+    if !running(ctx) {
+        return;
+    }
     let pass = ctx.cumulative_pass_nr();
     ctx.data_mut(|d| {
         let a = d.get_temp_mut_or_default::<Anchors>(Id::NULL);
@@ -169,10 +197,23 @@ pub struct Run {
     pub step: usize,
     /// A passing check moves on. Off after Back, so the step stays until its check fails.
     armed: bool,
-    /// The step whose reveal last ran; each step reveals once, so a missing anchor can't
-    /// repaint every frame.
-    revealed: Option<usize>,
+    /// The lesson's `setup` ran; the steps wait for it.
+    set_up: bool,
+    /// The current step's reveal ran. Once per visit, so a missing anchor can't repaint every
+    /// frame.
+    revealed: bool,
+    /// The current step's missing anchor was logged.
+    warned: bool,
+    /// A step passed its check rather than being skipped.
+    completed: bool,
     stash: Stash,
+}
+
+impl Run {
+    fn go(&mut self, step: usize) {
+        self.step = step.min(self.lesson.steps.len());
+        (self.revealed, self.warned) = (false, false);
+    }
 }
 
 struct Stash {
@@ -181,8 +222,10 @@ struct Stash {
     missing: HashSet<PathBuf>,
     match_source: bool,
     importer: Importer,
-    playhead: Time,
+    /// The playhead, selection and clipboard: clip ids repeat across projects.
+    timeline: Timeline,
     bin_tab: usize,
+    bin_selected: Option<AssetId>,
 }
 
 #[derive(Clone, Copy)]
@@ -196,26 +239,42 @@ enum Click {
 
 impl App {
     /// Opens `lesson` in a sandbox project built from its media, setting the user's aside.
+    /// Shows an error and starts nothing if a clip can't be written out.
     pub(super) fn start_lesson(&mut self, lesson: &'static Lesson) {
+        let media: std::io::Result<Vec<_>> = lesson.media.iter().map(|n| sample(n)).collect();
+        let media = match media {
+            Ok(m) => m,
+            Err(e) => {
+                let path = lesson.media.join(", ");
+                return self.error(tr!("app.open_failed", path = path, error = e));
+            }
+        };
         self.end_lesson();
         self.leave_project();
-        let importer = self.importer.sibling();
+        // Autosave is off in a lesson, so the edits it hasn't written yet are written now.
+        if let Some(target) = self.autosave_target() {
+            self.autosave.flush(&self.history, &target);
+        }
+        let (importer, timeline) = (self.importer.sibling(), self.timeline.sibling());
         let stash = Stash {
             history: std::mem::replace(&mut self.history, History::new(Project::default())),
             path: self.path.take(),
             missing: std::mem::take(&mut self.missing),
             match_source: std::mem::replace(&mut self.match_source, true),
             importer: std::mem::replace(&mut self.importer, importer),
-            playhead: self.timeline.playhead(),
+            timeline: std::mem::replace(&mut self.timeline, timeline),
             bin_tab: self.bin.tab,
+            bin_selected: self.bin.selected.take(),
         };
-        self.import((lesson.media)());
-        self.timeline.seek(Time(0));
+        self.import(media);
         self.lesson = Some(Run {
             lesson,
             step: 0,
             armed: true,
-            revealed: None,
+            set_up: false,
+            revealed: false,
+            warned: false,
+            completed: false,
             stash,
         });
     }
@@ -232,20 +291,54 @@ impl App {
         self.missing = s.missing;
         self.match_source = s.match_source;
         self.importer = s.importer;
-        self.timeline.seek(s.playhead);
+        self.timeline = s.timeline;
         self.bin.tab = s.bin_tab;
+        self.bin.selected = s.bin_selected;
+    }
+
+    /// Esc exits the lesson unless a dialog, menu or text field would take it. Runs before
+    /// anything else this frame, so it sees what was open last frame.
+    pub(super) fn lesson_keys(&mut self, ctx: &egui::Context) {
+        if self.lesson.is_none() {
+            return;
+        }
+        let free = ctx.memory(|m| m.top_modal_layer().is_none() && m.focused().is_none())
+            && !egui::Popup::is_any_open(ctx);
+        if free && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            self.end_lesson();
+        }
     }
 
     /// Runs the lesson a frame, after the panels drew their anchors: moves on when the step's
     /// check passes, reveals a hidden anchor, and draws the overlay and step card.
     pub(super) fn lesson_frame(&mut self, ctx: &egui::Context) {
+        let recorded = running(ctx);
+        if recorded != self.lesson.is_some() {
+            ctx.data_mut(|d| d.insert_temp(Id::new(RUNNING), self.lesson.is_some()));
+            ctx.request_repaint();
+        }
+        // Without this frame's anchors, a step would look hidden.
+        if !recorded {
+            return;
+        }
         let Some(mut run) = self.lesson.take() else {
             return;
         };
+        if !run.set_up {
+            if self.importer.is_busy() {
+                self.lesson = Some(run);
+                return;
+            }
+            (run.lesson.setup)(self);
+            // The starting project isn't an edit: nothing to undo or save.
+            self.history = History::new(self.history.project().clone());
+            run.set_up = true;
+        }
         let steps = run.lesson.steps;
         if let Some(step) = steps.get(run.step) {
             let done = (step.done)(self);
             if done && run.armed {
+                run.completed = true;
                 self.next_step(&mut run);
                 ctx.request_repaint();
             }
@@ -253,23 +346,36 @@ impl App {
         }
         let step = steps.get(run.step);
         let target = step.and_then(|s| anchor_rect(ctx, s.anchor));
-        let hidden = target.is_none() && run.revealed != Some(run.step);
-        if let Some(reveal) = step.filter(|_| hidden).and_then(|s| s.reveal) {
-            run.revealed = Some(run.step);
-            reveal(self);
-            ctx.request_repaint();
+        if let Some(s) = step.filter(|_| target.is_none()) {
+            let queue =
+                (s.anchor == Tab::RenderQueue.anchor()).then_some(App::show_queue as fn(&mut App));
+            match s.reveal.or(queue) {
+                Some(reveal) if !run.revealed => {
+                    run.revealed = true;
+                    reveal(self);
+                    ctx.request_repaint();
+                }
+                _ if !run.warned => {
+                    run.warned = true;
+                    let (id, n, anchor) = (run.lesson.id, run.step, s.anchor);
+                    tracing::warn!("lesson {id} step {n}: anchor `{anchor}` isn't drawn");
+                }
+                _ => {}
+            }
         }
         if let Some(t) = target {
             dim(ctx, t);
         }
-        let Some(click) = card(ctx, &run, target) else {
+        let text = step.map_or_else(|| tr!("tutorial.complete").into(), |s| (s.text)(self));
+        let modal = ctx.memory(|m| m.top_modal_layer().is_some());
+        let Some(click) = card(ctx, &run, &text, target, !modal) else {
             self.lesson = Some(run);
             return;
         };
         ctx.request_repaint();
         match click {
             Click::Back => {
-                run.step = run.step.saturating_sub(1);
+                run.go(run.step.saturating_sub(1));
                 run.armed = false;
             }
             Click::ShowMe => {
@@ -290,9 +396,10 @@ impl App {
     }
 
     fn next_step(&mut self, run: &mut Run) {
-        run.step = (run.step + 1).min(run.lesson.steps.len());
+        run.go(run.step + 1);
         run.armed = true;
-        if run.step == run.lesson.steps.len() {
+        // Skipping every step isn't finishing the lesson.
+        if run.step == run.lesson.steps.len() && run.completed {
             self.lesson_done(run.lesson.id);
         }
     }
@@ -336,12 +443,15 @@ impl App {
     }
 }
 
+/// Over the panels, under windows, menus and the step card.
+const DIM: Order = Order::Background;
+
 /// Dims the window around `target`, outlined in Light Blue. Painted only, so every click
 /// still reaches the editor.
 fn dim(ctx: &egui::Context, target: Rect) {
     let screen = ctx.content_rect();
     let hole = target.expand(space::S4).intersect(screen);
-    let painter = ctx.layer_painter(LayerId::new(Order::Middle, Id::new("lesson_dim")));
+    let painter = ctx.layer_painter(LayerId::new(DIM, Id::new("lesson_dim")));
     let shade = color::ground().gamma_multiply(0.8);
     for r in [
         Rect::from_min_max(screen.min, pos2(screen.max.x, hole.top())),
@@ -364,8 +474,14 @@ const CARD_W: f32 = 320.0;
 const CARD_H: f32 = 140.0;
 
 /// The step card beside `target`, or centred when there is none: the lesson and step, the
-/// instruction and the buttons. Returns the button clicked.
-fn card(ctx: &egui::Context, run: &Run, target: Option<Rect>) -> Option<Click> {
+/// instruction `text` and the buttons. Returns the button clicked, never while not `live`.
+fn card(
+    ctx: &egui::Context,
+    run: &Run,
+    text: &str,
+    target: Option<Rect>,
+    live: bool,
+) -> Option<Click> {
     let screen = ctx.content_rect().shrink(space::S16);
     let gap = space::S12;
     let (at, pivot) = match target {
@@ -388,6 +504,7 @@ fn card(ctx: &egui::Context, run: &Run, target: Option<Rect>) -> Option<Click> {
     let mut click = None;
     egui::Area::new(Id::new("lesson_card"))
         .order(Order::Foreground)
+        .interactable(live)
         .fixed_pos(at.max(screen.min))
         .pivot(pivot)
         .show(ctx, |ui| {
@@ -412,7 +529,6 @@ fn card(ctx: &egui::Context, run: &Run, target: Option<Rect>) -> Option<Click> {
                         }
                     });
                     ui.add_space(space::S8);
-                    let text = step.map_or(tr!("tutorial.complete"), |s| (s.text)());
                     let text = egui::RichText::new(text)
                         .font(theme::body())
                         .color(color::ink());
@@ -451,6 +567,14 @@ mod tests {
 
     use super::*;
 
+    /// A fresh temp folder for test `tag`.
+    fn tmp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("jvid-tutorial-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     fn harness() -> Harness<'static, App> {
         let mut h = Harness::builder()
             .with_size([1280.0, 720.0])
@@ -458,9 +582,44 @@ mod tests {
         let state = h.state_mut();
         state.on_welcome = false;
         state.settings_path = None;
+        state.untitled = None;
         h.run();
         h
     }
+
+    fn step(h: &Harness<'_, App>) -> Option<usize> {
+        h.state().lesson.as_ref().map(|r| r.step)
+    }
+
+    /// Prepared by `setup` with an extra video track; its first step points at the closed
+    /// Render Queue and its second at nothing.
+    const PREPARED: Lesson = Lesson {
+        id: "prepared",
+        title: || "Prepared",
+        minutes: 1,
+        media: &[],
+        setup: |a| {
+            let kind = jvid_core::model::TrackKind::Video;
+            let name = String::new();
+            apply(a, Command::AddTrack { kind, name });
+        },
+        steps: &[
+            Step {
+                anchor: "render_queue",
+                text: |_| String::new(),
+                done: |_| false,
+                show_me: |_| {},
+                reveal: None,
+            },
+            Step {
+                anchor: "nowhere",
+                text: |_| String::new(),
+                done: |_| false,
+                show_me: |_| {},
+                reveal: None,
+            },
+        ],
+    };
 
     /// Runs frames until the sandbox's media has imported and the card has caught up.
     fn settle(h: &mut Harness<'_, App>) {
@@ -608,12 +767,202 @@ mod tests {
             h.state().lesson.as_ref().map(|r| r.lesson.id),
             Some("basics")
         );
-        for _ in LESSONS[0].steps {
-            settle(&mut h);
+        settle(&mut h);
+        click(&mut h, tr!("tutorial.show_me"));
+        for _ in &LESSONS[0].steps[1..] {
             click(&mut h, tr!("tutorial.skip_step"));
         }
         let saved = crate::settings_file::load_from(&path);
         assert_eq!(saved.tutorials_done, vec!["basics".to_string()]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn skipping_every_step_isnt_finishing() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&LESSONS[0]);
+        settle(&mut h);
+        for _ in LESSONS[0].steps {
+            click(&mut h, tr!("tutorial.skip_step"));
+        }
+        assert_eq!(step(&h), Some(LESSONS[0].steps.len()));
+        assert!(h.state().tutorials_done.is_empty());
+    }
+
+    #[test]
+    fn saving_in_a_lesson_keeps_the_untitled_autosave() {
+        let dir = tmp("untitled");
+        let untitled = dir.join("Untitled.jvid");
+        let auto = crate::autosave::slot(&untitled, 1);
+        std::fs::write(&auto, "the user's work").unwrap();
+        let mut h = harness();
+        h.state_mut().untitled = Some(untitled);
+        h.state_mut().start_lesson(&LESSONS[0]);
+        settle(&mut h);
+        click(&mut h, tr!("tutorial.show_me"));
+        // Where Keep Project and Ctrl+S both land once the save dialog picks a file.
+        assert!(h.state_mut().save_to(dir.join("kept.jvid")));
+        assert!(auto.exists(), "Keep Project deleted the untitled autosave");
+        h.key_press_modifiers(Modifiers::COMMAND, Key::S);
+        h.run();
+        assert!(auto.exists(), "Ctrl+S deleted the untitled autosave");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn starting_a_lesson_writes_the_pending_autosave() {
+        let dir = tmp("flush");
+        let user = dir.join("mine.jvid");
+        let mut h = harness();
+        let state = h.state_mut();
+        state.path = Some(user.clone());
+        let kind = jvid_core::model::TrackKind::Audio;
+        let name = String::new();
+        state
+            .history
+            .apply(Command::AddTrack { kind, name })
+            .unwrap();
+        let before = state.history.project().clone();
+        h.run();
+        h.state_mut().start_lesson(&LESSONS[0]);
+        let saved = crate::project_file::load(&crate::autosave::slot(&user, 1)).unwrap();
+        assert_eq!(saved, before);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_selection_made_in_a_lesson_doesnt_survive_exit() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&LESSONS[0]);
+        settle(&mut h);
+        for _ in 0..3 {
+            click(&mut h, tr!("tutorial.show_me"));
+        }
+        assert!(!h.state().timeline.selected().is_empty());
+        assert!(h.state().bin.selected.is_some());
+        click(&mut h, tr!("tutorial.exit"));
+        assert!(h.state().timeline.selected().is_empty());
+        assert_eq!(h.state().bin.selected, None);
+    }
+
+    #[test]
+    fn show_me_selects_the_new_title_like_a_click() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&LESSONS[0]);
+        settle(&mut h);
+        click(&mut h, tr!("tutorial.show_me"));
+        let state = h.state();
+        let title = state
+            .history
+            .project()
+            .assets()
+            .iter()
+            .find(|a| a.text.is_some());
+        assert_eq!(state.bin.selected, title.map(|a| a.id));
+        assert_eq!(state.bin.tab, 0);
+    }
+
+    #[test]
+    fn back_reveals_again() {
+        let mut h = harness();
+        h.state_mut().bin.tab = 3;
+        h.state_mut().start_lesson(&LESSONS[0]);
+        settle(&mut h);
+        assert_eq!(h.state().bin.tab, 2);
+        click(&mut h, tr!("tutorial.show_me"));
+        assert_eq!(step(&h), Some(1));
+        h.state_mut().bin.tab = 3;
+        click(&mut h, tr!("tutorial.back"));
+        assert_eq!(step(&h), Some(0));
+        assert_eq!(
+            h.state().bin.tab,
+            2,
+            "Back to step 0 reveals the Text tab again"
+        );
+    }
+
+    #[test]
+    fn setup_prepares_a_project_that_cant_be_undone() {
+        let mut h = harness();
+        let tracks = |h: &Harness<'_, App>| h.state().history.project().sequence().tracks().len();
+        h.state_mut().start_lesson(&PREPARED);
+        settle(&mut h);
+        let empty = History::new(Project::default());
+        assert_eq!(tracks(&h), empty.project().sequence().tracks().len() + 1);
+        assert!(!h.state().history.can_undo());
+        assert!(!h.state().history.is_dirty());
+    }
+
+    #[test]
+    fn the_render_queue_reveals_itself_and_a_missing_anchor_is_logged() {
+        let mut h = harness();
+        assert!(h.state().dock.find_tab(&Tab::RenderQueue).is_none());
+        h.state_mut().start_lesson(&PREPARED);
+        settle(&mut h);
+        assert!(drawn(&h, "render_queue").is_some());
+        let warned = |h: &Harness<'_, App>| h.state().lesson.as_ref().is_some_and(|r| r.warned);
+        assert!(!warned(&h));
+        click(&mut h, tr!("tutorial.skip_step"));
+        assert!(warned(&h), "the missing `nowhere` anchor is logged");
+    }
+
+    #[test]
+    fn a_sample_that_cant_be_found_starts_nothing() {
+        const BROKEN: Lesson = Lesson {
+            media: &["not-a-sample.mp4"],
+            ..PREPARED
+        };
+        let mut h = harness();
+        h.state_mut().start_lesson(&BROKEN);
+        assert!(h.state().lesson.is_none());
+        assert!(matches!(
+            h.state().prompts.as_slice(),
+            [super::super::Prompt::Error(_)]
+        ));
+    }
+
+    #[test]
+    fn esc_exits_unless_a_dialog_is_open() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&LESSONS[0]);
+        settle(&mut h);
+        h.key_press(Key::Escape);
+        h.run();
+        assert!(h.state().lesson.is_none(), "Esc exits");
+
+        // A card shown after Project Settings opened sits above it, but neither its Exit nor
+        // Esc leave the sandbox under the dialog, whose Apply would land on the user's project.
+        let under_settings = |h: &mut Harness<'_, App>| {
+            h.state_mut().end_lesson();
+            let state = h.state_mut();
+            state.settings_dialog.open(state.history.project());
+            h.run();
+            h.state_mut().start_lesson(&LESSONS[0]);
+            settle(h);
+        };
+        under_settings(&mut h);
+        h.key_press(Key::Escape);
+        h.run();
+        assert!(
+            h.state().lesson.is_some(),
+            "Esc closes the dialog, not the lesson"
+        );
+        under_settings(&mut h);
+        click(&mut h, tr!("tutorial.exit"));
+        assert!(
+            h.state().lesson.is_some(),
+            "the card is inert under a dialog"
+        );
+    }
+
+    #[test]
+    fn no_anchors_are_recorded_without_a_lesson() {
+        let h = harness();
+        assert!(h.ctx.data(|d| d.get_temp::<Anchors>(Id::NULL)).is_none());
+    }
+
+    #[test]
+    fn the_dim_stays_under_windows() {
+        assert!(DIM < Order::Middle);
     }
 }
