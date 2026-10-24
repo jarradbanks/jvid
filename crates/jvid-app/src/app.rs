@@ -517,7 +517,7 @@ impl App {
                     Align2::CENTER_CENTER,
                     icon::CIRCLE_ALERT,
                     theme::icon_font(),
-                    color::RED,
+                    color::red(),
                 );
             }
             let shortcut = self.keymap.shortcut("export");

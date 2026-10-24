@@ -127,7 +127,7 @@ impl ExportDialog {
                 };
                 egui::Frame::NONE.inner_margin(head).show(ui, |ui| {
                     let title = RichText::new(tr!("export.export")).font(theme::headline());
-                    ui.label(title.color(color::INK));
+                    ui.label(title.color(color::ink()));
                 });
                 let body = Margin {
                     left: 16,
@@ -220,8 +220,8 @@ impl ExportDialog {
                                     if i > 0 {
                                         ui.add_space(space::S4);
                                     }
-                                    ui.label(RichText::new(label).color(color::INK_3));
-                                    ui.label(RichText::new(tc(t)).color(color::INK_2));
+                                    ui.label(RichText::new(label).color(color::ink_3()));
+                                    ui.label(RichText::new(tc(t)).color(color::ink_2()));
                                 }
                             });
                             if *range == Range::Highlights {
@@ -245,7 +245,7 @@ impl ExportDialog {
                                                     |ui| {
                                                         let d = super::queue::clock(secs);
                                                         ui.label(
-                                                            RichText::new(d).color(color::INK_3),
+                                                            RichText::new(d).color(color::ink_3()),
                                                         );
                                                     },
                                                 );
@@ -357,9 +357,9 @@ impl ExportDialog {
                                 b - a,
                             )),
                         };
-                        ui.label(RichText::new(tr!("export.estimated_size")).color(color::INK_3));
+                        ui.label(RichText::new(tr!("export.estimated_size")).color(color::ink_3()));
                         let size = RichText::new(size).font(theme::body_strong());
-                        ui.label(size.color(color::INK));
+                        ui.label(size.color(color::ink()));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let chosen = chosen(seq, &self.skipped);
                             let kind = *range;
@@ -452,7 +452,7 @@ fn section(ui: &mut Ui, title: &str, first: bool) {
     let w = ui.available_width();
     ui.allocate_ui_with_layout(vec2(w, 28.0), Layout::left_to_right(Align::Center), |ui| {
         let t = RichText::new(title).font(theme::body_strong());
-        ui.label(t.color(color::INK));
+        ui.label(t.color(color::ink()));
     });
 }
 
@@ -464,7 +464,7 @@ fn row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
             Layout::left_to_right(Align::Center),
             |ui| {
                 ui.set_width(LABEL);
-                let l = egui::Label::new(RichText::new(label).color(color::INK_2)).truncate();
+                let l = egui::Label::new(RichText::new(label).color(color::ink_2())).truncate();
                 ui.add(l);
             },
         );
@@ -479,7 +479,7 @@ fn readout(ui: &mut Ui, text: &str) {
     ui.allocate_ui_with_layout(
         vec2(w, size::CONTROL),
         Layout::left_to_right(Align::Center),
-        |ui| ui.add(egui::Label::new(RichText::new(text).color(color::INK_2)).truncate()),
+        |ui| ui.add(egui::Label::new(RichText::new(text).color(color::ink_2())).truncate()),
     );
 }
 
@@ -493,12 +493,12 @@ fn note(ui: &mut Ui, kind: Note, text: &str) -> egui::Response {
     ui.horizontal_top(|ui| {
         ui.add_space(LABEL + space::S4);
         let ink = match kind {
-            Note::Help => color::INK_3,
+            Note::Help => color::ink_3(),
             Note::Warn => {
                 let glyph = RichText::new(icon::CIRCLE_ALERT)
                     .font(FontId::new(14.0, theme::icon_font().family));
-                ui.label(glyph.color(color::AMBER));
-                color::AMBER
+                ui.label(glyph.color(color::amber()));
+                color::amber()
             }
         };
         ui.add(egui::Label::new(RichText::new(text).color(ink)).wrap())
@@ -510,7 +510,7 @@ fn note(ui: &mut Ui, kind: Note, text: &str) -> egui::Response {
 fn rule(ui: &mut Ui) {
     let line = 1.0 / ui.pixels_per_point();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), line), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, color::BORDER);
+    ui.painter().rect_filled(rect, 0.0, color::border());
 }
 
 fn loudness_picker(ui: &mut Ui, loudness: &mut Option<f64>) {

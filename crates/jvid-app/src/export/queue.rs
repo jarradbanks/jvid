@@ -275,7 +275,7 @@ pub fn menu(ui: &mut Ui, rows: &[Row], confirm: bool, shortcut: &str) -> Option<
         }
     }
     let show = tr!("export.show_queue");
-    if menu_row(ui, Some(icon::PANEL_BOTTOM), show, "", true, color::INK) {
+    if menu_row(ui, Some(icon::PANEL_BOTTOM), show, "", true, color::ink()) {
         action = Some(Action::Show);
     }
     if menu_row(
@@ -284,7 +284,7 @@ pub fn menu(ui: &mut Ui, rows: &[Row], confirm: bool, shortcut: &str) -> Option<
         tr!("export.new"),
         shortcut,
         true,
-        color::INK,
+        color::ink(),
     ) {
         action = Some(Action::New);
     }
@@ -297,7 +297,7 @@ pub fn menu(ui: &mut Ui, rows: &[Row], confirm: bool, shortcut: &str) -> Option<
         ui.horizontal(|ui| {
             ui.set_height(size::CONTROL);
             ui.add_space(space::S8);
-            ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::INK));
+            ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::ink()));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = space::S4;
                 if ui
@@ -318,11 +318,11 @@ pub fn menu(ui: &mut Ui, rows: &[Row], confirm: bool, shortcut: &str) -> Option<
     }
     let finished = rows.len() > live;
     let clear = tr!("export.clear_finished");
-    if menu_row(ui, None, clear, "", finished, color::INK) {
+    if menu_row(ui, None, clear, "", finished, color::ink()) {
         action = Some(Action::ClearFinished);
     }
     let cancel = tr!("export.cancel_all");
-    if menu_row(ui, None, cancel, "", live > 0, color::RED) {
+    if menu_row(ui, None, cancel, "", live > 0, color::red()) {
         action = Some(Action::CancelAll);
     }
     action
@@ -349,7 +349,7 @@ fn summary(ui: &mut Ui, rows: &[Row]) {
         Align2::LEFT_TOP,
         &top,
         theme::body_strong(),
-        color::INK,
+        color::ink(),
     );
     let Some((r, progress, left)) = running else {
         return;
@@ -361,17 +361,17 @@ fn summary(ui: &mut Ui, rows: &[Row]) {
         Align2::RIGHT_TOP,
         &pct,
         theme::body(),
-        color::INK_2,
+        color::ink_2(),
     );
     let bar_rect =
         Rect::from_min_size(inner.left_top() + vec2(0.0, 22.0), vec2(inner.width(), 6.0));
     bar(ui, bar_rect, progress);
     let bottom = format!("{} · {}", file_name(&r.path), r.preset);
-    let galley = elide(ui, &bottom, inner.width(), color::INK_3);
+    let galley = elide(ui, &bottom, inner.width(), color::ink_3());
     ui.painter().galley(
         pos2(inner.left(), inner.bottom() - galley.size().y),
         galley,
-        color::INK_3,
+        color::ink_3(),
     );
 }
 
@@ -398,11 +398,11 @@ fn recent(ui: &mut Ui, r: &Row) -> bool {
         vec2(size::SMALL_CONTROL, size::SMALL_CONTROL),
     );
     let name = file_name(&r.path);
-    let galley = elide(ui, &name, reveal.left() - space::S4 - left, color::INK_2);
+    let galley = elide(ui, &name, reveal.left() - space::S4 - left, color::ink_2());
     ui.painter().galley(
         pos2(left, rect.center().y - galley.size().y / 2.0),
         galley,
-        color::INK_2,
+        color::ink_2(),
     );
     r.status == Status::Done
         && ui
@@ -417,10 +417,10 @@ fn empty(ui: &mut Ui) {
         ui.label(
             RichText::new(tr!("export.empty_title"))
                 .font(theme::title())
-                .color(color::INK),
+                .color(color::ink()),
         );
         ui.add_space(space::S4);
-        ui.label(RichText::new(tr!("export.empty_help")).color(color::INK_3));
+        ui.label(RichText::new(tr!("export.empty_help")).color(color::ink_3()));
         ui.add_space(space::S16);
     });
     separator(ui);
@@ -444,12 +444,12 @@ fn menu_row(
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
     if enabled && (response.hovered() || response.has_focus()) {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::BORDER);
+            .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::border());
     }
-    let ink = if enabled { ink } else { color::INK_4 };
+    let ink = if enabled { ink } else { color::ink_4() };
     let mut x = rect.left() + space::S8;
     if let Some(g) = glyph {
-        let c = if enabled { color::INK_2 } else { ink };
+        let c = if enabled { color::ink_2() } else { ink };
         let at = pos2(x + size::ICON / 2.0, rect.center().y);
         text(ui, at, Align2::CENTER_CENTER, g, theme::icon_font(), c);
         x += size::ICON + space::S8;
@@ -469,7 +469,7 @@ fn menu_row(
         Align2::RIGHT_CENTER,
         shortcut,
         theme::small(),
-        color::INK_3,
+        color::ink_3(),
     );
     response.clicked()
 }
@@ -480,7 +480,7 @@ fn separator(ui: &mut Ui) {
     ui.painter().rect_filled(
         Rect::from_x_y_ranges(rect.x_range(), rect.center().y..=rect.center().y + line),
         0.0,
-        color::BORDER,
+        color::border(),
     );
 }
 
@@ -506,9 +506,9 @@ pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<
                 ui.vertical_centered(|ui| {
                     ui.add_space(space::S32);
                     let t = RichText::new(tr!("export.empty_title")).font(theme::title());
-                    ui.label(t.color(color::INK));
+                    ui.label(t.color(color::ink()));
                     ui.add_space(space::S4);
-                    ui.label(RichText::new(tr!("export.empty_help")).color(color::INK_3));
+                    ui.label(RichText::new(tr!("export.empty_help")).color(color::ink_3()));
                 });
                 return;
             }
@@ -536,7 +536,7 @@ pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<
     let right = header.right() - space::S8 - size::CONTROL - space::S8;
     let title_w = ui
         .painter()
-        .layout_no_wrap(tr!("export.queue").into(), theme::body_strong(), color::INK)
+        .layout_no_wrap(tr!("export.queue").into(), theme::body_strong(), color::ink())
         .size()
         .x;
     let left = header.left() + space::INSET + title_w + space::S12;
@@ -565,7 +565,7 @@ pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<
                 {
                     action = Some(Action::KeepExporting);
                 }
-                ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::INK));
+                ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::ink()));
                 return;
             }
             let cancel = Button::destructive(tr!("export.cancel_all")).state(on(live > 0));
@@ -633,9 +633,9 @@ fn header_row(ui: &mut Ui, wide: bool) {
     ];
     for (c, name) in cols.iter().zip(names) {
         if c.width() > 0.0 {
-            let galley = elide(ui, name, c.width(), color::INK_3);
+            let galley = elide(ui, name, c.width(), color::ink_3());
             let at = pos2(c.left(), c.center().y - galley.size().y / 2.0);
-            ui.painter().galley(at, galley, color::INK_3);
+            ui.painter().galley(at, galley, color::ink_3());
         }
     }
     rule(ui, rect);
@@ -648,28 +648,28 @@ fn row(ui: &mut Ui, i: usize, r: &Row, wide: bool) -> Option<Action> {
     let cols = columns(rect, wide);
     let mut action = None;
     let name = file_name(&r.path);
-    cell(ui, cols[0], &name, color::INK);
+    cell(ui, cols[0], &name, color::ink());
     let size = r.size.map_or("–".into(), size_text);
-    cell(ui, cols[1], &r.preset, color::INK_3);
-    cell(ui, cols[2], &clock(seconds(r.duration)), color::INK_3);
-    cell(ui, cols[3], &size, color::INK_3);
+    cell(ui, cols[1], &r.preset, color::ink_3());
+    cell(ui, cols[2], &clock(seconds(r.duration)), color::ink_3());
+    cell(ui, cols[3], &size, color::ink_3());
     match &r.status {
         Status::Rendering { progress, left } => {
             let pct = percent(*progress, *left);
             let font = theme::body();
             let w = ui
                 .painter()
-                .layout_no_wrap(pct.clone(), font.clone(), color::INK_2)
+                .layout_no_wrap(pct.clone(), font.clone(), color::ink_2())
                 .size()
                 .x;
             let c = cols[4];
             let at = pos2(c.right(), c.center().y);
-            text(ui, at, Align2::RIGHT_CENTER, &pct, font, color::INK_2);
+            text(ui, at, Align2::RIGHT_CENTER, &pct, font, color::ink_2());
             let bar_w = (c.width() - w - space::S8).max(0.0);
             let b = Rect::from_min_size(pos2(c.left(), c.center().y - 2.0), vec2(bar_w, 4.0));
             bar(ui, b, *progress);
         }
-        Status::Failed(e) => cell(ui, cols[4], e, color::RED),
+        Status::Failed(e) => cell(ui, cols[4], e, color::red()),
         _ => {}
     }
     chip(ui, cols[5], &r.status);
@@ -709,7 +709,7 @@ fn rule(ui: &Ui, rect: Rect) {
     ui.painter().rect_filled(
         Rect::from_x_y_ranges(rect.x_range(), rect.bottom() - line..=rect.bottom()),
         0.0,
-        color::BORDER,
+        color::border(),
     );
 }
 
@@ -751,20 +751,20 @@ fn chip(ui: &mut Ui, cell: Rect, s: &Status) {
 /// A status's icon, colour and label.
 fn look(s: &Status) -> (&'static str, Color32, &'static str) {
     match s {
-        Status::Waiting => (icon::CLOCK, color::INK_2, tr!("export.waiting")),
-        Status::Rendering { .. } => (icon::LOADER, color::INK, tr!("export.rendering")),
-        Status::Done => (icon::CIRCLE_CHECK, color::GREEN, tr!("export.done")),
-        Status::Failed(_) => (icon::CIRCLE_ALERT, color::RED, tr!("export.failed_short")),
-        Status::Cancelled => (icon::BAN, color::INK_3, tr!("export.cancelled")),
+        Status::Waiting => (icon::CLOCK, color::ink_2(), tr!("export.waiting")),
+        Status::Rendering { .. } => (icon::LOADER, color::ink(), tr!("export.rendering")),
+        Status::Done => (icon::CIRCLE_CHECK, color::green(), tr!("export.done")),
+        Status::Failed(_) => (icon::CIRCLE_ALERT, color::red(), tr!("export.failed_short")),
+        Status::Cancelled => (icon::BAN, color::ink_3(), tr!("export.cancelled")),
     }
 }
 
 /// A neutral progress bar: Ink on Border Strong, never Blue.
 fn bar(ui: &Ui, rect: Rect, progress: f32) {
     let corner = CornerRadius::same((rect.height() / 2.0) as u8);
-    ui.painter().rect_filled(rect, corner, color::BORDER_STRONG);
+    ui.painter().rect_filled(rect, corner, color::border_strong());
     let done = rect.with_max_x(rect.left() + rect.width() * progress.clamp(0.0, 1.0));
-    ui.painter().rect_filled(done, corner, color::INK);
+    ui.painter().rect_filled(done, corner, color::ink());
 }
 
 /// A truncated label in `rect`, left-aligned and vertically centred; screen readers get it whole.
