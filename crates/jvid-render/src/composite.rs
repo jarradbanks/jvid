@@ -653,10 +653,11 @@ fn map(
 pub(crate) fn unpad(buf: &wgpu::Buffer, width: u32) -> Vec<u8> {
     let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
     let data = buf.slice(..).get_mapped_range().unwrap();
-    data.chunks(row as usize)
-        .flat_map(|r| &r[..width as usize * 4])
-        .copied()
-        .collect()
+    let mut out = Vec::with_capacity(data.len());
+    for r in data.chunks(row as usize) {
+        out.extend_from_slice(&r[..width as usize * 4]);
+    }
+    out
 }
 
 /// Composites one frame at full `size` (as [`Compositor::render`] at scale 1) and writes the
