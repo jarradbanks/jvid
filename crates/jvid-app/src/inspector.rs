@@ -4413,6 +4413,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_swatch_keeps_its_edge_against_a_panel_of_its_own_colour() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        use suite_ui::themes::{HIGH_CONTRAST, LIGHT};
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        // White on Light and black on High Contrast, each about the colour of its panel.
+        for (theme, field) in [
+            (LIGHT, "Color FFFFFF"),
+            (HIGH_CONTRAST, "Outline Color 000000"),
+        ] {
+            let mut h = text_harness(264.0, sample());
+            suite_ui::themes::apply(&h.ctx, &theme);
+            // Outline starts collapsed.
+            h.get_by_label("Outline").click();
+            h.run();
+            let r = h.get_by_role_and_label(Role::ColorWell, field).rect();
+            let img = h.render().unwrap();
+            let px = |x: f32| img.get_pixel(x as u32, r.center().y as u32).0;
+            let (panel, edge, fill) = (px(r.left() - 2.0), px(r.left()), px(r.left() + 4.0));
+            assert!(edge != fill && edge != panel, "{field}: its edge shows");
+        }
+    }
+
     // The Inspector at 1280x720 (288) and at its minimum (PANEL_MIN), less 2 x INSET.
     #[test]
     fn the_text_tab_lines_up_at_the_default_width() {
