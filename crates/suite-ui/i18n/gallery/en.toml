@@ -37,6 +37,7 @@ search = "Search"
 numeric = "Numeric"
 dropdown = "Dropdown"
 colour = "Colour"
+swatches = "Swatches"
 segmented = "Segmented"
 checkbox = "Checkbox"
 section = "Section"
@@ -61,6 +62,10 @@ previous = "Previous Keyframe"
 next = "Next Keyframe"
 animate = "Animate"
 plus_second = "+1s"
+violet = "Violet"
+plum = "Plum"
+ochre = "Ochre"
+green = "Green"
 
 # The type scale, each line in its own style.
 [type]

@@ -7,7 +7,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{
     Button, ButtonKind, Checkbox, ColorField, DragField, Dropdown, KeyButton, Keyed, SectionHeader,
-    Segmented, Slider, State, TextInput, Timecode,
+    Segmented, Slider, State, Swatches, TextInput, Timecode,
 };
 
 /// The gallery's demo labels; the widgets' own strings are in suite-ui's catalog.
@@ -64,6 +64,7 @@ pub struct Gallery {
     level: f64,
     choice: usize,
     colour: [u8; 4],
+    swatch: usize,
     segment: usize,
     checked: bool,
     open: bool,
@@ -245,6 +246,18 @@ fn states(ui: &mut egui::Ui, g: &mut Gallery) {
                 let mut half = [g.colour[0], g.colour[1], g.colour[2], 0x80];
                 ui.add(ColorField::new(&mut half, tr!("demo.fill")));
             });
+            ui.end_row();
+
+            ui.label(tr!("row.swatches"));
+            let names = [
+                tr!("demo.violet"),
+                tr!("demo.plum"),
+                tr!("demo.ochre"),
+                tr!("demo.green"),
+            ];
+            for (_, s) in STATES {
+                ui.add(Swatches::new(&mut g.swatch, &color::CLIPS, &names).state(s));
+            }
             ui.end_row();
 
             ui.label(tr!("row.segmented"));
