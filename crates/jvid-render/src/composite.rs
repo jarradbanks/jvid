@@ -630,9 +630,11 @@ pub(crate) fn copy_out(
         tex.size(),
     );
     let done = queue.submit([encoder.finish()]);
+    // An Err means the buffer was dropped before the copy landed (export cancelled or app quit).
     buf.slice(..).map_async(wgpu::MapMode::Read, |r| {
-        r.unwrap();
-        mapped();
+        if r.is_ok() {
+            mapped();
+        }
     });
     (buf, done)
 }
