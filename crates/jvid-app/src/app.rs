@@ -1440,8 +1440,12 @@ impl TabViewer for Viewer<'_> {
         if *tab == Tab::Preview {
             // While a clip edge is dragged, the frame at the trim point.
             let trim = self.timeline.trim_frame(self.project);
-            let trim = trim.and_then(|(a, t)| Some((self.project.asset(a)?.path.as_path(), t)));
-            let offline = trim.is_some_and(|(p, _)| self.missing.contains(p));
+            let trim = trim.and_then(|(a, t)| {
+                let a = self.project.asset(a)?;
+                let video = a.probe.as_ref().is_none_or(|p| p.width.is_some());
+                Some((a.path.as_path(), t, video))
+            });
+            let offline = trim.is_some_and(|(p, ..)| self.missing.contains(p));
             panel.show(ui, |ui| {
                 let frame = self.preview.project_rect(ui, self.project.settings());
                 let head = self.timeline.playhead();
