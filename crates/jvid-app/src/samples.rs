@@ -75,6 +75,15 @@ pub fn path(name: &str) -> std::io::Result<Option<PathBuf>> {
     path_in(&dirs.data_dir().join("samples").join(VERSION), name)
 }
 
+/// The folder holding every clip, each written out first if needed; see [`path`].
+pub fn dir() -> std::io::Result<Option<PathBuf>> {
+    let mut dir = None;
+    for (name, _) in CLIPS {
+        dir = path(name)?.and_then(|p| Some(p.parent()?.to_owned()));
+    }
+    Ok(dir)
+}
+
 fn path_in(dir: &Path, name: &str) -> std::io::Result<Option<PathBuf>> {
     let Some(&(_, bytes)) = CLIPS.iter().find(|(n, _)| *n == name) else {
         return Ok(None);
