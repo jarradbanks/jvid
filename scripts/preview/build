@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Regenerates docs/media/preview.webp and docs/media/preview.mp4: the README's preview reel.
-# Usage: scripts/preview/build   (needs the FFmpeg CLI with libx264 and libwebp, curl and Mesa
-# lavapipe or another Vulkan driver; see CONTRIBUTING.md for the build's own requirements)
+# Regenerates docs/media/preview.webp and docs/media/preview.mp4: the README's preview video.
+# Usage: scripts/preview/build   (needs the FFmpeg CLI with libx264 and libwebp, curl, Node 22+,
+# and Mesa lavapipe or another Vulkan driver; see CONTRIBUTING.md for the build's own requirements)
 #
 # Downloads Tears of Steel (CC-BY 3.0, Blender Foundation) once into target/preview/, cuts four
 # shots from it, has the reel test (crates/jvid-app/src/app/reel.rs) drive the real editor
-# frame by frame through egui_kittest and wgpu, then encodes the frames. Footage stays in target/.
+# frame by frame through egui_kittest and wgpu, then lays that capture out with headlines and
+# camera moves in scripts/preview/motion.html, rendered by HyperFrames. Footage stays in target/.
+# HyperFrames downloads its own headless Chrome (it needs unzip); to use another Chrome or
+# Chromium, set HYPERFRAMES_BROWSER_PATH to its binary.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -41,20 +44,24 @@ mkdir -p "$frames"
 JVID_REEL_MEDIA="$media" JVID_REEL_FRAMES="$frames" LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
   cargo test --manifest-path "$root/Cargo.toml" -p jvid-app --lib app::reel -- --ignored --exact app::reel::reel
 
-# The loop: the last half second fades into the first, and the frames under that fade are
-# dropped from the start, so the reel plays on without a cut.
-n=$(find "$frames" -name '*.png' | wc -l)
-fade=15
-secs() { awk "BEGIN { print $1 / 30 }"; }
+# The composition: the capture plus fonts, staged next to motion.html, rendered at 1920x1080.
+motion="$cache/motion"
+rm -rf "$motion"
+mkdir -p "$motion"
+cp "$root/scripts/preview/motion.html" "$motion/index.html"
+cp "$root"/crates/suite-ui/assets/Inter-{Regular,Medium,SemiBold}.ttf "$motion/"
+ff -framerate 30 -i "$frames/%05d.png" -c:v libx264 -preset slow -crf 10 -g 15 -pix_fmt yuv420p \
+  "$motion/ui.mp4"
+(cd "$motion" && HYPERFRAMES_NO_TELEMETRY=1 DO_NOT_TRACK=1 HYPERFRAMES_SKIP_SKILLS=1 \
+  npx -y hyperframes@0.8.143 render --fps 30 --quality high --crf 12 --video-frame-format png \
+  --workers 1 -o render.mp4)
+
+# The composition ends on its first frame, so both files loop without a cut. The camera moves
+# change every pixel, so the webp drops to 20 fps and quality 55 to stay under 4 MB.
 out="$root/docs/media"
 mkdir -p "$out"
-ff -framerate 30 -i "$frames/%05d.png" -framerate 30 -i "$frames/%05d.png" -filter_complex "
-  [0]trim=start_frame=$fade,setpts=PTS-STARTPTS[body];
-  [1]trim=end_frame=$fade,setpts=PTS-STARTPTS[head];
-  [body][head]xfade=transition=fade:duration=$(secs $fade):offset=$(secs $((n - 2 * fade))),split[a][b];
-  [a]format=yuv420p[mp4];
-  [b]scale=1280:-1:flags=lanczos[webp]" \
-  -map '[mp4]' -c:v libx264 -preset veryslow -crf 18 -movflags +faststart -an "$out/preview.mp4" \
-  -map '[webp]' -c:v libwebp_anim -lossless 0 -quality 75 -compression_level 6 -loop 0 -an \
+ff -i "$motion/render.mp4" -filter_complex "split[a][b];[a]format=yuv420p[mp4];[b]fps=20,scale=1280:-1:flags=lanczos[webp]" \
+  -map '[mp4]' -c:v libx264 -preset veryslow -crf 20 -movflags +faststart -an "$out/preview.mp4" \
+  -map '[webp]' -c:v libwebp_anim -lossless 0 -quality 55 -compression_level 6 -loop 0 -an \
   "$out/preview.webp"
 ls -l "$out/preview.mp4" "$out/preview.webp"

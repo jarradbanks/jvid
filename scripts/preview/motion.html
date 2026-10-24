@@ -1,0 +1,122 @@
+<!doctype html>
+<!--
+  The README preview: a HyperFrames composition (HTML rendered to video) built around ui.mp4, the
+  real editor driven frame by frame by crates/jvid-app/src/app/reel.rs. scripts/preview/build copies
+  this file, ui.mp4 and the Inter fonts into target/preview/motion/ and renders it there.
+  Times are seconds of the composition; data-media-start is seconds into ui.mp4. The last frame
+  matches the first, so the render loops without a cut.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: Inter; font-weight: 400; src: url(Inter-Regular.ttf); }
+      @font-face { font-family: Inter; font-weight: 500; src: url(Inter-Medium.ttf); }
+      @font-face { font-family: Inter; font-weight: 600; src: url(Inter-SemiBold.ttf); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #0a0b0d; }
+      #root {
+        position: relative; width: 100%; height: 100%;
+        font-family: Inter, sans-serif; color: #edeef1;
+      }
+      .center {
+        position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; text-align: center;
+      }
+      .mark { font-size: 168px; font-weight: 600; letter-spacing: -0.045em; line-height: 1; }
+      .tag { margin-top: 28px; font-size: 40px; font-weight: 400; color: #adb1b8; letter-spacing: -0.01em; }
+      .facts { position: absolute; left: 0; right: 0; top: 724px; text-align: center; font-size: 26px; color: #82868e; }
+      .facts b { font-weight: 500; color: #adb1b8; }
+      .head { position: absolute; left: 0; right: 0; top: 64px; text-align: center; }
+      .head h2 { font-size: 56px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; }
+      .head p { margin-top: 12px; font-size: 26px; color: #adb1b8; }
+      /* The editor window: 1600x900 capture shown at 0.88, the camera moves inside it. */
+      #window {
+        position: absolute; left: 256px; top: 236px; width: 1600px; height: 900px;
+        transform-origin: 0 0; opacity: 0;
+        border: 1px solid #36383c; border-radius: 14px; overflow: hidden; background: #040404;
+        box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
+      }
+      #cam { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; }
+      #cam video { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="27" data-width="1920" data-height="1080">
+      <div id="brand" class="center clip" data-start="0" data-duration="27">
+        <div class="mark">jvid</div>
+        <div class="tag">A small, fast video editor.</div>
+      </div>
+      <div id="facts" class="facts clip" data-start="24" data-duration="3">
+        <b>Free and open source</b> &nbsp;·&nbsp; Windows, macOS and Linux &nbsp;·&nbsp; Written in Rust
+      </div>
+
+      <div id="h1" class="head clip" data-start="1.8" data-duration="3.8"><h2>Drop In Your Clips</h2><p>Drag shots from the bin straight onto the timeline.</p></div>
+      <div id="h2" class="head clip" data-start="5.6" data-duration="3.2"><h2>Play It Back</h2><p>Frame-accurate preview, with proxies for heavy footage.</p></div>
+      <div id="h3" class="head clip" data-start="8.8" data-duration="2.6"><h2>Trim With a Drag</h2><p>Grab a clip's edge and pull it in.</p></div>
+      <div id="h4" class="head clip" data-start="11.4" data-duration="7.2"><h2>Add a Title</h2><p>Drop a preset onto the timeline and type.</p></div>
+      <div id="h5" class="head clip" data-start="18.6" data-duration="5.6"><h2>Export in the Background</h2><p>Presets for YouTube, Shorts and more, while you keep editing.</p></div>
+
+      <div id="window">
+        <div id="cam">
+          <video id="ui1" class="clip" src="ui.mp4" muted data-start="1.4" data-duration="4.2" data-media-start="0"></video>
+          <video id="ui2" class="clip" src="ui.mp4" muted data-start="5.6" data-duration="3.2" data-media-start="4.3"></video>
+          <video id="ui3" class="clip" src="ui.mp4" muted data-start="8.8" data-duration="2.6" data-media-start="8.6"></video>
+          <video id="ui4" class="clip" src="ui.mp4" muted data-start="11.4" data-duration="7.2" data-media-start="11.6"></video>
+          <video id="ui5" class="clip" src="ui.mp4" muted data-start="18.6" data-duration="6" data-media-start="18.8"></video>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      const ease = "power3.inOut";
+
+      // Camera transform that centres (fx, fy) of the 1600x900 capture at zoom z, kept inside the frame.
+      const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+      const focus = (fx, fy, z) => ({
+        scale: z,
+        x: clamp(800 - fx * z, 1600 - 1600 * z, 0),
+        y: clamp(450 - fy * z, 900 - 900 * z, 0),
+      });
+      const cam = (at, dur, fx, fy, z) => tl.to("#cam", { ...focus(fx, fy, z), duration: dur, ease }, at);
+      gsap.set("#cam", focus(800, 450, 1));
+
+      // Intro: the wordmark lifts away as the editor rises in.
+      gsap.set("#window", { opacity: 0, y: 80, scale: 0.84 });
+      tl.to("#brand", { opacity: 0, y: -60, duration: 0.7, ease: "power2.in" }, 1.2);
+      tl.to("#window", { opacity: 1, y: 0, scale: 0.88, duration: 1.0, ease: "power3.out" }, 1.4);
+
+      // Headlines fade up in and out.
+      const head = (id, start, dur) => {
+        tl.fromTo(id, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, start);
+        tl.to(id, { opacity: 0, y: -10, duration: 0.3, ease: "power2.in" }, start + dur - 0.3);
+      };
+      head("#h1", 1.8, 3.8);
+      head("#h2", 5.6, 3.2);
+      head("#h3", 8.8, 2.6);
+      head("#h4", 11.4, 7.2);
+      head("#h5", 18.6, 5.6);
+
+      // Camera: whole editor for the drag, then each feature up close.
+      cam(5.3, 0.8, 824, 300, 1.5);      // Program monitor
+      cam(8.5, 0.8, 1330, 690, 2.2);     // tower clip's tail on V1
+      cam(11.1, 0.8, 500, 400, 1.2);     // bin and timeline, for the Title drag
+      cam(15.0, 1.0, 1010, 290, 1.45);   // Program and Inspector while typing
+      cam(18.3, 0.8, 800, 440, 1.3);     // Export dialog
+      cam(21.4, 1.0, 1600, 0, 1.5);      // Exporting badge, Inspector and the title
+
+      // Outro: the editor sinks away and the wordmark returns where the reel began.
+      tl.to("#cam", { ...focus(800, 450, 1), duration: 0.8, ease }, 23.8);
+      tl.to("#window", { opacity: 0, y: 80, scale: 0.84, duration: 0.8, ease: "power3.in" }, 23.8);
+      tl.fromTo("#brand", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", immediateRender: false }, 24.4);
+      tl.fromTo("#facts", { opacity: 0 }, { opacity: 1, duration: 0.6, ease: "power2.out" }, 25.0);
+      tl.to("#facts", { opacity: 0, duration: 0.5, ease: "power2.in" }, 26.3);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

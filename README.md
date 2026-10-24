@@ -1,6 +1,6 @@
 # jvid
 
-[![jvid editing four shots: a clip dragged onto the timeline, played, trimmed, titled and exported](docs/media/preview.webp)](docs/media/preview.mp4)
+[![A short tour of jvid: dropping a clip onto the timeline, playing it back, trimming it, adding a title and exporting](docs/media/preview.webp)](docs/media/preview.mp4)
 
 jvid is a small, fast video editor for quick edits: pull a highlight out of a long recording, trim a screen capture, add a title and export. It's written in Rust, draws its UI on the GPU and runs on Windows, macOS and Linux. Free and open source, no account.
 
@@ -34,7 +34,7 @@ cargo run --release -p jvid-app    # the desktop app
 cargo run --release -p jvid-cli -- render project.jvid -o out.mp4    # headless render
 ```
 
-`scripts/preview/build` regenerates the preview at the top of this page from the real app. It needs the FFmpeg command line tools and a Vulkan driver (Mesa's lavapipe works), and downloads its footage once into `target/preview/`.
+`scripts/preview/build` regenerates the preview at the top of this page. It drives the real app frame by frame, then lays the capture out with [HyperFrames](https://github.com/heygen-com/hyperframes) from `scripts/preview/motion.html`. It needs the FFmpeg command line tools, Node 22 or later and a Vulkan driver (Mesa's lavapipe works), and downloads its footage once into `target/preview/`.
 
 ## Workspace
 
