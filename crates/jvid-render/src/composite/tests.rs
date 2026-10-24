@@ -212,6 +212,20 @@ fn readback_returns_each_frame_one_push_late() {
     assert_eq!(reds, [(960, 10, 10), (960, 20, 20), (960, 30, 30)]);
 }
 
+#[test]
+fn readback_dropped_mid_frame_does_not_panic() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut comp = Compositor::new(&device);
+    let mut rb = Readback::default();
+    let tex = comp.render(&device, &queue, (24, 10), 1, [10, 0, 0, 255], &[]);
+    assert!(rb.push(&device, &queue, tex).is_none());
+    drop(rb);
+    // Runs the dropped copy's map callback, which used to unwrap a BufferAsyncError.
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+}
+
 /// Each property static, then keyframed so its value at the midpoint equals the static one: both
 /// frames must hit the same pixels, and the first keyframe's frame must differ.
 #[test]
