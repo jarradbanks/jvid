@@ -810,6 +810,12 @@ impl Timeline {
         self.media.caches.as_ref().is_none_or(|c| c.jobs.is_idle())
     }
 
+    /// The x of `t` on lanes whose left edge is at `left`, at the current scroll and zoom.
+    #[cfg(test)]
+    pub fn x_at(&self, t: Time, left: f32) -> f32 {
+        self.view(left).x(t)
+    }
+
     fn view(&self, left: f32) -> View {
         View {
             left,

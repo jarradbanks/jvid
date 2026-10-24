@@ -1,39 +1,40 @@
 # jvid
 
-A lightweight, fast, cross-platform video editor written in Rust. It's for quick clip editing: trim, stitch, title, add music and export, without the weight of a full NLE.
+[![jvid editing four shots: a clip dragged onto the timeline, played, trimmed, titled and exported](docs/media/preview.webp)](docs/media/preview.mp4)
 
-jvid is the first tool in a planned suite of small, high-performance, open source apps.
+jvid is a small, fast video editor for quick edits: pull a highlight out of a long recording, trim a screen capture, add a title and export. It's written in Rust, draws its UI on the GPU and runs on Windows, macOS and Linux. Free and open source, no account.
 
-![jvid main editor prototype](docs/prototypes/01-editor.png)
-
-> **Status:** early development. The cargo workspace exists but no features are implemented yet; the screenshot is a generated prototype.
+It's in early development and isn't packaged yet; you [build it from source](#building).
 
 - [User guide](docs/guide.md) and [shortcut cheat sheet](docs/shortcuts.md)
 - [Plan](docs/PLAN.md): feature set, architecture and licensing
 - [Roadmap](docs/ROADMAP.md): implementation order, milestones and issues
-- [UI prototypes](docs/prototypes/): main editor, keyframe editing, export dialog, welcome screen
 
-## Goals
+## What it does
 
-- **Instant and fast.** Opens in under a second, scrubs long high-resolution recordings without stutter, and stays small.
-- **Built for quick edits.** Pulling highlights out of long gameplay recordings, and trimming screen recordings for demos and tutorials.
-- **Premiere-style editing.** In/out points, J/K/L, ripple trims and a Premiere default keymap, with every shortcut remappable.
-- **Frame-accurate.** Rational time throughout, so variable-frame-rate recordings never drift out of sync.
-- **Hackable.** Plain-text JSON projects, a headless CLI renderer and WGSL shader effects.
-- **Windows, Linux and macOS**, free and open source.
+- **Premiere-style editing.** In/out points, J/K/L, insert and overwrite, ripple trims, razor and split, markers. Every shortcut is remappable.
+- **Quick to start.** Drag media onto the window; projects are plain JSON, autosaved, with relinking for moved files.
+- **Proxies.** Low-res copies of 4K and HEVC sources made in the background for smooth scrubbing; export uses the originals.
+- **Titles and solids.** Text presets with font, outline, shadow and box in the Inspector.
+- **Keyframes.** Transform, opacity, blend mode, crop, color and volume, with an easing editor and zoom-to-region on the Program monitor.
+- **Transitions and audio.** Crossfades and dips on cuts, clip fades, and a volume line on each clip.
+- **Effects.** WGSL shader effects with keyframeable parameters; [write your own](docs/effects.md).
+- **Export.** Presets for highlights, screen recordings, YouTube, Shorts/Reels and ProRes, a background Render Queue, and `jvid render` for exporting from the command line.
 
 ## Building
 
 jvid needs a Rust toolchain from [rustup](https://rustup.rs). `rust-toolchain.toml` pins the stable channel, so rustup installs the right toolchain, with `rustfmt` and `clippy`, the first time you run `cargo` in the repo.
 
+It also needs the FFmpeg 4.4 to 8.x development libraries, `pkg-config` and libclang; the per-OS commands are in [CONTRIBUTING.md](CONTRIBUTING.md#developer-setup).
+
 ```sh
 cargo build --workspace
 cargo test --workspace
-cargo run -p jvid-app    # the desktop app
-cargo run -p jvid-cli    # headless render
+cargo run --release -p jvid-app    # the desktop app
+cargo run --release -p jvid-cli -- render project.jvid -o out.mp4    # headless render
 ```
 
-The crates are skeletons for now. FFmpeg setup is added with [#4](https://github.com/jarradbanks/jvid/issues/4).
+`scripts/preview/build` regenerates the preview at the top of this page from the real app. It needs the FFmpeg command line tools and a Vulkan driver (Mesa's lavapipe works), and downloads its footage once into `target/preview/`.
 
 ## Workspace
 
@@ -50,6 +51,10 @@ The crates are skeletons for now. FFmpeg setup is added with [#4](https://github
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Credits
+
+The preview uses footage from [Tears of Steel](https://mango.blender.org), (CC) Blender Foundation | mango.blender.org, licensed [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
 
 ## License
 

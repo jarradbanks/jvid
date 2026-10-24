@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Regenerates docs/media/preview.webp and docs/media/preview.mp4: the README's preview reel.
+# Usage: scripts/preview/build   (needs the FFmpeg CLI with libx264 and libwebp, curl and Mesa
+# lavapipe or another Vulkan driver; see CONTRIBUTING.md for the build's own requirements)
+#
+# Downloads Tears of Steel (CC-BY 3.0, Blender Foundation) once into target/preview/, cuts four
+# shots from it, has the reel test (crates/jvid-app/src/app/reel.rs) drive the real editor
+# frame by frame through egui_kittest and wgpu, then encodes the frames. Footage stays in target/.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+cache="$root/target/preview"
+media="$cache/media"
+frames="$cache/frames"
+src="$cache/tears_of_steel_720p.mov"
+url=https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov
+sha=efa9062d9cdb7a338e40ad530dfdf234806743f29ae6a1a136b97ece4e588e8f
+mkdir -p "$media"
+
+ff() { ffmpeg -nostdin -hide_banner -loglevel error -y "$@"; }
+
+if [ ! -f "$src" ]; then
+  curl -fL --retry 8 --retry-delay 30 -C - -o "$src.part" "$url"
+  mv "$src.part" "$src"
+fi
+echo "$sha  $src" | sha256sum -c --quiet
+
+# name, start and length in seconds: whole shots, short GOPs so every seek is quick.
+while read -r name start len; do
+  ff -ss "$start" -i "$src" -t "$len" -c:v libx264 -preset slow -crf 16 -g 12 -pix_fmt yuv420p \
+    -c:a aac -b:a 128k "$media/$name.mp4"
+done <<'EOF'
+bridge 26.0 3.5
+walk 269.5 3.5
+face 316.0 3.5
+tower 438.7 2.4
+EOF
+
+rm -rf "$frames"
+mkdir -p "$frames"
+JVID_REEL_MEDIA="$media" JVID_REEL_FRAMES="$frames" LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
+  cargo test --manifest-path "$root/Cargo.toml" -p jvid-app --lib app::reel -- --ignored --exact app::reel::reel
+
+# The loop: the last half second fades into the first, and the frames under that fade are
+# dropped from the start, so the reel plays on without a cut.
+n=$(find "$frames" -name '*.png' | wc -l)
+fade=15
+secs() { awk "BEGIN { print $1 / 30 }"; }
+out="$root/docs/media"
+mkdir -p "$out"
+ff -framerate 30 -i "$frames/%05d.png" -framerate 30 -i "$frames/%05d.png" -filter_complex "
+  [0]trim=start_frame=$fade,setpts=PTS-STARTPTS[body];
+  [1]trim=end_frame=$fade,setpts=PTS-STARTPTS[head];
+  [body][head]xfade=transition=fade:duration=$(secs $fade):offset=$(secs $((n - 2 * fade))),split[a][b];
+  [a]format=yuv420p[mp4];
+  [b]scale=1280:-1:flags=lanczos[webp]" \
+  -map '[mp4]' -c:v libx264 -preset veryslow -crf 18 -movflags +faststart -an "$out/preview.mp4" \
+  -map '[webp]' -c:v libwebp_anim -lossless 0 -quality 75 -compression_level 6 -loop 0 -an \
+  "$out/preview.webp"
+ls -l "$out/preview.mp4" "$out/preview.webp"
