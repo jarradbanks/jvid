@@ -1479,3 +1479,12 @@ I("ci-cross-os-green", "Main CI green on Windows and macOS", None, ["infra"], "S
   ],
   ac=["A workflow_dispatch run on the branch passes ubuntu, windows and macOS",
       "A real layout regression still fails on Linux"])
+
+I("ci-cross-os-green-2", "Main CI: Windows record test file lock, macOS slow-decoder flake", None, ["infra"], "S", labels=["later"],
+  summary="After #275, main run 40062193057 still fails off Linux: on Windows, record_button_records_into_a_new_armed_track_and_shift_r_stops_it (#276) panics at its final remove_dir_all with os error 32 because the recorded file is still open; on macOS, playback::tests::slow_decoder_drops_frames_instead_of_drifting is wall-clock flaky like the loop test #275 fixed.",
+  scope=[
+      "Find what still holds the recorded take open on Windows: if the app (probe, waveform or decoder) leaks the handle, fix that; if it is only test teardown order, drop the harness before removing the directory",
+      "Make slow_decoder_drops_frames_instead_of_drifting deterministic with the stepped fake clock #275 introduced, keeping what it proves",
+  ],
+  ac=["A workflow_dispatch run on the branch passes ubuntu, windows and macOS",
+      "The slow-decoder test still fails if frames are shown late instead of dropped"])

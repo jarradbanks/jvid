@@ -458,6 +458,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#265](https://github.com/jarradbanks/jvid/issues/265) **Record button in the transport bar** — Voiceover only starts by arming a track in its header and pressing Shift+R, which nothing on screen explains. Add a Record button next to the play controls, as other editors have.
 - [#266](https://github.com/jarradbanks/jvid/issues/266) **Impeccable polish pass on the remaining panels** — Bring every panel not covered by the issues above to the same finish, using the impeccable skill's critique and audit.
 - [#274](https://github.com/jarradbanks/jvid/issues/274) **Main CI green on Windows and macOS** — Main's full matrix fails off Linux: three kittest snapshots differ on Windows WARP (bin_effects_hover, editor_light, preferences), and macOS playback::tests::loop_wraps_without_dropping_frames is timing-flaky. PRs only run Ubuntu, so it goes unseen.
+- [#277](https://github.com/jarradbanks/jvid/issues/277) **Main CI: Windows record test file lock, macOS slow-decoder flake** — After #275, main run 40062193057 still fails off Linux: on Windows, record_button_records_into_a_new_armed_track_and_shift_r_stops_it (#276) panics at its final remove_dir_all with os error 32 because the recorded file is still open; on macOS, playback::tests::slow_decoder_drops_frames_instead_of_drifting is wall-clock flaky like the loop test #275 fixed.
 
 ---
 
