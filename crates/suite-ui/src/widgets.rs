@@ -70,6 +70,14 @@ fn hover_fade(ui: &Ui, id: Id, hover: bool, rest: Color32, hovered: Color32) -> 
     rest.lerp_to_gamma(hovered, t)
 }
 
+/// Paints icon `glyph` with its ink, not its line box, centred on `center`: a Lucide glyph's
+/// box runs a pixel taller than the icon, and some, such as Folder and Check, sit high in it.
+pub fn paint_icon(painter: &egui::Painter, center: egui::Pos2, glyph: &str, color: Color32) {
+    let galley = painter.layout_no_wrap(glyph.into(), theme::icon_font(), color);
+    let pos = center - galley.mesh_bounds.center().to_vec2();
+    painter.galley(pos, galley, color);
+}
+
 /// The focus-visible ring: 2px Light Blue at 60%, 1px outside the shape.
 pub fn focus_ring(rect: Rect, corner: u8) -> Shape {
     Shape::rect_stroke(
@@ -344,13 +352,7 @@ impl Widget for Button<'_> {
                     .color(ink)
                     .paint_at(ui, Rect::from_center_size(slot.center(), Vec2::splat(12.0)));
             } else if let Some(glyph) = self.icon {
-                ui.painter().text(
-                    slot.center(),
-                    Align2::CENTER_CENTER,
-                    glyph,
-                    theme::icon_font(),
-                    ink,
-                );
+                paint_icon(ui.painter(), slot.center(), glyph, ink);
             }
             x += size::ICON + space::S4;
         }

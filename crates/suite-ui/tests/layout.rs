@@ -310,3 +310,48 @@ fn a_translucent_swatch_shows_the_checkerboard_and_an_opaque_one_is_solid() {
     let light = half.iter().filter(|v| (91..=97).contains(*v)).count();
     assert!(dark >= 6 && light >= 8, "{half:?}");
 }
+
+#[test]
+fn icon_buttons_centre_their_glyphs_ink() {
+    use egui_kittest::kittest::Queryable;
+    use suite_ui::theme::icon;
+    use suite_ui::widgets::Button;
+    if !common::gpu() {
+        return;
+    }
+    // Folder and Check sit a pixel high in their line box; Plus doesn't.
+    for (name, glyph) in [
+        ("Folder", icon::FOLDER),
+        ("Check", icon::CHECK),
+        ("Plus", icon::PLUS),
+    ] {
+        let mut fresh = true;
+        let mut h = Harness::builder()
+            .with_size([60.0, 40.0])
+            .with_pixels_per_point(2.0)
+            .wgpu()
+            .build_ui(move |ui| {
+                if !common::install_theme(ui, &mut fresh) {
+                    let _ = ui.add(Button::icon(glyph, name));
+                }
+            });
+        h.run();
+        // In physical pixels, where a half-point offset is a whole pixel.
+        let rect = h.get_by_label(name).rect() * 2.0;
+        let img = h.render().expect("render");
+        let bg = img
+            .get_pixel(rect.left() as u32 + 1, rect.top() as u32 + 1)
+            .0;
+        let ink: Vec<(u32, u32)> = (rect.top() as u32..rect.bottom() as u32)
+            .flat_map(|y| (rect.left() as u32..rect.right() as u32).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let p = img.get_pixel(x, y).0;
+                (0..3).any(|c| p[c].abs_diff(bg[c]) > 40)
+            })
+            .collect();
+        let (top, bottom) = (ink.iter().map(|p| p.1).min(), ink.iter().map(|p| p.1).max());
+        let (top, bottom) = (top.unwrap() as f32, bottom.unwrap() as f32 + 1.0);
+        let off = (top + bottom) / 2.0 - rect.center().y;
+        assert!(off.abs() <= 1.0, "{name}: ink {top}..{bottom} in {rect:?}");
+    }
+}
