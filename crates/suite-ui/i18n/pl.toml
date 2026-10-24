@@ -1,5 +1,22 @@
 # suite-ui strings, Polish. Keep keys and {placeholders} in step with en.toml.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
 
 [language]
 name = "Polski"
+
+[panel]
+more_tabs = "Więcej kart"
+
+[input]
+search = "Szukaj"
+
+[color]
+# A fully transparent colour.
+none = "Brak"
+
+[theme]
+error = "Motyw {path}: {error}"
+bad_color = "`{value}` nie jest w formacie #RRGGBB"
+at = "wiersz {line}, kolumna {column}: {error}"
+dark = "Ciemny"
+light = "Jasny"
+high_contrast = "Wysoki kontrast"
