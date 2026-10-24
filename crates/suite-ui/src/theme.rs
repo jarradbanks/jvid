@@ -45,6 +45,9 @@ pub mod icon {
     pub const SLIDERS: &str = "\u{E29A}";
     pub const MIC: &str = "\u{E11C}";
     pub const FOLDER: &str = "\u{E0DC}";
+    pub const ALIGN_LEFT: &str = "\u{E041}";
+    pub const ALIGN_CENTER: &str = "\u{E03C}";
+    pub const ALIGN_RIGHT: &str = "\u{E042}";
 }
 
 /// Inter Medium (500), for Body Strong, buttons, tabs and the timecode.

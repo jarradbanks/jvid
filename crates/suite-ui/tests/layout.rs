@@ -272,3 +272,41 @@ fn popup_border_is_one_physical_pixel() {
         assert_eq!(border.len(), 1, "{ppp}x popup border columns {border:?}");
     }
 }
+
+#[test]
+fn a_translucent_swatch_shows_the_checkerboard_and_an_opaque_one_is_solid() {
+    use egui_kittest::kittest::Queryable;
+    use suite_ui::widgets::ColorField;
+    if !common::gpu() {
+        return;
+    }
+    // The swatch's middle row, 2pt in from each side of the 24pt swatch.
+    let row = |rgba: [u8; 4]| {
+        let mut fresh = true;
+        let mut h = Harness::builder()
+            .with_size([200.0, 40.0])
+            .wgpu()
+            .build_ui(move |ui| {
+                if common::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                let mut c = rgba;
+                ui.add(ColorField::new(&mut c, "Box Color"));
+            });
+        h.run();
+        let rect = h.get_by_role(egui::accesskit::Role::ColorWell).rect();
+        let img = h.render().expect("render");
+        let y = (rect.top() + size::CONTROL / 2.0) as u32;
+        let x = rect.left() as u32;
+        (x + 2..x + 22)
+            .map(|x| img.get_pixel(x, y).0[0])
+            .collect::<Vec<_>>()
+    };
+    let solid = row([0, 0, 0, 255]);
+    assert!(solid.iter().all(|v| *v == 0), "{solid:?}");
+    let half = row([0, 0, 0, 128]);
+    // A dark cell between light ones, under 50% black.
+    let dark = half.iter().filter(|v| (66..=72).contains(*v)).count();
+    let light = half.iter().filter(|v| (91..=97).contains(*v)).count();
+    assert!(dark >= 6 && light >= 8, "{half:?}");
+}

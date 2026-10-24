@@ -13,7 +13,8 @@ use jvid_core::time::Time;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{
-    Button, Checkbox, DragField, Dropdown, KeyButton, Keyed, SectionHeader, Slider, TextInput,
+    Button, Checkbox, ColorField, DragField, Dropdown, KeyButton, Keyed, SectionHeader, Segmented,
+    Slider, TextInput,
 };
 
 use crate::i18n::{CATALOG, Label, tr, verbatim};
@@ -742,7 +743,7 @@ pub fn show(
     }
     if pane == Pane::Text
         && let Some(a) = shared.filter(|a| a.text.is_some())
-        && let Some(e) = text_props(ui, a, if same { &clips[..] } else { &[] }, t)
+        && let Some(e) = text_props(ui, a, if same { &clips[..] } else { &[] }, t, &mut seek)
     {
         edit = Some(e);
     }
@@ -1491,6 +1492,7 @@ fn path_row(
         reset: None,
         nav: anim,
         key: Some((keyed, &key)),
+        compact: false,
     };
     let points = tr!("inspector.mask_points", n = n / 3);
     let (_, c) = prop_row(ui, label, tools, |ui| {
@@ -1557,6 +1559,7 @@ fn speed_row(ui: &mut Ui, c: &Clip, t: Time, index: u64, seek: &mut Option<Time>
         reset: None,
         nav: anim,
         key: c.freeze.is_none().then_some((keyed, label.as_str())),
+        compact: false,
     };
     // The keys with speed `v` keyed at source time `at`.
     let with_key = |at: Time, v: f64| {
@@ -1892,32 +1895,44 @@ fn section(ui: &mut Ui, id: &str, tools: Option<bool>) -> (bool, Option<Head>) {
     let mut open = ui.data_mut(|d| *d.get_temp_mut_or(id, true));
     let rect = ui.add(SectionHeader::new(title, &mut open)).rect;
     ui.data_mut(|d| d.insert_temp(id, open));
-    let mut head = None;
-    if let Some(changed) = tools {
-        let mut ui = ui.new_child(UiBuilder::new().max_rect(rect));
-        let reset = tr!("inspector.reset_section", section = title);
-        let key = tr!("inspector.keyframe_all", section = title);
-        let c = slots(
-            &mut ui,
-            rect,
-            Tools {
-                reset: changed.then_some(&reset),
-                nav: false,
-                key: Some((Keyed::Static, &key)),
-            },
-        );
-        if c.key.is_some_and(|k| k.clicked()) {
-            head = Some(Head::Key);
-        }
-        if c.reset {
-            head = Some(Head::Reset);
-        }
-    }
+    let head = tools.and_then(|changed| head_tools(ui, rect, title, changed, true, false));
     (open, head)
+}
+
+/// A section head's Reset (when `changed`) and, with `key`, its Keyframe All, in `rect`'s
+/// tool slots; which was clicked.
+fn head_tools(
+    ui: &mut Ui,
+    rect: Rect,
+    title: &str,
+    changed: bool,
+    key: bool,
+    compact: bool,
+) -> Option<Head> {
+    let mut ui = ui.new_child(UiBuilder::new().max_rect(rect));
+    let reset = tr!("inspector.reset_section", section = title);
+    let all = tr!("inspector.keyframe_all", section = title);
+    let c = slots(
+        &mut ui,
+        rect,
+        Tools {
+            reset: changed.then_some(&reset),
+            key: key.then_some((Keyed::Static, &all)),
+            compact,
+            ..Tools::default()
+        },
+    );
+    match () {
+        _ if c.reset => Some(Head::Reset),
+        _ if c.key.is_some_and(|k| k.clicked()) => Some(Head::Key),
+        _ => None,
+    }
 }
 
 /// Width of a row's tool slots: reset, previous and next keyframe, then the diamond.
 const TOOLS: f32 = 4.0 * size::SMALL_CONTROL + 3.0 * GAP;
+/// Width of a compact row's: reset, then the diamond.
+const COMPACT_TOOLS: f32 = 2.0 * size::SMALL_CONTROL + GAP;
 /// Space between tool slots.
 const GAP: f32 = 2.0;
 
@@ -1928,6 +1943,8 @@ struct Tools<'a> {
     reset: Option<&'a str>,
     nav: bool,
     key: Option<(Keyed, &'a str)>,
+    /// Only reset and the diamond, the keyframe arrows moving to its menu (the Text tab).
+    compact: bool,
 }
 
 /// What happened in a row's tool slots.
@@ -1952,8 +1969,9 @@ fn slots(ui: &mut Ui, rect: Rect, tools: Tools) -> Clicks {
     let slot = |i: f32| slot(rect, i);
     let mut c = Clicks::default();
     if let Some(name) = tools.reset {
+        let at = if tools.compact { 2.0 } else { 0.0 };
         c.reset = ui
-            .put(slot(0.0), Button::icon(icon::UNDO, name).small())
+            .put(slot(at), Button::icon(icon::UNDO, name).small())
             .clicked();
     }
     if tools.nav {
@@ -1986,7 +2004,8 @@ fn prop_row<R>(
         ui.set_min_width(size::INSPECTOR_LABEL);
         ui.label(egui::RichText::new(label).color(color::ink_2()))
     });
-    let w = rect.right() - TOOLS - space::S4 - row.cursor().left();
+    let tools_w = if tools.compact { COMPACT_TOOLS } else { TOOLS };
+    let w = rect.right() - tools_w - space::S4 - row.cursor().left();
     let inner = row
         .allocate_ui_with_layout(vec2(w, size::CONTROL), layout, |ui| {
             ui.set_max_width(w);
@@ -2045,6 +2064,7 @@ fn row(
         reset: (p.resets && differs(clips, p, t)).then_some(reset),
         nav: anim,
         key: Some((keyed, &key)),
+        compact: false,
     };
     let mut edit = None;
     let (_, c) = prop_row(ui, p.label(), tools, |ui| {
@@ -2120,6 +2140,26 @@ fn key_clicks(
     index: u64,
     seek: &mut Option<Time>,
 ) -> Option<Edit> {
+    let toggles = (
+        || toggle_animate(clips, names, t),
+        || toggle_key(clips, names, t),
+    );
+    key_menu(clips, names, c, t, index, seek, false, toggles)
+}
+
+/// [`key_clicks`] with the diamond's commands: `animate` starts or stops animating, `key`
+/// adds or removes the keyframe at the playhead. With `nav` the menu has the arrows too.
+#[allow(clippy::too_many_arguments)]
+fn key_menu(
+    clips: &[&Clip],
+    names: &[&str],
+    c: Clicks,
+    t: Time,
+    index: u64,
+    seek: &mut Option<Time>,
+    nav: bool,
+    (animate, key): (impl Fn() -> Command, impl Fn() -> Command),
+) -> Option<Edit> {
     let anim = any_animated(clips, names);
     let keyed = match () {
         _ if !anim => Keyed::Static,
@@ -2136,8 +2176,8 @@ fn key_clicks(
     let diamond = c.key.expect("rows have a diamond");
     if diamond.clicked() {
         let cmd = match anim {
-            false => toggle_animate(clips, names, t),
-            true => toggle_key(clips, names, t),
+            false => animate(),
+            true => key(),
         };
         edit = Some((cmd, None));
     }
@@ -2150,11 +2190,19 @@ fn key_clicks(
                 {
                     edit = Some(e);
                 }
+                for (name, dir) in [("inspector.previous_key", -1), ("inspector.next_key", 1)] {
+                    let to = neighbour(clips, names, t, dir);
+                    let b = Button::ghost(CATALOG.get(name).unwrap_or(name));
+                    if nav && ui.add_enabled(to.is_some(), b).clicked() {
+                        *seek = to;
+                        ui.close();
+                    }
+                }
                 if ui
                     .add(Button::ghost(tr!("inspector.stop_animating")))
                     .clicked()
                 {
-                    edit = Some((toggle_animate(clips, names, t), None));
+                    edit = Some((animate(), None));
                     ui.close();
                 }
             });
@@ -2202,12 +2250,10 @@ fn set_easing(clips: &[&Clip], names: &[&str], t: Time, e: Easing) -> Command {
 // shortcut: edits the asset's color; per-clip `color` keyframes wait on a later issue.
 fn solid_color(ui: &mut Ui, a: &MediaAsset) -> Option<Edit> {
     let mut rgba = jvid_render::solid::rgba8(a.solid?);
-    let changed = ui
-        .horizontal(|ui| {
-            ui.label(tr!("inspector.color"));
-            ui.color_edit_button_srgba_unmultiplied(&mut rgba).changed()
-        })
-        .inner;
+    let name = tr!("inspector.color");
+    let (changed, _) = prop_row(ui, name, Tools::default(), |ui| {
+        ui.add(ColorField::new(&mut rgba, name)).changed()
+    });
     let color = rgba.map(|v| v as f64 / 255.0);
     changed.then_some((
         Command::SetSolidColor { id: a.id, color },
@@ -2258,25 +2304,80 @@ struct FontSearch {
     area: egui::Rect,
 }
 
-/// The Font field: shows `family` (or "(missing)" when `list` lacks it); clicked, a search
-/// over `list` that previews the hovered or highlighted family in `family`. Enter or a click
-/// keeps it, Esc or a click away restores the one before. True once `family` changed.
+/// `text` laid out on one line, cut to `width` with an ellipsis.
+fn truncated(
+    ui: &Ui,
+    text: &str,
+    color: egui::Color32,
+    width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let format = egui::TextFormat::simple(theme::body(), color);
+    let mut job = egui::text::LayoutJob::single_section(text.to_owned(), format);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(0.0));
+    ui.painter().layout_job(job)
+}
+
+/// The Font field's face: `shown` and a chevron in a field, after an Amber warning when
+/// `missing`. Takes the row's width.
+fn font_button(ui: &mut Ui, shown: &str, missing: bool, open: bool) -> egui::Response {
+    let (rect, r) =
+        ui.allocate_exact_size(vec2(ui.available_width(), size::CONTROL), Sense::click());
+    let name = match missing {
+        true => tr!("inspector.font_missing", family = shown),
+        false => shown.to_owned(),
+    };
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, &name));
+    let v = match r.hovered() || open {
+        true => &ui.visuals().widgets.hovered,
+        false => &ui.visuals().widgets.inactive,
+    };
+    let p = ui.painter();
+    p.rect(
+        rect,
+        v.corner_radius,
+        v.bg_fill,
+        v.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    let (mut x, y) = (rect.left() + space::S8, rect.center().y);
+    if missing {
+        let c = pos2(x + size::ICON / 2.0, y);
+        let a = egui::Align2::CENTER_CENTER;
+        p.text(c, a, icon::CIRCLE_ALERT, theme::icon_font(), color::amber());
+        x += size::ICON + space::S4;
+    }
+    let chevron = rect.right() - space::S4 - size::ICON / 2.0;
+    let g = truncated(ui, shown, color::ink(), chevron - size::ICON / 2.0 - x);
+    p.galley(pos2(x, y - g.size().y / 2.0), g, color::ink());
+    let a = egui::Align2::CENTER_CENTER;
+    p.text(
+        pos2(chevron, y),
+        a,
+        icon::CHEVRON_DOWN,
+        theme::icon_font(),
+        color::ink_2(),
+    );
+    r
+}
+
+/// The Font field: shows `family` (warning when `list` lacks it); clicked, a search over
+/// `list` under it that previews the hovered or highlighted family in `family`. Enter or a
+/// click keeps it, Esc or a click away restores the one before. True once `family` changed.
 fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     use egui::Key;
     let id = egui::Id::new("inspector font");
-    let Some(mut st) = ui.data(|d| d.get_temp::<FontSearch>(id)) else {
-        let missing = !family.is_empty() && !list.contains(family);
-        let shown = match family.as_str() {
-            "" => tr!("inspector.sans_serif").to_owned(),
-            f if missing => tr!("inspector.font_missing", family = f),
-            f => f.to_owned(),
-        };
-        let r = ui.button(shown);
-        let r = if missing {
-            r.on_hover_text(tr!("inspector.font_missing_tooltip"))
-        } else {
-            r
-        };
+    let missing = !family.is_empty() && !list.contains(family);
+    let shown = match family.as_str() {
+        "" => tr!("inspector.sans_serif").to_owned(),
+        f => f.to_owned(),
+    };
+    let st = ui.data(|d| d.get_temp::<FontSearch>(id));
+    let r = font_button(ui, &shown, missing, st.is_some());
+    let r = match missing {
+        true => r.on_hover_text(tr!("inspector.font_missing_tooltip", family = shown)),
+        false => r,
+    };
+    let Some(mut st) = st else {
         if r.clicked() {
             let st = FontSearch {
                 query: String::new(),
@@ -2293,7 +2394,7 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
         let away = i.pointer.any_pressed()
             && i.pointer
                 .press_origin()
-                .is_some_and(|p| !st.area.contains(p));
+                .is_some_and(|p| !st.area.contains(p) && !r.rect.contains(p));
         (
             i.consume_key(egui::Modifiers::NONE, Key::ArrowDown),
             i.consume_key(egui::Modifiers::NONE, Key::ArrowUp),
@@ -2302,6 +2403,8 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
             away,
         )
     });
+    // Clicking the field again closes the search, like a click away.
+    let away = away || r.clicked();
     if down {
         st.at += 1;
     }
@@ -2311,33 +2414,40 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     st.at = st.at.min(matches.len().saturating_sub(1));
     let mut pick = matches.get(st.at).copied();
     let mut clicked = false;
-    let inner = ui.vertical(|ui| {
-        let q = ui.add(
-            egui::TextEdit::singleline(&mut st.query).hint_text(tr!("inspector.search_fonts")),
-        );
-        q.request_focus();
-        if q.changed() {
-            st.at = 0;
-        }
-        egui::ScrollArea::vertical()
-            .max_height(200.0)
-            .show(ui, |ui| {
-                for (i, f) in matches.iter().enumerate() {
-                    let r = ui.selectable_label(i == st.at, *f);
-                    if down || up {
-                        if i == st.at {
-                            r.scroll_to_me(None);
-                        }
-                    } else if r.hovered() {
-                        pick = Some(*f);
-                    }
-                    if r.clicked() {
-                        (pick, clicked) = (Some(*f), true);
-                    }
+    let menu = egui::Area::new(id.with("menu"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(r.rect.left_bottom() + vec2(0.0, space::S4))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::menu(ui.style()).show(ui, |ui| {
+                ui.set_width(r.rect.width().max(160.0));
+                let q = ui.add(
+                    egui::TextEdit::singleline(&mut st.query)
+                        .hint_text(tr!("inspector.search_fonts")),
+                );
+                q.request_focus();
+                if q.changed() {
+                    st.at = 0;
                 }
+                egui::ScrollArea::vertical()
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        for (i, f) in matches.iter().enumerate() {
+                            let r = ui.selectable_label(i == st.at, *f);
+                            if down || up {
+                                if i == st.at {
+                                    r.scroll_to_me(None);
+                                }
+                            } else if r.hovered() {
+                                pick = Some(*f);
+                            }
+                            if r.clicked() {
+                                (pick, clicked) = (Some(*f), true);
+                            }
+                        }
+                    });
             });
-    });
-    st.area = inner.response.rect;
+        });
+    st.area = menu.response.rect;
     let next = if esc || (away && !clicked) {
         st.before.clone()
     } else {
@@ -2353,46 +2463,287 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     changed
 }
 
-/// A text style row's animate toggle, when clips are selected; sets `toggle` once clicked.
-fn animate(ui: &mut Ui, clips: &[&Clip], name: &'static str, toggle: &mut Option<&'static str>) {
-    let on = match clips.iter().any(|c| animated(c, name)) {
-        true => Keyed::Animated,
-        false => Keyed::Static,
-    };
-    let tip = tr!("inspector.animate", name = caption(name));
-    if !clips.is_empty() && ui.add(KeyButton::diamond(on, &tip)).clicked() {
-        *toggle = Some(name);
+/// The Text tab's sections by id, each with its rows: a style id (a [`text_names`] keyframe
+/// name, or `font`, `weight` or `align`) and the id naming its label.
+const TEXT_SECTIONS: [(&str, &[(&str, &str)]); 5] = [
+    (
+        "text",
+        &[
+            ("font", "font"),
+            ("text_size", "text_size"),
+            ("weight", "weight"),
+            ("align", "align"),
+            ("text_anchor", "text_anchor"),
+        ],
+    ),
+    ("fill", &[("color", "color")]),
+    (
+        "outline",
+        &[("outline", "outline_width"), ("outline_color", "color")],
+    ),
+    (
+        "shadow",
+        &[("shadow", "shadow_offset"), ("shadow_color", "color")],
+    ),
+    ("box", &[("box_padding", "padding"), ("box_color", "color")]),
+];
+
+/// Value column width under which a row's slider gives way, and X and Y drop their prefixes.
+const SLIDER_ROOM: f32 = 112.0;
+
+/// Whether text style `id` can animate.
+fn keyable(id: &str) -> bool {
+    text_names().any(|n| n == id)
+}
+
+/// Sets style `id` of `s` back to [`Text::default`]'s.
+fn restore(s: &mut Text, id: &str) {
+    let d = Text::default();
+    match id {
+        "font" => s.family = d.family,
+        "weight" => s.weight = d.weight,
+        "align" => s.align = d.align,
+        n => text_set(s, n, text_get(&d, n).expect("a text name")),
     }
 }
 
-/// A straight 0..=1 RGBA picker with `name`'s animate toggle; true once changed.
-fn color_field(
+/// Whether style `id` of `s` is off its default.
+fn off_default(s: &Text, id: &str) -> bool {
+    let mut d = s.clone();
+    restore(&mut d, id);
+    d != *s
+}
+
+/// A collapsed section's summary of `s`, such as `4 px · #000000`.
+fn text_summary(s: &Text, id: &str) -> String {
+    let px = |n: f32| tr!("inspector.px", n = format!("{n:.0}"));
+    let color = |c: [f64; 4]| match suite_ui::widgets::color_text(jvid_render::solid::rgba8(c)) {
+        None => suite_ui::i18n::CATALOG.tr("color.none").to_owned(),
+        Some((hex, None)) => format!("#{hex}"),
+        Some((_, Some(alpha))) => alpha,
+    };
+    match id {
+        "text" => {
+            let family = match s.family.as_str() {
+                "" => tr!("inspector.sans_serif"),
+                f => f,
+            };
+            format!("{family} · {:.0}", s.size)
+        }
+        "fill" => color(s.color),
+        "outline" => format!("{} · {}", px(s.outline), color(s.outline_color)),
+        "shadow" => format!(
+            "{:.0}, {:.0} · {}",
+            s.shadow[0],
+            s.shadow[1],
+            color(s.shadow_color)
+        ),
+        _ => format!("{} · {}", px(s.box_padding), color(s.box_color)),
+    }
+}
+
+/// A Text tab section head remembering whether it's open (first Text and Fill are), with
+/// `summary` after the title while it's closed and the compact tool slots.
+fn text_section(
     ui: &mut Ui,
-    label: &str,
-    c: &mut [f64; 4],
-    (clips, name, toggle): (&[&Clip], &'static str, &mut Option<&'static str>),
+    id: &str,
+    changed: bool,
+    key: bool,
+    summary: &str,
+) -> (bool, Option<Head>) {
+    let title = caption(id);
+    let sid = ui.id().with(("inspector text", id));
+    let first = matches!(id, "text" | "fill");
+    let mut open = ui.data_mut(|d| *d.get_temp_mut_or(sid, first));
+    let rect = ui.add(SectionHeader::new(title, &mut open)).rect;
+    ui.data_mut(|d| d.insert_temp(sid, open));
+    if !open {
+        let title_w = ui
+            .painter()
+            .layout_no_wrap(title.to_owned(), theme::body_strong(), color::ink())
+            .size()
+            .x;
+        let x = rect.left() + size::ICON + space::S4 + title_w + space::S8;
+        let w = rect.right() - COMPACT_TOOLS - space::S4 - x;
+        let g = truncated(ui, summary, color::ink_3(), w);
+        let pos = pos2(x, rect.center().y - g.size().y / 2.0);
+        ui.painter().galley(pos, g, color::ink_3());
+    }
+    (open, head_tools(ui, rect, title, changed, key, true))
+}
+
+/// A number field, with a slider over `slider` (snapping to `step`) when the row has room.
+fn number(
+    ui: &mut Ui,
+    v: &mut f64,
+    (lo, hi): (f64, f64),
+    (slider, step): ((f64, f64), Option<f64>),
+    name: &str,
 ) -> bool {
-    let mut rgba = jvid_render::solid::rgba8(*c);
-    let changed = ui
-        .horizontal(|ui| {
-            ui.label(label);
-            let changed = ui.color_edit_button_srgba_unmultiplied(&mut rgba).changed();
-            animate(ui, clips, name, toggle);
-            changed
-        })
-        .inner;
-    if changed {
-        *c = rgba.map(|v| v as f64 / 255.0);
+    let wide = ui.available_width() >= SLIDER_ROOM;
+    let speed = step.map_or(1.0, |s| s / 10.0);
+    let f = DragField::new(v).range(lo..=hi).speed(speed).width(56.0);
+    let mut changed = ui.add(f).changed();
+    if wide {
+        let mut s = Slider::new(v, slider.0..=slider.1, name);
+        if let Some(step) = step {
+            s = s.step(step);
+        }
+        changed |= ui.add(s).changed();
     }
     changed
 }
 
-/// The editors for a text asset's style at playhead `t`, with `clips` (all showing it) for
-/// keyframes; the edit once anything changes. Animated properties key every clip at `t`;
-/// the rest edit the asset, so every clip of it changes.
-// shortcut: a per-clip caption needs its own asset; add a Duplicate action if users ask.
-fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<Edit> {
+/// An X and a Y field, which drop their prefixes for tooltips in a narrow row.
+fn pair(ui: &mut Ui, v: &mut [f32; 2], (lo, hi): (f64, f64), decimals: usize, label: &str) -> bool {
+    let wide = ui.available_width() >= SLIDER_ROOM;
+    let w = (ui.available_width() - space::S4) / 2.0;
+    let speed = 10f64.powi(-(decimals as i32)) / 2.0;
+    let mut changed = false;
+    for (v, axis) in v.iter_mut().zip(XY.iter().map(|l| l())) {
+        let mut x = f64::from(*v);
+        let mut f = DragField::new(&mut x)
+            .range(lo..=hi)
+            .speed(speed)
+            .decimals(decimals)
+            .width(w);
+        if wide {
+            f = f.prefix(axis);
+        }
+        if ui.add(f).on_hover_text(format!("{label} {axis}")).changed() {
+            *v = x as f32;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// The fields of Text tab row `id` editing `s`; true once one changed it.
+fn text_fields(ui: &mut Ui, s: &mut Text, id: &str, label: &str) -> bool {
     use jvid_core::model::Align;
+    let mut num = |v: &mut f32, range, slider| {
+        let mut x = f64::from(*v);
+        let changed = number(ui, &mut x, range, slider, label);
+        *v = x as f32;
+        changed
+    };
+    match id {
+        "text_size" => num(&mut s.size, (1.0, 1000.0), ((8.0, 400.0), None)),
+        "outline" => num(&mut s.outline, (0.0, 32.0), ((0.0, 32.0), None)),
+        "box_padding" => num(&mut s.box_padding, (0.0, 200.0), ((0.0, 200.0), None)),
+        "weight" => {
+            let mut w = f32::from(s.weight);
+            let changed = num(&mut w, (100.0, 900.0), ((100.0, 900.0), Some(100.0)));
+            s.weight = w.round() as u16;
+            changed
+        }
+        "font" => font_field(ui, &mut s.family, jvid_render::text::families()),
+        "align" => {
+            let all = [Align::Left, Align::Center, Align::Right];
+            let mut i = all.iter().position(|a| *a == s.align).unwrap_or(1);
+            let names = [
+                tr!("inspector.align_left"),
+                tr!("inspector.align_center"),
+                tr!("inspector.align_right"),
+            ];
+            let glyphs = [icon::ALIGN_LEFT, icon::ALIGN_CENTER, icon::ALIGN_RIGHT];
+            let changed = ui.add(Segmented::icons(&mut i, &glyphs, &names)).changed();
+            s.align = all[i];
+            changed
+        }
+        "text_anchor" => pair(ui, &mut s.anchor, (0.0, 1.0), 2, label),
+        "shadow" => pair(ui, &mut s.shadow, (-64.0, 64.0), 0, label),
+        _ => {
+            let c = match id {
+                "color" => &mut s.color,
+                "outline_color" => &mut s.outline_color,
+                "shadow_color" => &mut s.shadow_color,
+                _ => &mut s.box_color,
+            };
+            let mut rgba = jvid_render::solid::rgba8(*c);
+            let changed = ui.add(ColorField::new(&mut rgba, caption(id))).changed();
+            if changed {
+                *c = rgba.map(|v| f64::from(v) / 255.0);
+            }
+            changed
+        }
+    }
+}
+
+/// A Text tab row of style `id` in `s`, on the label column: its fields, Reset once it's off
+/// its default or animated, and the diamond for a style that animates. True once a field
+/// changed `s`; the edit a tool made.
+fn text_row(
+    ui: &mut Ui,
+    clips: &[&Clip],
+    s: &mut Text,
+    (id, label): (&'static str, &str),
+    t: Time,
+    index: u64,
+    seek: &mut Option<Time>,
+) -> (bool, Option<Edit>) {
+    let names = [id];
+    let keys = keyable(id) && !clips.is_empty();
+    let anim = any_animated(clips, &names);
+    let keyed = match () {
+        _ if !anim => Keyed::Static,
+        _ if all_keyed(clips, &names, t) => Keyed::Here,
+        _ => Keyed::Animated,
+    };
+    let key_name = match keyed {
+        Keyed::Static => tr!("inspector.animate", name = caption(id)),
+        _ => tr!("inspector.key_here").to_owned(),
+    };
+    let tools = Tools {
+        reset: (anim || off_default(s, id)).then_some(tr!("inspector.reset")),
+        key: keys.then_some((keyed, &key_name)),
+        compact: true,
+        ..Tools::default()
+    };
+    let (changed, c) = prop_row(ui, label, tools, |ui| text_fields(ui, s, id, label));
+    if c.reset {
+        // shortcut: an animated style's Reset drops its keys, so the asset's value shows and
+        // a second Reset restores the default; one step for both needs a compound command.
+        if anim {
+            return (false, Some((drop_keys(clips, &names), None)));
+        }
+        restore(s, id);
+        return (true, None);
+    }
+    if !keys {
+        return (changed, None);
+    }
+    let v = text_get(s, id).expect("a text name");
+    let toggles = (
+        || text_animate(clips, id, v, t),
+        || text_toggle_key(clips, id, v, t),
+    );
+    (
+        changed,
+        key_menu(clips, &names, c, t, index, seek, true, toggles),
+    )
+}
+
+/// Drops every clip's keyframes of `names`.
+fn drop_keys(clips: &[&Clip], names: &[&str]) -> Command {
+    rewrite(clips, |_, _, keys| {
+        for n in names {
+            keys.remove(*n);
+        }
+    })
+}
+
+/// The editors for a text asset's style at playhead `t`, with `clips` (all showing it) for
+/// keyframes; the edit once anything changes, and where to seek. Animated properties key
+/// every clip at `t`; the rest edit the asset, so every clip of it changes.
+// shortcut: a per-clip caption needs its own asset; add a Duplicate action if users ask.
+fn text_props(
+    ui: &mut Ui,
+    a: &MediaAsset,
+    clips: &[&Clip],
+    t: Time,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
     let base = a.text.clone()?;
     let anim = |name: &str| clips.iter().any(|c| animated(c, name));
     // `clips` share the asset, so the first stands for all at the playhead.
@@ -2404,101 +2755,73 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
         s
     });
     let before = s.clone();
-    let mut toggle = None;
-    let content = ui.add(
-        egui::TextEdit::multiline(&mut s.content)
-            .id(content_id())
-            .desired_rows(2),
-    );
-    let mut changed = content.changed();
-    ui.horizontal(|ui| {
-        ui.label(tr!("inspector.font"));
-        changed |= font_field(ui, &mut s.family, jvid_render::text::families());
+    // Each press starts its own undo step; typing and arrow keys until the next are one.
+    let presses = egui::Id::new("inspector text presses");
+    let pressed = ui.input(|i| i.pointer.any_pressed());
+    let press = ui.data_mut(|d| {
+        let n = d.get_temp_mut_or(presses, 0u64);
+        *n += u64::from(pressed);
+        *n
     });
-    ui.horizontal(|ui| {
-        ui.label(tr!("inspector.text_size"));
-        changed |= ui
-            .add(egui::DragValue::new(&mut s.size).range(1.0..=1000.0))
-            .changed();
-        animate(ui, clips, "text_size", &mut toggle);
-        ui.label(tr!("inspector.weight"));
-        changed |= ui
-            .add(
-                egui::DragValue::new(&mut s.weight)
-                    .range(100..=900)
-                    .speed(10),
+    let gesture = TEXT_GESTURE ^ a.id.0 ^ (press << 20);
+    // At least two lines, growing to eight, then it scrolls.
+    let line = ui.fonts_mut(|f| f.row_height(&theme::body()));
+    let content = egui::ScrollArea::vertical()
+        .id_salt("inspector text box")
+        .max_height(8.0 * line + 2.0 * space::S4)
+        .show(ui, |ui| {
+            ui.add(
+                egui::TextEdit::multiline(&mut s.content)
+                    .id(content_id())
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(2)
+                    .margin(vec2(space::S8, space::S4)),
             )
-            .changed();
-    });
-    changed |= color_field(
-        ui,
-        tr!("inspector.color"),
-        &mut s.color,
-        (clips, "color", &mut toggle),
-    );
-    ui.horizontal(|ui| {
-        for (al, name) in [
-            (Align::Left, tr!("inspector.align_left")),
-            (Align::Center, tr!("inspector.align_center")),
-            (Align::Right, tr!("inspector.align_right")),
-        ] {
-            changed |= ui.selectable_value(&mut s.align, al, name).changed();
+        });
+    let mut changed = content.inner.changed();
+    ui.add_space(space::S4);
+    let mut tool = None;
+    // Apart from the Video tab's rows, for the easing gesture.
+    let mut index = 1u64 << 32;
+    for (id, rows) in TEXT_SECTIONS {
+        let keys: Vec<&str> = rows.iter().map(|r| r.0).filter(|n| keyable(n)).collect();
+        let off = rows.iter().any(|(n, _)| off_default(&s, n) || anim(n));
+        let summary = text_summary(&s, id);
+        let (open, head) = text_section(ui, id, off, !clips.is_empty(), &summary);
+        match head {
+            Some(Head::Reset) => {
+                let animated: Vec<&str> = keys.iter().copied().filter(|n| anim(n)).collect();
+                // shortcut: as a row's Reset, animated styles first lose their keys.
+                if animated.is_empty() {
+                    rows.iter().for_each(|(n, _)| restore(&mut s, n));
+                    changed = true;
+                } else {
+                    tool = Some((drop_keys(clips, &animated), None));
+                }
+            }
+            Some(Head::Key) => {
+                let cmd = rewrite(clips, |c, _, k| {
+                    for n in &keys {
+                        key(c, k, n, t, text_get(&s, n).expect("a text name"));
+                    }
+                });
+                tool = Some((cmd, None));
+            }
+            None => {}
         }
-    });
-    ui.horizontal(|ui| {
-        ui.label(tr!("inspector.text_anchor"));
-        for v in &mut s.anchor {
-            changed |= ui
-                .add(egui::DragValue::new(v).range(0.0..=1.0).speed(0.005))
-                .changed();
+        if !open {
+            index += rows.len() as u64;
+            continue;
         }
-        animate(ui, clips, "text_anchor", &mut toggle);
-    });
-    ui.horizontal(|ui| {
-        ui.label(tr!("inspector.outline"));
-        changed |= ui
-            .add(egui::DragValue::new(&mut s.outline).range(0.0..=32.0))
-            .changed();
-        animate(ui, clips, "outline", &mut toggle);
-    });
-    let outline = (clips, "outline_color", &mut toggle);
-    changed |= color_field(
-        ui,
-        tr!("inspector.outline_color"),
-        &mut s.outline_color,
-        outline,
-    );
-    ui.horizontal(|ui| {
-        ui.label(tr!("inspector.shadow"));
-        for v in &mut s.shadow {
-            changed |= ui
-                .add(egui::DragValue::new(v).range(-64.0..=64.0))
-                .changed();
+        for (n, label) in rows {
+            index += 1;
+            let (ch, e) = text_row(ui, clips, &mut s, (n, caption(label)), t, index, seek);
+            changed |= ch;
+            tool = e.or(tool);
         }
-        animate(ui, clips, "shadow", &mut toggle);
-    });
-    let shadow = (clips, "shadow_color", &mut toggle);
-    changed |= color_field(
-        ui,
-        tr!("inspector.shadow_color"),
-        &mut s.shadow_color,
-        shadow,
-    );
-    ui.horizontal(|ui| {
-        ui.label(tr!("inspector.box_padding"));
-        changed |= ui
-            .add(egui::DragValue::new(&mut s.box_padding).range(0.0..=200.0))
-            .changed();
-        animate(ui, clips, "box_padding", &mut toggle);
-    });
-    changed |= color_field(
-        ui,
-        tr!("inspector.box_color"),
-        &mut s.box_color,
-        (clips, "box_color", &mut toggle),
-    );
-    if let Some(name) = toggle {
-        return Some((text_animate(clips, &before, name, t), None));
+    }
+    if tool.is_some() {
+        return tool;
     }
     if !changed {
         return None;
@@ -2512,28 +2835,41 @@ fn text_props(ui: &mut Ui, a: &MediaAsset, clips: &[&Clip], t: Time) -> Option<E
                 key(c, keys, n, t, text_get(&s, n).expect("a text name"));
             }
         });
-        return Some((cmd, Some(TEXT_GESTURE ^ a.id.0 ^ 1 << 40)));
+        return Some((cmd, Some(gesture ^ 1 << 40)));
     }
     // Animated values stay the asset's; the keys showed over them.
     for n in text_names().filter(|n| anim(n)) {
         text_set(&mut s, n, text_get(&base, n).expect("a text name"));
     }
-    (s != base).then_some((
-        Command::SetText { id: a.id, text: s },
-        Some(TEXT_GESTURE ^ a.id.0),
-    ))
+    (s != base).then_some((Command::SetText { id: a.id, text: s }, Some(gesture)))
 }
 
-/// Animates text property `name` from its value in `shown`, or, if any clip animates it,
-/// drops its keys so the asset's value shows again.
-fn text_animate(clips: &[&Clip], shown: &Text, name: &str, t: Time) -> Command {
+/// Animates text property `name` from `v`, or, if any clip animates it, drops its keys so the
+/// asset's value shows again.
+fn text_animate(clips: &[&Clip], name: &str, v: Value, t: Time) -> Command {
     let on = clips.iter().any(|c| animated(c, name));
-    let v = text_get(shown, name).expect("a text name");
     rewrite(clips, |c, _, keys| {
         if on {
             keys.remove(name);
         } else {
             key(c, keys, name, t, v);
+        }
+    })
+}
+
+/// Removes the keyframes of text property `name` at `t` if every clip has one there, else
+/// keys `v` there. The last key gone, the asset's value shows again.
+fn text_toggle_key(clips: &[&Clip], name: &str, v: Value, t: Time) -> Command {
+    let all = all_keyed(clips, &[name], t);
+    rewrite(clips, |c, _, keys| {
+        if !all {
+            key(c, keys, name, t, v);
+            return;
+        }
+        let list = keys.get_mut(name).expect("all have a key");
+        list.retain(|k| k.time != source(c, t));
+        if list.is_empty() {
+            keys.remove(name);
         }
     })
 }
@@ -2590,7 +2926,12 @@ mod tests {
                     .iter()
                     .flat_map(|(id, knobs)| std::iter::once(*id).chain(knobs.iter().map(|k| k.id))),
             )
-            .chain(text_names());
+            .chain(text_names())
+            .chain(
+                TEXT_SECTIONS
+                    .iter()
+                    .flat_map(|(id, rows)| std::iter::once(*id).chain(rows.iter().map(|r| r.1))),
+            );
         for id in ids {
             let key = format!("inspector.{id}");
             for lang in suite_ui::i18n::LANGUAGES {
@@ -2717,16 +3058,16 @@ mod tests {
     #[test]
     fn text_style_animates_per_clip_and_stops() {
         let mut clips = [clip(1, 0), clip(2, 50)];
-        let shown = Text {
-            outline: 3.0,
-            ..Text::default()
-        };
-        apply(&mut clips, |c| text_animate(c, &shown, "outline", Time(60)));
+        apply(&mut clips, |c| {
+            text_animate(c, "outline", Value::Scalar(3.0), Time(60))
+        });
         assert_eq!(clips[0].keyframes["outline"][0].time, Time(70));
         assert_eq!(clips[1].keyframes["outline"][0].time, Time(20));
         let t = Text::default().with(&clips[1].text_keys(Time(60)));
         assert_eq!(t.outline, 3.0, "the key shows over the asset");
-        apply(&mut clips, |c| text_animate(c, &shown, "outline", Time(60)));
+        apply(&mut clips, |c| {
+            text_animate(c, "outline", Value::Scalar(3.0), Time(60))
+        });
         assert!(clips.iter().all(|c| c.keyframes.is_empty()));
     }
 
@@ -3523,6 +3864,250 @@ mod tests {
         assert_eq!(stack(&h), on(&["vignette", "film_grain", "film_grain"]));
     }
 
+    /// The mockup's sample: a long three-line title, Size 120, a 4px outline, a 3, 3 shadow
+    /// and a 50% black box.
+    fn sample() -> Text {
+        Text {
+            content: "TRIPLE KILL\nclutch_round_3 — ranked, season 4 finals, map 2 overtime\nGG WP"
+                .into(),
+            size: 120.0,
+            outline: 4.0,
+            shadow: [3.0, 3.0],
+            box_color: [0.0, 0.0, 0.0, 0.5],
+            ..Text::default()
+        }
+    }
+
+    /// The Text tab `width` wide (the Inspector's body: its width less the panel's insets),
+    /// for one clip of a title in `style`.
+    fn text_harness(width: f32, style: Text) -> egui_kittest::Harness<'static, History> {
+        use jvid_core::history::Created;
+        use jvid_core::model::NewClip;
+        use jvid_core::time::FLICKS_PER_SECOND as S;
+        let mut h = History::new(Project::default());
+        let Ok(Created::Asset(asset)) = h.apply(Command::AddText {
+            name: "Title".into(),
+            text: style,
+        }) else {
+            panic!()
+        };
+        let _ = h.apply(Command::AddTrack {
+            kind: TrackKind::Video,
+            name: "V1".into(),
+        });
+        let track = h.project().sequence().tracks()[0].id;
+        let _ = h.apply(Command::AddClip {
+            track,
+            clip: NewClip {
+                asset,
+                source_in: Time(0),
+                source_out: Time(10 * S),
+                start: Time(0),
+                link: None,
+            },
+        });
+        let id = h.project().sequence().tracks()[0].clips()[0].id;
+        let mut fresh = true;
+        // Plus the harness's own 8px margins.
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([width + 16.0, 720.0])
+            .wgpu()
+            .build_ui_state(
+                move |ui, h: &mut History| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    ui.painter().rect_filled(ui.max_rect(), 0.0, color::panel());
+                    let sel = Selection::new(h.project(), &HashSet::from([id]), None);
+                    let (edit, _) = egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .show(ui, |ui| show(ui, &sel, Some(Pane::Text), Time(S)))
+                        .inner;
+                    match edit {
+                        Some((c, Some(k))) => h.apply_coalesced(k, c).unwrap(),
+                        Some((c, None)) => h.apply(c).unwrap(),
+                        None => Created::Nothing,
+                    };
+                },
+                h,
+            );
+        harness.run();
+        harness
+    }
+
+    fn title(h: &egui_kittest::Harness<'_, History>) -> Text {
+        h.state().project().assets()[0].text.clone().unwrap()
+    }
+
+    /// Every Text tab row starts its fields on one column at `width`, with sliders if
+    /// `sliders`; snapshot `name`.
+    fn lines_up(width: f32, name: &str, sliders: bool) {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        {
+            let mut h = text_harness(width, sample());
+            for head in ["Outline", "Shadow", "Box"] {
+                h.get_by_label(head).click();
+                h.run();
+            }
+            let column = h.get_by_label("Sans-serif").rect().left();
+            let fields: Vec<_> = h
+                .get_all_by_role(Role::ColorWell)
+                .map(|n| n.rect().left())
+                .collect();
+            assert_eq!(fields.len(), 4, "Fill, Outline, Shadow and Box");
+            assert!(
+                fields.iter().all(|x| *x == column),
+                "{fields:?} vs {column}"
+            );
+            for spin in h.get_all_by_role(Role::SpinButton) {
+                assert!(spin.rect().left() >= column, "{:?}", spin.rect());
+            }
+            let first = |r: &str| h.get_by_role_and_label(Role::RadioButton, r).rect().left();
+            assert!(first("Left") - column <= 2.0);
+            assert_eq!(h.query_all_by_role(Role::Slider).count() > 0, sliders);
+            // Off the rows, into the empty foot of the panel.
+            h.hover_at(egui::pos2(width / 2.0, 700.0));
+            h.run();
+            h.snapshot(name);
+        }
+    }
+
+    // The Inspector at 1280x720 (288) and at its minimum (PANEL_MIN), less 2 x INSET.
+    #[test]
+    fn the_text_tab_lines_up_at_the_default_width() {
+        lines_up(264.0, "inspector_text", true);
+    }
+
+    #[test]
+    fn the_text_tab_lines_up_at_the_minimum_width_and_sliders_give_way() {
+        lines_up(
+            size::PANEL_MIN - 2.0 * space::INSET,
+            "inspector_text_min",
+            false,
+        );
+    }
+
+    #[test]
+    fn text_edits_are_one_undo_step_each() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = text_harness(264.0, Text::default());
+        // Two drags of Size's slider are two steps.
+        let rect = h.get_by_role_and_label(Role::Slider, "Size").rect();
+        let from = egui::pos2(rect.left() + 10.0, rect.center().y);
+        for dx in [20.0, 40.0] {
+            h.hover_at(from);
+            h.run();
+            h.drag_at(from);
+            h.run();
+            for x in [dx / 2.0, dx] {
+                h.hover_at(from + vec2(x, 0.0));
+                h.run();
+            }
+            h.drop_at(from + vec2(dx, 0.0));
+            h.run();
+        }
+        let dragged = title(&h).size;
+        assert!(dragged > 8.0, "{dragged}");
+        // Typing is one more.
+        h.get_by_role(Role::MultilineTextInput).click();
+        h.run();
+        h.get_by_role(Role::MultilineTextInput).type_text("!!");
+        h.run();
+        assert_eq!(title(&h).content, "Title!!");
+        // And Align another.
+        h.get_by_role_and_label(Role::RadioButton, "Left").click();
+        h.run();
+        assert_eq!(title(&h).align, jvid_core::model::Align::Left);
+        assert!(h.state_mut().undo());
+        assert_eq!(title(&h).align, jvid_core::model::Align::Center);
+        assert!(h.state_mut().undo());
+        assert_eq!(title(&h).content, "Title");
+        assert!(h.state_mut().undo());
+        assert!(title(&h).size < dragged && title(&h).size != 96.0);
+        assert!(h.state_mut().undo());
+        assert_eq!(title(&h).size, 96.0);
+    }
+
+    #[test]
+    fn the_text_diamond_keys_and_its_menu_has_the_arrows() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = text_harness(264.0, Text::default());
+        assert!(h.query_by_label("Previous Keyframe").is_none());
+        h.get_by_label("Animate Size").click();
+        h.run();
+        let keys = |h: &egui_kittest::Harness<'_, History>| {
+            let c = &h.state().project().sequence().tracks()[0].clips()[0];
+            c.keyframes.get("text_size").map_or(0, Vec::len)
+        };
+        assert_eq!(keys(&h), 1);
+        h.get_by_label("Keyframe at Playhead").click_secondary();
+        h.run();
+        assert!(h.query_by_label("Previous Keyframe").is_some());
+        assert!(h.query_by_label("Next Keyframe").is_some());
+        assert!(
+            h.query_by_label("Reset").is_some(),
+            "animated reads as changed"
+        );
+    }
+
+    #[test]
+    fn restore_sets_each_style_back_and_only_that_one() {
+        let mut s = sample();
+        s.weight = 300;
+        for (_, rows) in TEXT_SECTIONS {
+            for (id, _) in rows {
+                let was = off_default(&s, id);
+                let mut r = s.clone();
+                restore(&mut r, id);
+                assert!(!off_default(&r, id), "{id}");
+                assert_eq!(was, r != s, "{id}");
+            }
+        }
+        assert!(off_default(&s, "weight") && off_default(&s, "box_color"));
+        assert!(!off_default(&s, "font") && !off_default(&s, "align"));
+    }
+
+    #[test]
+    fn collapsed_sections_summarise_their_style() {
+        let s = Text {
+            shadow_color: [0.0, 0.0, 0.0, 0.6],
+            ..sample()
+        };
+        let sum = |id| text_summary(&s, id);
+        assert_eq!(sum("text"), "Sans-serif · 120");
+        assert_eq!(sum("fill"), "#FFFFFF");
+        assert_eq!(sum("outline"), "4 px · #000000");
+        assert_eq!(sum("shadow"), "3, 3 · 60%");
+        assert_eq!(sum("box"), "16 px · 50%");
+        assert_eq!(text_summary(&Text::default(), "box"), "16 px · None");
+    }
+
+    #[test]
+    fn a_text_key_toggles_and_the_last_one_leaves_the_asset_value() {
+        let mut clips = vec![clip(1, 0)];
+        let t = Time(0);
+        let v = Value::Scalar(50.0);
+        apply(&mut clips, |c| text_animate(c, "text_size", v, t));
+        assert_eq!(clips[0].keyframes["text_size"].len(), 1);
+        let later = Time(jvid_core::time::FLICKS_PER_SECOND);
+        apply(&mut clips, |c| text_toggle_key(c, "text_size", v, later));
+        assert_eq!(clips[0].keyframes["text_size"].len(), 2);
+        apply(&mut clips, |c| text_toggle_key(c, "text_size", v, later));
+        apply(&mut clips, |c| text_toggle_key(c, "text_size", v, t));
+        assert!(!clips[0].keyframes.contains_key("text_size"));
+    }
+
     #[test]
     fn font_matches_ignore_case() {
         let list = ["Arial", "Arial Black", "Courier New", "Mariana"].map(String::from);
@@ -3535,8 +4120,12 @@ mod tests {
 
     fn font_harness(family: &str) -> egui_kittest::Harness<'static, String> {
         let list = ["Arial", "Arial Black", "Courier New"].map(String::from);
+        let mut fresh = true;
         let mut h = egui_kittest::Harness::builder().build_ui_state(
             move |ui, f: &mut String| {
+                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    return;
+                }
                 font_field(ui, f, &list);
             },
             family.to_owned(),
@@ -3591,7 +4180,12 @@ mod tests {
         let keys = SECTIONS
             .iter()
             .flat_map(|(_, props)| props.iter().map(|p| format!("inspector.{}", p.name)))
-            .chain(["inspector.blend".into(), "inspector.lut".into()]);
+            .chain(["inspector.blend".into(), "inspector.lut".into()])
+            .chain(
+                TEXT_SECTIONS
+                    .iter()
+                    .flat_map(|(_, rows)| rows.iter().map(|r| format!("inspector.{}", r.1))),
+            );
         for key in keys {
             let [en, es] = ["en", "es"].map(|l| crate::i18n::CATALOG.get_in(l, &key).unwrap());
             let [en_w, es_w] = crate::i18n::widths(&[en, es]).try_into().unwrap();
