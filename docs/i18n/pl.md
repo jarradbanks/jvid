@@ -64,7 +64,7 @@ then the next source wins and the row says why.
 | Mute | wycisz | Kdenlive, Shotcut. BMD's console page leaves "Mute" in English. |
 | Solo | solo | Kdenlive "Tryb solo"; BMD leaves "Solo". |
 | Scrubbing | przewijanie | Kdenlive's "szorowanie" is a literal calque; Shotcut "przeszukuj dźwięk". "Dźwięk przy przewijaniu" for Audio Scrubbing. |
-| Shuttle | szybkie przewijanie | Kdenlive keeps "Jog Shuttle" for the device; the J/K/L actions get a descriptive name ("Szybkie przewijanie wstecz"). |
+| Shuttle | szybkie przewijanie, verb przewiń szybko | Kdenlive keeps "Jog Shuttle" for the device; the J/K/L actions are imperatives like every other command ("Przewiń szybko wstecz", "Zatrzymaj szybkie przewijanie"). |
 | Timecode | kod czasowy | BMD, Shotcut. Kdenlive "kod czasu". |
 | Frame rate | liczba klatek na sekundę | BMD "klatek na sekundę". Label "Klatki na sekundę", unit "kl./s" (Kdenlive "kl/s"). Kdenlive "szybkość klatkowa" and Shotcut "częstotliwość klatek" are less common. |
 | Resolution | rozdzielczość | All sources. |
@@ -76,7 +76,7 @@ then the next source wins and the row says why.
 | Preset | preset | BMD "presety". Kdenlive "nastawa", Shotcut "zapisane ustawienia". |
 | Codec | kodek | Names stay as written. |
 | Bitrate | przepływność | Shotcut; the Polish telecom term. Kdenlive "szybkość bitowa". |
-| Title | tytuł | Kdenlive, Shotcut. BMD's "nagłówek" means a heading in Polish UI. A lower third is **belka**, the Polish broadcast word. |
+| Title | tytuł | Kdenlive, Shotcut. BMD's "nagłówek" means a heading in Polish UI. A lower third is **belka**, the Polish broadcast word, which BMD also uses ("dolne belki"). |
 | Subtitles | napisy | All sources. |
 | Waveform | kształt fali | BMD "kształt fali dźwiękowej", Kdenlive "Kształt fali". Also the waveform scope; the Scopes tab is **Wykresy** (Shotcut's "Wskaźniki" would clash with the playhead). |
 | Mixer | mikser | BMD, Kdenlive. |
@@ -87,8 +87,10 @@ then the next source wins and the row says why.
 
 - Labels, buttons, menus and tabs use sentence case ("Zapisz jako", "Kolejka renderowania"),
   as Polish Windows and macOS do; English Title Case isn't copied.
-- Buttons and menu commands are imperatives ("Zapisz", "Otwórz…", "Dodaj znacznik"), as in
-  Polish Windows and macOS menus; status words and section heads are nouns or participles.
+- Buttons and menu commands are imperatives ("Zapisz", "Otwórz…", "Dodaj znacznik", "Przejdź o
+  klatkę wstecz"), as in Polish Windows and macOS menus; status words, toggles and section heads
+  are nouns or participles ("Przyciąganie", "Odtwarzanie w pętli").
+- An effect's bypass is "Wyłącz", the pair of its "Włącz".
 - Blend modes follow Photoshop's Polish UI (Normalny, Pomnóż, Nakładka, Ciemniej, Jaśniej,
   Różnica), except Screen: Photoshop's "Mnożenie odwrotne" doesn't fit the 132-point blend
   dropdown, so it's GIMP's and Shotcut's **Ekran**.
