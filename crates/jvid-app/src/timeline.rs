@@ -936,9 +936,11 @@ impl Timeline {
             self.press_scroll = (self.scroll, self.vscroll);
         }
         // Drags that began in the lanes, and bin drags over the timeline, scroll at the
-        // edges; ruler and playhead scrubs scroll themselves.
+        // edges; ruler and playhead scrubs scroll themselves, and a refused drag stays put.
         let scrubbing = scrub.is_pointer_button_down_on() || drag.dragged();
-        let ours = ui.ctx().dragged_id().is_some()
+        let refused = self.holding.is_some_and(|c| locked(seq, c));
+        let ours = !refused
+            && ui.ctx().dragged_id().is_some()
             && ui
                 .input(|i| i.pointer.press_origin())
                 .is_some_and(|o| lanes.contains(o));
@@ -1002,7 +1004,12 @@ impl Timeline {
             && ui
                 .input(|i| i.pointer.interact_pos())
                 .is_some_and(|p| lanes.contains(p) && p.y < top_y + self.slot + SLOT_PX);
-        let t = if open { 0.15 } else { 0.1 };
+        // Reduce Motion zeroes the style's animation time; the slot then snaps.
+        let t = match () {
+            _ if ui.style().animation_time == 0.0 => 0.0,
+            _ if open => 0.15,
+            _ => 0.1,
+        };
         let slot_id = id.with("slot");
         let ease = egui::emath::easing::cubic_out;
         let shown = ui
@@ -1111,14 +1118,20 @@ impl Timeline {
                 if let Some(e) = self.trim_handles(ui, project, view, clip, r) {
                     edit = Some(e);
                 }
-                if let Some(e) = self.fade_handles(ui, &painter, view, clip, r, id) {
+                // Fades and keys change only this clip, so only its own track's lock counts.
+                let fixed = track.locked;
+                if let Some(e) = self.fade_handles(ui, &painter, view, clip, r, id, fixed) {
                     edit = Some(e);
                 }
                 if let Some(e) = self.transition_block(ui, &painter, project, view, clip, r) {
                     edit = Some(e);
                 }
-                self.key_toggle(ui, &painter, view, clip, r, id);
-                if self.keys.expanded.contains(&clip.id) {
+                // A locked clip's keys can't change, so its lanes and their toggle hide until
+                // the track unlocks.
+                if !fixed {
+                    self.key_toggle(ui, &painter, view, clip, r, id);
+                }
+                if !fixed && self.keys.expanded.contains(&clip.id) {
                     let under =
                         Rect::from_x_y_ranges(r.x_range(), r.bottom() + 2.0..=lane.bottom());
                     if let Some(e) = self.key_lanes(ui, &painter, seq, view, clip, under, id) {
@@ -1360,22 +1373,19 @@ impl Timeline {
             lanes_left - 64.0..=lanes_left - space::INSET,
             ruler.y_range(),
         );
-        let mut z = self.zoom;
-        let r = ui
-            .scope(|ui| {
-                // Its default width would spill past `slider` over the timecode and ruler.
-                ui.spacing_mut().slider_width = slider.width();
-                ui.put(
-                    slider,
-                    egui::Slider::new(&mut z, MIN_ZOOM..=MAX_ZOOM)
-                        .logarithmic(true)
-                        .show_value(false),
-                )
-            })
-            .inner;
+        // Logarithmic: the suite slider is linear, so it moves the zoom's log.
+        let mut z = self.zoom.ln();
+        let r = ui.put(
+            slider,
+            suite_ui::widgets::Slider::new(
+                &mut z,
+                MIN_ZOOM.ln()..=MAX_ZOOM.ln(),
+                tr!("timeline.zoom_tooltip"),
+            ),
+        );
         if r.changed() {
             let x = view.x(playhead).clamp(lanes.left(), lanes.right());
-            self.zoom_by(z / self.zoom, view, x);
+            self.zoom_by(z.exp() / self.zoom, view, x);
         }
         r.on_hover_text(tr!("timeline.zoom_tooltip"));
 
@@ -2263,7 +2273,10 @@ fn toggle(
     if r.has_focus() {
         painter.add(suite_ui::widgets::focus_ring(rect, radius::SMALL));
     }
-    let r = r.on_hover_text(name);
+    // Above the toggle, so the bottom track's tooltips don't cover + Track under it.
+    let mut tip = egui::Tooltip::for_enabled(&r);
+    tip.popup = tip.popup.align(egui::RectAlign::TOP);
+    tip.show(|ui| ui.label(name));
     r.clicked()
 }
 
@@ -2961,9 +2974,18 @@ mod tests {
 
     /// Edits from the timeline go through a real history, as in the app.
     pub(super) fn harness(project: Project) -> egui_kittest::Harness<'static, (Timeline, History)> {
+        harness_at(project, 0.25)
+    }
+
+    /// [`harness`] stepping `dt` seconds a frame.
+    fn harness_at(
+        project: Project,
+        dt: f32,
+    ) -> egui_kittest::Harness<'static, (Timeline, History)> {
         let mut fresh = true;
         let mut h = egui_kittest::Harness::builder()
             .with_size([1000.0, 200.0])
+            .with_step_dt(dt)
             .wgpu()
             .build_ui_state(
                 move |ui, (t, h): &mut (Timeline, History)| {
@@ -3111,6 +3133,29 @@ mod tests {
         h.get_by_label("Stop Recording").click();
         h.run();
         assert_eq!(h.state().0.armed, None);
+    }
+
+    #[test]
+    fn the_bottom_tracks_tooltips_leave_add_track_clear() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(2));
+        let arm = h.get_by_label("Arm for Recording").rect();
+        h.hover_at(arm.center());
+        for _ in 0..4 {
+            h.step();
+        }
+        h.run();
+        h.snapshot("timeline_arm_tooltip");
+        let tip = h
+            .get_all_by_label("Arm for Recording")
+            .map(|n| n.rect())
+            .find(|r| *r != arm)
+            .expect("the tooltip shows");
+        let add = h.get_by_label_contains("Track").rect();
+        assert!(!tip.intersects(add), "{tip:?} covers + Track at {add:?}");
     }
 
     #[test]
@@ -3452,6 +3497,38 @@ mod tests {
         assert_eq!(t[0].clips()[0].asset, solid);
     }
 
+    /// With Reduce Motion the New Track slot opens in the frame the drag reaches the edge.
+    #[test]
+    fn reduce_motion_opens_the_new_track_slot_at_once() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut p = History::new(project(2));
+        let _ = p.apply(Command::AddText {
+            name: "Title".into(),
+            text: Default::default(),
+        });
+        let title = p.project().assets()[1].id;
+        for reduce in [false, true] {
+            let mut h = harness_at(p.project().clone(), 1.0 / 60.0);
+            crate::preferences::reduce_motion(&h.ctx, reduce);
+            let v1 = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+            let x = size::TRACK_HEADER + 100.0;
+            h.hover_at(pos2(x, v1));
+            h.run();
+            egui::DragAndDrop::set_payload(&h.ctx, title);
+            h.drag_at(pos2(x, v1));
+            h.run();
+            h.hover_at(pos2(x, 8.0 + size::RULER + 2.0));
+            h.step();
+            let full = h.state().0.slot == Track::default_height();
+            assert_eq!(full, reduce, "reduce motion {reduce}: {}", h.state().0.slot);
+            h.drop_at(pos2(x, 8.0 + size::RULER / 2.0));
+            h.run();
+        }
+    }
+
     #[test]
     fn bin_drop_at_the_top_edge_opens_a_new_track_slot() {
         use egui_kittest::kittest::Queryable;
@@ -3541,6 +3618,171 @@ mod tests {
         v1.locked = true;
         h.apply(Command::SetTrack(v1)).unwrap();
         h.project().clone()
+    }
+
+    /// A locked clip keeps its fade line but loses the fade handles and its keyframe lanes.
+    #[test]
+    fn a_locked_clip_shows_no_fade_or_keyframe_handles() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        // Fade and key V1's clip, then lock V1: a locked track refuses both edits.
+        let mut p = History::new(project(2));
+        let c = p.project().sequence().tracks()[0].clips()[0].clone();
+        let mut x = c.transform.clone();
+        x.fade_in = Time(S);
+        let props = Command::SetClipProps(vec![(c.id, x, c.keyframes.clone())]);
+        let key = jvid_core::keyframe::Keyframe {
+            time: Time(0),
+            value: jvid_core::keyframe::Value::Scalar(1.0),
+            easing: jvid_core::keyframe::Easing::Linear,
+        };
+        let param = "opacity".into();
+        let mut v1 = p.project().sequence().tracks()[0].settings();
+        v1.locked = true;
+        for cmd in [
+            props,
+            Command::AddKeyframe {
+                id: c.id,
+                param,
+                key,
+            },
+            Command::SetTrack(v1),
+        ] {
+            p.apply(cmd).unwrap();
+        }
+        let mut h = harness(p.project().clone());
+        h.state_mut().0.selected.insert(c.id);
+        h.run();
+        assert!(!h.state().0.keys.expanded.contains(&c.id), "no lanes");
+        let before = h.state().1.project().clone();
+        // V1's clip sits 2px into the lane under the ruler.
+        let top = 8.0 + size::RULER + 2.0;
+        let view = h.state().0.view(8.0 + size::TRACK_HEADER);
+        // The fade-in handle: a 7px square on the clip's top edge at the fade's end.
+        let at = pos2(view.x(c.start + Time(S)), top + 3.5);
+        h.hover_at(at);
+        h.run();
+        let cursor = h.output().platform_output.cursor_icon;
+        assert_ne!(cursor, CursorIcon::ResizeHorizontal, "no fade handle");
+        h.drag_at(at);
+        h.run();
+        h.hover_at(at + vec2(-20.0, 0.0));
+        h.run();
+        h.drop_at(at + vec2(-20.0, 0.0));
+        h.run();
+        assert_eq!(h.state().1.project(), &before);
+    }
+
+    /// A1's clip, linked to a clip on locked V1, keeps its own fade handles and lanes: they
+    /// change only A1's clip, which history allows.
+    #[test]
+    fn a_clip_linked_to_a_locked_track_keeps_its_fades_and_lanes() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut p = History::new(locked_v1());
+        let a1 = p.project().sequence().tracks()[1].clone();
+        let c = a1.clips()[0].clone();
+        let key = jvid_core::keyframe::Keyframe {
+            time: Time(0),
+            value: jvid_core::keyframe::Value::Scalar(1.0),
+            easing: jvid_core::keyframe::Easing::Linear,
+        };
+        let param = "volume".into();
+        p.apply(Command::AddKeyframe {
+            id: c.id,
+            param,
+            key,
+        })
+        .unwrap();
+        let mut h = harness(p.project().clone());
+        h.state_mut().0.selected.insert(c.id);
+        h.run();
+        assert!(h.state().0.keys.expanded.contains(&c.id), "lanes");
+        let v1 = h.state().1.project().sequence().tracks()[0].height;
+        // A1's clip sits 2px into its lane, under the ruler and V1.
+        let top = 8.0 + size::RULER + v1 + 2.0;
+        let view = h.state().0.view(8.0 + size::TRACK_HEADER);
+        // The fade-in handle: a 7px square on the clip's top-left corner while there's no fade.
+        let at = pos2(view.x(c.start) + 3.5, top + 3.5);
+        h.hover_at(at);
+        h.run();
+        h.drag_at(at);
+        h.run();
+        h.hover_at(at + vec2(30.0, 0.0));
+        h.run();
+        h.drop_at(at + vec2(30.0, 0.0));
+        h.run();
+        let seq = h.state().1.project().sequence().clone();
+        let fade = seq.clip(c.id).unwrap().1.transform.fade_in;
+        assert!(fade > Time(0), "{fade:?}");
+    }
+
+    /// Lanes open when V1 locks hide with its lock and come back when it unlocks.
+    #[test]
+    fn unlocking_a_track_brings_its_open_lanes_back() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut p = History::new(project(2));
+        let c = p.project().sequence().tracks()[0].clips()[0].clone();
+        let key = jvid_core::keyframe::Keyframe {
+            time: Time(0),
+            value: jvid_core::keyframe::Value::Scalar(1.0),
+            easing: jvid_core::keyframe::Easing::Linear,
+        };
+        let param = "opacity".into();
+        p.apply(Command::AddKeyframe {
+            id: c.id,
+            param,
+            key,
+        })
+        .unwrap();
+        let mut h = harness(p.project().clone());
+        h.state_mut().0.selected.insert(c.id);
+        h.run();
+        // Deselected, the lanes stay open; only the toggle closes them.
+        h.state_mut().0.selected.clear();
+        h.run();
+        let extra = |h: &egui_kittest::Harness<'_, (Timeline, History)>| {
+            let t = &h.state().1.project().sequence().tracks()[0];
+            h.state().0.keys.extra(t)
+        };
+        assert!(extra(&h) > 0.0, "lanes open");
+        let lock = |h: &mut egui_kittest::Harness<'_, (Timeline, History)>, locked| {
+            let mut v1 = h.state().1.project().sequence().tracks()[0].settings();
+            v1.locked = locked;
+            h.state_mut().1.apply(Command::SetTrack(v1)).unwrap();
+            h.run();
+        };
+        lock(&mut h, true);
+        assert_eq!(extra(&h), 0.0, "locked, no lanes");
+        lock(&mut h, false);
+        assert!(extra(&h) > 0.0, "unlocked, lanes again");
+    }
+
+    /// A refused drag held at the edge leaves the view where it was.
+    #[test]
+    fn a_refused_drag_at_the_edge_doesnt_scroll() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(locked_v1());
+        let x = size::TRACK_HEADER + 20.0;
+        let y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        h.hover_at(pos2(x, y));
+        h.run();
+        h.drag_at(pos2(x, y));
+        h.run();
+        h.hover_at(pos2(995.0, y));
+        for _ in 0..4 {
+            h.step();
+        }
+        assert_eq!(h.state().0.scroll, 0.0);
+        h.drop_at(pos2(995.0, y));
+        h.run();
     }
 
     #[test]

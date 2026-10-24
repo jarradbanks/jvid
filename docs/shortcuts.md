@@ -41,7 +41,7 @@ Work in any panel except while typing in a text field.
 | Overwrite | `.` |
 | Undo | `Ctrl+Z` |
 | Redo | `Ctrl+Shift+Z` |
-| Redo (alternate) | `Ctrl+Y` |
+| Redo (Alternate) | `Ctrl+Y` |
 | Razor Tool | `C` |
 | Selection Tool | `V` |
 | Step Back One Frame | `Left` |

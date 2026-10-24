@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use egui::{Align2, Id, Painter, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use egui::{Id, Painter, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, SPEED};
 use jvid_core::model::{Clip, ClipId, Sequence, Track};
@@ -48,21 +48,26 @@ pub(super) fn lanes(c: &Clip) -> impl Iterator<Item = (&String, &Vec<Keyframe>)>
     c.keyframes.iter().filter(|(_, k)| !k.is_empty())
 }
 
-/// Lane `name`'s caption: a built-in property's `lane.<name>`, a bundled effect's parameter
-/// after its stored slot (`fx0.amount`), anything else as stored with spaces for underscores.
+/// Lane `name`'s caption: a built-in property's `lane.<name>`, an effect's parameter after the
+/// effect's name (`Film Grain · Amount`), anything else as stored in Title Case.
 pub(super) fn caption(c: &Clip, name: &str) -> String {
+    use crate::effects;
     if let Some(s) = CATALOG.get(&format!("lane.{name}")) {
         return s.to_owned();
     }
     if let Some((i, id)) = crate::inspector::fx_param(name)
         && let Some(fx) = c.transform.effects.get(i)
-        && crate::effects::with(|l| l.shipped(&fx.shader))
     {
-        let slot = &name[..name.len() - id.len()];
-        let id = crate::effects::param(&fx.shader, true, id).to_lowercase();
-        return format!("{slot}{id}");
+        let (title, shipped) = effects::with(|l| {
+            let shipped = l.shipped(&fx.shader);
+            match l.get(&fx.shader) {
+                Some(Ok(s)) => (effects::name(&fx.shader, shipped, s), shipped),
+                _ => (fx.shader.clone(), shipped),
+            }
+        });
+        return format!("{title} · {}", effects::param(&fx.shader, shipped, id));
     }
-    name.replace('_', " ")
+    effects::title_case_name(&name.replace(['_', '.'], " "))
 }
 
 /// Inserts `k`, replacing any key at the same time.
@@ -246,8 +251,11 @@ impl Keys {
             .collect();
     }
 
-    /// Extra height under `track`'s clips for its tallest expanded clip.
+    /// Extra height under `track`'s clips for its tallest expanded clip; none while locked.
     pub fn extra(&self, track: &Track) -> f32 {
+        if track.locked {
+            return 0.0;
+        }
         let open = track
             .clips()
             .iter()
@@ -377,17 +385,17 @@ impl Timeline {
         let shift_x = self.keys.drag.map_or(0.0, |d| view.x(d) - view.x(Time(0)));
         for (row, (name, keys)) in lanes(clip).enumerate() {
             let y = area.top() + (row as f32 + 0.5) * LANE_H;
-            painter.text(
-                pos2(area.left().max(painter.clip_rect().left()) + 6.0, y),
-                Align2::LEFT_CENTER,
-                caption(clip, name),
-                theme::small(),
-                color::ink_3(),
-            );
             if let (Some(a), Some(b)) = (keys.first(), keys.last()) {
                 let (a, b) = (view.x(tl(a.time)), view.x(tl(b.time)));
                 painter.line_segment([pos2(a, y), pos2(b, y)], Stroke::new(1.0, color::ink_4()));
             }
+            // The caption sits on a plate in the lane's fill, so the key line passes behind it.
+            let galley =
+                painter.layout_no_wrap(caption(clip, name), theme::small(), color::ink_3());
+            let at = pos2(area.left().max(left) + 6.0, y - galley.size().y / 2.0);
+            let plate = Rect::from_min_size(at, galley.size()).expand2(vec2(3.0, 1.0));
+            painter.rect_filled(plate, 4.0, color::raised());
+            painter.galley(at, galley, color::ink_3());
             let on_times: Vec<Time> = picked(&self.keys.selected, clip)
                 .filter(|s| s.0 == name)
                 .map(|s| s.1)
@@ -575,11 +583,16 @@ mod tests {
         let c = project(1).sequence().tracks()[0].clips()[0].clone();
         for key in lanes {
             assert!(keys.contains(&key), "lane.{key} isn't a built-in key");
-            assert_eq!(caption(&c, key), key.replace('_', " "));
+            let words = caption(&c, key);
+            assert!(
+                words.split(' ').all(|w| w.starts_with(char::is_uppercase)),
+                "lane.{key} = {words:?} isn't Title Case"
+            );
         }
-        // An effect's parameter, or any other name, shows as stored.
-        assert_eq!(caption(&c, "fx0.grain_size"), "fx0.grain size");
-        assert_eq!(caption(&c, "fx_bad"), "fx bad");
+        assert_eq!(caption(&c, "crop_bottom"), "Crop Bottom");
+        // An effect the clip doesn't have, or any other name, shows as stored in Title Case.
+        assert_eq!(caption(&c, "fx0.grain_size"), "Fx0 Grain Size");
+        assert_eq!(caption(&c, "mask0.feather"), "Mask0 Feather");
     }
 
     fn times(h: &History, p: &str) -> Vec<(i64, Easing)> {
@@ -767,6 +780,16 @@ mod tests {
         let lock = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
         let y = lock - height / 2.0 + height + 2.0 + LANE_H / 2.0;
         let view = h.state().0.view(8.0 + size::TRACK_HEADER);
+        // The opacity line runs from the clip's start, but stops at its caption's plate.
+        let img = h.render().expect("render");
+        let words = view.x(Time(0)) + 10.0;
+        let through = (0..20).any(|dx| {
+            (-3..=3).any(|dy| {
+                let p = img.get_pixel((words + dx as f32) as u32, (y + dy as f32) as u32);
+                egui::Color32::from_rgb(p[0], p[1], p[2]) == suite_ui::tokens::color::ink_4()
+            })
+        });
+        assert!(!through, "the key line shows through the caption");
         let (x, dx) = (view.x(Time(S)), view.x(Time(2 * S)) - view.x(Time(S)));
         h.hover_at(pos2(x, y));
         h.run();

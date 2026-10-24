@@ -1,6 +1,6 @@
 //! The app preferences dialog, under Edit > Preferences: a sidebar of sections beside the
-//! chosen one's fields. General holds the UI language and the colour theme, Audio the
-//! voiceover input device. Each applies at once and is saved to `settings.toml` as it changes.
+//! chosen one's fields. General holds the UI language, the colour theme and Reduce Motion,
+//! Audio the voiceover input device. Each applies at once and is saved to `settings.toml` as it changes.
 
 use std::path::{Path, PathBuf};
 
@@ -9,7 +9,7 @@ use suite_ui::i18n::{self, LANGUAGES, SYSTEM};
 use suite_ui::theme::{self, hairline, icon};
 use suite_ui::themes::{self, Choice, Palette};
 use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Dropdown, fit_text};
+use suite_ui::widgets::{Button, Checkbox, Dropdown, fit_text};
 
 use crate::i18n::tr;
 
@@ -61,16 +61,17 @@ impl Preferences {
     }
 
     /// Shows the dialog while open. `language` is the setting (`system` or a code), `theme`
-    /// a built-in name or a theme file's path, and `input` the input device name (empty for
-    /// the system default). A pick applies at once and saves through `save(key, value)`.
-    /// True when `theme` changed.
+    /// a built-in name or a theme file's path, `motion` the `reduce_motion` setting and `input`
+    /// the input device name (empty for the system default). A pick applies at once and saves
+    /// through `save(key, value)`. True when `theme` changed.
     pub fn show(
         &mut self,
         ui: &mut Ui,
         language: &mut String,
         theme: &mut String,
+        motion: &mut bool,
         input: &mut String,
-        mut save: impl FnMut(&str, &str) -> std::io::Result<()>,
+        mut save: impl FnMut(&str, toml::Value) -> std::io::Result<()>,
     ) -> bool {
         if !self.open {
             return false;
@@ -88,7 +89,7 @@ impl Preferences {
             WIDTH.min(screen.width() - 2.0 * space::S16),
             HEIGHT.min(screen.height() - 2.0 * space::S16),
         );
-        let mut save = |error: &mut Option<_>, key: &'static str, value: &str| {
+        let mut save = |error: &mut Option<_>, key: &'static str, value: toml::Value| {
             *error = save(key, value).err().map(|e| (key, e.to_string()));
         };
         let mut theme_changed = false;
@@ -120,7 +121,7 @@ impl Preferences {
                             egui::Frame::new().inner_margin(space::S16).show(ui, |ui| {
                                 match self.section {
                                     Section::General => {
-                                        if self.general(ui, language, theme, &mut save) {
+                                        if self.general(ui, language, theme, motion, &mut save) {
                                             theme_changed = true;
                                         }
                                     }
@@ -181,7 +182,8 @@ impl Preferences {
         ui: &mut Ui,
         language: &mut String,
         theme: &mut String,
-        save: &mut impl FnMut(&mut Option<(&'static str, String)>, &'static str, &str),
+        motion: &mut bool,
+        save: &mut impl FnMut(&mut Option<(&'static str, String)>, &'static str, toml::Value),
     ) -> bool {
         section_head(ui, tr!("settings.general"));
         field_label(ui, tr!("settings.language"));
@@ -194,7 +196,7 @@ impl Preferences {
         {
             *language = setting(picked).into();
             i18n::set_language(i18n::resolve(language));
-            save(&mut self.error, "language", language);
+            save(&mut self.error, "language", language.as_str().into());
             // The built-in theme names are in the language they were listed in.
             self.next_scan = 0.0;
         }
@@ -222,7 +224,7 @@ impl Preferences {
                 }
             });
         if changed {
-            save(&mut self.error, "theme", theme);
+            save(&mut self.error, "theme", theme.as_str().into());
         }
         if let Some(Err(e)) = self
             .themes
@@ -241,6 +243,15 @@ impl Preferences {
         {
             open_folder(dir);
         }
+        ui.add_space(20.0);
+        if ui
+            .add(Checkbox::new(motion, tr!("settings.reduce_motion")))
+            .changed()
+        {
+            reduce_motion(ui.ctx(), *motion);
+            save(&mut self.error, "reduce_motion", (*motion).into());
+        }
+        self.save_error(ui, "reduce_motion");
         changed
     }
 
@@ -249,7 +260,7 @@ impl Preferences {
         ui: &mut Ui,
         body: Rect,
         input: &mut String,
-        save: &mut impl FnMut(&mut Option<(&'static str, String)>, &'static str, &str),
+        save: &mut impl FnMut(&mut Option<(&'static str, String)>, &'static str, toml::Value),
     ) {
         section_head(ui, tr!("settings.audio"));
         field_label(ui, tr!("settings.input_device"));
@@ -266,7 +277,7 @@ impl Preferences {
             } else {
                 rows[picked].clone()
             };
-            save(&mut self.error, "input_device", input);
+            save(&mut self.error, "input_device", input.as_str().into());
         }
         self.save_error(ui, "input_device");
     }
@@ -278,6 +289,16 @@ impl Preferences {
             ui.label(egui::RichText::new(text).color(color::red()));
         }
     }
+}
+
+/// Turns egui's animations off, or back to their default length.
+pub fn reduce_motion(ctx: &egui::Context, on: bool) {
+    let time = if on {
+        0.0
+    } else {
+        egui::Style::default().animation_time
+    };
+    ctx.global_style_mut(|s| s.animation_time = time);
 }
 
 fn section_head(ui: &mut Ui, text: &str) {
@@ -493,6 +514,45 @@ pub fn setting(row: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reduce_motion_turns_animation_off_and_saves() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut fresh = true;
+        let mut prefs = Preferences::default();
+        prefs.open(Vec::new(), None);
+        let saved = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let log = saved.clone();
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([800.0, 600.0])
+            .build_ui_state(
+                move |ui, motion: &mut bool| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    let (mut language, mut theme, mut input) =
+                        ("system".into(), "dark".into(), String::new());
+                    prefs.show(ui, &mut language, &mut theme, motion, &mut input, |k, v| {
+                        log.borrow_mut().push((k.to_owned(), v));
+                        Ok(())
+                    });
+                },
+                false,
+            );
+        h.run();
+        h.get_by_label("Reduce Motion").click();
+        h.run();
+        assert!(*h.state());
+        assert_eq!(h.ctx.global_style().animation_time, 0.0);
+        let want = ("reduce_motion".to_owned(), toml::Value::Boolean(true));
+        assert_eq!(saved.borrow().last(), Some(&want));
+        h.get_by_label("Reduce Motion").click();
+        h.run();
+        assert!(h.ctx.global_style().animation_time > 0.0);
+    }
 
     #[test]
     fn picker_rows_map_to_settings_and_back() {

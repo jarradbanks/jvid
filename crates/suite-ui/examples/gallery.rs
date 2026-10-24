@@ -6,8 +6,8 @@ use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{
-    Button, ButtonKind, Checkbox, DragField, Dropdown, KeyButton, Keyed, SectionHeader, Segmented,
-    Slider, State, TextInput, Timecode,
+    Button, ButtonKind, Checkbox, ColorField, DragField, Dropdown, KeyButton, Keyed, SectionHeader,
+    Segmented, Slider, State, TextInput, Timecode,
 };
 
 /// The gallery's demo labels; the widgets' own strings are in suite-ui's catalog.
@@ -63,6 +63,7 @@ pub struct Gallery {
     value: f64,
     level: f64,
     choice: usize,
+    colour: [u8; 4],
     segment: usize,
     checked: bool,
     open: bool,
@@ -74,6 +75,7 @@ impl Gallery {
         Self {
             open: true,
             level: 0.5,
+            colour: [0x2F, 0x6F, 0xEB, 0xFF],
             frame: 30 * 72 + 8,
             ..Self::default()
         }
@@ -230,6 +232,19 @@ fn states(ui: &mut egui::Ui, g: &mut Gallery) {
             for (_, s) in STATES {
                 ui.add(Dropdown::new(&mut g.choice, &options).width(96.0).state(s));
             }
+            ui.end_row();
+
+            ui.label(tr!("row.colour"));
+            for (_, s) in STATES {
+                ui.allocate_ui(egui::vec2(120.0, size::CONTROL), |ui| {
+                    ui.add(ColorField::new(&mut g.colour, tr!("demo.fill")).state(s));
+                });
+            }
+            // Translucent: the swatch shows the checkerboard.
+            ui.allocate_ui(egui::vec2(120.0, size::CONTROL), |ui| {
+                let mut half = [g.colour[0], g.colour[1], g.colour[2], 0x80];
+                ui.add(ColorField::new(&mut half, tr!("demo.fill")));
+            });
             ui.end_row();
 
             ui.label(tr!("row.segmented"));

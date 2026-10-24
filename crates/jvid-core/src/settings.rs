@@ -40,6 +40,8 @@ pub struct Settings {
     pub language: String,
     /// Voiceover input device name; empty follows the system default.
     pub input_device: String,
+    /// Turns the UI's animations off, such as hover fades and the timeline's New Track slot.
+    pub reduce_motion: bool,
 }
 
 impl Default for Settings {
@@ -55,6 +57,7 @@ impl Default for Settings {
             hardware_decode: true,
             language: "system".into(),
             input_device: String::new(),
+            reduce_motion: false,
         }
     }
 }
@@ -93,6 +96,7 @@ impl Settings {
                 "hardware_decode" => set(&mut out.hardware_decode, &key, value, |_| true),
                 "language" => set(&mut out.language, &key, value, |v: &String| !v.is_empty()),
                 "input_device" => set(&mut out.input_device, &key, value, |_| true),
+                "reduce_motion" => set(&mut out.reduce_motion, &key, value, |_| true),
                 _ => tracing::warn!("settings: ignoring unknown key `{key}`"),
             }
         }
@@ -190,6 +194,7 @@ mod tests {
             hardware_decode: false,
             language: "es".into(),
             input_device: "USB Mic".into(),
+            reduce_motion: true,
         };
         assert_eq!(Settings::from_toml(&s.to_toml()).unwrap(), s);
         let d = Settings::default();

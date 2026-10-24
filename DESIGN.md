@@ -61,6 +61,14 @@ Every clip colour carries Ink clip names at 4.8:1 or better, and none sits close
 - **Ink 4** (#5A5E63): disabled text and icons only.
 - **Viewer** (#040404): the neutral, untinted black behind the picture in the preview.
 
+### Themes
+Every value above is the Dark theme. Light and High Contrast are the other built-ins, and Edit > Preferences > General picks between them and any theme files.
+
+- **Themes folder:** `themes` in the platform config folder (`~/.config/jvid/themes` on Linux, `%APPDATA%\jvid\config\themes` on Windows). It's created on first run holding Warm Dark and Soft Light, which double as commented templates, and Preferences has an Open Themes Folder button. A file deleted from it stays deleted.
+- **Theme files:** one `.toml` per theme, named in Title Case after its file (`nord-night.toml` is Nord Night). Each line sets one token as `"#RRGGBB"`, and a token left out takes its Dark value. A misspelt key or a bad hex is an error, shown on that theme's card in Preferences. Saving the chosen file reloads it without a restart.
+- **Token keys:** `blue`, `light_blue`, `red`, `amber`, `green`, `ground`, `panel`, `raised`, `field`, `border`, `border_strong`, `ink`, `ink_2`, `ink_3`, `ink_4`. In code each is `color::<key>()`; nothing else paints chrome.
+- **`ink_2` and `ink_4`:** the second and fourth steps of the ink scale. `ink_2` is Ink 2 (secondary text, labels, icons at rest). `ink_4` is Ink 4, for disabled text and icons only, so unlike `ink` and `ink_3`, which must reach 4.5:1 on `panel`, it may fall below that; keep it visibly fainter than `ink_3`. Clip colours and Viewer are fixed and aren't theme tokens.
+
 ### Named Rules
 **The One Blue Rule.** Blue marks focus, selection, the playhead, the in/out range and the single primary action. Nothing decorative is ever blue, and no other accent exists.
 
@@ -197,7 +205,7 @@ A 160px column on Panel. The track ID (V1, A1) in Body Strong and Ink, the name 
 
 ### Motion and state
 - Hover and press colours fade over 100ms. Menus, popovers, dialogs and toasts open over 150ms (ease-out, opacity plus a 4px slide) and close over 100ms. Docking and resizing don't animate. The playhead and timeline never ease, because they report time.
-- With the OS reduced-motion setting on, overlays appear and disappear instantly.
+- With Reduce Motion on (Edit > Preferences > General), hover fades, overlays and the New Track slot change instantly. Following the OS setting is a follow-up.
 - Every interactive component defines default, hover, focus-visible, pressed and disabled states, plus loading and error wherever they can occur.
 
 ## Do's and Don'ts

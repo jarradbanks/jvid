@@ -58,10 +58,24 @@ fn look(response: &Response, pinned: State) -> Look {
 
 /// Fades a colour towards its hover value over 100ms.
 fn hover_fade(ui: &Ui, id: Id, hover: bool, rest: Color32, hovered: Color32) -> Color32 {
+    // No fade when the app turns animation off, as Reduce Motion does.
+    let time = if ui.style().animation_time == 0.0 {
+        0.0
+    } else {
+        0.1
+    };
     let t = ui
         .ctx()
-        .animate_bool_with_time(id.with("hover"), hover, 0.1);
+        .animate_bool_with_time(id.with("hover"), hover, time);
     rest.lerp_to_gamma(hovered, t)
+}
+
+/// Paints icon `glyph` with its ink, not its line box, centred on `center`: a Lucide glyph's
+/// box runs a pixel taller than the icon, and some, such as Folder and Check, sit high in it.
+pub fn paint_icon(painter: &egui::Painter, center: egui::Pos2, glyph: &str, color: Color32) {
+    let galley = painter.layout_no_wrap(glyph.into(), theme::icon_font(), color);
+    let pos = center - galley.mesh_bounds.center().to_vec2();
+    painter.galley(pos, galley, color);
 }
 
 /// The focus-visible ring: 2px Light Blue at 60%, 1px outside the shape.
@@ -338,13 +352,7 @@ impl Widget for Button<'_> {
                     .color(ink)
                     .paint_at(ui, Rect::from_center_size(slot.center(), Vec2::splat(12.0)));
             } else if let Some(glyph) = self.icon {
-                ui.painter().text(
-                    slot.center(),
-                    Align2::CENTER_CENTER,
-                    glyph,
-                    theme::icon_font(),
-                    ink,
-                );
+                paint_icon(ui.painter(), slot.center(), glyph, ink);
             }
             x += size::ICON + space::S4;
         }
@@ -710,7 +718,7 @@ fn paint_left(ui: &Ui, x: f32, y: f32, galley: Arc<Galley>, color: Color32) {
 
 /// Where a dropdown's menu opens, and its tallest scroll height: below the field unless
 /// there's more room above, never past `bounds`, and `MARGIN` short of its edge.
-fn menu_place(field: Rect, bounds: Rect, wanted: f32) -> (RectAlign, f32) {
+pub fn menu_place(field: Rect, bounds: Rect, wanted: f32) -> (RectAlign, f32) {
     const MARGIN: f32 = space::S8;
     let below = bounds.bottom() - field.bottom() - MARGIN;
     let above = field.top() - bounds.top() - MARGIN;
@@ -733,6 +741,7 @@ pub struct Dropdown<'a> {
     width: f32,
     state: State,
     bounds: Option<Rect>,
+    placeholder: &'a str,
 }
 
 impl<'a> Dropdown<'a> {
@@ -743,7 +752,15 @@ impl<'a> Dropdown<'a> {
             width: 120.0,
             state: State::Live,
             bounds: None,
+            placeholder: "",
         }
+    }
+
+    /// What the field shows, in Ink 2, while `selected` is past the options, such as "Custom"
+    /// for a value no preset matches. It isn't in the menu.
+    pub fn placeholder(mut self, text: &'a str) -> Self {
+        self.placeholder = text;
+        self
     }
 
     pub fn width(mut self, width: f32) -> Self {
@@ -772,14 +789,15 @@ impl Widget for Dropdown<'_> {
             self.state,
             Sense::click(),
         );
-        let current = self.options.get(*self.selected).copied().unwrap_or("");
+        let picked = self.options.get(*self.selected).copied();
+        let current = picked.unwrap_or(self.placeholder);
         response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, current));
         let l = look(&response, self.state);
         ui.painter().add(field_frame(ui, rect, l, false));
-        let ink = if l.disabled {
-            color::ink_4()
-        } else {
-            color::ink()
+        let ink = match () {
+            _ if l.disabled => color::ink_4(),
+            _ if picked.is_none() => color::ink_2(),
+            _ => color::ink(),
         };
         let chevron = if l.disabled {
             color::ink_4()
@@ -827,14 +845,27 @@ impl Widget for Dropdown<'_> {
 }
 
 /// A 24px menu row: Body Ink text with a 6px-radius Border-colour hover fill.
-struct MenuRow<'a> {
+#[must_use = "add it with `ui.add(..)`"]
+pub struct MenuRow<'a> {
     label: &'a str,
     checked: bool,
+    lit: bool,
 }
 
 impl<'a> MenuRow<'a> {
-    fn new(label: &'a str, checked: bool) -> Self {
-        Self { label, checked }
+    /// `checked` puts a check at the row's end.
+    pub fn new(label: &'a str, checked: bool) -> Self {
+        Self {
+            label,
+            checked,
+            lit: false,
+        }
+    }
+
+    /// Shows the hover fill without the pointer, such as for the row the arrow keys reached.
+    pub fn lit(mut self, lit: bool) -> Self {
+        self.lit = lit;
+        self
     }
 }
 
@@ -845,7 +876,7 @@ impl Widget for MenuRow<'_> {
         response.widget_info(|| {
             WidgetInfo::selected(WidgetType::SelectableLabel, true, self.checked, self.label)
         });
-        if response.hovered() || response.has_focus() {
+        if self.lit || response.hovered() || response.has_focus() {
             ui.painter()
                 .rect_filled(rect, CornerRadius::same(radius::CONTROL), color::border());
         }

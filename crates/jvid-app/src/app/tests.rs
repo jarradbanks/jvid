@@ -1726,3 +1726,64 @@ fn editor_in_light_and_high_contrast() {
         results.add(h.try_snapshot(format!("editor_{theme}")));
     }
 }
+
+/// #266: with the Timeline focused, Up over an EQ band nudges the band and leaves the
+/// playhead where it was, instead of also jumping to the previous edit.
+#[test]
+fn up_over_an_eq_band_nudges_it_and_not_the_playhead() {
+    use jvid_core::history::Created;
+    use jvid_core::model::{NewClip, ProbeInfo, TrackKind};
+    use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
+    if !gpu() {
+        return;
+    }
+    let mut h = harness([1280.0, 1000.0], 1.0);
+    let history = &mut h.state_mut().history;
+    let probe = ProbeInfo {
+        duration: Time(60 * S),
+        sample_rate: Some(48_000),
+        audio_streams: 1,
+        ..Default::default()
+    };
+    history
+        .apply(Command::Import(vec![("/nonexistent/a.wav".into(), probe)]))
+        .unwrap();
+    let asset = history.project().assets()[0].id;
+    let Ok(Created::Track(track)) = history.apply(Command::AddTrack {
+        kind: TrackKind::Audio,
+        name: "A1".into(),
+    }) else {
+        panic!("track")
+    };
+    let clip = NewClip {
+        asset,
+        source_in: Time(0),
+        source_out: Time(10 * S),
+        start: Time(0),
+        link: None,
+    };
+    let Ok(Created::Clip(id)) = history.apply(Command::AddClip { track, clip }) else {
+        panic!("clip")
+    };
+    let app = h.state_mut();
+    app.timeline
+        .select_clip(app.history.project().sequence(), id);
+    app.timeline.seek(Time(5 * S));
+    app.run_action("focus_timeline", false);
+    h.run();
+    let band = |h: &Harness<'_, App>| {
+        let seq = h.state().history.project().sequence();
+        let clip = &seq.track(track).unwrap().clips()[0];
+        clip.transform.audio_fx.eq.bands[5]
+    };
+    let at = h
+        .get_by_role_and_label(egui::accesskit::Role::Slider, "1 kHz")
+        .rect()
+        .center();
+    h.hover_at(at);
+    h.run();
+    h.key_press(egui::Key::ArrowUp);
+    h.run();
+    assert_eq!(band(&h), 0.5);
+    assert_eq!(h.state().timeline.playhead(), Time(5 * S));
+}

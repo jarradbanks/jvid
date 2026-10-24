@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use egui::{Align, FontId, Layout, Margin, RichText, Ui, vec2};
+use egui::{Align, FontId, Layout, Margin, Rect, RichText, Ui, vec2};
 use jvid_core::model::{ClipId, Marker, MarkerId, Project, Sequence};
 use jvid_core::preset::{AudioCodec, Preset, VideoCodec};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
@@ -11,7 +11,7 @@ use jvid_media::remux::{Cut, SMART_ENCODER};
 use rfd::FileDialog;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Checkbox, Dropdown, Segmented, State, TextInput};
+use suite_ui::widgets::{Button, Checkbox, DragField, Dropdown, Segmented, State, TextInput};
 
 use super::lossless::{self, Lossless};
 use super::{Request, preset_name};
@@ -139,6 +139,8 @@ impl ExportDialog {
                     .max_height(max_body.max(120.0))
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
+                        // Menus stay in the body, clear of the head and the buttons.
+                        let bounds = ui.clip_rect();
                         egui::Frame::NONE.inner_margin(body).show(ui, |ui| {
                             ui.spacing_mut().item_spacing = vec2(space::S4, space::S4);
                             section(ui, tr!("export.format"), true);
@@ -151,7 +153,8 @@ impl ExportDialog {
                                     .collect();
                                 let before = self.preset;
                                 let w = ui.available_width();
-                                ui.add(Dropdown::new(&mut self.preset, &names).width(w));
+                                let d = Dropdown::new(&mut self.preset, &names).bounds(bounds);
+                                ui.add(d.width(w));
                                 if self.preset != before {
                                     path.set_extension(&self.presets[self.preset].extension);
                                 }
@@ -172,7 +175,7 @@ impl ExportDialog {
                             row(ui, tr!("inspector.audio"), |ui| readout(ui, audio));
                             row(ui, tr!("export.loudness"), |ui| {
                                 ui.add_enabled_ui(preset.audio.is_some(), |ui| {
-                                    loudness_picker(ui, &mut self.loudness)
+                                    loudness_picker(ui, &mut self.loudness, bounds)
                                 });
                             });
                             if seq.tracks().iter().any(|t| t.subtitles) {
@@ -312,7 +315,7 @@ impl ExportDialog {
                                 matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
                             row(ui, tr!("export.target_size"), |ui| {
                                 ui.add_enabled_ui(sizable, |ui| {
-                                    target_picker(ui, &mut self.target)
+                                    target_picker(ui, &mut self.target, bounds)
                                 });
                             });
                             let secs = (b - a).0 as f64 / FLICKS_PER_SECOND as f64;
@@ -513,25 +516,24 @@ fn rule(ui: &mut Ui) {
     ui.painter().rect_filled(rect, 0.0, color::border());
 }
 
-fn loudness_picker(ui: &mut Ui, loudness: &mut Option<f64>) {
+fn loudness_picker(ui: &mut Ui, loudness: &mut Option<f64>, bounds: Rect) {
     let label =
         |l: Option<f64>| l.map_or(tr!("export.off").into(), |l| tr!("export.lufs", value = l));
-    egui::ComboBox::from_id_salt("export_loudness")
-        .selected_text(label(*loudness))
-        .show_ui(ui, |ui| {
-            for l in [None, Some(-14.0), Some(-16.0), Some(-23.0)] {
-                ui.selectable_value(loudness, l, label(l));
-            }
-            let mut custom = loudness.unwrap_or(-14.0);
-            let drag = egui::DragValue::new(&mut custom)
-                .range(-40.0..=-5.0)
-                .speed(0.1)
-                .prefix(tr!("export.custom_prefix"))
-                .suffix(verbatim(" LUFS"));
-            if ui.add(drag).changed() {
-                *loudness = Some(custom);
-            }
-        });
+    let presets = [None, Some(-14.0), Some(-16.0), Some(-23.0)];
+    let field = |ui: &mut Ui, v: &mut f64, w| {
+        let f = DragField::new(v).range(-40.0..=-5.0).speed(0.1).decimals(1);
+        ui.add(f.suffix(verbatim(" LUFS")).width(w))
+    };
+    custom_picker(
+        ui,
+        "export_loudness",
+        loudness,
+        &presets,
+        label,
+        -18.0,
+        field,
+        bounds,
+    );
 }
 
 /// Off, Copy or Smart Render; Copy and Smart Render are off when the range doesn't copy, with
@@ -570,24 +572,70 @@ fn lossless_picker(
 
 const MB: u64 = 1_000_000;
 
-fn target_picker(ui: &mut Ui, target: &mut Option<u64>) {
+fn target_picker(ui: &mut Ui, target: &mut Option<u64>, bounds: Rect) {
     let label =
         |t: Option<u64>| t.map_or(tr!("export.off").into(), |t| tr!("export.mb", value = t));
-    egui::ComboBox::from_id_salt("export_target_size")
-        .selected_text(label(*target))
-        .show_ui(ui, |ui| {
-            for t in [None, Some(10), Some(25), Some(50), Some(100), Some(500)] {
-                ui.selectable_value(target, t, label(t));
-            }
-            let mut custom = target.unwrap_or(25);
-            let drag = egui::DragValue::new(&mut custom)
-                .range(1..=100_000)
-                .prefix(tr!("export.custom_prefix"))
-                .suffix(verbatim(" MB"));
-            if ui.add(drag).changed() {
-                *target = Some(custom);
-            }
-        });
+    let presets = [None, Some(10), Some(25), Some(50), Some(100), Some(500)];
+    let field = |ui: &mut Ui, v: &mut u64, w| {
+        let mut mb = *v as f64;
+        let f = DragField::new(&mut mb).range(1.0..=100_000.0).decimals(0);
+        let r = ui.add(f.suffix(verbatim(" MB")).width(w));
+        *v = mb as u64;
+        r
+    };
+    custom_picker(
+        ui,
+        "export_target_size",
+        target,
+        &presets,
+        label,
+        200,
+        field,
+        bounds,
+    );
+}
+
+/// A dropdown of `presets`, then Custom, kept inside `bounds`. Custom, or a value no preset
+/// holds, adds `field` beside it for any value, starting at `start`.
+#[allow(clippy::too_many_arguments)]
+fn custom_picker<T: Copy + PartialEq + Send + Sync + 'static>(
+    ui: &mut Ui,
+    salt: &str,
+    value: &mut Option<T>,
+    presets: &[Option<T>],
+    label: impl Fn(Option<T>) -> String,
+    start: T,
+    field: impl FnOnce(&mut Ui, &mut T, f32) -> egui::Response,
+    bounds: Rect,
+) {
+    // Custom stays picked while its field passes through a preset's value.
+    let id = ui.id().with(salt);
+    let picked = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    let n = presets.len();
+    let mut i = match presets.iter().position(|p| p == value) {
+        Some(i) if !picked => i,
+        _ => n,
+    };
+    let mut names: Vec<String> = presets.iter().map(|p| label(*p)).collect();
+    names.push(tr!("export.custom").into());
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let w = ui.available_width();
+    let custom_w = 96.0;
+    let shown = if i == n { w - custom_w - space::S4 } else { w };
+    let d = Dropdown::new(&mut i, &names).width(shown).bounds(bounds);
+    if ui.add(d).changed() {
+        if i < n {
+            *value = presets[i];
+        } else if value.is_none() {
+            *value = Some(start);
+        }
+        ui.data_mut(|d| d.insert_temp(id, i == n));
+    }
+    if i == n
+        && let Some(v) = value
+    {
+        field(ui, v, custom_w);
+    }
 }
 
 /// Bits per pixel per frame below which H.264/HEVC turns to mush.
@@ -929,7 +977,10 @@ mod tests {
         (project, dialog)
     }
 
-    fn snapshot(name: &str, project: Project, dialog: ExportDialog) {
+    fn harness(
+        project: Project,
+        dialog: ExportDialog,
+    ) -> egui_kittest::Harness<'static, ExportDialog> {
         let mut fresh = true;
         let mut harness = egui_kittest::Harness::builder()
             .with_size([960.0, 600.0])
@@ -942,7 +993,36 @@ mod tests {
                 dialog,
             );
         harness.run_steps(2);
-        harness.snapshot(name);
+        harness
+    }
+
+    fn snapshot(name: &str, project: Project, dialog: ExportDialog) {
+        harness(project, dialog).snapshot(name);
+    }
+
+    #[test]
+    fn custom_loudness_adds_a_field_and_a_preset_takes_it_away() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let (project, dialog) = scenario();
+        let mut h = harness(project, dialog);
+        h.get_by_role_and_label(Role::ComboBox, "-14 LUFS").click();
+        h.run();
+        h.get_by_label("Custom").click();
+        h.run();
+        // Custom keeps the value it had, in a field beside the dropdown.
+        assert_eq!(h.state().loudness, Some(-14.0));
+        h.get_by_role_and_label(Role::ComboBox, "Custom");
+        assert!(h.query_by_role(Role::SpinButton).is_some());
+        h.get_by_role_and_label(Role::ComboBox, "Custom").click();
+        h.run();
+        h.get_by_label("-23 LUFS").click();
+        h.run();
+        assert_eq!(h.state().loudness, Some(-23.0));
+        assert!(h.query_by_role(Role::SpinButton).is_none());
     }
 
     /// Option A at the smallest supported window: Format, Range and Output in one column, the
@@ -955,6 +1035,40 @@ mod tests {
         }
         let (project, dialog) = scenario();
         snapshot("export_dialog", project, dialog);
+    }
+
+    /// Every dropdown's menu opens inside the dialog's body, clear of its head and buttons.
+    #[test]
+    fn every_dropdown_menu_fits_inside_the_dialog() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        // Highlights' marker list pushes Loudness and Target Size down the body.
+        let (project, mut dialog) = scenario();
+        dialog.range = Some(Range::Highlights);
+        let mut h = harness(project, dialog);
+        let top = h
+            .get_by_role_and_label(Role::Label, "Export")
+            .rect()
+            .bottom();
+        let bottom = h.get_by_role_and_label(Role::Button, "Cancel").rect().top();
+        let preset = h.state().presets[h.state().preset].name.clone();
+        let mut menus = crate::test_util::menu_rects(&mut h, &[&preset, "-14 LUFS"]);
+        // Down to Output, for Target Size.
+        h.hover_at(egui::pos2(480.0, 300.0));
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -1000.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        h.run_steps(2);
+        menus.extend(crate::test_util::menu_rects(&mut h, &["Off"]));
+        for (l, r) in menus {
+            assert!(r.top() >= top && r.bottom() <= bottom, "{l}: {r:?}");
+        }
     }
 
     /// Highlights lists the markers; the body scrolls and the footer stays pinned.
