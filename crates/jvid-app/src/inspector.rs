@@ -1885,8 +1885,9 @@ fn db_readout(v: f32) -> String {
 
 /// The Slider Bank (#263 option A): a column per band, its dB above and its frequency below,
 /// over the response curve and a ±15 dB grid. Pressing or dragging a column sets its band to
-/// the pointer in 0.5 dB steps, 0.1 with Shift; double-click resets it; a focused band takes Up
-/// and Down. Returns the band, its new gain and the response that set it.
+/// the pointer in 0.5 dB steps, 0.1 with Shift; double-click resets it; the hovered band, else
+/// the focused one, takes Up and Down. Returns the band, its new gain and the response that set
+/// it.
 fn slider_bank(ui: &mut Ui, eq: &Equalizer) -> Option<(usize, f32, egui::Response)> {
     use egui::emath::GuiRounding as _;
     let (w, ppp) = (ui.available_width(), ui.pixels_per_point());
@@ -1945,6 +1946,8 @@ fn slider_bank(ui: &mut Ui, eq: &Equalizer) -> Option<(usize, f32, egui::Respons
 
     let mut out = None;
     let medium = egui::FontId::new(theme::small().size, theme::medium());
+    // Up and Down nudge the band under the pointer, else the focused one.
+    let over = ui.rect_contains_pointer(rect);
     for (k, (label, name)) in BANDS.iter().enumerate() {
         let column = Rect::from_x_y_ranges(
             rect.left() + col * k as f32..=rect.left() + col * (k + 1) as f32,
@@ -1971,7 +1974,7 @@ fn slider_bank(ui: &mut Ui, eq: &Equalizer) -> Option<(usize, f32, egui::Respons
         {
             let t = (p.y - plot.top() - 8.0) / (plot.height() - 16.0);
             Some(snap(range - t * 2.0 * range))
-        } else if r.has_focus() && keys != 0 {
+        } else if (r.hovered() || !over && r.has_focus()) && keys != 0 {
             Some(snap(v + keys as f32 * step))
         } else {
             None
@@ -4054,6 +4057,39 @@ mod tests {
         h.run();
         assert!(fx(&h).eq.enabled && !fx(&h).compressor.enabled);
         assert_eq!(h.get_all_by_label("Turn On").count(), 1);
+    }
+
+    #[test]
+    fn up_and_down_nudge_the_hovered_eq_band() {
+        use egui::accesskit::Role;
+        use egui::{Key, Modifiers};
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness_of(TrackKind::Audio, Pane::Audio);
+        h.set_size(vec2(264.0, 640.0));
+        h.run();
+        let band = |h: &egui_kittest::Harness<'_, History>, k: usize| {
+            h.state().project().sequence().tracks()[0].clips()[0]
+                .transform
+                .audio_fx
+                .eq
+                .bands[k]
+        };
+        let at = h
+            .get_by_role_and_label(Role::Slider, "1 kHz")
+            .rect()
+            .center();
+        h.hover_at(at);
+        h.run();
+        h.key_press(Key::ArrowUp);
+        h.run();
+        assert_eq!(band(&h, 5), 0.5);
+        h.key_press_modifiers(Modifiers::SHIFT, Key::ArrowDown);
+        h.run();
+        assert!((band(&h, 5) - 0.4).abs() < 1e-6, "{}", band(&h, 5));
+        assert!((0..10).filter(|k| *k != 5).all(|k| band(&h, k) == 0.0));
     }
 
     /// [`harness`] with Vignette then Film Grain on its clip, tall enough to show them.
