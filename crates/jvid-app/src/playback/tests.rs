@@ -232,20 +232,74 @@ fn indexed() -> OpenAudio {
 
 /// With a decoder too slow for 30fps, so frames really arrive late, playback keeps to the audio
 /// clock: every frame shown is the one for the clock's time and within a frame of the audio heard
-/// with it, frames are skipped rather than shown late, and it keeps up to the end.
+/// with it, frames are skipped rather than shown late, and it keeps up to the end. Stepped, not
+/// real time: decodes finish at once and the test hands them back as 4 decode threads at 200ms
+/// (6 frames) a frame would, 20fps, one tick per frame.
 #[test]
 fn slow_decoder_drops_frames_instead_of_drifting() {
+    const SLOW: Duration = Duration::from_millis(200);
     let mut h = History::new(Project::default());
     add(&mut h, TrackKind::Video, "v.mp4", secs(10));
     add(&mut h, TrackKind::Audio, "a.m4a", secs(10));
     let p = h.project();
-    // 4 decode threads at 200ms a frame: 20fps.
-    let decode: DecodeFn = Arc::new(|_, t| {
-        std::thread::sleep(Duration::from_millis(200));
-        Ok(tiny(t))
-    });
-    let mut pb = Playback::new(decode, indexed(), DEFAULT_BUDGET);
-    let seen = play(&mut pb, p, 3 * SAMPLE_RATE as u64, |_| {});
+    let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), indexed(), DEFAULT_BUDGET);
+    pb.sync(p);
+    let fake = Fake::default();
+    let mut out = Output::new(Box::new(fake.clone()), None);
+    let mut last = None;
+    catch_up(&mut pb, p, 0, &mut last);
+    while !pb.pending.is_empty() {
+        std::thread::sleep(Duration::from_micros(100));
+        pb.decode_ahead(p, 0);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let decoded = std::mem::replace(&mut pb.done, rx);
+    pb.latency = SLOW;
+    // Decodes waiting for a thread, oldest (nearest) first, and those on one with the step they end.
+    let mut queued = std::collections::BTreeMap::new();
+    let mut running: Vec<(u64, Key, Result<Frame, String>)> = Vec::new();
+    pb.transport.toggle(out.clock());
+    let mut seen = Vec::new();
+    for step in 0..90 {
+        let (done, busy) = std::mem::take(&mut running)
+            .into_iter()
+            .partition(|r| r.0 <= step);
+        running = busy;
+        for (_, k, r) in done {
+            tx.send((k, SLOW, r)).unwrap();
+        }
+        let shown = pb.tick(p, &mut out);
+        if let Some(s) = &shown {
+            assert_eq!(s.index, pb.transport.frame(out.clock()), "shown on time");
+        }
+        // Everything playback is waiting on is held here, not still in the real decode.
+        loop {
+            while let Ok((k, _, r)) = decoded.try_recv() {
+                queued.insert(k, r);
+            }
+            let held = |k| queued.contains_key(k) || running.iter().any(|r| r.1 == *k);
+            if pb.pending.keys().all(held) {
+                break;
+            }
+            std::thread::sleep(Duration::from_micros(100));
+        }
+        // A decode cancelled before a thread took it never runs.
+        queued.retain(|k, _| pb.pending.contains_key(k));
+        while running.len() < DECODE_THREADS
+            && let Some((k, r)) = queued.pop_first()
+        {
+            running.push((step + 6, k, r));
+        }
+        let heard = fake.pull(SAMPLE_RATE as usize / 30);
+        if let Some(s) = shown {
+            let pts = s.layers.iter().map(|(f, _)| frame_of(f).pts).collect();
+            seen.push(Seen {
+                index: s.index,
+                pts,
+                heard: heard[0],
+            });
+        }
+    }
     let gain = pan_gains(0.0).0;
     let frame = FPS30.time_floor(1).0 as f64 / FLICKS_PER_SECOND as f64;
     let mut checked = 0;
@@ -973,6 +1027,7 @@ fn scrub_queues_a_snippet_from_the_parked_playhead() {
     add(&mut h, TrackKind::Audio, "/a.wav", secs(10));
     let p = h.project();
     let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), indexed(), DEFAULT_BUDGET);
+    pb.sync(p);
     let fake = Fake::default();
     let mut out = Output::new(Box::new(fake.clone()), None);
     pb.tick(p, &mut out);

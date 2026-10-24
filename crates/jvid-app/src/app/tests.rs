@@ -1463,6 +1463,9 @@ fn record_button_records_into_a_new_armed_track_and_shift_r_stops_it() {
         panic!("one clip on the new track")
     };
     assert_eq!(clip.start, jvid_core::time::Time(0));
+    // The parked playhead is on the take, so Program keeps it open to scrub; Windows won't
+    // remove an open file.
+    drop(h);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
