@@ -620,6 +620,14 @@
     "ci-playback-stepped": {
       "number": 298,
       "id": 6009972394
+    },
+    "ci-i18n-fast": {
+      "number": 309,
+      "id": 6011103456
+    },
+    "ui-long-text": {
+      "number": 310,
+      "id": 6011103742
     }
   },
   "links": [
@@ -1493,6 +1501,10 @@
     ],
     [
       "i18n-nl",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "ui-long-text",
       "i18n-wave1-foundation"
     ]
   ]

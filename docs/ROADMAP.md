@@ -478,6 +478,8 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#290](https://github.com/jarradbanks/jvid/issues/290) **Translate jvid into Chinese (Simplified)** — Fill the Chinese (Simplified) (zh-Hans) catalogs registered by the wave-1 foundation, accurately and consistently with what Chinese (Simplified)-speaking editors see in DaVinci Resolve and Premiere Pro.
 - [#291](https://github.com/jarradbanks/jvid/issues/291) **Translate jvid into Korean** — Fill the Korean (ko) catalogs registered by the wave-1 foundation, accurately and consistently with what Korean-speaking editors see in DaVinci Resolve and Premiere Pro.
 - [#298](https://github.com/jarradbanks/jvid/issues/298) **Playback tests: no wall-clock waits left** — #275 and #277 made two playback tests stepped; others still poll with Instant::now() and fail under CI load, e.g. failed_decodes_retry_and_relink_redecodes ('never shown with 1 layers', PR #297 run 40068128664).
+- [#309](https://github.com/jarradbanks/jvid/issues/309) **Translation-only PRs skip the 11-minute CI** — Owner, 2026-10-24: a PR that only changes translation catalogs should not wait on the full build and GPU test suite. A seconds-long check covers what a catalog change can break.
+- [#310](https://github.com/jarradbanks/jvid/issues/310) **UI handles long translated text** — Owner, 2026-10-24: text that is too long is a UI problem, not a translation one. Translators should translate naturally and the layout should cope, as in other editors.
 
 ---
 

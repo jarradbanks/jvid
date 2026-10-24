@@ -1535,3 +1535,16 @@ I("ci-playback-stepped", "Playback tests: no wall-clock waits left", None, ["inf
   scope=["Move every remaining wall-clock wait in crates/jvid-app/src/playback/tests.rs onto the stepped Fake clock pattern from #275/#277, or an explicit completion signal; no retries or longer timeouts"],
   ac=["grep finds no Instant::now()-based polling left in playback tests, or each remaining use is justified in a comment",
       "Each converted test still fails under a mutation of the behaviour it covers"])
+I("ci-i18n-fast", "Translation-only PRs skip the 11-minute CI", None, ["infra"], "S", labels=["later"],
+  summary="Owner, 2026-10-24: a PR that only changes translation catalogs should not wait on the full build and GPU test suite. A seconds-long check covers what a catalog change can break.",
+  scope=["ci.yml's pull_request trigger ignores PRs whose files are all under crates/*/i18n/** or docs/i18n/**; push to main still runs everything",
+         "A new workflow runs on those paths only: a stdlib Python script (scripts/i18n_check.py) that parses every catalog, checks its keys and {placeholders} against en.toml and checks plural tables carry the categories the language needs; no Rust build"],
+  ac=["A PR touching only one language's catalogs finishes CI in under a minute",
+      "The script fails on a missing key, a renamed placeholder, a TOML syntax error and a missing plural category, each shown by a test or a documented manual run"])
+I("ui-long-text", "UI handles long translated text", None, ["ui", "suite-ui"], "M", ["i18n-wave1-foundation"], labels=["later"],
+  summary="Owner, 2026-10-24: text that is too long is a UI problem, not a translation one. Translators should translate naturally and the layout should cope, as in other editors.",
+  scope=["Every label, button, tab, menu item and column header in a fixed-width spot truncates with an ellipsis and shows the full text on hover; wrap instead where the layout has room",
+         "One pseudo-locale test (every en string padded about 40%) proves the editor, Preferences, Export dialog and Render Queue have no overlap or clipping without an ellipsis",
+         "Delete the per-language editor/preferences/export_dialog snapshot tests and PNGs in crates/jvid-app/tests; the pseudo-locale test replaces them"],
+  ac=["The pseudo-locale test passes and fails if one truncation is removed",
+      "No per-language snapshot PNGs remain; cargo test --workspace passes"])
