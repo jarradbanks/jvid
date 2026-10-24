@@ -35,7 +35,7 @@ changes = "Frames 101 to 220, sRGB, darkened and warmed for the colour lesson, s
 [[clip]]
 file = "screen-recording.mp4"
 title = "Terminal session with a pause"
-source = "Made for jvid by scripts/gen-samples (FFmpeg drawtext)"
+source = "Made for jvid by scripts/gen-samples (FFmpeg drawtext, room tone and key clicks from aevalsrc)"
 author = "jvid contributors"
 licence = "CC0 1.0"
 licence_url = "https://creativecommons.org/publicdomain/zero/1.0/"

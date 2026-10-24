@@ -42,7 +42,8 @@ ff -ss 2.0 -t 10 -i "$cache/satie.ogg" -af "afade=t=out:st=8.5:d=1.5" "${aac[@]}
 get "https://archive.org/download/gettysburg_johng_librivox/gettysburg_address.mp3" "$cache/gettysburg.mp3"
 ff -ss 23.1 -t 9.3 -i "$cache/gettysburg.mp3" -ac 1 -af "afade=t=out:st=9.0:d=0.3" "${aac[@]}" "$out/voice.m4a"
 
-# Screen recording, made here: a terminal session with dead air from 4 s to 7 s.
+# Screen recording, made here: a terminal session with dead air from 2.4 s to 7 s. Its audio is
+# room tone with key clicks while typing, near silent through the dead air for Detect Silence.
 font=$(fc-match -f '%{file}' monospace)
 type_line() { # text, y, start second: types one character every 0.08 s, then holds it
   local text=$1 y=$2 t0=$3 i
@@ -67,7 +68,9 @@ show_line() { # text, y, second it appears
   type_line "cd hello && cargo run" 200 7.0
   show_line "Hello, world!" 240 9.0
 } >"$cache/screen.filter"
-ff -f lavfi -i color=c=0x0f1115:s=1280x720:r=30:d=10 -filter_script:v "$cache/screen.filter" "${x264[@]}" \
-  "$out/screen-recording.mp4"
+keys="between(t,0.6,1.8)+between(t,7,8.7)"
+room="aevalsrc=exprs='0.08*(2*random(0)-1)*if(between(t,2.4,7),0.005,1+5*($keys)*lt(mod(t,0.08),0.01))'"
+ff -f lavfi -i color=c=0x0f1115:s=1280x720:r=30:d=10 -f lavfi -i "$room:s=48000:d=10,lowpass=f=4000" \
+  -filter_script:v "$cache/screen.filter" "${x264[@]}" "${aac[@]}" -b:a 64k -ac 1 "$out/screen-recording.mp4"
 
 du -ch "$out"/*.mp4 "$out"/*.m4a | tail -1
