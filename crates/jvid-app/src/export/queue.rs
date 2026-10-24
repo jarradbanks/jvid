@@ -544,16 +544,13 @@ pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<
         .rect
         .with_max_y(r.response.rect.top() + size::HEADER);
     let right = header.right() - space::S8 - size::CONTROL - space::S8;
-    let title_w = ui
-        .painter()
-        .layout_no_wrap(
-            tr!("export.queue").into(),
-            theme::body_strong(),
-            color::ink(),
-        )
-        .size()
-        .x;
-    let left = header.left() + space::INSET + title_w + space::S12;
+    let painter = ui.painter().clone();
+    let text_w = move |s: &str, font| {
+        let g = painter.layout_no_wrap(s.into(), font, color::ink());
+        g.size().x.ceil()
+    };
+    let left = header.left() + space::INSET + text_w(tr!("export.queue"), theme::body_strong());
+    let left = left + space::S12;
     if right <= left {
         return action;
     }
@@ -565,36 +562,58 @@ pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<
             .max_rect(area)
             .layout(Layout::right_to_left(Align::Center)),
         |ui| {
-            // shortcut: too narrow, the buttons clip instead of dropping; measure them if that bites.
             ui.set_clip_rect(area.intersect(ui.clip_rect()));
             ui.spacing_mut().item_spacing.x = space::S4;
+            // Labels while both fit, else icons named on hover; the question goes first.
+            let button_w = |s: &str| 2.0 * space::S12 + text_w(s, theme::body_strong());
+            let room = area.width();
+            let pair = |a: &str, b: &str| button_w(a) + space::S4 + button_w(b);
             if confirm {
-                if ui
-                    .add(Button::destructive(tr!("export.cancel_all")))
-                    .clicked()
-                {
+                let (yes, no) = (tr!("export.cancel_all"), tr!("export.keep_exporting"));
+                let question = trn!("export.cancel_confirm", live);
+                let labels = pair(yes, no) <= room;
+                let b = head_button(yes, icon::BAN, true, labels);
+                if ui.add(b).on_hover_text(yes).clicked() {
                     action = Some(Action::ConfirmCancelAll);
                 }
-                if ui
-                    .add(Button::ghost(tr!("export.keep_exporting")))
-                    .clicked()
-                {
+                let b = head_button(no, icon::PLAY, false, labels);
+                if ui.add(b).on_hover_text(no).clicked() {
                     action = Some(Action::KeepExporting);
                 }
-                ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::ink()));
+                if pair(yes, no) + space::S4 + text_w(&question, theme::body()) <= room {
+                    ui.label(RichText::new(question).color(color::ink()));
+                }
                 return;
             }
-            let cancel = Button::destructive(tr!("export.cancel_all")).state(on(live > 0));
-            if ui.add(cancel).clicked() {
+            let (cancel, clear) = (tr!("export.cancel_all"), tr!("export.clear_finished"));
+            let labels = pair(cancel, clear) <= room;
+            let b = head_button(cancel, icon::BAN, true, labels).state(on(live > 0));
+            if ui.add(b).on_hover_text(cancel).clicked() {
                 action = Some(Action::CancelAll);
             }
-            let clear = Button::ghost(tr!("export.clear_finished")).state(on(rows.len() > live));
-            if ui.add(clear).clicked() {
+            let b = head_button(clear, icon::CIRCLE_CHECK, false, labels);
+            let b = b.state(on(rows.len() > live));
+            if ui.add(b).on_hover_text(clear).clicked() {
                 action = Some(Action::ClearFinished);
             }
         },
     );
     action
+}
+
+/// A header button: `label` when `labels`, else `glyph` alone; Red when `destructive`.
+fn head_button<'a>(
+    label: &'a str,
+    glyph: &'static str,
+    destructive: bool,
+    labels: bool,
+) -> Button<'a> {
+    match (labels, destructive) {
+        (true, true) => Button::destructive(label),
+        (true, false) => Button::ghost(label),
+        (false, true) => Button::icon(glyph, label).ink(color::red()),
+        (false, false) => Button::icon(glyph, label),
+    }
 }
 
 /// The cells of a row of `width`, left to right: file, preset, duration, size, progress, chip,
@@ -981,6 +1000,21 @@ mod tests {
     #[test]
     fn render_queue_narrow() {
         shot("render_queue_narrow", [480.0, 280.0], |ui| {
+            panel(ui, &rows(), true, true);
+        });
+    }
+
+    /// Too narrow for their labels, the header's buttons drop to icons rather than clip.
+    #[test]
+    fn render_queue_header_drops_to_icons() {
+        shot("render_queue_icons", [300.0, 200.0], |ui| {
+            panel(ui, &rows(), false, true);
+        });
+    }
+
+    #[test]
+    fn render_queue_confirm_drops_its_question_then_its_labels() {
+        shot("render_queue_icons_confirm", [300.0, 200.0], |ui| {
             panel(ui, &rows(), true, true);
         });
     }
