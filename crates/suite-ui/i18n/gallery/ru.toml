@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Russian. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Обычное"
+hover = "Наведение"
+focus = "Видимый фокус"
+pressed = "Нажатие"
+disabled = "Отключено"
+loading_error = "Загрузка / ошибка"
+
+[panel]
+widgets = "Виджеты"
+effects = "Эффекты"
+text = "Текст"
+add = "Добавить"
+more = "Ещё"
+inspector = "Инспектор"
+source = "Источник"
+program = "Программа"
+audio = "Аудио"
+markers = "Маркеры"
+history = "История"
+captions = "Подписи"
+overflow = "Вкладки шириной меньше 64 пикс. уходят в меню со стрелкой."
+type_and_colour = "Шрифты и цвета"
+
+[row]
+primary = "Основная"
+secondary = "Вторичная"
+ghost = "Призрачная"
+destructive = "Опасная"
+icon = "Значок"
+input = "Поле ввода"
+search = "Поиск"
+numeric = "Число"
+dropdown = "Список"
+colour = "Цвет"
+segmented = "Сегменты"
+checkbox = "Флажок"
+section = "Раздел"
+slider = "Ползунок"
+keyframe = "Ключевой кадр"
+
+[demo]
+delete = "Удалить"
+export = "Экспорт"
+width_prefix = "Ш"
+min_error = "Не меньше 2"
+full = "Полное"
+fit = "Вписать"
+fill = "Заполнить"
+snap = "Привязка"
+live = "Вживую"
+transform = "Трансформация"
+position = "Положение"
+scale = "Масштаб"
+reset = "Сбросить"
+previous = "Предыдущий ключевой кадр"
+next = "Следующий ключевой кадр"
+animate = "Анимировать"
+plus_second = "+1 с"
+
+[type]
+display = "Дисплейный 22"
+headline = "Заголовок 16"
+title = "Название 14"
+body_strong = "Основной жирный 12"
+body = "Основной 12 · 0123456789 стоят на месте"
+small = "Мелкий 10 · подсказка сочетания"
+
+[clip]
+video = "Видео"
+title = "Титр"
+still = "Кадр"
+audio = "Аудио"
