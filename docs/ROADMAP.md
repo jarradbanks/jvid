@@ -483,6 +483,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#322](https://github.com/jarradbanks/jvid/issues/322) **README: real UI preview video and current pitch** — Owner, 2026-10-24: the README still leads with the AI-generated prototype and 'first tool in a planned suite'. Replace both with a short, professional, minimal motion preview made from the real UI, and copy that matches what jvid does today.
 - [#323](https://github.com/jarradbanks/jvid/issues/323) **Translation leftovers found in wave 1** — Gaps the wave-1 translators found that sit in code, not catalogs (PRs #301, #302).
 - [#325](https://github.com/jarradbanks/jvid/issues/325) **Preview stops decoding video from audio-only files** — Owner, 2026-10-24, Windows: 246 'preview decode of D:\fishing\media\Voiceover 2.wav failed: Stream not found' warnings in one two-minute session. The audio played fine; the preview asks the decode pool for a video frame from a WAV on every new time (crates/jvid-app/src/preview.rs around line 745) and logs each failure.
+- [#326](https://github.com/jarradbanks/jvid/issues/326) **Voiceover take grows on the timeline as it records** — Owner, 2026-10-24: while a voiceover records, the timeline should show it happening, as other editors do. Today the take only lands as a clip when recording stops; until then the track header shows an input level.
 
 ---
 

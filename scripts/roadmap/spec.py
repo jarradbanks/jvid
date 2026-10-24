@@ -1570,3 +1570,11 @@ I("preview-audio-only", "Preview stops decoding video from audio-only files", No
          "A decode failure for a source is logged once until the source or its file changes, not once per requested time"],
   ac=["A test with an audio-only source plays or scrubs across many times and submits no video decode",
       "A failing video source logs its warning once per source, shown by a test"])
+I("voiceover-live-clip", "Voiceover take grows on the timeline as it records", None, ["timeline", "audio"], "M", ["voiceover"], labels=["later"],
+  summary="Owner, 2026-10-24: while a voiceover records, the timeline should show it happening, as other editors do. Today the take only lands as a clip when recording stops; until then the track header shows an input level.",
+  scope=["While a take records, the armed track shows a live clip from the record start to the playhead, in the recording colour, with its waveform drawn from the incoming samples as they arrive",
+         "The live clip is drawing only: it is not in the project or undo history until the take stops, when the existing one-step commit replaces it with the real clip, whose cached waveform matches what was shown",
+         "Samples reach the timeline through a small lock-free or bounded buffer of peaks from jvid-audio's Recorder; the audio thread never blocks on the UI"],
+  ac=["A test records a fake input for N seconds and the live clip's width and peak count follow the playhead every frame",
+      "After stop, the committed clip sits exactly where the live clip was, and undo removes it in one step",
+      "Recording on a real microphone shows the waveform growing smoothly (Needs user testing)"])
