@@ -99,3 +99,14 @@ pub const fn en_es(
     s[1] = es;
     s
 }
+
+/// The rect of each area `ctx` shows, such as a window, a modal or an open menu.
+pub fn area_rects(ctx: &egui::Context) -> Vec<(egui::Id, egui::Rect)> {
+    ctx.memory(|m| {
+        let shown = m.areas().visible_layer_ids();
+        let rects = shown
+            .into_iter()
+            .filter_map(|l| m.area_rect(l.id).map(|r| (l.id, r)));
+        rects.collect()
+    })
+}
