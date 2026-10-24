@@ -82,6 +82,8 @@ pub struct Timeline {
     clipboard: Vec<(TrackId, Clip)>,
     /// An edit from a keymap action, handed out by the next `show`.
     pending: Option<Command>,
+    /// Where M went down; its release adds the marker.
+    marker_hold: Option<Time>,
     /// Where Q puts the playhead once its trim applies.
     seek_after: Option<Time>,
     /// Copy or cut ran since the last `show`.
@@ -176,6 +178,7 @@ impl Default for Timeline {
             linked_selection: true,
             clipboard: Vec::new(),
             pending: None,
+            marker_hold: None,
             seek_after: None,
             copied: false,
             razor: false,
