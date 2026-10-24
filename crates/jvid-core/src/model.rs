@@ -2,6 +2,7 @@
 //! clips, markers and in/out points. No I/O; probing fills `MediaAsset::probe`.
 
 use std::collections::BTreeMap;
+use std::f64::consts::{PI, SQRT_2};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -568,27 +569,105 @@ impl AudioFx {
     }
 }
 
-/// Three bands: a low shelf, a peak and a high shelf (RBJ cookbook, shelf slope 1). Gains in dB,
-/// frequencies in Hz.
+/// A 10-band graphic EQ, an octave apart from 31 Hz to 16 kHz, then Post-Gain. The end bands
+/// shelve from the edge they share with their neighbour; the rest are peaks with Q 1 (RBJ
+/// cookbook). Gains in dB, ±[`Equalizer::RANGE`].
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(from = "EqualizerFile")]
 pub struct Equalizer {
     /// Off bypasses it, keeping the settings.
     pub enabled: bool,
-    pub low: f32,
-    pub low_freq: f32,
-    pub mid: f32,
-    pub mid_freq: f32,
-    /// The peak's Q.
-    pub mid_q: f32,
-    pub high: f32,
-    pub high_freq: f32,
+    pub bands: [f32; 10],
+    pub post_gain: f32,
 }
 
 impl Default for Equalizer {
     fn default() -> Self {
         Self {
             enabled: true,
+            bands: [0.0; 10],
+            post_gain: 0.0,
+        }
+    }
+}
+
+impl Equalizer {
+    /// Each band's centre in Hz.
+    pub const HZ: [f64; 10] = [
+        31.25, 62.5, 125.0, 250.0, 500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0,
+    ];
+    /// Each band's and Post-Gain's limit either way, in dB.
+    pub const RANGE: f32 = 15.0;
+
+    /// Whether it leaves the sound alone.
+    pub fn is_flat(&self) -> bool {
+        self.post_gain == 0.0 && self.bands.iter().all(|b| *b == 0.0)
+    }
+
+    /// Band `i`'s biquad at `rate` Hz: `(b, a)` with `a0` divided out.
+    pub fn filter(&self, i: usize, rate: f64) -> ([f64; 3], [f64; 2]) {
+        let (hz, db) = (Self::HZ[i], self.bands[i] as f64);
+        match i {
+            0 => shelf(hz * SQRT_2, db, false, rate),
+            9 => shelf(hz / SQRT_2, db, true, rate),
+            _ => peak(hz, db, 1.0, rate),
+        }
+    }
+
+    /// The gain in dB at `hz` when mixing at `rate`, Post-Gain included.
+    pub fn response(&self, hz: f64, rate: f64) -> f64 {
+        let bands: f64 = (0..10).map(|i| db_at(self.filter(i, rate), hz, rate)).sum();
+        bands + self.post_gain as f64
+    }
+}
+
+/// What an [`Equalizer`] loads from: its own fields, or #85's three bands in older projects.
+#[derive(Deserialize)]
+struct EqualizerFile {
+    #[serde(default = "enabled")]
+    enabled: bool,
+    #[serde(default)]
+    bands: Option<[f32; 10]>,
+    #[serde(default)]
+    post_gain: f32,
+    #[serde(flatten)]
+    three: ThreeBand,
+}
+
+impl From<EqualizerFile> for Equalizer {
+    fn from(f: EqualizerFile) -> Self {
+        let eq = f.bands.map_or_else(
+            || f.three.into(),
+            |bands| Self {
+                bands,
+                ..Self::default()
+            },
+        );
+        Self {
+            enabled: f.enabled,
+            post_gain: f.post_gain,
+            ..eq
+        }
+    }
+}
+
+/// #85's three-band EQ, which older projects store: a low shelf, a peak and a high shelf (shelf
+/// slope 1). Gains in dB, frequencies in Hz. It loads as the closest ten bands.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ThreeBand {
+    pub low: f32,
+    pub low_freq: f32,
+    pub mid: f32,
+    pub mid_freq: f32,
+    pub mid_q: f32,
+    pub high: f32,
+    pub high_freq: f32,
+}
+
+impl Default for ThreeBand {
+    fn default() -> Self {
+        Self {
             low: 0.0,
             low_freq: 100.0,
             mid: 0.0,
@@ -598,6 +677,102 @@ impl Default for Equalizer {
             high_freq: 10_000.0,
         }
     }
+}
+
+impl ThreeBand {
+    /// The gain in dB at `hz` when mixing at `rate`.
+    pub fn response(&self, hz: f64, rate: f64) -> f64 {
+        let f = |v: f32| v as f64;
+        [
+            shelf(f(self.low_freq), f(self.low), false, rate),
+            peak(f(self.mid_freq), f(self.mid), f(self.mid_q), rate),
+            shelf(f(self.high_freq), f(self.high), true, rate),
+        ]
+        .into_iter()
+        .map(|q| db_at(q, hz, rate))
+        .sum()
+    }
+}
+
+impl From<ThreeBand> for Equalizer {
+    /// The bands that match `old`'s curve at every band's centre, to 0.1 dB, within ±15 dB.
+    fn from(old: ThreeBand) -> Self {
+        // The mixer's rate, `jvid_audio::SAMPLE_RATE`.
+        const RATE: f64 = 48_000.0;
+        let r = Self::RANGE;
+        let want = Self::HZ.map(|hz| old.response(hz, RATE) as f32);
+        let mut eq = Self {
+            bands: want.map(|w| w.clamp(-r, r)),
+            ..Self::default()
+        };
+        // Each pass moves every band by its error. A band adds under a third of itself at its
+        // neighbours' centres, so this settles.
+        for _ in 0..30 {
+            let now = eq;
+            for (i, b) in eq.bands.iter_mut().enumerate() {
+                let err = want[i] - now.response(Self::HZ[i], RATE) as f32;
+                *b = (*b + err).clamp(-r, r);
+            }
+        }
+        eq.bands = eq.bands.map(|b| (b * 10.0).round() / 10.0);
+        eq
+    }
+}
+
+/// `hz` in radians per sample at `rate`, held below Nyquist, and its cosine and sine.
+fn omega(hz: f64, rate: f64) -> (f64, f64) {
+    let w = 2.0 * PI * hz.clamp(10.0, 0.45 * rate) / rate;
+    (w.cos(), w.sin())
+}
+
+fn normalized(b: [f64; 3], a: [f64; 3]) -> ([f64; 3], [f64; 2]) {
+    (b.map(|b| b / a[0]), [a[1] / a[0], a[2] / a[0]])
+}
+
+/// RBJ cookbook peaking EQ.
+fn peak(hz: f64, db: f64, q: f64, rate: f64) -> ([f64; 3], [f64; 2]) {
+    let a = 10f64.powf(db / 40.0);
+    let (cos, sin) = omega(hz, rate);
+    let alpha = sin / (2.0 * q.max(0.1));
+    normalized(
+        [1.0 + alpha * a, -2.0 * cos, 1.0 - alpha * a],
+        [1.0 + alpha / a, -2.0 * cos, 1.0 - alpha / a],
+    )
+}
+
+/// RBJ cookbook low or high shelf with slope 1.
+fn shelf(hz: f64, db: f64, high: bool, rate: f64) -> ([f64; 3], [f64; 2]) {
+    let a = 10f64.powf(db / 40.0);
+    let (cos, sin) = omega(hz, rate);
+    // A high shelf is the low shelf with cos negated and b1, a1 flipped.
+    let (cos, s) = if high { (-cos, -1.0) } else { (cos, 1.0) };
+    let k = 2.0 * a.sqrt() * sin / 2.0 * SQRT_2;
+    normalized(
+        [
+            a * ((a + 1.0) - (a - 1.0) * cos + k),
+            s * 2.0 * a * ((a - 1.0) - (a + 1.0) * cos),
+            a * ((a + 1.0) - (a - 1.0) * cos - k),
+        ],
+        [
+            (a + 1.0) + (a - 1.0) * cos + k,
+            s * -2.0 * ((a - 1.0) + (a + 1.0) * cos),
+            (a + 1.0) + (a - 1.0) * cos - k,
+        ],
+    )
+}
+
+/// A biquad's gain in dB at `hz`.
+fn db_at((b, a): ([f64; 3], [f64; 2]), hz: f64, rate: f64) -> f64 {
+    // |sum c_n e^-jwn|, with e^-jwn = cos(wn) - j sin(wn).
+    let w = 2.0 * PI * hz / rate;
+    let mag = |c: [f64; 3]| {
+        let (re, im) = (0..3).fold((0.0, 0.0), |(re, im), n| {
+            let wn = w * n as f64;
+            (re + c[n] * wn.cos(), im - c[n] * wn.sin())
+        });
+        re.hypot(im)
+    };
+    20.0 * (mag(b) / mag([1.0, a[0], a[1]])).log10()
 }
 
 /// A feed-forward peak compressor, stereo-linked. The default 1:1 ratio leaves the sound alone.
@@ -3087,7 +3262,8 @@ mod tests {
         let json = serde_json::to_string(&track).unwrap();
         assert!(!json.contains("fx"), "{json}");
         assert_eq!(serde_json::from_str::<Track>(&json).unwrap(), track);
-        track.fx.eq.mid = 6.0;
+        track.fx.eq.bands[5] = 6.0;
+        track.fx.eq.post_gain = -1.5;
         track.fx.compressor.enabled = false;
         let json = serde_json::to_string(&track).unwrap();
         assert_eq!(serde_json::from_str::<Track>(&json).unwrap(), track);
@@ -3095,6 +3271,60 @@ mod tests {
         st.fx.compressor.ratio = 4.0;
         s.set_track(st.clone()).unwrap();
         assert_eq!(s.track(a).unwrap().fx, st.fx);
+    }
+
+    /// Acceptance (#263): a track or clip saved with #85's three-band EQ reopens with ten bands
+    /// that sound the same, within 1 dB from 31 Hz to 16 kHz. `jvid-audio`'s
+    /// `three_band_projects_sound_the_same` plays it back.
+    #[test]
+    fn three_band_eq_loads_as_the_same_curve() {
+        let old = r#"{"enabled":false,"low":6.0,"low_freq":100.0,"mid":-4.0,"mid_freq":1000.0,
+            "mid_q":1.0,"high":3.0,"high_freq":10000.0}"#;
+        let eq: Equalizer = serde_json::from_str(old).unwrap();
+        let three = ThreeBand {
+            low: 6.0,
+            mid: -4.0,
+            high: 3.0,
+            ..ThreeBand::default()
+        };
+        let enabled = false;
+        assert_eq!(
+            eq,
+            Equalizer {
+                enabled,
+                ..three.into()
+            }
+        );
+        assert_eq!(eq.post_gain, 0.0);
+        // Both shelves and the peak at their #85 defaults, each way.
+        for (low, mid, high) in [(6.0, -4.0, 3.0), (-6.0, 6.0, -6.0), (12.0, -12.0, 12.0)] {
+            let three = ThreeBand {
+                low,
+                mid,
+                high,
+                ..ThreeBand::default()
+            };
+            let eq = Equalizer::from(three);
+            for k in 0..=54 {
+                let hz = 31.25 * 2f64.powf(k as f64 / 6.0);
+                let (got, want) = (eq.response(hz, 48e3), three.response(hz, 48e3));
+                assert!(
+                    (got - want).abs() <= 1.0,
+                    "{three:?} at {hz:.0} Hz: {got} vs {want}"
+                );
+            }
+        }
+        // An untouched #85 EQ loads flat, and today's bands win over any old fields.
+        let flat: Equalizer = serde_json::from_str(r#"{"enabled":true,"low":0.0}"#).unwrap();
+        assert_eq!(flat, Equalizer::default());
+        let new = r#"{"bands":[1,2,3,4,5,6,7,8,9,10],"mid":6}"#;
+        assert_eq!(
+            serde_json::from_str::<Equalizer>(new).unwrap().bands[9],
+            10.0
+        );
+        // Projects from before audio effects load with the default.
+        let none: AudioFx = serde_json::from_str("{}").unwrap();
+        assert_eq!(none, AudioFx::default());
     }
 
     #[test]
