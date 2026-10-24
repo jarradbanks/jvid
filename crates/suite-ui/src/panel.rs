@@ -10,7 +10,7 @@ use crate::i18n::CATALOG;
 use crate::theme::{self, hairline, icon};
 use crate::tokens::{color, radius, size, space};
 use crate::tr;
-use crate::widgets::{Button, focus_ring};
+use crate::widgets::{Button, fit_text, focus_ring, hover_full, paint_fit};
 
 /// What a panel's header shows.
 pub enum Header<'a> {
@@ -117,12 +117,10 @@ impl<'a> Panel<'a> {
 
         match self.header {
             Header::Title(title) => {
-                let galley = painter.layout_job(elided(title, header.width(), color::ink()));
-                let pos = pos2(
-                    header.left() + space::INSET,
-                    header.center().y - galley.size().y / 2.0,
-                );
-                painter.galley(pos.round_to_pixels(ppp), galley, color::ink());
+                let left = header.left() + space::INSET;
+                let galley = fit_text(ui, title, theme::body_strong(), color::ink(), right - left);
+                let pos = pos2(left, header.center().y - galley.size().y / 2.0);
+                paint_fit(ui, pos.round_to_pixels(ppp), galley, color::ink());
             }
             Header::Tabs { labels, active } => {
                 let right = if self.actions.is_empty() {
@@ -227,9 +225,14 @@ fn tabs(
         } else {
             color::ink_3()
         };
-        let galley = ui
-            .painter()
-            .layout_job(elided(label, width - 2.0 * space::S8, ink));
+        let galley = fit_text(
+            ui,
+            label,
+            theme::body_strong(),
+            ink,
+            width - 2.0 * space::S8,
+        );
+        let r = hover_full(r, &galley);
         let pos = pos2(
             pill.center().x - galley.size().x / 2.0,
             header.center().y - galley.size().y / 2.0,
@@ -255,14 +258,4 @@ fn tabs(
             }
         });
     }
-}
-
-/// A one-line Body Strong label, cut with an ellipsis to fit `max_width`.
-fn elided(text: &str, max_width: f32, color: egui::Color32) -> egui::text::LayoutJob {
-    let mut job = egui::text::LayoutJob::single_section(
-        text.to_owned(),
-        egui::TextFormat::simple(theme::body_strong(), color),
-    );
-    job.wrap = egui::text::TextWrapping::truncate_at_width(max_width.max(0.0));
-    job
 }
