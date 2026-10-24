@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -89,19 +90,55 @@ fn cache_evicts_least_recently_used_over_budget() {
     assert_eq!(c.bytes(), 500);
 }
 
+/// `pb`'s finished decodes, taken from it so the test hands them back when it chooses.
+struct Decodes {
+    decoded: Receiver<Done>,
+    to_pb: Sender<Done>,
+}
+
+impl Decodes {
+    fn take(pb: &mut Playback) -> Self {
+        let (to_pb, rx) = channel();
+        let decoded = std::mem::replace(&mut pb.done, rx);
+        Self { decoded, to_pb }
+    }
+
+    /// Hands back the decodes `pb` queues at `clock` as they finish, each as instant so the lead
+    /// stays zero however loaded the machine, until `done`. Bounded by decodes, not time: a decode
+    /// queued over and over fails rather than hangs.
+    fn until(
+        &self,
+        pb: &mut Playback,
+        p: &Project,
+        clock: u64,
+        mut done: impl FnMut(&mut Playback) -> bool,
+    ) {
+        for _ in 0..1_000 {
+            pb.decode_ahead(p, clock);
+            if done(pb) {
+                return;
+            }
+            assert!(!pb.pending.is_empty(), "nothing left to decode");
+            let (k, _, r) = self.decoded.recv().unwrap();
+            self.to_pb.send((k, Duration::ZERO, r)).unwrap();
+        }
+        panic!("decodes never settled");
+    }
+
+    /// Waits for every decode `pb` queues at `clock`.
+    fn settle(&self, pb: &mut Playback, p: &Project, clock: u64) {
+        self.until(pb, p, clock, |pb| pb.pending.is_empty());
+    }
+}
+
 /// Decodes until the frame at `clock` is shown, as a fast decoder would have it by then.
-fn catch_up(pb: &mut Playback, p: &Project, clock: u64, last: &mut Option<Shown>) {
-    for _ in 0..10_000 {
-        pb.decode_ahead(p, clock);
+fn catch_up(pb: &mut Playback, p: &Project, d: &Decodes, clock: u64, last: &mut Option<Shown>) {
+    d.until(pb, p, clock, |pb| {
         if let Some(s) = pb.show(p, clock) {
             *last = Some(s);
         }
-        if pb.shown == Some((pb.transport.frame(clock), true)) {
-            return;
-        }
-        std::thread::sleep(Duration::from_micros(100));
-    }
-    panic!("frame at {clock} never decoded");
+        pb.shown == Some((pb.transport.frame(clock), true))
+    });
 }
 
 /// Five minutes of a video clip over an audio clip, through the mixer, where every audio sample
@@ -117,6 +154,7 @@ fn video_stays_within_one_frame_of_audio_over_five_minutes() {
     let p = h.project();
     let budget = 64 * size(&tiny(Time(0)));
     let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), indexed(), budget);
+    let d = Decodes::take(&mut pb);
     let fake = Fake::default();
     let mut out = Output::new(Box::new(fake.clone()), None);
     let gain = pan_gains(0.0).0;
@@ -148,7 +186,7 @@ fn video_stays_within_one_frame_of_audio_over_five_minutes() {
         if t.speed() == 0 && t.position(out.clock()) >= t.duration {
             break;
         }
-        catch_up(&mut pb, p, out.clock(), &mut last);
+        catch_up(&mut pb, p, &d, out.clock(), &mut last);
         assert!(pb.cache.bytes() <= budget);
         // Only 1x audio carries source positions; the rest is silence or underrun.
         let heard = pulled.last().copied().unwrap_or(0.0);
@@ -182,6 +220,7 @@ const STALL: Duration = Duration::from_millis(100);
 /// decode-ahead is idle, then playing until the clock reaches `until` samples or play stops, with
 /// one `tick` per 800-sample device callback (~60Hz) and the fake device held to wall time, so
 /// decoding has to keep up for real. Every frame shown is the one for the clock, and goes to `each`.
+/// Wall clock on purpose, for the release-only throughput test; the rest use [`play_stepped`].
 fn play(pb: &mut Playback, p: &Project, until: u64, mut each: impl FnMut(&Shown)) -> Vec<Seen> {
     let fake = Fake::default();
     let mut out = Output::new(Box::new(fake.clone()), None);
@@ -230,65 +269,58 @@ fn indexed() -> OpenAudio {
     })
 }
 
-/// With a decoder too slow for 30fps, so frames really arrive late, playback keeps to the audio
-/// clock: every frame shown is the one for the clock's time and within a frame of the audio heard
-/// with it, frames are skipped rather than shown late, and it keeps up to the end. Stepped, not
-/// real time: decodes finish at once and the test hands them back as 4 decode threads at 200ms
-/// (6 frames) a frame would, 20fps, one tick per frame.
-#[test]
-fn slow_decoder_drops_frames_instead_of_drifting() {
-    const SLOW: Duration = Duration::from_millis(200);
-    let mut h = History::new(Project::default());
-    add(&mut h, TrackKind::Video, "v.mp4", secs(10));
-    add(&mut h, TrackKind::Audio, "a.m4a", secs(10));
-    let p = h.project();
-    let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), indexed(), DEFAULT_BUDGET);
-    pb.sync(p);
+/// Like [`play`], stepped rather than in real time, one tick per frame so a frame missed at its
+/// tick is dropped, not shown a tick late. Decodes finish at once and are handed back as
+/// [`DECODE_THREADS`] threads would if each took `cost`, rounded up to whole frames.
+fn play_stepped(
+    pb: &mut Playback,
+    p: &Project,
+    until: u64,
+    mut cost: impl FnMut(&Key) -> Duration,
+) -> Vec<Seen> {
     let fake = Fake::default();
     let mut out = Output::new(Box::new(fake.clone()), None);
-    let mut last = None;
-    catch_up(&mut pb, p, 0, &mut last);
-    while !pb.pending.is_empty() {
-        std::thread::sleep(Duration::from_micros(100));
-        pb.decode_ahead(p, 0);
-    }
-    let (tx, rx) = std::sync::mpsc::channel();
-    let decoded = std::mem::replace(&mut pb.done, rx);
-    pb.latency = SLOW;
+    let d = Decodes::take(pb);
     // Decodes waiting for a thread, oldest (nearest) first, and those on one with the step they end.
-    let mut queued = std::collections::BTreeMap::new();
-    let mut running: Vec<(u64, Key, Result<Frame, String>)> = Vec::new();
-    pb.transport.toggle(out.clock());
-    let mut seen = Vec::new();
-    for step in 0..90 {
-        let (done, busy) = std::mem::take(&mut running)
+    let mut queued = BTreeMap::new();
+    let mut running: Vec<(u64, Done)> = Vec::new();
+    let (mut primed, mut playing, mut seen) = (false, false, Vec::new());
+    for step in 0u64.. {
+        let (done, busy): (Vec<_>, Vec<_>) = std::mem::take(&mut running)
             .into_iter()
             .partition(|r| r.0 <= step);
         running = busy;
-        for (_, k, r) in done {
-            tx.send((k, SLOW, r)).unwrap();
+        for (_, done) in done {
+            d.to_pb.send(done).unwrap();
         }
         let shown = pb.tick(p, &mut out);
         if let Some(s) = &shown {
             assert_eq!(s.index, pb.transport.frame(out.clock()), "shown on time");
         }
         // Everything playback is waiting on is held here, not still in the real decode.
-        loop {
-            while let Ok((k, _, r)) = decoded.try_recv() {
-                queued.insert(k, r);
-            }
-            let held = |k| queued.contains_key(k) || running.iter().any(|r| r.1 == *k);
-            if pb.pending.keys().all(held) {
-                break;
-            }
-            std::thread::sleep(Duration::from_micros(100));
+        let held = |k: &Key, q: &BTreeMap<Key, _>, r: &[(u64, Done)]| {
+            q.contains_key(k) || r.iter().any(|r| r.1.0 == *k)
+        };
+        while !pb.pending.keys().all(|k| held(k, &queued, &running)) {
+            let (k, _, r) = d.decoded.recv().unwrap();
+            queued.insert(k, r);
         }
         // A decode cancelled before a thread took it never runs.
         queued.retain(|k, _| pb.pending.contains_key(k));
         while running.len() < DECODE_THREADS
             && let Some((k, r)) = queued.pop_first()
         {
-            running.push((step + 6, k, r));
+            let took = cost(&k);
+            let frames = (took.as_micros() * 30).div_ceil(1_000_000).max(1) as u64;
+            running.push((step + frames, (k, took, r)));
+        }
+        if !playing {
+            primed |= shown.is_some();
+            playing = primed && pb.pending.is_empty();
+            if playing {
+                pb.transport.toggle(out.clock());
+            }
+            continue;
         }
         let heard = fake.pull(SAMPLE_RATE as usize / 30);
         if let Some(s) = shown {
@@ -299,7 +331,27 @@ fn slow_decoder_drops_frames_instead_of_drifting() {
                 heard: heard[0],
             });
         }
+        if out.clock() >= until || pb.transport.speed() == 0 {
+            break;
+        }
     }
+    seen
+}
+
+/// With a decoder too slow for 30fps, so frames really arrive late, playback keeps to the audio
+/// clock: every frame shown is the one for the clock's time and within a frame of the audio heard
+/// with it, frames are skipped rather than shown late, and it keeps up to the end. Stepped: 4
+/// decode threads at 200ms (6 frames) a frame, 20fps.
+#[test]
+fn slow_decoder_drops_frames_instead_of_drifting() {
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, "v.mp4", secs(10));
+    add(&mut h, TrackKind::Audio, "a.m4a", secs(10));
+    let p = h.project();
+    let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), indexed(), DEFAULT_BUDGET);
+    let seen = play_stepped(&mut pb, p, 3 * SAMPLE_RATE as u64, |_| {
+        Duration::from_millis(200)
+    });
     let gain = pan_gains(0.0).0;
     let frame = FPS30.time_floor(1).0 as f64 / FLICKS_PER_SECOND as f64;
     let mut checked = 0;
@@ -322,21 +374,10 @@ fn slow_decoder_drops_frames_instead_of_drifting() {
     eprintln!("{} of 90 frames shown: {shown:?}", shown.len());
 }
 
-/// A decoder that takes `cold` for the first frame of each file (opening it and seeking to a
-/// keyframe) and `warm` for the rest.
-fn cold_open(cold: Duration, warm: Duration) -> DecodeFn {
-    let opened = Mutex::new(HashSet::new());
-    Arc::new(move |path, t| {
-        let first = opened.lock().unwrap().insert(path.to_owned());
-        std::thread::sleep(if first { cold } else { warm });
-        Ok(tiny(t))
-    })
-}
-
-/// Back-to-back clips of two files, then a gap and a third: each file is slow to open, but
-/// decode-ahead opens it before the playhead gets there, so no frame drops at either boundary;
-/// the gap shows nothing. The audio clip after the gap is opened and seeked to its in point
-/// before it's heard.
+/// Back-to-back clips of two files, then a gap and a third: each file is slow to open (150ms for
+/// its first frame, 5ms for the rest), but decode-ahead opens it before the playhead gets there,
+/// so no frame drops at either boundary; the gap shows nothing. The audio clip after the gap is
+/// opened and seeked to its in point before it's heard. Stepped, not real time.
 #[test]
 fn clip_boundaries_play_without_drops() {
     use TrackKind::{Audio, Video};
@@ -354,9 +395,11 @@ fn clip_boundaries_play_without_drops() {
         let (log, path) = (log.clone(), path.to_owned());
         Box::new(move |start, out| log.lock().unwrap().push((path.clone(), start, out.len())))
     });
-    let decode = cold_open(Duration::from_millis(150), Duration::from_millis(5));
-    let mut pb = Playback::new(decode, open, DEFAULT_BUDGET);
-    let seen = play(&mut pb, p, u64::MAX, |_| {});
+    let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), open, DEFAULT_BUDGET);
+    let mut opened = HashSet::new();
+    let seen = play_stepped(&mut pb, p, u64::MAX, |k| {
+        Duration::from_millis(if opened.insert(k.0) { 150 } else { 5 })
+    });
     let shown: Vec<_> = seen.iter().map(|s| s.index).collect();
     assert!(shown.windows(2).all(|w| w[1] == w[0] + 1), "{shown:?}");
     assert!(shown[0] == 1 && *shown.last().unwrap() >= 104, "{shown:?}");
@@ -383,7 +426,7 @@ fn clip_boundaries_play_without_drops() {
 /// Looping the in/out range plays it over and over with no frame dropped at the wrap: decode-ahead
 /// wraps too, so the in point's frames are decoded (again, with the cache too small to hold the
 /// loop) before the playhead jumps back. Stepped, not real time: each tick's decodes finish before
-/// the clock moves on, so a frame shows only if it was queued before the playhead got there.
+/// the next, so a frame shows only if it was queued before the playhead got there.
 #[test]
 fn loop_wraps_without_dropping_frames() {
     let mut h = History::new(Project::default());
@@ -403,23 +446,8 @@ fn loop_wraps_without_dropping_frames() {
     pb.looping = true;
     pb.sync(p);
     pb.transport.seek(secs(1), 0);
-    let fake = Fake::default();
-    let mut out = Output::new(Box::new(fake.clone()), None);
-    let mut last = None;
-    catch_up(&mut pb, p, 0, &mut last);
-    pb.transport.toggle(out.clock());
-    let mut shown = Vec::new();
-    while out.clock() < 6 * SAMPLE_RATE as u64 {
-        if let Some(s) = pb.tick(p, &mut out) {
-            shown.push(s.index);
-        }
-        while !pb.pending.is_empty() {
-            std::thread::sleep(Duration::from_micros(100));
-            pb.decode_ahead(p, out.clock());
-        }
-        // One tick per frame, so a frame missed at its tick is dropped, not shown a tick late.
-        fake.pull(SAMPLE_RATE as usize / 30);
-    }
+    let seen = play_stepped(&mut pb, p, 6 * SAMPLE_RATE as u64, |_| Duration::ZERO);
+    let shown: Vec<_> = seen.iter().map(|s| s.index).collect();
     assert_eq!(shown[0], 31, "the in point was shown parked");
     assert!(
         shown
@@ -431,8 +459,9 @@ fn loop_wraps_without_dropping_frames() {
     assert!(wraps >= 2, "{wraps} wraps: {shown:?}");
 }
 
-/// A failed decode leaves its layer out, then is retried; a relink drops frames decoded from the
-/// asset's old path, so the new file is decoded.
+/// A failed decode leaves its layer out, then is retried after [`RETRY`]; a relink drops frames
+/// decoded from the asset's old path, so the new file is decoded. Stepped, not real time: decodes
+/// are waited for, and failures dated rather than waited out.
 #[test]
 fn failed_decodes_retry_and_relink_redecodes() {
     let mut h = History::new(Project::default());
@@ -449,28 +478,29 @@ fn failed_decodes_retry_and_relink_redecodes() {
         }
     });
     let mut pb = Playback::new(decode, silent(), DEFAULT_BUDGET);
+    let d = Decodes::take(&mut pb);
     let mut out = Output::new(Box::new(Fake::default()), None);
-    // The frame at the playhead once it has `layers` layers.
-    let mut until = |pb: &mut Playback, p: &Project, layers: usize| {
-        let start = Instant::now();
-        while start.elapsed() < 3 * RETRY {
-            pb.refresh();
-            if pb
-                .tick(p, &mut out)
-                .is_some_and(|s| s.layers.len() == layers)
-            {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        panic!("never shown with {layers} layers");
+    // Decodes what's queued, dates every failure `failed_at`, then the layers at the playhead.
+    let mut layers = |pb: &mut Playback, p: &Project, failed_at: Instant| {
+        pb.tick(p, &mut out);
+        d.settle(pb, p, 0);
+        pb.failed.values_mut().for_each(|at| *at = failed_at);
+        pb.refresh();
+        pb.tick(p, &mut out).map(|s| s.layers.len())
     };
-    until(&mut pb, h.project(), 0);
+    let (held, due) = (Instant::now() + 1000 * RETRY, Instant::now() - RETRY);
+    assert_eq!(layers(&mut pb, h.project(), held), Some(0), "left out");
     *fail.lock().unwrap() = false;
-    until(&mut pb, h.project(), 1);
+    assert_eq!(
+        layers(&mut pb, h.project(), held),
+        Some(0),
+        "not before RETRY"
+    );
+    layers(&mut pb, h.project(), due);
+    assert_eq!(layers(&mut pb, h.project(), held), Some(1), "retried");
     h.apply(Command::RelinkAssets(vec![(asset, "new.mp4".into())]))
         .unwrap();
-    until(&mut pb, h.project(), 1);
+    assert_eq!(layers(&mut pb, h.project(), held), Some(1), "relinked");
     assert!(paths.lock().unwrap().contains(&"new.mp4".into()));
 }
 
@@ -480,7 +510,7 @@ fn failed_decodes_retry_and_relink_redecodes() {
 /// frames, each the right one: decoding keeps up with zero drops. The same run with every frame
 /// composited at half-size preview scale is only reported: CI composites on lavapipe, a software
 /// rasterizer at ~30ms a frame, which says nothing about a real GPU. Full rate with compositing
-/// is checked by hand on real hardware (#32).
+/// is checked by hand on real hardware (#32). Wall clock on purpose: it times real decoding.
 /// shortcut: gate compositing too once a perf harness (#42) runs on real GPU hardware.
 #[test]
 fn two_layer_1080p30_plays_in_real_time() {
@@ -563,8 +593,6 @@ fn two_layer_1080p30_plays_in_real_time() {
     }
 }
 
-/// Release only. Perf (docs/perf.md): parked seeks to scattered frames of a 1080p30 H.264 file,
-/// timed from the seek until `tick` shows that frame. Under one frame (33ms) scrubs at 30fps.
 /// Solids draw without decoding: the asset's color, or the clip's `color` keyframes over it.
 #[test]
 fn solids_show_their_color_without_decoding() {
@@ -617,6 +645,9 @@ fn solids_show_their_color_without_decoding() {
     assert_eq!(color(&mut pb, h.project()), [0, 0, 255, 255]);
 }
 
+/// Release only. Perf (docs/perf.md): parked seeks to scattered frames of a 1080p30 H.264 file,
+/// timed from the seek until `tick` shows that frame. Under one frame (33ms) scrubs at 30fps.
+/// Wall clock on purpose: it times real decoding.
 #[test]
 fn seek_latency_1080p30() {
     if cfg!(debug_assertions) {
@@ -673,7 +704,8 @@ pub(crate) fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
 }
 
 /// Acceptance (#90): a 2-hour 1440p60 recording is editable within 2 s of import, and a seek
-/// anywhere shows a frame in under 150 ms.
+/// anywhere shows a frame in under 150 ms. Release only; wall clock on purpose, it times real
+/// decoding.
 #[test]
 fn long_recording_imports_and_seeks_fast() {
     if cfg!(debug_assertions) {
@@ -763,24 +795,29 @@ fn parked_seek_shows_a_keyframe_stand_in_then_the_exact_frame() {
     });
     let mut pb = Playback::new(decode, silent(), DEFAULT_BUDGET);
     pb.quick = Some(Arc::new(|_, _| Ok(tiny(Time(0)))));
+    let d = Decodes::take(&mut pb);
     let mut out = Output::new(Box::new(Fake::default()), None);
-    pb.tick(p, &mut out);
+    pb.sync(p);
     pb.transport.seek(secs(5), out.clock());
+    pb.tick(p, &mut out);
+    // Waited for, not polled: the stand-in thread's result is handed back once it's sent.
+    assert!(
+        pb.stand_ins.contains_key(&(p.assets()[0].id, secs(5))),
+        "no stand-in queued"
+    );
+    let r = pb.quick_done.recv().unwrap();
+    pb.quick_tx.send(r).unwrap();
     let mut next = |pb: &mut Playback| {
-        let start = Instant::now();
-        loop {
-            if let Some(s) = pb.tick(p, &mut out).filter(|s| s.index == 150) {
-                let Pixels::Frame(f) = &s.layers[0].0 else {
-                    panic!("frame")
-                };
-                return (s.exact, f.pts);
-            }
-            assert!(start.elapsed() < Duration::from_secs(5), "nothing shown");
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        let s = pb.tick(p, &mut out).expect("shown");
+        assert_eq!(s.index, 150);
+        let Pixels::Frame(f) = &s.layers[0].0 else {
+            panic!("frame")
+        };
+        (s.exact, f.pts)
     };
     assert_eq!(next(&mut pb), (false, Time(0)));
     release.store(true, std::sync::atomic::Ordering::SeqCst);
+    d.settle(&mut pb, p, 0);
     assert_eq!(next(&mut pb), (true, secs(5)));
 }
 
@@ -1045,7 +1082,8 @@ fn scrub_queues_a_snippet_from_the_parked_playhead() {
 }
 
 /// Acceptance (#41): dragging the playhead across 1080p H.264, the Program monitor updates 30+
-/// times a second, showing keyframe stand-ins first and exact frames once decoded.
+/// times a second, showing keyframe stand-ins first and exact frames once decoded. Release only;
+/// wall clock on purpose, it times real decoding.
 #[test]
 fn scrub_1080p30_updates_30_per_second() {
     if cfg!(debug_assertions) {
