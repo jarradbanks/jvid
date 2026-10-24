@@ -9,6 +9,10 @@ more_tabs = "Más pestañas"
 [input]
 search = "Buscar"
 
+[color]
+# A fully transparent colour.
+none = "Ninguno"
+
 [theme]
 error = "Tema {path}: {error}"
 bad_color = "`{value}` no es #RRGGBB"

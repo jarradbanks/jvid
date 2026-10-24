@@ -92,6 +92,9 @@ pub struct Timeline {
     trim: Option<Trim>,
     /// The clip being moved or trimmed, kept interactive after it scrolls out of view.
     holding: Option<ClipId>,
+    /// Height of the New Track slot above the top track last frame, open while a video
+    /// asset is dragged at the top edge.
+    slot: f32,
     /// `scroll` and `vscroll` when the pointer went down, so drags track time while the
     /// view auto-scrolls.
     press_scroll: (f64, f32),
@@ -133,6 +136,9 @@ const SNAP_PX: f64 = 8.0;
 /// Points inside a lanes edge where a drag starts auto-scrolling.
 const EDGE_PX: f32 = 24.0;
 
+/// Points into the top track's upper edge that open the New Track slot.
+const SLOT_PX: f32 = 8.0;
+
 /// Auto-scroll speed in points per second for a pointer at `p` along `lo..=hi`: zero
 /// away from the edges, growing with depth into (and past) either edge zone.
 fn edge_speed(p: f32, lo: f32, hi: f32) -> f32 {
@@ -160,6 +166,7 @@ impl Default for Timeline {
             scroll: 0.0,
             vscroll: 0.0,
             holding: None,
+            slot: 0.0,
             press_scroll: (0.0, 0.0),
             media: Media::default(),
             renaming: None,
@@ -616,7 +623,7 @@ impl Timeline {
         clip: &Clip,
         r: Rect,
     ) -> Option<Edit> {
-        if self.razor {
+        if self.razor || locked(project.sequence(), clip.id) {
             return None;
         }
         let w = 6.0f32.min(r.width() / 3.0);
@@ -978,7 +985,45 @@ impl Timeline {
             .flatten()
             .flat_map(|&(id, a, b)| seq.linked(id).into_iter().map(move |(_, c)| (c.id, a, b)))
             .collect();
-        let mut y = lanes.top() - self.vscroll;
+        // A video asset dragged at the top edge opens a slot for a new track above the rest.
+        let top_y = lanes.top() - self.vscroll;
+        let video = egui::DragAndDrop::payload::<AssetId>(ui.ctx()).is_some_and(|a| {
+            let pl = project.placement(*a, Time(0), false, None, false);
+            pl.is_some_and(|pl| pl.video.is_some() || pl.add_video)
+        });
+        let open = video
+            && !tracks.is_empty()
+            && ui
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|p| lanes.contains(p) && p.y < top_y + self.slot + SLOT_PX);
+        let t = if open { 0.15 } else { 0.1 };
+        let slot_id = id.with("slot");
+        let ease = egui::emath::easing::cubic_out;
+        let shown = ui
+            .ctx()
+            .animate_bool_with_time_and_easing(slot_id, open, t, ease);
+        self.slot = shown * Track::default_height();
+        let slot = Rect::from_x_y_ranges(lanes.x_range(), top_y..=top_y + self.slot);
+        if self.slot > 0.0 {
+            let tint = color::blue().gamma_multiply(0.12 * shown);
+            lane_painter.rect_filled(slot.with_min_x(area.left()), 0.0, tint);
+            lane_painter.rect_filled(
+                Rect::from_x_y_ranges(area.x_range(), slot.bottom() - line..=slot.bottom()),
+                0.0,
+                color::border(),
+            );
+            let name = slot.with_min_x(headers.left()).with_max_x(headers.right());
+            lane_painter
+                .with_clip_rect(name.intersect(lanes.union(headers)))
+                .text(
+                    pos2(name.left() + space::S8, name.center().y),
+                    Align2::LEFT_CENTER,
+                    tr!("timeline.new_track"),
+                    theme::body(),
+                    color::light_blue().gamma_multiply(shown),
+                );
+        }
+        let mut y = top_y + self.slot;
         let mut lane_rects = Vec::new();
         // The clip being dragged, its track, and its response.
         let mut held = None;
@@ -1077,7 +1122,13 @@ impl Timeline {
                 if cr.is_pointer_button_down_on() {
                     self.holding = Some(clip.id);
                 }
-                if cr.dragged() || cr.drag_stopped() {
+                // A clip tied to a locked track can't move: no ghost, a refusal instead.
+                if cr.dragged() && locked(seq, clip.id) {
+                    ui.ctx().set_cursor_icon(CursorIcon::NotAllowed);
+                    egui::Tooltip::for_widget(&cr)
+                        .at_pointer()
+                        .show(|ui| ui.label(tr!("timeline.track_locked")));
+                } else if cr.dragged() || cr.drag_stopped() {
                     held = Some((clip, track, cr));
                 }
             }
@@ -1160,19 +1211,27 @@ impl Timeline {
             held,
             &mut edit,
             &mut top,
+            open,
         );
         ghosts.extend(self.trim_ghosts(seq));
+        // Dropped into the slot: the new track takes its place, so it closes at once.
+        if open && edit.is_some() {
+            ui.ctx().animate_bool_with_time(slot_id, false, 0.0);
+        }
         // Where a drop's new video track goes in: the top of the stack.
-        if top {
+        if top && !open {
             let y = (lanes.top() - self.vscroll).max(lanes.top());
             let r = Rect::from_x_y_ranges(lanes.x_range(), y..=y + 2.0);
             clip_painter.rect_filled(r, 0.0, color::light_blue());
         }
-        // Ghosts for tracks a drop will add go in rows below the last lane.
+        // Ghosts for tracks a drop will add go in rows below the last lane, a new top video
+        // track's (it comes first) in the open slot.
         let mut below = y;
+        let mut slot_rows = (top && open).then(|| slot.y_range());
         for (t, from, to) in ghosts {
             let rows = match t {
                 Some(t) => lane_rects.iter().find(|l| l.0 == t).map(|l| l.2.y_range()),
+                None if slot_rows.is_some() => slot_rows.take(),
                 None => {
                     below += Track::default_height();
                     Some((below - Track::default_height()..=below).into())
@@ -1474,7 +1533,8 @@ impl Timeline {
     }
 
     /// Bin drops and clip drags: the ghosts to draw as (track, start, end), and the edit
-    /// once the pointer is released. `top` is set when a bin drop adds a video track on top.
+    /// once the pointer is released. `top` is set when a bin drop adds a video track on top;
+    /// `slot` drops into the open New Track slot.
     #[allow(clippy::too_many_arguments)]
     fn drops(
         &mut self,
@@ -1486,6 +1546,7 @@ impl Timeline {
         held: Option<(&Clip, &Track, egui::Response)>,
         edit: &mut Option<Edit>,
         top: &mut bool,
+        slot: bool,
     ) -> Vec<(Option<TrackId>, Time, Time)> {
         let rate = self.transport.rate;
         let snap = |t: Time| rate.time_floor(rate.index_nearest(t)).max(Time(0));
@@ -1514,9 +1575,10 @@ impl Timeline {
             && area.contains(p)
             // Alt merges a multi-stream file's audio into one clip.
             && let merge = ui.input(|i| i.modifiers.alt)
-            && let Some(mut pl) = project.placement(*asset, snap(view.time(p.x)), false, lane_at(None), merge)
+            && let on = lane_at(None).filter(|_| !slot)
+            && let Some(mut pl) = project.placement(*asset, snap(view.time(p.x)), false, on, merge)
         {
-            *top = lane_at(None).is_none() && onto_new_track(&mut pl);
+            *top = on.is_none() && onto_new_track(&mut pl);
             let end = pl.start + (pl.source_out - pl.source_in);
             let ghosts = [(pl.video, pl.add_video), (pl.audio, pl.add_audio)].into_iter();
             let ghosts = ghosts.filter(|(t, add)| t.is_some() || *add);
@@ -2033,6 +2095,12 @@ fn onto_new_track(pl: &mut Placement) -> bool {
         pl.add_audio = true;
     }
     false
+}
+
+/// Whether the clip or a linked partner sits on a locked track, so it can't move or trim.
+fn locked(seq: &Sequence, id: ClipId) -> bool {
+    let tracks = seq.linked(id).into_iter().map(|(t, _)| seq.track(t));
+    tracks.flatten().any(|t| t.locked)
 }
 
 fn to_targets(seq: &Sequence, clips: &[(TrackId, Clip)]) -> Vec<(TrackId, Clip)> {
@@ -3366,6 +3434,132 @@ mod tests {
         let t = tracks(&h);
         assert_eq!(t.len(), 3);
         assert_eq!(t[0].clips()[0].asset, solid);
+    }
+
+    #[test]
+    fn bin_drop_at_the_top_edge_opens_a_new_track_slot() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut p = History::new(project(2));
+        let _ = p.apply(Command::AddText {
+            name: "Title".into(),
+            text: Default::default(),
+        });
+        let title = p.project().assets()[1].id;
+        let mut h = harness(p.project().clone());
+        let before = h.state().1.project().clone();
+        let tracks = |h: &egui_kittest::Harness<'_, (Timeline, History)>| {
+            h.state().1.project().sequence().tracks().to_vec()
+        };
+        let v1 = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let edge = 8.0 + size::RULER + 2.0;
+        let at = |s: i64, y| pos2(size::TRACK_HEADER + s as f32 * 20.0, y);
+        let start = |h: &mut egui_kittest::Harness<'_, (Timeline, History)>, p| {
+            h.hover_at(p);
+            h.run();
+            egui::DragAndDrop::set_payload(&h.ctx, title);
+            h.drag_at(p);
+            h.run();
+        };
+
+        // At the edge the slot opens; leaving up over the ruler closes it and adds nothing.
+        start(&mut h, at(5, edge));
+        h.hover_at(at(5, edge));
+        h.run();
+        assert_eq!(h.state().0.slot, Track::default_height());
+        let ruler = 8.0 + size::RULER / 2.0;
+        h.hover_at(at(5, ruler));
+        h.run();
+        assert_eq!(h.state().0.slot, 0.0);
+        h.drop_at(at(5, ruler));
+        h.run();
+        assert_eq!(h.state().1.project(), &before);
+        assert!(!h.state().1.can_undo());
+
+        // Nor does a drop that wanders from the slot down onto V1, below its open edge.
+        start(&mut h, at(5, edge));
+        h.hover_at(at(5, edge));
+        h.run();
+        h.hover_at(at(5, v1 + Track::default_height()));
+        h.run();
+        h.hover_at(at(5, v1));
+        h.run();
+        assert_eq!(h.state().0.slot, 0.0);
+        h.drop_at(at(5, v1));
+        h.run();
+        let t = tracks(&h);
+        assert_eq!(t.len(), 2, "no track added");
+        assert_eq!(t[0].clips().len(), 2, "dropped onto V1");
+        assert!(h.state_mut().1.undo());
+        assert_eq!(h.state().1.project(), &before);
+
+        // Dropped in the slot: a video track above V1 holds the title at 5s.
+        start(&mut h, at(5, edge));
+        h.hover_at(at(5, edge));
+        h.run();
+        h.drop_at(at(5, edge));
+        h.run();
+        let t = tracks(&h);
+        assert_eq!(t.len(), 3);
+        assert_eq!(t[0].kind, TrackKind::Video);
+        let c = &t[0].clips()[0];
+        assert_eq!(c.asset, title);
+        assert!((c.start.0 - 5 * S).abs() <= S, "{:?}", c.start);
+        assert_eq!(t[1].clips().len(), 1, "V1 untouched");
+        assert_eq!(h.state().0.slot, 0.0, "the new track replaces the slot");
+
+        // One undo takes the clip and its track together.
+        assert!(h.state_mut().1.undo());
+        assert_eq!(h.state().1.project(), &before);
+    }
+
+    /// `project(2)` with its V1 clip linked to its A1 clip and V1 locked, from a fresh history.
+    fn locked_v1() -> Project {
+        let mut h = History::new(project(2));
+        let s = h.project().sequence();
+        let ids = s.tracks().iter().map(|t| t.clips()[0].id).collect();
+        h.apply(Command::LinkClips { ids, linked: true }).unwrap();
+        let mut v1 = h.project().sequence().tracks()[0].settings();
+        v1.locked = true;
+        h.apply(Command::SetTrack(v1)).unwrap();
+        h.project().clone()
+    }
+
+    #[test]
+    fn dragging_a_clip_tied_to_a_locked_track_is_refused() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(locked_v1());
+        let before = h.state().1.project().clone();
+        let lanes: Vec<f32> = h
+            .get_all_by_label("Lock")
+            .map(|n| n.rect().center().y)
+            .collect();
+        // V1's own clip, then the unlocked A1 clip linked to it; mid-clip, then on its tail.
+        let x = size::TRACK_HEADER + 20.0;
+        let tail = 8.0 + size::TRACK_HEADER + 36.0;
+        for (x, y) in [(x, lanes[0]), (x, lanes[1]), (tail, lanes[1])] {
+            h.hover_at(pos2(x, y));
+            h.run();
+            h.drag_at(pos2(x, y));
+            h.run();
+            for dx in [10.0, 40.0] {
+                h.hover_at(pos2(x + dx, y));
+                h.run();
+                let t = &h.state().0;
+                assert!(t.drag_to.is_none() && t.trim.is_none(), "no ghost");
+                let cursor = h.output().platform_output.cursor_icon;
+                assert_eq!(cursor, CursorIcon::NotAllowed);
+            }
+            h.drop_at(pos2(x + 40.0, y));
+            h.run();
+            assert_eq!(h.state().1.project(), &before);
+            assert!(!h.state().1.can_undo(), "nothing on the undo stack");
+        }
     }
 
     #[test]

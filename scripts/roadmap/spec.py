@@ -1470,3 +1470,12 @@ I("polish-pass", "Impeccable polish pass on the remaining panels", None, ["ui"],
   ac=["Keyframe lane names show in Title Case and never overlap their lane's line",
       "The PR lists each finding with a before and after screenshot"],
   refs=[f"[DESIGN.md]({DESIGN})"])
+
+I("ci-cross-os-green", "Main CI green on Windows and macOS", None, ["infra"], "S", labels=["later"],
+  summary="Main's full matrix fails off Linux: three kittest snapshots differ on Windows WARP (bin_effects_hover, editor_light, preferences), and macOS playback::tests::loop_wraps_without_dropping_frames is timing-flaky. PRs only run Ubuntu, so it goes unseen.",
+  scope=[
+      "Snapshots: Linux (lavapipe) stays the pixel reference; other OSes still render every snapshot test but compare with a tolerance that absorbs driver rasterisation, or skip only the pixel compare, decided in one shared place",
+      "Make loop_wraps_without_dropping_frames deterministic (no wall-clock dependence) rather than retrying it",
+  ],
+  ac=["A workflow_dispatch run on the branch passes ubuntu, windows and macOS",
+      "A real layout regression still fails on Linux"])

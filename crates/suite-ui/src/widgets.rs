@@ -872,6 +872,8 @@ impl Widget for MenuRow<'_> {
 pub struct Segmented<'a> {
     selected: &'a mut usize,
     options: &'a [&'a str],
+    /// Each option's name when `options` are icon glyphs.
+    names: Option<&'a [&'a str]>,
     state: State,
 }
 
@@ -880,7 +882,16 @@ impl<'a> Segmented<'a> {
         Self {
             selected,
             options,
+            names: None,
             state: State::Live,
+        }
+    }
+
+    /// Icon segments: `glyphs` drawn in the icon font, each named by `names` in its tooltip.
+    pub fn icons(selected: &'a mut usize, glyphs: &'a [&'a str], names: &'a [&'a str]) -> Self {
+        Self {
+            names: Some(names),
+            ..Self::new(selected, glyphs)
         }
     }
 
@@ -893,12 +904,18 @@ impl<'a> Segmented<'a> {
 
 impl Widget for Segmented<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
-        let font = theme::body_strong();
+        let font = match self.names {
+            Some(_) => theme::icon_font(),
+            None => theme::body_strong(),
+        };
         let pad = 2.0;
         let widths: Vec<f32> = self
             .options
             .iter()
-            .map(|o| (text_width(ui, o, &font) + 2.0 * space::S8).ceil())
+            .map(|o| match self.names {
+                Some(_) => size::SMALL_CONTROL,
+                None => (text_width(ui, o, &font) + 2.0 * space::S8).ceil(),
+            })
             .collect();
         let total = widths.iter().sum::<f32>() + 2.0 * pad;
         let (rect, mut response) =
@@ -932,9 +949,13 @@ impl Widget for Segmented<'_> {
                 },
             );
             let on = i == *self.selected;
-            seg_response.widget_info(|| {
-                WidgetInfo::selected(WidgetType::RadioButton, !disabled, on, *option)
-            });
+            let name = self.names.map_or(*option, |n| n[i]);
+            seg_response
+                .widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, !disabled, on, name));
+            let seg_response = match self.names {
+                Some(_) => seg_response.on_hover_text(name),
+                None => seg_response,
+            };
             if seg_response.clicked() {
                 *self.selected = i;
                 response.mark_changed();
@@ -1217,6 +1238,7 @@ impl Widget for KeyButton<'_> {
 pub struct Slider<'a> {
     value: &'a mut f64,
     range: std::ops::RangeInclusive<f64>,
+    step: Option<f64>,
     centred: bool,
     name: &'a str,
     state: State,
@@ -1228,10 +1250,17 @@ impl<'a> Slider<'a> {
         Self {
             value,
             range,
+            step: None,
             centred: false,
             name,
             state: State::Live,
         }
+    }
+
+    /// Snaps to multiples of `step` from the start, marked with ticks; arrow keys move a step.
+    pub fn step(mut self, step: f64) -> Self {
+        self.step = Some(step);
+        self
     }
 
     /// Fills from zero, for values that go either way from it.
@@ -1260,19 +1289,27 @@ impl Widget for Slider<'_> {
         let track = rect.shrink2(vec2(3.0, 0.0)).x_range();
         let x_of =
             |v: f64| track.min + (((v - lo) / (hi - lo)).clamp(0.0, 1.0) as f32) * track.span();
+        let snap = |v: f64| match self.step {
+            Some(s) => (lo + ((v - lo) / s).round() * s).clamp(lo, hi),
+            None => v,
+        };
         if (response.dragged() || response.clicked())
             && let Some(p) = response.interact_pointer_pos()
         {
             let t = ((p.x - track.min) / track.span()).clamp(0.0, 1.0) as f64;
-            *self.value = lo + t * (hi - lo);
-            response.mark_changed();
+            let v = snap(lo + t * (hi - lo));
+            if v != *self.value {
+                *self.value = v;
+                response.mark_changed();
+            }
         }
         if response.has_focus() {
             let step = ui.input(|i| {
                 i32::from(i.key_pressed(Key::ArrowRight)) - i32::from(i.key_pressed(Key::ArrowLeft))
             });
             if step != 0 {
-                *self.value = (*self.value + f64::from(step) * (hi - lo) / 100.0).clamp(lo, hi);
+                let by = self.step.unwrap_or((hi - lo) / 100.0);
+                *self.value = snap(*self.value + f64::from(step) * by).clamp(lo, hi);
                 response.mark_changed();
             }
         }
@@ -1294,6 +1331,15 @@ impl Widget for Slider<'_> {
         }
         let bar = |x: egui::Rangef| Rect::from_x_y_ranges(x, y - 1.0..=y + 1.0);
         painter.rect_filled(bar(track), 0.0, color::border_strong());
+        if let Some(s) = self.step {
+            let line = 1.0 / ui.pixels_per_point();
+            for k in 0..=((hi - lo) / s).round() as usize {
+                let x = x_of(lo + k as f64 * s);
+                let tick =
+                    Rect::from_x_y_ranges(x - line / 2.0..=x + line / 2.0, y + 3.0..=y + 6.0);
+                painter.rect_filled(tick, 0.0, color::border_strong());
+            }
+        }
         if !l.disabled {
             painter.rect_filled(
                 bar(egui::Rangef::new(a.min(b), a.max(b))),
@@ -1313,6 +1359,158 @@ impl Widget for Slider<'_> {
             .rect_filled(thumb, CornerRadius::same(radius::SMALL), ink);
         if l.focus {
             ui.painter().add(focus_ring(thumb, radius::SMALL));
+        }
+        response
+    }
+}
+
+/// A colour: a 24px swatch with a Border Strong edge and a checkerboard behind it only when
+/// it isn't opaque, then its hex in a field, with the alpha after it when that fits, or None
+/// once fully transparent. Clicking either opens egui's picker under it. Takes the width left
+/// in the row; `rgba` is straight (unmultiplied) sRGB.
+#[must_use = "add it with `ui.add(..)`"]
+pub struct ColorField<'a> {
+    rgba: &'a mut [u8; 4],
+    name: &'a str,
+    state: State,
+}
+
+impl<'a> ColorField<'a> {
+    /// `name` is for screen readers.
+    pub fn new(rgba: &'a mut [u8; 4], name: &'a str) -> Self {
+        Self {
+            rgba,
+            name,
+            state: State::Live,
+        }
+    }
+
+    pub fn state(mut self, state: State) -> Self {
+        self.state = state;
+        self
+    }
+}
+
+/// The hex of `rgba`, and its alpha as a percentage when under 100%; `None` when fully
+/// transparent.
+pub fn color_text(rgba: [u8; 4]) -> Option<(String, Option<String>)> {
+    let [r, g, b, a] = rgba;
+    // Never 100% while not opaque.
+    let alpha = (a < 255).then(|| format!("{}%", (f32::from(a) / 2.55).round().min(99.0)));
+    (a > 0).then(|| (format!("{r:02X}{g:02X}{b:02X}"), alpha))
+}
+
+/// A 3x3 checkerboard filling `swatch`. Its corner cells are the light base, so the dark
+/// cells never reach the rounded corners.
+fn checker(ui: &Ui, swatch: Rect, corner: CornerRadius) {
+    let p = ui.painter();
+    p.rect_filled(swatch, corner, Color32::from_gray(0xBD));
+    let cell = swatch.width() / 3.0;
+    for (i, j) in [(1.0, 0.0), (0.0, 1.0), (2.0, 1.0), (1.0, 2.0)] {
+        let min = swatch.min + vec2(i, j) * cell;
+        p.rect_filled(
+            Rect::from_min_size(min, Vec2::splat(cell)),
+            0.0,
+            Color32::from_gray(0x8A),
+        );
+    }
+}
+
+impl Widget for ColorField<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let width = ui.available_width().max(2.0 * size::CONTROL);
+        let (rect, mut response) =
+            allocate(ui, vec2(width, size::CONTROL), self.state, Sense::click());
+        let text = color_text(*self.rgba);
+        response.widget_info(|| {
+            let shown = text
+                .as_ref()
+                .map_or(tr!(CATALOG, "color.none").to_owned(), |t| {
+                    format!("{} {}", t.0, t.1.as_deref().unwrap_or_default())
+                });
+            WidgetInfo::labeled(
+                WidgetType::ColorButton,
+                self.state != State::Disabled,
+                format!("{} {}", self.name, shown.trim_end()),
+            )
+        });
+        let popup = response.id.with("picker");
+        let open = egui::Popup::is_id_open(ui.ctx(), popup);
+        let mut l = look(&response, self.state);
+        l.focus |= open;
+        let corner = CornerRadius::same(radius::CONTROL);
+        let swatch = Rect::from_min_size(rect.min, Vec2::splat(size::CONTROL));
+        let [r, g, b, a] = *self.rgba;
+        if a < 255 {
+            checker(ui, swatch, corner);
+        }
+        ui.painter()
+            .rect_filled(swatch, corner, Color32::from_rgba_unmultiplied(r, g, b, a));
+        let edge = if l.hover || l.pressed {
+            color::ink_3()
+        } else {
+            color::border_strong()
+        };
+        ui.painter().add(border(ui, swatch, radius::CONTROL, edge));
+        let field =
+            Rect::from_x_y_ranges(swatch.right() + space::S4..=rect.right(), rect.y_range());
+        ui.painter().add(field_frame(ui, field, l, false));
+        let (left, right) = (field.left() + space::S8, field.right() - space::S8);
+        let y = field.center().y;
+        let ink = if l.disabled {
+            color::ink_4()
+        } else {
+            color::ink()
+        };
+        match &text {
+            None => {
+                let none = tr!(CATALOG, "color.none");
+                let p = pos2(left, y);
+                ui.painter()
+                    .text(p, Align2::LEFT_CENTER, none, theme::body(), color::ink_3());
+            }
+            Some((hex, alpha)) => {
+                ui.painter()
+                    .text(pos2(left, y), Align2::LEFT_CENTER, hex, theme::body(), ink);
+                let room = right - left - text_width(ui, hex, &theme::body()) - space::S8;
+                if let Some(alpha) = alpha.as_ref()
+                    && text_width(ui, alpha, &theme::body()) <= room
+                {
+                    let p = pos2(right, y);
+                    ui.painter().text(
+                        p,
+                        Align2::RIGHT_CENTER,
+                        alpha,
+                        theme::body(),
+                        color::ink_3(),
+                    );
+                }
+            }
+        }
+        let mut changed = false;
+        egui::Popup::menu(&response)
+            .id(popup)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                // The picker's own hue, so it survives a pass through grey or black.
+                let key = popup.with("hsva");
+                let rgba = *self.rgba;
+                let mut hsva = ui
+                    .data(|d| d.get_temp::<([u8; 4], egui::ecolor::Hsva)>(key))
+                    .filter(|(c, _)| *c == rgba)
+                    .map_or_else(
+                        || egui::ecolor::Hsva::from_srgba_unmultiplied(rgba),
+                        |(_, h)| h,
+                    );
+                let alpha = egui::color_picker::Alpha::OnlyBlend;
+                if egui::color_picker::color_picker_hsva_2d(ui, &mut hsva, alpha) {
+                    *self.rgba = hsva.to_srgba_unmultiplied();
+                    changed = true;
+                }
+                ui.data_mut(|d| d.insert_temp(key, (*self.rgba, hsva)));
+            });
+        if changed {
+            response.mark_changed();
         }
         response
     }

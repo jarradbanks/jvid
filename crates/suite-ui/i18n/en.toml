@@ -11,6 +11,10 @@ more_tabs = "More Tabs"
 [input]
 search = "Search"
 
+[color]
+# A fully transparent colour.
+none = "None"
+
 [theme]
 # A theme file that can't be read or parsed.
 error = "Theme {path}: {error}"
