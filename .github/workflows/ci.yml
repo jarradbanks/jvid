@@ -2,18 +2,11 @@ name: CI
 
 on:
   pull_request:
-    # Translation-only PRs run i18n.yml instead (#309); main still runs everything.
+    # Translation-only PRs run i18n.yml instead (#309); the nightly still runs everything.
     paths-ignore:
       - 'crates/*/i18n/**'
       - 'docs/i18n/**'
-  push:
-    branches: [main]
-    # Roadmap, issue-spec and docs-only commits build nothing; skip them.
-    paths-ignore:
-      - 'docs/**'
-      - 'scripts/roadmap/**'
-      - '*.md'
-  # Windows and macOS run nightly (and on demand) instead of on every merge.
+  # main is checked nightly (and on demand) on all three OSes instead of on every merge.
   schedule:
     - cron: '0 17 * * *'
   workflow_dispatch:
