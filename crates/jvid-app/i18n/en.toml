@@ -855,3 +855,11 @@ masks_key = "Click the diamond beside the mask's Position to add a key."
 masks_playhead = "Move the playhead near the end of the clip."
 masks_follow = "Drag the mask over the dashed outline again to add a second key."
 masks_play = "Press {key} to watch the mask follow the subject."
+# Mixing Audio: lower the music, duck it under the voice with volume keys, EQ the voice and
+# record a voiceover. Volume, EQ and Inspector are the names the editor shows; {key} is a
+# shortcut or modifier key.
+audio = "Mixing Audio"
+audio_levels = "Select the music clip and lower its Volume in the Inspector."
+audio_duck = "{key}+click the music's volume line twice, then drag the second point down."
+audio_eq = "Select the voice clip and drag a band of its EQ in the Inspector."
+audio_record = "Press {key} to record a voiceover, then press it again to stop."
