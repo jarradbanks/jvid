@@ -18,7 +18,7 @@ use suite_ui::tokens::{color, radius, space};
 use suite_ui::widgets::{Button, State};
 
 use super::{App, Tab};
-use crate::i18n::tr;
+use crate::i18n::{tr, verbatim};
 use crate::import::Importer;
 use crate::timeline::Timeline;
 
@@ -50,43 +50,47 @@ pub struct Step {
     pub reveal: Option<fn(&mut App)>,
 }
 
-pub const LESSONS: &[Lesson] = &[BASICS];
+pub const LESSONS: &[Lesson] = &[TOUR];
 
-/// A short test of the engine on a title clip; the real lessons come with the sample media.
-const BASICS: Lesson = Lesson {
-    id: "basics",
-    title: || tr!("tutorial.basics"),
-    minutes: 1,
+/// The sample the tour edits.
+const TOUR_CLIP: &str = "subject.mp4";
+
+/// The first-launch tour: a first edit of a sample clip, from import to export.
+const TOUR: Lesson = Lesson {
+    id: "first_edit",
+    title: || tr!("tutorial.tour"),
+    minutes: 5,
     media: &[],
     setup: |_| {},
     steps: &[
         Step {
-            anchor: "bin.titles",
-            text: |_| tr!("tutorial.basics_add").into(),
-            done: |a| {
-                a.history
-                    .project()
-                    .assets()
-                    .iter()
-                    .any(|a| a.text.is_some())
+            anchor: "media",
+            text: |a| {
+                let key = a.keymap.shortcut("import");
+                tr!(
+                    "tutorial.tour_import",
+                    key = key,
+                    file = verbatim(TOUR_CLIP)
+                )
             },
-            show_me: |a| {
-                let [(name, _, text), ..] = crate::media_bin::presets();
-                let name = name.into();
-                apply(a, Command::AddText { name, text });
-                // Where clicking a preset leaves the bin: the new title selected on the Media tab.
-                a.bin.selected = a.history.project().assets().last().map(|a| a.id);
-                (a.bin.tab, a.bin.query) = (0, String::new());
+            done: |a| tour_clip(a).is_some(),
+            show_me: |a| match sample(TOUR_CLIP) {
+                Ok(path) => a.import([path]),
+                Err(e) => a.error(tr!(
+                    "app.open_failed",
+                    path = verbatim(TOUR_CLIP),
+                    error = e
+                )),
             },
-            reveal: Some(|a| a.bin.tab = 2),
+            reveal: None,
         },
         Step {
             anchor: "timeline",
-            text: |_| tr!("tutorial.basics_place").into(),
+            text: |_| tr!("tutorial.tour_place", file = verbatim(TOUR_CLIP)),
             done: |a| first_clip(a).is_some(),
             show_me: |a| {
                 let project = a.history.project();
-                let Some(asset) = project.assets().iter().find(|a| a.text.is_some()) else {
+                let Some(asset) = tour_clip(a) else {
                     return;
                 };
                 if let Some(p) = project.placement(asset.id, Time(0), false, None, false) {
@@ -96,39 +100,138 @@ const BASICS: Lesson = Lesson {
             reveal: None,
         },
         Step {
-            anchor: "timeline",
-            text: |_| tr!("tutorial.basics_select").into(),
-            done: |a| !a.timeline.selected().is_empty(),
+            anchor: "preview",
+            text: |a| {
+                let k = |id| a.keymap.shortcut(id);
+                let (play, back) = (k("play_stop"), k("shuttle_left"));
+                let (stop, forward) = (k("shuttle_stop"), k("shuttle_right"));
+                tr!(
+                    "tutorial.tour_play",
+                    play = play,
+                    back = back,
+                    stop = stop,
+                    forward = forward
+                )
+            },
+            done: |a| a.timeline.playhead() > Time(0),
             show_me: |a| {
-                if let Some(id) = first_clip(a) {
-                    a.timeline.select_clip(a.history.project().sequence(), id);
-                }
+                let length = a.history.project().sequence().duration();
+                a.timeline.seek(Time(length.0 / 3));
             },
             reveal: None,
         },
         Step {
-            anchor: "inspector",
-            text: |_| tr!("tutorial.basics_edit").into(),
+            anchor: "timeline",
+            text: |a| {
+                let (mark_in, mark_out) =
+                    (a.keymap.shortcut("mark_in"), a.keymap.shortcut("mark_out"));
+                tr!(
+                    "tutorial.tour_marks",
+                    mark_in = mark_in,
+                    mark_out = mark_out
+                )
+            },
             done: |a| {
-                let preset = &crate::media_bin::presets()[0].2.content;
-                let texts = a.history.project().assets().iter();
-                texts
-                    .filter_map(|a| a.text.as_ref())
-                    .any(|t| t.content != *preset)
+                let seq = a.history.project().sequence();
+                matches!((seq.in_point(), seq.out_point()), (Some(i), Some(o)) if o > i)
+            },
+            show_me: mark,
+            reveal: None,
+        },
+        Step {
+            anchor: "timeline",
+            text: |a| tr!("tutorial.tour_cut", key = a.keymap.shortcut("extract")),
+            done: shortened,
+            show_me: |a| {
+                let seq = a.history.project().sequence();
+                if seq.in_point().is_none() || seq.out_point().is_none() {
+                    mark(a);
+                }
+                apply(a, Command::RemoveRange { ripple: true });
+            },
+            reveal: None,
+        },
+        Step {
+            anchor: "bin.titles",
+            text: |_| tr!("tutorial.tour_title").into(),
+            done: |a| {
+                let project = a.history.project();
+                let tracks = project.sequence().tracks().iter();
+                let mut clips = tracks.flat_map(|t| t.clips());
+                clips.any(|c| project.asset(c.asset).is_some_and(|x| x.text.is_some()))
             },
             show_me: |a| {
-                let project = a.history.project();
-                let Some(asset) = project.assets().iter().find(|a| a.text.is_some()) else {
+                use jvid_core::history::Created;
+                let [(name, _, text), ..] = crate::media_bin::presets();
+                let name = name.into();
+                let Ok(Created::Asset(title)) = a.history.apply(Command::AddText { name, text })
+                else {
                     return;
                 };
-                let mut text = asset.text.clone().unwrap_or_default();
-                text.content = tr!("tutorial.basics_text").into();
-                apply(a, Command::SetText { id: asset.id, text });
+                // Above the clip, as dropping it over the top track does.
+                let (kind, name) = (jvid_core::model::TrackKind::Video, String::new());
+                let Ok(Created::Track(track)) = a.history.apply(Command::AddTrack { kind, name })
+                else {
+                    return;
+                };
+                let project = a.history.project();
+                if let Some(p) = project.placement(title, Time(0), false, Some(track), false) {
+                    apply(a, Command::Place(p));
+                }
+            },
+            reveal: Some(|a| a.bin.tab = 2),
+        },
+        Step {
+            anchor: "export",
+            text: |_| tr!("tutorial.tour_export").into(),
+            done: |a| !a.queue.is_empty(),
+            show_me: |a| {
+                let Some(gpu) = a.preview.gpu() else {
+                    return;
+                };
+                let name = a.name();
+                let req = a
+                    .export_dialog
+                    .entire(a.history.project().sequence(), &name);
+                a.queue_export(req, gpu, 0.0);
             },
             reveal: None,
         },
     ],
 };
+
+/// The tour's sample in the project, once imported.
+fn tour_clip(app: &App) -> Option<&jvid_core::model::MediaAsset> {
+    let assets = app.history.project().assets();
+    assets.iter().find(|a| a.path.ends_with(TOUR_CLIP))
+}
+
+/// Sets In and Out around the middle third of the timeline, playhead on Out, as I and O do.
+fn mark(app: &mut App) {
+    let length = app.history.project().sequence().duration().0;
+    let (in_point, out_point) = (Time(length / 3), Time(length * 2 / 3));
+    apply(
+        app,
+        Command::SetInOut {
+            in_point: Some(in_point),
+            out_point: Some(out_point),
+        },
+    );
+    app.timeline.seek(out_point);
+}
+
+/// Whether a section of the tour's clip is gone from some track, however it was cut out.
+fn shortened(app: &App) -> bool {
+    let Some(asset) = tour_clip(app) else {
+        return false;
+    };
+    let full = asset.probe.as_ref().map_or(0, |p| p.duration.0);
+    app.history.project().sequence().tracks().iter().any(|t| {
+        let clips = t.clips().iter().filter(|c| c.asset == asset.id);
+        let kept: i64 = clips.map(|c| c.duration().0).sum();
+        kept > 0 && kept < full
+    })
+}
 
 /// Sample clip `name`'s path, written out first if needed.
 fn sample(name: &str) -> std::io::Result<PathBuf> {
@@ -418,6 +521,17 @@ impl App {
         }
     }
 
+    /// Stops the Welcome screen offering the tour, now and in `settings.toml`.
+    pub(super) fn tour_offered(&mut self) {
+        self.welcome.tour = false;
+        let Some(path) = &self.settings_path else {
+            return;
+        };
+        if let Err(e) = crate::settings_file::save_value_to(path, "tour_offered", true.into()) {
+            tracing::warn!("couldn't save the tour offer: {e}");
+        }
+    }
+
     /// The Help menu's Tutorials rows: each lesson with its length, and a check once done.
     pub(super) fn tutorials_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button(tr!("menu.tutorials"), |ui| {
@@ -574,9 +688,16 @@ mod tests {
     }
 
     fn harness() -> Harness<'static, App> {
-        let mut h = Harness::builder()
+        harness_with(Harness::builder(), &Default::default())
+    }
+
+    fn harness_with(
+        builder: egui_kittest::HarnessBuilder<App>,
+        settings: &jvid_core::settings::Settings,
+    ) -> Harness<'static, App> {
+        let mut h = builder
             .with_size([1280.0, 720.0])
-            .build_eframe(|cc| App::new(cc, &Default::default()));
+            .build_eframe(|cc| App::new(cc, settings));
         let state = h.state_mut();
         state.on_welcome = false;
         state.settings_path = None;
@@ -588,6 +709,84 @@ mod tests {
     fn step(h: &Harness<'_, App>) -> Option<usize> {
         h.state().lesson.as_ref().map(|r| r.step)
     }
+
+    /// A short lesson on a title clip that tests the engine without sample media.
+    const BASICS: Lesson = Lesson {
+        id: "basics",
+        title: || "Basics",
+        minutes: 1,
+        media: &[],
+        setup: |_| {},
+        steps: &[
+            Step {
+                anchor: "bin.titles",
+                text: |_| String::new(),
+                done: |a| {
+                    a.history
+                        .project()
+                        .assets()
+                        .iter()
+                        .any(|a| a.text.is_some())
+                },
+                show_me: |a| {
+                    let [(name, _, text), ..] = crate::media_bin::presets();
+                    let name = name.into();
+                    apply(a, Command::AddText { name, text });
+                    // Where clicking a preset leaves the bin: the new title selected on the Media tab.
+                    a.bin.selected = a.history.project().assets().last().map(|a| a.id);
+                    (a.bin.tab, a.bin.query) = (0, String::new());
+                },
+                reveal: Some(|a| a.bin.tab = 2),
+            },
+            Step {
+                anchor: "timeline",
+                text: |_| String::new(),
+                done: |a| first_clip(a).is_some(),
+                show_me: |a| {
+                    let project = a.history.project();
+                    let Some(asset) = project.assets().iter().find(|a| a.text.is_some()) else {
+                        return;
+                    };
+                    if let Some(p) = project.placement(asset.id, Time(0), false, None, false) {
+                        apply(a, Command::Place(p));
+                    }
+                },
+                reveal: None,
+            },
+            Step {
+                anchor: "timeline",
+                text: |_| String::new(),
+                done: |a| !a.timeline.selected().is_empty(),
+                show_me: |a| {
+                    if let Some(id) = first_clip(a) {
+                        a.timeline.select_clip(a.history.project().sequence(), id);
+                    }
+                },
+                reveal: None,
+            },
+            Step {
+                anchor: "inspector",
+                text: |_| String::new(),
+                done: |a| {
+                    let preset = &crate::media_bin::presets()[0].2.content;
+                    let texts = a.history.project().assets().iter();
+                    texts
+                        .filter_map(|a| a.text.as_ref())
+                        .any(|t| t.content != *preset)
+                },
+                show_me: |a| {
+                    let project = a.history.project();
+                    let Some(asset) = project.assets().iter().find(|a| a.text.is_some()) else {
+                        return;
+                    };
+                    let mut text = asset.text.clone().unwrap_or_default();
+                    text.content = "Edited".into();
+                    apply(a, Command::SetText { id: asset.id, text });
+                },
+                reveal: None,
+            },
+        ],
+    };
 
     /// Prepared by `setup` with an extra video track; its first step points at the closed
     /// Render Queue and its second at nothing.
@@ -620,15 +819,17 @@ mod tests {
     };
 
     /// Runs frames until the sandbox's media has imported and the card has caught up.
+    /// Importing and exporting repaint until they finish, so frames run without waiting for
+    /// the UI to go idle.
     fn settle(h: &mut Harness<'_, App>) {
         for _ in 0..500 {
-            h.run();
+            h.run_ok();
             if !h.state().importer.is_busy() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        h.run();
+        h.run_ok();
     }
 
     /// Where anchor `name` was drawn in the last frame run.
@@ -642,14 +843,21 @@ mod tests {
 
     fn click(h: &mut Harness<'_, App>, label: &str) {
         h.get_by_label(label).click();
-        h.run();
+        h.run_ok();
         settle(h);
     }
 
+    /// Exports need a GPU, so the tour's last step does too.
     #[test]
     fn every_lesson_runs_by_show_me_and_draws_each_steps_anchor() {
-        for lesson in LESSONS {
-            let mut h = harness();
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let dir = tmp("show-me");
+        for lesson in LESSONS.iter().chain([&BASICS]) {
+            let mut h = harness_with(Harness::builder().wgpu(), &Default::default());
+            // Where Show Me's export lands.
+            h.state_mut().export_dialog.set_path(dir.join("x.mp4"));
             h.state_mut().start_lesson(lesson);
             for (i, step) in lesson.steps.iter().enumerate() {
                 settle(&mut h);
@@ -677,6 +885,61 @@ mod tests {
             click(&mut h, tr!("tutorial.exit"));
             assert!(h.state().lesson.is_none());
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The Welcome screen with the tour offered, as on first launch.
+    fn first_launch(settings: &jvid_core::settings::Settings) -> Harness<'static, App> {
+        let mut h = Harness::builder()
+            .with_size([1280.0, 720.0])
+            .build_eframe(|cc| App::new(cc, settings));
+        h.run();
+        h
+    }
+
+    #[test]
+    fn take_the_tour_starts_it_from_the_welcome_screen() {
+        let mut h = first_launch(&Default::default());
+        h.get_by_label(tr!("welcome.tour")).click();
+        h.run();
+        let state = h.state();
+        assert!(!state.on_welcome);
+        assert_eq!(state.lesson.as_ref().map(|r| r.lesson.id), Some(TOUR.id));
+        assert!(!state.welcome.tour);
+    }
+
+    #[test]
+    fn declining_the_tour_never_offers_it_again() {
+        let dir = tmp("decline");
+        let path = dir.join("settings.toml");
+        let mut h = first_launch(&Default::default());
+        h.state_mut().settings_path = Some(path.clone());
+        h.get_by_label(tr!("welcome.no_tour")).click();
+        h.run();
+        assert!(h.query_by_label(tr!("welcome.tour")).is_none());
+        assert!(
+            h.state().on_welcome,
+            "declining stays on the Welcome screen"
+        );
+
+        let saved = crate::settings_file::load_from(&path);
+        assert!(saved.tour_offered);
+        let h = first_launch(&saved);
+        assert!(h.query_by_label(tr!("welcome.tour")).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn leaving_the_welcome_screen_any_way_ends_the_offer() {
+        let dir = tmp("leave");
+        let path = dir.join("settings.toml");
+        let mut h = first_launch(&Default::default());
+        h.state_mut().settings_path = Some(path.clone());
+        h.get_by_label(tr!("menu.new_project")).click();
+        h.run();
+        h.run();
+        assert!(crate::settings_file::load_from(&path).tour_offered);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -700,7 +963,7 @@ mod tests {
         edit(&mut expect);
         let before = state.history.project().clone();
 
-        state.start_lesson(&LESSONS[0]);
+        state.start_lesson(&BASICS);
         settle(&mut h);
         click(&mut h, tr!("tutorial.show_me"));
         settle(&mut h);
@@ -724,7 +987,7 @@ mod tests {
     #[test]
     fn back_stays_on_a_done_step_and_skip_moves_on() {
         let mut h = harness();
-        h.state_mut().start_lesson(&LESSONS[0]);
+        h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         click(&mut h, tr!("tutorial.show_me"));
         let step = |h: &Harness<'_, App>| h.state().lesson.as_ref().map(|r| r.step);
@@ -740,7 +1003,7 @@ mod tests {
     fn a_hidden_anchor_is_revealed() {
         let mut h = harness();
         h.state_mut().bin.tab = 3;
-        h.state_mut().start_lesson(&LESSONS[0]);
+        h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         assert_eq!(h.state().bin.tab, 2);
         assert!(drawn(&h, "bin.titles").is_some());
@@ -763,7 +1026,7 @@ mod tests {
         h.run();
         assert_eq!(
             h.state().lesson.as_ref().map(|r| r.lesson.id),
-            Some("basics")
+            Some(LESSONS[0].id)
         );
         settle(&mut h);
         click(&mut h, tr!("tutorial.show_me"));
@@ -771,19 +1034,19 @@ mod tests {
             click(&mut h, tr!("tutorial.skip_step"));
         }
         let saved = crate::settings_file::load_from(&path);
-        assert_eq!(saved.tutorials_done, vec!["basics".to_string()]);
+        assert_eq!(saved.tutorials_done, vec![LESSONS[0].id.to_string()]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
     fn skipping_every_step_isnt_finishing() {
         let mut h = harness();
-        h.state_mut().start_lesson(&LESSONS[0]);
+        h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
-        for _ in LESSONS[0].steps {
+        for _ in BASICS.steps {
             click(&mut h, tr!("tutorial.skip_step"));
         }
-        assert_eq!(step(&h), Some(LESSONS[0].steps.len()));
+        assert_eq!(step(&h), Some(BASICS.steps.len()));
         assert!(h.state().tutorials_done.is_empty());
     }
 
@@ -795,7 +1058,7 @@ mod tests {
         std::fs::write(&auto, "the user's work").unwrap();
         let mut h = harness();
         h.state_mut().untitled = Some(untitled);
-        h.state_mut().start_lesson(&LESSONS[0]);
+        h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         click(&mut h, tr!("tutorial.show_me"));
         // Where Keep Project and Ctrl+S both land once the save dialog picks a file.
@@ -822,7 +1085,7 @@ mod tests {
             .unwrap();
         let before = state.history.project().clone();
         h.run();
-        h.state_mut().start_lesson(&LESSONS[0]);
+        h.state_mut().start_lesson(&BASICS);
         let saved = crate::project_file::load(&crate::autosave::slot(&user, 1)).unwrap();
         assert_eq!(saved, before);
         std::fs::remove_dir_all(dir).unwrap();
@@ -831,7 +1094,7 @@ mod tests {
     #[test]
     fn a_selection_made_in_a_lesson_doesnt_survive_exit() {
         let mut h = harness();
-        h.state_mut().start_lesson(&LESSONS[0]);
+        h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         for _ in 0..3 {
             click(&mut h, tr!("tutorial.show_me"));
@@ -846,7 +1109,7 @@ mod tests {
     #[test]
     fn show_me_selects_the_new_title_like_a_click() {
         let mut h = harness();
-        h.state_mut().start_lesson(&LESSONS[0]);
+        h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         click(&mut h, tr!("tutorial.show_me"));
         let state = h.state();
@@ -864,7 +1127,7 @@ mod tests {
     fn back_reveals_again() {
         let mut h = harness();
         h.state_mut().bin.tab = 3;
-        h.state_mut().start_lesson(&LESSONS[0]);
+        h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         assert_eq!(h.state().bin.tab, 2);
         click(&mut h, tr!("tutorial.show_me"));
@@ -922,7 +1185,7 @@ mod tests {
     #[test]
     fn esc_exits_unless_a_dialog_is_open() {
         let mut h = harness();
-        h.state_mut().start_lesson(&LESSONS[0]);
+        h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         h.key_press(Key::Escape);
         h.run();
@@ -935,7 +1198,7 @@ mod tests {
             let state = h.state_mut();
             state.settings_dialog.open(state.history.project());
             h.run();
-            h.state_mut().start_lesson(&LESSONS[0]);
+            h.state_mut().start_lesson(&BASICS);
             settle(h);
         };
         under_settings(&mut h);

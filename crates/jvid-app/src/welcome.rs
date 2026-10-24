@@ -70,6 +70,8 @@ pub enum Action {
     Open,
     OpenRecent(PathBuf),
     Import,
+    Tour,
+    DeclineTour,
 }
 
 #[derive(Default)]
@@ -77,6 +79,8 @@ pub struct Welcome {
     pub preset: usize,
     pub fps: usize,
     pub recent: Vec<Recent>,
+    /// Offer the first-edit tour under the recent projects.
+    pub tour: bool,
     posters: Posters,
 }
 
@@ -161,6 +165,11 @@ impl Welcome {
                     ui.set_min_size(ui.available_size());
                     if let Some(p) = self.recent_list(ui) {
                         action = Some(Action::OpenRecent(p));
+                    }
+                    if self.tour
+                        && let Some(a) = tour_offer(ui)
+                    {
+                        action = Some(a);
                     }
                 });
             });
@@ -298,7 +307,10 @@ impl Welcome {
 
     fn recent_list(&mut self, ui: &mut Ui) -> Option<PathBuf> {
         let mut open = None;
-        let r = ui.max_rect().shrink(space::INSET);
+        let mut r = ui.max_rect().shrink(space::INSET);
+        if self.tour {
+            r.max.y -= size::CONTROL + space::S12;
+        }
         ui.painter().text(
             r.left_top(),
             Align2::LEFT_TOP,
@@ -361,6 +373,24 @@ impl Welcome {
         }
         open
     }
+}
+
+/// Take the Tour and No Thanks along the bottom of the recent card.
+fn tour_offer(ui: &mut Ui) -> Option<Action> {
+    let r = ui.max_rect().shrink(space::INSET);
+    let row = Rect::from_min_max(egui::pos2(r.left(), r.bottom() - size::CONTROL), r.max);
+    let mut ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(row)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    ui.spacing_mut().item_spacing.x = space::S4;
+    if ui.add(Button::secondary(tr!("welcome.tour"))).clicked() {
+        return Some(Action::Tour);
+    }
+    ui.add(Button::ghost(tr!("welcome.no_tour")))
+        .clicked()
+        .then_some(Action::DeclineTour)
 }
 
 fn card_frame() -> Frame {

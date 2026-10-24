@@ -103,6 +103,21 @@ impl ExportDialog {
         self.name = name.into();
     }
 
+    /// What Export would queue for the entire timeline in the chosen format, without showing
+    /// the dialog: Show Me's export. The file is named as by `open`.
+    pub fn entire(&mut self, seq: &Sequence, name: &str) -> Request {
+        self.open(seq, name);
+        self.range = None;
+        Request {
+            path: self.path.clone(),
+            range: (Time(0), seq.duration()),
+            preset: self.presets[self.preset].clone(),
+            loudness: self.loudness,
+            lossless: None,
+            sidecar: self.sidecar,
+        }
+    }
+
     /// Shows the dialog while open; returns the request when the user clicks Export or Add to
     /// Queue, with `true` for Export; Highlights gives one request per chosen marker.
     ///
