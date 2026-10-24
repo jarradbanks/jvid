@@ -1792,3 +1792,11 @@ I("lesson-markers", "Lesson: markers and highlights", None, ["ui"], "S", ["tutor
   summary="Mark moments while you watch, then export them as highlight clips.",
   scope=["Steps: tap M on moments while playing, hold M to mark a range, jump between markers with Shift+M and Ctrl+Shift+M, right-click a marker to name and colour it, export Highlights with Before and After padding"],
   ac=["The Show Me run passes in egui_kittest"])
+
+I("fast-tests", "Faster test suite: slim the slow export tests", None, ["export"], "S", [], labels=["later"],
+  summary="PR CI spends about 3 minutes in three export tests; make them prove the same thing on tiny inputs.",
+  scope=["jvid-app's export::tests::a_ramped_clip_exports_its_curve, every_builtin_preset_exports and target_size_lands_within_three_percent each run over 60 s in CI (run 40108900410). Encode the smallest input that still proves each claim (tiny frame size, frames or seconds) instead of full-size media",
+         "Measure `cargo test --workspace` before and after on the same machine and put both numbers in the PR",
+         "Requested by the owner on 2026-10-25 to cut CI time"],
+  ac=["No CI test runs over 30 s, and each of the three still fails when the behaviour it guards breaks",
+      "The jvid-app lib tests take at most half as long as before"])

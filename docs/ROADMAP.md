@@ -510,6 +510,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#353](https://github.com/jarradbanks/jvid/issues/353) **Marker popup: house widgets and layout** — The marker popup gets the same cleanup the Inspector got (owner request).
 - [#357](https://github.com/jarradbanks/jvid/issues/357) **Lesson: subtitles and edit by text** — Make subtitles from speech, fix them, then cut the video by editing its transcript.
 - [#358](https://github.com/jarradbanks/jvid/issues/358) **Lesson: markers and highlights** — Mark moments while you watch, then export them as highlight clips.
+- [#360](https://github.com/jarradbanks/jvid/issues/360) **Faster test suite: slim the slow export tests** — PR CI spends about 3 minutes in three export tests; make them prove the same thing on tiny inputs.
 
 ---
 
