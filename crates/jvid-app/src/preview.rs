@@ -18,7 +18,7 @@ use jvid_jobs::Priority;
 use jvid_media::decode::{DecoderPool, Frame};
 use jvid_media::proxy::{self, Proxies};
 use jvid_render::preview::{self as render, Yuv};
-use jvid_render::scope::Scopes;
+use jvid_render::scope::{Analysis, Scopes};
 use jvid_render::thumb::Thumbs;
 use jvid_render::{solid, text};
 use suite_ui::theme::{self, icon};
@@ -188,6 +188,8 @@ pub struct Preview {
     suggested: usize,
     thumb: Thumb,
     scopes: scopes::State,
+    /// What the Scopes tab shows, for a lesson step to read.
+    pub analysis: Option<Analysis>,
 }
 
 impl Preview {
@@ -240,6 +242,7 @@ impl Preview {
             suggested: 0,
             thumb,
             scopes: scopes::State::default(),
+            analysis: None,
             recording: None,
             record_clicked: false,
         }
@@ -514,6 +517,7 @@ impl Preview {
             }
             if empty {
                 scopes::clear(ui.ctx());
+                self.analysis = None;
             }
             self.show(ui, trim, offline, None, None);
             return None;
@@ -649,6 +653,7 @@ impl Preview {
         let (landed, busy) = polled.unwrap_or((None, false));
         if let Some(a) = landed {
             scopes::set(ctx, &a);
+            self.analysis = Some(a);
         }
         let moving = dragging || self.program.transport.speed() != 0;
         let now = ctx.input(|i| i.time);

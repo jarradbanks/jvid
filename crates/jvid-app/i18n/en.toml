@@ -832,3 +832,12 @@ tour_marks = "Press {mark_in} to set an In point, then {mark_out} further on for
 tour_cut = "Press {key} to split out the section between In and Out and delete it."
 tour_title = "Click a title in Text, then drag it onto the Timeline above your clip."
 tour_export = "Click Export, then Export again to save your video."
+# Color and Scopes: brighten and neutralise a dark, too-warm shot by reading the Scopes tab,
+# then apply a look. Exposure, Temperature, Tint, LUT, LUT Mix, Waveform, Vectorscope and
+# Histogram are the names the editor shows; {none} is the LUT button's label before one is
+# chosen and {file} the look's file name.
+color = "Color and Scopes"
+color_exposure = "Raise Exposure until the Waveform's top nears 100%, but stop before it flattens there."
+color_balance = "Lower Temperature and nudge Tint until the grays gather in the Vectorscope's center."
+color_histogram = "Fine-tune Temperature and Tint until the tops of red, green and blue line up in the Histogram."
+color_look = "Click {none} beside LUT, open {file}, then lower LUT Mix to compare before and after."

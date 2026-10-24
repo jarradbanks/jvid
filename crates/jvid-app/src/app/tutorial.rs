@@ -22,6 +22,8 @@ use crate::i18n::{tr, verbatim};
 use crate::import::Importer;
 use crate::timeline::Timeline;
 
+mod colour;
+
 /// One lesson. Its `id` is the progress key in `settings.toml`.
 pub struct Lesson {
     pub id: &'static str,
@@ -53,7 +55,7 @@ pub struct Step {
     pub also: &'static [&'static str],
 }
 
-pub const LESSONS: &[Lesson] = &[TOUR];
+pub const LESSONS: &[Lesson] = &[TOUR, colour::COLOUR];
 
 /// The sample the tour edits.
 const TOUR_CLIP: &str = "subject.mp4";
