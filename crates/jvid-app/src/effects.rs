@@ -268,7 +268,7 @@ pub fn name(stem: &str, shipped: bool, shader: &Shader) -> String {
 
 /// `film grain` -> `Film Grain`, leaving short joining words lowercase after the first and the
 /// rest of each word as written, so `LUT` stays.
-fn title_case_name(name: &str) -> String {
+pub(crate) fn title_case_name(name: &str) -> String {
     const SMALL: [&str; 15] = [
         "a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "the",
         "to",

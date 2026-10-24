@@ -643,7 +643,7 @@ mod tests {
             [(0, (0.0, 100.0)), (1, (4.0, 6.0))],
             "flat sits mid-height"
         );
-        assert_eq!(label(&c, &curves(&c)[1]), "position Y");
+        assert_eq!(label(&c, &curves(&c)[1]), "Position Y");
 
         // The later key moves back half a second and its x drops; y stays.
         let mut t = Timeline::default();

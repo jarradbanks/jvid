@@ -299,8 +299,8 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
     h.run();
     // The Transform section's position comes before the text's own.
     for (tab, key, caption) in [
-        ("Vídeo", "Posición", "posición"),
-        ("Efectos 1", "Intensidad", "fx0.intensidad"),
+        ("Vídeo", "Posición", "Posición"),
+        ("Efectos 1", "Intensidad", "Viñeta · Intensidad"),
     ] {
         click_rightmost(&mut h, tab);
         let label = format!("Animar: {key}");
@@ -336,10 +336,10 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
     i18n::set_language("en");
     h.run();
     let shown = painted(&h);
-    for text in ["position", "fx0.strength", "Vignette"] {
+    for text in ["Position", "Vignette · Strength", "Vignette"] {
         assert!(shown.iter().any(|t| t == text), "no {text:?}");
     }
-    for text in ["posición", "fx0.intensidad", "Viñeta", corners] {
+    for text in ["Posición", "Viñeta · Intensidad", "Viñeta", corners] {
         assert!(!shown.iter().any(|t| t == text), "{text:?} still drawn");
     }
     assert!(has(&h, "Strength") && has(&h, "Softness") && has(&h, "Animate Softness"));
@@ -361,10 +361,12 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
     h.get_by_label("Undo").click();
     h.run();
     let shown = painted(&h);
-    assert!(shown.iter().any(|t| t == "position") && !shown.iter().any(|t| t == "fx0.strength"));
+    assert!(
+        shown.iter().any(|t| t == "Position") && !shown.iter().any(|t| t == "Vignette · Strength")
+    );
     h.get_by_label("Redo").click();
     h.run();
-    assert!(painted(&h).iter().any(|t| t == "fx0.strength"));
+    assert!(painted(&h).iter().any(|t| t == "Vignette · Strength"));
     h.get_by_label("Add Effect").scroll_to_me();
     h.run();
     h.get_by_label("Add Effect").click();
