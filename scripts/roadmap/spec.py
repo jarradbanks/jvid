@@ -1807,7 +1807,7 @@ I("windows-playback-hang", "Windows: playback retry test hangs intermittently", 
          "Add a timeout to the test so a hang fails in seconds rather than burning the job"],
   ac=["The test passes 50 times in a row on Windows (a loop in CI or locally), and a forced hang fails within 30 s"])
 
-I("whisper-cancel", "Speech-to-text: Cancel stops whisper promptly", None, ["transcribe"], "S", ["transcribe"], labels=["later"],
+I("whisper-cancel", "Speech-to-text: Cancel stops whisper promptly", None, ["media"], "S", ["transcribe"], labels=["later"],
   summary="After Cancel, the jvid-whisper thread runs on for one encoder pass (3.8-8 s measured in #361).",
   scope=["Use whisper's abort callback so Cancel stops between encoder steps, not after the next pass",
          "Return the detected language from a transcription job"],

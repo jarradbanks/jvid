@@ -511,6 +511,9 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#357](https://github.com/jarradbanks/jvid/issues/357) **Lesson: subtitles and edit by text** — Make subtitles from speech, fix them, then cut the video by editing its transcript.
 - [#358](https://github.com/jarradbanks/jvid/issues/358) **Lesson: markers and highlights** — Mark moments while you watch, then export them as highlight clips.
 - [#360](https://github.com/jarradbanks/jvid/issues/360) **Faster test suite: slim the slow export tests** — PR CI spends about 3 minutes in three export tests; make them prove the same thing on tiny inputs.
+- [#371](https://github.com/jarradbanks/jvid/issues/371) **Windows: playback retry test hangs intermittently** — playback::tests::failed_decodes_retry_and_relink_redecodes hung for 65 minutes on windows-latest and passed on a rerun.
+- [#372](https://github.com/jarradbanks/jvid/issues/372) **Speech-to-text: Cancel stops whisper promptly** — After Cancel, the jvid-whisper thread runs on for one encoder pass (3.8-8 s measured in #361).
+- [#373](https://github.com/jarradbanks/jvid/issues/373) **Track Volume control on the audio track header** — TrackSettings.volume exists but has no UI; the audio lesson (#341) had to use clip Volume.
 
 ---
 

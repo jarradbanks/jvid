@@ -752,6 +752,18 @@
     "fast-tests": {
       "number": 360,
       "id": 6015226790
+    },
+    "windows-playback-hang": {
+      "number": 371,
+      "id": 6016308230
+    },
+    "whisper-cancel": {
+      "number": 372,
+      "id": 6016308586
+    },
+    "track-volume": {
+      "number": 373,
+      "id": 6016308925
     }
   },
   "links": [
@@ -1886,6 +1898,14 @@
     [
       "lesson-markers",
       "marker-popup-style"
+    ],
+    [
+      "whisper-cancel",
+      "transcribe"
+    ],
+    [
+      "track-volume",
+      "mixer"
     ]
   ]
 }
