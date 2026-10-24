@@ -84,6 +84,8 @@ pub struct Timeline {
     pending: Option<Command>,
     /// Where M went down; its release adds the marker.
     marker_hold: Option<Time>,
+    /// Shift+M or Ctrl+Shift+M jumped to a marker, for the markers lesson.
+    pub jumped: bool,
     /// Where Q puts the playhead once its trim applies.
     seek_after: Option<Time>,
     /// Copy or cut ran since the last `show`.
@@ -179,6 +181,7 @@ impl Default for Timeline {
             clipboard: Vec::new(),
             pending: None,
             marker_hold: None,
+            jumped: false,
             seek_after: None,
             copied: false,
             razor: false,

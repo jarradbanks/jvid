@@ -125,6 +125,7 @@ impl Timeline {
                 };
                 if let Some(t) = to {
                     self.seek(t);
+                    self.jumped = true;
                 }
             }
             _ => return false,
@@ -165,6 +166,7 @@ impl Timeline {
     ) -> Option<Edit> {
         let painter = ui.painter().with_clip_rect(ruler);
         let mut edit = None;
+        let mut anchored = false;
         for m in seq.markers() {
             let (x, c) = (view.x(m.time), swatch(m.color));
             if m.duration > Time(0) {
@@ -181,6 +183,10 @@ impl Timeline {
             // The upper part only, so scrubbing still works under a flag.
             let hit = Rect::from_x_y_ranges(x - 5.0..=x + 5.0, top..=top + 10.0);
             let r = ui.interact(hit, id.with(("marker", m.id.0)), Sense::click());
+            if !anchored && ruler.intersects(hit) {
+                anchored = true;
+                crate::app::tutorial::anchor(ui.ctx(), "marker", hit);
+            }
             if r.clicked() {
                 self.seek(m.time);
             }
@@ -243,8 +249,10 @@ mod tests {
         .unwrap();
         run(&mut t, &mut h, "add_range_marker");
         assert_eq!(marks(&h)[2], (5, 2));
+        assert!(!t.jumped);
         run(&mut t, &mut h, "prev_marker");
         assert_eq!(t.playhead(), Time(S));
+        assert!(t.jumped);
         run(&mut t, &mut h, "next_marker");
         assert_eq!(t.playhead(), Time(3 * S));
         run(&mut t, &mut h, "next_marker");
