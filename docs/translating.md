@@ -57,12 +57,12 @@ add_to_queue = "Add to Queue"
 range = "Range"
 ```
 
-- Share a key only between places that mean the same thing and have the same room. Otherwise
-  give each place its own key, even when the English matches, so a translation can be short
-  where it has to be. Fixed-width places are listed in `every_language_fits_the_fixed_width_dropdowns`
-  in `crates/jvid-app/src/i18n.rs`.
+- Share a key only between places that mean the same thing. Otherwise give each place its own
+  key, even when the English matches.
+- Translate naturally; length is the layout's problem. Text too long for its spot ends in an
+  ellipsis and shows in full on hover, as in other editors.
 - A comment above a section or key says where it shows and anything a translator can't see
-  from the text: a width limit, what a placeholder holds, words that must stay as they are.
+  from the text: what a placeholder holds, words that must stay as they are.
 - English labels use Title Case ("Add to Queue"); descriptions and messages are sentences.
   Other languages follow their own conventions: Spanish labels are sentence case
   ("Añadir a la cola").
@@ -199,9 +199,8 @@ A language whose script isn't Latin also needs a font; see the font policy below
 | Command | Checks |
 | --- | --- |
 | `cargo test -p jvid-app --test i18n_guard` | no UI text bypasses the catalogs; every `tr!`/`trn!` key exists and gets its placeholders |
-| `cargo test -p jvid-app --lib i18n` | jvid-app catalogs match English; translations fit the fixed-width dropdowns; every character has a glyph |
-| `cargo test -p jvid-app --lib inspector::tests::spanish` | Inspector captions fit the label column |
-| `cargo test -p jvid-app --test i18n` | the editor, a selected clip's Inspector, the bundled effects (bin, search, Add Effect, the Inspector) and keyframe lanes, the export dialog and Settings in Spanish and back without a restart; the export dialog fits 640 points wide, narrower than the 960-point minimum the editor asks for (its height isn't tested). The tests that open the whole editor run on Linux only, the one place the test can move its folders |
+| `cargo test -p jvid-app --lib i18n` | jvid-app catalogs match English; every character has a glyph |
+| `cargo test -p jvid-app --test i18n` | the editor, a selected clip's Inspector, the bundled effects (bin, search, Add Effect, the Inspector) and keyframe lanes, the export dialog and Settings in Spanish and back without a restart; the export dialog fits 640 points wide, narrower than the 960-point minimum the editor asks for (its height isn't tested). A pseudo-locale (every English text about 40% longer) checks that the editor, Preferences, the Export dialog and the Render Queue cut text too long for its spot with an ellipsis rather than clip it or draw it over other text. The tests that open the whole editor run on Linux only, the one place the test can move its folders |
 | `cargo test -p jvid-app --lib -- shipped_examples lane_captions` | bundled effects translate only while their file is as shipped; English lane captions read as before |
 | `cargo test -p jvid-app --lib -- settings_file preferences` | the language setting saves and reads back, including older files |
 | `cargo test -p suite-ui --test i18n` | live switching, fallback, every language listed by its own name, placeholders, plural rules, glyphs (with Polish, Russian and other samples), the Japanese face loading only while Japanese is shown, the CJK size budget, the gallery in Spanish |

@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Turkish. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Varsayılan"
+hover = "Üzerine Gelme"
+focus = "Görünür Odak"
+pressed = "Basılı"
+disabled = "Devre Dışı"
+loading_error = "Yükleniyor / Hata"
+
+[panel]
+widgets = "Bileşenler"
+effects = "Efektler"
+text = "Metin"
+add = "Ekle"
+more = "Diğer"
+inspector = "Denetçi"
+source = "Kaynak"
+program = "Program"
+audio = "Ses"
+markers = "İşaretçiler"
+history = "Geçmiş"
+captions = "Altyazılar"
+overflow = "64 pikselden dar sekmeler köşeli ok menüsüne taşınır."
+type_and_colour = "Yazı ve Renk"
+
+[row]
+primary = "Birincil"
+secondary = "İkincil"
+ghost = "Hayalet"
+destructive = "Yıkıcı"
+icon = "Simge"
+input = "Giriş"
+search = "Arama"
+numeric = "Sayısal"
+dropdown = "Açılır Menü"
+colour = "Renk"
+segmented = "Bölümlü"
+checkbox = "Onay Kutusu"
+section = "Bölüm"
+slider = "Kaydırıcı"
+keyframe = "Anahtar Kare"
+
+[demo]
+delete = "Sil"
+export = "Dışa Aktar"
+width_prefix = "G"
+min_error = "En az 2 olmalı"
+full = "Tam"
+fit = "Sığdır"
+fill = "Doldur"
+snap = "Yaslama"
+live = "Canlı"
+transform = "Dönüştürme"
+position = "Konum"
+scale = "Ölçek"
+reset = "Sıfırla"
+previous = "Önceki Anahtar Kare"
+next = "Sonraki Anahtar Kare"
+animate = "Anime Et"
+plus_second = "+1 sn"
+
+[type]
+display = "Vitrin 22"
+headline = "Manşet 16"
+title = "Başlık 14"
+body_strong = "Kalın gövde 12"
+body = "Gövde 12 · 0123456789 yerinde durur"
+small = "Küçük 10 · kısayol ipucu"
+
+[clip]
+video = "Video"
+title = "Başlık"
+still = "Durağan Görüntü"
+audio = "Ses"

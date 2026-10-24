@@ -16,7 +16,7 @@ use jvid_jobs::Handle;
 use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, State};
+use suite_ui::widgets::{Button, State, fit_text, paint_fit};
 
 use super::Error;
 use crate::i18n::{tr, trn};
@@ -377,7 +377,7 @@ fn summary(ui: &mut Ui, rows: &[Row]) {
         Rect::from_min_size(inner.left_top() + vec2(0.0, 22.0), vec2(inner.width(), 6.0));
     bar(ui, bar_rect, progress);
     let bottom = format!("{} · {}", file_name(&r.path), r.preset);
-    let galley = elide(ui, &bottom, inner.width(), color::ink_3());
+    let galley = fit_text(ui, &bottom, theme::body(), color::ink_3(), inner.width());
     ui.painter().galley(
         pos2(inner.left(), inner.bottom() - galley.size().y),
         galley,
@@ -408,7 +408,8 @@ fn recent(ui: &mut Ui, r: &Row) -> bool {
         vec2(size::SMALL_CONTROL, size::SMALL_CONTROL),
     );
     let name = file_name(&r.path);
-    let galley = elide(ui, &name, reveal.left() - space::S4 - left, color::ink_2());
+    let width = reveal.left() - space::S4 - left;
+    let galley = fit_text(ui, &name, theme::body(), color::ink_2(), width);
     ui.painter().galley(
         pos2(left, rect.center().y - galley.size().y / 2.0),
         galley,
@@ -678,9 +679,9 @@ fn header_row(ui: &mut Ui, wide: bool) {
     ];
     for (c, name) in cols.iter().zip(names) {
         if c.width() > 0.0 {
-            let galley = elide(ui, name, c.width(), color::ink_3());
+            let galley = fit_text(ui, name, theme::body(), color::ink_3(), c.width());
             let at = pos2(c.left(), c.center().y - galley.size().y / 2.0);
-            ui.painter().galley(at, galley, color::ink_3());
+            paint_fit(ui, at, galley, color::ink_3());
         }
     }
     rule(ui, rect);
@@ -828,13 +829,6 @@ fn cell(ui: &mut Ui, rect: Rect, s: &str, ink: Color32) {
 
 fn text(ui: &Ui, at: egui::Pos2, align: Align2, s: &str, font: egui::FontId, ink: Color32) {
     ui.painter().text(at, align, s, font, ink);
-}
-
-/// `s` in Body, cut to `width` with an ellipsis.
-fn elide(ui: &Ui, s: &str, width: f32, ink: Color32) -> std::sync::Arc<egui::Galley> {
-    let mut job = egui::text::LayoutJob::simple_singleline(s.into(), theme::body(), ink);
-    job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(0.0));
-    ui.painter().layout_job(job)
 }
 
 /// "42% · 1:12 Left", or "Estimating…" before there's enough to go on.

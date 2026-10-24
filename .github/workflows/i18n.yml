@@ -1,0 +1,20 @@
+name: i18n
+
+# The seconds-long check for PRs that ci.yml skips (#309); the Rust parity tests still run on main.
+on:
+  pull_request:
+    paths:
+      - 'crates/*/i18n/**'
+      - 'docs/i18n/**'
+      - 'scripts/i18n_check.py'
+      - 'scripts/test_i18n_check.py'
+
+jobs:
+  catalogs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # ubuntu-latest's Python 3.12 has tomllib.
+      - run: python3 -m unittest discover -s scripts
+      - run: python3 scripts/i18n_check.py

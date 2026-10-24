@@ -1,5 +1,22 @@
 # suite-ui strings, Japanese. Keep keys and {placeholders} in step with en.toml.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
 
 [language]
 name = "日本語"
+
+[panel]
+more_tabs = "その他のタブ"
+
+[input]
+search = "検索"
+
+[color]
+# A fully transparent colour.
+none = "なし"
+
+[theme]
+error = "テーマ {path}：{error}"
+bad_color = "`{value}` は #RRGGBB ではありません"
+at = "{line} 行 {column} 列：{error}"
+dark = "ダーク"
+light = "ライト"
+high_contrast = "ハイコントラスト"
