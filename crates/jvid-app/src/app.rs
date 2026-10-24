@@ -1572,6 +1572,7 @@ impl TabViewer for Viewer<'_> {
                 if let Some((c, g)) = crate::masks::show(ui, self.project, selected, t, frame) {
                     (self.command, self.gesture) = (Some(c), g);
                 }
+                tutorial::ghost(ui, frame, self.project.settings().width);
                 if let Some((id, at)) =
                     crate::handles::double_clicked_text(ui, self.project, t, frame)
                 {

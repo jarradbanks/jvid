@@ -48,6 +48,9 @@ pub struct Step {
     /// Brings the anchor into view when it isn't drawn, such as by switching tabs. The Render
     /// Queue reveals itself.
     pub reveal: Option<fn(&mut App)>,
+    /// A target ellipse, its centre and size in project pixels from the frame's centre,
+    /// drawn dashed on the Program view while the step shows.
+    pub ghost: Option<[[f64; 2]; 2]>,
 }
 
 pub const LESSONS: &[Lesson] = &[TOUR];
@@ -83,6 +86,7 @@ const TOUR: Lesson = Lesson {
                 )),
             },
             reveal: None,
+            ghost: None,
         },
         Step {
             anchor: "timeline",
@@ -98,6 +102,7 @@ const TOUR: Lesson = Lesson {
                 }
             },
             reveal: None,
+            ghost: None,
         },
         Step {
             anchor: "preview",
@@ -119,6 +124,7 @@ const TOUR: Lesson = Lesson {
                 a.timeline.seek(Time(length.0 / 3));
             },
             reveal: None,
+            ghost: None,
         },
         Step {
             anchor: "timeline",
@@ -137,6 +143,7 @@ const TOUR: Lesson = Lesson {
             },
             show_me: mark,
             reveal: None,
+            ghost: None,
         },
         Step {
             anchor: "timeline",
@@ -150,6 +157,7 @@ const TOUR: Lesson = Lesson {
                 apply(a, Command::RemoveRange { ripple: true });
             },
             reveal: None,
+            ghost: None,
         },
         Step {
             anchor: "bin.titles",
@@ -180,6 +188,7 @@ const TOUR: Lesson = Lesson {
                 }
             },
             reveal: Some(|a| a.bin.tab = 2),
+            ghost: None,
         },
         Step {
             anchor: "export",
@@ -196,6 +205,7 @@ const TOUR: Lesson = Lesson {
                 a.queue_export(req, gpu, 0.0);
             },
             reveal: None,
+            ghost: None,
         },
     ],
 };
@@ -283,6 +293,32 @@ pub fn anchor_rect(ctx: &egui::Context, name: &str) -> Option<Rect> {
         let a = d.get_temp::<Anchors>(Id::NULL)?;
         (a.pass == pass).then(|| a.rects.get(name).copied())?
     })
+}
+
+/// The current step's [`Step::ghost`], for [`ghost`] to draw.
+const GHOST: &str = "lesson_ghost";
+
+/// Draws the current step's [`Step::ghost`] dashed over `frame`, the Program view's
+/// on-screen project rect, `width` project pixels wide.
+pub fn ghost(ui: &egui::Ui, frame: Rect, width: u32) {
+    let ctx = ui.ctx();
+    let Some([c, size]) = ctx.data(|d| d.get_temp::<[[f64; 2]; 2]>(Id::new(GHOST))) else {
+        return;
+    };
+    if !running(ctx) {
+        return;
+    }
+    let s = frame.width() / width as f32;
+    let points: Vec<_> = (0..=64)
+        .map(|k| {
+            let (sin, cos) = (k as f64 / 64.0 * std::f64::consts::TAU).sin_cos();
+            let p = [c[0] + cos * size[0] / 2.0, c[1] + sin * size[1] / 2.0];
+            frame.center() + vec2(p[0] as f32, p[1] as f32) * s
+        })
+        .collect();
+    let line = Stroke::new(2.0, color::light_blue());
+    let dashes = egui::Shape::dashed_line(&points, line, space::S8, space::S4);
+    ui.painter().with_clip_rect(frame).extend(dashes);
 }
 
 #[derive(Clone, Default)]
@@ -446,6 +482,16 @@ impl App {
             run.armed |= !done;
         }
         let step = steps.get(run.step);
+        let ghost = step.and_then(|s| s.ghost);
+        if ghost != ctx.data(|d| d.get_temp(Id::new(GHOST))) {
+            ctx.data_mut(|d| match ghost {
+                Some(g) => {
+                    d.insert_temp(Id::new(GHOST), g);
+                }
+                None => d.remove::<[[f64; 2]; 2]>(Id::new(GHOST)),
+            });
+            ctx.request_repaint();
+        }
         let target = step.and_then(|s| anchor_rect(ctx, s.anchor));
         if let Some(s) = step.filter(|_| target.is_none()) {
             let queue =
@@ -737,6 +783,7 @@ mod tests {
                     (a.bin.tab, a.bin.query) = (0, String::new());
                 },
                 reveal: Some(|a| a.bin.tab = 2),
+                ghost: None,
             },
             Step {
                 anchor: "timeline",
@@ -752,6 +799,7 @@ mod tests {
                     }
                 },
                 reveal: None,
+                ghost: None,
             },
             Step {
                 anchor: "timeline",
@@ -763,6 +811,7 @@ mod tests {
                     }
                 },
                 reveal: None,
+                ghost: None,
             },
             Step {
                 anchor: "inspector",
@@ -784,6 +833,7 @@ mod tests {
                     apply(a, Command::SetText { id: asset.id, text });
                 },
                 reveal: None,
+                ghost: None,
             },
         ],
     };
@@ -807,6 +857,7 @@ mod tests {
                 done: |_| false,
                 show_me: |_| {},
                 reveal: None,
+                ghost: None,
             },
             Step {
                 anchor: "nowhere",
@@ -814,6 +865,7 @@ mod tests {
                 done: |_| false,
                 show_me: |_| {},
                 reveal: None,
+                ghost: None,
             },
         ],
     };
@@ -1214,6 +1266,35 @@ mod tests {
             h.state().lesson.is_some(),
             "the card is inert under a dialog"
         );
+    }
+
+    #[test]
+    fn a_steps_ghost_shows_only_while_it_does() {
+        const GHOSTED: Lesson = Lesson {
+            steps: &[Step {
+                anchor: "preview",
+                text: |_| String::new(),
+                done: |_| false,
+                show_me: |_| {},
+                reveal: None,
+                ghost: Some([[10.0, 20.0], [300.0, 400.0]]),
+            }],
+            ..PREPARED
+        };
+        let shown = |h: &Harness<'_, App>| {
+            let g = h.ctx.data(|d| d.get_temp::<[[f64; 2]; 2]>(Id::new(GHOST)));
+            g.filter(|_| running(&h.ctx))
+        };
+        let mut h = harness();
+        h.state_mut().start_lesson(&GHOSTED);
+        settle(&mut h);
+        assert_eq!(shown(&h), Some([[10.0, 20.0], [300.0, 400.0]]));
+        click(&mut h, tr!("tutorial.skip_step"));
+        assert_eq!(shown(&h), None, "the finished card has no ghost");
+        h.state_mut().start_lesson(&GHOSTED);
+        settle(&mut h);
+        click(&mut h, tr!("tutorial.exit"));
+        assert_eq!(shown(&h), None, "exiting hides it");
     }
 
     #[test]
