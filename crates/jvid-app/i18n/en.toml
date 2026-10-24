@@ -304,6 +304,9 @@ drop = "Drop media here, or click to choose files"
 drop_tooltip = "Starts a Match Source project and imports everything"
 recent = "Recent"
 recent_empty = "Projects you open or save show here."
+# The first-launch offer of the tour, under the recent projects.
+tour = "Take the Tour"
+no_tour = "No Thanks"
 
 # When a recent project was last opened.
 [date]
@@ -818,12 +821,14 @@ exit = "Exit"
 keep_project = "Keep Project"
 # The step card once the last step is done.
 complete = "Lesson complete."
-# Editor Basics, a short lesson that adds a title, places it, selects it and edits it.
-# Title, Media and Inspector are the names the editor shows for them.
-basics = "Editor Basics"
-basics_add = "Click Title to add a title to the project."
-basics_place = "Drag the title from the Media tab onto the timeline."
-basics_select = "Click the clip on the timeline to select it."
-basics_edit = "Change the title's text in the Inspector."
-# The text Show Me types into the title.
-basics_text = "My First Edit"
+# Your First Edit, the first-launch tour: import a sample clip, place it, play, mark In and Out,
+# cut that section out, add a title and export. Media, Timeline, Text and Export are the names
+# the editor shows for them; {file} is the sample's file name and the others are shortcuts.
+tour = "Your First Edit"
+tour_import = "Press {key} and open {file}."
+tour_place = "Drag {file} from Media onto the Timeline."
+tour_play = "Press {play} to play, then {back}, {stop} and {forward} to scrub."
+tour_marks = "Press {mark_in} to set an In point, then {mark_out} further on for the Out."
+tour_cut = "Press {key} to split out the section between In and Out and delete it."
+tour_title = "Click a title in Text, then drag it onto the Timeline above your clip."
+tour_export = "Click Export, then Export again to save your video."

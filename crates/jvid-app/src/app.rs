@@ -198,7 +198,9 @@ impl App {
         app.input_device = settings.input_device.clone();
         app.reduce_motion = settings.reduce_motion;
         app.tutorials_done = settings.tutorials_done.clone();
-        app.settings_path = crate::settings_file::path();
+        app.welcome.tour = !settings.tour_offered;
+        // Tests never write the real settings file; those that save set their own.
+        app.settings_path = crate::settings_file::path().filter(|_| !cfg!(test));
         app.untitled = autosave::untitled();
         crate::preferences::reduce_motion(&cc.egui_ctx, settings.reduce_motion);
         if let Some(auto) = app.untitled.as_deref().and_then(autosave::newer) {
@@ -321,6 +323,11 @@ impl App {
                     self.import(paths);
                 }
             }
+            welcome::Action::Tour => {
+                self.new_project(None);
+                self.start_lesson(&tutorial::LESSONS[0]);
+            }
+            welcome::Action::DeclineTour => self.tour_offered(),
         }
     }
 
@@ -594,11 +601,11 @@ impl App {
         };
         // While a queue exists, "Exporting 9%" to "Export" keeps the chevron still.
         let min = if self.queue.is_empty() { 0.0 } else { 112.0 };
-        if ui
+        let export = ui
             .add(Button::primary(&label).state(state).width(min))
-            .on_disabled_hover_text(tr!("export.nothing"))
-            .clicked()
-        {
+            .on_disabled_hover_text(tr!("export.nothing"));
+        tutorial::anchor(ui.ctx(), "export", export.rect);
+        if export.clicked() {
             self.run_action("export", true);
         }
     }
@@ -906,10 +913,16 @@ impl App {
 
     /// Asks for media files and queues them for import.
     fn import_dialog(&mut self) {
-        if let Some(paths) = FileDialog::new()
-            .set_title(tr!("app.import_title"))
-            .pick_files()
-        {
+        let mut dialog = FileDialog::new().set_title(tr!("app.import_title"));
+        // A lesson's sample clips sit in the app data folder, where no one would look.
+        if self.lesson.is_some() {
+            match crate::samples::dir() {
+                Ok(Some(dir)) => dialog = dialog.set_directory(dir),
+                Ok(None) => {}
+                Err(e) => tracing::warn!("couldn't write the sample clips: {e}"),
+            }
+        }
+        if let Some(paths) = dialog.pick_files() {
             self.import(paths);
         }
     }
@@ -1210,6 +1223,10 @@ impl eframe::App for App {
             }
             self.show_toasts(&ctx);
             return;
+        }
+        // Offered on the first Welcome screen only, whatever left it.
+        if self.welcome.tour {
+            self.tour_offered();
         }
 
         egui::Panel::top("app_bar")
