@@ -32,7 +32,7 @@ impl std::error::Error for ProbeError {}
 
 /// Probes `path`. Call `ffmpeg::init` first.
 pub fn probe(path: &Path) -> Result<ProbeInfo, ProbeError> {
-    let input = format::input(path).map_err(ProbeError::Unreadable)?;
+    let mut input = format::input(path).map_err(ProbeError::Unreadable)?;
     let streams = input
         .streams()
         .map(stream_info)
@@ -53,9 +53,14 @@ pub fn probe(path: &Path) -> Result<ProbeInfo, ProbeError> {
     }
     // Stills report no duration.
     let micros = input.duration().max(0);
+    let padding = match audio.first() {
+        Some(a) if input.format().name() == "mp3" => mp3_padding(&mut input, micros, a.sample_rate),
+        _ => Time(0),
+    };
     Ok(ProbeInfo {
         // 705.6 flicks per microsecond: dividing first truncated every duration by 0.085%.
-        duration: Time((i128::from(micros) * i128::from(FLICKS_PER_SECOND) / 1_000_000) as i64),
+        duration: Time((i128::from(micros) * i128::from(FLICKS_PER_SECOND) / 1_000_000) as i64)
+            - padding,
         width: video.map(|v| v.width),
         height: video.map(|v| v.height),
         frame_rate: video.and_then(|v| {
@@ -71,6 +76,36 @@ pub fn probe(path: &Path) -> Result<ProbeInfo, ProbeError> {
         streams,
         file_size: std::fs::metadata(path).ok().map(|m| m.len()),
     })
+}
+
+/// The encoder delay and trailing padding an MP3's duration counts in whole 1152-sample frames.
+/// FFmpeg reads both from the LAME tag: the delay as the stream's start time, the padding as
+/// the last packet's discard padding.
+fn mp3_padding(input: &mut format::context::Input, micros: i64, rate: u32) -> Time {
+    let Some(s) = input.streams().best(media::Type::Audio) else {
+        return Time(0);
+    };
+    let (index, tb) = (s.index(), s.time_base());
+    let flicks = |ts: i64, tb: Rational| {
+        let t =
+            i128::from(ts) * i128::from(FLICKS_PER_SECOND) * i128::from(tb.0) / i128::from(tb.1);
+        Time(t as i64)
+    };
+    // NOPTS is i64::MIN.
+    let delay = flicks(s.start_time().max(0), tb);
+    // Only the last packet carries the padding; a failed seek just reads the whole file.
+    let near_end = (micros - 1_000_000).max(0);
+    let _ = input.seek(near_end, ..near_end + 1);
+    let mut discard = 0;
+    for (_, p) in input.packets().filter(|(s, _)| s.index() == index) {
+        discard = p
+            .side_data()
+            .find(|d| d.kind() == side_data::Type::SkipSamples && d.data().len() >= 8)
+            .map_or(0, |d| {
+                u32::from_le_bytes(d.data()[4..8].try_into().unwrap())
+            });
+    }
+    delay + flicks(i64::from(discard), Rational(1, rate.max(1) as i32))
 }
 
 fn stream_info(stream: Stream) -> Result<StreamInfo, ProbeError> {
