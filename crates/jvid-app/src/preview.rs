@@ -139,6 +139,10 @@ struct Player {
 }
 
 pub struct Preview {
+    /// Set by the app while a voiceover records: its elapsed time and input level, 0..=1.
+    pub recording: Option<(std::time::Duration, f32)>,
+    /// The Program row's Record button was clicked; the app runs the `record` action.
+    pub record_clicked: bool,
     pool: Arc<DecoderPool>,
     jobs: jvid_jobs::Pool,
     tx: Sender<Decoded>,
@@ -234,6 +238,8 @@ impl Preview {
             suggested: 0,
             thumb,
             scopes: scopes::State::default(),
+            recording: None,
+            record_clicked: false,
         }
     }
 
@@ -725,6 +731,8 @@ impl Preview {
         row: Option<&SourceRow>,
         program: Option<(&ProjectSettings, bool)>,
     ) -> Option<&'static str> {
+        // Only the timeline's own row records.
+        let records = matches!(program, Some((_, false)));
         let path = source.map(|(p, _)| p);
         if self.source.as_deref() != path {
             self.source = path.map(Path::to_path_buf);
@@ -881,7 +889,13 @@ impl Preview {
                 theme::timecode(),
                 color::ink(),
             );
-            let width = 5.0 * 28.0;
+            let records = records.then_some(self.recording);
+            // Five buttons, then Record after a wider gap; a take adds its time and meter.
+            let width = 5.0 * 28.0 + records.map_or(0.0, |_| 28.0 + space::S4);
+            let extra = match records {
+                Some(Some(_)) => TAKE_WIDTH,
+                _ => 0.0,
+            };
             // The dropdowns first, so the buttons can stay clear of them in a narrow panel.
             let rtl = Layout::right_to_left(Align::Center);
             let right = ui.scope_builder(UiBuilder::new().max_rect(inner).layout(rtl), |ui| {
@@ -895,7 +909,8 @@ impl Preview {
                     theme::body(),
                     color::ink_2(),
                 );
-                let room = ui.available_width() - timecode.width() - width - 4.0 * space::S8;
+                let room =
+                    ui.available_width() - timecode.width() - width - extra - 4.0 * space::S8;
                 if galley.size().x <= room {
                     ui.add(egui::Label::new(text).selectable(false))
                         .on_hover_text(tr!("bin.sort_duration"));
@@ -905,10 +920,13 @@ impl Preview {
             let x = bar
                 .center()
                 .x
-                .min(right.inner - space::S8 - width / 2.0)
+                .min(right.inner - space::S8 - width / 2.0 - extra)
                 .max(timecode.right() + space::S8 + width / 2.0);
-            let buttons =
-                Rect::from_center_size(pos2(x, bar.center().y), vec2(width, bar.height()));
+            // Centred on the buttons alone, so a take's readout doesn't shift them.
+            let buttons = Rect::from_min_size(
+                pos2(x - width / 2.0, bar.top()),
+                vec2(width + extra, bar.height()),
+            );
             ui.scope_builder(UiBuilder::new().max_rect(buttons), |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = space::S4;
@@ -953,6 +971,10 @@ impl Preview {
                         {
                             action = Some(id);
                         }
+                    }
+                    if let Some(take) = records {
+                        ui.add_space(space::S4);
+                        self.record_clicked |= record_button(ui, take);
                     }
                 });
             });
@@ -1011,6 +1033,42 @@ impl Preview {
         .response
         .on_hover_text(tr!("preview.guides"));
     }
+}
+
+/// Room for a take's elapsed time and meter after the Record button.
+const TAKE_WIDTH: f32 = 84.0;
+
+/// The Program row's Record button: a dot, or while `take` records a Red stop square with its
+/// elapsed time and input meter. Returns whether it was clicked.
+fn record_button(ui: &mut Ui, take: Option<(std::time::Duration, f32)>) -> bool {
+    let name = match take {
+        Some(_) => tr!("timeline.stop_recording"),
+        None => tr!("action.record"),
+    };
+    // Keycaps stay English, like the other transport buttons.
+    let name = tr!("preview.with_key", action = name, key = verbatim("Shift+R"));
+    let b = ui.add(Button::icon("", &name)).on_hover_text(&name);
+    let c = b.rect.center();
+    let Some((elapsed, level)) = take else {
+        let ink = if b.hovered() {
+            color::ink()
+        } else {
+            color::ink_2()
+        };
+        ui.painter().circle_filled(c, 5.0, ink);
+        return b.clicked();
+    };
+    let square = Rect::from_center_size(c, vec2(10.0, 10.0));
+    ui.painter()
+        .rect_filled(square, egui::CornerRadius::same(2), color::red());
+    let s = elapsed.as_secs();
+    let text = egui::RichText::new(format!("{}:{:02}", s / 60, s % 60))
+        .font(theme::body())
+        .color(color::ink());
+    ui.add(egui::Label::new(text).selectable(false));
+    let (bar, _) = ui.allocate_exact_size(vec2(32.0, 4.0), egui::Sense::hover());
+    crate::timeline::meter(ui.painter(), bar, level);
+    b.clicked()
 }
 
 /// The video area of a viewer `ui`: its rect above the transport row.
@@ -1438,7 +1496,11 @@ mod program_tests {
     /// Each item's ink in the transport row, left to right, as (left x, vertical centre, top,
     /// bottom) in physical pixels, against the row's centre. Ink is anything not the row's
     /// background; items are runs of inked columns more than 3 points apart.
-    fn transport_ink(size: [f32; 2], ppp: f32) -> (f32, Vec<(u32, f32, u32, u32)>) {
+    fn transport_ink(
+        size: [f32; 2],
+        ppp: f32,
+        recording: Option<(std::time::Duration, f32)>,
+    ) -> (f32, Vec<(u32, f32, u32, u32)>) {
         let mut h = egui_kittest::Harness::builder()
             .with_size(size)
             .with_pixels_per_point(ppp)
@@ -1450,6 +1512,7 @@ mod program_tests {
             });
         // A clip, so the row has its timecodes and buttons.
         add_solid(&mut h.state_mut().history, [0.0, 0.0, 0.0, 1.0], Time(0));
+        h.state_mut().preview.recording = recording;
         h.run();
         let img = h.render().unwrap();
         let px = |pt: f32| (pt * ppp).round() as u32;
@@ -1479,7 +1542,7 @@ mod program_tests {
     }
 
     /// DESIGN.md Layout > Checks, for the Program transport row: every item's ink (timecodes,
-    /// buttons, the end time, the dropdowns, the Preview checkbox, the guides menu) is centred
+    /// buttons, Record, the end time, the dropdowns, the Preview checkbox, the guides menu) is centred
     /// within 1 physical pixel of the row's centre, at 100% and 150% scale.
     #[test]
     fn transport_items_share_the_rows_centre_line() {
@@ -1487,10 +1550,15 @@ mod program_tests {
             return;
         }
         for ppp in [1.0, 1.5] {
-            let (centre, items) = transport_ink([960.0, 360.0], ppp);
-            // Timecode, 5 buttons, end time, guides, checkbox box and label, 2 dropdowns.
-            assert_eq!(items.len(), 12, "@{ppp}x: {items:?}");
-            for i in &items {
+            let (centre, items) = transport_ink([960.0, 360.0], ppp, None);
+            // Timecode, 5 buttons, Record, end time, guides, checkbox box and label, 2
+            // dropdowns.
+            assert_eq!(items.len(), 13, "@{ppp}x: {items:?}");
+            // While recording: Stop, its elapsed time and meter join the row.
+            let take = Some((std::time::Duration::from_secs(72), 0.5));
+            let (_, recording) = transport_ink([960.0, 360.0], ppp, take);
+            assert_eq!(recording.len(), 15, "@{ppp}x: {recording:?}");
+            for i in items.iter().chain(&recording) {
                 assert!(
                     (i.1 - centre).abs() <= 1.0,
                     "@{ppp}x: {i:?} off the centre {centre}, all {items:?}"

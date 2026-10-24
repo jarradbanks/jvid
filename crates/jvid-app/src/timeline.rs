@@ -1885,16 +1885,7 @@ impl Timeline {
                 rect.left() + space::INSET..=rect.right() - space::S8,
                 top..=top + 3.0,
             );
-            let db = 20.0 * level.max(1e-6).log10();
-            let fill = match db {
-                d if d >= 0.0 => color::red(),
-                d if d > -6.0 => color::amber(),
-                _ => color::green(),
-            };
-            let w = ((db + 60.0) / 60.0).clamp(0.0, 1.0) * bar.width();
-            let corner = CornerRadius::same(1);
-            painter.rect_filled(bar, corner, color::field());
-            painter.rect_filled(Rect::from_min_size(bar.min, vec2(w, 3.0)), corner, fill);
+            meter(painter, bar, level);
         }
 
         // Name, or the rename field.
@@ -2206,6 +2197,25 @@ fn stream_name(p: &ProbeInfo, n: u32) -> String {
 /// A dragged height, snapped and clamped to the allowed range.
 fn snap_height(h: f32) -> f32 {
     ((h / HEIGHT_STEP).round() * HEIGHT_STEP).clamp(Track::MIN_HEIGHT, Track::MAX_HEIGHT)
+}
+
+/// An input meter filling `bar` from -60 to 0 dBFS for a 0..=1 `level`, amber above -6 dB
+/// and Red at clipping.
+pub fn meter(painter: &egui::Painter, bar: Rect, level: f32) {
+    let db = 20.0 * level.max(1e-6).log10();
+    let fill = match db {
+        d if d >= 0.0 => color::red(),
+        d if d > -6.0 => color::amber(),
+        _ => color::green(),
+    };
+    let w = ((db + 60.0) / 60.0).clamp(0.0, 1.0) * bar.width();
+    let corner = CornerRadius::same(1);
+    painter.rect_filled(bar, corner, color::field());
+    painter.rect_filled(
+        Rect::from_min_size(bar.min, vec2(w, bar.height())),
+        corner,
+        fill,
+    );
 }
 
 fn add_menu(ui: &mut Ui, edit: &mut Option<Edit>) {

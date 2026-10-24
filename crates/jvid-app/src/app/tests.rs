@@ -1367,6 +1367,50 @@ fn title_harness() -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Po
     (h, id, center)
 }
 
+/// #265: with nothing armed, the transport row's Record button adds an audio track, arms it
+/// and records there; Shift+R ends the same take and the clip lands at the record start.
+#[test]
+fn record_button_records_into_a_new_armed_track_and_shift_r_stops_it() {
+    use jvid_core::model::TrackKind;
+    if !gpu() {
+        return;
+    }
+    let (mut h, _, _) = title_harness();
+    let dir = std::env::temp_dir().join(format!("jvid-record-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mic = crate::record::tests::FakeMic::default();
+    let app = h.state_mut();
+    app.path = Some(dir.join("p.jvid"));
+    app.input = Some(Box::new(mic.clone()));
+    let tracks = |h: &Harness<'_, App>| h.state().history.project().sequence().tracks().to_vec();
+    let before = tracks(&h).len();
+    assert_eq!(h.state().timeline.armed, None);
+
+    h.get_by_label("Record Voiceover (Shift+R)").click();
+    // A take repaints every frame, so step rather than run to idle.
+    h.run_steps(2);
+    let t = tracks(&h);
+    assert_eq!(t.len(), before + 1);
+    let new = t.iter().find(|t| t.kind == TrackKind::Audio).unwrap().id;
+    assert_eq!(h.state().timeline.armed, Some(new));
+    assert!(h.state().take.is_some());
+    assert!(h.state().preview.recording.is_some());
+    // The button turns into Stop with the same take behind it.
+    h.get_by_label("Stop Recording (Shift+R)");
+
+    mic.0.lock().unwrap().as_ref().unwrap().push(&[0.25; 4_800]);
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::R);
+    h.run_steps(2);
+    assert!(h.state().take.is_none() && h.state().preview.recording.is_none());
+    let project = h.state().history.project();
+    let [clip] = project.sequence().track(new).unwrap().clips() else {
+        panic!("one clip on the new track")
+    };
+    assert_eq!(clip.start, jvid_core::time::Time(0));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn a_selected_title_puts_text_video_and_effects_tabs_in_the_inspector_header() {
     if !gpu() {
