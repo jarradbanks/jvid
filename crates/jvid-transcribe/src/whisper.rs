@@ -11,7 +11,7 @@ use whisper_rs::{
     WhisperState, WhisperTokenId,
 };
 
-use crate::{Error, Options, Transcriber, Word};
+use crate::{Error, Options, Transcriber, Transcript, Word};
 
 /// Whisper reports times in centiseconds.
 const FLICKS_PER_CS: i64 = jvid_core::time::FLICKS_PER_SECOND / 100;
@@ -36,7 +36,7 @@ impl Whisper {
 }
 
 impl Transcriber for Whisper {
-    fn transcribe(&self, audio: Vec<f32>, opts: &Options, ctx: &Ctx) -> Result<Vec<Word>, Error> {
+    fn transcribe(&self, audio: Vec<f32>, opts: &Options, ctx: &Ctx) -> Result<Transcript, Error> {
         let state = self.0.create_state().map_err(failed)?;
         let eot = self.0.token_eot();
         let (opts, job) = (opts.clone(), ctx.clone());
@@ -72,7 +72,7 @@ fn full(
     audio: &[f32],
     opts: &Options,
     ctx: &Ctx,
-) -> Result<Vec<Word>, Error> {
+) -> Result<Transcript, Error> {
     let mut p = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     p.set_language(opts.language.as_deref());
     if let Some(prompt) = &opts.initial_prompt {
@@ -92,6 +92,9 @@ fn full(
     let c = ctx.clone();
     p.set_progress_callback_safe(move |pct: i32| c.set_progress(pct as f32 / 100.0));
     let c = ctx.clone();
+    // whisper.cpp checks this only after each whole encoder/decoder graph: its sched-based
+    // `ggml_graph_compute_helper` (src/whisper.cpp) never gives it to the CPU backend, which would
+    // check per node. Nothing to change here once upstream fixes that.
     // F spelled out: whisper-rs 0.16 calls the abort closure through `&mut F` but stores a
     // `Box<dyn FnMut>`, which only agree when F is that box.
     p.set_abort_callback_safe::<_, Box<dyn FnMut() -> bool>>(
@@ -122,5 +125,6 @@ fn full(
             confidence: p.iter().sum::<f32>() / p.len() as f32,
         });
     }
-    Ok(words)
+    let language = whisper_rs::get_lang_str(state.full_lang_id_from_state()).map(str::to_owned);
+    Ok(Transcript { language, words })
 }
