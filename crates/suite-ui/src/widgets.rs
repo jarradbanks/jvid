@@ -436,7 +436,7 @@ fn error_line(ui: &mut Ui, error: Option<&str>) {
     }
 }
 
-/// A one-line text input with an optional inline prefix, icon and error.
+/// A text input with an optional inline prefix, icon and error. One line unless `.rows(..)`.
 #[must_use = "add it with `ui.add(..)`"]
 pub struct TextInput<'a> {
     text: &'a mut String,
@@ -445,6 +445,7 @@ pub struct TextInput<'a> {
     hint: &'a str,
     error: Option<&'a str>,
     width: f32,
+    rows: usize,
     state: State,
 }
 
@@ -457,8 +458,15 @@ impl<'a> TextInput<'a> {
             hint: "",
             error: None,
             width: 160.0,
+            rows: 1,
             state: State::Live,
         }
+    }
+
+    /// Multi-line, `rows` lines tall; longer text scrolls.
+    pub fn rows(mut self, rows: usize) -> Self {
+        self.rows = rows.max(1);
+        self
     }
 
     /// A search field: search icon prefix and an Ink 3 placeholder.
@@ -499,9 +507,11 @@ impl<'a> TextInput<'a> {
 impl Widget for TextInput<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         ui.vertical(|ui| {
+            let row = ui.fonts_mut(|f| f.row_height(&theme::body()));
+            let extra = (self.rows - 1) as f32 * row;
             let (rect, outer) = allocate(
                 ui,
-                vec2(self.width, size::CONTROL),
+                vec2(self.width, size::CONTROL + extra),
                 self.state,
                 Sense::hover(),
             );
@@ -515,17 +525,27 @@ impl Widget for TextInput<'_> {
                 color::ink()
             };
             let edit = ui.add_enabled_ui(!disabled, |ui| {
-                let row = ui.fonts_mut(|f| f.row_height(&theme::body()));
-                let edit_rect = Rect::from_center_size(inner.center(), vec2(inner.width(), row));
-                ui.put(
-                    edit_rect,
+                let edit_rect =
+                    Rect::from_center_size(inner.center(), vec2(inner.width(), row + extra));
+                let edit = if self.rows > 1 {
+                    TextEdit::multiline(self.text).desired_width(f32::INFINITY)
+                } else {
                     TextEdit::singleline(self.text)
-                        .frame(egui::Frame::NONE)
-                        .margin(0)
-                        .font(theme::body())
-                        .text_color(ink)
-                        .hint_text(self.hint),
-                )
+                }
+                .frame(egui::Frame::NONE)
+                .margin(0)
+                .font(theme::body())
+                .text_color(ink)
+                .hint_text(self.hint);
+                if self.rows == 1 {
+                    return ui.put(edit_rect, edit);
+                }
+                ui.put(edit_rect, |ui: &mut Ui| {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .show(ui, |ui| ui.add(edit))
+                        .inner
+                })
             });
             let mut response = edit.inner.union(outer);
             response.rect = rect;
@@ -537,6 +557,90 @@ impl Widget for TextInput<'_> {
             response
         })
         .inner
+    }
+}
+
+/// A row of colour swatches to pick one of: 20px squares 4px apart, each a radio button
+/// named for screen readers and on hover, the selected one ringed in Ink.
+#[must_use = "add it with `ui.add(..)`"]
+pub struct Swatches<'a> {
+    selected: &'a mut usize,
+    colors: &'a [Color32],
+    names: &'a [&'a str],
+    state: State,
+}
+
+impl<'a> Swatches<'a> {
+    /// `names[i]` names `colors[i]`.
+    pub fn new(selected: &'a mut usize, colors: &'a [Color32], names: &'a [&'a str]) -> Self {
+        Self {
+            selected,
+            colors,
+            names,
+            state: State::Live,
+        }
+    }
+
+    /// Pins the state of the first unselected swatch.
+    pub fn state(mut self, state: State) -> Self {
+        self.state = state;
+        self
+    }
+}
+
+impl Widget for Swatches<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let n = self.colors.len() as f32;
+        let side = size::SMALL_CONTROL;
+        let width = n * side + (n - 1.0).max(0.0) * space::S4;
+        let (rect, mut response) = allocate(ui, vec2(width, side), self.state, Sense::hover());
+        let disabled = self.state == State::Disabled || !ui.is_enabled();
+        let first_unselected = (0..self.colors.len()).find(|i| i != self.selected);
+        let corner = CornerRadius::same(radius::SMALL);
+        for (i, c) in self.colors.iter().enumerate() {
+            let x = rect.left() + i as f32 * (side + space::S4);
+            let swatch = Rect::from_min_size(pos2(x, rect.top()), Vec2::splat(side));
+            let sense = if disabled {
+                Sense::hover()
+            } else {
+                Sense::click()
+            };
+            let name = self.names.get(i).copied().unwrap_or_default();
+            let on = i == *self.selected;
+            let r = ui.interact(swatch, response.id.with(i), sense);
+            r.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, !disabled, on, name));
+            let r = r.on_hover_text(name);
+            if r.clicked() {
+                *self.selected = i;
+                response.mark_changed();
+            }
+            let pinned = if Some(i) == first_unselected {
+                self.state
+            } else {
+                State::Live
+            };
+            let l = look(&r, pinned);
+            let fill = if disabled { c.gamma_multiply(0.4) } else { *c };
+            ui.painter().rect_filled(swatch, corner, fill);
+            let edge = if l.hover || l.pressed {
+                color::ink_3()
+            } else {
+                color::border_strong()
+            };
+            ui.painter().add(border(ui, swatch, radius::SMALL, edge));
+            if on {
+                ui.painter().rect_stroke(
+                    swatch,
+                    corner,
+                    Stroke::new(1.5, color::ink()),
+                    StrokeKind::Outside,
+                );
+            }
+            if l.focus {
+                ui.painter().add(focus_ring(swatch, radius::SMALL));
+            }
+        }
+        response
     }
 }
 

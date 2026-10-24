@@ -3,12 +3,15 @@
 //! ranged one, Shift+M / Ctrl+Shift+M jump between them. Flags sit on the ruler; click one to
 //! seek, right-click to edit its name, color and note.
 
-use egui::{Color32, Id, Rect, Sense, Shape, Stroke, Ui, pos2};
+use egui::{
+    Align, Color32, Id, Label, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, pos2, vec2,
+};
 use jvid_core::history::Command;
-use jvid_core::model::Sequence;
+use jvid_core::model::{Marker, Sequence};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use suite_ui::themes::DARK;
-use suite_ui::tokens::color;
+use suite_ui::tokens::{color, size, space};
+use suite_ui::widgets::{Button, Swatches, TextInput};
 
 use crate::i18n::tr;
 
@@ -24,8 +27,73 @@ pub const PALETTE: &[Color32] = &[
     color::CLIP_VIOLET,
 ];
 
+/// Each `PALETTE` colour's name, for screen readers and hover.
+const COLOR_NAMES: [&str; 6] = [
+    "timeline.marker_amber",
+    "timeline.marker_red",
+    "timeline.marker_green",
+    "timeline.marker_blue",
+    "timeline.marker_plum",
+    "timeline.marker_violet",
+];
+
 fn swatch(i: u8) -> Color32 {
     PALETTE.get(i as usize).copied().unwrap_or(DARK.amber)
+}
+
+/// The popup's width: Inspector-style rows, a label column then the field.
+const POPUP_WIDTH: f32 = 240.0;
+
+/// The right-click popup's rows for `m`: the edit it makes, if any. Each pointer press starts
+/// a new undo gesture, so typing in Name, then in Note, is two steps.
+fn popup(ui: &mut Ui, m: &Marker, id: Id) -> Option<Edit> {
+    ui.set_width(POPUP_WIDTH);
+    ui.spacing_mut().item_spacing = vec2(space::S4, space::S4);
+    let presses = id.with("presses");
+    let pressed = ui.input(|i| i.pointer.any_pressed());
+    let press = ui.data_mut(|d| {
+        let n = d.get_temp_mut_or(presses, 0u64);
+        *n += u64::from(pressed);
+        *n
+    });
+    let gesture = id.value() ^ (press << 20);
+    let field = POPUP_WIDTH - size::INSPECTOR_LABEL - space::S4;
+    let mut e = m.clone();
+    let mut changed = row(ui, tr!("timeline.marker_name"), |ui| {
+        ui.add(TextInput::new(&mut e.name).width(field)).changed()
+    });
+    let names = COLOR_NAMES.map(|k| crate::i18n::CATALOG.tr(k));
+    let mut pick = e.color as usize;
+    let picked = row(ui, tr!("timeline.marker_color"), |ui| {
+        ui.add(Swatches::new(&mut pick, PALETTE, &names)).changed()
+    });
+    e.color = pick as u8;
+    changed |= row(ui, tr!("timeline.marker_note"), |ui| {
+        ui.add(TextInput::new(&mut e.note).width(field).rows(4))
+            .changed()
+    });
+    if ui
+        .add(Button::destructive(tr!("timeline.delete_marker")).width(POPUP_WIDTH))
+        .clicked()
+    {
+        ui.close();
+        return Some((Command::RemoveMarker(m.id), None));
+    }
+    // A swatch click is a step of its own.
+    (changed || picked).then(|| (Command::SetMarker(e), (!picked).then_some(gesture)))
+}
+
+/// A label in the Inspector's label column, then `add`'s field, both from the row's top.
+fn row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.horizontal_top(|ui| {
+        let layout = Layout::left_to_right(Align::Center);
+        ui.allocate_ui_with_layout(vec2(size::INSPECTOR_LABEL, size::CONTROL), layout, |ui| {
+            ui.set_min_width(size::INSPECTOR_LABEL);
+            ui.add(Label::new(RichText::new(label).color(color::ink_2())).truncate());
+        });
+        add(ui)
+    })
+    .inner
 }
 
 impl Timeline {
@@ -123,40 +191,12 @@ impl Timeline {
                 (false, false) => format!("{}\n{}", m.name, m.note),
             };
             let r = r.on_hover_text(tip);
-            let gesture = r.id.value();
             // Default close-on-click would shut it on the first click into Name.
             egui::Popup::context_menu(&r)
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .show(|ui| {
-                    let mut e = m.clone();
-                    ui.label(tr!("timeline.marker_name"));
-                    let mut changed = ui.text_edit_singleline(&mut e.name).changed();
-                    ui.horizontal(|ui| {
-                        for (i, c) in PALETTE.iter().enumerate() {
-                            let (rect, r) =
-                                ui.allocate_exact_size(egui::vec2(14.0, 14.0), Sense::click());
-                            ui.painter().rect_filled(rect, 3.0, *c);
-                            if i as u8 == e.color {
-                                ui.painter().rect_stroke(
-                                    rect,
-                                    3.0,
-                                    Stroke::new(1.5, color::ink()),
-                                    egui::StrokeKind::Outside,
-                                );
-                            }
-                            if r.clicked() {
-                                (e.color, changed) = (i as u8, true);
-                            }
-                        }
-                    });
-                    ui.label(tr!("timeline.marker_note"));
-                    changed |= ui.text_edit_multiline(&mut e.note).changed();
-                    if changed {
-                        edit = Some((Command::SetMarker(e), Some(gesture)));
-                    }
-                    if ui.button(tr!("timeline.delete_marker")).clicked() {
-                        edit = Some((Command::RemoveMarker(m.id), None));
-                        ui.close();
+                    if let Some(e) = popup(ui, m, r.id) {
+                        edit = Some(e);
                     }
                 });
         }
@@ -298,14 +338,8 @@ mod tests {
         }
     }
 
-    /// #331: clicking into the right-click popup to name a marker keeps it open.
-    #[test]
-    fn marker_popup_takes_a_name() {
-        use egui::accesskit::Role;
-        use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
-            return;
-        }
+    /// A timeline with one marker at 1s, its popup open.
+    fn popup_open() -> egui_kittest::Harness<'static, (Timeline, History)> {
         let mut h = super::super::tests::harness(project(4));
         let c = Command::AddMarker {
             time: Time(S),
@@ -328,6 +362,18 @@ mod tests {
             });
             h.run();
         }
+        h
+    }
+
+    /// #331: clicking into the right-click popup to name a marker keeps it open.
+    #[test]
+    fn marker_popup_takes_a_name() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = popup_open();
         let name = h.get_all_by_role(Role::TextInput).next().expect("popup");
         name.click();
         h.run();
@@ -339,5 +385,44 @@ mod tests {
         let marker = &h.state().1.project().sequence().markers()[0];
         assert_eq!(marker.name, "Intro");
         assert!(h.query_by_label("Note").is_some(), "popup closed");
+    }
+
+    /// #353: house widgets in the popup; Name, Note and a colour are one undo step each.
+    #[test]
+    fn marker_popup_edits_are_one_undo_step_each() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = popup_open();
+        h.set_size(egui::vec2(1000.0, 260.0));
+        h.run();
+        h.snapshot("timeline_marker_popup");
+        for (role, text) in [
+            (Role::TextInput, "Intro"),
+            (Role::MultilineTextInput, "Cut here"),
+        ] {
+            h.get_by_role(role).click();
+            h.run();
+            h.get_by_role(role).type_text(text);
+            h.run();
+        }
+        h.get_by_role_and_label(Role::RadioButton, "Green").click();
+        h.run();
+        let marker = |h: &egui_kittest::Harness<'_, (Timeline, History)>| {
+            let m = &h.state().1.project().sequence().markers()[0];
+            (m.name.clone(), m.note.clone(), m.color)
+        };
+        let green = PALETTE.iter().position(|c| *c == DARK.green).unwrap() as u8;
+        assert_eq!(marker(&h), ("Intro".into(), "Cut here".into(), green));
+        let steps = [("Intro", "Cut here", 0), ("Intro", "", 0), ("", "", 0)];
+        for (name, note, color) in steps {
+            assert!(h.state_mut().1.undo());
+            assert_eq!(marker(&h), (name.into(), note.into(), color));
+        }
+        // Next back is the marker itself.
+        assert!(h.state_mut().1.undo());
+        assert!(h.state().1.project().sequence().markers().is_empty());
     }
 }
