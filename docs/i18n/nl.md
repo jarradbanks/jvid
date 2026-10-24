@@ -44,14 +44,11 @@ Resolve and Premiere show it.
 - **Dates**: day before month, CLDR's abbreviated months ("24 okt.", "24 okt. 2026", "3 mei").
 - **Plurals**: `one` for 1 and `other` for everything else, as in English. "uur" doesn't take a
   plural after a number ("2 uur geleden").
-- **Widths**: the Inspector's label column is 72 points; every Dutch caption that goes there
-  is a single short word ("Dekking", "Verzadiging", "Eindgain"). "Temperatuur" is 0.4 pt wider
-  than English "Temperature", which already fills the column; it still shows whole. Keyframe
-  lanes have room and use the full compound ("Uitsnijden links", "Omlijningsbreedte"). Fixed-width
-  dropdowns forced three short forms: preview quality "Vol" (not "Volledig"), bin sort "Datum"
-  (not "Toegevoegd") and blend mode "Vermenigv." (not "Vermenigvuldigen"). The Export dialog's
-  queue button has room for the full "Aan wachtrij toevoegen" at its narrowest, 640 points; a
-  short "In wachtrij" would read as a status.
+- **Length**: every string is the natural Dutch, never shortened or abbreviated to fit a
+  layout; text too long for its place is a layout problem, fixed in the layout (#310). So preview
+  quality is "Volledig", bin sort "Datum toegevoegd" (as in Dutch Windows Explorer), blend mode
+  "Vermenigvuldigen", EQ Post-Gain "Naversterking" (Kdenlive's word) and the Export dialog's queue
+  button "Aan wachtrij toevoegen"; a short "In wachtrij" would read as a status.
 
 ## Terms
 
@@ -126,7 +123,7 @@ layout (QWERTY, AZERTY) in Dutch Windows; "wissen" for unbinding a shortcut, bec
   Snijgereedschap, Vastklikken, Dempen, Audioscrubbing, Tijdcode, Framesnelheid,
   Beeldverhouding, Proxy, Voorinstelling, Bitsnelheid, Ondertitels, Golfvorm, Audiomixer,
   Ongedaan maken / Opnieuw, Verhogen (Lift), Projectmap, wachtrij, Ondertiteltrack, Bypass,
-  Spill Suppress, Tint (Hue), Naversterking (Post Gain, too wide for the Inspector's column).
+  Spill Suppress, Tint (Hue), Naversterking (Post Gain).
 - Adobe's Dutch [Premiere Elements reference](https://help.adobe.com/archive/nl/premiere-elements/12/premiere-elements_reference.pdf),
   searched for each term: tijdlijn, huidige-tijdindicator (CTI), Bronmonitor, inpunt/uitpunt,
   hoofdframe, markeerteken, bijsnijden, Uitsnijden, splitsen, Magnetisch,
