@@ -1089,7 +1089,7 @@ fn fx_head(ui: &mut Ui, head: FxHead, open: &mut bool, i: usize, n: usize) -> Op
         return act;
     }
     let more = Button::icon(icon::ELLIPSIS, tr!("inspector.more")).small();
-    let more = ui.put(slot(rect, 3.0), more);
+    let more = ui.put(slot(rect, 1.0), more);
     egui::Popup::menu(&more).show(|ui| {
         let item = |ui: &mut Ui, label: &str, enabled| {
             ui.add_enabled(enabled, egui::Button::new(label)).clicked()
@@ -1490,9 +1490,7 @@ fn path_row(
     };
     let tools = Tools {
         reset: None,
-        nav: anim,
         key: Some((keyed, &key)),
-        compact: false,
     };
     let points = tr!("inspector.mask_points", n = n / 3);
     let (_, c) = prop_row(ui, label, tools, |ui| {
@@ -1557,9 +1555,7 @@ fn speed_row(ui: &mut Ui, c: &Clip, t: Time, index: u64, seek: &mut Option<Time>
     // A freeze ignores its speed, so it gets no diamond.
     let tools = Tools {
         reset: None,
-        nav: anim,
         key: c.freeze.is_none().then_some((keyed, label.as_str())),
-        compact: false,
     };
     // The keys with speed `v` keyed at source time `at`.
     let with_key = |at: Time, v: f64| {
@@ -1625,12 +1621,6 @@ fn speed_row(ui: &mut Ui, c: &Clip, t: Time, index: u64, seek: &mut Option<Time>
         }
         _ => None,
     };
-    if tool.previous {
-        *seek = neighbour(&[c], &names, t, -1);
-    }
-    if tool.next {
-        *seek = neighbour(&[c], &names, t, 1);
-    }
     let diamond = tool.key?;
     let here = c.speed_at(t);
     if diamond.clicked() {
@@ -1661,6 +1651,7 @@ fn speed_row(ui: &mut Ui, c: &Clip, t: Time, index: u64, seek: &mut Option<Time>
                     let keys = v.pop().and_then(|(.., mut k)| k.remove(SPEED));
                     edit = Some((retime(c.speed, keys.unwrap_or_default()), g));
                 }
+                nav_items(ui, &[c], &names, t, seek);
                 if ui
                     .add(Button::ghost(tr!("inspector.stop_animating")))
                     .clicked()
@@ -2190,20 +2181,13 @@ fn section(ui: &mut Ui, id: &str, tools: Option<bool>) -> (bool, Option<Head>) {
     let mut open = ui.data_mut(|d| *d.get_temp_mut_or(id, true));
     let rect = ui.add(SectionHeader::new(title, &mut open)).rect;
     ui.data_mut(|d| d.insert_temp(id, open));
-    let head = tools.and_then(|changed| head_tools(ui, rect, title, changed, true, false));
+    let head = tools.and_then(|changed| head_tools(ui, rect, title, changed, true));
     (open, head)
 }
 
 /// A section head's Reset (when `changed`) and, with `key`, its Keyframe All, in `rect`'s
 /// tool slots; which was clicked.
-fn head_tools(
-    ui: &mut Ui,
-    rect: Rect,
-    title: &str,
-    changed: bool,
-    key: bool,
-    compact: bool,
-) -> Option<Head> {
+fn head_tools(ui: &mut Ui, rect: Rect, title: &str, changed: bool, key: bool) -> Option<Head> {
     let mut ui = ui.new_child(UiBuilder::new().max_rect(rect));
     let reset = tr!("inspector.reset_section", section = title);
     let all = tr!("inspector.keyframe_all", section = title);
@@ -2213,8 +2197,6 @@ fn head_tools(
         Tools {
             reset: changed.then_some(&reset),
             key: key.then_some((Keyed::Static, &all)),
-            compact,
-            ..Tools::default()
         },
     );
     match () {
@@ -2224,10 +2206,9 @@ fn head_tools(
     }
 }
 
-/// Width of a row's tool slots: reset, previous and next keyframe, then the diamond.
-const TOOLS: f32 = 4.0 * size::SMALL_CONTROL + 3.0 * GAP;
-/// Width of a compact row's: reset, then the diamond.
-const COMPACT_TOOLS: f32 = 2.0 * size::SMALL_CONTROL + GAP;
+/// Width of a row's tool slots: reset, then the diamond. The keyframe arrows are in the
+/// diamond's right-click menu.
+const TOOLS: f32 = 2.0 * size::SMALL_CONTROL + GAP;
 /// Space between tool slots.
 const GAP: f32 = 2.0;
 
@@ -2236,23 +2217,17 @@ const GAP: f32 = 2.0;
 #[derive(Default)]
 struct Tools<'a> {
     reset: Option<&'a str>,
-    nav: bool,
     key: Option<(Keyed, &'a str)>,
-    /// Only reset and the diamond, the keyframe arrows moving to its menu (the Text tab).
-    compact: bool,
 }
 
 /// What happened in a row's tool slots.
 #[derive(Default)]
 struct Clicks {
     reset: bool,
-    previous: bool,
-    next: bool,
     key: Option<egui::Response>,
 }
 
-/// Tool slot `i` at the right edge of `rect`: 0 reset, 1 and 2 the keyframe arrows, 3 the
-/// diamond (or an effect's More).
+/// Tool slot `i` at the right edge of `rect`: 0 reset, 1 the diamond (or an effect's More).
 fn slot(rect: Rect, i: f32) -> Rect {
     let x = rect.right() - TOOLS + i * (size::SMALL_CONTROL + GAP);
     let y = rect.center().y - size::SMALL_CONTROL / 2.0;
@@ -2264,21 +2239,13 @@ fn slots(ui: &mut Ui, rect: Rect, tools: Tools) -> Clicks {
     let slot = |i: f32| slot(rect, i);
     let mut c = Clicks::default();
     if let Some(name) = tools.reset {
-        let at = if tools.compact { 2.0 } else { 0.0 };
         c.reset = ui
-            .put(slot(at), Button::icon(icon::UNDO, name).small())
-            .clicked();
-    }
-    if tools.nav {
-        let previous = KeyButton::previous(tr!("inspector.previous_key"));
-        c.previous = ui.put(slot(1.0), previous).clicked();
-        c.next = ui
-            .put(slot(2.0), KeyButton::next(tr!("inspector.next_key")))
+            .put(slot(0.0), Button::icon(icon::UNDO, name).small())
             .clicked();
     }
     c.key = tools
         .key
-        .map(|(k, name)| ui.put(slot(3.0), KeyButton::diamond(k, name)));
+        .map(|(k, name)| ui.put(slot(1.0), KeyButton::diamond(k, name)));
     c
 }
 
@@ -2299,8 +2266,7 @@ fn prop_row<R>(
         ui.set_min_width(size::INSPECTOR_LABEL);
         ui.label(egui::RichText::new(label).color(color::ink_2()))
     });
-    let tools_w = if tools.compact { COMPACT_TOOLS } else { TOOLS };
-    let w = rect.right() - tools_w - space::S4 - row.cursor().left();
+    let w = rect.right() - TOOLS - space::S4 - row.cursor().left();
     let inner = row
         .allocate_ui_with_layout(vec2(w, size::CONTROL), layout, |ui| {
             ui.set_max_width(w);
@@ -2357,9 +2323,7 @@ fn row(
     };
     let tools = Tools {
         reset: (p.resets && differs(clips, p, t)).then_some(reset),
-        nav: anim,
         key: Some((keyed, &key)),
-        compact: false,
     };
     let mut edit = None;
     let (_, c) = prop_row(ui, p.label(), tools, |ui| {
@@ -2439,7 +2403,7 @@ fn key_clicks(
         || toggle_animate(clips, names, t),
         || toggle_key(clips, names, t),
     );
-    key_menu(clips, names, c, t, index, seek, false, toggles)
+    key_menu(clips, names, c, t, index, seek, toggles)
 }
 
 /// [`key_clicks`] with the diamond's commands: `animate` starts or stops animating, `key`
@@ -2452,7 +2416,6 @@ fn key_menu(
     t: Time,
     index: u64,
     seek: &mut Option<Time>,
-    nav: bool,
     (animate, key): (impl Fn() -> Command, impl Fn() -> Command),
 ) -> Option<Edit> {
     let anim = any_animated(clips, names);
@@ -2462,12 +2425,6 @@ fn key_menu(
         _ => Keyed::Animated,
     };
     let mut edit = None;
-    if c.previous {
-        *seek = neighbour(clips, names, t, -1);
-    }
-    if c.next {
-        *seek = neighbour(clips, names, t, 1);
-    }
     let diamond = c.key.expect("rows have a diamond");
     if diamond.clicked() {
         let cmd = match anim {
@@ -2485,14 +2442,7 @@ fn key_menu(
                 {
                     edit = Some(e);
                 }
-                for (name, dir) in [("inspector.previous_key", -1), ("inspector.next_key", 1)] {
-                    let to = neighbour(clips, names, t, dir);
-                    let b = Button::ghost(CATALOG.get(name).unwrap_or(name));
-                    if nav && ui.add_enabled(to.is_some(), b).clicked() {
-                        *seek = to;
-                        ui.close();
-                    }
-                }
+                nav_items(ui, clips, names, t, seek);
                 if ui
                     .add(Button::ghost(tr!("inspector.stop_animating")))
                     .clicked()
@@ -2503,6 +2453,19 @@ fn key_menu(
             });
     }
     edit
+}
+
+/// The diamond menu's Previous and Next Keyframe, seeking to the nearest key of `names`
+/// either side of `t`.
+fn nav_items(ui: &mut Ui, clips: &[&Clip], names: &[&str], t: Time, seek: &mut Option<Time>) {
+    for (name, dir) in [("inspector.previous_key", -1), ("inspector.next_key", 1)] {
+        let to = neighbour(clips, names, t, dir);
+        let b = Button::ghost(CATALOG.get(name).unwrap_or(name));
+        if ui.add_enabled(to.is_some(), b).clicked() {
+            *seek = to;
+            ui.close();
+        }
+    }
 }
 
 /// The easing editor for the keyframes of `names` at `t`, opened by right-clicking their
@@ -2859,12 +2822,12 @@ fn text_section(
             .size()
             .x;
         let x = rect.left() + size::ICON + space::S4 + title_w + space::S8;
-        let w = rect.right() - COMPACT_TOOLS - space::S4 - x;
+        let w = rect.right() - TOOLS - space::S4 - x;
         let g = truncated(ui, summary, color::ink_3(), w);
         let pos = pos2(x, rect.center().y - g.size().y / 2.0);
         ui.painter().galley(pos, g, color::ink_3());
     }
-    (open, head_tools(ui, rect, title, changed, key, true))
+    (open, head_tools(ui, rect, title, changed, key))
 }
 
 /// A number field, with a slider over `slider` (snapping to `step`) when the row has room.
@@ -2992,8 +2955,6 @@ fn text_row(
     let tools = Tools {
         reset: (anim || off_default(s, id)).then_some(tr!("inspector.reset")),
         key: keys.then_some((keyed, &key_name)),
-        compact: true,
-        ..Tools::default()
     };
     let (changed, c) = prop_row(ui, label, tools, |ui| text_fields(ui, s, id, label));
     if c.reset {
@@ -3013,10 +2974,7 @@ fn text_row(
         || text_animate(clips, id, v, t),
         || text_toggle_key(clips, id, v, t),
     );
-    (
-        changed,
-        key_menu(clips, &names, c, t, index, seek, true, toggles),
-    )
+    (changed, key_menu(clips, &names, c, t, index, seek, toggles))
 }
 
 /// Drops every clip's keyframes of `names`.
@@ -3795,7 +3753,65 @@ mod tests {
     }
 
     #[test]
-    fn the_diamond_animates_then_keys_and_shows_the_arrows() {
+    fn every_tab_keeps_its_slider_widths_when_reset_shows() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::{NodeT, Queryable};
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let sliders = |h: &egui_kittest::Harness<'_, History>| -> Vec<_> {
+            h.query_all_by_role(Role::Slider)
+                .map(|n| n.accesskit_node().bounding_box().unwrap())
+                .collect()
+        };
+        let tabs = [
+            ("Video", harness_on(Pane::Video)),
+            ("Audio", harness_of(TrackKind::Audio, Pane::Audio)),
+            ("Text", text_harness(264.0, Text::default())),
+            ("Effects", fx_harness()),
+        ];
+        let mut ends = Vec::new();
+        for (tab, mut h) in tabs {
+            // The Text harness's width.
+            h.set_size(vec2(280.0, 720.0));
+            h.run();
+            let resets = |h: &egui_kittest::Harness<'_, History>| {
+                h.query_all_by_label_contains("Reset").count()
+            };
+            let before = sliders(&h);
+            let shown = resets(&h);
+            // Drag the first slider off its value, so its row and section show Reset.
+            let from = h
+                .get_all_by_role(Role::Slider)
+                .next()
+                .unwrap()
+                .rect()
+                .center();
+            h.drag_at(from);
+            h.run();
+            for dx in [10.0, 30.0] {
+                h.hover_at(from + vec2(dx, 0.0));
+                h.run();
+            }
+            h.drop_at(from + vec2(30.0, 0.0));
+            h.run();
+            assert!(resets(&h) > shown, "{tab}: Reset shows");
+            let after = sliders(&h);
+            let widths = |r: &[egui::accesskit::Rect]| -> Vec<_> {
+                r.iter().map(|r| (r.x0, r.x1)).collect()
+            };
+            assert_eq!(widths(&before), widths(&after), "{tab}");
+            // Bar the Graphic EQ's vertical bands.
+            let rows = after.iter().filter(|r| r.x1 - r.x0 > r.y1 - r.y0);
+            ends.extend(rows.map(|r| (tab, r.x1)));
+        }
+        // One tool column on every tab, so every slider ends on the same line.
+        let x1 = ends[0].1;
+        assert!(ends.iter().all(|e| e.1 == x1), "{ends:?}");
+    }
+
+    #[test]
+    fn the_diamond_animates_then_keys_and_its_menu_has_the_arrows() {
         use egui_kittest::kittest::Queryable;
         if !suite_ui::test_support::gpu() {
             return;
@@ -3813,9 +3829,14 @@ mod tests {
             "scale",
             Time(jvid_core::time::FLICKS_PER_SECOND)
         ));
+        h.snapshot("inspector_animated");
+        assert!(h.query_by_label("Previous Keyframe").is_none());
+        h.get_by_label("Keyframe at Playhead").click_secondary();
+        h.run();
         assert_eq!(h.query_all_by_label("Previous Keyframe").count(), 1);
         assert_eq!(h.query_all_by_label("Next Keyframe").count(), 1);
-        h.snapshot("inspector_animated");
+        h.key_press(egui::Key::Escape);
+        h.run();
         // Keyed at the playhead, the same one diamond removes the key.
         h.get_by_label("Keyframe at Playhead").click();
         h.run();
@@ -3843,7 +3864,11 @@ mod tests {
         let s = Time(jvid_core::time::FLICKS_PER_SECOND);
         assert_eq!((keys.len(), keys[0].time), (1, s));
         assert_eq!(keys[0].value, Value::Scalar(1.0));
+        h.get_by_label("Keyframe at Playhead").click_secondary();
+        h.run();
         assert_eq!(h.query_all_by_label("Next Keyframe").count(), 1);
+        h.key_press(egui::Key::Escape);
+        h.run();
         h.get_by_label("Keyframe at Playhead").click();
         h.run();
         assert_eq!((clip(&h).ramp(), clip(&h).speed), (None, 1.0));
