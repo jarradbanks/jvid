@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, German. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Standard"
+hover = "Hover"
+focus = "Fokus sichtbar"
+pressed = "Gedrückt"
+disabled = "Deaktiviert"
+loading_error = "Laden / Fehler"
+
+[panel]
+widgets = "Widgets"
+effects = "Effekte"
+text = "Text"
+add = "Hinzufügen"
+more = "Mehr"
+inspector = "Inspektor"
+source = "Quelle"
+program = "Programm"
+audio = "Audio"
+markers = "Marker"
+history = "Verlauf"
+captions = "Untertitel"
+overflow = "Tabs unter 64 px wandern ins Chevron-Menü."
+type_and_colour = "Schrift und Farbe"
+
+[row]
+primary = "Primär"
+secondary = "Sekundär"
+ghost = "Ghost"
+destructive = "Destruktiv"
+icon = "Symbol"
+input = "Eingabe"
+search = "Suche"
+numeric = "Numerisch"
+dropdown = "Dropdown"
+colour = "Farbe"
+segmented = "Segmentiert"
+checkbox = "Kontrollkästchen"
+section = "Abschnitt"
+slider = "Schieberegler"
+keyframe = "Keyframe"
+
+[demo]
+delete = "Löschen"
+export = "Exportieren"
+width_prefix = "B"
+min_error = "Muss mindestens 2 sein"
+full = "Voll"
+fit = "Einpassen"
+fill = "Füllen"
+snap = "Einrasten"
+live = "Live"
+transform = "Transformieren"
+position = "Position"
+scale = "Skalierung"
+reset = "Zurücksetzen"
+previous = "Vorheriger Keyframe"
+next = "Nächster Keyframe"
+animate = "Animieren"
+plus_second = "+1 s"
+
+[type]
+display = "Display 22"
+headline = "Überschrift 16"
+title = "Titel 14"
+body_strong = "Fließtext fett 12"
+body = "Fließtext 12 · 0123456789 bleibt stehen"
+small = "Klein 10 · Tastenhinweis"
+
+[clip]
+video = "Video"
+title = "Titel"
+still = "Standbild"
+audio = "Audio"
