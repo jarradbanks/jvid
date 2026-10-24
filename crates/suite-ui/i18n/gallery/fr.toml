@@ -1,2 +1,74 @@
-# The suite-ui gallery example's demo labels, French. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+# The suite-ui gallery example's demo labels, French.
+
+[state]
+default = "Normal"
+hover = "Survol"
+focus = "Focus visible"
+pressed = "Appuyé"
+disabled = "Désactivé"
+loading_error = "Chargement / Erreur"
+
+[panel]
+widgets = "Contrôles"
+effects = "Effets"
+text = "Texte"
+add = "Ajouter"
+more = "Plus"
+inspector = "Inspecteur"
+source = "Source"
+program = "Programme"
+audio = "Audio"
+markers = "Marqueurs"
+history = "Historique"
+captions = "Sous-titres"
+overflow = "Les onglets de moins de 64 px passent dans le menu à chevron."
+type_and_colour = "Typographie et couleur"
+
+[row]
+primary = "Principal"
+secondary = "Secondaire"
+ghost = "Fantôme"
+destructive = "Destructif"
+icon = "Icône"
+input = "Saisie"
+search = "Recherche"
+numeric = "Numérique"
+dropdown = "Liste déroulante"
+segmented = "Segmenté"
+checkbox = "Case à cocher"
+section = "Section"
+slider = "Curseur"
+keyframe = "Image clé"
+
+[demo]
+delete = "Supprimer"
+export = "Exporter"
+width_prefix = "L"
+min_error = "Doit valoir au moins 2"
+full = "Pleine"
+fit = "Ajuster"
+fill = "Remplir"
+snap = "Magnétisme"
+live = "En direct"
+transform = "Transformation"
+position = "Position"
+scale = "Échelle"
+reset = "Réinitialiser"
+previous = "Image clé précédente"
+next = "Image clé suivante"
+animate = "Animer"
+plus_second = "+1 s"
+
+[type]
+display = "Affichage 22"
+headline = "Gros titre 16"
+title = "Titre 14"
+body_strong = "Corps gras 12"
+body = "Corps 12 · 0123456789 reste immobile"
+small = "Petit 10 · indication de raccourci"
+
+[clip]
+video = "Vidéo"
+title = "Titre"
+still = "Image fixe"
+audio = "Audio"
