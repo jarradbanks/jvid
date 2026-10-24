@@ -53,7 +53,8 @@ impl Handle {
     }
 }
 
-/// What a running job sees.
+/// What a running job sees. Clones share the job, for callbacks that must be `'static`.
+#[derive(Clone)]
 pub struct Ctx(Arc<State>);
 
 impl Ctx {

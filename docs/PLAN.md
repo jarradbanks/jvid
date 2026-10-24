@@ -152,6 +152,8 @@ Multicam, node compositing, 3D, motion tracking, collaboration, built-in AI.
 | Resampling | `rubato` |
 | Text shaping | `cosmic-text` |
 | Serialization | `serde` (JSON project files, TOML config) |
+| Speech-to-text | whisper.cpp via `whisper-rs`, CPU (owner-approved, #342) |
+| Model downloads | `ureq` (rustls only) and `sha2` (owner-approved, #342) |
 
 ### Cargo workspace
 
@@ -161,6 +163,7 @@ crates/
   jvid-media/    FFmpeg probe/decode/encode, thumbnails, waveforms, proxies
   jvid-render/   wgpu compositor, transforms, blend modes, color, WGSL effects
   jvid-audio/    mixer, cpal output, resampling, loudness
+  jvid-transcribe/ speech-to-text with word timings, whisper model downloads
   jvid-app/      eframe desktop app
   jvid-cli/      headless render
   suite-ui/      shared theme, widgets, keybinding system — reused by the rest of the suite

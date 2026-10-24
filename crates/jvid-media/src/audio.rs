@@ -190,6 +190,69 @@ impl AudioDecoder {
     }
 }
 
+/// Speech-to-text input rate (whisper.cpp's): mono at 16 kHz.
+pub const SPEECH_RATE: u32 = 16_000;
+
+/// Audio stream `nth` of `path` over project-rate sample frames `range`, averaged to mono and
+/// resampled to [`SPEECH_RATE`]. `Ok(None)` once `cancelled` returns true.
+pub fn decode_speech(
+    path: &Path,
+    nth: usize,
+    range: std::ops::Range<i64>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Option<Vec<f32>>, String> {
+    let err = |e: Error| e.to_string();
+    let mut d = AudioDecoder::open(path, nth).map_err(|e| e.to_string())?;
+    if range.start > 0 {
+        d.seek(range.start).map_err(err)?;
+    }
+    let format = Sample::F32(Type::Packed);
+    let layout = ChannelLayout::MONO;
+    let mut resampler =
+        resampling::Context::get(format, layout, SAMPLE_RATE, format, layout, SPEECH_RATE)
+            .map_err(err)?;
+    let mut out = Vec::new();
+    let mut take = |f: &frame::Audio| {
+        let n = f.samples() * 4;
+        out.extend(
+            f.data(0)[..n]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|&b| f32::from_ne_bytes(b)),
+        );
+    };
+    while let Some(c) = d.next_chunk().map_err(err)? {
+        if cancelled() {
+            return Ok(None);
+        }
+        let n = (range.end - c.start).clamp(0, c.samples.len() as i64 / 2) as usize;
+        if n == 0 {
+            break;
+        }
+        let mut input = frame::Audio::new(format, n, layout);
+        input.set_rate(SAMPLE_RATE);
+        let mono = c.samples[..n * 2].as_chunks::<2>().0.iter();
+        for (b, [l, r]) in input
+            .data_mut(0)
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(mono)
+        {
+            *b = ((l + r) * 0.5).to_ne_bytes();
+        }
+        // Headroom for the resampler's buffered delay.
+        let mut o = frame::Audio::new(format, n / 3 + 256, layout);
+        resampler.run(&input, &mut o).map_err(err)?;
+        take(&o);
+    }
+    let mut o = frame::Audio::new(format, 256, layout);
+    resampler.flush(&mut o).map_err(err)?;
+    take(&o);
+    Ok(Some(out))
+}
+
 /// The frame's layout, or FFmpeg's default for its channel count when the codec left it unset.
 fn layout_of(f: &frame::Audio) -> ChannelLayout {
     let l = f.channel_layout();
@@ -305,6 +368,25 @@ mod tests {
             assert!(pl <= 1.0, "{file}: clipped");
             assert!((frequency(&r) - 1000.0).abs() < 1.0, "{file}");
         }
+    }
+
+    #[test]
+    fn speech_range_is_16k_mono_at_right_frequency_and_level() {
+        let Some(dir) = corpus() else { return };
+        crate::ffmpeg::init().unwrap();
+        let path = dir.join("tone-1khz-44k.wav");
+        let s = SAMPLE_RATE as i64;
+        let got = decode_speech(&path, 0, s..3 * s, &|| false)
+            .unwrap()
+            .unwrap();
+        let want = 2 * SPEECH_RATE as usize;
+        assert!(got.len().abs_diff(want) < 64, "{} samples", got.len());
+        let mid = &got[1000..want - 1000];
+        // `frequency` counts at the project rate; scale back to 16 kHz.
+        let hz = frequency(mid) * SPEECH_RATE as f64 / SAMPLE_RATE as f64;
+        assert!((hz - 1000.0).abs() < 1.0, "{hz} Hz");
+        assert!((peak(mid) - 0.1).abs() < 0.005, "peak {}", peak(mid));
+        assert_eq!(decode_speech(&path, 0, 0..i64::MAX, &|| true), Ok(None));
     }
 
     // shortcut: MP3 is left out; FFmpeg can't shift its timestamps for gapless trimming, so it lands

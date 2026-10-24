@@ -1,0 +1,21 @@
+[package]
+name = "jvid-transcribe"
+description = "Local speech-to-text with word timings (whisper.cpp), and its model downloads."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+directories.workspace = true
+jvid-core.workspace = true
+jvid-jobs.workspace = true
+jvid-media.workspace = true
+sha2 = "0.10"
+tracing.workspace = true
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+whisper-rs = { version = "0.16", features = ["tracing_backend"] }
