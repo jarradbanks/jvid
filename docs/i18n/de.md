@@ -16,12 +16,12 @@ the two differ, the note says which one jvid follows and why, with Final Cut Pro
 | Source | Quelle | Quelle | Quelle (Quellmonitor) | |
 | Program | Programm | Programm | Programm (Programmmonitor) | |
 | Viewer | Viewer | Viewer | Monitor | Resolve's word; jvid's panels are titled Quelle and Programm, so the term itself rarely shows. |
-| Inspector | Inspektor | Inspector (manual), Inspektor (Blackmagic's German site) | Effekteinstellungen | German spelling of Resolve's panel name; Premiere's "Effekteinstellungen" names a panel that holds only effect controls. |
+| Inspector | Inspektor | Inspector (manual), Inspektor (Blackmagic's German site, German tutorials) | Effekteinstellungen | German spelling of Resolve's panel name; Premiere's "Effekteinstellungen" names a panel that holds only effect controls. Its sections are nouns ("Transformation"), since they fill "{section} zurücksetzen". |
 | Effect | Effekt | Effekt | Effekt | |
 | Transition | Übergang | Übergang | Überblendung | Resolve and Final Cut say Übergang. jvid's transitions include dips, which are not blends, and "Überblendung" is kept for the crossfade itself. |
 | Keyframe | Keyframe | Keyframe | Keyframe | Plural "Keyframes". |
 | Marker | Marker | Marker | Marke | Resolve and Final Cut agree on Marker; Premiere's "Marke" also means a brand. |
-| In point | In-Punkt | In-Punkt | In-Point | Resolve's German compound. Short labels say "In" as both programs do ("In setzen", "Zu In gehen"). |
+| In point | In-Punkt | In-Punkt | In-Point | Resolve's German compound, used in full in menus and shortcuts ("In-Punkt setzen", "Zum In-Punkt gehen"). Only the Export dialog's range says "In bis Out". |
 | Out point | Out-Punkt | Out-Punkt | Out-Point | As In-Punkt. |
 | Range | Bereich | Bereich | In/Out-Bereich | |
 | Trim | Trimmen | Trimmen | Trimmen | |
@@ -32,7 +32,7 @@ the two differ, the note says which one jvid follows and why, with Final Cut Pro
 | Snapping | Einrasten | Einrasten | Ausrichten | Resolve and Final Cut say Einrasten; Premiere's "Ausrichten" is also its word for aligning, which jvid's text tools use. |
 | Link | Verknüpfen | Verknüpfen | Verknüpfen | "Verknüpfte Auswahl" for Linked Selection, as Premiere. |
 | Lock | Sperren | Sperren | Sperren | |
-| Mute | Stummschalten | Stummschalten | Stummschalten | Short track button: "Stumm". |
+| Mute | Stummschalten | Stummschalten | Stummschalten | The track button shows "M"; its tooltip says "Stummschalten". |
 | Solo | Solo | Solo | Solo | Final Cut says "Isolieren". |
 | Scrubbing | Scrubbing | Scrubbing | Scrubbing | |
 | Shuttle | Shuttle | Shuttle | Shuttle | As Premiere: "Shuttle links", "Shuttle rechts", "Shuttle Stopp". |
@@ -43,7 +43,7 @@ the two differ, the note says which one jvid follows and why, with Final Cut Pro
 | Proxy | Proxy | Proxy | Proxy | Plural "Proxys", as both. |
 | Render | Rendern | Rendern | Rendern | |
 | Export | Exportieren | Exportieren | Exportieren | Noun "Export". |
-| Render Queue | Renderliste | Renderliste | Warteschlange (Media Encoder) | Resolve's German name for the same list. |
+| Render Queue | Renderliste | Render-Queue, Renderwarteschlange (German tutorials; not checked in the app) | Warteschlange (Media Encoder) | No source confirms Resolve says "Renderliste"; it is kept because "Zur Renderwarteschlange" overflows the Export dialog's footer, and it reads plainly as the list of renders. |
 | Preset | Vorgabe | Preset | Vorgabe | Adobe's German word across its apps; Resolve leaves "Preset" in English. |
 | Codec | Codec | Codec | Codec | Codec names stay as written. |
 | Bitrate | Bitrate | Bitrate | Bitrate | |
@@ -77,8 +77,18 @@ Words chosen over the obvious one because the obvious one clipped a fixed-width 
 - Crop is "Zuschnitt", Fit is "Passend", the bin's Date Added sort is "Importiert", the
   vertical size is "9:16 · Vertikal" and Custom is "Eigene Größe".
 - The Export dialog says "Zur Renderliste", "Geschätzt", "Ganze Timeline" and "Auswahl" so its
-  footer keeps English's width; the cancel prompt's Keep Exporting is "Nein".
+  footer keeps English's width; the cancel prompt's Keep Exporting is "Weiter", next to "Alle abbrechen".
 - Insert is "Clip einfügen", so it never reads as Paste ("Einfügen") in the Edit menu.
+
+## Words kept apart
+
+- Reverse (playback) is "Rückwärts" everywhere; "Umkehren" is only the mask's Invert, as in
+  Photoshop.
+- Where English "frame" means the picture's canvas (Project Settings' rescale and refit
+  prompts), German says "Bildformat"; "Frame" is always one picture.
+- Lossless export's Copy mode is "Stream-Kopie", so it never reads as Edit > Kopieren.
+- Ease In/Out are "Langsamer Eintritt", "Langsamer Austritt" and "Langsamer Ein-/Austritt".
+  Neither Resolve's nor Premiere's German wording could be confirmed from a source.
 
 ## Sources
 
@@ -86,7 +96,7 @@ Words chosen over the obvious one because the obvious one clipped a fixed-width 
   <https://documents.blackmagicdesign.com/de/UserManuals/DaVinci-Resolve-15-Definitive-Guide.pdf>:
   Abspielkopf, Einrasten, Bin, Spur, Marker, In-Punkt/Out-Punkt, Ripple, Slip, Trimmen,
   Keyframe, Übergang, Viewer, Timeline, Preset, Framerate, Bildseitenverhältnis,
-  stummschalten, Solo, verknüpfen, Scrubbing, Wellenform, Mixer, Bitrate, Renderliste; and
+  stummschalten, Solo, verknüpfen, Scrubbing, Wellenform, Mixer, Bitrate; and
   "Edit > Ripple Delete (Bearbeiten > Löschen und Lücke schließen)".
 - Blackmagic Design, DaVinci Resolve media page (German),
   <https://www.blackmagicdesign.com/de/products/davinciresolve/media>: "Inspektor", "Abspielkopf".
@@ -97,6 +107,11 @@ Words chosen over the obvious one because the obvious one clipped a fixed-width 
   Verknüpfte Auswahl, In Schnittfenster ausrichten, Verschachteln, Shuttle - links, Endlosschleife,
   Frame exportieren, Voiceover aufzeichnen, Proxys ein/aus, Rückgängig/Wiederherstellen,
   Effekteinstellungen, Audiospur-Mischer, Quellmonitor, Programmmonitor.
+- German DaVinci Resolve tutorials: tutkit.com,
+  <https://www.tutkit.com/de/text-tutorials/1762-effiziente-videobearbeitung-mit-davinci-resolve-schritt-fuer-schritt>
+  ("Inspektor"), and Lazi Akademie,
+  <https://www.lazi-akademie.de/wiki/software-tools/davinci-resolve/deliver-page-davinci-resolve/>
+  ("Render-Queue").
 - Apple, Final Cut Pro keyboard shortcuts (German),
   <https://support.apple.com/de-de/guide/final-cut-pro/ver90ba5929/mac>: Abspielposition,
   Einrasten, Überschreiben, Einfügen, Standardübergang, Isolieren, Clip aktivieren/deaktivieren.
