@@ -48,6 +48,9 @@ pub struct Step {
     /// Brings the anchor into view when it isn't drawn, such as by switching tabs. The Render
     /// Queue reveals itself.
     pub reveal: Option<fn(&mut App)>,
+    /// More anchors left undimmed beside `anchor`, such as a scope to read while editing in
+    /// the Inspector.
+    pub also: &'static [&'static str],
 }
 
 pub const LESSONS: &[Lesson] = &[TOUR];
@@ -83,6 +86,7 @@ const TOUR: Lesson = Lesson {
                 )),
             },
             reveal: None,
+            also: &[],
         },
         Step {
             anchor: "timeline",
@@ -98,6 +102,7 @@ const TOUR: Lesson = Lesson {
                 }
             },
             reveal: None,
+            also: &[],
         },
         Step {
             anchor: "preview",
@@ -119,6 +124,7 @@ const TOUR: Lesson = Lesson {
                 a.timeline.seek(Time(length.0 / 3));
             },
             reveal: None,
+            also: &[],
         },
         Step {
             anchor: "timeline",
@@ -137,6 +143,7 @@ const TOUR: Lesson = Lesson {
             },
             show_me: mark,
             reveal: None,
+            also: &[],
         },
         Step {
             anchor: "timeline",
@@ -150,6 +157,7 @@ const TOUR: Lesson = Lesson {
                 apply(a, Command::RemoveRange { ripple: true });
             },
             reveal: None,
+            also: &[],
         },
         Step {
             anchor: "bin.titles",
@@ -180,6 +188,7 @@ const TOUR: Lesson = Lesson {
                 }
             },
             reveal: Some(|a| a.bin.tab = 2),
+            also: &[],
         },
         Step {
             anchor: "export",
@@ -196,6 +205,7 @@ const TOUR: Lesson = Lesson {
                 a.queue_export(req, gpu, 0.0);
             },
             reveal: None,
+            also: &[],
         },
     ],
 };
@@ -254,7 +264,8 @@ fn first_clip(app: &App) -> Option<jvid_core::model::ClipId> {
 /// Turned on by a running lesson, so [`anchor`] records nothing otherwise.
 const RUNNING: &str = "lesson_running";
 
-fn running(ctx: &egui::Context) -> bool {
+/// Whether a lesson runs.
+pub(crate) fn running(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp(Id::new(RUNNING)).unwrap_or(false))
 }
 
@@ -465,7 +476,9 @@ impl App {
             }
         }
         if let Some(t) = target {
-            dim(ctx, t);
+            let also = step.map_or(&[][..], |s| s.also);
+            let more = also.iter().filter_map(|a| anchor_rect(ctx, a));
+            dim(ctx, &[t].into_iter().chain(more).collect::<Vec<_>>());
         }
         let text = step.map_or_else(|| tr!("tutorial.complete").into(), |s| (s.text)(self));
         let modal = ctx.memory(|m| m.top_modal_layer().is_some());
@@ -560,25 +573,54 @@ const DIM: Order = Order::Background;
 
 /// Dims the window around `target`, outlined in Light Blue. Painted only, so every click
 /// still reaches the editor.
-fn dim(ctx: &egui::Context, target: Rect) {
+fn dim(ctx: &egui::Context, targets: &[Rect]) {
     let screen = ctx.content_rect();
-    let hole = target.expand(space::S4).intersect(screen);
+    let holes: Vec<Rect> = targets
+        .iter()
+        .map(|t| t.expand(space::S4).intersect(screen))
+        .collect();
     let painter = ctx.layer_painter(LayerId::new(DIM, Id::new("lesson_dim")));
     let shade = color::ground().gamma_multiply(0.8);
-    for r in [
-        Rect::from_min_max(screen.min, pos2(screen.max.x, hole.top())),
-        Rect::from_min_max(pos2(screen.min.x, hole.bottom()), screen.max),
-        Rect::from_min_max(pos2(screen.min.x, hole.top()), hole.left_bottom()),
-        Rect::from_min_max(hole.right_top(), pos2(screen.max.x, hole.bottom())),
-    ] {
+    for r in shaded(screen, &holes) {
         painter.rect_filled(r, 0, shade);
     }
-    painter.rect_stroke(
-        hole,
-        CornerRadius::same(radius::PANEL),
-        Stroke::new(2.0, color::light_blue()),
-        egui::StrokeKind::Inside,
-    );
+    for &hole in &holes {
+        painter.rect_stroke(
+            hole,
+            CornerRadius::same(radius::PANEL),
+            Stroke::new(2.0, color::light_blue()),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+/// `screen` less `holes`, as rects: in each band between hole edges, the gaps between the
+/// holes crossing it.
+fn shaded(screen: Rect, holes: &[Rect]) -> Vec<Rect> {
+    let edges = holes.iter().flat_map(|h| [h.top(), h.bottom()]);
+    let mut ys: Vec<f32> = edges.chain([screen.top(), screen.bottom()]).collect();
+    ys.sort_by(f32::total_cmp);
+    ys.dedup();
+    let mut out = Vec::new();
+    for band in ys.windows(2) {
+        let (top, bottom) = (band[0], band[1]);
+        let crossing = holes
+            .iter()
+            .filter(|h| h.top() <= top && h.bottom() >= bottom);
+        let mut spans: Vec<_> = crossing.map(|h| h.x_range()).collect();
+        spans.sort_by(|a, b| a.min.total_cmp(&b.min));
+        let mut x = screen.left();
+        for s in spans
+            .into_iter()
+            .chain([egui::Rangef::point(screen.right())])
+        {
+            if s.min > x {
+                out.push(Rect::from_min_max(pos2(x, top), pos2(s.min, bottom)));
+            }
+            x = x.max(s.max);
+        }
+    }
+    out
 }
 
 const CARD_W: f32 = 320.0;
@@ -737,6 +779,7 @@ mod tests {
                     (a.bin.tab, a.bin.query) = (0, String::new());
                 },
                 reveal: Some(|a| a.bin.tab = 2),
+                also: &[],
             },
             Step {
                 anchor: "timeline",
@@ -752,6 +795,7 @@ mod tests {
                     }
                 },
                 reveal: None,
+                also: &[],
             },
             Step {
                 anchor: "timeline",
@@ -763,6 +807,7 @@ mod tests {
                     }
                 },
                 reveal: None,
+                also: &[],
             },
             Step {
                 anchor: "inspector",
@@ -784,6 +829,7 @@ mod tests {
                     apply(a, Command::SetText { id: asset.id, text });
                 },
                 reveal: None,
+                also: &[],
             },
         ],
     };
@@ -807,6 +853,7 @@ mod tests {
                 done: |_| false,
                 show_me: |_| {},
                 reveal: None,
+                also: &[],
             },
             Step {
                 anchor: "nowhere",
@@ -814,6 +861,7 @@ mod tests {
                 done: |_| false,
                 show_me: |_| {},
                 reveal: None,
+                also: &[],
             },
         ],
     };
@@ -864,14 +912,24 @@ mod tests {
                 let at = h.state().lesson.as_ref().map(|r| r.step);
                 assert_eq!(at, Some(i), "{}: on step {i}", lesson.id);
                 // A renamed or removed control fails here instead of in the lesson.
-                let at = drawn(&h, step.anchor);
-                assert!(
-                    at.is_some(),
-                    "{} step {i}: `{}` never drawn",
-                    lesson.id,
-                    step.anchor
-                );
-                click(&mut h, tr!("tutorial.show_me"));
+                for anchor in [step.anchor].iter().chain(step.also) {
+                    assert!(
+                        drawn(&h, anchor).is_some(),
+                        "{} step {i}: `{anchor}` never drawn",
+                        lesson.id,
+                    );
+                }
+                h.get_by_label(tr!("tutorial.show_me")).click();
+                // Each frame renders, as in the app: the scopes count a rendered frame, so a
+                // step reading them passes a few frames on.
+                for _ in 0..100 {
+                    h.step();
+                    h.render().unwrap();
+                    if (step.done)(h.state()) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
                 assert!(
                     (step.done)(h.state()),
                     "{} step {i}: Show Me didn't pass",
@@ -1225,5 +1283,27 @@ mod tests {
     #[test]
     fn the_dim_stays_under_windows() {
         assert!(DIM < Order::Middle);
+    }
+
+    #[test]
+    fn the_dim_shades_everything_but_each_hole() {
+        let screen = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0));
+        let a = Rect::from_min_max(pos2(10.0, 10.0), pos2(30.0, 60.0));
+        let b = Rect::from_min_max(pos2(50.0, 40.0), pos2(90.0, 80.0));
+        let shade = shaded(screen, &[a, b]);
+        let area: f32 = shade.iter().map(|r| r.area()).sum();
+        assert_eq!(area, screen.area() - a.area() - b.area());
+        let shaded_at = |p| shade.iter().any(|r| r.contains(p));
+        for p in [pos2(20.0, 30.0), pos2(70.0, 50.0), pos2(70.0, 70.0)] {
+            assert!(!shaded_at(p), "{p:?} in a hole");
+        }
+        for p in [
+            pos2(5.0, 5.0),
+            pos2(40.0, 50.0),
+            pos2(20.0, 70.0),
+            pos2(95.0, 95.0),
+        ] {
+            assert!(shaded_at(p), "{p:?} not shaded");
+        }
     }
 }
