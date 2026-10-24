@@ -465,7 +465,7 @@ impl Timeline {
                 }
             }
             "copy" | "cut" | "paste" | "duplicate" | "delete" | "ripple_delete" | "link"
-            | "enable" | "reverse" | "freeze_frame" | "paste_grade" => {
+            | "enable" | "reverse" | "freeze_frame" | "paste_grade" | "clean_up_voice" => {
                 self.pending = self.clip_action(id, project.sequence());
             }
             _ => return false,
@@ -509,8 +509,13 @@ impl Timeline {
 
     /// The selected clips on video tracks, top track first.
     fn video_chosen<'a>(&self, seq: &'a Sequence) -> Vec<&'a Clip> {
-        let video = seq.tracks().iter().filter(|t| t.kind == TrackKind::Video);
-        let clips = video.flat_map(|t| t.clips());
+        self.chosen_on(seq, TrackKind::Video)
+    }
+
+    /// The selected clips on `kind` tracks, top track first.
+    fn chosen_on<'a>(&self, seq: &'a Sequence, kind: TrackKind) -> Vec<&'a Clip> {
+        let tracks = seq.tracks().iter().filter(|t| t.kind == kind);
+        let clips = tracks.flat_map(|t| t.clips());
         clips.filter(|c| self.selected.contains(&c.id)).collect()
     }
 
@@ -590,6 +595,20 @@ impl Timeline {
                         })
                         .collect(),
                 )
+            }
+            // Every chosen audio clip gets the voice preset, in one undo step.
+            "clean_up_voice" => {
+                let changed: Vec<_> = self
+                    .chosen_on(seq, TrackKind::Audio)
+                    .into_iter()
+                    .filter_map(|c| {
+                        let mut x = c.transform.clone();
+                        crate::inspector::clean_up_voice(&mut x.audio_fx);
+                        (x != c.transform).then(|| (c.id, x, c.keyframes.clone()))
+                    })
+                    .collect();
+                (!changed.is_empty()).then_some(())?;
+                Command::SetClipProps(changed)
             }
             // The chosen clip under the playhead, video first.
             "freeze_frame" => {
@@ -2702,6 +2721,48 @@ mod tests {
         }
         let a = seq(&h).clip(audio).unwrap().1.clone();
         assert_eq!(a.transform.exposure, 0.0, "audio clips have no grade");
+        h.undo();
+        assert_eq!(h.project(), &before, "one undo puts every clip back");
+    }
+
+    /// Acceptance (#346): Clean Up Voice on several audio clips is one undo step.
+    #[test]
+    fn clean_up_voice_on_several_clips_is_one_undo_step() {
+        let mut h = History::new(project(6));
+        let mut t = Timeline::default();
+        t.sync(h.project());
+        let seq = |h: &History| h.project().sequence().clone();
+        let video = seq(&h).tracks()[0].clips()[0].id;
+        let a: Vec<Clip> = seq(&h).tracks()[1].clips().to_vec();
+        // The second has its compressor bypassed: the preset turns it back on.
+        let mut off = a[1].transform.clone();
+        off.audio_fx.compressor.enabled = false;
+        let cmd = Command::SetClipProps(vec![(a[1].id, off, a[1].keyframes.clone())]);
+        h.apply(cmd).unwrap();
+        let (first, second) = (a[0].id, a[1].id);
+        t.selected = HashSet::from([video]);
+        assert!(
+            !t.can("clean_up_voice", &seq(&h)),
+            "video clips have no voice"
+        );
+        t.selected = HashSet::from([video, first, second]);
+        assert!(t.can("clean_up_voice", &seq(&h)));
+        let before = h.project().clone();
+        h.apply(t.clip_action("clean_up_voice", &seq(&h)).unwrap())
+            .unwrap();
+        for id in [first, second] {
+            let fx = seq(&h).clip(id).unwrap().1.transform.audio_fx;
+            assert_eq!(
+                (fx.high_pass.freq, fx.noise_reduction.amount),
+                (80.0, 100.0)
+            );
+            assert!(fx.compressor.enabled && fx.compressor.ratio > 1.0);
+            assert!(fx.eq.enabled && !fx.eq.is_flat());
+        }
+        assert!(
+            !t.can("clean_up_voice", &seq(&h)),
+            "a second pass changes nothing"
+        );
         h.undo();
         assert_eq!(h.project(), &before, "one undo puts every clip back");
     }

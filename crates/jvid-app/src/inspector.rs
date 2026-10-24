@@ -6,8 +6,8 @@ use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value};
 use jvid_core::model::{
-    AudioFx, Blend, Clip, ClipId, Compressor, Effect, Equalizer, Mask, MaskMode, MaskShape,
-    MediaAsset, Project, Text, TrackKind, Transform, Wheels,
+    AudioFx, Blend, Clip, ClipId, Compressor, Effect, Equalizer, HighPass, Mask, MaskMode,
+    MaskShape, MediaAsset, NoiseReduction, Project, Text, TrackKind, Transform, Wheels,
 };
 use jvid_core::time::Time;
 use suite_ui::theme::{self, icon};
@@ -1841,8 +1841,23 @@ const fn knob(id: &'static str, lo: f32, hi: f32, suffix: &'static str) -> Knob 
     }
 }
 
-/// The EQ then Compressor blocks, by id (`inspector.<id>` names them), in processing order.
-const AUDIO_FX: [(&str, &[Knob]); 2] = [
+/// The High-Pass, Noise Reduction, EQ then Compressor blocks, by id (`inspector.<id>` names
+/// them), in processing order.
+const AUDIO_FX: [(&str, &[Knob]); 4] = [
+    (
+        "high_pass",
+        &[Knob {
+            decimals: 0,
+            ..knob("hp_freq", 0.0, 500.0, verbatim(" Hz"))
+        }],
+    ),
+    (
+        "noise_reduction",
+        &[Knob {
+            decimals: 0,
+            ..knob("nr_amount", 0.0, 100.0, "%")
+        }],
+    ),
     (
         "eq",
         &[knob(
@@ -1874,6 +1889,8 @@ const AUDIO_FX: [(&str, &[Knob]); 2] = [
 fn knob_mut<'a>(fx: &'a mut AudioFx, id: &str) -> &'a mut f32 {
     let (e, c) = (&mut fx.eq, &mut fx.compressor);
     match id {
+        "hp_freq" => &mut fx.high_pass.freq,
+        "nr_amount" => &mut fx.noise_reduction.amount,
         "eq_post_gain" => &mut e.post_gain,
         "comp_threshold" => &mut c.threshold,
         "comp_ratio" => &mut c.ratio,
@@ -1889,6 +1906,8 @@ fn knob_value(mut fx: AudioFx, id: &str) -> f32 {
 
 fn block_on<'a>(fx: &'a mut AudioFx, block: &str) -> &'a mut bool {
     match block {
+        "high_pass" => &mut fx.high_pass.enabled,
+        "noise_reduction" => &mut fx.noise_reduction.enabled,
         "eq" => &mut fx.eq.enabled,
         _ => &mut fx.compressor.enabled,
     }
@@ -1942,6 +1961,26 @@ fn comp_knobs(c: &mut Compressor) -> [&mut f32; 5] {
         &mut c.release,
         &mut c.makeup,
     ]
+}
+
+/// Clean Up Voice: a rumble cut, full noise reduction, then the Voice EQ and Compressor, all on.
+pub(crate) fn clean_up_voice(fx: &mut AudioFx) {
+    fx.high_pass = HighPass {
+        enabled: true,
+        freq: 80.0,
+    };
+    fx.noise_reduction = NoiseReduction {
+        enabled: true,
+        amount: 100.0,
+    };
+    let voice = |ids: &[&str]| {
+        ids.iter()
+            .position(|id| *id == "voice")
+            .expect("a Voice preset")
+    };
+    set_preset(fx, "eq", voice(&EQ_PRESETS.map(|p| p.0)));
+    set_preset(fx, "compressor", voice(&COMP_PRESETS.map(|p| p.0)));
+    (fx.eq.enabled, fx.compressor.enabled) = (true, true);
 }
 
 /// The block's preset `fx` matches exactly, by index.
@@ -2252,7 +2291,9 @@ pub(crate) fn audio_fx(ui: &mut Ui, fxs: &[AudioFx]) -> Option<(FxEdit, Option<G
         }
         // Bypassed: the settings stay, greyed out, until it's back on.
         ui.add_enabled_ui(on, |ui| {
-            if let Some(n) = preset_row(ui, fxs, block) {
+            if matches!(*block, "eq" | "compressor")
+                && let Some(n) = preset_row(ui, fxs, block)
+            {
                 let block = *block;
                 edit = Some((Box::new(move |fx| set_preset(fx, block, n)), None));
             }
@@ -4217,8 +4258,8 @@ mod tests {
         assert_eq!(eq.bands[1..], EQ_PRESETS[2].1[1..]);
         assert!(h.state_mut().undo());
         assert_eq!(fx(&h).eq.bands, EQ_PRESETS[2].1);
-        // EQ first, then Compressor.
-        h.get_all_by_label("Bypass").nth(1).unwrap().click();
+        // High-Pass, Noise Reduction, EQ, then Compressor.
+        h.get_all_by_label("Bypass").nth(3).unwrap().click();
         h.run();
         assert!(fx(&h).eq.enabled && !fx(&h).compressor.enabled);
         assert_eq!(h.get_all_by_label("Turn On").count(), 1);
