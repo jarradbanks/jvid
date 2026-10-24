@@ -760,6 +760,12 @@ chroma_key_key_hue = "To clau"
 chroma_key_tolerance = "Tolerància"
 chroma_key_edge_softness = "Suavitat de la vora"
 chroma_key_spill_suppression = "Supressió del vessament"
+gaussian_blur = "Desenfocament gaussià"
+gaussian_blur_about = "Desenfoca fins a `radius` píxels i conserva l'alfa, així un clip amb màscara només es desenfoca dins d'ella."
+gaussian_blur_radius = "Radi"
+pixelate = "Pixela"
+pixelate_about = "Mostra la imatge en quadres de `block` píxels i conserva l'alfa, així un clip amb màscara només es pixela dins d'ella."
+pixelate_block = "Bloc"
 
 [tutorial]
 minutes = "{count} min"

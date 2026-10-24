@@ -749,6 +749,12 @@ chroma_key_key_hue = "Nøkkelfargetone"
 chroma_key_tolerance = "Toleranse"
 chroma_key_edge_softness = "Kantmykhet"
 chroma_key_spill_suppression = "Søldemping"
+gaussian_blur = "Gaussisk uskarphet"
+gaussian_blur_about = "Gjør uskarpt med opptil `radius` piksler og beholder alfa, så et maskert klipp bare blir uskarpt innenfor masken."
+gaussian_blur_radius = "Radius"
+pixelate = "Pikseler"
+pixelate_about = "Viser bildet i ruter på `block` piksler og beholder alfa, så et maskert klipp bare pikseleres innenfor masken."
+pixelate_block = "Blokk"
 
 [tutorial]
 minutes = "{count} min"

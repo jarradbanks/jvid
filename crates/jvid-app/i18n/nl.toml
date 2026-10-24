@@ -764,6 +764,12 @@ chroma_key_key_hue = "Keykleur"
 chroma_key_tolerance = "Tolerantie"
 chroma_key_edge_softness = "Randzachtheid"
 chroma_key_spill_suppression = "Spill-onderdrukking"
+gaussian_blur = "Gaussiaanse vervaging"
+gaussian_blur_about = "Vervaagt tot `radius` pixels en behoudt alfa, zodat een gemaskeerde clip alleen binnen het masker vervaagt."
+gaussian_blur_radius = "Straal"
+pixelate = "Pixeleren"
+pixelate_about = "Toont het beeld in vierkanten van `block` pixels en behoudt alfa, zodat een gemaskeerde clip alleen binnen het masker pixeleert."
+pixelate_block = "Blok"
 
 [tutorial]
 minutes = "{count} min"

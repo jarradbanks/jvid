@@ -771,6 +771,12 @@ chroma_key_key_hue = "Тон ключа"
 chroma_key_tolerance = "Допуск"
 chroma_key_edge_softness = "Мягкость краёв"
 chroma_key_spill_suppression = "Подавление отсветов"
+gaussian_blur = "Размытие по Гауссу"
+gaussian_blur_about = "Размывает до `radius` пикселей и сохраняет альфу, так что клип с маской размывается только внутри маски."
+gaussian_blur_radius = "Радиус"
+pixelate = "Пикселизация"
+pixelate_about = "Показывает изображение квадратами по `block` пикселей и сохраняет альфу, так что клип с маской пикселизуется только внутри маски."
+pixelate_block = "Блок"
 
 [tutorial]
 minutes = "{count} мин"

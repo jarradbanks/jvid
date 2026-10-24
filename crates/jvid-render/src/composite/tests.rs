@@ -844,3 +844,74 @@ fn a_path_subtracts_from_a_rectangle() {
     let got = [alpha(8, 16), alpha(32, 2), alpha(32, 16), alpha(100, 16)];
     assert_eq!(got, [255, 255, 0, 0]);
 }
+
+#[test]
+fn masked_blur_and_pixelate_change_only_inside_the_mask() {
+    use jvid_core::model::{Mask, MaskShape};
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping effect test: no software adapter on this platform");
+        return;
+    };
+    // A 4 px red checkerboard over a green ramp, so blur and pixelation both show.
+    let (w, h) = (64u32, 32u32);
+    let px = |x: u32, y: u32| [((x / 4 + y / 4) % 2 * 255) as u8, (x * 4) as u8, 0, 255];
+    let src = image(&device, &queue, (w, h), px);
+    let mut comp = Compositor::new(&device);
+    let plain = read_back(
+        &device,
+        &queue,
+        comp.render(
+            &device,
+            &queue,
+            (w, h),
+            1,
+            [0, 0, 0, 255],
+            &[(&src, op(1.0))],
+        ),
+    );
+    let at = |rgba: &[u8], x: u32, y: u32| rgba[((y * w + x) * 4) as usize..][..4].to_vec();
+    for (file, params) in [("gaussian_blur.wgsl", 6.0), ("pixelate.wgsl", 8.0)] {
+        let (_, text) = crate::effect::BUNDLED
+            .iter()
+            .find(|(f, _)| *f == file)
+            .unwrap();
+        let shader = crate::effect::parse(text).unwrap();
+        comp.set_effect(&device, file, Some(&shader)).unwrap();
+        // The clip again on top, masked to x 16..48, y 8..24, with the effect: a hidden region.
+        let top = Transform {
+            masks: vec![Mask::new(
+                MaskShape::Rectangle,
+                vec![[0.0, 0.0], [32.0, 16.0]],
+            )],
+            effects: vec![Effect {
+                shader: file.into(),
+                params: [(shader.params[0].name.clone(), params)].into(),
+                enabled: true,
+            }],
+            ..Default::default()
+        };
+        let layers = [(&src, top), (&src, op(1.0))];
+        let tex = comp.render(&device, &queue, (w, h), 1, [0, 0, 0, 255], &layers);
+        let out = read_back(&device, &queue, tex);
+        for (x, y) in (0..w).flat_map(|x| (0..h).map(move |y| (x, y))) {
+            // One pixel of antialiasing either side of the mask's edge.
+            let outside = !(15..49).contains(&x) || !(7..25).contains(&y);
+            if outside {
+                assert_eq!(at(&out, x, y), at(&plain, x, y), "{file} at ({x}, {y})");
+            }
+        }
+        if file == "gaussian_blur.wgsl" {
+            // The checkerboard averages out to mid red.
+            for (x, y) in (18..46).flat_map(|x| (10..22).map(move |y| (x, y))) {
+                let r = at(&out, x, y)[0] as i32;
+                assert!((r - 128).abs() < 40, "blurred at ({x}, {y}): {r}");
+            }
+        } else {
+            // Each 8 px block clear of the mask's edge is one colour.
+            for (x, y) in (24..40).flat_map(|x| (16..24).map(move |y| (x, y))) {
+                let corner = at(&out, x / 8 * 8, y / 8 * 8);
+                assert_eq!(at(&out, x, y), corner, "pixelated at ({x}, {y})");
+            }
+        }
+    }
+}

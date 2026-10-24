@@ -815,6 +815,12 @@ chroma_key_key_hue = "Key Hue"
 chroma_key_tolerance = "Tolerance"
 chroma_key_edge_softness = "Edge Softness"
 chroma_key_spill_suppression = "Spill Suppression"
+gaussian_blur = "Gaussian Blur"
+gaussian_blur_about = "Blurs by up to `radius` pixels, keeping alpha so a masked clip blurs only inside its mask."
+gaussian_blur_radius = "Radius"
+pixelate = "Pixelate"
+pixelate_about = "Shows the image in `block`-pixel squares, keeping alpha so a masked clip pixelates only inside its mask."
+pixelate_block = "Block"
 
 # The lesson step card and Help > Tutorials.
 [tutorial]

@@ -751,6 +751,12 @@ chroma_key_key_hue = "키 색조"
 chroma_key_tolerance = "허용 범위"
 chroma_key_edge_softness = "가장자리 부드러움"
 chroma_key_spill_suppression = "번짐 억제"
+gaussian_blur = "가우시안 블러"
+gaussian_blur_about = "최대 `radius` 픽셀만큼 블러를 적용하고 투명도를 유지하므로, 마스크된 클립은 마스크 안쪽에만 블러가 적용됩니다."
+gaussian_blur_radius = "반경"
+pixelate = "픽셀화"
+pixelate_about = "이미지를 `block` 픽셀 정사각형으로 보여 주고 투명도를 유지하므로, 마스크된 클립은 마스크 안쪽만 픽셀화됩니다."
+pixelate_block = "블록"
 
 [tutorial]
 minutes = "{count}분"

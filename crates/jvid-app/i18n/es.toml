@@ -763,6 +763,12 @@ chroma_key_key_hue = "Tono de Clave"
 chroma_key_tolerance = "Tolerancia"
 chroma_key_edge_softness = "Suavidad del Borde"
 chroma_key_spill_suppression = "Supresión de Derrame"
+gaussian_blur = "Desenfoque Gaussiano"
+gaussian_blur_about = "Desenfoca hasta `radius` píxeles y conserva el alfa, así un clip con máscara solo se desenfoca dentro de ella."
+gaussian_blur_radius = "Radio"
+pixelate = "Pixelar"
+pixelate_about = "Muestra la imagen en cuadros de `block` píxeles y conserva el alfa, así un clip con máscara solo se pixela dentro de ella."
+pixelate_block = "Bloque"
 
 [tutorial]
 minutes = "{count} min"

@@ -684,6 +684,8 @@ mod tests {
                 "chroma_key",
                 "chromatic_aberration",
                 "film_grain",
+                "gaussian_blur",
+                "pixelate",
                 "vignette"
             ]
         );
@@ -751,7 +753,7 @@ mod tests {
         let rows = lib.rows("CORNERS");
         assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].name.as_str(), rows[0].bundled), ("Vignette", true));
-        assert_eq!(lib.rows("").len(), 4);
+        assert_eq!(lib.rows("").len(), effect::BUNDLED.len());
         assert!(bundled("vignette") && !bundled("new_effect"));
 
         // A broken user shader: listed by file name with the compiler's message.

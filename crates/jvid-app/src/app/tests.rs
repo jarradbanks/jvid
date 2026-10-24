@@ -1345,6 +1345,8 @@ fn effect_rows_show_each_effect_and_hover_only_fills() {
         "Chroma Key",
         "Chromatic Aberration",
         "Film Grain",
+        "Gaussian Blur",
+        "Pixelate",
         "Vignette",
     ];
     let nodes = |h: &Harness<'_, App>| {

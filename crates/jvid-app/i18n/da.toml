@@ -749,6 +749,12 @@ chroma_key_key_hue = "Nøglefarvetone"
 chroma_key_tolerance = "Tolerance"
 chroma_key_edge_softness = "Kantblødhed"
 chroma_key_spill_suppression = "Spildundertrykkelse"
+gaussian_blur = "Gaussisk sløring"
+gaussian_blur_about = "Slører op til `radius` pixels og bevarer alfa, så et maskeret klip kun sløres inden for masken."
+gaussian_blur_radius = "Radius"
+pixelate = "Pixeler"
+pixelate_about = "Viser billedet i firkanter på `block` pixels og bevarer alfa, så et maskeret klip kun pixeleres inden for masken."
+pixelate_block = "Blok"
 
 [tutorial]
 minutes = "{count} min."

@@ -749,6 +749,12 @@ chroma_key_key_hue = "Key-Farbton"
 chroma_key_tolerance = "Toleranz"
 chroma_key_edge_softness = "Kantenweichheit"
 chroma_key_spill_suppression = "Spill-Unterdrückung"
+gaussian_blur = "Gaußscher Weichzeichner"
+gaussian_blur_about = "Zeichnet um bis zu `radius` Pixel weich und behält Alpha, sodass ein maskierter Clip nur innerhalb der Maske weich wird."
+gaussian_blur_radius = "Radius"
+pixelate = "Verpixeln"
+pixelate_about = "Zeigt das Bild in Quadraten von `block` Pixeln und behält Alpha, sodass ein maskierter Clip nur innerhalb der Maske verpixelt wird."
+pixelate_block = "Block"
 
 [tutorial]
 minutes = "{count} Min."

@@ -782,6 +782,12 @@ chroma_key_key_hue = "键控色相"
 chroma_key_tolerance = "容差"
 chroma_key_edge_softness = "边缘柔化"
 chroma_key_spill_suppression = "溢色抑制"
+gaussian_blur = "虚化"
+gaussian_blur_about = "最多虚化 `radius` 像素并保留 Alpha，因此带蒙版的片段仅在蒙版内虚化。"
+gaussian_blur_radius = "半径"
+pixelate = "像素化"
+pixelate_about = "以 `block` 像素的方块显示图像并保留 Alpha，因此带蒙版的片段仅在蒙版内像素化。"
+pixelate_block = "块大小"
 
 [tutorial]
 minutes = "{count} 分钟"
