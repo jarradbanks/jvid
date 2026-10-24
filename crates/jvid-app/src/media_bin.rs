@@ -774,6 +774,22 @@ impl Thumbs {
             );
             return;
         }
+        if let Some(t) = &asset.text {
+            // A title's own picture: its first line in its fill over black.
+            p.rect_filled(rect, CornerRadius::same(radius::CONTROL), color::VIEWER);
+            let [r, g, b, a] = jvid_render::solid::rgba8(t.color);
+            let line = t.content.lines().next().unwrap_or_default();
+            let galley = p.layout(
+                line.to_owned(),
+                theme::body_strong(),
+                egui::Color32::from_rgba_unmultiplied(r, g, b, a),
+                rect.width() - space::S16,
+            );
+            let at = rect.center() - galley.size() / 2.0;
+            p.with_clip_rect(rect.shrink(space::S4))
+                .galley(at, galley, color::ink());
+            return;
+        }
         if asset.sequence.is_some() {
             // A sequence: a little timeline of three tracks, shrunk to fit a list row.
             let (w, h) = (
