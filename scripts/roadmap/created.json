@@ -648,6 +648,14 @@
     "inspector-tabs-wide": {
       "number": 327,
       "id": 6014118568
+    },
+    "highlight-points": {
+      "number": 330,
+      "id": 6014574907
+    },
+    "hold-m-range": {
+      "number": 331,
+      "id": 6014575310
     }
   },
   "links": [
@@ -1534,6 +1542,14 @@
     [
       "voiceover-live-clip",
       "voiceover"
+    ],
+    [
+      "highlight-points",
+      "batch-highlights"
+    ],
+    [
+      "hold-m-range",
+      "markers"
     ]
   ]
 }

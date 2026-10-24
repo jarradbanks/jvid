@@ -485,6 +485,8 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#325](https://github.com/jarradbanks/jvid/issues/325) **Preview stops decoding video from audio-only files** — Owner, 2026-10-24, Windows: 246 'preview decode of D:\fishing\media\Voiceover 2.wav failed: Stream not found' warnings in one two-minute session. The audio played fine; the preview asks the decode pool for a video frame from a WAV on every new time (crates/jvid-app/src/preview.rs around line 745) and logs each failure.
 - [#326](https://github.com/jarradbanks/jvid/issues/326) **Voiceover take grows on the timeline as it records** — Owner, 2026-10-24: while a voiceover records, the timeline should show it happening, as other editors do. Today the take only lands as a clip when recording stops; until then the track header shows an input level.
 - [#327](https://github.com/jarradbanks/jvid/issues/327) **Inspector tabs fill the header width** — Owner, 2026-10-24: the Inspector's tabs stop at 160px each and leave the right of the header empty; they should share the full width evenly, as the Media panel's tabs do (Panel::wide, crates/jvid-app/src/media_bin.rs).
+- [#330](https://github.com/jarradbanks/jvid/issues/330) **Highlights from point markers** — Tap M when something happens, then export a clip around it: point markers count as highlights.
+- [#331](https://github.com/jarradbanks/jvid/issues/331) **Hold M to mark a range while playing** — The press-and-release ranged marker from the Markers issue (#40), which shipped without it.
 
 ---
 

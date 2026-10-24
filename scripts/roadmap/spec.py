@@ -1584,3 +1584,21 @@ I("inspector-tabs-wide", "Inspector tabs fill the header width", None, ["ui"], "
          "DESIGN.md's Tab row says side panels (Media, Inspector) share the full header width; other panels keep the 160px cap"],
   ac=["A kittest test shows the Inspector's last tab ending 4px from the header's right edge for two and three panes",
       "Snapshots that show the Inspector are updated"])
+
+I("highlight-points", "Highlights from point markers", None, ["export"], "S", ["batch-highlights"], labels=["later"],
+  summary="Tap M when something happens, then export a clip around it: point markers count as highlights.",
+  scope=[
+      "The Highlights range also takes point markers: each becomes a highlight from Before to After around its time, clamped to the sequence",
+      "Before and After fields in the Highlights section, defaulting to 15 s and 5 s, remembered like the other export settings",
+      "Ranged markers keep their own range; overlapping highlights still export as separate files",
+      "Highlights is disabled only when there are no markers at all, and the reason reads \"Add markers first\"",
+  ],
+  ac=["Two point markers export as two files of Before + After length (test)",
+      "A point marker 3 s into the sequence exports from 0 (clamped)",
+      "New strings are in every catalog"])
+
+I("hold-m-range", "Hold M to mark a range while playing", None, ["timeline"], "S", ["markers"], labels=["later"],
+  summary="The press-and-release ranged marker from the Markers issue (#40), which shipped without it.",
+  scope=["While playing, holding M marks a range from press to release; a tap (under about 0.3 s) still drops a point marker, and playback never stops"],
+  ac=["Press at 1 s and release at 4 s during playback makes one 3 s ranged marker (test with simulated key events)",
+      "A tap still makes a point marker, and one undo removes either"])
