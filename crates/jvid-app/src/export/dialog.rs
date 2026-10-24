@@ -74,6 +74,12 @@ impl Default for ExportDialog {
 }
 
 impl ExportDialog {
+    /// Sets the output file, whose folder the next `open` keeps; for tests that need a fixed path.
+    #[doc(hidden)]
+    pub fn set_path(&mut self, path: PathBuf) {
+        self.path = path;
+    }
+
     /// Opens on In to Out when a mark is set, else the entire timeline; the file is named `name`
     /// next to the last export.
     pub fn open(&mut self, seq: &Sequence, name: &str) {

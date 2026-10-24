@@ -1,5 +1,23 @@
 # suite-ui strings, French. Keep keys and {placeholders} in step with en.toml.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+# The spaces before : and inside « » are no-break spaces (U+00A0).
 
 [language]
 name = "Français"
+
+[panel]
+more_tabs = "Plus d'onglets"
+
+[input]
+search = "Rechercher"
+
+[color]
+# A fully transparent colour.
+none = "Aucune"
+
+[theme]
+error = "Thème {path} : {error}"
+bad_color = "`{value}` n'est pas au format #RRGGBB"
+at = "ligne {line}, colonne {column} : {error}"
+dark = "Sombre"
+light = "Clair"
+high_contrast = "Contraste élevé"

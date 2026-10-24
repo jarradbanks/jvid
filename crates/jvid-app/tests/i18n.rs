@@ -107,19 +107,33 @@ fn content(h: &Harness<'_, impl Sized>) -> Option<String> {
     h.get_by_role(Role::MultilineTextInput).value()
 }
 
+/// New Project, Text, Title, Track, Edit and Select All in Spanish, for [`titled_project`].
+const ES: [&str; 6] = [
+    "Nuevo proyecto",
+    "Texto",
+    "Título",
+    "Pista",
+    "Edición",
+    "Seleccionar todo Ctrl+A",
+];
+
 /// A new project with one title clip, selected, made the way a user makes one: the bin's preset
-/// dragged onto the timeline. Run in Spanish.
-fn titled_project() -> Harness<'static, App> {
-    let mut h = Harness::builder()
-        .with_size([1280.0, 720.0])
-        .build_eframe(|cc| App::new(cc, &Default::default()));
+/// dragged onto the timeline. Run in the language `labels` are in (see [`ES`]); `wgpu` lets it
+/// render snapshots.
+fn titled_project(wgpu: bool, labels: [&str; 6]) -> Harness<'static, App> {
+    let [new, text, title, track, edit, select_all] = labels;
+    let mut b = Harness::builder().with_size([1280.0, 720.0]);
+    if wgpu {
+        b = b.wgpu();
+    }
+    let mut h = b.build_eframe(|cc| App::new(cc, &Default::default()));
     h.run();
-    h.get_by_label("Nuevo proyecto").click();
+    h.get_by_label(new).click();
     h.run();
-    h.get_by_label("Texto").click();
+    h.get_by_label(text).click();
     h.run();
-    let from = h.get_by_label("Título").rect().center();
-    let to = egui::pos2(500.0, h.get_by_label("Pista").rect().center().y);
+    let from = h.get_by_label(title).rect().center();
+    let to = egui::pos2(500.0, h.get_by_label(track).rect().center().y);
     h.hover_at(from);
     h.run();
     h.drag_at(from);
@@ -130,9 +144,9 @@ fn titled_project() -> Harness<'static, App> {
     }
     h.drop_at(to);
     h.run();
-    h.get_by_label("Edición").click();
+    h.get_by_label(edit).click();
     h.run();
-    h.get_by_label("Seleccionar todo Ctrl+A").click();
+    h.get_by_label(select_all).click();
     h.run();
     h
 }
@@ -143,7 +157,7 @@ fn selected_clip_inspector_switches_live() {
         return;
     }
     let _es = switch("es");
-    let mut h = titled_project();
+    let mut h = titled_project(false, ES);
     let spanish = [
         "Fuente",
         "Contorno",
@@ -286,7 +300,7 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
         return;
     }
     let _es = switch("es");
-    let mut h = titled_project();
+    let mut h = titled_project(false, ES);
     click_rightmost(&mut h, "Efectos");
     h.get_by_label("Añadir efecto").scroll_to_me();
     h.run();
@@ -534,4 +548,68 @@ fn preferences_snapshot_in_russian() {
     h.run();
     assert!(has(&h, "Настройки") && has(&h, "Язык"));
     h.snapshot("preferences_ru");
+}
+
+/// The Export dialog in French at the narrowest width: its longest labels, and a snapshot.
+#[test]
+fn export_dialog_fits_in_french() {
+    let _fr = switch("fr");
+    let project = jvid_core::model::Project::default();
+    let mut dialog = ExportDialog::default();
+    // A fixed folder, not the working directory, so the snapshot matches on every machine.
+    dialog.set_path("/exports/Projet.mp4".into());
+    dialog.open(project.sequence(), "Projet");
+    let mut fresh = true;
+    let mut h = Harness::builder()
+        .with_size([NARROWEST, 720.0])
+        .build_ui_state(
+            move |ui, d: &mut ExportDialog| {
+                if !install_theme(ui, &mut fresh) {
+                    d.show(ui, &project, &HashSet::new());
+                }
+            },
+            dialog,
+        );
+    h.run();
+    assert_eq!(spills(&h), Vec::<String>::new());
+    for label in ["Ajouter à la file d'attente", "De l'entrée à la sortie"] {
+        assert!(has(&h, label), "no {label:?}");
+    }
+    if suite_ui::test_support::gpu() {
+        h.snapshot("export_dialog_fr");
+    }
+}
+
+/// The editor and Preferences in French at 1280×720, to read for clipped or overlapping labels.
+#[test]
+fn editor_and_preferences_snapshot_in_french() {
+    if !isolated() {
+        return;
+    }
+    let _fr = switch("fr");
+    if !suite_ui::test_support::gpu() {
+        return;
+    }
+    let labels = [
+        "Nouveau projet",
+        "Texte",
+        "Titre",
+        "Piste",
+        "Édition",
+        "Tout sélectionner Ctrl+A",
+    ];
+    let mut h = titled_project(true, labels);
+    // The Video tab holds the Inspector's longest captions.
+    click_rightmost(&mut h, "Vidéo");
+    assert!(has(&h, "Échelle") && has(&h, "Opacité"));
+    // The Text tab's title thumbnails use system fonts, which differ between machines.
+    click_leftmost(&mut h, "Médias");
+    let mut results = egui_kittest::SnapshotResults::new();
+    results.add(h.try_snapshot("editor_fr"));
+    h.get_by_label("Édition").click();
+    h.run();
+    h.get_by_label("Préférences…").click();
+    h.run();
+    assert!(has(&h, "Préférences") && has(&h, "Langue"));
+    results.add(h.try_snapshot("preferences_fr"));
 }
