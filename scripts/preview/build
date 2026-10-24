@@ -50,6 +50,17 @@ rm -rf "$motion"
 mkdir -p "$motion"
 cp "$root/scripts/preview/motion.html" "$motion/index.html"
 cp "$root"/crates/suite-ui/assets/Inter-{Regular,Medium,SemiBold}.ttf "$motion/"
+# Stills for the before/after wipe and the theme cards, by reel frame (seconds x 30): the
+# frame before the grade, after it, then the Light, High Contrast and Dark themes.
+while read -r name frame; do
+  cp "$frames/$frame.png" "$motion/$name.png"
+done <<'STILLS'
+before 00117
+after 00360
+light 00945
+hc 00975
+dark 01020
+STILLS
 ff -framerate 30 -i "$frames/%05d.png" -c:v libx264 -preset slow -crf 10 -g 15 -pix_fmt yuv420p \
   "$motion/ui.mp4"
 (cd "$motion" && HYPERFRAMES_NO_TELEMETRY=1 DO_NOT_TRACK=1 HYPERFRAMES_SKIP_SKILLS=1 \
@@ -57,11 +68,11 @@ ff -framerate 30 -i "$frames/%05d.png" -c:v libx264 -preset slow -crf 10 -g 15 -
   --workers 1 -o render.mp4)
 
 # The composition ends on its first frame, so both files loop without a cut. The camera moves
-# change every pixel, so the webp drops to 20 fps and quality 55 to stay under 4 MB.
+# change every pixel, so the webp drops to 18 fps, 1024 wide and quality 50 to stay under 4 MB.
 out="$root/docs/media"
 mkdir -p "$out"
-ff -i "$motion/render.mp4" -filter_complex "split[a][b];[a]format=yuv420p[mp4];[b]fps=20,scale=1280:-1:flags=lanczos[webp]" \
+ff -i "$motion/render.mp4" -filter_complex "split[a][b];[a]format=yuv420p[mp4];[b]fps=18,scale=1024:-1:flags=lanczos[webp]" \
   -map '[mp4]' -c:v libx264 -preset veryslow -crf 20 -movflags +faststart -an "$out/preview.mp4" \
-  -map '[webp]' -c:v libwebp_anim -lossless 0 -quality 55 -compression_level 6 -loop 0 -an \
+  -map '[webp]' -c:v libwebp_anim -lossless 0 -quality 50 -compression_level 6 -loop 0 -an \
   "$out/preview.webp"
 ls -l "$out/preview.mp4" "$out/preview.webp"

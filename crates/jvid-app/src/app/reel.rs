@@ -125,18 +125,6 @@ impl Reel {
         }
     }
 
-    /// Like `move_to`, along a curve bent towards `via`.
-    fn curve_to(&mut self, via: Pos2, to: Pos2, secs: f32) {
-        let from = self.cursor;
-        let n = frames(secs);
-        for i in 1..=n {
-            let t = ease(i as f32 / n as f32);
-            self.cursor = from.lerp(via, t).lerp(via.lerp(to, t), t);
-            self.h.hover_at(self.cursor);
-            self.frame();
-        }
-    }
-
     fn press(&mut self) {
         self.h.drag_at(self.cursor);
         self.frame();
@@ -149,12 +137,6 @@ impl Reel {
 
     fn click(&mut self) {
         self.press();
-        self.release();
-    }
-
-    fn drag_to(&mut self, to: Pos2, secs: f32) {
-        self.press();
-        self.move_to(to, secs);
         self.release();
     }
 
@@ -252,8 +234,8 @@ fn inside(poly: &[Pos2], p: Pos2) -> bool {
     odd
 }
 
-/// Imports the shots, puts all but the last on the timeline and fits the timeline to all of
-/// them, so the last one lands in view when the reel drags it in.
+/// Imports the shots and puts them end to end, each with half a second of handle at either
+/// end so a crossfade has media past the cut, then fits the timeline to them.
 fn project(h: &mut Harness<'static, App>, media: &Path) {
     jvid_media::ffmpeg::init().unwrap();
     let names = ["bridge", "walk", "face", "tower"];
@@ -274,20 +256,22 @@ fn project(h: &mut Harness<'static, App>, media: &Path) {
         .iter()
         .map(|a| a.id)
         .collect();
+    let handle = FLICKS_PER_SECOND / 2;
     let mut at = jvid_core::time::Time(0);
     for &asset in &assets {
-        let p = app
+        let mut p = app
             .history
             .project()
             .placement(asset, at, false, None, false)
             .unwrap();
+        p.source_in.0 += handle;
+        p.source_out.0 -= handle;
         at = p.start + (p.source_out - p.source_in);
         app.history.apply(Command::Place(p)).unwrap();
     }
     h.run_steps(2);
     let app = h.state_mut();
     assert!(app.timeline.action("zoom_fit", app.history.project()));
-    app.history.undo();
     app.history.mark_saved();
     app.path = Some(media.with_file_name("Tears of Steel.jvid"));
     app.bin.selected = None;
@@ -304,6 +288,10 @@ fn reel() {
     };
     assert!(suite_ui::test_support::gpu(), "the reel needs a GPU");
     suite_ui::i18n::set_language("en");
+    // A fresh effects folder holding the bundled examples, as tests have no real one.
+    let effects = Path::new(&media).with_file_name("effects");
+    let _ = std::fs::remove_dir_all(&effects);
+    crate::effects::scan_for_test(&effects);
     let mut h = Harness::builder()
         .with_size(SIZE)
         .with_pixels_per_point(1.0)
@@ -345,70 +333,226 @@ impl Reel {
         (left, y)
     }
 
+    /// The ruler's centre line: just above the top track.
+    fn ruler(&self) -> f32 {
+        let top = self
+            .h
+            .get_all_by_label("Hide")
+            .map(|h| h.rect().center().y)
+            .fold(f32::MAX, f32::min);
+        top - size::TRACK / 2.0 - 12.0
+    }
+
     fn x_at(&self, secs: f64) -> f32 {
         let (left, _) = self.lane();
         let t = jvid_core::time::Time((secs * FLICKS_PER_SECOND as f64) as i64);
         self.h.state().timeline.x_at(t, left)
     }
 
-    /// The edit: drop a shot onto the end of the timeline, play into the second shot, trim the
-    /// new shot's tail, drag a title above the playhead, retitle it in the Inspector, export.
+    fn duration(&self) -> f64 {
+        secs(self.h.state().history.project().sequence().duration())
+    }
+
+    fn playhead(&self) -> f64 {
+        secs(self.h.state().timeline.playhead())
+    }
+
+    /// Where the walk shot starts on V1: the last clip starting by 2.6s, cut or not.
+    fn walk(&self) -> f64 {
+        let seq = self.h.state().history.project().sequence();
+        seq.tracks()
+            .iter()
+            .find(|t| t.kind == jvid_core::model::TrackKind::Video)
+            .unwrap()
+            .clips()
+            .iter()
+            .map(|c| secs(c.start))
+            .filter(|&s| s <= 2.6)
+            .fold(0.0, f64::max)
+    }
+
+    /// Notes where a beat starts, for laying out scripts/preview/motion.html.
+    fn mark(&self, beat: &str) {
+        println!("reel: {beat} at {:.2}s", self.frame as f32 / FPS as f32);
+    }
+
+    fn key(&mut self, modifiers: egui::Modifiers, key: egui::Key) {
+        self.h.key_press_modifiers(modifiers, key);
+        self.frame();
+    }
+
+    /// Clicks the ruler at `secs`, moving the playhead there.
+    fn seek(&mut self, secs: f64, travel: f32) {
+        self.move_to(pos2(self.x_at(secs), self.ruler()), travel);
+        self.click();
+        let at = self.playhead();
+        assert!((at - secs).abs() < 0.05, "seek to {secs} landed at {at}");
+    }
+
+    /// The storyboard: each beat is a short moment the composition cuts to.
     fn edit(&mut self) {
-        self.hold(0.6);
-        // The tower shot's bin tile, fourth in a three-column grid. Up into V1 from below, as
-        // slowing over its top edge would open a new track instead.
-        let tile = pos2(78.0, 257.0);
-        self.move_to(tile, 0.9);
-        self.hold(0.15);
-        let (_, v1) = self.lane();
-        let to = pos2(self.x_at(3.0 * 3.5) + 1.0, v1 + 6.0);
-        self.press();
-        self.curve_to(to + vec2(-120.0, 160.0), to, 1.2);
-        self.release();
-        self.hold(0.4);
+        self.hold(0.5);
+        self.cut();
+        self.grade();
+        self.keys();
+        self.dissolve();
+        self.title();
+        self.looks();
+        self.export();
+    }
 
-        let play = self.rect("Play (Space)").center();
-        self.move_to(play, 0.8);
-        self.hold(0.15);
-        self.click();
-        self.move_to(play + vec2(30.0, 60.0), 1.2);
-        self.hold(1.9);
-        self.move_to(play, 0.6);
-        self.click();
-        self.hold(0.4);
-
-        // Trim the tower shot's tail by half a second.
+    /// Takes a beat out of the bridge shot: split twice and ripple delete the piece between.
+    fn cut(&mut self) {
+        self.mark("cut");
+        let before = self.duration();
+        self.seek(1.0, 0.6);
+        self.key(egui::Modifiers::COMMAND, egui::Key::K);
+        self.hold(0.2);
+        self.seek(1.6, 0.4);
+        self.key(egui::Modifiers::COMMAND, egui::Key::K);
+        self.hold(0.2);
         let (_, v1) = self.lane();
-        let end = secs(self.h.state().history.project().sequence().duration());
+        self.move_to(pos2(self.x_at(1.3), v1), 0.4);
+        self.click();
+        self.hold(0.2);
+        self.key(egui::Modifiers::SHIFT, egui::Key::Delete);
+        let after = self.duration();
         assert!(
-            (end - 12.9).abs() < 0.05,
-            "the tower shot ends the timeline, at {end}"
+            (before - after - 0.6).abs() < 0.05,
+            "cut {before} to {after}"
         );
-        let tail = self.x_at(end) - 3.0;
-        self.move_to(pos2(tail, v1), 1.0);
-        self.hold(0.15);
-        let to = self.x_at(end - 0.5) - 3.0;
-        self.drag_to(pos2(to, v1), 0.8);
-        let trimmed = secs(self.h.state().history.project().sequence().duration());
-        assert!((end - trimmed - 0.5).abs() < 0.05, "trimmed to {trimmed}");
-        self.hold(0.4);
+        self.hold(0.6);
+    }
 
-        // A title from the Text tab onto V2, over the playhead.
-        self.move_to(self.rect("Text").center(), 0.9);
+    /// Selects the clip under the playhead, warms it up and adds a vignette from the Effects tab.
+    fn grade(&mut self) {
+        self.mark("grade");
+        let (_, v1) = self.lane();
+        self.move_to(pos2(self.x_at(self.playhead() - 0.2), v1), 0.5);
+        self.click();
+        self.hold(0.2);
+        self.slide("Temperature", 0.5, 0.85, 0.7);
+        self.slide("Saturation", 0.5, 0.7, 0.5);
+
+        // The bin's tab, left of the Inspector's Effects section.
+        let tab = self
+            .h
+            .get_all_by_label("Effects")
+            .map(|n| n.rect())
+            .min_by(|a, b| a.left().total_cmp(&b.left()))
+            .unwrap();
+        self.move_to(tab.center(), 0.6);
+        self.click();
+        self.hold(0.2);
+        let row = self.rect("Vignette").center();
+        self.move_to(row, 0.4);
+        self.hold(0.1);
+        self.press();
+        self.move_to(pos2(self.x_at(self.playhead() - 0.2), v1), 0.7);
+        self.release();
+        self.hold(0.2);
+        self.move_to(self.rect("Effects 1").center(), 0.5);
+        self.click();
+        self.hold(0.2);
+        self.slide("Strength", 0.5, 1.0, 0.6);
+        self.hold(0.5);
+    }
+
+    /// Drags the slider labelled `label` from `from` to `to` of its width.
+    fn slide(&mut self, label: &str, from: f32, to: f32, secs: f32) {
+        let r = self
+            .h
+            .get_by_role_and_label(egui::accesskit::Role::Slider, label)
+            .rect();
+        let at = |f: f32| pos2(r.lerp_inside(vec2(f, 0.5)).x, r.center().y);
+        self.move_to(at(from), 0.5);
+        self.hold(0.1);
+        self.press();
+        self.move_to(at(to), secs);
+        self.release();
+        self.hold(0.2);
+    }
+
+    /// Keys the walk shot's scale at its start and again larger, then plays the push-in.
+    fn keys(&mut self) {
+        self.mark("keys");
+        let (_, v1) = self.lane();
+        let walk = self.walk();
+        self.seek(walk + 0.1, 0.6);
+        self.move_to(pos2(self.x_at(walk + 0.6), v1), 0.4);
+        self.click();
+        self.hold(0.2);
+        if self.h.query_by_label("Animate Scale").is_none() {
+            // The grade left the Inspector on the clip's effects.
+            self.move_to(self.rect("Video").center(), 0.5);
+            self.click();
+            self.hold(0.2);
+        }
+        let diamond = self.h.get_by_label("Animate Scale").rect().center();
+        self.move_to(diamond, 0.6);
         self.click();
         self.hold(0.3);
+        self.seek(walk + 1.6, 0.6);
+        // 100% sits a quarter of the way along the Scale slider.
+        self.slide("Scale", 0.25, 0.4, 0.6);
+        self.seek(walk + 0.1, 0.6);
+        self.move_to(start(), 0.4);
+        self.key(egui::Modifiers::NONE, egui::Key::Space);
+        self.hold(1.8);
+        self.key(egui::Modifiers::NONE, egui::Key::Space);
+        self.hold(0.3);
+    }
+
+    /// A crossfade on the walk shot's end, played across the cut.
+    fn dissolve(&mut self) {
+        self.mark("dissolve");
+        self.key(egui::Modifiers::COMMAND, egui::Key::D);
+        self.hold(0.3);
+        let cut = self.walk() + 2.5;
+        self.seek(cut - 0.9, 0.6);
+        self.move_to(start(), 0.4);
+        self.key(egui::Modifiers::NONE, egui::Key::Space);
+        self.hold(1.6);
+        self.key(egui::Modifiers::NONE, egui::Key::Space);
+        self.hold(0.3);
+    }
+
+    /// A title from the Text tab onto a new track over the playhead, retitled in the Inspector.
+    fn title(&mut self) {
+        self.mark("title");
+        self.move_to(self.rect("Text").center(), 0.6);
+        self.click();
+        self.hold(0.2);
         let preset = self.rect("Title").center();
-        self.move_to(preset, 0.6);
-        self.hold(0.15);
+        self.move_to(preset, 0.5);
+        self.hold(0.1);
         // Onto V1's top edge, which opens a new track above it; starting before the playhead,
         // so the Program shows it.
         let (_, v1) = self.lane();
-        let head = self.x_at(secs(self.h.state().timeline.playhead()));
+        let head = self.x_at(self.playhead());
         self.press();
-        self.move_to(pos2(head - 60.0, v1 - size::TRACK / 2.0 + 8.0), 1.2);
+        self.move_to(pos2(head - 60.0, v1 - size::TRACK / 2.0 + 8.0), 0.9);
         self.hold(0.3);
         self.release();
-        self.hold(0.5);
+        self.hold(0.3);
+        // Select it on the new top track, and show the Inspector's Text tab, the rightmost "Text".
+        let v2 = self
+            .h
+            .get_all_by_label("Hide")
+            .map(|h| h.rect().center().y)
+            .fold(f32::MAX, f32::min);
+        self.move_to(pos2(head + 40.0, v2), 0.5);
+        self.click();
+        self.hold(0.2);
+        let tab = self
+            .h
+            .get_all_by_label("Text")
+            .map(|n| n.rect())
+            .max_by(|a, b| a.left().total_cmp(&b.left()))
+            .unwrap();
+        self.move_to(tab.center(), 0.5);
+        self.click();
+        self.hold(0.2);
 
         // Retitle it: double-click the word in the Inspector's text box and type.
         let text = self
@@ -416,19 +560,36 @@ impl Reel {
             .get_by_role(egui::accesskit::Role::MultilineTextInput)
             .rect();
         let word = text.left_top() + vec2(20.0, 12.0);
-        self.move_to(word, 0.9);
-        self.hold(0.15);
+        self.move_to(word, 0.7);
         self.click();
         self.click();
-        self.hold(0.3);
+        self.hold(0.2);
         for c in "Tears of Steel".chars() {
             self.h.event(egui::Event::Text(c.into()));
-            self.hold(0.08);
+            self.hold(0.06);
         }
-        self.hold(0.6);
+        self.hold(0.5);
+    }
 
-        // Export. The real job waits behind a blocked pool and is swapped for a stand-in whose
-        // progress the reel sets, so the header counts up the same on every machine.
+    /// The built-in themes, then a run through some of the languages.
+    fn looks(&mut self) {
+        self.mark("themes");
+        self.move_to(start(), 0.6);
+        for theme in ["light", "high-contrast", "dark"] {
+            self.h.state_mut().theme = suite_ui::themes::LiveTheme::new(theme);
+            self.hold(1.0);
+        }
+        self.mark("languages");
+        for lang in ["ja", "de", "es", "ko", "fr", "zh-Hans", "tr", "sv", "en"] {
+            suite_ui::i18n::set_language(lang);
+            self.hold(0.4);
+        }
+    }
+
+    /// Export. The real job waits behind a blocked pool and is swapped for a stand-in whose
+    /// progress the reel sets, so the header counts up the same on every machine.
+    fn export(&mut self) {
+        self.mark("export");
         let (unblock, blocked) = channel::<()>();
         let app = self.h.state_mut();
         app.exports = jvid_jobs::Pool::new(1);
@@ -438,17 +599,17 @@ impl Reel {
             });
         app.export_dialog
             .set_path(PathBuf::from("~/Videos/Tears of Steel.mp4"));
-        self.move_to(self.rect("Export").center(), 1.0);
+        self.move_to(self.rect("Export").center(), 0.8);
         self.click();
-        self.hold(0.9);
+        self.hold(0.7);
         let export = self
             .h
             .get_all_by_role_and_label(egui::accesskit::Role::Button, "Export")
             .map(|n| n.rect())
             .max_by(|a, b| a.top().total_cmp(&b.top()))
             .unwrap();
-        self.move_to(export.center(), 0.9);
-        self.hold(0.15);
+        self.move_to(export.center(), 0.7);
+        self.hold(0.1);
         self.click();
 
         let (progress, rx) = channel::<f32>();
@@ -468,9 +629,8 @@ impl Reel {
         app.queue = crate::export::queue::Queue::default();
         app.queue
             .push(row.path, row.preset, row.duration, (handle, result));
-        // Count up while the cursor eases back to where it started, for the loop.
         let (from, home) = (self.cursor, start());
-        let (n, m) = (frames(2.4), frames(1.4));
+        let (n, m) = (frames(2.0), frames(1.2));
         for i in 1..=n {
             progress.send(i as f32 / n as f32).unwrap();
             acked.recv().unwrap();
@@ -484,7 +644,7 @@ impl Reel {
     }
 }
 
-/// Where the cursor rests at the start and the end, so the loop meets itself.
+/// Where the cursor rests at the start and the end.
 fn start() -> Pos2 {
     pos2(SIZE[0] * 0.55, SIZE[1] * 0.62)
 }

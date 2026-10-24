@@ -1,6 +1,6 @@
 # jvid
 
-[![A short tour of jvid: dropping a clip onto the timeline, playing it back, trimming it, adding a title and exporting](docs/media/preview.webp)](docs/media/preview.mp4)
+[![A quick tour of jvid: cutting a clip, grading it with a Vignette, keyframing a push-in, a crossfade, typing a title, switching themes and languages, and exporting](docs/media/preview.webp)](docs/media/preview.mp4)
 
 jvid is a small, fast video editor for quick edits: pull a highlight out of a long recording, trim a screen capture, add a title and export. It's written in Rust, draws its UI on the GPU and runs on Windows, macOS and Linux. Free and open source, no account.
 

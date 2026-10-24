@@ -2,9 +2,9 @@
 <!--
   The README preview: a HyperFrames composition (HTML rendered to video) built around ui.mp4, the
   real editor driven frame by frame by crates/jvid-app/src/app/reel.rs. scripts/preview/build copies
-  this file, ui.mp4 and the Inter fonts into target/preview/motion/ and renders it there.
-  Times are seconds of the composition; data-media-start is seconds into ui.mp4. The last frame
-  matches the first, so the render loops without a cut.
+  this file, ui.mp4, the stills and the Inter fonts into target/preview/motion/ and renders it there.
+  Times are seconds of the composition; data-media-start is seconds into ui.mp4, picked from the
+  "reel: <beat> at" lines the reel prints. The last frame matches the first, so the render loops.
 -->
 <html lang="en">
   <head>
@@ -18,7 +18,7 @@
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body { width: 1920px; height: 1080px; overflow: hidden; background: #0a0b0d; }
       #root {
-        position: relative; width: 100%; height: 100%;
+        position: relative; width: 100%; height: 100%; overflow: hidden;
         font-family: Inter, sans-serif; color: #edeef1;
       }
       .center {
@@ -29,43 +29,106 @@
       .tag { margin-top: 28px; font-size: 40px; font-weight: 400; color: #adb1b8; letter-spacing: -0.01em; }
       .facts { position: absolute; left: 0; right: 0; top: 724px; text-align: center; font-size: 26px; color: #82868e; }
       .facts b { font-weight: 500; color: #adb1b8; }
-      .head { position: absolute; left: 0; right: 0; top: 64px; text-align: center; }
-      .head h2 { font-size: 56px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; }
-      .head p { margin-top: 12px; font-size: 26px; color: #adb1b8; }
-      /* The editor window: 1600x900 capture shown at 0.88, the camera moves inside it. */
+
+      /* Hook: one word per flash of the Program monitor, cropped to fill the frame. */
+      #flashes { position: absolute; inset: 0; opacity: 0.38; }
+      #flashes video { position: absolute; left: -1057px; top: -204px; width: 3914px; height: 2202px; }
+      #shade { position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(10,11,13,0.35), rgba(10,11,13,0.9)); }
+      .word { font-size: 220px; font-weight: 600; letter-spacing: -0.05em; line-height: 1; }
+
+      .head { position: absolute; left: 0; right: 0; top: 52px; text-align: center; }
+      .head h2 { font-size: 64px; font-weight: 600; letter-spacing: -0.035em; line-height: 1.1; }
+      .head p { margin-top: 10px; font-size: 26px; color: #adb1b8; }
+      .head .pair { position: relative; height: 42px; }
+      .head .pair p { position: absolute; left: 0; right: 0; top: 0; }
+      .head b { font-weight: 600; color: #edeef1; }
+
+      /* The editor window: the 1600x900 capture shown at 0.88 about its centre; the camera moves inside it. */
       #window {
-        position: absolute; left: 256px; top: 236px; width: 1600px; height: 900px;
-        transform-origin: 0 0; opacity: 0;
+        position: absolute; left: 160px; top: 182px; width: 1600px; height: 900px; opacity: 0;
         border: 1px solid #36383c; border-radius: 14px; overflow: hidden; background: #040404;
         box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
       }
       #cam { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; }
       #cam video { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; }
+
+      /* Before/after: the Program monitor (432,137.5 785x334 in the capture) filling the window. */
+      #wipe { position: absolute; inset: 0; background: #040404; }
+      .shot { position: absolute; left: 0; top: 110px; width: 1600px; height: 681px; overflow: hidden; }
+      .shot img { position: absolute; left: -880px; top: -280px; width: 3261px; height: 1834px; }
+      #seam { position: absolute; left: 0; top: 110px; width: 3px; height: 681px; margin-left: -1px; background: #edeef1; }
+      .label {
+        position: absolute; top: 132px; padding: 6px 14px; border-radius: 8px;
+        background: rgba(10, 11, 13, 0.7); font-size: 24px; font-weight: 500;
+      }
+
+      #cards .card {
+        position: absolute; top: 430px; width: 704px; height: 396px; border-radius: 12px;
+        border: 1px solid #36383c; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
+      }
     </style>
   </head>
   <body>
-    <div id="root" data-composition-id="main" data-start="0" data-duration="27" data-width="1920" data-height="1080">
-      <div id="brand" class="center clip" data-start="0" data-duration="27">
+    <div id="root" data-composition-id="main" data-start="0" data-duration="28.6" data-width="1920" data-height="1080">
+      <div id="flashes">
+        <video id="f1" class="clip" src="ui.mp4" muted data-start="0.6" data-duration="0.45" data-media-start="1.2"></video>
+        <video id="f2" class="clip" src="ui.mp4" muted data-start="1.05" data-duration="0.45" data-media-start="11.8"></video>
+        <video id="f3" class="clip" src="ui.mp4" muted data-start="1.5" data-duration="0.45" data-media-start="19.4"></video>
+        <video id="f4" class="clip" src="ui.mp4" muted data-start="1.95" data-duration="0.5" data-media-start="41.6"></video>
+      </div>
+      <div id="shade"></div>
+      <div id="w1" class="center clip" data-start="0.6" data-duration="0.45"><div class="word">Cut.</div></div>
+      <div id="w2" class="center clip" data-start="1.05" data-duration="0.45"><div class="word">Grade.</div></div>
+      <div id="w3" class="center clip" data-start="1.5" data-duration="0.45"><div class="word">Animate.</div></div>
+      <div id="w4" class="center clip" data-start="1.95" data-duration="0.5"><div class="word">Export.</div></div>
+
+      <div id="brand" class="center clip" data-start="0" data-duration="28.6">
         <div class="mark">jvid</div>
         <div class="tag">A small, fast video editor.</div>
       </div>
-      <div id="facts" class="facts clip" data-start="24" data-duration="3">
+      <div id="facts" class="facts clip" data-start="27" data-duration="1.6">
         <b>Free and open source</b> &nbsp;·&nbsp; Windows, macOS and Linux &nbsp;·&nbsp; Written in Rust
       </div>
 
-      <div id="h1" class="head clip" data-start="1.8" data-duration="3.8"><h2>Drop In Your Clips</h2><p>Drag shots from the bin straight onto the timeline.</p></div>
-      <div id="h2" class="head clip" data-start="5.6" data-duration="3.2"><h2>Play It Back</h2><p>Frame-accurate preview, with proxies for heavy footage.</p></div>
-      <div id="h3" class="head clip" data-start="8.8" data-duration="2.6"><h2>Trim With a Drag</h2><p>Grab a clip's edge and pull it in.</p></div>
-      <div id="h4" class="head clip" data-start="11.4" data-duration="7.2"><h2>Add a Title</h2><p>Drop a preset onto the timeline and type.</p></div>
-      <div id="h5" class="head clip" data-start="18.6" data-duration="5.6"><h2>Export in the Background</h2><p>Presets for YouTube, Shorts and more, while you keep editing.</p></div>
+      <div id="h1" class="head clip" data-start="2.7" data-duration="2.7"><h2>Cut</h2><p>Split at the playhead and ripple out the gap.</p></div>
+      <div id="h2" class="head clip" data-start="5.4" data-duration="5.6"><h2>Grade</h2><p>Warm it up, drop on a Vignette, see the difference.</p></div>
+      <div id="h3" class="head clip" data-start="11" data-duration="3.2"><h2>Animate</h2><p>Keyframe any property, like a push-in on Scale.</p></div>
+      <div id="h4" class="head clip" data-start="14.2" data-duration="1.9"><h2>Transitions</h2><p>A crossfade on the cut, with one shortcut.</p></div>
+      <div id="h5" class="head clip" data-start="16.1" data-duration="3"><h2>Titles</h2><p>Drop a preset and type.</p></div>
+      <div id="h6" class="head clip" data-start="19.1" data-duration="4.4">
+        <h2>Make It Yours</h2>
+        <div class="pair">
+          <p id="p6a">Dark, Light and High Contrast themes.</p>
+          <p id="p6b"><b id="count">1</b> languages, switched live.</p>
+        </div>
+      </div>
+      <div id="h7" class="head clip" data-start="23.5" data-duration="2.8"><h2>Export</h2><p>Presets for YouTube, Shorts and more, rendered in the background.</p></div>
+
+      <div id="cards" class="clip" data-start="19.1" data-duration="2">
+        <img id="c1" class="card" src="light.png" style="left: 208px" />
+        <img id="c3" class="card" src="dark.png" style="left: 1008px" />
+        <img id="c2" class="card" src="hc.png" style="left: 608px" />
+      </div>
 
       <div id="window">
         <div id="cam">
-          <video id="ui1" class="clip" src="ui.mp4" muted data-start="1.4" data-duration="4.2" data-media-start="0"></video>
-          <video id="ui2" class="clip" src="ui.mp4" muted data-start="5.6" data-duration="3.2" data-media-start="4.3"></video>
-          <video id="ui3" class="clip" src="ui.mp4" muted data-start="8.8" data-duration="2.6" data-media-start="8.6"></video>
-          <video id="ui4" class="clip" src="ui.mp4" muted data-start="11.4" data-duration="7.2" data-media-start="11.6"></video>
-          <video id="ui5" class="clip" src="ui.mp4" muted data-start="18.6" data-duration="6" data-media-start="18.8"></video>
+          <video id="ui1" class="clip" src="ui.mp4" muted data-start="2.4" data-duration="3" data-media-start="0.4"></video>
+          <video id="ui2" class="clip" src="ui.mp4" muted data-start="5.4" data-duration="2.4" data-media-start="4.4"></video>
+          <video id="ui3" class="clip" src="ui.mp4" muted data-start="7.8" data-duration="2" data-media-start="9.5"></video>
+          <video id="ui4" class="clip" src="ui.mp4" muted data-start="11" data-duration="1.3" data-media-start="16.2"></video>
+          <video id="ui5" class="clip" src="ui.mp4" muted data-start="12.3" data-duration="1.9" data-media-start="18.5"></video>
+          <video id="ui6" class="clip" src="ui.mp4" muted data-start="14.2" data-duration="1.9" data-media-start="21.8"></video>
+          <video id="ui7" class="clip" src="ui.mp4" muted data-start="16.1" data-duration="1.5" data-media-start="24.9"></video>
+          <video id="ui8" class="clip" src="ui.mp4" muted data-start="17.6" data-duration="1.5" data-media-start="29.5"></video>
+          <video id="ui9" class="clip" src="ui.mp4" muted data-start="21" data-duration="2.5" data-media-start="34.5"></video>
+          <video id="ui10" class="clip" src="ui.mp4" muted data-start="23.5" data-duration="3.4" data-media-start="39.5"></video>
+        </div>
+        <div id="wipe" class="clip" data-start="9.8" data-duration="1.2">
+          <div class="shot"><img src="before.png" /></div>
+          <div id="after" class="shot"><img src="after.png" /></div>
+          <div id="seam"></div>
+          <div class="label" style="left: 24px">Before</div>
+          <div class="label" style="right: 24px">After</div>
         </div>
       </div>
     </div>
@@ -84,36 +147,83 @@
       const cam = (at, dur, fx, fy, z) => tl.to("#cam", { ...focus(fx, fy, z), duration: dur, ease }, at);
       gsap.set("#cam", focus(800, 450, 1));
 
-      // Intro: the wordmark lifts away as the editor rises in.
-      gsap.set("#window", { opacity: 0, y: 80, scale: 0.84 });
-      tl.to("#brand", { opacity: 0, y: -60, duration: 0.7, ease: "power2.in" }, 1.2);
-      tl.to("#window", { opacity: 1, y: 0, scale: 0.88, duration: 1.0, ease: "power3.out" }, 1.4);
+      // Hook: the wordmark snaps away, then one word per flash, each punching in.
+      gsap.set("#window", { opacity: 0, y: 120, scale: 0.8, transformPerspective: 2400 });
+      tl.to("#brand", { opacity: 0, scale: 0.96, duration: 0.15, ease: "power2.in" }, 0.45);
+      ["#w1", "#w2", "#w3", "#w4"].forEach((w, i) => {
+        tl.fromTo(`${w} .word`, { scale: 1.18, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "expo.out" }, 0.6 + i * 0.45);
+      });
+      tl.to("#flashes, #shade", { opacity: 0, duration: 0.25, ease: "power2.in" }, 2.25);
+      tl.to("#w4 .word", { opacity: 0, y: -40, duration: 0.2, ease: "power2.in" }, 2.3);
+      tl.to("#window", { opacity: 1, y: 0, scale: 0.88, duration: 0.7, ease: "expo.out" }, 2.4);
 
-      // Headlines fade up in and out.
+      // Headlines rise in and lift out.
       const head = (id, start, dur) => {
-        tl.fromTo(id, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, start);
-        tl.to(id, { opacity: 0, y: -10, duration: 0.3, ease: "power2.in" }, start + dur - 0.3);
+        tl.fromTo(`${id} h2`, { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.45, ease: "expo.out" }, start);
+        // #p6b comes in later, with the language count.
+        tl.fromTo(`${id} p:not(#p6b)`, { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.45, ease: "expo.out" }, start + 0.08);
+        tl.to(id, { opacity: 0, y: -14, duration: 0.25, ease: "power2.in" }, start + dur - 0.25);
       };
-      head("#h1", 1.8, 3.8);
-      head("#h2", 5.6, 3.2);
-      head("#h3", 8.8, 2.6);
-      head("#h4", 11.4, 7.2);
-      head("#h5", 18.6, 5.6);
+      head("#h1", 2.7, 2.7);
+      head("#h2", 5.4, 5.6);
+      head("#h3", 11, 3.2);
+      head("#h4", 14.2, 1.9);
+      head("#h5", 16.1, 3);
+      head("#h6", 19.1, 4.4);
+      head("#h7", 23.5, 2.8);
 
-      // Camera: whole editor for the drag, then each feature up close.
-      cam(5.3, 0.8, 824, 300, 1.5);      // Program monitor
-      cam(8.5, 0.8, 1330, 690, 2.2);     // tower clip's tail on V1
-      cam(11.1, 0.8, 500, 400, 1.2);     // bin and timeline, for the Title drag
-      cam(15.0, 1.0, 1010, 290, 1.45);   // Program and Inspector while typing
-      cam(18.3, 0.8, 800, 440, 1.3);     // Export dialog
-      cam(21.4, 1.0, 1600, 0, 1.5);      // Exporting badge, Inspector and the title
+      // Cut: the split and ripple on the timeline.
+      cam(2.9, 0.7, 480, 640, 2);
+      // Grade: Inspector sliders, the Vignette drag from the Effects bin, then its Strength.
+      cam(5.2, 0.6, 1000, 300, 1.35);
+      cam(7.6, 0.6, 800, 450, 1);
+      cam(8.8, 0.5, 1000, 300, 1.35);
+      // Before and after, wiped across the Program monitor.
+      gsap.set("#after", { clipPath: "inset(0% 0% 0% 100%)" });
+      gsap.set("#seam", { x: 1600 });
+      tl.to("#after", { clipPath: "inset(0% 0% 0% 0%)", duration: 0.9, ease }, 9.95);
+      tl.to("#seam", { x: 0, duration: 0.9, ease }, 9.95);
+      // Animate: the Scale key, then the push-in playing, with the window swung in 3D.
+      cam(10.6, 0.3, 1000, 300, 1.35);
+      tl.to("#window", { rotationY: -10, rotationX: 4, duration: 1.2, ease }, 10.9);
+      cam(12.1, 0.6, 824, 300, 1.6);
+      tl.to("#window", { rotationY: 0, rotationX: 0, duration: 0.8, ease }, 13.6);
+      // Transitions: the crossfade on the Program monitor.
+      cam(14.1, 0.6, 824, 360, 1.4);
+      // Titles: the preset dragged down, then typed in the Inspector.
+      cam(15.9, 0.5, 600, 450, 1.1);
+      cam(17.4, 0.5, 1010, 290, 1.45);
+
+      // Make it yours: the window steps back for the three themes, fanned out as cards.
+      tl.to("#window", { opacity: 0, scale: 0.8, duration: 0.3, ease: "power2.in" }, 18.8);
+      cam(19.3, 0.1, 800, 450, 1);
+      const fan = [["#c1", -7, -40], ["#c2", 0, 30], ["#c3", 7, -40]];
+      fan.forEach(([c, r, y], i) => {
+        tl.fromTo(c, { opacity: 0, y: 360, rotation: 0, rotationY: 0 },
+          { opacity: 1, y, rotation: r, rotationY: -r * 2, transformPerspective: 1600, duration: 0.7, ease: "expo.out" }, 19.15 + i * 0.12);
+      });
+      tl.to("#cards", { opacity: 0, scale: 0.94, duration: 0.3, ease: "power2.in" }, 20.8);
+      tl.to("#window", { opacity: 1, scale: 0.88, duration: 0.5, ease: "expo.out" }, 21.0);
+      // Then the languages flip by while the count runs up.
+      gsap.set("#p6b", { opacity: 0 });
+      tl.to("#p6a", { opacity: 0, y: -10, duration: 0.25 }, 21.0);
+      tl.fromTo("#p6b", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.3, immediateRender: false }, 21.15);
+      const n = { v: 1 };
+      tl.to(n, { v: 19, duration: 1.8, ease: "power1.out", onUpdate: () => {
+        document.getElementById("count").textContent = Math.round(n.v);
+      } }, 21.2);
+
+      // Export: the dialog, then the badge counting up beside the title.
+      cam(23.3, 0.6, 800, 440, 1.25);
+      cam(24.9, 0.8, 1600, 0, 1.5);
 
       // Outro: the editor sinks away and the wordmark returns where the reel began.
-      tl.to("#cam", { ...focus(800, 450, 1), duration: 0.8, ease }, 23.8);
-      tl.to("#window", { opacity: 0, y: 80, scale: 0.84, duration: 0.8, ease: "power3.in" }, 23.8);
-      tl.fromTo("#brand", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", immediateRender: false }, 24.4);
-      tl.fromTo("#facts", { opacity: 0 }, { opacity: 1, duration: 0.6, ease: "power2.out" }, 25.0);
-      tl.to("#facts", { opacity: 0, duration: 0.5, ease: "power2.in" }, 26.3);
+      tl.to("#cam", { ...focus(800, 450, 1), duration: 0.6, ease }, 26.3);
+      tl.to("#window", { opacity: 0, y: 120, scale: 0.8, duration: 0.6, ease: "power3.in" }, 26.3);
+      tl.fromTo("#brand", { opacity: 0, scale: 1, y: 40 }, { opacity: 1, y: 0, duration: 0.8, ease: "expo.out", immediateRender: false }, 26.7);
+      tl.fromTo("#facts", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power2.out" }, 27.0);
+      tl.to("#facts", { opacity: 0, duration: 0.4, ease: "power2.in" }, 28.0);
+      tl.set({}, {}, 28.6);
 
       window.__timelines["main"] = tl;
       tl.seek(0);
