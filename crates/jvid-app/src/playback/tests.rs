@@ -328,7 +328,8 @@ fn clip_boundaries_play_without_drops() {
 
 /// Looping the in/out range plays it over and over with no frame dropped at the wrap: decode-ahead
 /// wraps too, so the in point's frames are decoded (again, with the cache too small to hold the
-/// loop) before the playhead jumps back.
+/// loop) before the playhead jumps back. Stepped, not real time: each tick's decodes finish before
+/// the clock moves on, so a frame shows only if it was queued before the playhead got there.
 #[test]
 fn loop_wraps_without_dropping_frames() {
     let mut h = History::new(Project::default());
@@ -339,15 +340,32 @@ fn loop_wraps_without_dropping_frames() {
     })
     .unwrap();
     let p = h.project();
-    // About two frames of latency, so a frame queued only after the wrap would be late.
-    let decode = cold_open(Duration::from_millis(60), Duration::from_millis(60));
     // Room for the decode-ahead window and what was just shown, not for the whole loop.
-    let mut pb = Playback::new(decode, silent(), 40 * size(&tiny(Time(0))));
+    let mut pb = Playback::new(
+        Arc::new(|_, t| Ok(tiny(t))),
+        silent(),
+        40 * size(&tiny(Time(0))),
+    );
     pb.looping = true;
     pb.sync(p);
     pb.transport.seek(secs(1), 0);
-    let seen = play(&mut pb, p, 6 * SAMPLE_RATE as u64, |_| {});
-    let shown: Vec<_> = seen.iter().map(|s| s.index).collect();
+    let fake = Fake::default();
+    let mut out = Output::new(Box::new(fake.clone()), None);
+    let mut last = None;
+    catch_up(&mut pb, p, 0, &mut last);
+    pb.transport.toggle(out.clock());
+    let mut shown = Vec::new();
+    while out.clock() < 6 * SAMPLE_RATE as u64 {
+        if let Some(s) = pb.tick(p, &mut out) {
+            shown.push(s.index);
+        }
+        while !pb.pending.is_empty() {
+            std::thread::sleep(Duration::from_micros(100));
+            pb.decode_ahead(p, out.clock());
+        }
+        // One tick per frame, so a frame missed at its tick is dropped, not shown a tick late.
+        fake.pull(SAMPLE_RATE as usize / 30);
+    }
     assert_eq!(shown[0], 31, "the in point was shown parked");
     assert!(
         shown
