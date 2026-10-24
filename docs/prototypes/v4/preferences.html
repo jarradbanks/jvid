@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preferences and Themes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* v4 base: copied verbatim into every v4 page. Tokens and chrome from v3/inspector-effects-text.html. */
+:root {
+  --ground: #0A0B0D; --panel: #121416; --raised: #1C1E21; --field: #0D0E11;
+  --border: #232529; --border2: #36383C;
+  --ink: #EDEEF1; --ink2: #ADB1B8; --ink3: #82868E; --ink4: #5A5E63;
+  --blue: #2368C9; --blueh: #2C70D3; --bluel: #7AACF6;
+  --red: #EC5B57; --amber: #F2AF48; --green: #4EBE7D;
+  --shadow: 0 8px 24px rgba(0, 0, 0, .4);
+  color-scheme: dark;
+}
+/* Built-in palettes from crates/suite-ui/src/themes.rs. Ink 2 and Ink 4 aren't palette tokens; these are the derived values. */
+.th-light { --ground: #E6E7EA; --panel: #F6F7F8; --raised: #FFFFFF; --field: #FFFFFF; --border: #D9DBDF; --border2: #B4B7BD;
+  --ink: #16181B; --ink2: #3F434A; --ink3: #5E6269; --ink4: #9A9EA5; --bluel: #1D5BB5; --red: #C03632; --amber: #8A5A00; --green: #1E7A46; --shadow: 0 8px 24px rgba(0, 0, 0, .14); color-scheme: light; }
+.th-hc { --ground: #000; --panel: #000; --raised: #141414; --field: #000; --border: #8A8A8A; --border2: #FFFFFF;
+  --ink: #FFFFFF; --ink2: #E0E0E0; --ink3: #C8C8C8; --ink4: #8A8A8A; --bluel: #9CC4FF; --red: #FF7A75; --amber: #FFC85C; --green: #6BE09A; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ground); color: var(--ink2); }
+body { font: 400 14px/1.55 Inter, system-ui, sans-serif; font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased; }
+::selection { background: rgba(35, 104, 201, .45); color: var(--ink); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+:focus-visible { outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+code { font-size: 12px; color: var(--ink); }
+a { color: var(--bluel); text-underline-offset: 2px; }
+
+/* The page around the mockups */
+.page { max-width: 1320px; margin: 0 auto; padding: 56px 32px 120px; }
+h1 { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); margin: 0 0 12px; }
+h2 { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); margin: 0 0 12px; }
+h3 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); margin: 32px 0 8px; }
+section { margin-top: 88px; }
+p { margin: 0 0 12px; max-width: 68ch; }
+ul.notes { margin: 0; padding-left: 18px; max-width: 68ch; }
+ul.notes li { margin: 6px 0; }
+ul.notes li::marker { color: var(--ink4); }
+.page b { color: var(--ink); font-weight: 500; }
+.compare { display: flex; flex-wrap: wrap; gap: 40px 48px; align-items: flex-start; margin-top: 32px; }
+.stack { display: flex; flex-direction: column; gap: 56px; margin-top: 32px; }
+figure { margin: 0; max-width: 100%; }
+figcaption { margin: 16px 0 6px; color: var(--ink); font-weight: 500; }
+.why { margin: 0; max-width: 60ch; }
+.why span { color: var(--ink3); }
+.stage { overflow-x: auto; }
+.states { display: flex; flex-wrap: wrap; gap: 32px 40px; align-items: flex-start; margin-top: 24px; }
+.state-lbl { font-size: 12px; color: var(--ink3); margin: 0 0 8px; }
+.toggle { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; margin: 8px 0 0; }
+.toggle button { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: var(--ink3); }
+.toggle button.on { background: var(--raised); color: var(--ink); }
+.rec { margin-top: 88px; padding-top: 24px; border-top: 1px solid var(--border); }
+
+/* App chrome, at the app's own scale (egui points = CSS px) */
+.app { font-size: 12px; line-height: 16px; color: var(--ink); user-select: none; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.phead { height: 32px; flex: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; font-weight: 500; }
+.phead.tabs { padding: 0 4px; gap: 4px; }
+.tab { flex: 1 1 0; max-width: 160px; min-width: 64px; height: 24px; border-radius: 6px; color: var(--ink3); font-weight: 500; text-align: center; transition: color .1s, background .1s; }
+.tab:hover { color: var(--ink2); }
+.tab.on { background: var(--raised); color: var(--ink); }
+.pbody { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 12px 12px; scrollbar-gutter: stable; }
+
+.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ib { width: 20px; height: 20px; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); transition: background .1s, color .1s; flex: none; }
+.ib:hover { background: var(--raised); color: var(--ink); }
+.ib.ph { pointer-events: none; }
+.ib[disabled] { color: var(--ink4); pointer-events: none; }
+
+/* Inspector sections and rows */
+.sec + .sec { border-top: 1px solid var(--border); }
+.shead { height: 32px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500; }
+.shead .chev { color: var(--ink2); transition: transform .1s; }
+.sec:not(.open) > .shead .chev { transform: rotate(-90deg); }
+.sec:not(.open) > .sbody { display: none; }
+.sbody { padding-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+.tools { margin-left: auto; display: flex; gap: 2px; flex: none; }
+.row .reset, .shead .reset { visibility: hidden; }
+.row.changed .reset, .sec.changed > .shead .reset { visibility: visible; }
+.dia { width: 8px; height: 8px; transform: rotate(45deg); border: 1px solid var(--ink4); border-radius: 1px; }
+.key:hover .dia { border-color: var(--ink2); }
+.row.anim .dia { border-color: var(--bluel); }
+.row.anim.here .dia { background: var(--bluel); }
+.row { display: flex; align-items: center; gap: 4px; min-height: 24px; }
+.lbl { width: 72px; flex: none; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vals { flex: 1; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.fld { height: 24px; border-radius: 6px; background: var(--field); border: 1px solid var(--border); padding: 0 8px; display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; white-space: nowrap; transition: border-color .1s; color: var(--ink); }
+.fld:hover { border-color: var(--border2); }
+.fld.focus { border-color: var(--blue); outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+.fld.err { border-color: var(--red); }
+.fld.num { cursor: ew-resize; }
+.fld.w56 { flex: 0 0 56px; } .fld.w64 { flex: 0 0 64px; }
+.fld .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pre { color: var(--ink3); }
+.ph-txt { color: var(--ink3); }
+.dd { cursor: pointer; justify-content: space-between; }
+.dd .i { color: var(--ink3); margin-right: -4px; }
+.sl { flex: 1; position: relative; display: flex; align-items: center; margin-left: 4px; min-width: 40px; }
+.sl.bi::before { content: ""; position: absolute; left: 50%; top: 7px; height: 10px; width: 1px; background: var(--border2); }
+.sl input { position: relative; -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; --lo: 0%; --hi: 0%; }
+.sl input:focus-visible { outline: none; }
+.sl input::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: linear-gradient(90deg, var(--border2) var(--lo), var(--ink3) var(--lo) var(--hi), var(--border2) var(--hi)); }
+.sl input::-webkit-slider-thumb { -webkit-appearance: none; width: 6px; height: 14px; border-radius: 2px; background: var(--ink2); margin-top: -6px; }
+.sl input:hover::-webkit-slider-thumb { background: var(--ink); }
+.chk { display: flex; align-items: center; gap: 6px; color: var(--ink2); height: 24px; white-space: nowrap; }
+.box { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border2); background: var(--field); display: grid; place-items: center; }
+.box .i { width: 12px; height: 12px; stroke: var(--ink); visibility: hidden; }
+.chk.on .box { background: var(--raised); }
+.chk.on .box .i { visibility: visible; }
+.seg { display: flex; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); padding: 1px; gap: 1px; }
+.seg button { flex: 1; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); min-width: 24px; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--raised); color: var(--ink); }
+
+/* Buttons */
+.btn { height: 24px; border-radius: 6px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500; color: var(--ink); background: var(--raised); border: 1px solid var(--border); transition: border-color .1s, background .1s; white-space: nowrap; }
+.btn:hover { border-color: var(--border2); }
+.btn .i { color: var(--ink2); }
+.btn.lg { height: 28px; }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.btn.primary:hover { background: var(--blueh); border-color: var(--blueh); }
+.btn.primary .i { color: #fff; }
+.btn.ghost { background: none; border-color: transparent; color: var(--ink2); }
+.btn.ghost:hover { background: var(--raised); color: var(--ink); }
+.btn.danger { color: var(--red); }
+.btn[disabled], .btn.off { background: var(--raised); border-color: var(--border); color: var(--ink4); pointer-events: none; }
+.btn[disabled] .i, .btn.off .i { color: var(--ink4); }
+
+/* Menus, popovers, tooltips, dialogs */
+.menu { background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); }
+.mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 24px; padding: 0 8px; border-radius: 6px; white-space: nowrap; color: var(--ink); }
+.mi:hover, .mi.hover { background: var(--border); }
+.mi .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.mi .ck { width: 12px; height: 12px; stroke: var(--ink); }
+.mi[disabled] { color: var(--ink4); pointer-events: none; }
+.mi .k { margin-left: auto; padding-left: 16px; font-size: 10px; color: var(--ink3); }
+.msep { height: 1px; background: var(--border); margin: 4px 0; }
+.tip { position: absolute; background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; color: var(--ink); white-space: nowrap; box-shadow: var(--shadow); z-index: 5; font-size: 12px; line-height: 16px; }
+.dlg { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.dlg-title { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.help { color: var(--ink3); }
+.errtxt { color: var(--red); }
+
+/* An editor at the minimum window size (960×600, app.rs), for dialogs to sit over. Flat blocks only. */
+.editor { position: relative; width: 960px; height: 600px; background: var(--ground); overflow: hidden; border-radius: 6px; flex: none; }
+.editor .bar { position: absolute; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; padding: 0 12px; gap: 12px; font-weight: 600; color: var(--ink); }
+.editor .bar .x { margin-left: auto; }
+.editor .p { position: absolute; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.editor .p::before { content: ""; position: absolute; left: 0; right: 0; top: 32px; border-top: 1px solid var(--border); }
+.editor .scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); }
+.editor .center { position: absolute; inset: 40px 0 0; display: grid; place-items: center; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+@media (max-width: 600px) { .page { padding: 32px 16px 80px; } }
+
+/* Preferences page */
+/* Every theme as a scope, so a preview can show its own palette inside a different one. */
+.th-dark, .th-warm, .th-nord { --bluel: #7AACF6; --red: #EC5B57; --amber: #F2AF48; --green: #4EBE7D; --shadow: 0 8px 24px rgba(0, 0, 0, .4); color-scheme: dark; }
+.th-dark { --ground: #0A0B0D; --panel: #121416; --raised: #1C1E21; --field: #0D0E11; --border: #232529; --border2: #36383C; --ink: #EDEEF1; --ink2: #ADB1B8; --ink3: #82868E; --ink4: #5A5E63; }
+/* Proposed bundled files. Warm Dark only nudges the neutrals; the accent stays blue. */
+.th-warm { --ground: #0D0C0B; --panel: #161412; --raised: #211E1B; --field: #100F0D; --border: #2A2724; --border2: #3D3934; --ink: #EFEDEA; --ink2: #B5B0A9; --ink3: #8C877F; --ink4: #5F5A54; }
+.th-soft { --ground: #D5D7DB; --panel: #E6E8EB; --raised: #F1F2F4; --field: #F5F6F7; --border: #C9CCD1; --border2: #A6AAB1; --ink: #1B1D21; --ink2: #41454C; --ink3: #5A5E65; --ink4: #959AA1; --bluel: #1D5BB5; --red: #B8322E; --amber: #835500; --green: #1C7342; --shadow: 0 8px 24px rgba(0, 0, 0, .14); color-scheme: light; }
+/* A user's own file in the themes folder. */
+.th-nord { --ground: #0B0E13; --panel: #12161D; --raised: #1B2029; --field: #0D1016; --border: #252B35; --border2: #38404C; --ink: #E5E9F0; --ink2: #A8B1BE; --ink3: #7E8896; --ink4: #56606C; }
+.th-light .scrim, .th-soft .scrim { background: rgba(0, 0, 0, .32); }
+.editor .center { inset: 0; }
+.editor .dlg { position: relative; color: var(--ink); }
+
+.dlg-head { padding: 16px 16px 12px; flex: none; }
+.dlg-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px 16px; position: relative; }
+.dlg-foot { padding: 12px 16px 16px; border-top: 1px solid var(--border); flex: none; }
+.dsec { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); margin: 0 0 12px; }
+.dsec.rule { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.help, .errtxt { margin: 0; font-size: 12px; line-height: 16px; max-width: none; }
+.form { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: start; }
+.form > .l { height: 24px; display: flex; align-items: center; color: var(--ink2); }
+.form > .f { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ddwrap { position: relative; }
+.dd { cursor: pointer; }
+.dd .t { flex: 1; }
+.fld.dd.open { border-color: var(--blue); }
+.pop { position: absolute; left: 0; right: 0; z-index: 10; overflow-y: auto; }
+.pop.down { top: 28px; }
+.pop.up { bottom: 28px; }
+.mi .ck { visibility: hidden; }
+.mi.on .ck { visibility: visible; }
+.mi .tag { font-size: 10px; color: var(--ink3); margin-left: 8px; flex: none; }
+.mi .tag.bad { color: var(--red); }
+.grp { height: 24px; display: flex; align-items: center; padding: 0 8px; color: var(--ink3); font-weight: 500; }
+
+/* Palette chip: panel, ink and light blue of one theme */
+.chip { width: 20px; height: 14px; border-radius: 4px; display: flex; overflow: hidden; border: 1px solid rgba(128, 132, 140, .45); flex: none; }
+.chip i { flex: 1; }
+/* Token strip under the Theme dropdown: the applied palette, token by token */
+.tokens { display: flex; height: 16px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+.tokens i { flex: 1; }
+.tokens i + i { border-left: 1px solid rgba(128, 132, 140, .25); }
+
+/* A miniature editor drawn in one palette: flat rects only */
+.mwrap { display: block; border-radius: 4px; }
+.mini { position: relative; display: block; aspect-ratio: 16 / 9; background: var(--ground); border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+.mini b { position: absolute; display: block; }
+.mini .p { background: var(--panel); border: 1px solid var(--border); border-radius: 2px; }
+.mini .ex { right: 3%; top: 2.5%; width: 13%; height: 5.5%; background: var(--blue); border-radius: 1px; }
+.mini .wm { left: 2%; top: 3.5%; width: 8%; height: 3%; background: var(--ink); border-radius: 1px; }
+.mini .vw { background: #040404; border-radius: 1px; }
+.mini .ln { height: 1px; background: var(--ink3); }
+.mini .hd { height: 1px; background: var(--border); }
+.mini .c { border-radius: 1px; }
+.mini .ph { width: 1px; background: var(--bluel); }
+.mbroken { display: grid; place-items: center; aspect-ratio: 16 / 9; border-radius: 4px; background: var(--field); border: 1px solid var(--red); color: var(--red); }
+
+/* A: sidebar and swatch cards */
+.pa { flex-direction: column; }
+.pa-main { flex: 1; min-height: 0; display: flex; }
+.pa-side { width: 160px; flex: none; border-right: 1px solid var(--border); padding: 16px 8px; display: flex; flex-direction: column; gap: 2px; }
+.pa-side .dlg-title { padding: 0 8px 12px; }
+.navi { height: 24px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 6px; color: var(--ink2); font-weight: 500; width: 100%; }
+.navi .i { color: var(--ink3); }
+.navi:hover { color: var(--ink); }
+.navi.on { background: var(--raised); color: var(--ink); }
+.navi.on .i { color: var(--ink2); }
+.pa .dlg-body { padding: 16px; }
+.stackf { display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
+.stackf > .l { color: var(--ink2); }
+.cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.card { display: flex; flex-direction: column; gap: 6px; padding: 4px; border-radius: 6px; min-width: 0; }
+.card:hover { background: var(--raised); }
+.card.on .mwrap { outline: 2px solid var(--bluel); outline-offset: 1px; }
+.card .mwrap, .card .mbroken, .mini { width: 100%; }
+.card .nm { font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
+.card .src { font-size: 10px; line-height: 12px; color: var(--ink3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; margin-top: -4px; }
+.card .src.bad { color: var(--red); }
+
+/* C: tabs in the header and a list with live previews */
+.pc-head { height: 48px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.pc-head .tabsg { display: flex; gap: 4px; }
+.pc-head .tab { flex: 0 0 88px; }
+.pc .dlg-body { padding: 16px; }
+.tlist { border: 1px solid var(--border); background: var(--field); border-radius: 6px; height: 236px; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; }
+.trow { display: flex; align-items: center; gap: 10px; padding: 4px 8px 4px 4px; border-radius: 6px; width: 100%; flex: none; }
+.trow:hover { background: var(--raised); }
+.trow.on { background: rgba(35, 104, 201, .2); }
+.trow .mwrap, .trow .mbroken { width: 88px; flex: none; }
+.trow .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.trow .nm { font-weight: 500; color: var(--ink); }
+.trow .src { color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow .src.bad { color: var(--red); }
+.trow .ck { width: 16px; height: 16px; stroke: var(--ink); visibility: hidden; }
+.trow.on .ck { visibility: visible; }
+.below { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+
+/* Today's dialog, drawn as it renders now */
+.today { position: relative; width: 640px; height: 300px; background: var(--ground); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.today .old { position: absolute; left: 24px; top: 24px; width: 392px; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); }
+.today .og { display: grid; grid-template-columns: auto 200px; gap: 8px; margin-top: 8px; align-items: center; }
+.today .og .fld { cursor: default; }
+.today .small { font-size: 10px; line-height: 12px; color: var(--ink3); margin: 8px 0 16px; }
+.today .spill { position: absolute; left: 128px; top: 130px; width: 580px; }
+.mark { position: absolute; border: 1px dashed var(--red); border-radius: 6px; pointer-events: none; }
+
+/* Scaled whole-editor previews for Light and High Contrast */
+.shrink { width: 596px; height: 372px; overflow: hidden; border-radius: 6px; }
+.shrink .editor { transform: scale(.62); transform-origin: 0 0; }
+.capnote { font-size: 12px; color: var(--ink3); margin-top: 8px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chev-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.5l6 10.5H2z"/><path d="M8 6.5v3M8 11.3v.2"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 16 16"><path d="M2.5 4h3M8.5 4h5M2.5 8h7M12.5 8h1M2.5 12h1.5M7 12h6.5"/><circle cx="7" cy="4" r="1.5"/><circle cx="11" cy="8" r="1.5"/><circle cx="5.5" cy="12" r="1.5"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 16 16"><rect x="6" y="2" width="4" height="7.5" rx="2"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2"/></symbol>
+</svg>
+
+<main class="page">
+  <h1>Preferences and Themes</h1>
+  <p>Mockups for <a href="https://github.com/jarradbanks/jvid/issues/257">#257</a> (Preferences: sections, and dropdowns that fit) and <a href="https://github.com/jarradbanks/jvid/issues/258">#258</a> (a Theme picker in Preferences). Every dialog sits over the editor at its minimum window size, 960×600. The fields are the real ones from <code>preferences.rs</code>; the palettes are the built-ins from <code>themes.rs</code>.</p>
+  <p>Picking a theme in any alternative applies it to the whole mock editor at once, the way it will in the app. Neon is a broken file, so you can see the error and the fall back to Dark.</p>
+
+  <section id="now">
+    <h2>What's Wrong Now</h2>
+    <div class="compare" style="margin-top:16px">
+      <figure>
+        <div class="stage"><div class="today app" aria-label="Today's Preferences dialog with the Input Device list open">
+          <div class="old">
+            <div class="dlg-title">Preferences</div>
+            <div class="og">
+              <span>Language</span><span class="fld dd"><span class="t">System (English)</span><svg class="i"><use href="#i-chev-down"/></svg></span>
+              <span>Input Device</span><span class="fld dd open"><span class="t">System Default</span><svg class="i"><use href="#i-chev-down"/></svg></span>
+            </div>
+            <p class="small">Applies right away. Names already in a project, such as track names, stay as they are.</p>
+            <div style="display:flex;justify-content:flex-end"><span class="btn primary lg">Done</span></div>
+          </div>
+          <div class="menu spill">
+            <div class="mi">System Default</div>
+            <div class="mi">Microphone Array (Realtek(R) Audio) — Intel® Smart Sound Technology for Digital Microphones</div>
+            <div class="mi">Headset Microphone (Arctis Nova 7 Wireless)</div>
+            <div class="mi">Line In (Focusrite Scarlett 2i2 4th Gen)</div>
+            <div class="mi">Microphone (NVIDIA Broadcast)</div>
+            <div class="mi">Microphone (Steam Streaming Microphone)</div>
+          </div>
+          <div class="mark" style="left:330px;top:184px;width:76px;height:36px"></div>
+        </div></div>
+        <figcaption>Today, with the Input Device list open</figcaption>
+      </figure>
+      <ul class="notes" style="flex:1 1 320px">
+        <li>The list grows to its widest device name, so it runs past the dialog's edge and covers Done (dashed). The popup that opens is wider than the window at 960×600 on some laptops.</li>
+        <li>A 360px box with two unlabelled rows in a grid. Nothing groups Language apart from Input Device, and the one help line sits under both fields, in 10px type, explaining only the first.</li>
+        <li>Three built-in themes and live-reloading TOML themes exist in <code>themes.rs</code>, but the only way to switch is to edit <code>settings.toml</code> by hand.</li>
+        <li>A theme file that fails to parse returns <code>Theme {path}: {error}</code> with nowhere next to the choice to show it.</li>
+        <li>A save error lands at the bottom of the dialog, not under the field that failed.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="alts">
+    <h2>Alternatives</h2>
+    <p>Three dialog structures, each paired with one way of picking a theme: <b>A</b> sidebar with swatch cards, <b>B</b> one scrolling page with a dropdown and a token strip, <b>C</b> header tabs with a list of live previews. The pairings can be swapped; each picker works in each dialog.</p>
+
+    <div class="stack">
+      <figure class="alt" id="alt-a">
+        <div class="stage"><div class="editor app" data-editor>
+          <div class="bar">jvid<span style="font-weight:400;color:var(--ink2)">ranked-highlights</span><span class="btn primary x">Export</span></div>
+          <div class="p" style="left:4px;top:40px;width:245px;height:300px"></div>
+          <div class="p" style="left:253px;top:40px;width:458px;height:300px"><div style="position:absolute;left:12px;right:12px;top:44px;bottom:44px;background:#040404;border-radius:4px"></div></div>
+          <div class="p" style="left:715px;top:40px;width:241px;height:300px"></div>
+          <div class="p" style="left:4px;top:344px;width:952px;height:252px"></div>
+          <div class="scrim"></div>
+          <div class="center">
+            <div class="dlg pa" style="width:640px;height:500px">
+              <div class="pa-main">
+                <nav class="pa-side">
+                  <div class="dlg-title">Preferences</div>
+                  <button class="navi on" data-pane="general"><svg class="i"><use href="#i-sliders"/></svg>General</button>
+                  <button class="navi" data-pane="audio"><svg class="i"><use href="#i-mic"/></svg>Audio</button>
+                </nav>
+                <div class="dlg-body">
+                  <div data-pane-body="general">
+                    <h4 class="dsec">General</h4>
+                    <div class="stackf"><span class="l">Language</span>
+                      <span class="fld dd" style="width:240px"><span class="t">System (English)</span><svg class="i"><use href="#i-chev-down"/></svg></span>
+                      <p class="help">Applies right away. Names already in a project, such as track names, stay as they are.</p></div>
+                    <div class="stackf" style="margin-bottom:0"><span class="l">Theme</span>
+                      <div class="cards" data-gen="cards"></div>
+                      <p class="errtxt theme-err" hidden></p>
+                      <p class="help theme-err" hidden>Using Dark until the file loads. Saving it reloads it.</p>
+                      <div class="below" style="margin-top:2px"><button class="btn"><svg class="i"><use href="#i-folder"/></svg>Open Themes Folder</button><span class="help">Drop a .toml theme in and it appears here.</span></div>
+                    </div>
+                  </div>
+                  <div data-pane-body="audio" hidden>
+                    <h4 class="dsec">Audio</h4>
+                    <div class="stackf"><span class="l">Input Device</span>
+                      <span class="fld dd" style="width:280px"><span class="t">Microphone (Elgato Wave:3)</span><svg class="i"><use href="#i-chev-down"/></svg></span>
+                      <p class="help">Records voiceovers. A saved device that isn't plugged in stays chosen.</p></div>
+                  </div>
+                </div>
+              </div>
+              <div class="dlg-foot" style="display:flex;justify-content:flex-end"><button class="btn primary lg">Done</button></div>
+            </div>
+          </div>
+        </div></div>
+        <figcaption>A. Sidebar of Sections, with Swatch Cards</figcaption>
+        <p class="why">Optimises for growth: each new group (Playback, Keyboard Shortcuts) is one more sidebar row, and the cards show every theme at a glance. <span>Tradeoff: with three settings today, two of them hide behind a click, and the cards grow a third row by eight themes.</span></p>
+      </figure>
+
+      <figure class="alt" id="alt-b">
+        <div class="stage"><div class="editor app" data-editor>
+          <div class="bar">jvid<span style="font-weight:400;color:var(--ink2)">ranked-highlights</span><span class="btn primary x">Export</span></div>
+          <div class="p" style="left:4px;top:40px;width:245px;height:300px"></div>
+          <div class="p" style="left:253px;top:40px;width:458px;height:300px"><div style="position:absolute;left:12px;right:12px;top:44px;bottom:44px;background:#040404;border-radius:4px"></div></div>
+          <div class="p" style="left:715px;top:40px;width:241px;height:300px"></div>
+          <div class="p" style="left:4px;top:344px;width:952px;height:252px"></div>
+          <div class="scrim"></div>
+          <div class="center" data-b></div>
+        </div></div>
+        <figcaption>B. One Scrolling Page, with a Dropdown and Token Strip</figcaption>
+        <p class="why">Optimises for seeing everything at once: every setting is on screen at 960×600, and the dropdown holds any number of folder themes. Click Theme to open it. <span>Tradeoff: you can't compare themes side by side; each one is a pick, though picks apply instantly.</span></p>
+      </figure>
+
+      <figure class="alt" id="alt-c">
+        <div class="stage"><div class="editor app" data-editor>
+          <div class="bar">jvid<span style="font-weight:400;color:var(--ink2)">ranked-highlights</span><span class="btn primary x">Export</span></div>
+          <div class="p" style="left:4px;top:40px;width:245px;height:300px"></div>
+          <div class="p" style="left:253px;top:40px;width:458px;height:300px"><div style="position:absolute;left:12px;right:12px;top:44px;bottom:44px;background:#040404;border-radius:4px"></div></div>
+          <div class="p" style="left:715px;top:40px;width:241px;height:300px"></div>
+          <div class="p" style="left:4px;top:344px;width:952px;height:252px"></div>
+          <div class="scrim"></div>
+          <div class="center">
+            <div class="dlg pc" style="width:520px;height:520px">
+              <div class="pc-head">
+                <div class="dlg-title">Preferences</div>
+                <div class="tabsg"><button class="tab on" data-pane="general">General</button><button class="tab" data-pane="audio">Audio</button></div>
+              </div>
+              <div class="dlg-body">
+                <div data-pane-body="general">
+                  <div class="form">
+                    <span class="l">Language</span>
+                    <div class="f"><span class="fld dd"><span class="t">System (English)</span><svg class="i"><use href="#i-chev-down"/></svg></span>
+                      <p class="help">Applies right away. Names already in a project, such as track names, stay as they are.</p></div>
+                    <span class="l">Theme</span>
+                    <div class="f">
+                      <div class="tlist" data-gen="list"></div>
+                      <p class="errtxt theme-err" hidden></p>
+                      <p class="help theme-err" hidden>Using Dark until the file loads. Saving it reloads it.</p>
+                      <div class="below" style="margin-top:2px"><button class="btn"><svg class="i"><use href="#i-folder"/></svg>Open Themes Folder</button></div>
+                    </div>
+                  </div>
+                </div>
+                <div data-pane-body="audio" hidden>
+                  <div class="form">
+                    <span class="l">Input Device</span>
+                    <div class="f"><span class="fld dd"><span class="t">Microphone (Elgato Wave:3)</span><svg class="i"><use href="#i-chev-down"/></svg></span>
+                      <p class="help">Records voiceovers. A saved device that isn't plugged in stays chosen.</p></div>
+                  </div>
+                </div>
+              </div>
+              <div class="dlg-foot" style="display:flex;justify-content:flex-end"><button class="btn primary lg">Done</button></div>
+            </div>
+          </div>
+        </div></div>
+        <figcaption>C. Tabs in the Header, with a Live Preview List</figcaption>
+        <p class="why">Optimises for choosing a theme by eye: each row draws the whole editor in that palette, and the list is one scroll. <span>Tradeoff: the list takes most of the dialog for a setting you change once, and Audio, one field, gets a whole tab.</span></p>
+      </figure>
+    </div>
+  </section>
+
+  <section id="states">
+    <h2>States</h2>
+    <p>Drawn in B, the recommended structure. The dropdown rules are the suite-ui change in #257, so every dropdown in the app gets them.</p>
+
+    <h3>Input Device Open at 960×600, With a Very Long Name</h3>
+    <div class="compare" style="margin-top:16px">
+      <figure class="alt" id="st-open">
+        <div class="stage"><div class="editor app" data-editor style="position:relative">
+          <div class="bar">jvid<span style="font-weight:400;color:var(--ink2)">ranked-highlights</span><span class="btn primary x">Export</span></div>
+          <div class="p" style="left:4px;top:40px;width:245px;height:300px"></div>
+          <div class="p" style="left:253px;top:40px;width:458px;height:300px"><div style="position:absolute;left:12px;right:12px;top:44px;bottom:44px;background:#040404;border-radius:4px"></div></div>
+          <div class="p" style="left:715px;top:40px;width:241px;height:300px"></div>
+          <div class="p" style="left:4px;top:344px;width:952px;height:252px"></div>
+          <div class="scrim"></div>
+          <div class="center" data-b="input"></div>
+          <div class="tip" id="devtip" style="max-width:380px;white-space:normal;z-index:20" hidden>Microphone Array (Realtek(R) Audio) — Intel® Smart Sound Technology for Digital Microphones</div>
+        </div></div>
+      </figure>
+      <ul class="notes" style="flex:1 1 300px">
+        <li><b>The list stays inside the dialog body.</b> It opens on the side with more room (here, above, because Input Device is the last field) and stops 8px short of the body's edge. Past that it scrolls. Done is never covered.</li>
+        <li><b>The list is as wide as its field.</b> Long names end in an ellipsis; hovering one shows the full name in a tooltip after 500ms, and so does hovering the closed field.</li>
+        <li><b>The chosen device keeps its row when it's unplugged</b>, as <code>input_rows()</code> does now, with a Not Connected tag so the choice doesn't look broken.</li>
+        <li>Fifteen devices is a normal streamer's machine: virtual cables, NVIDIA Broadcast, Steam and a capture card each add one.</li>
+      </ul>
+    </div>
+
+    <h3>Broken Theme File</h3>
+    <div class="compare" style="margin-top:16px">
+      <figure class="alt" id="st-broken">
+        <div class="stage"><div class="editor app" data-editor>
+          <div class="bar">jvid<span style="font-weight:400;color:var(--ink2)">ranked-highlights</span><span class="btn primary x">Export</span></div>
+          <div class="p" style="left:4px;top:40px;width:245px;height:300px"></div>
+          <div class="p" style="left:253px;top:40px;width:458px;height:300px"><div style="position:absolute;left:12px;right:12px;top:44px;bottom:44px;background:#040404;border-radius:4px"></div></div>
+          <div class="p" style="left:715px;top:40px;width:241px;height:300px"></div>
+          <div class="p" style="left:4px;top:344px;width:952px;height:252px"></div>
+          <div class="scrim"></div>
+          <div class="center" data-b></div>
+        </div></div>
+      </figure>
+      <ul class="notes" style="flex:1 1 300px">
+        <li>The dropdown keeps the file's name with a Red border, so you can see what you picked. The error sits directly under it, in the <code>theme.error</code> string: <code>Theme {path}: {error}</code>.</li>
+        <li>TOML's multi-line error is folded to one line: line, column, and the <code>theme.bad_color</code> message.</li>
+        <li>The editor falls back to Dark, and a second line says so. <code>LiveTheme</code> already re-reads the file when it changes, so fixing it in a text editor clears the error without reopening Preferences.</li>
+        <li>In the list it shows a Red alert where its colours would be, and Can't Load. It stays pickable, so you can see the error again.</li>
+      </ul>
+    </div>
+
+    <h3>Light and High Contrast</h3>
+    <div class="compare" style="margin-top:16px">
+      <figure class="alt" id="st-light">
+        <div class="shrink"><div class="editor app" data-editor>
+          <div class="bar">jvid<span style="font-weight:400;color:var(--ink2)">ranked-highlights</span><span class="btn primary x">Export</span></div>
+          <div class="p" style="left:4px;top:40px;width:245px;height:300px"></div>
+          <div class="p" style="left:253px;top:40px;width:458px;height:300px"><div style="position:absolute;left:12px;right:12px;top:44px;bottom:44px;background:#040404;border-radius:4px"></div></div>
+          <div class="p" style="left:715px;top:40px;width:241px;height:300px"></div>
+          <div class="p" style="left:4px;top:344px;width:952px;height:252px"></div>
+          <div class="scrim"></div>
+          <div class="center" data-b></div>
+        </div></div>
+        <figcaption>Light</figcaption>
+        <p class="capnote">The viewer stays neutral black in every theme (The Neutral Viewer Rule). The scrim is lighter over light themes.</p>
+      </figure>
+      <figure class="alt" id="st-hc">
+        <div class="shrink"><div class="editor app" data-editor>
+          <div class="bar">jvid<span style="font-weight:400;color:var(--ink2)">ranked-highlights</span><span class="btn primary x">Export</span></div>
+          <div class="p" style="left:4px;top:40px;width:245px;height:300px"></div>
+          <div class="p" style="left:253px;top:40px;width:458px;height:300px"><div style="position:absolute;left:12px;right:12px;top:44px;bottom:44px;background:#040404;border-radius:4px"></div></div>
+          <div class="p" style="left:715px;top:40px;width:241px;height:300px"></div>
+          <div class="p" style="left:4px;top:344px;width:952px;height:252px"></div>
+          <div class="scrim"></div>
+          <div class="center" data-b></div>
+        </div></div>
+        <figcaption>High Contrast</figcaption>
+        <p class="capnote">Grey borders at 8A8A8A and white Border Strong carry the structure; help text is C8C8C8 on black.</p>
+      </figure>
+    </div>
+  </section>
+
+  <section id="themes">
+    <h2>Bundled Themes</h2>
+    <ul class="notes">
+      <li><b>Dark</b> (default), <b>Light</b> and <b>High Contrast</b> stay compiled in, as <code>BUILT_IN</code> has them, so the app always has a theme that loads.</li>
+      <li><b>Warm Dark</b> and <b>Soft Light</b> ship as <code>warm-dark.toml</code> and <code>soft-light.toml</code>, copied into the themes folder on first run, so they double as commented templates for custom themes. Warm Dark only warms the neutrals a few degrees; the accent stays blue, so it can't drift back to the rejected warm-grey-and-amber look. It's opt-in, never the default.</li>
+      <li>A folder theme is listed under its file name in Title Case (<code>nord-night.toml</code> is Nord Night). The <code>theme</code> setting keeps saving the built-in name or the file's path, as <code>LiveTheme::new</code> reads it.</li>
+    </ul>
+  </section>
+
+  <section class="rec" id="rec">
+    <h2>Recommendation</h2>
+    <p><b>B: one scrolling page, with the Theme dropdown and token strip.</b> There are three settings. A sidebar or tabs would put two of them behind a click to save space nobody needs; B shows all three at 960×600 without scrolling, each with its help under the field it explains. The dropdown copes with any number of folder themes, and the palette chip on each row previews it before you pick. Picking applies to the whole editor at once, which is a bigger preview than any thumbnail.</p>
+    <p>B's section heads map one-to-one onto A's sidebar. When Preferences grows past a screenful (Playback, Keyboard Shortcuts), move to A without reworking the sections. Keep C's broken-file row (Red alert, Can't Load) in the dropdown, as drawn here.</p>
+    <p>Build order: the suite-ui dropdown cap first (side with more room, capped to the dialog body, field-width, ellipsis, tooltip), since every dropdown in the app needs it, then the dialog.</p>
+  </section>
+</main>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const I = n => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const CK = '<svg class="i ck" aria-hidden="true"><use href="#i-check"/></svg>';
+const ERR = 'Theme ~/.config/jvid/themes/neon.toml: line 3, column 9: `#12345` is not #RRGGBB';
+
+const THEMES = [
+  { id: 'dark', name: 'Dark', src: 'Built-in', cls: 'th-dark' },
+  { id: 'light', name: 'Light', src: 'Built-in', cls: 'th-light' },
+  { id: 'hc', name: 'High Contrast', src: 'Built-in', cls: 'th-hc' },
+  { id: 'warm', name: 'Warm Dark', src: 'warm-dark.toml', cls: 'th-warm' },
+  { id: 'soft', name: 'Soft Light', src: 'soft-light.toml', cls: 'th-soft' },
+  { id: 'nord', name: 'Nord Night', src: 'nord-night.toml', cls: 'th-nord' },
+  { id: 'neon', name: 'Neon', src: 'neon.toml', err: 1 },
+];
+const CLASSES = THEMES.filter(t => t.cls).map(t => t.cls);
+
+const DEVICES = [
+  'Microphone Array (Realtek(R) Audio) — Intel® Smart Sound Technology for Digital Microphones',
+  'Headset Microphone (Arctis Nova 7 Wireless)',
+  'Line In (Focusrite Scarlett 2i2 4th Gen)',
+  'Microphone (NVIDIA Broadcast)',
+  'Microphone (Steam Streaming Microphone)',
+  'CABLE Output (VB-Audio Virtual Cable)',
+  'Stereo Mix (Realtek(R) Audio)',
+  'Digital Audio Interface (USB Capture HDMI 4K+)',
+  'Microphone (Razer Seiren Mini)',
+  'Microphone (Logitech BRIO)',
+  'Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO)',
+  'Microphone (OBS Virtual Audio)',
+  'Line (Elgato Wave Link Stream)',
+];
+const SAVED = 'Microphone (Elgato Wave:3)';
+
+const mini = cls => `<span class="mwrap"><span class="mini ${cls}">
+  <b class="wm"></b><b class="ex"></b>
+  <b class="p" style="left:2%;top:11%;width:23%;height:51%"></b>
+  <b class="p" style="left:26.5%;top:11%;width:47%;height:51%"></b><b class="vw" style="left:29%;top:22%;width:42%;height:33%"></b>
+  <b class="p" style="left:75%;top:11%;width:23%;height:51%"></b>
+  <b class="ln" style="left:78%;top:28%;width:12%"></b><b class="ln" style="left:78%;top:36%;width:16%"></b><b class="ln" style="left:78%;top:44%;width:10%"></b>
+  <b class="p" style="left:2%;top:64%;width:96%;height:33%"></b>
+  <b class="c" style="left:16%;top:71%;width:30%;height:8%;background:#5E589F"></b><b class="c" style="left:47%;top:71%;width:26%;height:8%;background:#5E589F"></b>
+  <b class="c" style="left:22%;top:82%;width:36%;height:8%;background:#30715D"></b>
+  <b class="ph" style="left:44%;top:66%;height:30%"></b>
+</span></span>`;
+const broken = () => `<span class="mbroken">${I('alert')}</span>`;
+const chip = cls => cls
+  ? `<span class="chip ${cls}"><i style="background:var(--panel)"></i><i style="background:var(--ink)"></i><i style="background:var(--bluel)"></i></span>`
+  : `<span class="chip" style="border-color:var(--red);display:grid;place-items:center;color:var(--red)"><svg class="i" style="width:10px;height:10px"><use href="#i-alert"/></svg></span>`;
+const tokens = () => `<div class="tokens" title="Ground, Panel, Raised, Field, Border, Border Strong, Ink, Ink 3, Light Blue, Blue, Red, Amber, Green">${
+  ['ground', 'panel', 'raised', 'field', 'border', 'border2', 'ink', 'ink3', 'bluel', 'blue', 'red', 'amber', 'green'].map(v => `<i style="background:var(--${v})"></i>`).join('')}</div>`;
+
+const themeMenu = () => `<div class="grp">Built-in</div>${THEMES.slice(0, 3).map(themeItem).join('')}
+  <div class="msep"></div><div class="grp">Themes Folder</div>${THEMES.slice(3).map(themeItem).join('')}`;
+function themeItem(t) {
+  return `<button class="mi" data-theme="${t.id}">${CK}${chip(t.cls)}<span class="t">${t.name}</span>${t.err ? '<span class="tag bad">Can\'t Load</span>' : t.src !== 'Built-in' ? `<span class="tag">${t.src}</span>` : ''}</button>`;
+}
+
+function dlgB(mode) {
+  const devs = ['System Default', ...DEVICES, SAVED];
+  const pop = mode === 'input' ? `<div class="menu pop up" data-cap>${devs.map(d =>
+    `<div class="mi${d === SAVED ? ' on' : ''}${d === DEVICES[0] ? ' hover' : ''}">${CK}<span class="t">${d}</span>${d === SAVED ? '<span class="tag">Not Connected</span>' : ''}</div>`).join('')}</div>` : '';
+  return `<div class="dlg pb" style="width:480px;max-height:552px">
+    <div class="dlg-head"><div class="dlg-title">Preferences</div></div>
+    <div class="dlg-body">
+      <h4 class="dsec">General</h4>
+      <div class="form">
+        <span class="l">Language</span>
+        <div class="f"><span class="fld dd"><span class="t">System (English)</span>${I('chev-down')}</span>
+          <p class="help">Applies right away. Names already in a project, such as track names, stay as they are.</p></div>
+        <span class="l">Theme</span>
+        <div class="f">
+          <div class="ddwrap"><span class="fld dd thfld" role="button" tabindex="0"><span class="curchip"></span><span class="t curname">Dark</span>${I('chev-down')}</span>
+            <div class="menu pop down" data-cap hidden>${themeMenu()}</div></div>
+          <p class="errtxt theme-err" hidden></p>
+          <p class="help theme-err" hidden>Using Dark until the file loads. Saving it reloads it.</p>
+          ${tokens()}
+          <div><button class="btn">${I('folder')}Open Themes Folder</button></div>
+        </div>
+      </div>
+      <h4 class="dsec rule">Audio</h4>
+      <div class="form">
+        <span class="l">Input Device</span>
+        <div class="f"><div class="ddwrap"><span class="fld dd${mode === 'input' ? ' open' : ''}"><span class="t">${SAVED}</span>${I('chev-down')}</span>${pop}</div>
+          <p class="help">Records voiceovers. A saved device that isn't plugged in stays chosen.</p></div>
+      </div>
+    </div>
+    <div class="dlg-foot" style="display:flex;justify-content:flex-end"><button class="btn primary lg">Done</button></div>
+  </div>`;
+}
+
+$$('[data-b]').forEach(c => { c.innerHTML = dlgB(c.dataset.b); });
+$$('[data-gen="cards"]').forEach(c => {
+  c.innerHTML = THEMES.map(t => `<button class="card" data-theme="${t.id}">${t.err ? broken() : mini(t.cls)}<span class="nm">${t.name}</span><span class="src${t.err ? ' bad' : ''}">${t.err ? 'Can\'t Load' : t.src}</span></button>`).join('');
+});
+$$('[data-gen="list"]').forEach(c => {
+  c.innerHTML = THEMES.map(t => `<button class="trow" data-theme="${t.id}">${t.err ? broken() : mini(t.cls)}<span class="tx"><span class="nm">${t.name}</span><span class="src${t.err ? ' bad' : ''}">${t.err ? 'Can\'t Load: line 3, `#12345` is not #RRGGBB' : t.src}</span></span>${CK}</button>`).join('');
+});
+
+function pick(fig, id) {
+  const t = THEMES.find(x => x.id === id);
+  const ed = $('[data-editor]', fig);
+  ed.classList.remove(...CLASSES);
+  ed.classList.add(t.err ? 'th-dark' : t.cls);
+  $$('[data-theme]', fig).forEach(x => x.classList.toggle('on', x.dataset.theme === id));
+  $$('.theme-err', fig).forEach(x => { x.hidden = !t.err; });
+  $$('.errtxt.theme-err', fig).forEach(x => { x.textContent = ERR; });
+  $$('.curname', fig).forEach(x => { x.textContent = t.name; });
+  $$('.curchip', fig).forEach(x => { x.outerHTML = `<span class="curchip">${chip(t.cls)}</span>`; });
+  $$('.thfld', fig).forEach(x => x.classList.toggle('err', !!t.err));
+}
+
+// Cap a popup to the dialog body on its side of the field, 8px short of the edge.
+function cap(pop) {
+  const body = pop.closest('.dlg-body').getBoundingClientRect();
+  const f = pop.closest('.ddwrap').getBoundingClientRect();
+  const room = pop.classList.contains('up') ? f.top - body.top - 8 : body.bottom - f.bottom - 8;
+  pop.style.maxHeight = `${Math.floor(room)}px`;
+}
+
+const START = { 'alt-a': 'dark', 'alt-b': 'dark', 'alt-c': 'dark', 'st-open': 'dark', 'st-broken': 'neon', 'st-light': 'light', 'st-hc': 'hc' };
+Object.entries(START).forEach(([id, th]) => pick(document.getElementById(id), th));
+
+function placeTip() {
+  const ed = $('#st-open [data-editor]'), tip = $('#devtip');
+  const pop = $('#st-open .pop.up');
+  cap(pop);
+  const row = $('.mi.hover', pop), e = ed.getBoundingClientRect(), r = row.getBoundingClientRect();
+  tip.hidden = false;
+  tip.style.left = `${r.left - e.left + 40}px`;
+  tip.style.top = `${r.bottom - e.top + 6}px`;
+}
+placeTip();
+addEventListener('load', placeTip);
+
+document.addEventListener('click', e => {
+  const t = e.target;
+  const th = t.closest('[data-theme]');
+  if (th) {
+    pick(th.closest('.alt'), th.dataset.theme);
+    const pop = th.closest('.pop');
+    if (pop && !pop.closest('#st-open')) { pop.hidden = true; pop.previousElementSibling.classList.remove('open'); }
+    return;
+  }
+  const fld = t.closest('.thfld');
+  if (fld) {
+    const pop = fld.nextElementSibling;
+    pop.hidden = !pop.hidden;
+    fld.classList.toggle('open', !pop.hidden);
+    if (!pop.hidden) cap(pop);
+    return;
+  }
+  const nav = t.closest('[data-pane]');
+  if (nav) {
+    const dlg = nav.closest('.dlg');
+    $$('[data-pane]', dlg).forEach(x => x.classList.toggle('on', x === nav));
+    $$('[data-pane-body]', dlg).forEach(x => { x.hidden = x.dataset.paneBody !== nav.dataset.pane; });
+    return;
+  }
+  $$('.alt:not(#st-open) .pop').forEach(p => { if (!p.hidden && !p.contains(t)) { p.hidden = true; p.previousElementSibling.classList.remove('open'); } });
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') $$('.alt:not(#st-open) .pop').forEach(p => { p.hidden = true; p.previousElementSibling.classList.remove('open'); });
+  const h = e.target.closest && e.target.closest('.thfld');
+  if (h && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); h.click(); }
+});
+</script>
+</body>
+</html>
