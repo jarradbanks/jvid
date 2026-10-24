@@ -22,6 +22,7 @@ use crate::i18n::{tr, verbatim};
 use crate::import::Importer;
 use crate::timeline::Timeline;
 
+mod audio;
 mod masks;
 
 /// One lesson. Its `id` is the progress key in `settings.toml`.
@@ -55,7 +56,7 @@ pub struct Step {
     pub ghost: Option<[[f64; 2]; 2]>,
 }
 
-pub const LESSONS: &[Lesson] = &[TOUR, masks::MASKS];
+pub const LESSONS: &[Lesson] = &[TOUR, masks::MASKS, audio::AUDIO];
 
 /// The sample the tour edits.
 const TOUR_CLIP: &str = "subject.mp4";
@@ -926,6 +927,11 @@ mod tests {
                     lesson.id,
                     step.anchor
                 );
+                // A take needs a microphone, so the run skips it.
+                if step.anchor == "record" {
+                    click(&mut h, tr!("tutorial.skip_step"));
+                    continue;
+                }
                 click(&mut h, tr!("tutorial.show_me"));
                 assert!(
                     (step.done)(h.state()),
@@ -1207,6 +1213,44 @@ mod tests {
         assert_eq!(tracks(&h), empty.project().sequence().tracks().len() + 1);
         assert!(!h.state().history.can_undo());
         assert!(!h.state().history.is_dirty());
+    }
+
+    #[test]
+    fn the_audio_lesson_starts_with_the_voice_over_the_music_and_nothing_ducked() {
+        use audio::{AUDIO, MUSIC, VOICE, clip_of, ducked};
+        let mut h = harness();
+        h.state_mut().start_lesson(&AUDIO);
+        settle(&mut h);
+        let (voice, music) = (clip_of(h.state(), VOICE), clip_of(h.state(), MUSIC));
+        let (Some(voice), Some(music)) = (voice, music) else {
+            panic!("both samples placed")
+        };
+        let seq = h.state().history.project().sequence();
+        let track = |id| {
+            seq.tracks()
+                .iter()
+                .position(|t| t.clips().iter().any(|c| c.id == id))
+        };
+        assert_ne!(track(voice.id), track(music.id));
+        assert_eq!(voice.start, Time(2 * jvid_core::time::FLICKS_PER_SECOND));
+        assert_eq!(music.start, Time(0));
+        assert!(!h.state().history.can_undo());
+
+        // Level keys don't duck; a dip does.
+        use jvid_core::keyframe::{Easing, Keyframe, Value};
+        let key = |t, v| Keyframe {
+            time: Time(t),
+            value: Value::Scalar(v),
+            easing: Easing::Linear,
+        };
+        let mut c = music.clone();
+        assert!(!ducked(&c));
+        c.keyframes
+            .insert("volume".into(), vec![key(0, 1.0), key(1, 1.0)]);
+        assert!(!ducked(&c));
+        c.keyframes
+            .insert("volume".into(), vec![key(0, 1.0), key(1, 0.3)]);
+        assert!(ducked(&c));
     }
 
     #[test]

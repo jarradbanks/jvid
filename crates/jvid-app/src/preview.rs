@@ -1055,6 +1055,7 @@ fn record_button(ui: &mut Ui, take: Option<(std::time::Duration, f32)>) -> bool 
     // Keycaps stay English, like the other transport buttons.
     let name = tr!("preview.with_key", action = name, key = verbatim("Shift+R"));
     let b = ui.add(Button::icon("", &name)).on_hover_text(&name);
+    crate::app::tutorial::anchor(ui.ctx(), "record", b.rect);
     let c = b.rect.center();
     let Some((elapsed, level)) = take else {
         let ink = if b.hovered() {
