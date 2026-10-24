@@ -1360,22 +1360,19 @@ impl Timeline {
             lanes_left - 64.0..=lanes_left - space::INSET,
             ruler.y_range(),
         );
-        let mut z = self.zoom;
-        let r = ui
-            .scope(|ui| {
-                // Its default width would spill past `slider` over the timecode and ruler.
-                ui.spacing_mut().slider_width = slider.width();
-                ui.put(
-                    slider,
-                    egui::Slider::new(&mut z, MIN_ZOOM..=MAX_ZOOM)
-                        .logarithmic(true)
-                        .show_value(false),
-                )
-            })
-            .inner;
+        // Logarithmic: the suite slider is linear, so it moves the zoom's log.
+        let mut z = self.zoom.ln();
+        let r = ui.put(
+            slider,
+            suite_ui::widgets::Slider::new(
+                &mut z,
+                MIN_ZOOM.ln()..=MAX_ZOOM.ln(),
+                tr!("timeline.zoom_tooltip"),
+            ),
+        );
         if r.changed() {
             let x = view.x(playhead).clamp(lanes.left(), lanes.right());
-            self.zoom_by(z / self.zoom, view, x);
+            self.zoom_by(z.exp() / self.zoom, view, x);
         }
         r.on_hover_text(tr!("timeline.zoom_tooltip"));
 
