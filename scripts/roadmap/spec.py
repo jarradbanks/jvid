@@ -1429,14 +1429,15 @@ I("graphic-eq", "Graphic EQ with presets", None, ["audio", "core", "ui"], "M", l
   summary="The EQ is seven rows of sliders (Low, Low Freq, Mid, Mid Freq, Mid Q, High, High Freq). Editors and players use a horizontal graphic EQ; build one, with presets.",
   scope=[
       "A 10-band graphic EQ (31, 62, 125, 250, 500, 1K, 2K, 4K, 8K and 16K Hz, ±15 dB each, plus Post-Gain) replacing the three-band parametric EQ for clips and tracks",
-      "A horizontal widget: one vertical slider per band with its dB value above and its frequency below, a response curve through the handles over a ±15 dB grid; double-click a band to reset it",
+      "Option A of `docs/prototypes/v4/graphic-eq.html` (owner's pick, Slider Bank): one vertical slider per band with its dB value above and its frequency below, the response curve drawn behind over a ±15 dB grid; double-click a band to reset it. Follow the page's States, Preset values and build notes",
       "A Presets dropdown: Flat, Voice, Podcast, Bass Boost, Bass Cut, Treble Boost, Low Cut and Loudness. The Compressor gets the same dropdown with Gentle, Voice, Broadcast and Limiter",
       "Old projects with the three-band EQ load with an equivalent 10-band curve",
       "The track Audio Effects submenu opens the same widget in a popover",
   ],
   ac=["A 1 kHz tone through the EQ with only the 1K band at +6 dB comes out within 0.5 dB of +6 dB (test)",
       "Each preset sets the bands it names, as one undo step",
-      "A project saved with the old EQ reopens with the same sound (test against the three-band response)"])
+      "A project saved with the old EQ reopens with the same sound (test against the three-band response)"],
+  refs=[f"[Graphic EQ mockup, option A]({PROTO}/v4/graphic-eq.html)"])
 
 I("locked-drag", "Locked tracks: no drag ghost for clips that can't move", None, ["ui", "timeline"], "S", labels=["later"],
   summary="Dragging a clip on a locked track draws the full move ghost, then nothing moves.",
