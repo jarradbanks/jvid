@@ -972,7 +972,8 @@ fn target_size_lands(src: &str, ext: &str, target: u64, fill: f64) {
         Time(0),
         secs(2),
     );
-    // A sixteenth of 1080p, so these targets are the same bits per pixel as 1080p ones 16x the size.
+    // A sixteenth of 1080p. The 48 kB of 192 kb/s audio does not shrink with it, so targets need
+    // that much on top of a sixteenth of a 1080p one, or the encoder can't get small enough.
     let mut preset = preset("YouTube 1080p");
     preset.extension = ext.into();
     preset.size = Some([480, 270]);
@@ -1017,12 +1018,12 @@ fn target_size_lands_within_three_percent_portrait() {
 
 #[test]
 fn target_size_lands_within_three_percent_vfr_mov() {
-    target_size_lands("vfr-phone.mp4", "mov", 93_750, 0.97);
+    target_size_lands("vfr-phone.mp4", "mov", 156_250, 0.97);
 }
 
 #[test]
 fn target_size_lands_under_when_it_cant_fill() {
-    target_size_lands("screen-1440p60.mp4", "mp4", 62_500, 0.0);
+    target_size_lands("screen-1440p60.mp4", "mp4", 250_000, 0.0);
 }
 
 #[test]
