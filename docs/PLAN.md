@@ -45,7 +45,7 @@ jvid is a lightweight, cross-platform video editor written in Rust, and the firs
 
 ### In / Out points
 
-Premiere-style marking, used for playback, editing, and export.
+Standard I/O marking, used for playback, editing, and export.
 
 | Key | Action |
 | --- | --- |
@@ -113,7 +113,7 @@ Premiere-style marking, used for playback, editing, and export.
 
 ### App
 
-- Every keybinding remappable; the default keymap follows Premiere so muscle memory carries over
+- Every keybinding remappable; the default keymap follows the standard pro-editor layout so muscle memory carries over
 - Dockable panels and themes (dark by default)
 - Config and keymaps in TOML
 
@@ -204,14 +204,4 @@ The implementation order, issue for each item, dependencies and critical path ar
 
 ## Design
 
-The visual system is in [DESIGN.md](../DESIGN.md): "The Quiet Frame", a minimal look in the spirit of Linear on Premiere's layout, with fixed layout rules that keep every panel header on one line.
-
-## UI prototypes
-
-Generated with Codex image generation. The first four set the panel layout; their look is superseded by DESIGN.md. Prompts are in [`prototypes/BRIEF.md`](prototypes/BRIEF.md).
-
-1. `prototypes/01-editor.png` — main editor
-2. `prototypes/02-keyframes.png` — keyframe editing
-3. `prototypes/03-export.png` — export dialog
-4. `prototypes/04-welcome.png` — welcome screen
-5. `prototypes/v2/01-editor.png` — main editor in the DESIGN.md look
+The visual system is in [DESIGN.md](../DESIGN.md): "The Quiet Frame", a minimal dark look on the standard editor layout, with fixed layout rules that keep every panel header on one line.

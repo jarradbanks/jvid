@@ -1251,6 +1251,19 @@ impl Preview {
     pub fn settled(&self) -> bool {
         self.frame.is_some() || self.error.is_some() || self.program_shown.is_some()
     }
+
+    /// Plays through `out` instead of the audio device, so a test owns the clock.
+    pub fn set_output(&mut self, out: Output) {
+        self.output = Some(out);
+    }
+
+    /// The Program shows the exact frame at the playback clock.
+    pub fn program_caught_up(&self) -> bool {
+        let want = self.program.transport.frame(self.clock());
+        self.program_shown
+            .as_ref()
+            .is_some_and(|s| s.index == want && s.exact)
+    }
 }
 
 #[cfg(test)]

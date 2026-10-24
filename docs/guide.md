@@ -1,6 +1,6 @@
 # User guide
 
-How to use jvid as it is today. It assumes you know the basics of a Premiere-style editor. Every shortcut is listed in the [shortcut cheat sheet](shortcuts.md); "Ctrl" means Cmd on macOS.
+How to use jvid as it is today. Every shortcut is listed in the [shortcut cheat sheet](shortcuts.md); "Ctrl" means Cmd on macOS.
 
 ## Building from source
 

@@ -29,6 +29,8 @@ use crate::{autosave, project_file, relink};
 use eframe::egui_wgpu::wgpu;
 
 #[cfg(test)]
+mod reel;
+#[cfg(test)]
 mod tests;
 
 const DOCK_KEY: &str = "dock";

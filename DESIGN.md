@@ -11,13 +11,13 @@ description: A small, fast video editor for cutting gaming highlights and screen
 
 **Creative North Star: "The Quiet Frame"**
 
-jvid is a quiet frame around the footage. It has Premiere's layout and conventions and the calm precision of Linear: neutral dark surfaces, thin borders, subtle rounded corners, clean inputs, one typeface and one blue accent. The chrome steps back so the picture is the brightest, most colourful thing on screen, and the polish shows in the details: exact alignment, consistent spacing, real hover and focus states, and numbers that don't jitter.
+jvid is a quiet frame around the footage. It has the standard pro-editor layout and conventions, with a calm, precise finish: neutral dark surfaces, thin borders, subtle rounded corners, clean inputs, one typeface and one blue accent. The chrome steps back so the picture is the brightest, most colourful thing on screen, and the polish shows in the details: exact alignment, consistent spacing, real hover and focus states, and numbers that don't jitter.
 
-Density is compact (12px text, 24px controls) to fit as much timeline on screen as possible. Panels sit where Premiere puts them, so an editor knows where everything is before they notice anything about the style.
+Density is compact (12px text, 24px controls) to fit as much timeline on screen as possible. Panels sit where pro editors expect them, so an editor knows where everything is before they notice anything about the style.
 
 The usual scene is an evening at a desk after a gaming session, or a screen recording made beside the app, often in a dim room. So the UI is dark, the viewer is neutral black, and colour in the chrome is spent only on meaning.
 
-Two looks have been tried and rejected. The first prototypes' warm greys with an amber accent felt generic. The "Clean Cut" Y2K tech-graphic direction (cut corners, wide capitals, acid accent) was too stylised once seen in a mockup. The panel layout from the first prototypes stands.
+Two looks have been tried and rejected: warm greys with an amber accent felt generic, and a Y2K tech-graphic direction (cut corners, wide capitals, acid accent) was too stylised.
 
 **Key Characteristics:**
 - Neutral, faintly cool dark surfaces separated by thin borders and 4px gaps
@@ -80,7 +80,7 @@ Every value above is the Dark theme. Light and High Contrast are the other built
 
 **Font:** Inter (OFL), embedded in `suite-ui` with tabular figures made the default (frozen in with fonttools' feature freezer), because egui can't switch OpenType features on.
 
-**Character:** One neutral, highly legible UI face at small sizes, the way Linear uses it. Hierarchy comes from weight and colour, not from extra families or capitals. Every digit is tabular, so timecodes and dragged values never change width.
+**Character:** One neutral, highly legible UI face at small sizes. Hierarchy comes from weight and colour, not from extra families or capitals. Every digit is tabular, so timecodes and dragged values never change width.
 
 ### Hierarchy
 Sizes are egui points; the scale steps by about 1.17.
@@ -99,7 +99,7 @@ Sizes are egui points; the scale steps by about 1.17.
 
 ## Layout
 
-Panels sit where Premiere puts them, as in the first prototypes: media bin on the left, preview in the centre, inspector on the right, and the timeline across the bottom, all under a 40px app bar. Docking can rearrange them, and every rule below holds in any arrangement. Units are egui points; every edge lands on a whole physical pixel at every UI scale.
+Panels sit in the standard editor layout: media bin on the left, preview in the centre, inspector on the right, and the timeline across the bottom, all under a 40px app bar. Docking can rearrange them, and every rule below holds in any arrangement. Units are egui points; every edge lands on a whole physical pixel at every UI scale.
 
 **Spacing scale (4px base):** 4 (gutters, icon-to-label gaps), 8 (between controls, list padding), 12 (the inset inside a panel), 16 (between inspector sections), 24, 32.
 
@@ -160,7 +160,7 @@ Keyframes are 8px diamonds (squares turned 45° with 1px rounding). Scrollbars a
 These specs are for the first `suite-ui` build. The next `/impeccable document` run replaces them with the components as built.
 
 ### Panels, headers and tabs
-- **Panel:** Panel fill, 1px Border, 8px radius. A panel with keyboard focus swaps its border to Blue, as Premiere does, because focus decides what shortcuts do.
+- **Panel:** Panel fill, 1px Border, 8px radius. A panel with keyboard focus swaps its border to Blue, because focus decides what shortcuts do.
 - **Header:** a 32px row with a Border divider at its bottom.
 - **Tabs:** a panel's tabs fill its header. The group runs from 4px in on the left to the header actions, or to 4px from the right edge, and the tabs share that width equally, 4px apart, up to 160px each. A wide panel such as the preview keeps its tabs at 160px, left-aligned. Each tab is a 24px pill centred vertically in the header (4px above and below), with its Body Strong label centred in the pill. Active: Ink text on Raised. Inactive: Ink 3, turning Ink 2 on hover. Tabs that would shrink below 64px move into a chevron menu at the end of the group.
 - **Actions:** 24px icon buttons at the right, 4px apart.
