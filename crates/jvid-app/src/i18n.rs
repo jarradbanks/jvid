@@ -43,34 +43,9 @@ macro_rules! trn {
 
 pub(crate) use {tr, trn};
 
-/// Each text's width in the theme's body font, in points.
-#[cfg(test)]
-pub(crate) fn widths(texts: &[&str]) -> Vec<f32> {
-    let ctx = egui::Context::default();
-    suite_ui::theme::install(&ctx);
-    let mut out = Vec::new();
-    // The theme's fonts load on the first pass.
-    for _ in 0..2 {
-        let mut pass = ctx.run_ui(Default::default(), |ui| {
-            let width = |t: &&str| {
-                let g = ui.painter().layout_no_wrap(
-                    t.to_string(),
-                    suite_ui::theme::body(),
-                    egui::Color32::WHITE,
-                );
-                g.size().x
-            };
-            out = texts.iter().map(width).collect();
-        });
-        pass.textures_delta.clear();
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use suite_ui::tokens::{size, space};
 
     #[test]
     fn every_language_has_every_key_with_the_same_placeholders() {
@@ -83,57 +58,6 @@ mod tests {
             .filter(|k| CATALOG.get_in("es", k) == CATALOG.get_in("en", k))
             .collect();
         assert!(same.len() * 10 < es.len(), "{same:?}");
-    }
-
-    #[test]
-    fn every_language_fits_the_fixed_width_dropdowns() {
-        // A dropdown's text starts S8 in and has to stop short of its chevron.
-        let room = |w: f32| w - space::S8 - space::S4 - size::ICON - space::S4;
-        // Key prefixes, by the width of the dropdown that lists them.
-        let fixed = [
-            ("preview.fit", room(88.0)),
-            ("preview.full", room(72.0)),
-            ("bin.sort_", room(96.0)),
-            ("blend.", room(132.0)),
-            ("size.custom", room(120.0)),
-            ("size.vertical", room(120.0)),
-            ("size.square", room(120.0)),
-            ("preset.", room(260.0)),
-            // The welcome screen's size cards, not a dropdown.
-            ("size.", 160.0 - 2.0 * space::S8),
-        ];
-        let mut over = Vec::new();
-        let mut check = |lang: &str, texts: &[&str], room: f32| {
-            for (t, w) in texts.iter().zip(widths(texts)) {
-                if w > room {
-                    over.push(format!("{lang}: {t:?} is {w:.0}pt, {room:.0}pt fit"));
-                }
-            }
-        };
-        for lang in suite_ui::i18n::LANGUAGES {
-            // A key a language doesn't have yet shows, and is measured, in English.
-            let text = |k: &str| CATALOG.get_in(lang, k).or(CATALOG.get_in("en", k)).unwrap();
-            for (prefix, room) in fixed {
-                let keys: Vec<&str> = CATALOG
-                    .keys("en")
-                    .into_iter()
-                    .filter(|k| k.starts_with(prefix))
-                    .collect();
-                assert!(!keys.is_empty(), "{prefix}");
-                let texts: Vec<&str> = keys.iter().map(|k| text(k)).collect();
-                check(lang, &texts, room);
-            }
-            // Settings: System (its language), then each language's own name.
-            let system = text("settings.system");
-            let rows: Vec<String> = suite_ui::i18n::LANGUAGES
-                .iter()
-                .map(|l| suite_ui::i18n::autonym(l))
-                .flat_map(|name| [system.replace("{language}", name), name.to_owned()])
-                .collect();
-            let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
-            check(lang, &rows, room(200.0));
-        }
-        assert_eq!(over, Vec::<String>::new());
     }
 
     #[test]

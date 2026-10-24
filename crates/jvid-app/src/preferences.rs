@@ -9,7 +9,7 @@ use suite_ui::i18n::{self, LANGUAGES, SYSTEM};
 use suite_ui::theme::{self, hairline, icon};
 use suite_ui::themes::{self, Choice, Palette};
 use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Checkbox, Dropdown, fit_text};
+use suite_ui::widgets::{Button, Checkbox, Dropdown, fit_text, hover_full};
 
 use crate::i18n::tr;
 
@@ -335,13 +335,17 @@ fn nav_row(ui: &mut Ui, glyph: &str, label: &str, on: bool) -> egui::Response {
         theme::icon_font(),
         glyph_ink,
     );
-    ui.painter().text(
-        egui::pos2(x + size::ICON + space::S8, rect.center().y),
-        Align2::LEFT_CENTER,
+    let left = x + size::ICON + space::S8;
+    let galley = fit_text(
+        ui,
         label,
         theme::body_strong(),
         ink,
+        rect.right() - space::S8 - left,
     );
+    let response = hover_full(response, &galley);
+    let pos = egui::pos2(left, rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(pos, galley, ink);
     response
 }
 

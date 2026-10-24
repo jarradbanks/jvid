@@ -1,5 +1,21 @@
 # suite-ui strings, Czech. Keep keys and {placeholders} in step with en.toml.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
 
 [language]
 name = "Čeština"
+
+[panel]
+more_tabs = "Další karty"
+
+[input]
+search = "Hledat"
+
+[color]
+none = "Žádná"
+
+[theme]
+error = "Motiv {path}: {error}"
+bad_color = "`{value}` není #RRGGBB"
+at = "řádek {line}, sloupec {column}: {error}"
+dark = "Tmavý"
+light = "Světlý"
+high_contrast = "Vysoký kontrast"

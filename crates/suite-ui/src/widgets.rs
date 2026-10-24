@@ -704,10 +704,36 @@ impl Widget for DragField<'_> {
 }
 
 /// One line of `text` cut to `width` with an ellipsis; check `elided` to know it was.
+///
+/// Text in a fixed-width spot (a tab, a column header, a caption beside its fields) goes
+/// through this, or through `egui::Label::truncate`, which cuts the same way and adds the
+/// tooltip itself. Translations run long, and the layout copes rather than the translator.
+/// Show the full text on hover with [`hover_full`] or [`paint_fit`].
 pub fn fit_text(ui: &Ui, text: &str, font: FontId, color: Color32, width: f32) -> Arc<Galley> {
     let mut job = LayoutJob::simple_singleline(text.to_owned(), font, color);
     job.wrap = TextWrapping::truncate_at_width(width.max(0.0));
     ui.fonts_mut(|f| f.layout_job(job))
+}
+
+/// `response` with `galley`'s full text on hover when [`fit_text`] cut it.
+pub fn hover_full(response: Response, galley: &Galley) -> Response {
+    if galley.elided {
+        response.on_hover_text(galley.text())
+    } else {
+        response
+    }
+}
+
+/// Paints `galley` from [`fit_text`] with its top left at `pos`; cut, it shows the full text on
+/// hover. For text with no widget of its own, such as a column header.
+pub fn paint_fit(ui: &Ui, pos: egui::Pos2, galley: Arc<Galley>, color: Color32) {
+    if galley.elided {
+        let id = ui.id().with(("fit", pos.x.to_bits(), pos.y.to_bits()));
+        let rect = Rect::from_min_size(pos, galley.size());
+        ui.interact(rect, id, Sense::hover())
+            .on_hover_text(galley.text());
+    }
+    ui.painter().galley(pos, galley, color);
 }
 
 /// Paints `galley` left-aligned at `x`, centred on `y`.
@@ -1589,6 +1615,7 @@ pub struct SectionHeader<'a> {
     title: &'a str,
     open: &'a mut bool,
     state: State,
+    reserve: f32,
 }
 
 impl<'a> SectionHeader<'a> {
@@ -1597,7 +1624,14 @@ impl<'a> SectionHeader<'a> {
             title,
             open,
             state: State::Live,
+            reserve: 0.0,
         }
+    }
+
+    /// Keeps `width` at the right clear of the title, for tools put over the header.
+    pub fn reserve(mut self, width: f32) -> Self {
+        self.reserve = width;
+        self
     }
 
     pub fn state(mut self, state: State) -> Self {
@@ -1639,13 +1673,11 @@ impl Widget for SectionHeader<'_> {
             theme::icon_font(),
             chevron_ink,
         );
-        ui.painter().text(
-            pos2(rect.left() + size::ICON + space::S4, y),
-            Align2::LEFT_CENTER,
-            self.title,
-            theme::body_strong(),
-            ink,
-        );
+        let x = rect.left() + size::ICON + space::S4;
+        let room = rect.right() - self.reserve - x;
+        let title = fit_text(ui, self.title, theme::body_strong(), ink, room);
+        let response = hover_full(response, &title);
+        paint_left(ui, x, y, title, ink);
         let line = 1.0 / ui.pixels_per_point();
         ui.painter().rect_filled(
             Rect::from_x_y_ranges(rect.x_range(), rect.bottom() - line..=rect.bottom()),
