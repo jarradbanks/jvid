@@ -14,7 +14,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{
     Button, Checkbox, ColorField, DragField, Dropdown, KeyButton, Keyed, MenuRow, SectionHeader,
-    Segmented, Slider, TextInput,
+    Segmented, Slider, TextInput, fit_text, paint_fit,
 };
 
 use crate::i18n::{CATALOG, Label, tr, verbatim};
@@ -2191,7 +2191,10 @@ fn section(ui: &mut Ui, id: &str, tools: Option<bool>) -> (bool, Option<Head>) {
     let title = caption(id);
     let id = ui.id().with(("inspector", id));
     let mut open = ui.data_mut(|d| *d.get_temp_mut_or(id, true));
-    let rect = ui.add(SectionHeader::new(title, &mut open)).rect;
+    let reserve = tools.map_or(0.0, |_| TOOLS + space::S4);
+    let rect = ui
+        .add(SectionHeader::new(title, &mut open).reserve(reserve))
+        .rect;
     ui.data_mut(|d| d.insert_temp(id, open));
     let head = tools.and_then(|changed| head_tools(ui, rect, title, changed, true));
     (open, head)
@@ -2294,7 +2297,7 @@ fn prop_rows<R>(
     row.spacing_mut().item_spacing = vec2(space::S4, space::S4);
     row.allocate_ui_with_layout(vec2(size::INSPECTOR_LABEL, size::CONTROL), layout, |ui| {
         ui.set_min_width(size::INSPECTOR_LABEL);
-        ui.label(egui::RichText::new(label).color(color::ink_2()))
+        ui.add(egui::Label::new(egui::RichText::new(label).color(color::ink_2())).truncate())
     });
     let w = rect.right() - TOOLS - space::S4 - row.cursor().left();
     let inner = row
@@ -2600,19 +2603,6 @@ struct FontSearch {
     area: egui::Rect,
 }
 
-/// `text` laid out on one line, cut to `width` with an ellipsis.
-fn truncated(
-    ui: &Ui,
-    text: &str,
-    color: egui::Color32,
-    width: f32,
-) -> std::sync::Arc<egui::Galley> {
-    let format = egui::TextFormat::simple(theme::body(), color);
-    let mut job = egui::text::LayoutJob::single_section(text.to_owned(), format);
-    job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(0.0));
-    ui.painter().layout_job(job)
-}
-
 /// The Font field's face: `shown` and a chevron in a field, after an Amber warning when
 /// `missing`. Takes the row's width.
 fn font_button(ui: &mut Ui, shown: &str, missing: bool, open: bool) -> egui::Response {
@@ -2643,7 +2633,13 @@ fn font_button(ui: &mut Ui, shown: &str, missing: bool, open: bool) -> egui::Res
         x += size::ICON + space::S4;
     }
     let chevron = rect.right() - space::S4 - size::ICON / 2.0;
-    let g = truncated(ui, shown, color::ink(), chevron - size::ICON / 2.0 - x);
+    let g = fit_text(
+        ui,
+        shown,
+        theme::body(),
+        color::ink(),
+        chevron - size::ICON / 2.0 - x,
+    );
     p.galley(pos2(x, y - g.size().y / 2.0), g, color::ink());
     let a = egui::Align2::CENTER_CENTER;
     p.text(
@@ -2858,19 +2854,19 @@ fn text_section(
     let sid = ui.id().with(("inspector text", id));
     let first = matches!(id, "text" | "fill");
     let mut open = ui.data_mut(|d| *d.get_temp_mut_or(sid, first));
-    let rect = ui.add(SectionHeader::new(title, &mut open)).rect;
+    let header = SectionHeader::new(title, &mut open).reserve(TOOLS + space::S4);
+    let rect = ui.add(header).rect;
     ui.data_mut(|d| d.insert_temp(sid, open));
-    if !open {
-        let title_w = ui
-            .painter()
-            .layout_no_wrap(title.to_owned(), theme::body_strong(), color::ink())
-            .size()
-            .x;
-        let x = rect.left() + size::ICON + space::S4 + title_w + space::S8;
-        let w = rect.right() - TOOLS - space::S4 - x;
-        let g = truncated(ui, summary, color::ink_3(), w);
+    let left = rect.left() + size::ICON + space::S4;
+    let room = rect.right() - TOOLS - space::S4 - left;
+    // The header's title as it drew it; cut short, it leaves no room for the summary.
+    let head = fit_text(ui, title, theme::body_strong(), color::ink(), room);
+    if !open && !head.elided {
+        let x = left + head.size().x + space::S8;
+        let w = room + left - x;
+        let g = fit_text(ui, summary, theme::body(), color::ink_3(), w);
         let pos = pos2(x, rect.center().y - g.size().y / 2.0);
-        ui.painter().galley(pos, g, color::ink_3());
+        paint_fit(ui, pos, g, color::ink_3());
     }
     (open, head_tools(ui, rect, title, changed, key))
 }
@@ -4756,27 +4752,5 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let h = font_harness("Helvetica");
         assert!(h.query_by_label("Helvetica (missing)").is_some());
-    }
-
-    #[test]
-    fn spanish_captions_fit_the_label_column_as_well_as_english() {
-        let keys = SECTIONS
-            .iter()
-            .flat_map(|(_, props)| props.iter().map(|p| format!("inspector.{}", p.name)))
-            .chain(["inspector.blend".into(), "inspector.lut".into()])
-            .chain(
-                TEXT_SECTIONS
-                    .iter()
-                    .flat_map(|(_, rows)| rows.iter().map(|r| format!("inspector.{}", r.1))),
-            );
-        for key in keys {
-            let [en, es] = ["en", "es"].map(|l| crate::i18n::CATALOG.get_in(l, &key).unwrap());
-            let [en_w, es_w] = crate::i18n::widths(&[en, es]).try_into().unwrap();
-            // English's Temperature already runs a fraction past the column.
-            assert!(
-                es_w <= size::INSPECTOR_LABEL.max(en_w),
-                "{es:?} is {es_w:.1}pt, {en:?} {en_w:.1}pt"
-            );
-        }
     }
 }

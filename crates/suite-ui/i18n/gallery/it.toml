@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Italian. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Predefinito"
+hover = "Al passaggio"
+focus = "Focus visibile"
+pressed = "Premuto"
+disabled = "Disattivato"
+loading_error = "Caricamento / Errore"
+
+[panel]
+widgets = "Widget"
+effects = "Effetti"
+text = "Testo"
+add = "Aggiungi"
+more = "Altro"
+inspector = "Inspector"
+source = "Sorgente"
+program = "Programma"
+audio = "Audio"
+markers = "Marcatori"
+history = "Cronologia"
+captions = "Didascalie"
+overflow = "Le schede sotto i 64 px passano nel menu a freccia."
+type_and_colour = "Tipografia e colore"
+
+[row]
+primary = "Primario"
+secondary = "Secondario"
+ghost = "Trasparente"
+destructive = "Distruttivo"
+icon = "Icona"
+input = "Campo"
+search = "Ricerca"
+numeric = "Numerico"
+dropdown = "Menu a discesa"
+colour = "Colore"
+segmented = "Segmentato"
+checkbox = "Casella di controllo"
+section = "Sezione"
+slider = "Cursore"
+keyframe = "Fotogramma chiave"
+
+[demo]
+delete = "Elimina"
+export = "Esporta"
+width_prefix = "L"
+min_error = "Deve essere almeno 2"
+full = "Intera"
+fit = "Adatta"
+fill = "Riempi"
+snap = "Aggancio"
+live = "In tempo reale"
+transform = "Trasformazione"
+position = "Posizione"
+scale = "Scala"
+reset = "Reimposta"
+previous = "Fotogramma chiave precedente"
+next = "Fotogramma chiave successivo"
+animate = "Anima"
+plus_second = "+1 s"
+
+[type]
+display = "Display 22"
+headline = "Titolo principale 16"
+title = "Titolo 14"
+body_strong = "Corpo in grassetto 12"
+body = "Corpo 12 · 0123456789 resta fermo"
+small = "Piccolo 10 · suggerimento scelta rapida"
+
+[clip]
+video = "Video"
+title = "Titolo"
+still = "Immagine fissa"
+audio = "Audio"
