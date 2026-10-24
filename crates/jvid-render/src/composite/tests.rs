@@ -504,6 +504,62 @@ fn neutral_grade_is_bit_identical_and_adjustments_apply_in_linear_light() {
     assert!(at(&warm, 128)[0] > 128 && at(&warm, 128)[2] < 127);
 }
 
+#[test]
+fn default_wheels_change_nothing_and_lift_raises_shadows_but_not_white() {
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping wheels test: no software adapter on this platform");
+        return;
+    };
+    // A grey ramp: every 8-bit code once.
+    let px = |x: u32, _| [x as u8, x as u8, x as u8, 255];
+    let img = image(&device, &queue, (256, 1), px);
+    let mut comp = Compositor::new(&device);
+    let mut run = |t: Transform| {
+        let tex = comp.render(&device, &queue, (256, 1), 1, [0, 0, 0, 255], &[(&img, t)]);
+        read_back(&device, &queue, tex)
+    };
+    let want: Vec<u8> = (0..256).flat_map(|x| px(x, 0)).collect();
+    let mut t = Transform::default();
+    assert!(t.wheels.is_default());
+    assert_eq!(
+        run(t.clone()),
+        want,
+        "default wheels leave pixels untouched"
+    );
+
+    t.wheels.lift.master = 1.0;
+    let lifted = run(t.clone());
+    let at = |rgba: &[u8], x: usize| rgba[x * 4];
+    assert!(at(&lifted, 0) > 100, "black lifts: {}", at(&lifted, 0));
+    assert!(at(&lifted, 64) > 64, "shadows rise: {}", at(&lifted, 64));
+    assert_eq!(at(&lifted, 255), 255, "white stays");
+
+    // Lift towards red: shadows warm, white stays white.
+    t.wheels.lift = jvid_core::model::Wheel {
+        color: [0.0, 1.0],
+        master: 0.0,
+    };
+    let red = run(t.clone());
+    assert!(
+        red[64 * 4] > red[64 * 4 + 2],
+        "{:?}",
+        &red[64 * 4..64 * 4 + 3]
+    );
+    assert_eq!(&red[255 * 4..255 * 4 + 3], &[255, 255, 255]);
+
+    // Gain halves, gamma brightens mids, offset shifts black.
+    t.wheels = Default::default();
+    t.wheels.gain.master = -1.0;
+    assert!(at(&run(t.clone()), 255) < 200);
+    t.wheels = Default::default();
+    t.wheels.gamma.master = 0.5;
+    let g = run(t.clone());
+    assert!(at(&g, 128) > 128 && at(&g, 0) == 0 && at(&g, 255) == 255);
+    t.wheels = Default::default();
+    t.wheels.offset.master = 0.5;
+    assert!(at(&run(t), 0) > 0);
+}
+
 /// Trilinear lookup on the CPU, the reference the shader must match.
 fn lut_reference(lut: &crate::lut::Lut, c: [f32; 3]) -> [f32; 3] {
     let n = lut.size as usize;

@@ -74,6 +74,9 @@ const CLIP: &[&str] = &[
     "reverse",
     "freeze_frame",
     "detect_silence",
+    "",
+    "copy_grade",
+    "paste_grade",
     "nest",
     "",
     "crossfade",
@@ -106,6 +109,8 @@ impl Timeline {
         let any = !self.selected.is_empty();
         match id {
             "paste" => !self.clipboard.is_empty(),
+            "copy_grade" => !self.video_chosen(seq).is_empty(),
+            "paste_grade" => self.grade.is_some() && self.clip_action(id, seq).is_some(),
             "delete" | "ripple_delete" => any || self.gap.is_some(),
             "copy" | "cut" | "duplicate" | "link" | "enable" | "reverse" | "nest" => any,
             "freeze_frame" => self.clip_action(id, seq).is_some(),

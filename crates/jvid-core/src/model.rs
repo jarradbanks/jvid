@@ -541,6 +541,9 @@ pub struct Transform {
     /// A `.cube` file applied after the adjustments, mixed in by `lut_intensity` (0..=1).
     pub lut: Option<String>,
     pub lut_intensity: f64,
+    /// Lift, Gamma, Gain and Offset, after the adjustments and before the LUT.
+    #[serde(skip_serializing_if = "Wheels::is_default")]
+    pub wheels: Wheels,
     /// Fade lengths from the clip's start and end; they scale opacity and gain, and trims keep
     /// them since they hang off the edges. Longer than the clip clamps to it.
     pub fade_in: Time,
@@ -553,6 +556,95 @@ pub struct Transform {
     pub effects: Vec<Effect>,
     /// Shapes cut out of the clip's image, combined in order, before its effects.
     pub masks: Vec<Mask>,
+}
+
+/// One primary colour wheel: a colour offset and a master amount. All 0 changes nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Wheel {
+    /// Where the puck sits in the unit disc: BT.709 Cb across and Cr up, as the vectorscope.
+    pub color: [f64; 2],
+    /// -1..=1 on every channel.
+    pub master: f64,
+}
+
+impl Wheel {
+    /// The colour's largest shift, in the same units as `master`.
+    const CHROMA: f64 = 0.25;
+
+    /// The amount per channel: master on all three plus the colour as a zero-luma shift.
+    pub fn rgb(&self) -> [f64; 3] {
+        let [cb, cr] = self.color.map(|v| v * Self::CHROMA);
+        let m = self.master;
+        [
+            m + 1.5748 * cr,
+            m - 0.1873 * cb - 0.4681 * cr,
+            m + 1.8556 * cb,
+        ]
+    }
+
+    /// Pulls the puck into the unit disc and master into -1..=1.
+    pub fn clamped(self) -> Self {
+        let [x, y] = self.color;
+        let r = x.hypot(y).max(1.0);
+        Self {
+            color: [x / r, y / r],
+            master: self.master.clamp(-1.0, 1.0),
+        }
+    }
+}
+
+/// Lift, Gamma, Gain and Offset, in that order. Keyframe names are the wheel's
+/// ([`Wheels::NAMES`], a `Vec2` colour) and `{name}_master` (`Scalar`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Wheels {
+    pub lift: Wheel,
+    pub gamma: Wheel,
+    pub gain: Wheel,
+    pub offset: Wheel,
+}
+
+impl Wheels {
+    pub const NAMES: [&str; 4] = ["lift", "gamma", "gain", "offset"];
+    /// Every keyframe name the wheels animate.
+    pub const KEYS: [&str; 8] = [
+        "lift",
+        "lift_master",
+        "gamma",
+        "gamma_master",
+        "gain",
+        "gain_master",
+        "offset",
+        "offset_master",
+    ];
+
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn all(&self) -> [&Wheel; 4] {
+        [&self.lift, &self.gamma, &self.gain, &self.offset]
+    }
+
+    pub fn all_mut(&mut self) -> [&mut Wheel; 4] {
+        [
+            &mut self.lift,
+            &mut self.gamma,
+            &mut self.gain,
+            &mut self.offset,
+        ]
+    }
+
+    /// The wheel and whether it's the master, for a keyframe name in [`Wheels::KEYS`].
+    pub fn param(&mut self, name: &str) -> Option<(&mut Wheel, bool)> {
+        let (wheel, master) = match name.strip_suffix("_master") {
+            Some(w) => (w, true),
+            None => (name, false),
+        };
+        let i = Self::NAMES.iter().position(|n| *n == wheel)?;
+        Some((self.all_mut().into_iter().nth(i)?, master))
+    }
 }
 
 /// A clip's or track's audio effects, in processing order. The defaults change nothing.
@@ -958,6 +1050,7 @@ impl Default for Transform {
             tint: 0.0,
             lut: None,
             lut_intensity: 1.0,
+            wheels: Wheels::default(),
             fade_in: Time(0),
             fade_out: Time(0),
             fade_curve: FadeCurve::Linear,
@@ -982,6 +1075,36 @@ impl Transform {
             self.temperature,
             self.tint,
         ]
+    }
+
+    /// Keyframe names of everything Paste Grade carries.
+    pub const GRADE_KEYS: [&str; 14] = [
+        "exposure",
+        "contrast",
+        "saturation",
+        "temperature",
+        "tint",
+        "lut_intensity",
+        "lift",
+        "lift_master",
+        "gamma",
+        "gamma_master",
+        "gain",
+        "gain_master",
+        "offset",
+        "offset_master",
+    ];
+
+    /// Copies `from`'s color adjustments, LUT and wheels, the grade Copy Grade carries.
+    pub fn paste_grade(&mut self, from: &Transform) {
+        self.exposure = from.exposure;
+        self.contrast = from.contrast;
+        self.saturation = from.saturation;
+        self.temperature = from.temperature;
+        self.tint = from.tint;
+        self.lut.clone_from(&from.lut);
+        self.lut_intensity = from.lut_intensity;
+        self.wheels = from.wheels;
     }
 }
 
@@ -1176,6 +1299,17 @@ impl Clip {
             *v = v.clamp(-1.0, 1.0);
         }
         x.lut_intensity = x.lut_intensity.clamp(0.0, 1.0);
+        for name in Wheels::KEYS {
+            let v = self.value_at(name, t);
+            if let Some((w, master)) = x.wheels.param(name) {
+                match v {
+                    Some(Scalar(n)) if master => w.master = n,
+                    Some(Vec2(c)) if !master => w.color = c,
+                    _ => {}
+                }
+                *w = w.clamped();
+            }
+        }
         for (i, e) in x.effects.iter_mut().enumerate() {
             for (name, v) in &mut e.params {
                 if let Some(Scalar(n)) = self.value_at(&Effect::key(i, name), t) {
@@ -3071,6 +3205,38 @@ mod tests {
     }
 
     #[test]
+    fn wheel_colour_keeps_luma_and_paste_grade_copies_only_the_grade() {
+        let w = Wheel {
+            color: [0.6, -0.8],
+            master: 0.0,
+        };
+        let [r, g, b] = w.rgb();
+        assert!((0.2126 * r + 0.7152 * g + 0.0722 * b).abs() < 1e-3);
+        // Up is Cr, towards red.
+        let red = Wheel {
+            color: [0.0, 1.0],
+            ..w
+        };
+        assert!(red.rgb()[0] > 0.0 && red.rgb()[2] < 1e-9);
+        let m = Wheel {
+            master: 0.5,
+            ..Wheel::default()
+        };
+        assert_eq!(m.rgb(), [0.5; 3]);
+        let mut from = Transform {
+            exposure: 1.0,
+            lut: Some("a.cube".into()),
+            opacity: 0.5,
+            ..Default::default()
+        };
+        from.wheels.lift.master = 0.3;
+        let mut to = Transform::default();
+        to.paste_grade(&from);
+        assert_eq!((to.exposure, to.lut.as_deref()), (1.0, Some("a.cube")));
+        assert_eq!((to.wheels, to.opacity), (from.wheels, 1.0));
+    }
+
+    #[test]
     fn transform_keyframes_override_static_values() {
         use crate::keyframe::{Easing, Value};
         let key = |t, value| Keyframe {
@@ -3125,6 +3291,16 @@ mod tests {
         assert_eq!(x.crop, [0.0, 4.0, 0.0, 0.0]);
         assert_eq!((x.position, x.rotation, x.opacity), ([5.0, 6.0], 30.0, 1.0));
         assert_eq!(x.grade(), [1.0, 0.0, 0.0, 0.0, -1.0], "keyed and clamped");
+        let lift = vec![
+            key(100, Value::Vec2([0.0, 0.0])),
+            key(120, Value::Vec2([4.0, 0.0])),
+        ];
+        c.keyframes.insert("lift".into(), lift);
+        let gain = vec![key(100, Value::Scalar(-3.0))];
+        c.keyframes.insert("gain_master".into(), gain);
+        let w = c.transform_at(Time(10)).wheels;
+        assert_eq!(w.lift.color, [1.0, 0.0], "keyed and pulled into the disc");
+        assert_eq!(w.gain.master, -1.0);
         c.keyframes
             .insert("scale".into(), vec![key(0, Value::Vec2([0.5, 2.0]))]);
         assert_eq!(c.transform_at(Time(10)).scale, [0.5, 2.0]);

@@ -440,12 +440,16 @@ impl Compositor {
                 let pre = f32::from(u8::from(pre == Some(&true)));
                 p.extend([t.opacity.clamp(0.0, 1.0) as f32, mode as f32, pre, 0.0]);
                 let g = t.grade();
-                let on = g.iter().any(|v| *v != 0.0);
+                let on = g.iter().any(|v| *v != 0.0) || !t.wheels.is_default();
                 p.extend(g.map(|v| v as f32));
                 let lut = t.lut.as_ref().and_then(|p| self.luts.get(p));
                 let mix = lut.map_or(0.0, |_| t.lut_intensity.clamp(0.0, 1.0) as f32);
                 let lut = lut.unwrap_or(&self.no_lut);
                 p.extend([f32::from(u8::from(on)), mix, lut.width() as f32]);
+                for w in t.wheels.all() {
+                    p.extend(w.rgb().map(|v| v as f32));
+                    p.push(0.0);
+                }
                 let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("layer"),
                     contents: &p.iter().flat_map(|f| f.to_ne_bytes()).collect::<Vec<_>>(),
