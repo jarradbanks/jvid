@@ -1435,6 +1435,70 @@ mod program_tests {
         assert_eq!(draw(Some(mine)), Some(mine));
     }
 
+    /// Each item's ink in the transport row, left to right, as (left x, vertical centre, top,
+    /// bottom) in physical pixels, against the row's centre. Ink is anything not the row's
+    /// background; items are runs of inked columns more than 3 points apart.
+    fn transport_ink(size: [f32; 2], ppp: f32) -> (f32, Vec<(u32, f32, u32, u32)>) {
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(size)
+            .with_pixels_per_point(ppp)
+            .wgpu()
+            .build_eframe(|cc| Program {
+                preview: Preview::new(cc.wgpu_render_state.as_ref()),
+                history: History::new(Project::default()),
+                fresh: true,
+            });
+        // A clip, so the row has its timecodes and buttons.
+        add_solid(&mut h.state_mut().history, [0.0, 0.0, 0.0, 1.0], Time(0));
+        h.run();
+        let img = h.render().unwrap();
+        let px = |pt: f32| (pt * ppp).round() as u32;
+        let (top, bottom) = (px(size[1] - size::HEADER), px(size[1]));
+        let bg = *img.get_pixel(0, bottom - 1);
+        let ink = |x, y| {
+            let p = img.get_pixel(x, y);
+            (0..3).any(|i| p[i].abs_diff(bg[i]) > 8)
+        };
+        let gap = px(3.0);
+        let mut items: Vec<(u32, u32, u32, u32)> = Vec::new();
+        for x in 0..img.width() {
+            let ys: Vec<u32> = (top..bottom).filter(|&y| ink(x, y)).collect();
+            let (Some(&t), Some(&b)) = (ys.first(), ys.last()) else {
+                continue;
+            };
+            match items.last_mut() {
+                Some(i) if x - i.1 <= gap => *i = (i.0, x, i.2.min(t), i.3.max(b)),
+                _ => items.push((x, x, t, b)),
+            }
+        }
+        let items = items
+            .into_iter()
+            .map(|(l, _, t, b)| (l, (t + b + 1) as f32 / 2.0, t, b))
+            .collect();
+        ((top + bottom) as f32 / 2.0, items)
+    }
+
+    /// DESIGN.md Layout > Checks, for the Program transport row: every item's ink (timecodes,
+    /// buttons, the end time, the dropdowns, the Preview checkbox, the guides menu) is centred
+    /// within 1 physical pixel of the row's centre, at 100% and 150% scale.
+    #[test]
+    fn transport_items_share_the_rows_centre_line() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        for ppp in [1.0, 1.5] {
+            let (centre, items) = transport_ink([960.0, 360.0], ppp);
+            // Timecode, 5 buttons, end time, guides, checkbox box and label, 2 dropdowns.
+            assert_eq!(items.len(), 12, "@{ppp}x: {items:?}");
+            for i in &items {
+                assert!(
+                    (i.1 - centre).abs() <= 1.0,
+                    "@{ppp}x: {i:?} off the centre {centre}, all {items:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn open_scopes_copy_the_program_frame_as_it_draws() {
         if !suite_ui::test_support::gpu() {
