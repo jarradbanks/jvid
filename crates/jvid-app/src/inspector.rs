@@ -2666,9 +2666,10 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     };
     let Some(mut st) = st else {
         if r.clicked() {
+            // Opening highlights the current family, so it previews no change.
             let st = FontSearch {
                 query: String::new(),
-                at: 0,
+                at: list.iter().position(|f| f == family).unwrap_or(0),
                 before: family.clone(),
                 area: egui::Rect::NOTHING,
             };
@@ -2701,6 +2702,7 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     st.at = st.at.min(matches.len().saturating_sub(1));
     let mut pick = matches.get(st.at).copied();
     let mut clicked = false;
+    let opened = st.area == egui::Rect::NOTHING;
     // Like a Dropdown's menu: as wide as the field and inside the Inspector.
     let bounds = ui.clip_rect().intersect(ui.ctx().content_rect());
     let row = size::CONTROL + ui.spacing().item_spacing.y;
@@ -2726,7 +2728,7 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
                 .show(ui, |ui| {
                     for (i, f) in matches.iter().enumerate() {
                         let r = ui.add(MenuRow::new(f, *f == st.before).lit(i == st.at));
-                        if down || up {
+                        if down || up || opened {
                             if i == st.at {
                                 r.scroll_to_me(None);
                             }
@@ -4731,7 +4733,8 @@ mod tests {
         let mut h = font_harness("Courier New");
         h.get_by_label("Courier New").click();
         h.run();
-        h.key_press(Key::ArrowDown);
+        assert_eq!(h.state(), "Courier New", "opening previews no change");
+        h.key_press(Key::ArrowUp);
         h.run();
         assert_eq!(h.state(), "Arial Black", "arrowing previews");
         h.key_press(Key::Escape);
