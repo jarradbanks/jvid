@@ -1,2 +1,75 @@
-# The suite-ui gallery example's demo labels, Dutch. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+# The suite-ui gallery example's demo labels, Dutch.
+
+[state]
+default = "Standaard"
+hover = "Aanwijzen"
+focus = "Focus zichtbaar"
+pressed = "Ingedrukt"
+disabled = "Uitgeschakeld"
+loading_error = "Laden / fout"
+
+[panel]
+widgets = "Bedieningselementen"
+effects = "Effecten"
+text = "Tekst"
+add = "Toevoegen"
+more = "Meer"
+inspector = "Inspector"
+source = "Bron"
+program = "Programma"
+audio = "Audio"
+markers = "Markeringen"
+history = "Geschiedenis"
+captions = "Bijschriften"
+overflow = "Tabbladen smaller dan 64 px gaan naar het pijltjesmenu."
+type_and_colour = "Letters en kleur"
+
+[row]
+primary = "Primair"
+secondary = "Secundair"
+ghost = "Spook"
+destructive = "Destructief"
+icon = "Pictogram"
+input = "Invoer"
+search = "Zoeken"
+numeric = "Numeriek"
+dropdown = "Vervolgkeuzelijst"
+colour = "Kleur"
+segmented = "Gesegmenteerd"
+checkbox = "Selectievakje"
+section = "Sectie"
+slider = "Schuifregelaar"
+keyframe = "Keyframe"
+
+[demo]
+delete = "Verwijderen"
+export = "Exporteren"
+width_prefix = "B"
+min_error = "Moet minstens 2 zijn"
+full = "Volledig"
+fit = "Passend"
+fill = "Vullen"
+snap = "Vastklikken"
+live = "Live"
+transform = "Transformatie"
+position = "Positie"
+scale = "Schaal"
+reset = "Resetten"
+previous = "Vorig keyframe"
+next = "Volgend keyframe"
+animate = "Animeren"
+plus_second = "+1 s"
+
+[type]
+display = "Display 22"
+headline = "Kop 16"
+title = "Titel 14"
+body_strong = "Tekst vet 12"
+body = "Tekst 12 · 0123456789 staat stil"
+small = "Klein 10 · sneltoetshint"
+
+[clip]
+video = "Video"
+title = "Titel"
+still = "Stilstaand beeld"
+audio = "Audio"
