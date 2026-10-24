@@ -2263,7 +2263,10 @@ fn toggle(
     if r.has_focus() {
         painter.add(suite_ui::widgets::focus_ring(rect, radius::SMALL));
     }
-    let r = r.on_hover_text(name);
+    // Above the toggle, so the bottom track's tooltips don't cover + Track under it.
+    let mut tip = egui::Tooltip::for_enabled(&r);
+    tip.popup = tip.popup.align(egui::RectAlign::TOP);
+    tip.show(|ui| ui.label(name));
     r.clicked()
 }
 
