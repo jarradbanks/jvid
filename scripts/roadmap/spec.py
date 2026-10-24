@@ -1578,3 +1578,9 @@ I("voiceover-live-clip", "Voiceover take grows on the timeline as it records", N
   ac=["A test records a fake input for N seconds and the live clip's width and peak count follow the playhead every frame",
       "After stop, the committed clip sits exactly where the live clip was, and undo removes it in one step",
       "Recording on a real microphone shows the waveform growing smoothly (Needs user testing)"])
+I("inspector-tabs-wide", "Inspector tabs fill the header width", None, ["ui"], "S", labels=["later"],
+  summary="Owner, 2026-10-24: the Inspector's tabs stop at 160px each and leave the right of the header empty; they should share the full width evenly, as the Media panel's tabs do (Panel::wide, crates/jvid-app/src/media_bin.rs).",
+  scope=["The Inspector panel's tabs use Panel::wide, whatever panes the selection shows (Video/Audio/Effects, Clip/Text/Effects, ...)",
+         "DESIGN.md's Tab row says side panels (Media, Inspector) share the full header width; other panels keep the 160px cap"],
+  ac=["A kittest test shows the Inspector's last tab ending 4px from the header's right edge for two and three panes",
+      "Snapshots that show the Inspector are updated"])
