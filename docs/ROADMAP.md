@@ -447,6 +447,16 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#86](https://github.com/jarradbanks/jvid/issues/86) **HDR support** — PQ/HLG sources, tone mapping and HDR export.
 - [#87](https://github.com/jarradbanks/jvid/issues/87) **Curve graph editor** — A full graph editor for keyframe curves.
 - [#95](https://github.com/jarradbanks/jvid/issues/95) **Silence detection to cut dead air** — Find silent stretches in screen recordings and offer to cut or speed them up.
+- [#257](https://github.com/jarradbanks/jvid/issues/257) **Preferences redesign: sections and dropdowns that fit** — The Preferences dialog is a small box whose Input Device list spills past it and over Done. Redesign it with the impeccable skill, starting from an HTML mockup like the v3 Inspector one.
+- [#258](https://github.com/jarradbanks/jvid/issues/258) **Theme picker in Preferences** — Themes work (built-in Dark, Light and High Contrast, TOML files, live reload), but only by editing the settings file. Add them to Preferences with a few good defaults.
+- [#259](https://github.com/jarradbanks/jvid/issues/259) **Text tab layout cleanup** — The Text tab is a ragged list: a narrow one-line text box, Size and Weight sharing a row, an unlabelled Left/Center/Right row, and colour swatches that render as odd half-checker squares. Bring it up to the Inspector row standard.
+- [#260](https://github.com/jarradbanks/jvid/issues/260) **Transport bar: vertical centring check** — The Program transport bar may sit off-centre vertically: the timecodes, transport buttons, grid toggle, Preview checkbox and Full/Fit dropdowns may not share one centre line.
+- [#261](https://github.com/jarradbanks/jvid/issues/261) **Export dialog and queue menu visual upgrade** — The Export button's queue menu is a bare list (file name, Done, Reveal, then New Export, Cancel All and Clear Finished as text buttons), and the Export dialog needs the same impeccable polish.
+- [#262](https://github.com/jarradbanks/jvid/issues/262) **Drop above the top track to create a track there** — Making a new track for a title or solid means dragging it into the empty space below every track, though it usually belongs on top. Open a slot above the top track while dragging there.
+- [#263](https://github.com/jarradbanks/jvid/issues/263) **Graphic EQ with presets** — The EQ is seven rows of sliders (Low, Low Freq, Mid, Mid Freq, Mid Q, High, High Freq). Editors and players use a horizontal graphic EQ; build one, with presets.
+- [#264](https://github.com/jarradbanks/jvid/issues/264) **Locked tracks: no drag ghost for clips that can't move** — Dragging a clip on a locked track draws the full move ghost, then nothing moves.
+- [#265](https://github.com/jarradbanks/jvid/issues/265) **Record button in the transport bar** — Voiceover only starts by arming a track in its header and pressing Shift+R, which nothing on screen explains. Add a Record button next to the play controls, as other editors have.
+- [#266](https://github.com/jarradbanks/jvid/issues/266) **Impeccable polish pass on the remaining panels** — Bring every panel not covered by the issues above to the same finish, using the impeccable skill's critique and audit.
 
 ---
 

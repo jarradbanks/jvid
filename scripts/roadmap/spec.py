@@ -1345,3 +1345,124 @@ I("silence-detect", "Silence detection to cut dead air", None, ["media", "timeli
   ac=["A tone, two seconds of silence, tone clip yields one region within one frame of the silence (test)",
       "Cut leaves two adjacent clips with the silence removed; undo restores the original clip",
       "Speed Up shortens the timeline by the expected amount"])
+
+# ───────────────────────── Owner polish batch, 2026-10-24 ─────────────────────────
+
+I("prefs-redesign", "Preferences redesign: sections and dropdowns that fit", None, ["ui", "suite-ui"], "M", labels=["later"],
+  summary="The Preferences dialog is a small box whose Input Device list spills past it and over Done. Redesign it with the impeccable skill, starting from an HTML mockup like the v3 Inspector one.",
+  scope=[
+      "First commit an HTML mockup at `docs/prototypes/v3/preferences.html` (DESIGN.md tokens, the owner's Title Case labels), then build the dialog to match it",
+      "Group settings into labelled sections (General: Language, and Theme once it exists; Audio: Input Device), each with its helper text under the field it explains",
+      "Dropdown popups never extend past the dialog or the window: in suite-ui's dropdown, cap the popup to the available space, truncate long items with an ellipsis and show the full name on hover. Every dropdown in the app gets this",
+      "The dialog is sized for its content, scrolls if the window is too small, and nothing covers Done",
+  ],
+  ac=["With input devices whose names are longer than the field, the open list stays inside the window, truncates and shows each full name on hover",
+      "The dialog matches the mockup at the minimum window size (kittest snapshot)",
+      "Language and Input Device still apply live and persist"],
+  refs=[f"[DESIGN.md]({DESIGN})", MOCK3])
+
+I("theme-picker", "Theme picker in Preferences", None, ["ui", "suite-ui"], "S", ["prefs-redesign"], labels=["later"],
+  summary="Themes work (built-in Dark, Light and High Contrast, TOML files, live reload), but only by editing the settings file. Add them to Preferences with a few good defaults.",
+  scope=[
+      "A Theme dropdown in Preferences > General listing the built-ins and any TOML themes in the themes folder, with Dark as the default",
+      "Choosing one applies live with no restart and persists to the `theme` setting",
+      "Ship two more bundled defaults (for example a warmer dark and a softer light) as TOML files that also serve as templates for custom themes",
+      "An Open Themes Folder button; a broken theme file shows its error under the dropdown and falls back to Dark",
+      "Check every panel in Light and High Contrast and fix any colour that ignores the palette",
+  ],
+  ac=["Switching to Light recolours the whole editor at once and survives a restart",
+      "A valid TOML theme dropped into the themes folder appears in the list",
+      "kittest snapshots of the editor in Light and High Contrast"])
+
+I("text-inspector-polish", "Text tab layout cleanup", None, ["ui"], "M", labels=["later"],
+  summary="The Text tab is a ragged list: a narrow one-line text box, Size and Weight sharing a row, an unlabelled Left/Center/Right row, and colour swatches that render as odd half-checker squares. Bring it up to the Inspector row standard.",
+  scope=[
+      "A full-width, multi-line text box that grows with its content",
+      "Sections like the Video tab: Text (Font, Size, Weight, Align), Fill (Color), Outline (Width, Color), Shadow (Offset X/Y, Color), Box (Padding, Color), using the shared Inspector rows (one diamond, reset slot, sliders for ranged values)",
+      "One label column width and one field rhythm across the tab; Align becomes a labelled icon segmented control",
+      "Colour swatches share one component: a rounded swatch with a border, with a checkerboard only behind transparent colours",
+      "Use the impeccable skill; follow DESIGN.md and the v3 Text mockup",
+  ],
+  ac=["Every row lines up on the same label column and field start (kittest snapshot)",
+      "Opaque swatches show solid colour; a 50% black box colour shows the checkerboard through it",
+      "Editing every Text field still updates the Program view live and undoes as one step"],
+  refs=[MOCK3, f"[DESIGN.md]({DESIGN})"])
+
+I("transport-align", "Transport bar: vertical centring check", None, ["ui"], "S", labels=["later"],
+  summary="The Program transport bar may sit off-centre vertically: the timecodes, transport buttons, grid toggle, Preview checkbox and Full/Fit dropdowns may not share one centre line.",
+  scope=[
+      "Measure each item's vertical centre in the bar; fix any that is off by a pixel or more, including the timecodes' text baseline against the icons",
+      "Add a layout check (in the style of DESIGN.md Layout > Checks) asserting every transport item's centre is within 1 px of the bar's centre",
+      "If everything is already centred, the check alone closes this",
+  ],
+  ac=["The layout check passes and fails if an item is moved 2 px",
+      "The bar looks centred at 100% and 150% UI scale"])
+
+I("export-polish", "Export dialog and queue menu visual upgrade", None, ["ui", "export"], "M", labels=["later"],
+  summary="The Export button's queue menu is a bare list (file name, Done, Reveal, then New Export, Cancel All and Clear Finished as text buttons), and the Export dialog needs the same impeccable polish.",
+  scope=[
+      "HTML mockup first at `docs/prototypes/v3/export.html`, then build to match",
+      "Queue rows: file name, preset and duration or size as a second line, a progress bar with percent and time left while running, a status chip with icon (Waiting, Rendering, Done, Failed, Cancelled), and Reveal and Cancel as icon buttons in fixed columns",
+      "An empty state; the footer with New Export as the primary action and the rest secondary, disabled states clearly disabled",
+      "An Export dialog pass for hierarchy, spacing and grouping with the impeccable skill, with no behaviour change",
+  ],
+  ac=["A running export shows live progress and time left in the menu; a failed one shows its error on hover",
+      "Rows don't shift as jobs change state (kittest snapshot of each state)",
+      "The Export dialog matches the mockup"],
+  refs=[f"[DESIGN.md]({DESIGN})"])
+
+I("drop-new-track-above", "Drop above the top track to create a track there", None, ["ui", "timeline"], "S", labels=["later"],
+  summary="Making a new track for a title or solid means dragging it into the empty space below every track, though it usually belongs on top. Open a slot above the top track while dragging there.",
+  scope=[
+      "While dragging a video, title or solid asset within a few pixels of the top track's upper edge, or in the gap under the ruler, open an animated New Track slot above the top track",
+      "Dropping into the slot creates a video track above all others and places the clip at the drop time, as one undo step; leaving the zone closes the slot",
+      "Audio-only assets and drops onto existing tracks keep their current behaviour; the empty-space-below drop from #229 stays",
+  ],
+  ac=["Dragging a title to the top edge opens the slot; dropping it creates a track above V1 with the title at the drop time",
+      "Undo removes the clip and the new track together",
+      "Moving the drag away from the top closes the slot and adds no track"])
+
+I("graphic-eq", "Graphic EQ with presets", None, ["audio", "core", "ui"], "M", labels=["later"],
+  summary="The EQ is seven rows of sliders (Low, Low Freq, Mid, Mid Freq, Mid Q, High, High Freq). Editors and players use a horizontal graphic EQ; build one, with presets.",
+  scope=[
+      "A 10-band graphic EQ (31, 62, 125, 250, 500, 1K, 2K, 4K, 8K and 16K Hz, ±15 dB each, plus Post-Gain) replacing the three-band parametric EQ for clips and tracks",
+      "A horizontal widget: one vertical slider per band with its dB value above and its frequency below, a response curve through the handles over a ±15 dB grid; double-click a band to reset it",
+      "A Presets dropdown: Flat, Voice, Podcast, Bass Boost, Bass Cut, Treble Boost, Low Cut and Loudness. The Compressor gets the same dropdown with Gentle, Voice, Broadcast and Limiter",
+      "Old projects with the three-band EQ load with an equivalent 10-band curve",
+      "The track Audio Effects submenu opens the same widget in a popover",
+  ],
+  ac=["A 1 kHz tone through the EQ with only the 1K band at +6 dB comes out within 0.5 dB of +6 dB (test)",
+      "Each preset sets the bands it names, as one undo step",
+      "A project saved with the old EQ reopens with the same sound (test against the three-band response)"])
+
+I("locked-drag", "Locked tracks: no drag ghost for clips that can't move", None, ["ui", "timeline"], "S", labels=["later"],
+  summary="Dragging a clip on a locked track draws the full move ghost, then nothing moves.",
+  scope=[
+      "A drag or trim that starts on a clip on a locked track shows no ghost; the cursor shows not-allowed and a tooltip says the track is locked",
+      "A selection or linked pair that includes a clip on a locked track can't be moved, with the same feedback (linked clips keep sync)",
+      "Trim handles are hidden on locked clips",
+  ],
+  ac=["Dragging a clip on a locked V1 shows no ghost and leaves the project and undo stack unchanged",
+      "With V1 locked and A1 unlocked, dragging the linked A1 clip is refused with the same feedback"])
+
+I("record-transport", "Record button in the transport bar", None, ["ui", "audio"], "S", ["transport-align"], labels=["later"],
+  summary="Voiceover only starts by arming a track in its header and pressing Shift+R, which nothing on screen explains. Add a Record button next to the play controls, as other editors have.",
+  scope=[
+      "A Record button beside the Program transport controls, with a tooltip showing Shift+R",
+      "Clicking it starts recording at the playhead into the armed track; with none armed, it adds a new audio track, arms it and records there",
+      "While recording, the button becomes a red Stop with the elapsed time and a small input meter beside it; clicking it, Space or Shift+R ends the take",
+      "An unsaved project asks to save first, as Shift+R does",
+  ],
+  ac=["With no armed track, one click records into a new audio track and Stop places the clip",
+      "The button and Shift+R drive the same recording state"])
+
+I("polish-pass", "Impeccable polish pass on the remaining panels", None, ["ui"], "M", ["prefs-redesign", "text-inspector-polish", "export-polish", "transport-align"], labels=["later"],
+  summary="Bring every panel not covered by the issues above to the same finish, using the impeccable skill's critique and audit.",
+  scope=[
+      "Critique the title bar, media bin, Source and Program headers, timeline toolbar, track headers, keyframe lanes, context menus, toasts and the welcome screen against DESIGN.md, and fix the material findings",
+      "Known items: keyframe lane names are lowercase (anchor, crop bottom, scale) and must be Title Case; a lane's name overlaps the keyframe line at its left edge; the Arm for Recording tooltip covers + Track",
+      "List any finding too big for this issue as a follow-up in the PR",
+  ],
+  ac=["Keyframe lane names show in Title Case and never overlap their lane's line",
+      "The PR lists each finding with a before and after screenshot"],
+  refs=[f"[DESIGN.md]({DESIGN})"])

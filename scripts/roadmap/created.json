@@ -496,6 +496,46 @@
     "text-tiles": {
       "number": 236,
       "id": 6001997176
+    },
+    "prefs-redesign": {
+      "number": 257,
+      "id": 6008128561
+    },
+    "theme-picker": {
+      "number": 258,
+      "id": 6008128897
+    },
+    "text-inspector-polish": {
+      "number": 259,
+      "id": 6008129292
+    },
+    "transport-align": {
+      "number": 260,
+      "id": 6008129735
+    },
+    "export-polish": {
+      "number": 261,
+      "id": 6008130197
+    },
+    "drop-new-track-above": {
+      "number": 262,
+      "id": 6008130580
+    },
+    "graphic-eq": {
+      "number": 263,
+      "id": 6008131036
+    },
+    "locked-drag": {
+      "number": 264,
+      "id": 6008131436
+    },
+    "record-transport": {
+      "number": 265,
+      "id": 6008131771
+    },
+    "polish-pass": {
+      "number": 266,
+      "id": 6008132174
     }
   },
   "links": [
@@ -1278,6 +1318,30 @@
     [
       "audio-fx",
       "inspector-tabs"
+    ],
+    [
+      "theme-picker",
+      "prefs-redesign"
+    ],
+    [
+      "record-transport",
+      "transport-align"
+    ],
+    [
+      "polish-pass",
+      "prefs-redesign"
+    ],
+    [
+      "polish-pass",
+      "text-inspector-polish"
+    ],
+    [
+      "polish-pass",
+      "export-polish"
+    ],
+    [
+      "polish-pass",
+      "transport-align"
     ]
   ]
 }
