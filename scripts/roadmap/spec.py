@@ -1602,3 +1602,173 @@ I("hold-m-range", "Hold M to mark a range while playing", None, ["timeline"], "S
   scope=["While playing, holding M marks a range from press to release; a tap (under about 0.3 s) still drops a point marker, and playback never stops"],
   ac=["Press at 1 s and release at 4 s during playback makes one 3 s ranged marker (test with simulated key events)",
       "A tap still makes a point marker, and one undo removes either"])
+
+# ───────────────────────── Later · tutorials, subtitles, grading (owner request 2026-10-24) ─────────────────────────
+
+I("tutorial-engine", "Interactive tutorials: lesson engine and Tutorials menu", None, ["ui"], "L", labels=["later"],
+  summary="Hands-on lessons that run inside the real editor on sample footage, one checked step at a time.",
+  scope=[
+      "Lessons are Rust data: steps with a target UI element, a short instruction, a completion check on project or UI state, and an optional Show Me that does the step through the normal undoable edits",
+      "Panels and controls register named anchors each frame; the overlay dims the window around the current anchor and a step card sits beside it with Back, Show Me, Skip Step and Exit; input is not blocked",
+      "A step whose anchor is hidden (another tab active, panel too narrow) switches to it first",
+      "A lesson opens its own sandbox project built from the sample media; the user's open project and undo history are untouched, and nothing is saved outside the app's data folder unless they choose Keep Project",
+      "Help > Tutorials lists lessons with their length and a done mark; progress is saved in config",
+      "Lesson text lives in the i18n catalogs",
+  ],
+  ac=["A test lesson runs end to end in egui_kittest by pressing Show Me on every step, and each step's check passes after it",
+      "A test fails when any lesson step's anchor is never drawn, so a renamed or removed control breaks the build instead of the lesson",
+      "Exiting a lesson halfway leaves the user's project and undo history exactly as before"])
+
+I("tutorial-samples", "Sample media for tutorials", None, ["media", "docs"], "S", labels=["later"],
+  summary="A few short, freely licensed clips installed with the app so every lesson works offline.",
+  scope=[
+      "4 to 6 clips, 720p H.264/AAC, 10 s or less each, 15 MB or less in total, installed with the app: a shot with a clear subject to mask, a green-screen shot, a slightly underexposed warm shot for colour, a screen recording with dead air, a music bed and a voice line",
+      "Freely licensed footage only (owner decision 2026-10-24): every clip's licence is checked and recorded, CC0 or CC-BY credited in About (for example Blender open-movie footage); no game footage",
+      "Lessons find the clips through the install's data path",
+  ],
+  ac=["Every bundled clip probes and decodes in the test suite, and every clip a lesson names exists",
+      "About credits every CC-BY clip"])
+
+I("lesson-basics", "Tour: your first edit", None, ["ui"], "M", ["tutorial-engine", "tutorial-samples", "welcome"], labels=["later"],
+  summary="The first-launch tour, done hands-on with the sample footage.",
+  scope=[
+      "The Welcome screen offers Take the Tour on first launch, once; Help > Tutorials runs it again",
+      "Steps: import the sample, drag it onto the timeline, play and scrub (Space, J/K/L), set In and Out, split and delete a section, add a title, export",
+  ],
+  ac=["The Show Me run passes in egui_kittest", "Declining the offer never shows it again"])
+
+I("lesson-masks", "Lesson: masks", None, ["ui"], "M", ["tutorial-engine", "tutorial-samples", "masks"], labels=["later"],
+  summary="Learn masks by spotlighting a subject: darken everything but them, then make the mask follow them.",
+  scope=[
+      "Steps: select the clip, duplicate it to the track above, darken the lower copy with Color Adjustments, add an ellipse mask to the top copy, drag it over a ghost outline drawn on the preview, feather it, try Invert and Subtract to see the difference",
+      "Then animate it: add a key, move the playhead, move the mask to follow the subject, play it back",
+      "Checks read the project: mask count and shape, feather past a threshold, overlap with the target outline, at least two path keys",
+  ],
+  ac=["The Show Me run passes in egui_kittest", "Dragging the mask over the outline completes the step at 60% overlap or more (unit test)"])
+
+I("lesson-keyframes", "Lesson: keyframes and easing", None, ["ui"], "M", ["tutorial-engine", "easing-ui", "graph-editor"], labels=["later"],
+  summary="Animate a title in and learn keys, easing and the graph editor.",
+  scope=["Steps: key a title's position and opacity, move between keys, change the easing, shape the curve in the graph editor, play it back"],
+  ac=["The Show Me run passes in egui_kittest"])
+
+I("lesson-colour", "Lesson: colour and scopes", None, ["ui"], "M", ["tutorial-engine", "tutorial-samples", "color", "lut", "scopes"], labels=["later"],
+  summary="Fix a dark, too-warm shot by reading the scopes, then apply a look.",
+  scope=[
+      "Waveform: raise Exposure until the brightest parts near 100% without flattening against it; see clipping when you go too far",
+      "Vectorscope: pull Temperature and Tint until something that should be white or grey sits in the centre",
+      "Histogram: see the R, G and B lines line up once the cast is gone",
+      "Apply a LUT and lower its intensity; compare before and after",
+  ],
+  ac=["The Show Me run passes in egui_kittest", "Each scope step's check reads the scope analysis, not the slider value"])
+
+I("lesson-green-screen", "Lesson: green screen", None, ["ui"], "S", ["tutorial-engine", "tutorial-samples", "chroma-key", "masks"], labels=["later"],
+  summary="Key the green-screen sample over a background.",
+  scope=["Steps: put a background under the green-screen clip, add Chroma Key, tune tolerance, softness and spill, mask off the edges the key misses"],
+  ac=["The Show Me run passes in egui_kittest"])
+
+I("lesson-screen-recording", "Lesson: screen recordings", None, ["ui"], "S", ["tutorial-engine", "tutorial-samples", "zoom-region", "silence-detect"], labels=["later"],
+  summary="Tidy a screen recording: cut dead air, zoom into the important part, add a callout.",
+  scope=["Steps: Detect Silence and cut, zoom to a region, add a title as a callout"],
+  ac=["The Show Me run passes in egui_kittest"])
+
+I("lesson-audio", "Lesson: audio", None, ["ui"], "M", ["tutorial-engine", "tutorial-samples", "mixer", "audio-keys", "voiceover", "audio-fx"], labels=["later"],
+  summary="Balance a voice over music, duck the music and record a voiceover.",
+  scope=["Steps: set levels in the mixer, duck the music under the voice with volume keys, EQ the voice, record a voiceover (skippable when there is no microphone)"],
+  ac=["The Show Me run passes in egui_kittest, skipping the recording step"])
+
+I("transcribe", "Speech-to-text engine", None, ["media"], "L", ["srt", "silence-detect"], labels=["later"],
+  summary="Local, offline transcription with word timings, the base for auto subtitles.",
+  scope=[
+      "whisper.cpp through `whisper-rs` (MIT), approved by the owner on 2026-10-24 as an addition to PLAN.md's stack",
+      "A clip's or range's audio is resampled to 16 kHz mono with FFmpeg; silence detection skips quiet stretches",
+      "Runs as a background job with progress and Cancel, and returns words with timestamps; kept out of jvid-core",
+      "Models download on first use into the data folder (base, small, large-v3-turbo quantised), each checked by SHA-256; none is bundled",
+  ],
+  ac=["A short speech fixture transcribes to the expected words with the smallest model (test runs with --ignored)",
+      "Cancel stops within a second, and a corrupt model download is rejected"])
+
+I("auto-subtitles", "Generate Subtitles", None, ["ui", "timeline"], "M", ["transcribe", "srt"], labels=["later"],
+  summary="Turn speech into editable subtitles in one click.",
+  scope=[
+      "Generate Subtitles on the selected clips or the In/Out range: language (auto or chosen), Fast or Accurate, and Translate to English",
+      "Words become caption lines: at most 2 lines of about 42 characters and about 7 s, breaking at punctuation and pauses",
+      "Captions land on a new subtitle track as editable text clips, which SRT burn-in and sidecar export already handle",
+  ],
+  ac=["Line-splitting unit tests over a fake transcript",
+      "A fake transcriber drives the whole flow in egui_kittest, and one undo removes the generated track"])
+
+I("text-edit", "Edit by text", None, ["ui", "timeline"], "L", ["transcribe"], labels=["later"],
+  summary="Cut video by editing its transcript: delete words and the matching video goes with them.",
+  scope=[
+      "A Transcript panel shows the words of the selected clips or the whole sequence, transcribed with the speech-to-text engine and cached per asset",
+      "Clicking a word seeks to it; the word under the playhead is highlighted during playback; Find searches the transcript",
+      "Selecting words and pressing Delete ripple-deletes those time ranges from the timeline across linked tracks, as one undo step",
+      "The transcript follows edits made on the timeline",
+  ],
+  ac=["Deleting three words from a fake transcript removes exactly their ranges from video and audio (test)",
+      "Undo restores the clip and the transcript"])
+
+I("filler-removal", "Remove filler words and long pauses", None, ["ui", "timeline"], "M", ["text-edit", "silence-detect"], labels=["later"],
+  summary="One pass that finds um, uh and dead air and cuts them out.",
+  scope=[
+      "Finds filler words (um, uh, er, and a per-language list) in the transcript and pauses longer than a set length",
+      "Whisper tends to leave fillers out, so transcription for this pass prompts it to keep them",
+      "A list previews every hit with its context; Remove All or pick, then ripple delete as one undo step",
+  ],
+  ac=["A fake transcript with four fillers and one long pause removes all five ranges (test)",
+      "Unticked hits stay in the edit"])
+
+I("voice-cleanup", "Voice cleanup: noise reduction and a voice preset", None, ["audio"], "M", ["audio-fx"], labels=["later"],
+  summary="Clean up a mic recording in one click.",
+  scope=[
+      "Noise reduction effect with `nnnoiseless` (BSD-3, pure Rust), approved by the owner on 2026-10-24 as an addition to PLAN.md's stack",
+      "Clean Up Voice: noise reduction, high-pass, EQ and compressor as one preset",
+  ],
+  ac=["The noise floor of a noisy fixture drops by 10 dB or more", "Applying the preset is one undo step"])
+
+I("find-highlights", "Find Highlights in long recordings", None, ["media", "timeline"], "M", ["markers", "batch-highlights"], labels=["later"],
+  summary="Scan a long recording for loud moments and scene changes and mark them.",
+  scope=[
+      "Scan a clip's audio for loud peaks and its video for scene changes; each result becomes a ranged marker",
+      "Sensitivity and padding settings, with a preview before markers are added",
+  ],
+  ac=["A synthetic clip with known loud bursts gets markers at the right times, within one frame"])
+
+I("color-wheels", "Colour wheels: lift, gamma, gain and offset", None, ["render", "ui"], "M", ["color", "scopes"], labels=["later"],
+  summary="Primary colour wheels, copy and paste of a grade, and a skin-tone line on the vectorscope.",
+  scope=[
+      "Lift, Gamma, Gain and Offset wheels with master sliders, in linear light like Color Adjustments, keyframeable",
+      "Copy Grade and Paste Grade across selected clips",
+      "The vectorscope gets a skin-tone line",
+  ],
+  ac=["Default wheels leave pixels unchanged (render test); lift moves the shadows and leaves white alone",
+      "Paste Grade onto several clips is one undo step"])
+
+I("color-curves", "Curves: RGB, luma and hue curves", None, ["render", "ui"], "M", ["color"], labels=["later"],
+  summary="Curve grading: master, R, G and B curves plus Hue vs Sat, Hue vs Hue and Luma vs Sat.",
+  scope=["Curves edit with points on a small graph and bake to a lookup texture on the GPU; keyframeable like other effect parameters"],
+  ac=["An identity curve is pixel-identical (render test)", "An S-curve darkens shadows and brightens highlights (render test)"])
+
+I("color-secondary", "Secondary grading and grade compare", None, ["render", "ui"], "M", ["color", "masks"], labels=["later"],
+  summary="Grade only one colour range, and compare before and after.",
+  scope=[
+      "Qualifier: pick a colour range by hue, saturation and luminance with softness, limit a grade to it, and combine it with masks",
+      "Program monitor: a before/after split and a Bypass Grade toggle",
+  ],
+  ac=["Qualifying a red patch and desaturating leaves a blue patch unchanged (render test)"])
+
+I("privacy-blur", "Blur and Pixelate effects", None, ["render"], "S", ["masks", "wgsl"], labels=["later"],
+  summary="Hide emails, keys and faces in recordings.",
+  scope=["Bundled Gaussian Blur and Pixelate effects, animatable; with a mask they hide one region"],
+  ac=["Render tests for both; pixels outside the mask are unchanged"])
+
+I("reframe", "Reframe for Shorts", None, ["core", "ui"], "M", ["transform", "keyframes", "gizmo", "overlays", "project-settings"], labels=["later"],
+  summary="Turn a 16:9 edit into a vertical Short, panning the crop to follow the action.",
+  scope=[
+      "Reframe: Save As 9:16 (also 1:1 and 4:5) makes a copy of the project at that frame size; every video clip is scaled to fill the new frame, centred",
+      "On the Program monitor a reframe box shows the new frame over the original wide shot; dragging it keys the clip's position, so the shot pans with the action",
+      "Text and titles keep their size and move inside the new frame's safe area",
+  ],
+  ac=["A 16:9 clip in the 9:16 copy fills the frame with no bars (render test)",
+      "The original project is unchanged",
+      "Dragging the box at two times makes two position keys, and one undo removes each"])

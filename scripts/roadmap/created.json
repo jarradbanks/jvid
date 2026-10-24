@@ -656,6 +656,86 @@
     "hold-m-range": {
       "number": 331,
       "id": 6014575310
+    },
+    "tutorial-engine": {
+      "number": 333,
+      "id": 6014712352
+    },
+    "tutorial-samples": {
+      "number": 334,
+      "id": 6014712706
+    },
+    "lesson-basics": {
+      "number": 335,
+      "id": 6014713095
+    },
+    "lesson-masks": {
+      "number": 336,
+      "id": 6014713478
+    },
+    "lesson-keyframes": {
+      "number": 337,
+      "id": 6014713867
+    },
+    "lesson-colour": {
+      "number": 338,
+      "id": 6014714226
+    },
+    "lesson-green-screen": {
+      "number": 339,
+      "id": 6014714646
+    },
+    "lesson-screen-recording": {
+      "number": 340,
+      "id": 6014715086
+    },
+    "lesson-audio": {
+      "number": 341,
+      "id": 6014715574
+    },
+    "transcribe": {
+      "number": 342,
+      "id": 6014716238
+    },
+    "auto-subtitles": {
+      "number": 343,
+      "id": 6014716660
+    },
+    "text-edit": {
+      "number": 344,
+      "id": 6014717275
+    },
+    "filler-removal": {
+      "number": 345,
+      "id": 6014717859
+    },
+    "voice-cleanup": {
+      "number": 346,
+      "id": 6014718507
+    },
+    "find-highlights": {
+      "number": 347,
+      "id": 6014718993
+    },
+    "color-wheels": {
+      "number": 348,
+      "id": 6014719556
+    },
+    "color-curves": {
+      "number": 349,
+      "id": 6014720142
+    },
+    "color-secondary": {
+      "number": 350,
+      "id": 6014720892
+    },
+    "privacy-blur": {
+      "number": 351,
+      "id": 6014721615
+    },
+    "reframe": {
+      "number": 352,
+      "id": 6014722261
     }
   },
   "links": [
@@ -1550,6 +1630,206 @@
     [
       "hold-m-range",
       "markers"
+    ],
+    [
+      "lesson-basics",
+      "tutorial-engine"
+    ],
+    [
+      "lesson-basics",
+      "tutorial-samples"
+    ],
+    [
+      "lesson-basics",
+      "welcome"
+    ],
+    [
+      "lesson-masks",
+      "tutorial-engine"
+    ],
+    [
+      "lesson-masks",
+      "tutorial-samples"
+    ],
+    [
+      "lesson-masks",
+      "masks"
+    ],
+    [
+      "lesson-keyframes",
+      "tutorial-engine"
+    ],
+    [
+      "lesson-keyframes",
+      "easing-ui"
+    ],
+    [
+      "lesson-keyframes",
+      "graph-editor"
+    ],
+    [
+      "lesson-colour",
+      "tutorial-engine"
+    ],
+    [
+      "lesson-colour",
+      "tutorial-samples"
+    ],
+    [
+      "lesson-colour",
+      "color"
+    ],
+    [
+      "lesson-colour",
+      "lut"
+    ],
+    [
+      "lesson-colour",
+      "scopes"
+    ],
+    [
+      "lesson-green-screen",
+      "tutorial-engine"
+    ],
+    [
+      "lesson-green-screen",
+      "tutorial-samples"
+    ],
+    [
+      "lesson-green-screen",
+      "chroma-key"
+    ],
+    [
+      "lesson-green-screen",
+      "masks"
+    ],
+    [
+      "lesson-screen-recording",
+      "tutorial-engine"
+    ],
+    [
+      "lesson-screen-recording",
+      "tutorial-samples"
+    ],
+    [
+      "lesson-screen-recording",
+      "zoom-region"
+    ],
+    [
+      "lesson-screen-recording",
+      "silence-detect"
+    ],
+    [
+      "lesson-audio",
+      "tutorial-engine"
+    ],
+    [
+      "lesson-audio",
+      "tutorial-samples"
+    ],
+    [
+      "lesson-audio",
+      "mixer"
+    ],
+    [
+      "lesson-audio",
+      "audio-keys"
+    ],
+    [
+      "lesson-audio",
+      "voiceover"
+    ],
+    [
+      "lesson-audio",
+      "audio-fx"
+    ],
+    [
+      "transcribe",
+      "srt"
+    ],
+    [
+      "transcribe",
+      "silence-detect"
+    ],
+    [
+      "auto-subtitles",
+      "transcribe"
+    ],
+    [
+      "auto-subtitles",
+      "srt"
+    ],
+    [
+      "text-edit",
+      "transcribe"
+    ],
+    [
+      "filler-removal",
+      "text-edit"
+    ],
+    [
+      "filler-removal",
+      "silence-detect"
+    ],
+    [
+      "voice-cleanup",
+      "audio-fx"
+    ],
+    [
+      "find-highlights",
+      "markers"
+    ],
+    [
+      "find-highlights",
+      "batch-highlights"
+    ],
+    [
+      "color-wheels",
+      "color"
+    ],
+    [
+      "color-wheels",
+      "scopes"
+    ],
+    [
+      "color-curves",
+      "color"
+    ],
+    [
+      "color-secondary",
+      "color"
+    ],
+    [
+      "color-secondary",
+      "masks"
+    ],
+    [
+      "privacy-blur",
+      "masks"
+    ],
+    [
+      "privacy-blur",
+      "wgsl"
+    ],
+    [
+      "reframe",
+      "transform"
+    ],
+    [
+      "reframe",
+      "keyframes"
+    ],
+    [
+      "reframe",
+      "gizmo"
+    ],
+    [
+      "reframe",
+      "overlays"
+    ],
+    [
+      "reframe",
+      "project-settings"
     ]
   ]
 }

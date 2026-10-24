@@ -487,6 +487,26 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#327](https://github.com/jarradbanks/jvid/issues/327) **Inspector tabs fill the header width** — Owner, 2026-10-24: the Inspector's tabs stop at 160px each and leave the right of the header empty; they should share the full width evenly, as the Media panel's tabs do (Panel::wide, crates/jvid-app/src/media_bin.rs).
 - [#330](https://github.com/jarradbanks/jvid/issues/330) **Highlights from point markers** — Tap M when something happens, then export a clip around it: point markers count as highlights.
 - [#331](https://github.com/jarradbanks/jvid/issues/331) **Hold M to mark a range while playing** — The press-and-release ranged marker from the Markers issue (#40), which shipped without it.
+- [#333](https://github.com/jarradbanks/jvid/issues/333) **Interactive tutorials: lesson engine and Tutorials menu** — Hands-on lessons that run inside the real editor on sample footage, one checked step at a time.
+- [#334](https://github.com/jarradbanks/jvid/issues/334) **Sample media for tutorials** — A few short, freely licensed clips installed with the app so every lesson works offline.
+- [#335](https://github.com/jarradbanks/jvid/issues/335) **Tour: your first edit** — The first-launch tour, done hands-on with the sample footage.
+- [#336](https://github.com/jarradbanks/jvid/issues/336) **Lesson: masks** — Learn masks by spotlighting a subject: darken everything but them, then make the mask follow them.
+- [#337](https://github.com/jarradbanks/jvid/issues/337) **Lesson: keyframes and easing** — Animate a title in and learn keys, easing and the graph editor.
+- [#338](https://github.com/jarradbanks/jvid/issues/338) **Lesson: colour and scopes** — Fix a dark, too-warm shot by reading the scopes, then apply a look.
+- [#339](https://github.com/jarradbanks/jvid/issues/339) **Lesson: green screen** — Key the green-screen sample over a background.
+- [#340](https://github.com/jarradbanks/jvid/issues/340) **Lesson: screen recordings** — Tidy a screen recording: cut dead air, zoom into the important part, add a callout.
+- [#341](https://github.com/jarradbanks/jvid/issues/341) **Lesson: audio** — Balance a voice over music, duck the music and record a voiceover.
+- [#342](https://github.com/jarradbanks/jvid/issues/342) **Speech-to-text engine** — Local, offline transcription with word timings, the base for auto subtitles.
+- [#343](https://github.com/jarradbanks/jvid/issues/343) **Generate Subtitles** — Turn speech into editable subtitles in one click.
+- [#344](https://github.com/jarradbanks/jvid/issues/344) **Edit by text** — Cut video by editing its transcript: delete words and the matching video goes with them.
+- [#345](https://github.com/jarradbanks/jvid/issues/345) **Remove filler words and long pauses** — One pass that finds um, uh and dead air and cuts them out.
+- [#346](https://github.com/jarradbanks/jvid/issues/346) **Voice cleanup: noise reduction and a voice preset** — Clean up a mic recording in one click.
+- [#347](https://github.com/jarradbanks/jvid/issues/347) **Find Highlights in long recordings** — Scan a long recording for loud moments and scene changes and mark them.
+- [#348](https://github.com/jarradbanks/jvid/issues/348) **Colour wheels: lift, gamma, gain and offset** — Primary colour wheels, copy and paste of a grade, and a skin-tone line on the vectorscope.
+- [#349](https://github.com/jarradbanks/jvid/issues/349) **Curves: RGB, luma and hue curves** — Curve grading: master, R, G and B curves plus Hue vs Sat, Hue vs Hue and Luma vs Sat.
+- [#350](https://github.com/jarradbanks/jvid/issues/350) **Secondary grading and grade compare** — Grade only one colour range, and compare before and after.
+- [#351](https://github.com/jarradbanks/jvid/issues/351) **Blur and Pixelate effects** — Hide emails, keys and faces in recordings.
+- [#352](https://github.com/jarradbanks/jvid/issues/352) **Reframe for Shorts** — Turn a 16:9 edit into a vertical Short, panning the crop to follow the action.
 
 ---
 
