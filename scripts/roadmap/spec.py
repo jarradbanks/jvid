@@ -1382,12 +1382,13 @@ I("text-inspector-polish", "Text tab layout cleanup", None, ["ui"], "M", labels=
       "Sections like the Video tab: Text (Font, Size, Weight, Align), Fill (Color), Outline (Width, Color), Shadow (Offset X/Y, Color), Box (Padding, Color), using the shared Inspector rows (one diamond, reset slot, sliders for ranged values)",
       "One label column width and one field rhythm across the tab; Align becomes a labelled icon segmented control",
       "Colour swatches share one component: a rounded swatch with a border, with a checkerboard only behind transparent colours",
-      "Use the impeccable skill; follow DESIGN.md and the v3 Text mockup",
+      "Build option A of `docs/prototypes/v4/text-tab.html` (owner's pick: collapsible sections like the Video tab), including its States and Build Notes. No helper text under fields",
+      "Use the impeccable skill; follow DESIGN.md",
   ],
   ac=["Every row lines up on the same label column and field start (kittest snapshot)",
       "Opaque swatches show solid colour; a 50% black box colour shows the checkerboard through it",
       "Editing every Text field still updates the Program view live and undoes as one step"],
-  refs=[MOCK3, f"[DESIGN.md]({DESIGN})"])
+  refs=[f"[Text tab mockup, option A]({PROTO}/v4/text-tab.html)", f"[DESIGN.md]({DESIGN})"])
 
 I("transport-align", "Transport bar: vertical centring check", None, ["ui"], "S", labels=["later"],
   summary="The Program transport bar may sit off-centre vertically: the timecodes, transport buttons, grid toggle, Preview checkbox and Full/Fit dropdowns may not share one centre line.",
