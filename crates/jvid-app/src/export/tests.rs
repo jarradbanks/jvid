@@ -455,7 +455,13 @@ fn in_to_out_exports_the_marked_range() {
     })
     .unwrap();
     let seq = h.project().sequence();
-    let range = dialog::span(dialog::Range::InOut, seq, &Default::default()).unwrap();
+    let range = dialog::span(
+        dialog::Range::InOut,
+        seq,
+        &Default::default(),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(range, (secs(1), half(5)));
     let path = out("in-out.mp4");
     let req = Request {
@@ -519,6 +525,47 @@ fn ten_highlights_export_as_ten_trimmed_files() {
         let (first, last) = (v.frame_at(Time(0)).unwrap(), v.frame_at(secs(10)).unwrap());
         let start = 15 + 27 * i as u32;
         assert_eq!((index(&first), index(&last)), (start, start + 14), "{name}");
+        std::fs::remove_file(&path).unwrap();
+    }
+}
+
+/// Point markers at 4 s and 7 s with Before 2 s and After 1 s: two 3 s files.
+#[test]
+fn two_point_markers_export_as_two_padded_files() {
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let mut h = History::new(project(&dir));
+    for (t, name) in [(4, "a"), (7, "b")] {
+        let (time, duration, name) = (secs(t), Time(0), name.into());
+        h.apply(Command::AddMarker {
+            time,
+            duration,
+            name,
+        })
+        .unwrap();
+    }
+    let seq = h.project().sequence();
+    let chosen = dialog::chosen(seq, &Default::default());
+    assert_eq!(chosen.len(), 2);
+    let frame = Rate::new(30, 1).time_floor(1);
+    let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
+    for (i, m) in chosen.iter().enumerate() {
+        let path = out(&format!("point-{i}.mp4"));
+        let req = Request {
+            path: path.clone(),
+            range: dialog::highlight(m, (secs(2), secs(1)), seq.duration()),
+            preset: preset("YouTube 1080p"),
+            loudness: None,
+            lossless: None,
+            sidecar: false,
+        };
+        let info = run_now(h.project(), &req, false).unwrap();
+        assert!((info.duration - secs(3)).0.abs() <= frame.0, "{i}");
+        let mut v = VideoDecoder::open(&path).unwrap();
+        let (first, last) = (v.frame_at(Time(0)).unwrap(), v.frame_at(secs(10)).unwrap());
+        let start = 60 + 90 * i as u32;
+        assert_eq!((index(&first), index(&last)), (start, start + 89), "{i}");
         std::fs::remove_file(&path).unwrap();
     }
 }

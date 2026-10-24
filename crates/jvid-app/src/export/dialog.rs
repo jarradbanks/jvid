@@ -23,7 +23,7 @@ pub enum Range {
     Entire,
     InOut,
     Selected,
-    /// Each chosen ranged marker as its own file.
+    /// Each chosen marker as its own file; a point marker spans Before to After around it.
     Highlights,
 }
 
@@ -49,8 +49,11 @@ pub struct ExportDialog {
     range: Option<Range>,
     /// Project name for the highlight template.
     name: String,
-    /// Ranged markers left out of a highlights export.
+    /// Markers left out of a highlights export.
     skipped: HashSet<MarkerId>,
+    /// Seconds a point marker's highlight starts before and ends after it.
+    before: f64,
+    after: f64,
     /// Highlight file name: `{project}`, `{marker}` and `{index}` are filled in.
     template: String,
 }
@@ -68,6 +71,8 @@ impl Default for ExportDialog {
             range: None,
             name: String::new(),
             skipped: HashSet::new(),
+            before: 15.0,
+            after: 5.0,
             template: TEMPLATE.into(),
         }
     }
@@ -113,6 +118,7 @@ impl ExportDialog {
         let path = &mut self.path;
         let seq = project.sequence();
         let s = project.settings();
+        let pad = (seconds(self.before), seconds(self.after));
         let mut request = None;
         // 16px clear of the window above and below.
         let max_body = ui.ctx().content_rect().height() - space::S32 - HEAD - FOOT;
@@ -215,7 +221,7 @@ impl ExportDialog {
                                     *range = RANGES[i];
                                 }
                             });
-                            let (a, b) = span(*range, seq, selected).unwrap_or_default();
+                            let (a, b) = span(*range, seq, selected, pad).unwrap_or_default();
                             let rate = s.frame_rate;
                             let tc =
                                 |t: Time| format_timecode(rate.index_floor(t).max(0) as u64, rate);
@@ -247,8 +253,9 @@ impl ExportDialog {
                                                         self.skipped.insert(m.id);
                                                     }
                                                 }
+                                                let (a, b) = highlight(m, pad, seq.duration());
                                                 let secs =
-                                                    m.duration.0 as f64 / FLICKS_PER_SECOND as f64;
+                                                    (b - a).0 as f64 / FLICKS_PER_SECOND as f64;
                                                 ui.with_layout(
                                                     Layout::right_to_left(Align::Center),
                                                     |ui| {
@@ -262,6 +269,19 @@ impl ExportDialog {
                                         }
                                     });
                                 });
+                                for (label, v) in [
+                                    (tr!("export.before"), &mut self.before),
+                                    (tr!("export.after"), &mut self.after),
+                                ] {
+                                    row(ui, label, |ui| {
+                                        let f = DragField::new(v)
+                                            .range(0.0..=600.0)
+                                            .speed(0.1)
+                                            .decimals(1)
+                                            .suffix(tr!("silence.seconds_suffix"));
+                                        ui.add(f.width(ui.available_width()));
+                                    });
+                                }
                                 row(ui, tr!("export.file_names"), |ui| {
                                     let w = ui.available_width();
                                     ui.add(TextInput::new(&mut self.template).width(w));
@@ -355,7 +375,7 @@ impl ExportDialog {
                         let preset = &self.presets[self.preset];
                         let sizable =
                             matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
-                        let span = span(*range, seq, selected).filter(|(a, b)| b > a);
+                        let span = span(*range, seq, selected, pad).filter(|(a, b)| b > a);
                         let size = match (span, self.target.filter(|_| sizable)) {
                             (None, _) => verbatim("–").to_owned(),
                             (Some(_), Some(mb)) => tr!("export.under_mb", mb = mb),
@@ -411,7 +431,7 @@ impl ExportDialog {
                                                 file_name(&self.template, &self.name, m, i + 1);
                                             req(
                                                 dir.join(format!("{name}.{ext}")),
-                                                (m.time, m.time + m.duration),
+                                                highlight(m, pad, seq.duration()),
                                             )
                                         })
                                         .collect()
@@ -679,18 +699,27 @@ pub fn audio_bitrate(a: AudioCodec) -> f64 {
     }
 }
 
-/// Ranged markers in timeline order.
+/// Markers, ranged and point, in timeline order.
 pub fn highlights(seq: &Sequence) -> impl Iterator<Item = &Marker> {
-    let mut all: Vec<_> = seq
-        .markers()
-        .iter()
-        .filter(|m| m.duration > Time(0))
-        .collect();
+    let mut all: Vec<_> = seq.markers().iter().collect();
     all.sort_by_key(|m| m.time);
     all.into_iter()
 }
 
-/// The highlights to export: every ranged marker not in `skipped`.
+/// The span `m` exports: its own range, or `before` to `after` around a point marker, kept
+/// within 0 to `end`.
+pub fn highlight(m: &Marker, (before, after): (Time, Time), end: Time) -> (Time, Time) {
+    if m.duration > Time(0) {
+        return (m.time, m.time + m.duration);
+    }
+    ((m.time - before).max(Time(0)), (m.time + after).min(end))
+}
+
+fn seconds(s: f64) -> Time {
+    Time((s * FLICKS_PER_SECOND as f64).round() as i64)
+}
+
+/// The highlights to export: every marker not in `skipped`.
 pub fn chosen<'a>(seq: &'a Sequence, skipped: &HashSet<MarkerId>) -> Vec<&'a Marker> {
     highlights(seq)
         .filter(|m| !skipped.contains(&m.id))
@@ -716,8 +745,14 @@ pub fn file_name(template: &str, project: &str, marker: &Marker, index: usize) -
         .to_owned()
 }
 
-/// The half-open timeline span `range` covers, or `None` when it covers nothing.
-pub fn span(range: Range, seq: &Sequence, selected: &HashSet<ClipId>) -> Option<(Time, Time)> {
+/// The half-open timeline span `range` covers, or `None` when it covers nothing; `pad` is
+/// Before and After for point-marker highlights.
+pub fn span(
+    range: Range,
+    seq: &Sequence,
+    selected: &HashSet<ClipId>,
+    pad: (Time, Time),
+) -> Option<(Time, Time)> {
     match range {
         Range::Entire => Some((Time(0), seq.duration())),
         Range::InOut => Some((
@@ -733,10 +768,12 @@ pub fn span(range: Range, seq: &Sequence, selected: &HashSet<ClipId>) -> Option<
             ))
         }
         Range::Highlights => {
-            let all: Vec<_> = highlights(seq).collect();
+            let all: Vec<_> = highlights(seq)
+                .map(|m| highlight(m, pad, seq.duration()))
+                .collect();
             Some((
-                all.first()?.time,
-                all.iter().map(|m| m.time + m.duration).max()?,
+                all.iter().map(|r| r.0).min()?,
+                all.iter().map(|r| r.1).max()?,
             ))
         }
     }
@@ -864,16 +901,27 @@ mod tests {
         let (h, second) = marked();
         let seq = h.project().sequence();
         let none = HashSet::new();
-        assert_eq!(span(Range::Entire, seq, &none), Some((secs(0), secs(10))));
+        let pad = (secs(15), secs(5));
+        assert_eq!(
+            span(Range::Entire, seq, &none, pad),
+            Some((secs(0), secs(10)))
+        );
         // A missing Out runs to the end of the timeline.
-        assert_eq!(span(Range::InOut, seq, &none), Some((secs(2), secs(10))));
-        assert_eq!(span(Range::Selected, seq, &none), None);
+        assert_eq!(
+            span(Range::InOut, seq, &none, pad),
+            Some((secs(2), secs(10)))
+        );
+        assert_eq!(span(Range::Selected, seq, &none, pad), None);
+        assert_eq!(span(Range::Highlights, seq, &none, pad), None);
         let sel = HashSet::from([second]);
-        assert_eq!(span(Range::Selected, seq, &sel), Some((secs(6), secs(10))));
+        assert_eq!(
+            span(Range::Selected, seq, &sel, pad),
+            Some((secs(6), secs(10)))
+        );
     }
 
     #[test]
-    fn highlights_skip_points_and_unchosen_and_fill_names() {
+    fn highlights_pad_points_skip_unchosen_and_fill_names() {
         let (mut h, _) = marked();
         for (t, d, name) in [(5, 1, "b"), (1, 0, "point"), (2, 2, "a/b")] {
             let (time, duration) = (secs(t), secs(d));
@@ -887,17 +935,40 @@ mod tests {
         }
         let seq = h.project().sequence();
         let names: Vec<_> = highlights(seq).map(|m| &*m.name).collect();
-        assert_eq!(names, ["a/b", "b"]);
+        assert_eq!(names, ["point", "a/b", "b"]);
+        // The point at 1 s starts at 0, not -1 s; ranged markers keep their own range.
+        let pad = (secs(2), secs(3));
+        let all: Vec<_> = highlights(seq)
+            .map(|m| highlight(m, pad, seq.duration()))
+            .collect();
         assert_eq!(
-            span(Range::Highlights, seq, &HashSet::new()),
-            Some((secs(2), secs(6)))
+            all,
+            [(secs(0), secs(4)), (secs(2), secs(4)), (secs(5), secs(6))]
+        );
+        assert_eq!(
+            span(Range::Highlights, seq, &HashSet::new(), pad),
+            Some((secs(0), secs(6)))
         );
         let skip = HashSet::from([highlights(seq).next().unwrap().id]);
         let left = chosen(seq, &skip);
-        assert_eq!(left.len(), 1);
-        assert_eq!(file_name(TEMPLATE, "Trip", left[0], 3), "Trip-b-03");
-        let first = highlights(seq).next().unwrap();
-        assert_eq!(file_name("{marker}: {index}", "p", first, 1), "a-b- 01");
+        assert_eq!(left.len(), 2);
+        assert_eq!(file_name(TEMPLATE, "Trip", left[1], 3), "Trip-b-03");
+        assert_eq!(file_name("{marker}: {index}", "p", left[0], 1), "a-b- 01");
+        // With the default 15 s Before and 5 s After, a point 3 s in exports 0 to 8 s.
+        let d = ExportDialog::default();
+        let pad = (seconds(d.before), seconds(d.after));
+        let point = highlights(seq).next().unwrap();
+        let three = Marker {
+            time: secs(3),
+            ..point.clone()
+        };
+        assert_eq!(highlight(&three, pad, seq.duration()), (secs(0), secs(8)));
+        // And one near the end stops at the sequence's end.
+        let nine = Marker {
+            time: secs(9),
+            ..point.clone()
+        };
+        assert_eq!(highlight(&nine, pad, seq.duration()), (secs(0), secs(10)));
     }
 
     #[test]
