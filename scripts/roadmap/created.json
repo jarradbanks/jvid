@@ -544,6 +544,58 @@
     "ci-cross-os-green-2": {
       "number": 277,
       "id": 6009424636
+    },
+    "i18n-wave1-foundation": {
+      "number": 279,
+      "id": 6009737614
+    },
+    "i18n-pl": {
+      "number": 280,
+      "id": 6009737877
+    },
+    "i18n-cs": {
+      "number": 281,
+      "id": 6009738137
+    },
+    "i18n-tr": {
+      "number": 282,
+      "id": 6009738421
+    },
+    "i18n-ru": {
+      "number": 283,
+      "id": 6009738703
+    },
+    "i18n-uk": {
+      "number": 284,
+      "id": 6009738974
+    },
+    "i18n-sv": {
+      "number": 285,
+      "id": 6009739230
+    },
+    "i18n-da": {
+      "number": 286,
+      "id": 6009739569
+    },
+    "i18n-nb": {
+      "number": 287,
+      "id": 6009739868
+    },
+    "i18n-ca": {
+      "number": 288,
+      "id": 6009740132
+    },
+    "i18n-ja": {
+      "number": 289,
+      "id": 6009740379
+    },
+    "i18n-zh-hans": {
+      "number": 290,
+      "id": 6009740638
+    },
+    "i18n-ko": {
+      "number": 291,
+      "id": 6009740922
     }
   },
   "links": [
@@ -1350,6 +1402,54 @@
     [
       "polish-pass",
       "transport-align"
+    ],
+    [
+      "i18n-pl",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-cs",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-tr",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-ru",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-uk",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-sv",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-da",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-nb",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-ca",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-ja",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-zh-hans",
+      "i18n-wave1-foundation"
+    ],
+    [
+      "i18n-ko",
+      "i18n-wave1-foundation"
     ]
   ]
 }
