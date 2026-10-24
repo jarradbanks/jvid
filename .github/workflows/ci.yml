@@ -153,7 +153,7 @@ jobs:
       - name: jvid-core boundary
         shell: bash
         run: |
-          if cargo tree -p jvid-core -e normal,build --prefix none | grep -E '^(egui|eframe|epaint|winit|wgpu|ffmpeg[a-z_-]*|rfd|cpal|image|jvid-media|jvid-render|jvid-audio|suite-ui) '; then
+          if cargo tree -p jvid-core -e normal,build --prefix none | grep -E '^(egui|eframe|epaint|winit|wgpu|ffmpeg[a-z_-]*|rfd|cpal|image|jvid-media|jvid-render|jvid-audio|jvid-transcribe|whisper-rs[a-z-]*|ureq|suite-ui) '; then
             echo "::error::jvid-core depends on a UI/media/I/O crate"; exit 1
           fi
 

@@ -52,3 +52,17 @@ allow = ["WTFPL"]
 [[licenses.exceptions]]
 crate = "ffmpeg-sys-next"
 allow = ["WTFPL"]
+
+# Unlicense is a public-domain dedication (no copyleft); the whisper.cpp they compile is MIT.
+[[licenses.exceptions]]
+crate = "whisper-rs"
+allow = ["Unlicense"]
+
+[[licenses.exceptions]]
+crate = "whisper-rs-sys"
+allow = ["Unlicense"]
+
+# Mozilla's CA list as data under a permissive data licence (ureq's TLS roots, model downloads).
+[[licenses.exceptions]]
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
