@@ -10,6 +10,10 @@ on:
   schedule:
     - cron: '0 17 * * *'
   workflow_dispatch:
+  # Dependency changes on main still run (Linux), so PRs restore a cache built from the new lockfile.
+  push:
+    branches: [main]
+    paths: ['Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml']
 
 concurrency:
   # Per event, so an on-demand run never cancels the nightly.
@@ -18,6 +22,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Line tables only: faster builds and links and a smaller cache, while backtraces keep file:line.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   check:
@@ -25,14 +31,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Private repo: macOS bills 10x and Windows 2x, so PRs run Linux only; main and manual runs get all three.
+        # PRs run Linux only; nightly and manual runs get all three.
         os: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       # rust-toolchain.toml pins stable + rustfmt + clippy; rustup installs it on first cargo call.
       - run: rustup show
+      # Only main saves: PR caches are never reused, and they evicted main's under the 10 GB limit.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
       # FFmpeg dev libraries (docs/adr/0001-ffmpeg-binding.md). bindgen's libclang ships on all runners.
       # suite-ui GPU tests render on Mesa lavapipe; required on Linux so they can't pass by skipping.
@@ -110,8 +119,8 @@ jobs:
           name: snapshots-${{ matrix.os }}
           path: crates/*/tests/snapshots/*.png
           if-no-files-found: ignore
-      # Playback throughput (#32) only means anything optimised; Linux only to save CI minutes.
-      - if: runner.os == 'Linux'
+      # Playback throughput (#32) only means anything optimised. Its release build costs PRs 2-5 minutes, so it runs on main only (Linux).
+      - if: runner.os == 'Linux' && github.event_name != 'pull_request'
         shell: bash # pipefail, so the tee doesn't hide a failure
         # The grep fails the gate if the test didn't run (the tests are in the lib, not the bin).
         run: |
@@ -121,7 +130,7 @@ jobs:
           JVID_GPU_TESTS: required
           JVID_TEST_MEDIA_REQUIRED: '1'
       # Perf numbers against docs/perf.md, reported to the job summary; non-blocking (noisy runners, lavapipe).
-      - if: runner.os == 'Linux'
+      - if: runner.os == 'Linux' && github.event_name != 'pull_request'
         name: perf report
         continue-on-error: true
         shell: bash
