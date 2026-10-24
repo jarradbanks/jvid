@@ -124,6 +124,8 @@ shortcuts = "Tastaturgenveje…"
 file = "Filer"
 edit = "Rediger"
 open_recent = "Åbn seneste"
+help = "Hjælp"
+about = "Om jvid…"
 
 [export]
 queue = "Renderkø"
@@ -242,6 +244,10 @@ restore_button = "Gendan"
 discard = "Kassér"
 error = "Fejl"
 ok = "OK"
+
+[about]
+version = "Version {version}"
+samples = "Eksempelmedier"
 
 [settings]
 title = "Indstillinger"

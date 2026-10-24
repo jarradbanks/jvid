@@ -124,6 +124,8 @@ shortcuts = "Hurtigtaster…"
 file = "Fil"
 edit = "Rediger"
 open_recent = "Åpne nylig brukt"
+help = "Hjelp"
+about = "Om jvid…"
 
 [export]
 queue = "Rendringskø"
@@ -242,6 +244,10 @@ restore_button = "Gjenopprett"
 discard = "Forkast"
 error = "Feil"
 ok = "OK"
+
+[about]
+version = "Versjon {version}"
+samples = "Eksempelmedier"
 
 [settings]
 title = "Innstillinger"

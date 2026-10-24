@@ -124,6 +124,8 @@ shortcuts = "Kortkommandon…"
 file = "Arkiv"
 edit = "Redigera"
 open_recent = "Öppna senaste"
+help = "Hjälp"
+about = "Om jvid…"
 
 [export]
 queue = "Renderingskö"
@@ -242,6 +244,10 @@ restore_button = "Återställ"
 discard = "Kasta"
 error = "Fel"
 ok = "OK"
+
+[about]
+version = "Version {version}"
+samples = "Exempelmedia"
 
 [settings]
 title = "Inställningar"

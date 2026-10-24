@@ -126,6 +126,8 @@ shortcuts = "キーボードショートカット…"
 file = "ファイル"
 edit = "編集"
 open_recent = "最近使用したプロジェクト"
+help = "ヘルプ"
+about = "jvid について…"
 
 [export]
 queue = "レンダーキュー"
@@ -244,6 +246,10 @@ restore_button = "復元"
 discard = "破棄"
 error = "エラー"
 ok = "OK"
+
+[about]
+version = "バージョン {version}"
+samples = "サンプルメディア"
 
 [settings]
 title = "環境設定"

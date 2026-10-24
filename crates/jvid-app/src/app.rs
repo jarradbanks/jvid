@@ -147,6 +147,8 @@ enum Prompt {
         auto: PathBuf,
     },
     Error(String),
+    /// Help > About: the version and the sample media credits.
+    About,
 }
 
 /// What runs once unsaved changes are saved or discarded.
@@ -314,7 +316,8 @@ impl App {
             color::ink(),
         );
         let file = self.file_menu(ui, logo.right() + space::S12);
-        self.edit_menu(ui, file + space::S4);
+        let edit = self.edit_menu(ui, file + space::S4);
+        self.help_menu(ui, edit + space::S4);
 
         let name = self.name();
         let text_w = ui
@@ -417,7 +420,8 @@ impl App {
     }
 
     /// The Edit menu, its left edge at `left`: each row runs its keymap action, then Preferences.
-    fn edit_menu(&mut self, ui: &mut Ui, left: f32) {
+    /// Returns its right edge.
+    fn edit_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
         let button = menu_button(ui, tr!("menu.edit"), left);
         let mut picked = None;
         egui::Popup::menu(&button).show(|ui| {
@@ -447,6 +451,17 @@ impl App {
         if let Some(id) = picked {
             self.run_action(id, true);
         }
+        button.rect.right()
+    }
+
+    /// The Help menu, its left edge at `left`.
+    fn help_menu(&mut self, ui: &mut Ui, left: f32) {
+        let button = menu_button(ui, tr!("menu.help"), left);
+        egui::Popup::menu(&button).show(|ui| {
+            if ui.button(tr!("menu.about")).clicked() {
+                self.prompts.push(Prompt::About);
+            }
+        });
     }
 
     fn file_action(&mut self, action: FileAction) {
@@ -1005,6 +1020,17 @@ impl App {
             Prompt::Error(message) => (
                 tr!("prompt.error"),
                 message.clone(),
+                &[(tr!("prompt.ok"), ButtonKind::Primary)],
+                0,
+            ),
+            Prompt::About => (
+                verbatim("jvid"),
+                format!(
+                    "{}\n\n{}\n{}",
+                    tr!("about.version", version = env!("CARGO_PKG_VERSION")),
+                    tr!("about.samples"),
+                    crate::samples::credits().join("\n")
+                ),
                 &[(tr!("prompt.ok"), ButtonKind::Primary)],
                 0,
             ),

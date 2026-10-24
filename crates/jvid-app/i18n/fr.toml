@@ -124,6 +124,8 @@ shortcuts = "Raccourcis clavier…"
 file = "Fichier"
 edit = "Édition"
 open_recent = "Ouvrir un projet récent"
+help = "Aide"
+about = "À propos de jvid…"
 
 [export]
 queue = "File d'attente de rendu"
@@ -244,6 +246,10 @@ restore_button = "Restaurer"
 discard = "Supprimer"
 error = "Erreur"
 ok = "OK"
+
+[about]
+version = "Version {version}"
+samples = "Médias d'exemple"
 
 [settings]
 title = "Préférences"

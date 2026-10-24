@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Rebuilds the tutorial sample clips in crates/jvid-app/assets/samples from their sources
+# (listed with licences in LICENSES.toml there). Downloads about 2.5 GB of EXR frames once.
+# Usage: scripts/gen-samples [cache-dir]   (default: target/sample-sources)
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+out="$root/crates/jvid-app/assets/samples"
+cache="${1:-$root/target/sample-sources}"
+mkdir -p "$cache" "$out"
+
+ff() { ffmpeg -nostdin -hide_banner -loglevel error -y "$@"; }
+get() { [ -s "$2" ] || curl -fsSL -A "jvid-gen-samples" -o "$2" "$1"; }
+x264=(-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -profile:v high -movflags +faststart
+  -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv)
+aac=(-c:a aac -b:a 128k -ar 48000 -movflags +faststart)
+
+# Tears of Steel HD plates: frames 101-220 (5 s at 24 fps) of a shot, linear EXR to sRGB 720p.
+tos=https://media.xiph.org/tearsofsteel/tearsofsteel-footage-exr
+plate() {
+  local shot=$1 dst=$2 vf=$3
+  mkdir -p "$cache/$shot"
+  curl -fsSL "$tos/$shot/linear_hd/" | grep -o 'href="[^"?]*\.exr"' | cut -d'"' -f2 | sed -n 101,220p |
+    while read -r f; do echo "$tos/$shot/linear_hd/$f $cache/$shot/$f"; done |
+    xargs -P 8 -n 2 sh -c '[ -s "$1" ] || curl -fsSL -o "$1" "$0"'
+  local first
+  first=$(find "$cache/$shot" -name '*.exr' | sort | head -1)
+  first=${first##*_}
+  ff -framerate 24 -apply_trc iec61966_2_1 -start_number "${first%.exr}" -i "$cache/$shot/${shot}_%05d.exr" \
+    -frames:v 120 -vf "scale=1280:720:flags=lanczos,$vf" "${x264[@]}" "$out/$dst"
+}
+plate 05_2a subject.mp4 null
+plate 08_3a green-screen.mp4 null
+# Pulled about a stop down and towards orange, for the colour lesson to fix.
+plate 05_3c dark-warm.mp4 "eq=gamma=0.75:brightness=-0.04,colorbalance=rs=0.12:bs=-0.12:rm=0.1:bm=-0.12:rh=0.06:bh=-0.08"
+
+# Gymnopédie No. 1 (Musopen, public domain): 10 s from the first chord, faded out.
+get "https://upload.wikimedia.org/wikipedia/commons/9/90/Erik_Satie_-_gymnopedies_-_la_1_ere._lent_et_douloureux.ogg" "$cache/satie.ogg"
+ff -ss 2.0 -t 10 -i "$cache/satie.ogg" -af "afade=t=out:st=8.5:d=1.5" "${aac[@]}" "$out/music.m4a"
+
+# The Gettysburg Address's opening, read by John Greenman (LibriVox, public domain).
+get "https://archive.org/download/gettysburg_johng_librivox/gettysburg_address.mp3" "$cache/gettysburg.mp3"
+ff -ss 23.1 -t 9.3 -i "$cache/gettysburg.mp3" -ac 1 -af "afade=t=out:st=9.0:d=0.3" "${aac[@]}" "$out/voice.m4a"
+
+# Screen recording, made here: a terminal session with dead air from 4 s to 7 s.
+font=$(fc-match -f '%{file}' monospace)
+type_line() { # text, y, start second: types one character every 0.08 s, then holds it
+  local text=$1 y=$2 t0=$3 i
+  for ((i = 1; i < ${#text}; i++)); do
+    printf ",drawtext=fontfile=%s:text='%s':x=96:y=%s:fontsize=28:fontcolor=0xd4d4d4:enable='between(t,%s,%s)'" \
+      "$font" "${text:0:i}" "$y" "$(bc <<<"$t0+$i*0.08")" "$(bc <<<"$t0+($i+1)*0.08")"
+  done
+  printf ",drawtext=fontfile=%s:text='%s':x=96:y=%s:fontsize=28:fontcolor=0xd4d4d4:enable='gte(t,%s)'" \
+    "$font" "$text" "$y" "$(bc <<<"$t0+${#text}*0.08")"
+}
+show_line() { # text, y, second it appears
+  printf ",drawtext=fontfile=%s:text='%s':x=96:y=%s:fontsize=28:fontcolor=0x9da5b4:enable='gte(t,%s)'" "$font" "$1" "$2" "$3"
+}
+{
+  printf "drawbox=x=64:y=48:w=1152:h=624:c=0x1e1e1e:t=fill,drawbox=x=64:y=48:w=1152:h=40:c=0x2d2d2d:t=fill"
+  printf ",drawtext=fontfile=%s:text='Terminal':x=600:y=58:fontsize=20:fontcolor=0x9da5b4" "$font"
+  printf ",drawtext=fontfile=%s:text='$':x=64+8:y=120:fontsize=28:fontcolor=0x6a9955" "$font"
+  type_line "cargo new hello" 120 0.6
+  show_line "    Creating binary (application) package" 160 2.2
+  printf ",drawtext=fontfile=%s:text='$':x=64+8:y=200:fontsize=28:fontcolor=0x6a9955:enable='gte(t,2.4)'" "$font"
+  printf ",drawbox=x=96:y=200:w=16:h=30:c=0xd4d4d4:t=fill:enable='between(t,2.4,7)*lt(mod(t,1),0.5)'"
+  type_line "cd hello && cargo run" 200 7.0
+  show_line "Hello, world!" 240 9.0
+} >"$cache/screen.filter"
+ff -f lavfi -i color=c=0x0f1115:s=1280x720:r=30:d=10 -filter_script:v "$cache/screen.filter" "${x264[@]}" \
+  "$out/screen-recording.mp4"
+
+du -ch "$out"/*.mp4 "$out"/*.m4a | tail -1

@@ -20,6 +20,7 @@ pub mod project_file;
 mod project_settings;
 mod record;
 mod relink;
+pub mod samples;
 mod scopes;
 pub mod settings_file;
 mod timeline;
