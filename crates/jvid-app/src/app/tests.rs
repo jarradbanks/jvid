@@ -91,7 +91,7 @@ impl Shot {
         let mut runs: Vec<(u32, u32)> = Vec::new();
         for (x, y) in points {
             let c = self.at(x, y);
-            if near(c, color::GROUND) || near(c, color::PANEL) {
+            if near(c, color::ground()) || near(c, color::panel()) {
                 continue;
             }
             let i = if vertical { y } else { x };
@@ -107,7 +107,9 @@ impl Shot {
     fn left_border(&self, r: Rect) -> u32 {
         let y = self.px(r.top() + size::HEADER / 2.0);
         let x = self.px(r.left()) - 2;
-        (x..).find(|&x| near(self.at(x, y), color::BORDER)).unwrap()
+        (x..)
+            .find(|&x| near(self.at(x, y), color::border()))
+            .unwrap()
     }
 
     /// Top border, header divider and bottom border, down a column near the panel's
@@ -275,7 +277,7 @@ fn titles_start_twelve_in() {
             let y = s2.px(r.top() + size::HEADER / 2.0);
             let border = s2.left_border(r);
             let pill = (border..)
-                .find(|&x| near(s2.at(x, y), color::RAISED))
+                .find(|&x| near(s2.at(x, y), color::raised()))
                 .unwrap();
             assert_eq!(pill - border, s2.px(space::S4), "{}: {tab:?}", s2.ctx);
         }
@@ -1524,4 +1526,101 @@ fn a_narrow_bin_opens_scopes_from_the_tab_menu() {
     h.get_by_label("Scopes").click();
     h.run();
     assert_eq!(h.state().bin.tab, 3);
+}
+
+/// A themes folder holding the bundled themes and a file that doesn't parse.
+fn themes_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("jvid-themes-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    suite_ui::themes::install_bundled(&dir).unwrap();
+    std::fs::write(dir.join("neon.toml"), "panel = \"#12345\"\n").unwrap();
+    dir
+}
+
+/// Input devices as a streamer's Windows machine names them.
+const DEVICES: [&str; 13] = [
+    "Microphone Array (Realtek(R) Audio) — Intel® Smart Sound Technology for Digital Microphones",
+    "Headset Microphone (Arctis Nova 7 Wireless)",
+    "Line In (Focusrite Scarlett 2i2 4th Gen)",
+    "Microphone (NVIDIA Broadcast)",
+    "Microphone (Steam Streaming Microphone)",
+    "CABLE Output (VB-Audio Virtual Cable)",
+    "Stereo Mix (Realtek(R) Audio)",
+    "Digital Audio Interface (USB Capture HDMI 4K+)",
+    "Microphone (Razer Seiren Mini)",
+    "Microphone (Logitech BRIO)",
+    "Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO)",
+    "Microphone (OBS Virtual Audio)",
+    "Line (Elgato Wave Link Stream)",
+];
+
+#[test]
+fn preferences_fit_the_minimum_window() {
+    if !gpu() {
+        return;
+    }
+    let mut results = egui_kittest::SnapshotResults::new();
+    let mut h = harness([960.0, 600.0], 1.0);
+    let dir = themes_dir("min");
+    let devices = DEVICES.map(String::from).to_vec();
+    h.state_mut().preferences.open(devices, Some(dir.clone()));
+    h.run();
+    for name in [
+        "Dark",
+        "Light",
+        "High Contrast",
+        "Warm Dark",
+        "Soft Light",
+        "Neon",
+    ] {
+        assert!(h.query_by_label(name).is_some(), "no {name} card");
+    }
+    results.add(h.try_snapshot("preferences_general"));
+
+    h.get_by_label("Audio").click();
+    h.run();
+    h.get_by_label("System Default").click();
+    h.run();
+    let long = DEVICES[0];
+    h.get_by_label(long).hover();
+    for _ in 0..40 {
+        h.step();
+    }
+    // The row and its tooltip.
+    assert_eq!(
+        h.query_all_by_label(long).count(),
+        2,
+        "no full name on hover"
+    );
+    let done = h.get_by_label("Done").rect();
+    let screen = h.ctx.content_rect();
+    let menu = h.get_by_label(DEVICES[1]).rect();
+    assert!(screen.contains_rect(menu), "{menu:?} outside the window");
+    assert!(
+        menu.max.x <= done.max.x,
+        "row wider than the dialog: {menu:?}"
+    );
+    results.add(h.try_snapshot("preferences_input_devices"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn editor_in_light_and_high_contrast() {
+    if !gpu() {
+        return;
+    }
+    let mut results = egui_kittest::SnapshotResults::new();
+    for theme in ["light", "high-contrast"] {
+        // A selected clip fills the inspector, so every panel shows its controls.
+        let (mut h, _, _) = title_harness();
+        h.state_mut().theme = suite_ui::themes::LiveTheme::new(theme);
+        h.run();
+        let want = suite_ui::themes::BUILT_IN
+            .iter()
+            .find(|t| t.0 == theme)
+            .unwrap()
+            .1;
+        assert_eq!(h.ctx.global_style().visuals.panel_fill, want.panel);
+        results.add(h.try_snapshot(format!("editor_{theme}")));
+    }
 }

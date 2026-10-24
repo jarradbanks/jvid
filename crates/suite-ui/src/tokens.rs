@@ -2,19 +2,18 @@
 
 use egui::Color32;
 
-const fn hex(rgb: u32) -> Color32 {
+pub(crate) const fn hex(rgb: u32) -> Color32 {
     Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
 }
 
-/// Colours. Starting values from `DESIGN.md`.
+/// Colours. The themed ones are functions returning the applied theme's value
+/// ([`crate::themes::apply`]); [`crate::themes::DARK`] holds the `DESIGN.md` starting values.
 pub mod color {
     use super::hex;
     use egui::Color32;
 
-    pub const BLUE: Color32 = hex(0x2368C9);
     pub const BLUE_HOVER: Color32 = hex(0x2C70D3);
     pub const BLUE_PRESSED: Color32 = hex(0x215DB3);
-    pub const LIGHT_BLUE: Color32 = hex(0x7AACF6);
 
     pub const CLIP_VIOLET: Color32 = hex(0x5E589F);
     pub const CLIP_PLUM: Color32 = hex(0x8E4771);
@@ -22,22 +21,33 @@ pub mod color {
     pub const CLIP_GREEN: Color32 = hex(0x30715D);
     pub const CLIPS: [Color32; 4] = [CLIP_VIOLET, CLIP_PLUM, CLIP_OCHRE, CLIP_GREEN];
 
-    pub const RED: Color32 = hex(0xEC5B57);
-    pub const AMBER: Color32 = hex(0xF2AF48);
-    pub const GREEN: Color32 = hex(0x4EBE7D);
-
-    pub const GROUND: Color32 = hex(0x0A0B0D);
-    pub const PANEL: Color32 = hex(0x121416);
-    pub const RAISED: Color32 = hex(0x1C1E21);
-    pub const FIELD: Color32 = hex(0x0D0E11);
-    pub const BORDER: Color32 = hex(0x232529);
-    pub const BORDER_STRONG: Color32 = hex(0x36383C);
-    pub const INK: Color32 = hex(0xEDEEF1);
-    pub const INK_2: Color32 = hex(0xADB1B8);
-    pub const INK_3: Color32 = hex(0x82868E);
-    pub const INK_4: Color32 = hex(0x5A5E63);
     pub const VIEWER: Color32 = hex(0x040404);
     pub const WHITE: Color32 = Color32::WHITE;
+
+    macro_rules! themed {
+        ($($name:ident),*) => {$(
+            pub fn $name() -> Color32 {
+                crate::themes::current().$name
+            }
+        )*};
+    }
+    themed!(
+        blue,
+        light_blue,
+        red,
+        amber,
+        green,
+        ground,
+        panel,
+        raised,
+        field,
+        border,
+        border_strong,
+        ink,
+        ink_2,
+        ink_3,
+        ink_4
+    );
 }
 
 /// Spacing scale (4px base).
@@ -109,19 +119,20 @@ pub fn contrast(a: Color32, b: Color32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::themes::DARK;
 
     #[test]
     fn ink_on_every_clip_colour_reaches_4_5() {
         for clip in color::CLIPS {
-            let ratio = contrast(color::INK, clip);
+            let ratio = contrast(DARK.ink, clip);
             assert!(ratio >= 4.5, "Ink on {clip:?} is {ratio:.2}:1");
         }
     }
 
     #[test]
     fn documented_text_contrasts_hold() {
-        assert!(contrast(color::WHITE, color::BLUE) >= 4.5);
-        assert!(contrast(color::INK_3, color::PANEL) >= 4.5);
-        assert!(contrast(color::LIGHT_BLUE, color::PANEL) >= 4.5);
+        assert!(contrast(color::WHITE, DARK.blue) >= 4.5);
+        assert!(contrast(DARK.ink_3, DARK.panel) >= 4.5);
+        assert!(contrast(DARK.light_blue, DARK.panel) >= 4.5);
     }
 }

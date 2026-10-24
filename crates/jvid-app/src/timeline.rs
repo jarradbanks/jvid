@@ -960,7 +960,7 @@ impl Timeline {
         // Lanes, clipped below the ruler.
         let lane_painter = painter.with_clip_rect(lanes.union(headers).intersect(area));
         let clip_painter = painter.with_clip_rect(lanes.intersect(area));
-        lane_painter.rect_filled(lanes, 0.0, color::FIELD);
+        lane_painter.rect_filled(lanes, 0.0, color::field());
         // Empty header space: add tracks.
         ui.interact(headers, id.with("headers"), Sense::click())
             .context_menu(|ui| {
@@ -996,7 +996,7 @@ impl Timeline {
             lane_painter.rect_filled(
                 Rect::from_x_y_ranges(area.x_range(), lane.bottom() - line..=lane.bottom()),
                 0.0,
-                color::BORDER,
+                color::border(),
             );
             let shown = visible(track.clips(), start, end);
             let held_clip = track.clips().iter().find(|c| Some(c.id) == self.holding);
@@ -1021,12 +1021,12 @@ impl Timeline {
                 // What Detect Silence would take out sinks back toward the ground.
                 for &(_, a, b) in shaded.iter().filter(|s| s.0 == clip.id) {
                     let x = view.x(a).max(r.left())..=view.x(b).min(r.right());
-                    let dim = color::GROUND.gamma_multiply(0.7);
+                    let dim = color::ground().gamma_multiply(0.7);
                     painter.rect_filled(Rect::from_x_y_ranges(x, r.y_range()), 0.0, dim);
                 }
                 if self.selected.contains(&clip.id) {
                     let corner = CornerRadius::same(radius::SMALL);
-                    let stroke = Stroke::new(2.0, color::LIGHT_BLUE);
+                    let stroke = Stroke::new(2.0, color::light_blue());
                     painter.rect_stroke(r, corner, stroke, egui::StrokeKind::Inside);
                 }
                 shown_clips.push((clip.id, r));
@@ -1107,7 +1107,7 @@ impl Timeline {
         {
             let r = Rect::from_x_y_ranges(view.x(a)..=view.x(b), lane.y_range())
                 .shrink2(vec2(1.0, 2.0));
-            clip_painter.rect_filled(r, 0.0, color::BLUE.gamma_multiply(0.2));
+            clip_painter.rect_filled(r, 0.0, color::blue().gamma_multiply(0.2));
         }
         if let (Some(a), Some(b)) = (
             ui.input(|i| i.pointer.press_origin()),
@@ -1126,8 +1126,8 @@ impl Timeline {
                 let hit = shown_clips.iter().filter(|(_, r)| r.intersects(band));
                 self.selected.extend(hit.map(|(c, _)| *c));
             } else {
-                clip_painter.rect_filled(band, 0.0, color::BLUE.gamma_multiply(0.15));
-                let stroke = Stroke::new(1.0, color::LIGHT_BLUE);
+                clip_painter.rect_filled(band, 0.0, color::blue().gamma_multiply(0.15));
+                let stroke = Stroke::new(1.0, color::light_blue());
                 clip_painter.rect_stroke(band, 0.0, stroke, egui::StrokeKind::Inside);
             }
         }
@@ -1163,7 +1163,7 @@ impl Timeline {
         if top {
             let y = (lanes.top() - self.vscroll).max(lanes.top());
             let r = Rect::from_x_y_ranges(lanes.x_range(), y..=y + 2.0);
-            clip_painter.rect_filled(r, 0.0, color::LIGHT_BLUE);
+            clip_painter.rect_filled(r, 0.0, color::light_blue());
         }
         // Ghosts for tracks a drop will add go in rows below the last lane.
         let mut below = y;
@@ -1179,11 +1179,11 @@ impl Timeline {
                 let x = view.x(from)..=view.x(to);
                 let r = Rect::from_x_y_ranges(x, rows).shrink2(vec2(1.0, 2.0));
                 let corner = CornerRadius::same(radius::SMALL);
-                clip_painter.rect_filled(r, corner, color::BLUE.gamma_multiply(0.3));
+                clip_painter.rect_filled(r, corner, color::blue().gamma_multiply(0.3));
                 clip_painter.rect_stroke(
                     r,
                     corner,
-                    Stroke::new(1.0, color::LIGHT_BLUE),
+                    Stroke::new(1.0, color::light_blue()),
                     egui::StrokeKind::Inside,
                 );
                 // What the drop overwrites on that track, in red.
@@ -1193,7 +1193,7 @@ impl Timeline {
                 for c in hit.filter(|c| c.start < to && c.end() > from) {
                     let x = view.x(c.start.max(from))..=view.x(c.end().min(to));
                     let o = Rect::from_x_y_ranges(x, rows).shrink2(vec2(1.0, 2.0));
-                    clip_painter.rect_filled(o, 0.0, color::RED.gamma_multiply(0.45));
+                    clip_painter.rect_filled(o, 0.0, color::red().gamma_multiply(0.45));
                 }
             }
         }
@@ -1212,12 +1212,12 @@ impl Timeline {
             Rect::from_x_y_ranges(view.x(a)..=view.x(b), area.y_range())
         });
         if let Some(r) = range {
-            clip_painter.rect_filled(r, 0.0, color::LIGHT_BLUE.gamma_multiply(0.08));
+            clip_painter.rect_filled(r, 0.0, color::light_blue().gamma_multiply(0.08));
         }
         if let Some(t) = self.snapped {
             let x = view.x(t);
             let r = Rect::from_x_y_ranges(x - 0.5..=x + 0.5, lanes.y_range());
-            clip_painter.rect_filled(r, 0.0, color::AMBER);
+            clip_painter.rect_filled(r, 0.0, color::amber());
         }
         if tracks.is_empty() {
             painter.text(
@@ -1225,12 +1225,12 @@ impl Timeline {
                 Align2::CENTER_CENTER,
                 tr!("timeline.empty"),
                 theme::body(),
-                color::INK_3,
+                color::ink_3(),
             );
         }
 
         // Ruler.
-        painter.rect_filled(ruler, 0.0, color::PANEL);
+        painter.rect_filled(ruler, 0.0, color::panel());
         let (major, minor) = tick_steps(self.zoom, rate);
         let first = rate.index_floor(start).max(0) / minor * minor;
         let last = rate.index_floor(end) + 1;
@@ -1242,7 +1242,7 @@ impl Timeline {
             painter.rect_filled(
                 Rect::from_x_y_ranges(x..=x + line, ruler.bottom() - h..=ruler.bottom()),
                 0.0,
-                color::BORDER_STRONG,
+                color::border_strong(),
             );
             if is_major {
                 painter.text(
@@ -1250,7 +1250,7 @@ impl Timeline {
                     Align2::LEFT_TOP,
                     format_timecode(f as u64, rate),
                     theme::small(),
-                    color::INK_3,
+                    color::ink_3(),
                 );
             }
             f += minor;
@@ -1258,19 +1258,19 @@ impl Timeline {
         painter.rect_filled(
             Rect::from_x_y_ranges(area.x_range(), ruler.bottom() - line..=ruler.bottom()),
             0.0,
-            color::BORDER,
+            color::border(),
         );
         let ruler_painter = painter.with_clip_rect(ruler);
         if let Some(r) = range {
             let band = Rect::from_x_y_ranges(r.x_range(), ruler.y_range());
-            ruler_painter.rect_filled(band, 0.0, color::LIGHT_BLUE.gamma_multiply(0.25));
+            ruler_painter.rect_filled(band, 0.0, color::light_blue().gamma_multiply(0.25));
         }
         edit = edit.or(self.markers(ui, seq, view, ruler, id));
         // Flags: a bracket at each set mark, opening toward the range.
         for (mark, dir) in [(mark_in, 1.0), (mark_out, -1.0)] {
             if let Some(t) = mark {
                 let x = view.x(t);
-                let stroke = Stroke::new(2.0, color::LIGHT_BLUE);
+                let stroke = Stroke::new(2.0, color::light_blue());
                 let (top, bottom) = (ruler.top() + 2.0, ruler.bottom() - 1.0);
                 ruler_painter.line_segment([pos2(x, top), pos2(x, bottom)], stroke);
                 for y in [top, bottom] {
@@ -1286,7 +1286,7 @@ impl Timeline {
             Align2::LEFT_CENTER,
             format_timecode(rate.index_floor(playhead).max(0) as u64, rate),
             theme::body_strong(),
-            color::INK,
+            color::ink(),
         );
         let slider = Rect::from_x_y_ranges(
             lanes_left - 64.0..=lanes_left - space::INSET,
@@ -1320,7 +1320,7 @@ impl Timeline {
             painter.rect_filled(
                 Rect::from_x_y_ranges(x..=x + line, ruler.top() + 12.0..=area.bottom()),
                 0.0,
-                color::LIGHT_BLUE,
+                color::light_blue(),
             );
             playhead_head(&painter, pos2(x + line / 2.0, ruler.top()));
         }
@@ -1582,7 +1582,7 @@ impl Timeline {
         let shown = rect.intersect(column);
         let body = ui.interact(shown, id, Sense::click());
         if body.hovered() {
-            painter.rect_filled(rect, 0.0, color::RAISED.gamma_multiply(0.5));
+            painter.rect_filled(rect, 0.0, color::raised().gamma_multiply(0.5));
         }
 
         // The ID; clicking it makes this the target for insert and overwrite.
@@ -1597,15 +1597,15 @@ impl Timeline {
             painter.rect_filled(
                 Rect::from_x_y_ranges(rect.left()..=rect.left() + 2.0, rect.y_range()),
                 0.0,
-                color::LIGHT_BLUE,
+                color::light_blue(),
             );
         }
         // Green while the track's EQ or compressor is on; the tooltip and label say so too.
         let fx = track.kind == TrackKind::Audio && !track.fx.is_default();
         let ink = match () {
-            _ if track.target => color::LIGHT_BLUE,
-            _ if fx => color::GREEN,
-            _ => color::INK,
+            _ if track.target => color::light_blue(),
+            _ if fx => color::green(),
+            _ => color::ink(),
         };
         painter.text(
             id_rect.center(),
@@ -1732,9 +1732,9 @@ impl Timeline {
             }
             // A Red dot once armed, a Red stop square while recording.
             let ink = match armed {
-                true => color::RED,
-                false if ui.rect_contains_pointer(r.intersect(column)) => color::INK_2,
-                false => color::INK_3,
+                true => color::red(),
+                false if ui.rect_contains_pointer(r.intersect(column)) => color::ink_2(),
+                false => color::ink_3(),
             };
             if level.is_some() {
                 let square = Rect::from_center_size(r.center(), vec2(8.0, 8.0));
@@ -1752,13 +1752,13 @@ impl Timeline {
             );
             let db = 20.0 * level.max(1e-6).log10();
             let fill = match db {
-                d if d >= 0.0 => color::RED,
-                d if d > -6.0 => color::AMBER,
-                _ => color::GREEN,
+                d if d >= 0.0 => color::red(),
+                d if d > -6.0 => color::amber(),
+                _ => color::green(),
             };
             let w = ((db + 60.0) / 60.0).clamp(0.0, 1.0) * bar.width();
             let corner = CornerRadius::same(1);
-            painter.rect_filled(bar, corner, color::FIELD);
+            painter.rect_filled(bar, corner, color::field());
             painter.rect_filled(Rect::from_min_size(bar.min, vec2(w, 3.0)), corner, fill);
         }
 
@@ -1791,12 +1791,12 @@ impl Timeline {
         } else if !track.name.is_empty() && track.name != label {
             let mut job = egui::text::LayoutJob::single_section(
                 track.name.clone(),
-                egui::TextFormat::simple(theme::body(), color::INK_2),
+                egui::TextFormat::simple(theme::body(), color::ink_2()),
             );
             job.wrap = egui::text::TextWrapping::truncate_at_width(name_rect.width().max(0.0));
             let g = painter.layout_job(job);
             let pos = pos2(name_rect.left(), mid - g.size().y / 2.0);
-            painter.galley(pos, g, color::INK_2);
+            painter.galley(pos, g, color::ink_2());
         }
         if body.double_clicked() {
             self.renaming = Some((track.id, track.name.clone()));
@@ -1895,7 +1895,7 @@ impl Timeline {
         let content = Rect::from_x_y_ranges(shown.x_range(), r.top() + NAME_STRIP..=r.bottom());
         let clipped = painter.with_clip_rect(r.intersect(painter.clip_rect()));
         if offline {
-            clipped.rect_filled(r, corner, color::RED.gamma_multiply(0.3));
+            clipped.rect_filled(r, corner, color::red().gamma_multiply(0.3));
         } else if let Some(a) = asset
             && content.height() >= 8.0
             && content.width() >= 1.0
@@ -1942,7 +1942,7 @@ impl Timeline {
             Align2::LEFT_CENTER,
             name,
             theme::body_strong(),
-            color::INK,
+            color::ink(),
         );
     }
 }
@@ -2025,9 +2025,9 @@ fn scrollbar(
         Rect::from_center_size(thumb.center(), vec2(4.0, thumb.height() - 4.0))
     };
     let ink = if r.hovered() || r.dragged() {
-        color::INK_2
+        color::ink_2()
     } else {
-        color::INK_3
+        color::ink_3()
     };
     painter.rect_filled(paint, CornerRadius::same(2), ink);
     offset
@@ -2098,10 +2098,10 @@ fn toggle(
     let r = ui.interact(rect.intersect(column), id, Sense::click());
     r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, on, name));
     let (fill, ink) = match (on, solo) {
-        (true, true) => (color::AMBER, color::GROUND),
-        (true, false) => (color::RAISED, color::INK),
-        _ if r.hovered() => (color::BORDER, color::INK_2),
-        _ => (Color32::TRANSPARENT, color::INK_3),
+        (true, true) => (color::amber(), color::ground()),
+        (true, false) => (color::raised(), color::ink()),
+        _ if r.hovered() => (color::border(), color::ink_2()),
+        _ => (Color32::TRANSPARENT, color::ink_3()),
     };
     painter.rect_filled(rect, CornerRadius::same(radius::SMALL), fill);
     painter.text(rect.center(), Align2::CENTER_CENTER, glyph, font, ink);
@@ -2124,7 +2124,7 @@ fn playhead_head(painter: &egui::Painter, top_center: Pos2) {
             sw: 0,
             se: 0,
         },
-        color::LIGHT_BLUE,
+        color::light_blue(),
     );
     painter.add(egui::Shape::convex_polygon(
         vec![
@@ -2132,7 +2132,7 @@ fn playhead_head(painter: &egui::Painter, top_center: Pos2) {
             pos2(body.right(), body.bottom()),
             top_center + vec2(0.0, h),
         ],
-        color::LIGHT_BLUE,
+        color::light_blue(),
         Stroke::NONE,
     ));
 }
@@ -2304,7 +2304,7 @@ impl Media {
             width,
         );
         let (mid, half) = (rect.center().y, rect.height() / 2.0 - 1.0);
-        let tint = color::CLIP_GREEN.lerp_to_gamma(color::INK, 0.45);
+        let tint = color::CLIP_GREEN.lerp_to_gamma(color::ink(), 0.45);
         for (i, [lo, hi]) in peaks.into_iter().enumerate() {
             let x = rect.left() + i as f32 + 0.5;
             let (y0, y1) = (
@@ -2813,7 +2813,7 @@ mod tests {
             .build_ui_state(
                 move |ui, (t, h): &mut (Timeline, History)| {
                     if !suite_ui::test_support::install_theme(ui, &mut fresh) {
-                        ui.painter().rect_filled(ui.max_rect(), 0.0, color::PANEL);
+                        ui.painter().rect_filled(ui.max_rect(), 0.0, color::panel());
                         let edit = t.show(ui, h.project(), &HashSet::new(), &Keymap::default());
                         match edit {
                             Some((c, Some(k))) => h.apply_coalesced(k, c).unwrap(),
@@ -3383,7 +3383,7 @@ mod tests {
                             return;
                         }
                         let r = ui.max_rect();
-                        ui.painter().rect_filled(r, 0.0, color::PANEL);
+                        ui.painter().rect_filled(r, 0.0, color::panel());
                         let (left, right) = r.split_left_right_at_x(300.0);
                         let missing = HashSet::new();
                         ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
@@ -3445,7 +3445,7 @@ mod tests {
             ..Default::default()
         };
         let path = p.assets()[0].path.clone();
-        let img = egui::ColorImage::filled([160, 90], color::BLUE);
+        let img = egui::ColorImage::filled([160, 90], color::blue());
         let tex = ctx.load_texture("strip", img, Default::default());
         t.media
             .strips

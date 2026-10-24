@@ -1,0 +1,28 @@
+# Soft Light: a light theme a step dimmer than Light, for bright rooms.
+#
+# A theme is this file's colour tokens as "#RRGGBB". Copy it under a new name in this
+# folder, edit the values, and pick it in Edit > Preferences. Saving it reloads it.
+# A token you leave out takes the Dark value.
+
+# The accent: the primary button, focus and selection fills.
+blue = "#2368C9"
+# Lines and text on the accent's side: playhead, focus rings, links.
+light_blue = "#1D5BB5"
+# State: errors, warnings, done.
+red = "#B8322E"
+amber = "#835500"
+green = "#1C7342"
+
+# Surfaces: the window behind panels, panels, menus and hovers, and input fills.
+ground = "#D5D7DB"
+panel = "#E6E8EB"
+raised = "#F1F2F4"
+field = "#F5F6F7"
+border = "#C9CCD1"
+border_strong = "#A6AAB1"
+
+# Text, strongest to faintest. ink_4 is for disabled text only.
+ink = "#1B1D21"
+ink_2 = "#41454C"
+ink_3 = "#5A5E65"
+ink_4 = "#959AA1"

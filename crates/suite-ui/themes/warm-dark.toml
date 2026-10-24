@@ -1,0 +1,29 @@
+# Warm Dark: Dark with its neutrals warmed a few degrees. The accent stays blue.
+#
+# A theme is this file's colour tokens as "#RRGGBB". Copy it under a new name in this
+# folder, edit the values, and pick it in Edit > Preferences. Saving it reloads it.
+# A token you leave out takes the Dark value.
+
+# The accent: the primary button, focus and selection fills.
+blue = "#2368C9"
+# Lines and text on the accent's side: playhead, focus rings, links.
+light_blue = "#7AACF6"
+# State: errors, warnings, done.
+red = "#EC5B57"
+amber = "#F2AF48"
+green = "#4EBE7D"
+
+# Surfaces, darkest to lightest: the window behind panels, panels, menus and hovers,
+# and input fills.
+ground = "#0D0C0B"
+panel = "#161412"
+raised = "#211E1B"
+field = "#100F0D"
+border = "#2A2724"
+border_strong = "#3D3934"
+
+# Text, strongest to faintest. ink_4 is for disabled text only.
+ink = "#EFEDEA"
+ink_2 = "#B5B0A9"
+ink_3 = "#8C877F"
+ink_4 = "#5F5A54"

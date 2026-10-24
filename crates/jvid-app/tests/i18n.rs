@@ -433,45 +433,64 @@ fn settings_picker_switches_at_once_and_saves() {
     let path = dir.join("settings.toml");
     std::fs::write(&path, "theme = \"light\"\n").unwrap();
     let mut prefs = Preferences::default();
-    prefs.open(vec!["USB Mic".into()]);
+    prefs.open(vec!["USB Mic".into()], None);
     let saved = path.clone();
     let mut fresh = true;
-    let mut h = Harness::builder().with_size([800.0, 600.0]).build_ui_state(
-        move |ui, (p, language, input): &mut (Preferences, String, String)| {
+    type State = (Preferences, String, String, String);
+    let mut h = Harness::builder().with_size([960.0, 600.0]).build_ui_state(
+        move |ui, (p, language, theme, input): &mut State| {
             if !install_theme(ui, &mut fresh) {
-                p.show(ui, language, input, |k, v| {
+                p.show(ui, language, theme, input, |k, v| {
                     jvid_app::settings_file::save_string_to(&saved, k, v)
                 });
             }
         },
-        (prefs, i18n::SYSTEM.to_owned(), String::new()),
+        (
+            prefs,
+            i18n::SYSTEM.to_owned(),
+            "light".into(),
+            String::new(),
+        ),
     );
     h.run();
     assert!(has(&h, "Idioma"));
     let system = jvid_app::preferences::options().remove(0);
     assert!(system.starts_with("Sistema ("), "{system}");
 
-    let mut pick = |current: &str, row: &str| {
+    let pick = |h: &mut Harness<'_, State>, current: &str, row: &str| {
         h.get_by_label(current).click();
         h.run();
         h.get_by_label(row).click();
         h.run();
     };
-    pick(&system, "English");
+    pick(&mut h, &system, "English");
     let settings = |p: &std::path::Path| jvid_app::settings_file::load_from(p);
     assert_eq!(i18n::language(), "en");
     assert_eq!(settings(&path).language, "en");
     assert_eq!(settings(&path).theme, "light", "other settings kept");
 
-    pick("English", "Español");
+    pick(&mut h, "English", "Español");
     assert_eq!(i18n::language(), "es");
     assert_eq!(settings(&path).language, "es");
 
-    pick("Predeterminado del sistema", "USB Mic");
+    h.get_by_label("Alto contraste").click();
+    h.run();
+    assert_eq!(settings(&path).theme, "high-contrast");
+    assert_eq!(h.state().2, "high-contrast");
+
+    h.get_by_label("Audio").click();
+    h.run();
+    assert!(
+        h.query_by_label("Idioma").is_none(),
+        "one section at a time"
+    );
+    pick(&mut h, "Predeterminado del sistema", "USB Mic");
     assert_eq!(settings(&path).input_device, "USB Mic");
     assert_eq!(settings(&path).language, "es", "other settings kept");
 
-    pick("Español", &system);
+    h.get_by_label("General").click();
+    h.run();
+    pick(&mut h, "Español", &system);
     assert_eq!(settings(&path).language, "system");
     assert_eq!(i18n::language(), i18n::system_language());
     std::fs::remove_dir_all(&dir).unwrap();

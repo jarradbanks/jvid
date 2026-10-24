@@ -16,3 +16,9 @@ search = "Search"
 error = "Theme {path}: {error}"
 # A color that isn't #RRGGBB; keep the notation as written.
 bad_color = "`{value}` is not #RRGGBB"
+# Where in a theme file it broke, and why.
+at = "line {line}, column {column}: {error}"
+# Built-in theme names.
+dark = "Dark"
+light = "Light"
+high_contrast = "High Contrast"

@@ -57,7 +57,8 @@ const EXEMPT_MACROS: &[&str] = &[
     "include_bytes",
     "cfg",
     "matches",
-    "pin", // no text, or patterns
+    "pin",
+    "thread_local", // no text, or patterns
 ];
 
 /// Macros that make text from build data. Fine as data, but not drawn: wrap the result in

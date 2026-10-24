@@ -251,7 +251,7 @@ pub fn show(
         .expand(HANDLE * 2.0)
         .intersect(crate::preview::viewer_rect(ui));
     let painter = ui.painter().with_clip_rect(clip);
-    let line = Stroke::new(1.0, color::LIGHT_BLUE);
+    let line = Stroke::new(1.0, color::light_blue());
     if let Some(pen) = pen.filter(|p| p.clip == c.id) {
         return pen_tool(ui, c, pen, clip, (to_screen, to_image));
     }
@@ -305,7 +305,7 @@ pub fn show(
                 painter.circle(p, HANDLE / 2.0, color::VIEWER, line);
             } else {
                 let square = Rect::from_center_size(p, Vec2::splat(HANDLE));
-                painter.rect_filled(square, 0.0, color::LIGHT_BLUE);
+                painter.rect_filled(square, 0.0, color::light_blue());
             }
         }
     }
@@ -357,7 +357,7 @@ fn pen_tool(
         ));
     }
     let painter = ui.painter().with_clip_rect(clip);
-    let line = Stroke::new(1.0, color::LIGHT_BLUE);
+    let line = Stroke::new(1.0, color::light_blue());
     if n >= 2 {
         let path = jvid_render::mask::flatten(&pen.points, jvid_render::mask::STEPS);
         let path = path
@@ -372,18 +372,18 @@ fn pen_tool(
         if k == 0 && near_first {
             painter.rect_stroke(square.expand(2.0), 0.0, line, egui::StrokeKind::Outside);
         }
-        painter.rect_filled(square, 0.0, color::LIGHT_BLUE);
+        painter.rect_filled(square, 0.0, color::light_blue());
     }
     let hint = painter.layout(
         tr!("inspector.draw_path").to_owned(),
         theme::body(),
-        color::INK,
+        color::ink(),
         clip.width() - 2.0 * space::S16,
     );
     let at = clip.center_top() + vec2(-hint.size().x / 2.0, space::S8);
     let back = Rect::from_min_size(at, hint.size()).expand(space::S4);
-    painter.rect_filled(back, suite_ui::tokens::radius::CONTROL, color::PANEL);
-    painter.galley(at, hint, color::INK);
+    painter.rect_filled(back, suite_ui::tokens::radius::CONTROL, color::panel());
+    painter.galley(at, hint, color::ink());
     ui.data_mut(|d| d.insert_temp(pen_id(), pen));
     None
 }

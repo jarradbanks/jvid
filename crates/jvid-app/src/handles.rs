@@ -302,14 +302,14 @@ pub fn edit_text(ui: &mut Ui, project: &Project, t: Time, frame: Rect) -> Option
                 at([x1, bottom]),
                 at([x0, bottom]),
             ];
-            let fill = color::AMBER.gamma_multiply(0.35);
+            let fill = color::amber().gamma_multiply(0.35);
             p.add(egui::Shape::convex_polygon(q, fill, Stroke::NONE));
         }
     }
     let [x, top, bottom] = carets[a.min(carets.len() - 1)];
     p.line_segment(
         [at([x, top]), at([x, bottom])],
-        Stroke::new(2.0, color::AMBER),
+        Stroke::new(2.0, color::amber()),
     );
 
     (typing.content != base.content).then(|| {
@@ -439,7 +439,7 @@ pub fn show(
     }
 
     let p = ui.painter().with_clip_rect(clip);
-    let stroke = Stroke::new(1.0, color::AMBER);
+    let stroke = Stroke::new(1.0, color::amber());
     p.add(egui::Shape::closed_line(vec![tl, tr, br, bl], stroke));
     p.line_segment([top, rot], stroke);
     p.circle(rot, HANDLE / 2.0, color::VIEWER, stroke);
@@ -456,7 +456,7 @@ pub fn show(
         p.rect_filled(
             Rect::from_center_size(h, Vec2::splat(HANDLE)),
             0.0,
-            color::AMBER,
+            color::amber(),
         );
     }
     p.circle_stroke(anchor, HANDLE, stroke);

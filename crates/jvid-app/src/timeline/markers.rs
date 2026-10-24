@@ -6,24 +6,25 @@ use egui::{Color32, Id, Rect, Sense, Shape, Stroke, Ui, pos2};
 use jvid_core::history::Command;
 use jvid_core::model::Sequence;
 use jvid_core::time::Time;
+use suite_ui::themes::DARK;
 use suite_ui::tokens::color;
 
 use crate::i18n::tr;
 
 use super::{Edit, Timeline, View};
 
-/// `Marker::color` indexes this.
+/// `Marker::color` indexes this. Like clip colours, they're the user's and don't follow the theme.
 pub const PALETTE: &[Color32] = &[
-    color::AMBER,
-    color::RED,
-    color::GREEN,
-    color::LIGHT_BLUE,
+    DARK.amber,
+    DARK.red,
+    DARK.green,
+    DARK.light_blue,
     color::CLIP_PLUM,
     color::CLIP_VIOLET,
 ];
 
 fn swatch(i: u8) -> Color32 {
-    PALETTE.get(i as usize).copied().unwrap_or(color::AMBER)
+    PALETTE.get(i as usize).copied().unwrap_or(DARK.amber)
 }
 
 impl Timeline {
@@ -116,7 +117,7 @@ impl Timeline {
                             ui.painter().rect_stroke(
                                 rect,
                                 3.0,
-                                Stroke::new(1.5, color::INK),
+                                Stroke::new(1.5, color::ink()),
                                 egui::StrokeKind::Outside,
                             );
                         }

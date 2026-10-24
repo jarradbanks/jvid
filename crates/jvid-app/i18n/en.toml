@@ -242,12 +242,15 @@ title = "Preferences"
 language = "Language"
 # Follow the operating system; {language} is the language that gives, in its own name.
 system = "System ({language})"
-language_note = "Applies right away. Names already in a project, such as track names, stay as they are."
 save_failed = "Couldn't save the setting: {error}"
 done = "Done"
 no_config_dir = "This system has no settings folder"
 not_written = "The setting didn't save as expected"
 input_device = "Input Device"
+general = "General"
+audio = "Audio"
+theme = "Theme"
+open_themes = "Open Themes Folder"
 input_default = "System Default"
 
 # Project size presets, on the welcome screen and in Project Settings.

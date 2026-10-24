@@ -182,7 +182,7 @@ pub fn show(
     p.rect_stroke(
         screen,
         0.0,
-        Stroke::new(1.0, color::AMBER),
+        Stroke::new(1.0, color::amber()),
         egui::StrokeKind::Inside,
     );
     None

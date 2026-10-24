@@ -399,7 +399,7 @@ impl Preview {
                 Align2::CENTER_CENTER,
                 tr!("preview.source_empty"),
                 theme::body(),
-                color::INK_3,
+                color::ink_3(),
             );
             return None;
         };
@@ -786,14 +786,14 @@ impl Preview {
                 Align2::CENTER_BOTTOM,
                 theme::icon::CIRCLE_ALERT,
                 theme::icon_font(),
-                color::RED,
+                color::red(),
             );
             ui.painter().text(
                 viewer.center() + vec2(0.0, space::S8),
                 Align2::CENTER_TOP,
                 tr!("preview.offline"),
                 theme::body(),
-                color::INK_2,
+                color::ink_2(),
             );
         } else if let Some(e) = &self.error {
             ui.painter().text(
@@ -801,7 +801,7 @@ impl Preview {
                 Align2::CENTER_CENTER,
                 tr!("preview.frame_error", error = e),
                 theme::body(),
-                color::INK_2,
+                color::ink_2(),
             );
         }
         let source = matches!(program, Some((_, true)));
@@ -860,7 +860,7 @@ impl Preview {
             let image = Rect::from_min_size(pos2(image[0], image[1]), vec2(image[2], image[3]));
             let (rects, lines) = self.overlays.shapes(image);
             let painter = ui.painter().with_clip_rect(viewer);
-            let stroke = Stroke::new(1.0, color::INK.gamma_multiply(0.6));
+            let stroke = Stroke::new(1.0, color::ink().gamma_multiply(0.6));
             for r in rects {
                 painter.rect_stroke(r, 0.0, stroke, egui::StrokeKind::Middle);
             }
@@ -879,7 +879,7 @@ impl Preview {
                 Align2::LEFT_CENTER,
                 format_timecode(r.frame as u64, r.rate),
                 theme::timecode(),
-                color::INK,
+                color::ink(),
             );
             let width = 5.0 * 28.0;
             // The dropdowns first, so the buttons can stay clear of them in a narrow panel.
@@ -889,11 +889,11 @@ impl Preview {
                 self.dropdowns(ui);
                 let text = egui::RichText::new(format_timecode(r.end as u64, r.rate))
                     .font(theme::body())
-                    .color(color::INK_2);
+                    .color(color::ink_2());
                 let galley = ui.painter().layout_no_wrap(
                     text.text().to_string(),
                     theme::body(),
-                    color::INK_2,
+                    color::ink_2(),
                 );
                 let room = ui.available_width() - timecode.width() - width - 4.0 * space::S8;
                 if galley.size().x <= room {
@@ -1046,13 +1046,13 @@ impl SourceRow {
             let from = x(self.in_point.unwrap_or(Time(0)));
             let to = x(self.out_point.unwrap_or(self.duration));
             let band = Rect::from_x_y_ranges(from..=to, strip.y_range());
-            painter.rect_filled(band, 0.0, color::LIGHT_BLUE.gamma_multiply(0.5));
+            painter.rect_filled(band, 0.0, color::light_blue().gamma_multiply(0.5));
         }
         let head = x(self.position);
         painter.rect_filled(
             Rect::from_x_y_ranges(head - 1.0..=head + 1.0, strip.y_range()),
             0.0,
-            color::LIGHT_BLUE,
+            color::light_blue(),
         );
     }
 }

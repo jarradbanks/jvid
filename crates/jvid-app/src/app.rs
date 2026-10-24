@@ -112,6 +112,8 @@ pub struct App {
     input_device: String,
     /// The voiceover being recorded.
     take: Option<crate::record::Take>,
+    /// The `theme` setting: a built-in name or a theme file's path.
+    theme_setting: String,
     theme: suite_ui::themes::LiveTheme,
     keymap_editor: crate::keymap_editor::KeymapEditor,
     exports: jvid_jobs::Pool,
@@ -159,6 +161,7 @@ impl App {
         app.preview.set_proxies(caches.proxies.clone());
         app.timeline = Timeline::new(caches);
         app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
+        app.theme_setting = settings.theme.clone();
         app.language = settings.language.clone();
         app.input_device = settings.input_device.clone();
         if let Some(auto) = autosave::untitled().as_deref().and_then(autosave::newer) {
@@ -209,6 +212,7 @@ impl App {
             language: jvid_core::settings::Settings::default().language,
             input_device: String::new(),
             take: None,
+            theme_setting: "dark".into(),
             theme: suite_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
             exports,
@@ -287,7 +291,7 @@ impl App {
             Align2::LEFT_CENTER,
             verbatim("jvid"),
             theme::title(),
-            color::INK,
+            color::ink(),
         );
         let file = self.file_menu(ui, logo.right() + space::S12);
         self.edit_menu(ui, file + space::S4);
@@ -295,7 +299,7 @@ impl App {
         let name = self.name();
         let text_w = ui
             .painter()
-            .layout_no_wrap(name.clone(), theme::body_strong(), color::INK)
+            .layout_no_wrap(name.clone(), theme::body_strong(), color::ink())
             .size()
             .x;
         let w = (2.0 * space::S12 + text_w).ceil();
@@ -321,7 +325,7 @@ impl App {
         if self.history.is_dirty() {
             let dot = menu.right_center() + vec2(space::S4, 0.0);
             ui.painter()
-                .text(dot, Align2::LEFT_CENTER, "•", theme::body(), color::INK_2);
+                .text(dot, Align2::LEFT_CENTER, "•", theme::body(), color::ink_2());
         }
         if let Some(a) = action {
             self.file_action(a);
@@ -414,8 +418,10 @@ impl App {
             ui.separator();
             if ui.button(tr!("menu.preferences")).clicked() {
                 use jvid_audio::InputBackend;
-                self.preferences
-                    .open(jvid_audio::CpalInput::default().devices());
+                self.preferences.open(
+                    jvid_audio::CpalInput::default().devices(),
+                    crate::settings_file::themes_dir(),
+                );
             }
         });
         if let Some(id) = picked {
@@ -1026,12 +1032,12 @@ impl eframe::App for App {
 
         egui::Panel::top("app_bar")
             .exact_size(size::APP_BAR)
-            .frame(Frame::NONE.fill(color::GROUND))
+            .frame(Frame::NONE.fill(color::ground()))
             .show_separator_line(false)
             .show(ui, |ui| self.app_bar(ui));
 
         let gutter = space::GUTTER as i8;
-        let frame = Frame::NONE.fill(color::GROUND).inner_margin(Margin {
+        let frame = Frame::NONE.fill(color::ground()).inner_margin(Margin {
             left: gutter,
             right: gutter,
             top: 0,
@@ -1141,11 +1147,17 @@ impl eframe::App for App {
                 tracing::warn!("edit failed: {e}");
             }
             let (language, input) = (&mut self.language, &mut self.input_device);
-            self.preferences.show(ui, language, input, |key, value| {
-                let path = crate::settings_file::path()
-                    .ok_or_else(|| std::io::Error::other(tr!("settings.no_config_dir")))?;
-                crate::settings_file::save_string_to(&path, key, value)
-            });
+            let theme = &mut self.theme_setting;
+            let changed = self
+                .preferences
+                .show(ui, language, theme, input, |key, value| {
+                    let path = crate::settings_file::path()
+                        .ok_or_else(|| std::io::Error::other(tr!("settings.no_config_dir")))?;
+                    crate::settings_file::save_string_to(&path, key, value)
+                });
+            if changed {
+                self.theme = suite_ui::themes::LiveTheme::new(&self.theme_setting);
+            }
         });
 
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
@@ -1182,7 +1194,7 @@ fn menu_button(ui: &mut Ui, name: &str, left: f32) -> egui::Response {
     let r = ui.max_rect();
     let text_w = ui
         .painter()
-        .layout_no_wrap(name.into(), theme::body_strong(), color::INK)
+        .layout_no_wrap(name.into(), theme::body_strong(), color::ink())
         .size()
         .x;
     let w = (2.0 * space::S12 + text_w).ceil();
@@ -1367,7 +1379,7 @@ impl TabViewer for Viewer<'_> {
                 .with_max_y(r.response.rect.top() + size::HEADER);
             let title_w = ui
                 .painter()
-                .layout_no_wrap(tab.title().to_owned(), theme::body_strong(), color::INK)
+                .layout_no_wrap(tab.title().to_owned(), theme::body_strong(), color::ink())
                 .size()
                 .x;
             let left = header.left() + space::INSET + title_w + space::S12;
@@ -1430,11 +1442,11 @@ fn drop_overlay(ctx: &egui::Context) {
     ));
     let rect = ctx.content_rect().shrink(space::GUTTER);
     let corner = egui::CornerRadius::same(suite_ui::tokens::radius::PANEL);
-    painter.rect_filled(rect, corner, color::BLUE.gamma_multiply(0.08));
+    painter.rect_filled(rect, corner, color::blue().gamma_multiply(0.08));
     painter.rect_stroke(
         rect,
         corner,
-        Stroke::new(2.0, color::LIGHT_BLUE),
+        Stroke::new(2.0, color::light_blue()),
         egui::StrokeKind::Inside,
     );
     painter.text(
@@ -1442,7 +1454,7 @@ fn drop_overlay(ctx: &egui::Context) {
         Align2::CENTER_CENTER,
         tr!("app.drop_to_import"),
         theme::title(),
-        color::INK,
+        color::ink(),
     );
 }
 
@@ -1457,7 +1469,7 @@ impl App {
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
                     egui::Frame::popup(ui.style())
-                        .fill(color::RAISED)
+                        .fill(color::raised())
                         .inner_margin(Margin::same(space::S12 as i8))
                         .show(ui, |ui| {
                             ui.set_max_width(360.0);
@@ -1465,7 +1477,7 @@ impl App {
                                 ui.label(
                                     egui::RichText::new(icon::CIRCLE_ALERT)
                                         .font(theme::icon_font())
-                                        .color(color::RED),
+                                        .color(color::red()),
                                 );
                                 ui.add(egui::Label::new(msg.as_str()).wrap());
                                 if ui.add(Button::icon(icon::X, tr!("app.dismiss"))).clicked() {
@@ -1496,7 +1508,7 @@ fn app_icon() -> egui::IconData {
             let c = match (in_square, in_play) {
                 (false, _) => egui::Color32::TRANSPARENT,
                 (true, true) => color::WHITE,
-                (true, false) => color::BLUE,
+                (true, false) => color::blue(),
             };
             rgba.extend_from_slice(&c.to_array());
         }

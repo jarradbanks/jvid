@@ -90,7 +90,7 @@ impl Timeline {
             line.push(pos2(x, y_of(gain(x), body)));
             x += 3.0;
         }
-        painter.add(egui::Shape::line(line, Stroke::new(1.5, color::AMBER)));
+        painter.add(egui::Shape::line(line, Stroke::new(1.5, color::amber())));
 
         let mut edit = None;
         let keys = clip.keyframes.get("volume").map_or(&[][..], Vec::as_slice);
@@ -107,7 +107,7 @@ impl Timeline {
                 Sense::drag(),
             );
             let hot = r.hovered() || r.dragged();
-            painter.circle_filled(c, if hot { R + 1.0 } else { R }, color::AMBER);
+            painter.circle_filled(c, if hot { R + 1.0 } else { R }, color::amber());
             if hot {
                 ui.ctx().set_cursor_icon(CursorIcon::Grab);
             }
