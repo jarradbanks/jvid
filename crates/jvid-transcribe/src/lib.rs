@@ -30,6 +30,15 @@ pub struct Word {
     pub confidence: f32,
 }
 
+/// What a transcription heard.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Transcript {
+    /// ISO 639-1 code of the language spoken (the one asked for, or the one detected); `None` when
+    /// the audio was all silence.
+    pub language: Option<String>,
+    pub words: Vec<Word>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     /// ISO 639-1 code such as "en"; `None` detects the language.
@@ -61,10 +70,10 @@ impl std::error::Error for Error {}
 
 /// Speech to words, so jobs and tests can swap whisper for a fake.
 pub trait Transcriber: Send + Sync {
-    /// Words in `audio` (mono at [`SPEECH_RATE`]), timed from its start. Reports progress to `ctx`
+    /// Words in `audio` (mono at [`SPEECH_RATE`]), timed from its start, and its language. Reports progress to `ctx`
     /// and returns [`Error::Cancelled`] within a second of it being cancelled; [`Whisper`] frees
     /// the CPU later, at whisper.cpp's next compute-graph boundary.
-    fn transcribe(&self, audio: Vec<f32>, opts: &Options, ctx: &Ctx) -> Result<Vec<Word>, Error>;
+    fn transcribe(&self, audio: Vec<f32>, opts: &Options, ctx: &Ctx) -> Result<Transcript, Error>;
 }
 
 /// What to transcribe: audio stream `nth` of `path` over project-rate sample frames `range`
@@ -76,14 +85,14 @@ pub struct Source {
     pub range: Range<i64>,
 }
 
-/// Transcribes `source` on `jobs` and hands the words to `done` there, timed from the start of the
+/// Transcribes `source` on `jobs` and hands the transcript to `done` there, its words, timed from the start of the
 /// file. Cancel through the handle; `done` isn't called for a cancelled job.
 pub fn submit(
     jobs: &Pool,
     engine: Arc<dyn Transcriber>,
     source: Source,
     opts: Options,
-    done: impl FnOnce(Result<Vec<Word>, Error>) + Send + 'static,
+    done: impl FnOnce(Result<Transcript, Error>) + Send + 'static,
 ) -> Handle {
     // Same audio with other options or another model is another job: the pool hands a duplicate
     // the live job's handle and drops its `done`.
@@ -108,25 +117,25 @@ fn run(
     s: &Source,
     opts: &Options,
     ctx: &Ctx,
-) -> Result<Vec<Word>, Error> {
+) -> Result<Transcript, Error> {
     let audio = decode_speech(&s.path, s.nth, s.range.clone(), &|| ctx.is_cancelled())
         .map_err(Error::Failed)?
         .ok_or(Error::Cancelled)?;
     let (speech, spans) = skip_silence(&audio);
     // An hour of speech-rate audio is about 230 MB.
     drop(audio);
-    let mut words = if speech.is_empty() {
-        Vec::new()
+    let mut t = if speech.is_empty() {
+        Transcript::default()
     } else {
         engine.transcribe(speech, opts, ctx)?
     };
     let offset = Rate::new(SAMPLE_RATE, 1).time_floor(s.range.start.max(0));
-    for w in &mut words {
+    for w in &mut t.words {
         let (start, end) = to_source(w.start, w.end, &spans);
         (w.start, w.end) = (offset + start, offset + end);
     }
     ctx.set_progress(1.0);
-    Ok(words)
+    Ok(t)
 }
 
 /// Quiet below this many dBFS for [`MIN_SILENCE`] samples or more is cut, keeping [`PAD`] samples
@@ -277,7 +286,7 @@ mod tests {
             audio: Vec<f32>,
             opts: &Options,
             ctx: &Ctx,
-        ) -> Result<Vec<Word>, Error> {
+        ) -> Result<Transcript, Error> {
             if self.slow {
                 while !ctx.is_cancelled() {
                     ctx.set_progress(0.5);
@@ -286,14 +295,17 @@ mod tests {
                 return Err(Error::Cancelled);
             }
             let text = opts.initial_prompt.clone().unwrap_or_default();
-            Ok((0..audio.len() / S)
-                .map(|i| Word {
-                    text: text.clone(),
-                    start: secs(i as f64),
-                    end: secs(i as f64 + 0.5),
-                    confidence: 1.0,
-                })
-                .collect())
+            Ok(Transcript {
+                language: Some(opts.language.clone().unwrap_or("en".into())),
+                words: (0..audio.len() / S)
+                    .map(|i| Word {
+                        text: text.clone(),
+                        start: secs(i as f64),
+                        end: secs(i as f64 + 0.5),
+                        confidence: 1.0,
+                    })
+                    .collect(),
+            })
         }
     }
 
@@ -362,8 +374,10 @@ mod tests {
                 tx.send(r).unwrap();
             },
         );
-        let words = rx.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+        let t = rx.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
         assert_eq!(h.progress(), 1.0);
+        assert_eq!(t.language.as_deref(), Some("en"));
+        let words = t.words;
         let starts: Vec<f64> = words
             .iter()
             .map(|w| w.start.0 as f64 / jvid_core::time::FLICKS_PER_SECOND as f64)
@@ -405,7 +419,7 @@ mod tests {
             };
             let tx = tx.clone();
             submit(&jobs, engine, source.clone(), opts, move |r| {
-                tx.send((i, r.unwrap()[0].text.clone())).unwrap();
+                tx.send((i, r.unwrap().words[0].text.clone())).unwrap();
             });
         }
         let mut got: Vec<_> = (0..3)

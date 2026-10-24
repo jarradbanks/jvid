@@ -41,19 +41,20 @@ fn source() -> Source {
     }
 }
 
-/// Acceptance: a short speech fixture transcribes to the expected words with the smallest model.
+/// Acceptance: a short speech fixture transcribes to the expected words with the smallest model,
+/// and its language is detected.
 #[test]
 #[ignore = "downloads a model"]
 fn jfk_transcribes_with_base_model() {
     let jobs = Pool::new(2);
     let (_one, engine) = whisper(&jobs);
     let (tx, rx) = mpsc::channel();
-    let opts = Options {
-        language: Some("en".into()),
-        ..Options::default()
-    };
-    jvid_transcribe::submit(&jobs, engine, source(), opts, move |r| tx.send(r).unwrap());
-    let words: Vec<Word> = rx.recv_timeout(Duration::from_secs(120)).unwrap().unwrap();
+    jvid_transcribe::submit(&jobs, engine, source(), Options::default(), move |r| {
+        tx.send(r).unwrap()
+    });
+    let t = rx.recv_timeout(Duration::from_secs(120)).unwrap().unwrap();
+    assert_eq!(t.language.as_deref(), Some("en"));
+    let words: Vec<Word> = t.words;
     let text: Vec<String> = words
         .iter()
         .map(|w| {
