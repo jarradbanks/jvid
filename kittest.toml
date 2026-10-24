@@ -1,0 +1,9 @@
+# Snapshot tolerance for every egui_kittest test. Linux (Mesa lavapipe) is the pixel reference and
+# must match exactly; Windows WARP and macOS rasterise text and antialiased edges differently
+# (up to ~6k pixels on a full editor view), so off Linux only a gross layout change fails.
+# shortcut: a fixed pixel budget, not per-image; upgrade to per-OS reference images if it masks a real regression.
+[windows]
+max_failed_pixels = 20000
+
+[mac]
+max_failed_pixels = 20000

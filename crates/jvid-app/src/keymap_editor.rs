@@ -231,8 +231,8 @@ fn toml_dialog() -> FileDialog {
 mod tests {
     use super::*;
     use egui::Modifiers;
+    use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
-    use egui_kittest::{Harness, OsThreshold, SnapshotOptions};
 
     #[test]
     fn search_matches_names_case_insensitively() {
@@ -295,9 +295,6 @@ mod tests {
             state,
         );
         h.run_steps(2);
-        // WARP antialiases one glyph pixel of the clipped last row past the threshold (by
-        // 2/255 per channel); every other OS must match exactly.
-        let options = SnapshotOptions::new().max_failed_pixels(OsThreshold::new(0).windows(1));
-        h.snapshot_options("keymap_editor", &options);
+        h.snapshot("keymap_editor");
     }
 }
