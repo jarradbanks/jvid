@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use egui::{Align, Align2, Frame, Layout, Margin, Stroke, Ui, UiBuilder, ViewportCommand, vec2};
 use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
 use jvid_core::history::{Command, History};
-use jvid_core::model::{AssetId, MAX_NEST_DEPTH, ModelError, Project, ProjectSettings};
+use jvid_core::model::{AssetId, MAX_NEST_DEPTH, ModelError, Project, ProjectSettings, TrackKind};
 use jvid_core::time::Time;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
@@ -112,6 +112,8 @@ pub struct App {
     input_device: String,
     /// The voiceover being recorded.
     take: Option<crate::record::Take>,
+    /// The microphone backend, opened on the first take; tests swap in a fake.
+    input: Option<Box<dyn jvid_audio::InputBackend>>,
     /// The `theme` setting: a built-in name or a theme file's path.
     theme_setting: String,
     theme: suite_ui::themes::LiveTheme,
@@ -212,6 +214,7 @@ impl App {
             language: jvid_core::settings::Settings::default().language,
             input_device: String::new(),
             take: None,
+            input: None,
             theme_setting: "dark".into(),
             theme: suite_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
@@ -686,29 +689,57 @@ impl App {
     }
 
     /// Starts a voiceover take on the armed track at the playhead, and plays the timeline
-    /// under it. Errors leave the project unchanged.
+    /// under it. With no audio track armed, records into a new one, armed. Errors leave the
+    /// project unchanged.
     fn start_take(&mut self) {
-        let seq = self.history.project().sequence();
-        let armed = self.timeline.armed.and_then(|id| seq.track(id));
-        let Some(track) = armed.filter(|t| t.kind == jvid_core::model::TrackKind::Audio) else {
-            self.timeline.notice = Some(tr!("timeline.record_no_track").into());
-            return;
-        };
         let Some(dir) = crate::record::media_dir(self.path.as_deref()) else {
             return;
         };
+        let seq = self.history.project().sequence();
+        let armed = self.timeline.armed.and_then(|id| seq.track(id));
+        let armed = armed.filter(|t| t.kind == TrackKind::Audio).map(|t| t.id);
+        // One undo step with the track, rolled back if the device won't open.
+        let txn = self.history.begin();
+        let track = match armed {
+            Some(id) => Ok(id),
+            None => self
+                .history
+                .apply(Command::AddTrack {
+                    kind: TrackKind::Audio,
+                    name: String::new(),
+                })
+                .map_err(|e| e.to_string())
+                .and_then(|c| match c {
+                    jvid_core::history::Created::Track(id) => Ok(id),
+                    _ => Err(tr!("timeline.record_no_track").into()),
+                }),
+        };
         let device = Some(self.input_device.as_str()).filter(|d| !d.is_empty());
-        let mut input = jvid_audio::CpalInput::default();
+        let input = self
+            .input
+            .get_or_insert_with(|| Box::new(jvid_audio::CpalInput::default()));
         let start = self.timeline.playhead();
-        match crate::record::Take::start(&mut input, device, &dir, track.id, start) {
+        let take = track.and_then(|track| {
+            crate::record::Take::start(input.as_mut(), device, &dir, track, start)
+        });
+        match take {
             Ok(take) => {
+                if txn {
+                    self.history.commit();
+                }
+                self.timeline.armed = Some(take.track);
                 self.take = Some(take);
                 self.preview_active = 1;
                 if !self.preview.playing() {
                     self.preview.program_action("shuttle_right");
                 }
             }
-            Err(e) => self.timeline.notice = Some(tr!("timeline.record_failed", error = e)),
+            Err(e) => {
+                if txn {
+                    self.history.rollback();
+                }
+                self.timeline.notice = Some(tr!("timeline.record_failed", error = e));
+            }
         }
     }
 
@@ -1012,6 +1043,11 @@ impl eframe::App for App {
         }
         let now = ctx.input(|i| i.time);
         self.poll_take(&ctx);
+        // The Program transport row's Record button shows the take Shift+R drives.
+        self.preview.recording = self.take.as_ref().map(|t| {
+            let level = self.timeline.level.unwrap_or(0.0);
+            (t.began.elapsed(), level)
+        });
         self.poll_import(now);
         self.poll_export(now);
         let target = self.autosave_target().filter(|_| !self.on_welcome);
@@ -1081,6 +1117,9 @@ impl eframe::App for App {
                 viewer.relink,
                 viewer.open,
             );
+            if std::mem::take(&mut self.preview.record_clicked) {
+                self.run_action("record", true);
+            }
             if let Some(msg) = self.timeline.notice.take() {
                 self.toasts.push((msg, now + TOAST_SECS));
             }

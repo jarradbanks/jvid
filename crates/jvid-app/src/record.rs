@@ -36,6 +36,8 @@ pub struct Take {
     pub track: TrackId,
     pub start: Time,
     pub path: PathBuf,
+    /// When recording began, for the transport row's elapsed time.
+    pub began: std::time::Instant,
     /// The meter: the input peak, falling back slowly.
     level: f32,
 }
@@ -56,6 +58,7 @@ impl Take {
             track,
             start,
             path,
+            began: std::time::Instant::now(),
             level: 0.0,
         })
     }
@@ -118,7 +121,7 @@ impl Take {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::any::Any;
     use std::sync::{Arc, Mutex};
 
@@ -129,7 +132,7 @@ mod tests {
 
     /// A microphone the test feeds by hand.
     #[derive(Default, Clone)]
-    struct FakeMic(Arc<Mutex<Option<Arc<Capture>>>>);
+    pub struct FakeMic(pub Arc<Mutex<Option<Arc<Capture>>>>);
 
     impl InputBackend for FakeMic {
         fn devices(&self) -> Vec<String> {
