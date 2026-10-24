@@ -3114,6 +3114,29 @@ mod tests {
     }
 
     #[test]
+    fn the_bottom_tracks_tooltips_leave_add_track_clear() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(2));
+        let arm = h.get_by_label("Arm for Recording").rect();
+        h.hover_at(arm.center());
+        for _ in 0..4 {
+            h.step();
+        }
+        h.run();
+        h.snapshot("timeline_arm_tooltip");
+        let tip = h
+            .get_all_by_label("Arm for Recording")
+            .map(|n| n.rect())
+            .find(|r| *r != arm)
+            .expect("the tooltip shows");
+        let add = h.get_by_label_contains("Track").rect();
+        assert!(!tip.intersects(add), "{tip:?} covers + Track at {add:?}");
+    }
+
+    #[test]
     fn header_toggles_and_height_drag_are_undoable() {
         use egui_kittest::kittest::Queryable;
         if !suite_ui::test_support::gpu() {
