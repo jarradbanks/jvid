@@ -617,6 +617,57 @@ fn dock_layout_persists() {
     }
 }
 
+/// Show Render Queue splits it off Timeline's right once; the layout keeps it; Close removes it
+/// cleanly and showing it again puts it back beside Timeline.
+#[test]
+fn render_queue_docks_beside_timeline_and_reopens_there() {
+    let mut app = App::restore(None);
+    let leaves = |app: &App| {
+        app.dock
+            .iter_all_nodes()
+            .filter(|(_, n)| n.is_leaf())
+            .count()
+    };
+    let before = leaves(&app);
+    assert!(app.dock.find_tab(&Tab::RenderQueue).is_none());
+    for _ in 0..2 {
+        app.show_queue();
+    }
+    let beside = |app: &App| {
+        let (q, t) = (
+            app.dock.find_tab(&Tab::RenderQueue).unwrap(),
+            app.dock.find_tab(&Tab::Timeline).unwrap(),
+        );
+        // A split's two children sit at 2n+1 and 2n+2, so the queue is Timeline's right sibling.
+        q.surface == t.surface && q.node.0 == t.node.0 + 1 && t.node.0 % 2 == 1
+    };
+    assert!(beside(&app));
+    assert_eq!(leaves(&app), before + 1);
+    assert_eq!(
+        app.dock.find_active_focused().map(|(_, t)| *t),
+        Some(Tab::RenderQueue)
+    );
+
+    let mut storage = Memory::default();
+    eframe::App::save(&mut app, &mut storage);
+    let mut app = App::restore(Some(&storage));
+    assert!(beside(&app));
+    for (_, node) in app.dock.iter_all_nodes() {
+        assert!(!node.is_leaf() || node.is_tab_bar_hidden());
+    }
+
+    let ctx = egui::Context::default();
+    app.queue_action(&ctx, Some(QueueAction::Close));
+    assert!(app.dock.find_tab(&Tab::RenderQueue).is_none());
+    assert_eq!(leaves(&app), before);
+    // A saved layout without the queue is still whole.
+    let mut storage = Memory::default();
+    eframe::App::save(&mut app, &mut storage);
+    let mut app = App::restore(Some(&storage));
+    app.queue_action(&ctx, Some(QueueAction::Show));
+    assert!(beside(&app));
+}
+
 #[test]
 fn corrupt_dock_layout_falls_back_to_default() {
     let mut storage = Memory::default();

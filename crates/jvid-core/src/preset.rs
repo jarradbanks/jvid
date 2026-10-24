@@ -92,6 +92,13 @@ impl Preset {
     }
 }
 
+/// The preset called `name`: an exact match, else one ignoring case, so names written before the
+/// built-ins moved to Title Case ("ProRes Master") still load.
+pub fn find<'a>(presets: &'a [Preset], name: &str) -> Option<&'a Preset> {
+    let exact = presets.iter().find(|p| p.name == name);
+    exact.or_else(|| presets.iter().find(|p| p.name.eq_ignore_ascii_case(name)))
+}
+
 /// The built-in presets, in menu order.
 pub fn builtin() -> Vec<Preset> {
     use AudioCodec::*;
@@ -132,7 +139,7 @@ pub fn builtin() -> Vec<Preset> {
         ),
         // Source size, low crf and no deblocking blur keep small text crisp.
         p(
-            "Screen recording (sharp text)",
+            "Screen Recording (Sharp Text)",
             "mp4",
             Some(H264),
             Some(Aac),
@@ -168,7 +175,7 @@ pub fn builtin() -> Vec<Preset> {
             hq,
         ),
         p(
-            "ProRes master",
+            "ProRes Master",
             "mov",
             Some(ProRes),
             Some(Pcm),
@@ -185,9 +192,9 @@ pub fn builtin() -> Vec<Preset> {
             Some(15),
             &[("width", "854"), ("loop", "0")],
         ),
-        p("Audio only (WAV)", "wav", None, Some(Pcm), None, None, &[]),
+        p("Audio Only (WAV)", "wav", None, Some(Pcm), None, None, &[]),
         p(
-            "Audio only (WAV 24-bit)",
+            "Audio Only (WAV 24-bit)",
             "wav",
             None,
             Some(Pcm24),
@@ -195,8 +202,8 @@ pub fn builtin() -> Vec<Preset> {
             None,
             &[],
         ),
-        p("Audio only (MP3)", "mp3", None, Some(Mp3), None, None, &[]),
-        p("Audio only (AAC)", "m4a", None, Some(Aac), None, None, &[]),
+        p("Audio Only (MP3)", "mp3", None, Some(Mp3), None, None, &[]),
+        p("Audio Only (AAC)", "m4a", None, Some(Aac), None, None, &[]),
     ]
 }
 
@@ -218,6 +225,30 @@ mod tests {
         assert_eq!(Preset::from_toml(&toml::to_string(&p).unwrap()).unwrap(), p);
         let a = Preset::from_toml("name = \"A\"\nextension = \"wav\"\naudio = \"pcm\"").unwrap();
         assert_eq!((a.video, a.size), (None, None));
+    }
+
+    #[test]
+    fn old_sentence_case_names_still_find_their_preset() {
+        let all = builtin();
+        for (old, new) in [
+            (
+                "Screen recording (sharp text)",
+                "Screen Recording (Sharp Text)",
+            ),
+            ("ProRes master", "ProRes Master"),
+            ("Audio only (WAV)", "Audio Only (WAV)"),
+            ("Audio only (WAV 24-bit)", "Audio Only (WAV 24-bit)"),
+            ("Audio only (MP3)", "Audio Only (MP3)"),
+            ("Audio only (AAC)", "Audio Only (AAC)"),
+        ] {
+            assert_eq!(find(&all, old).map(|p| p.name.as_str()), Some(new));
+        }
+        // An exact match wins over one that differs only in case.
+        let mut mine = all[0].clone();
+        mine.name = "prores master".into();
+        let both = [all[6].clone(), mine];
+        assert_eq!(find(&both, "prores master").unwrap().name, "prores master");
+        assert!(find(&all, "No Such Preset").is_none());
     }
 
     #[test]
@@ -244,7 +275,7 @@ mod tests {
         assert!(find("Shorts").aspect_warning((1920, 1080)).is_some());
         assert!(find("Shorts").aspect_warning((720, 1280)).is_none());
         assert!(find("Screen").aspect_warning((1000, 1)).is_none());
-        assert!(find("Audio only (WAV)").aspect_warning((1, 1)).is_none());
+        assert!(find("Audio Only (WAV)").aspect_warning((1, 1)).is_none());
     }
 
     #[test]

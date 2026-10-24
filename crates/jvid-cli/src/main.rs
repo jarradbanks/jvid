@@ -133,7 +133,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
 /// The export request, with the app's defaults: the first preset and the sequence's in/out points.
 fn request(project: &Project, args: &Args, presets: Vec<Preset>) -> Result<Request, String> {
     let mut preset = match &args.preset {
-        Some(n) => presets.into_iter().find(|p| &p.name == n),
+        Some(n) => jvid_core::preset::find(&presets, n).cloned(),
         None => presets.into_iter().next(),
     }
     .ok_or_else(|| format!("no preset {:?}", args.preset.as_deref().unwrap_or_default()))?;

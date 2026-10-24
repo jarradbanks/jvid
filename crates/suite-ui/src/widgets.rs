@@ -875,6 +875,8 @@ pub struct Segmented<'a> {
     /// Each option's name when `options` are icon glyphs.
     names: Option<&'a [&'a str]>,
     state: State,
+    off: &'a [Option<&'a str>],
+    tips: &'a [Option<&'a str>],
 }
 
 impl<'a> Segmented<'a> {
@@ -884,6 +886,8 @@ impl<'a> Segmented<'a> {
             options,
             names: None,
             state: State::Live,
+            off: &[],
+            tips: &[],
         }
     }
 
@@ -893,6 +897,18 @@ impl<'a> Segmented<'a> {
             names: Some(names),
             ..Self::new(selected, glyphs)
         }
+    }
+
+    /// Per option: `Some(why)` disables it, with `why` on hover.
+    pub fn off(mut self, off: &'a [Option<&'a str>]) -> Self {
+        self.off = off;
+        self
+    }
+
+    /// Per option: hover text while it's enabled.
+    pub fn tips(mut self, tips: &'a [Option<&'a str>]) -> Self {
+        self.tips = tips;
+        self
     }
 
     /// Pins the state of the first unselected segment.
@@ -932,9 +948,10 @@ impl Widget for Segmented<'_> {
         for (i, (option, w)) in self.options.iter().zip(&widths).enumerate() {
             let seg = Rect::from_x_y_ranges(x..=x + w, rect.top() + pad..=rect.bottom() - pad);
             x += w;
+            let off = self.off.get(i).copied().flatten();
             let pinned = if Some(i) == first_unselected {
                 self.state
-            } else if disabled {
+            } else if disabled || off.is_some() {
                 State::Disabled
             } else {
                 State::Live
@@ -942,7 +959,7 @@ impl Widget for Segmented<'_> {
             let seg_response = ui.interact(
                 seg,
                 response.id.with(i),
-                if disabled {
+                if disabled || off.is_some() {
                     Sense::hover()
                 } else {
                     Sense::click()
@@ -950,10 +967,14 @@ impl Widget for Segmented<'_> {
             );
             let on = i == *self.selected;
             let name = self.names.map_or(*option, |n| n[i]);
-            seg_response
-                .widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, !disabled, on, name));
-            let seg_response = match self.names {
-                Some(_) => seg_response.on_hover_text(name),
+            seg_response.widget_info(|| {
+                WidgetInfo::selected(WidgetType::RadioButton, !disabled && off.is_none(), on, name)
+            });
+            let tip = off
+                .or(self.tips.get(i).copied().flatten())
+                .or(self.names.map(|_| name));
+            let seg_response = match tip {
+                Some(tip) => seg_response.on_hover_text(tip),
                 None => seg_response,
             };
             if seg_response.clicked() {
@@ -962,7 +983,7 @@ impl Widget for Segmented<'_> {
             }
             let l = look(&seg_response, pinned);
             let l = Look {
-                disabled: l.disabled || disabled,
+                disabled: l.disabled || disabled || off.is_some(),
                 ..l
             };
             let fill = if on && !l.disabled {

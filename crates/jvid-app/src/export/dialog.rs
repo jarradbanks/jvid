@@ -3,15 +3,15 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use egui::Ui;
+use egui::{Align, FontId, Layout, Margin, RichText, Ui, vec2};
 use jvid_core::model::{ClipId, Marker, MarkerId, Project, Sequence};
 use jvid_core::preset::{AudioCodec, Preset, VideoCodec};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_media::remux::{Cut, SMART_ENCODER};
 use rfd::FileDialog;
-use suite_ui::theme;
-use suite_ui::tokens::{radius, space};
-use suite_ui::widgets::{Button, Dropdown, State};
+use suite_ui::theme::{self, icon};
+use suite_ui::tokens::{color, radius, size, space};
+use suite_ui::widgets::{Button, Checkbox, Dropdown, Segmented, State, TextInput};
 
 use super::lossless::{self, Lossless};
 use super::{Request, preset_name};
@@ -94,6 +94,9 @@ impl ExportDialog {
 
     /// Shows the dialog while open; returns the request when the user clicks Export or Add to
     /// Queue, with `true` for Export; Highlights gives one request per chosen marker.
+    ///
+    /// Format, Range and Output groups in one column with the inspector's row layout; the body
+    /// scrolls when it outgrows the window and the footer, with Estimated Size, stays put.
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -105,173 +108,213 @@ impl ExportDialog {
         let seq = project.sequence();
         let s = project.settings();
         let mut request = None;
+        // 16px clear of the window above and below.
+        let max_body = ui.ctx().content_rect().height() - space::S32 - HEAD - FOOT;
         let modal = egui::Modal::new(egui::Id::new("export_dialog"))
             .frame(
                 egui::Frame::popup(ui.style())
                     .corner_radius(radius::DIALOG)
-                    .inner_margin(space::S16),
+                    .inner_margin(0),
             )
             .show(ui.ctx(), |ui| {
-                ui.set_width(420.0);
-                ui.label(egui::RichText::new(tr!("export.export")).font(theme::headline()));
-                ui.add_space(space::S8);
-                egui::Grid::new("export_grid")
-                    .spacing([space::S8, space::S8])
+                ui.set_width(WIDTH);
+                ui.spacing_mut().item_spacing = vec2(space::S4, space::S4);
+                let head = Margin {
+                    left: 16,
+                    right: 16,
+                    top: 16,
+                    bottom: 8,
+                };
+                egui::Frame::NONE.inner_margin(head).show(ui, |ui| {
+                    let title = RichText::new(tr!("export.export")).font(theme::headline());
+                    ui.label(title.color(color::INK));
+                });
+                let body = Margin {
+                    left: 16,
+                    right: 12,
+                    top: 0,
+                    bottom: 4,
+                };
+                egui::ScrollArea::vertical()
+                    .max_height(max_body.max(120.0))
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        ui.label(tr!("export.preset"));
-                        let names: Vec<&str> = self
-                            .presets
-                            .iter()
-                            .enumerate()
-                            .map(|(i, p)| preset_name(i, p))
-                            .collect();
-                        let before = self.preset;
-                        ui.add(Dropdown::new(&mut self.preset, &names).width(260.0));
-                        let preset = &self.presets[self.preset];
-                        if self.preset != before {
-                            path.set_extension(&preset.extension);
-                        }
-                        ui.end_row();
-
-                        ui.label(tr!("export.video"));
-                        ui.horizontal(|ui| {
+                        egui::Frame::NONE.inner_margin(body).show(ui, |ui| {
+                            ui.spacing_mut().item_spacing = vec2(space::S4, space::S4);
+                            section(ui, tr!("export.format"), true);
+                            row(ui, tr!("export.preset"), |ui| {
+                                let names: Vec<&str> = self
+                                    .presets
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, p)| preset_name(i, p))
+                                    .collect();
+                                let before = self.preset;
+                                let w = ui.available_width();
+                                ui.add(Dropdown::new(&mut self.preset, &names).width(w));
+                                if self.preset != before {
+                                    path.set_extension(&self.presets[self.preset].extension);
+                                }
+                            });
+                            let preset = &self.presets[self.preset];
                             let shown = if s.hdr_output {
                                 &preset.clone().hdr()
                             } else {
                                 preset
                             };
-                            ui.label(video_summary(shown, s.width, s.height, s.frame_rate));
+                            let video = video_summary(shown, s.width, s.height, s.frame_rate);
+                            row(ui, tr!("export.video"), |ui| readout(ui, &video));
                             let name = preset_name(self.preset, preset);
                             if let Some(w) = aspect_warning(name, preset, (s.width, s.height)) {
-                                ui.label("⚠").on_hover_text(w);
+                                note(ui, Note::Warn, &w);
                             }
-                        });
-                        ui.end_row();
-
-                        ui.label(tr!("inspector.audio"));
-                        ui.label(preset.audio.map_or(tr!("export.none"), audio_name));
-                        ui.end_row();
-
-                        ui.label(tr!("export.loudness"));
-                        let enabled = preset.audio.is_some();
-                        ui.add_enabled_ui(enabled, |ui| loudness_picker(ui, &mut self.loudness));
-                        ui.end_row();
-
-                        if seq.tracks().iter().any(|t| t.subtitles) {
-                            ui.label(tr!("app.subtitles"));
-                            ui.horizontal(|ui| {
-                                ui.radio_value(&mut self.sidecar, false, tr!("export.burn_in"));
-                                ui.radio_value(&mut self.sidecar, true, tr!("export.sidecar"));
+                            let audio = preset.audio.map_or(tr!("export.none"), audio_name);
+                            row(ui, tr!("inspector.audio"), |ui| readout(ui, audio));
+                            row(ui, tr!("export.loudness"), |ui| {
+                                ui.add_enabled_ui(preset.audio.is_some(), |ui| {
+                                    loudness_picker(ui, &mut self.loudness)
+                                });
                             });
-                            ui.end_row();
-                        }
-
-                        ui.label(tr!("export.range"));
-                        ui.horizontal(|ui| {
-                            let marked = seq.in_point().is_some() || seq.out_point().is_some();
-                            ui.radio_value(range, Range::Entire, tr!("export.entire"));
-                            ui.add_enabled_ui(marked, |ui| {
-                                ui.radio_value(range, Range::InOut, tr!("export.in_out"))
-                                    .on_disabled_hover_text(tr!("export.in_out_off"))
-                            });
-                            ui.add_enabled_ui(!selected.is_empty(), |ui| {
-                                ui.radio_value(range, Range::Selected, tr!("export.selected"))
-                                    .on_disabled_hover_text(tr!("export.selected_off"))
-                            });
-                            ui.add_enabled_ui(highlights(seq).next().is_some(), |ui| {
-                                ui.radio_value(range, Range::Highlights, tr!("export.highlights"))
-                                    .on_disabled_hover_text(tr!("export.highlights_off"))
-                            });
-                        });
-                        ui.end_row();
-
-                        if *range == Range::Highlights {
-                            ui.label(tr!("export.highlights"));
-                            ui.vertical(|ui| {
-                                for m in highlights(seq) {
-                                    let mut on = !self.skipped.contains(&m.id);
-                                    if ui.checkbox(&mut on, &m.name).changed() {
-                                        if on {
-                                            self.skipped.remove(&m.id);
-                                        } else {
-                                            self.skipped.insert(m.id);
-                                        }
+                            if seq.tracks().iter().any(|t| t.subtitles) {
+                                row(ui, tr!("app.subtitles"), |ui| {
+                                    let mut i = self.sidecar as usize;
+                                    let options = [tr!("export.burn_in"), tr!("export.sidecar")];
+                                    if ui.add(Segmented::new(&mut i, &options)).changed() {
+                                        self.sidecar = i == 1;
                                     }
+                                });
+                            }
+
+                            section(ui, tr!("export.range"), false);
+                            row(ui, tr!("export.range"), |ui| {
+                                let marked = seq.in_point().is_some() || seq.out_point().is_some();
+                                let none = highlights(seq).next().is_none();
+                                let off = [
+                                    None,
+                                    (!marked).then_some(tr!("export.in_out_off")),
+                                    selected.is_empty().then_some(tr!("export.selected_off")),
+                                    none.then_some(tr!("export.highlights_off")),
+                                ];
+                                let mut i = RANGES.iter().position(|r| r == range).unwrap_or(0);
+                                let options = [
+                                    tr!("export.entire"),
+                                    tr!("export.in_out"),
+                                    tr!("export.selected"),
+                                    tr!("export.highlights"),
+                                ];
+                                if ui.add(Segmented::new(&mut i, &options).off(&off)).changed() {
+                                    *range = RANGES[i];
                                 }
                             });
-                            ui.end_row();
-                            ui.label(tr!("export.file_names"));
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.template).desired_width(260.0),
-                            )
-                            .on_hover_text(tr!(
-                                "export.file_names_tooltip",
-                                project = verbatim("{project}"),
-                                marker = verbatim("{marker}"),
-                                index = verbatim("{index}"),
-                            ));
-                            ui.end_row();
-                        }
-
-                        let span = span(*range, seq, selected);
-                        let rate = s.frame_rate;
-                        let tc = |t: Time| format_timecode(rate.index_floor(t).max(0) as u64, rate);
-                        let (a, b) = span.unwrap_or_default();
-                        let rows = [
-                            (tr!("export.in"), a),
-                            (tr!("export.out"), b),
-                            (tr!("bin.sort_duration"), b - a),
-                        ];
-                        for (label, t) in rows {
-                            ui.label(label);
-                            ui.monospace(tc(t));
-                            ui.end_row();
-                        }
-
-                        ui.label(tr!("export.lossless"));
-                        let copyable = lossless::check(project, (a, b));
-                        lossless_picker(ui, &mut self.lossless, &copyable);
-                        ui.end_row();
-                        if let (Some(_), Ok(cuts)) = (self.lossless, &copyable)
-                            && let Some(ext) = cuts[0].path.extension()
-                        {
-                            path.set_extension(ext);
-                        }
-
-                        ui.label(tr!("export.output"));
-                        ui.horizontal(|ui| {
-                            let mut text = path.display().to_string();
-                            if ui
-                                .add(egui::TextEdit::singleline(&mut text).desired_width(260.0))
-                                .changed()
-                            {
-                                *path = text.into();
+                            let (a, b) = span(*range, seq, selected).unwrap_or_default();
+                            let rate = s.frame_rate;
+                            let tc =
+                                |t: Time| format_timecode(rate.index_floor(t).max(0) as u64, rate);
+                            row(ui, "", |ui| {
+                                let pairs = [
+                                    (tr!("export.in"), a),
+                                    (tr!("export.out"), b),
+                                    (tr!("bin.sort_duration"), b - a),
+                                ];
+                                for (i, (label, t)) in pairs.into_iter().enumerate() {
+                                    if i > 0 {
+                                        ui.add_space(space::S4);
+                                    }
+                                    ui.label(RichText::new(label).color(color::INK_3));
+                                    ui.label(RichText::new(tc(t)).color(color::INK_2));
+                                }
+                            });
+                            if *range == Range::Highlights {
+                                row(ui, tr!("export.highlights"), |ui| {
+                                    ui.vertical(|ui| {
+                                        for m in highlights(seq) {
+                                            let mut on = !self.skipped.contains(&m.id);
+                                            ui.horizontal(|ui| {
+                                                if ui.add(Checkbox::new(&mut on, &m.name)).changed()
+                                                {
+                                                    if on {
+                                                        self.skipped.remove(&m.id);
+                                                    } else {
+                                                        self.skipped.insert(m.id);
+                                                    }
+                                                }
+                                                let secs =
+                                                    m.duration.0 as f64 / FLICKS_PER_SECOND as f64;
+                                                ui.with_layout(
+                                                    Layout::right_to_left(Align::Center),
+                                                    |ui| {
+                                                        let d = super::queue::clock(secs);
+                                                        ui.label(
+                                                            RichText::new(d).color(color::INK_3),
+                                                        );
+                                                    },
+                                                );
+                                            });
+                                        }
+                                    });
+                                });
+                                row(ui, tr!("export.file_names"), |ui| {
+                                    let w = ui.available_width();
+                                    ui.add(TextInput::new(&mut self.template).width(w));
+                                });
+                                let help = tr!(
+                                    "export.file_names_tooltip",
+                                    project = verbatim("{project}"),
+                                    marker = verbatim("{marker}"),
+                                    index = verbatim("{index}"),
+                                );
+                                note(ui, Note::Help, &help);
                             }
-                            if ui.add(Button::secondary(tr!("export.browse"))).clicked()
-                                && let Some(p) = FileDialog::new()
-                                    .set_title(tr!("export.export"))
-                                    .add_filter(
-                                        preset_name(self.preset, preset),
-                                        &[&preset.extension],
-                                    )
-                                    .set_directory(path.parent().unwrap_or(&PathBuf::new()))
-                                    .set_file_name(
-                                        path.file_name().unwrap_or_default().to_string_lossy(),
-                                    )
-                                    .save_file()
-                            {
-                                *path = p;
-                            }
-                        });
-                        ui.end_row();
 
-                        ui.label(tr!("export.target_size"));
-                        let sizable =
-                            matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
-                        ui.horizontal(|ui| {
-                            ui.add_enabled_ui(sizable, |ui| target_picker(ui, &mut self.target))
-                                .response
-                                .on_disabled_hover_text(tr!("export.target_size_off"));
+                            section(ui, tr!("export.output"), false);
+                            row(ui, tr!("export.output"), |ui| {
+                                let error = path
+                                    .file_name()
+                                    .is_none()
+                                    .then(|| tr!("export.no_file_name_row"));
+                                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                    if ui.add(Button::secondary(tr!("export.browse"))).clicked()
+                                        && let Some(p) = FileDialog::new()
+                                            .set_title(tr!("export.export"))
+                                            .add_filter(name, &[&preset.extension])
+                                            .set_directory(path.parent().unwrap_or(&PathBuf::new()))
+                                            .set_file_name(
+                                                path.file_name()
+                                                    .unwrap_or_default()
+                                                    .to_string_lossy(),
+                                            )
+                                            .save_file()
+                                    {
+                                        *path = p;
+                                    }
+                                    let mut text = path.display().to_string();
+                                    let w = ui.available_width();
+                                    let field = TextInput::new(&mut text).width(w).error(error);
+                                    if ui.add(field).changed() {
+                                        *path = text.into();
+                                    }
+                                });
+                            });
+                            let copyable = lossless::check(project, (a, b));
+                            row(ui, tr!("export.lossless"), |ui| {
+                                lossless_picker(ui, &mut self.lossless, &copyable)
+                            });
+                            if let Err(why) = &copyable {
+                                let text = tr!("export.unavailable", reason = why[0]);
+                                note(ui, Note::Help, &text).on_hover_text(why.join("\n"));
+                            }
+                            if let (Some(_), Ok(cuts)) = (self.lossless, &copyable)
+                                && let Some(ext) = cuts[0].path.extension()
+                            {
+                                path.set_extension(ext);
+                            }
+                            let sizable =
+                                matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
+                            row(ui, tr!("export.target_size"), |ui| {
+                                ui.add_enabled_ui(sizable, |ui| {
+                                    target_picker(ui, &mut self.target)
+                                });
+                            });
                             let secs = (b - a).0 as f64 / FLICKS_PER_SECOND as f64;
                             let warning = match self.target.filter(|_| sizable && secs > 0.0) {
                                 Some(mb) => match super::target_bitrate(preset, mb * MB, secs) {
@@ -282,84 +325,100 @@ impl ExportDialog {
                                 },
                                 None => None,
                             };
-                            if let Some(w) = warning {
-                                ui.label("⚠").on_hover_text(w);
+                            if !sizable {
+                                note(ui, Note::Help, tr!("export.target_size_off"));
+                            } else if let Some(w) = warning {
+                                note(ui, Note::Warn, &w);
                             }
                         });
-                        ui.end_row();
+                    });
 
-                        ui.label(tr!("export.estimated_size"));
-                        match self.target.filter(|_| sizable) {
-                            Some(mb) => ui.label(tr!("export.under_mb", mb = mb)),
-                            None => ui.label(format_size(estimate(
+                rule(ui);
+                let foot = Margin {
+                    left: 16,
+                    right: 16,
+                    top: 12,
+                    bottom: 16,
+                };
+                egui::Frame::NONE.inner_margin(foot).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = space::S8;
+                        let preset = &self.presets[self.preset];
+                        let sizable =
+                            matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
+                        let span = span(*range, seq, selected).filter(|(a, b)| b > a);
+                        let size = match (span, self.target.filter(|_| sizable)) {
+                            (None, _) => verbatim("–").to_owned(),
+                            (Some(_), Some(mb)) => tr!("export.under_mb", mb = mb),
+                            (Some((a, b)), None) => format_size(estimate(
                                 preset,
                                 (s.width, s.height),
-                                rate,
+                                s.frame_rate,
                                 b - a,
-                            ))),
+                            )),
                         };
-                        ui.end_row();
+                        ui.label(RichText::new(tr!("export.estimated_size")).color(color::INK_3));
+                        let size = RichText::new(size).font(theme::body_strong());
+                        ui.label(size.color(color::INK));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let chosen = chosen(seq, &self.skipped);
+                            let kind = *range;
+                            let ok = span.is_some()
+                                && path.file_name().is_some()
+                                && (kind != Range::Highlights || !chosen.is_empty());
+                            let state = if ok { State::Live } else { State::Disabled };
+                            let export = Button::primary(tr!("export.export"));
+                            let export = ui.add(export.state(state).height(FOOT_BUTTON)).clicked();
+                            let queue = Button::secondary(tr!("export.add_to_queue"));
+                            let queue = ui.add(queue.state(state).height(FOOT_BUTTON)).clicked();
+                            if (export || queue)
+                                && let Some(range) = span
+                            {
+                                let mut preset = preset.clone();
+                                if let Some(mb) = self.target.filter(|_| sizable) {
+                                    preset
+                                        .options
+                                        .insert("target_size".into(), (mb * MB).to_string());
+                                }
+                                let req = |path: PathBuf, range| Request {
+                                    path,
+                                    range,
+                                    preset: preset.clone(),
+                                    loudness: self.loudness,
+                                    lossless: self
+                                        .lossless
+                                        .filter(|_| lossless::check(project, range).is_ok()),
+                                    sidecar: self.sidecar,
+                                };
+                                let reqs = if kind == Range::Highlights {
+                                    let ext =
+                                        path.extension().unwrap_or_default().to_string_lossy();
+                                    let dir = path.parent().unwrap_or(std::path::Path::new(""));
+                                    chosen
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, m)| {
+                                            let name =
+                                                file_name(&self.template, &self.name, m, i + 1);
+                                            req(
+                                                dir.join(format!("{name}.{ext}")),
+                                                (m.time, m.time + m.duration),
+                                            )
+                                        })
+                                        .collect()
+                                } else {
+                                    vec![req(path.clone(), range)]
+                                };
+                                request = Some((reqs, export));
+                                ui.close();
+                            }
+                            let cancel =
+                                Button::secondary(tr!("prompt.cancel")).height(FOOT_BUTTON);
+                            if ui.add(cancel).clicked() {
+                                ui.close();
+                            }
+                        });
                     });
-                ui.add_space(space::S16);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = space::S8;
-                    let span = span(*range, seq, selected).filter(|(a, b)| b > a);
-                    let chosen = chosen(seq, &self.skipped);
-                    let kind = *range;
-                    let ok = span.is_some()
-                        && path.file_name().is_some()
-                        && (kind != Range::Highlights || !chosen.is_empty());
-                    let state = if ok { State::Live } else { State::Disabled };
-                    let export = ui
-                        .add(Button::primary(tr!("export.export")).state(state))
-                        .clicked();
-                    let queue = ui
-                        .add(Button::secondary(tr!("export.add_to_queue")).state(state))
-                        .clicked();
-                    if (export || queue)
-                        && let Some(range) = span
-                    {
-                        let mut preset = self.presets[self.preset].clone();
-                        if let Some(mb) = self.target
-                            && matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc))
-                        {
-                            preset
-                                .options
-                                .insert("target_size".into(), (mb * MB).to_string());
-                        }
-                        let req = |path: PathBuf, range| Request {
-                            path,
-                            range,
-                            preset: preset.clone(),
-                            loudness: self.loudness,
-                            lossless: self
-                                .lossless
-                                .filter(|_| lossless::check(project, range).is_ok()),
-                            sidecar: self.sidecar,
-                        };
-                        let reqs = if kind == Range::Highlights {
-                            let ext = path.extension().unwrap_or_default().to_string_lossy();
-                            let dir = path.parent().unwrap_or(std::path::Path::new(""));
-                            chosen
-                                .iter()
-                                .enumerate()
-                                .map(|(i, m)| {
-                                    let name = file_name(&self.template, &self.name, m, i + 1);
-                                    req(
-                                        dir.join(format!("{name}.{ext}")),
-                                        (m.time, m.time + m.duration),
-                                    )
-                                })
-                                .collect()
-                        } else {
-                            vec![req(path.clone(), range)]
-                        };
-                        request = Some((reqs, export));
-                        ui.close();
-                    }
-                    if ui.add(Button::secondary(tr!("prompt.cancel"))).clicked() {
-                        ui.close();
-                    }
                 });
             });
         if modal.should_close() {
@@ -367,6 +426,91 @@ impl ExportDialog {
         }
         request
     }
+}
+
+/// The dialog's width; its head and footer heights, which the body scrolls between.
+const WIDTH: f32 = 480.0;
+const HEAD: f32 = 46.0;
+const FOOT: f32 = 57.0;
+const FOOT_BUTTON: f32 = 28.0;
+/// The rows' label column.
+const LABEL: f32 = 96.0;
+/// The Range options, in their segmented control's order.
+const RANGES: [Range; 4] = [
+    Range::Entire,
+    Range::InOut,
+    Range::Selected,
+    Range::Highlights,
+];
+
+/// A group's head: Body Strong in a 28px row, with a rule above every group but the first.
+fn section(ui: &mut Ui, title: &str, first: bool) {
+    if !first {
+        ui.add_space(space::S4);
+        rule(ui);
+    }
+    let w = ui.available_width();
+    ui.allocate_ui_with_layout(vec2(w, 28.0), Layout::left_to_right(Align::Center), |ui| {
+        let t = RichText::new(title).font(theme::body_strong());
+        ui.label(t.color(color::INK));
+    });
+}
+
+/// A row: the label in a 96px column, then the controls, all top-aligned on 24px.
+fn row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.horizontal_top(|ui| {
+        ui.allocate_ui_with_layout(
+            vec2(LABEL, size::CONTROL),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.set_width(LABEL);
+                let l = egui::Label::new(RichText::new(label).color(color::INK_2)).truncate();
+                ui.add(l);
+            },
+        );
+        add(ui)
+    })
+    .inner
+}
+
+/// A read-only value, centred on the row's 24px.
+fn readout(ui: &mut Ui, text: &str) {
+    let w = ui.available_width();
+    ui.allocate_ui_with_layout(
+        vec2(w, size::CONTROL),
+        Layout::left_to_right(Align::Center),
+        |ui| ui.add(egui::Label::new(RichText::new(text).color(color::INK_2)).truncate()),
+    );
+}
+
+enum Note {
+    Help,
+    Warn,
+}
+
+/// A line written out under its row, in the controls' column: help in Ink 3, a warning in Amber.
+fn note(ui: &mut Ui, kind: Note, text: &str) -> egui::Response {
+    ui.horizontal_top(|ui| {
+        ui.add_space(LABEL + space::S4);
+        let ink = match kind {
+            Note::Help => color::INK_3,
+            Note::Warn => {
+                let glyph = RichText::new(icon::CIRCLE_ALERT)
+                    .font(FontId::new(14.0, theme::icon_font().family));
+                ui.label(glyph.color(color::AMBER));
+                color::AMBER
+            }
+        };
+        ui.add(egui::Label::new(RichText::new(text).color(ink)).wrap())
+    })
+    .inner
+}
+
+/// A 1px Border line across the available width.
+fn rule(ui: &mut Ui) {
+    let line = 1.0 / ui.pixels_per_point();
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), line), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, color::BORDER);
 }
 
 fn loudness_picker(ui: &mut Ui, loudness: &mut Option<f64>) {
@@ -390,30 +534,37 @@ fn loudness_picker(ui: &mut Ui, loudness: &mut Option<f64>) {
         });
 }
 
-/// Off, copy or smart render when the range copies; else why it can't, the first reason shown
-/// and all of them on hover.
+/// Off, Copy or Smart Render; Copy and Smart Render are off when the range doesn't copy, with
+/// the reason written under the row by the caller.
 fn lossless_picker(
     ui: &mut Ui,
     mode: &mut Option<Lossless>,
     copyable: &Result<Vec<Cut>, Vec<String>>,
 ) {
-    match copyable {
-        Ok(_) => {
-            ui.horizontal(|ui| {
-                ui.radio_value(mode, None, tr!("export.off"));
-                ui.radio_value(mode, Some(Lossless::Copy), tr!("export.copy"))
-                    .on_hover_text(tr!("export.copy_tooltip"));
-                ui.add_enabled_ui(SMART_ENCODER.is_some(), |ui| {
-                    ui.radio_value(mode, Some(Lossless::Smart), tr!("export.smart"))
-                        .on_hover_text(tr!("export.smart_tooltip"))
-                        .on_disabled_hover_text(tr!("export.smart_off"))
-                });
-            });
-        }
-        Err(why) => {
-            ui.label(tr!("export.unavailable", reason = why[0]))
-                .on_hover_text(why.join("\n"));
-        }
+    const MODES: [Option<Lossless>; 3] = [None, Some(Lossless::Copy), Some(Lossless::Smart)];
+    let why = copyable.as_ref().err().map(|w| w[0].as_str());
+    let off = [
+        None,
+        why,
+        why.or(SMART_ENCODER.is_none().then(|| tr!("export.smart_off"))),
+    ];
+    let tips = [
+        None,
+        Some(tr!("export.copy_tooltip")),
+        Some(tr!("export.smart_tooltip")),
+    ];
+    // Shown as Off while the range can't copy; the saved choice comes back when it can.
+    let mut i = if why.is_some() {
+        0
+    } else {
+        MODES.iter().position(|m| m == mode).unwrap_or(0)
+    };
+    let options = [tr!("export.off"), tr!("export.copy"), tr!("export.smart")];
+    if ui
+        .add(Segmented::new(&mut i, &options).off(&off).tips(&tips))
+        .changed()
+    {
+        *mode = MODES[i];
     }
 }
 
@@ -718,8 +869,8 @@ mod tests {
             estimate(p, (1920, 1080), r, Time(10 * FLICKS_PER_SECOND)),
             one * 10
         );
-        assert_eq!(format_size(0), "≈ 0 KB");
-        assert_eq!(format_size(3 << 20), "≈ 3 MB");
+        assert_eq!(format_size(0), "~0 KB");
+        assert_eq!(format_size(3 << 20), "~3 MB");
     }
 
     #[test]
@@ -736,5 +887,32 @@ mod tests {
                 .unwrap()
                 .contains("any")
         );
+    }
+
+    /// Option A at the smallest supported window: Format, Range and Output in one column, the
+    /// aspect warning under Video, Lossless off with its reason, Estimated Size by Export.
+    #[test]
+    fn export_dialog_960x600() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let (h, _) = marked();
+        let project = h.project().clone();
+        let mut dialog = ExportDialog::default();
+        dialog.open(project.sequence(), "Project");
+        dialog.path = "/exports/Project.mp4".into();
+        let mut fresh = true;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([960.0, 600.0])
+            .build_ui_state(
+                move |ui, d: &mut ExportDialog| {
+                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        d.show(ui, &project, &HashSet::new());
+                    }
+                },
+                dialog,
+            );
+        harness.run_steps(2);
+        harness.snapshot("export_dialog");
     }
 }

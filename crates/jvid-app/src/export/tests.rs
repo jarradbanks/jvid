@@ -630,7 +630,7 @@ fn screen_recording_keeps_text_sharp() {
     let req = Request {
         path: path.clone(),
         range: (secs(1), secs(2)),
-        preset: preset("Screen recording (sharp text)"),
+        preset: preset("Screen Recording (Sharp Text)"),
         loudness: None,
         lossless: None,
         sidecar: false,
@@ -663,7 +663,7 @@ fn export_hits_loudness_target() {
     let (Some(dir), Some(_)) = (corpus(), device()) else {
         return eprintln!("skipping export test: needs the corpus and a software adapter");
     };
-    for (name, target) in [("Audio only (WAV)", -14.0), ("Audio only (AAC)", -23.0)] {
+    for (name, target) in [("Audio Only (WAV)", -14.0), ("Audio Only (AAC)", -23.0)] {
         let p = preset(name);
         let path = out(&format!("loud.{}", p.extension));
         let req = Request {
@@ -699,7 +699,7 @@ fn audio_only_wav_is_the_mix() {
         return eprintln!("skipping export test: needs the corpus and a software adapter");
     };
     let p = project(&dir);
-    for (name, bits) in [("Audio only (WAV)", 16), ("Audio only (WAV 24-bit)", 24)] {
+    for (name, bits) in [("Audio Only (WAV)", 16), ("Audio Only (WAV 24-bit)", 24)] {
         let path = out(&format!("mix{bits}.wav"));
         let req = Request {
             path: path.clone(),
@@ -761,7 +761,7 @@ fn export_with_audio_fx_matches_playback() {
     let req = Request {
         path: path.clone(),
         range: (secs(1), secs(3)),
-        preset: preset("Audio only (WAV)"),
+        preset: preset("Audio Only (WAV)"),
         loudness: None,
         lossless: None,
         sidecar: false,
@@ -830,10 +830,8 @@ fn editing_after_queueing_doesnt_change_the_export() {
         sidecar: false,
     };
     let mut q = queue::Queue::default();
-    assert!(q.push(
-        path.clone(),
-        submit(&pool, h.project().clone(), req.clone(), gpu)
-    ));
+    let job = submit(&pool, h.project().clone(), req.clone(), gpu);
+    assert!(q.push(path.clone(), "YouTube 1080p".into(), secs(1), job));
     assert!(!q.writing(&out("other.mp4")) && q.writing(&path));
     let video = h.project().sequence().tracks()[0].clips()[0].id;
     h.apply(Command::RemoveClip(video)).unwrap();
@@ -863,7 +861,7 @@ fn queue_reports_cancelled_waiting_job() {
     let (tx, rx) = channel::<Result<ProbeInfo, Error>>();
     let h = pool.submit("job", Priority::Interactive, move |_| drop(tx));
     let mut q = queue::Queue::default();
-    assert!(q.push("a.mp4".into(), (h.clone(), rx)));
+    assert!(q.push("a.mp4".into(), "P".into(), secs(1), (h.clone(), rx)));
     assert_eq!(q.running(), Some(0.0));
     h.cancel();
     go.send(()).unwrap();
@@ -968,8 +966,8 @@ fn lossless_copies_the_marked_cut() {
     assert_eq!(info.duration, secs(3));
 }
 
-/// Two queued exports both show in the Export menu, each with a right-aligned Cancel; Cancel on
-/// one leaves the other, and Cancel All (confirmed, as two are live) stops both.
+/// Two queued exports both show in the Render Queue, each with Cancel in the same column; Cancel
+/// on one leaves the other, and Cancel All (confirmed, as two are live) stops both.
 #[test]
 fn export_menu_cancels_one_or_all() {
     use egui_kittest::kittest::Queryable;
@@ -984,15 +982,15 @@ fn export_menu_cancels_one_or_all() {
         let (tx, rx) = channel::<Result<ProbeInfo, Error>>();
         let h = pool.submit(name, Priority::Interactive, move |_| drop(tx));
         handles.push(h.clone());
-        assert!(q.push(name.into(), (h, rx)));
+        assert!(q.push(name.into(), "P".into(), secs(1), (h, rx)));
     }
     let mut fresh = true;
     let mut harness = egui_kittest::Harness::builder()
-        .with_size([480.0, 200.0])
+        .with_size([960.0, 240.0])
         .build_ui_state(
             move |ui, q: &mut queue::Queue| {
                 if !suite_ui::test_support::install_theme(ui, &mut fresh) {
-                    q.menu(ui);
+                    q.panel(ui, true);
                 }
             },
             q,
@@ -1005,11 +1003,7 @@ fn export_menu_cancels_one_or_all() {
         .map(|n| n.rect().max.x)
         .collect();
     assert_eq!(rights.len(), 2);
-    let all = harness.get_by_label("Cancel All").rect();
-    assert!(
-        rights[0] == rights[1] && rights[0] > all.max.x,
-        "{rights:?}"
-    );
+    assert_eq!(rights[0], rights[1]);
 
     harness.get_all_by_label("Cancel").next().unwrap().click();
     harness.run();

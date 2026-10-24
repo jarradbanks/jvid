@@ -219,6 +219,11 @@ impl Keymap {
         (ACTIONS[i].name(), sc)
     }
 
+    /// The action's shortcut as text, empty when unbound.
+    pub fn shortcut(&self, id: &str) -> String {
+        self.label(id).1
+    }
+
     /// Pairs of action ids sharing a shortcut where both could fire.
     pub fn conflicts(&self) -> Vec<(&'static str, &'static str)> {
         let mut out = Vec::new();

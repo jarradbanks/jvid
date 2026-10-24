@@ -16,6 +16,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, ButtonKind, State};
 
+use crate::export::queue::Action as QueueAction;
 use crate::export::{Error as ExportError, Request};
 use crate::i18n::{tr, trn, verbatim};
 use crate::import::Importer;
@@ -40,6 +41,8 @@ pub enum Tab {
     Preview,
     Inspector,
     Timeline,
+    /// Opened from the Export menu's Show Render Queue; closable, unlike the others.
+    RenderQueue,
 }
 
 impl Tab {
@@ -50,6 +53,7 @@ impl Tab {
             Tab::Preview => tr!("panel.preview"),
             Tab::Inspector => tr!("panel.inspector"),
             Tab::Timeline => tr!("panel.timeline"),
+            Tab::RenderQueue => tr!("export.queue"),
         }
     }
 }
@@ -178,9 +182,11 @@ impl App {
             .and_then(|s| eframe::get_value::<DockState<Tab>>(s, DOCK_KEY))
             // A layout missing or duplicating a panel can't be fixed from the UI.
             .filter(|d| {
+                let count = |t: Tab| d.iter_all_tabs().filter(|(_, x)| **x == t).count();
                 [Tab::Media, Tab::Preview, Tab::Inspector, Tab::Timeline]
-                    .iter()
-                    .all(|t| d.iter_all_tabs().filter(|(_, x)| *x == t).count() == 1)
+                    .into_iter()
+                    .all(|t| count(t) == 1)
+                    && count(Tab::RenderQueue) <= 1
             })
             .unwrap_or_else(default_dock);
         let exports = jvid_jobs::Pool::new(1);
@@ -191,7 +197,11 @@ impl App {
         Self {
             history: History::new(Project::default()),
             path: None,
-            dock: hide_tab_bars(dock),
+            dock: {
+                let mut dock = dock;
+                hide_tab_bars(&mut dock);
+                dock
+            },
             preview_views: &["source", "program"],
             preview_active: 1,
             window_title: String::new(),
@@ -488,20 +498,34 @@ impl App {
     }
 
     /// Opens the export dialog; while jobs exist it shows progress and a chevron opens the queue
-    /// menu.
+    /// menu. After a failure the chevron is a Red alert until the menu opens, since the toast may
+    /// have gone unseen during a long render.
     fn export_button(&mut self, ui: &mut Ui) {
         if !self.queue.is_empty() {
+            let glyph = if self.queue.failed_unseen {
+                icon::CIRCLE_ALERT
+            } else {
+                icon::CHEVRON_DOWN
+            };
             let r = ui
-                .add(Button::icon(icon::CHEVRON_DOWN, tr!("export.queue")))
+                .add(Button::icon(glyph, tr!("export.queue")))
                 .on_hover_text(trn!("export.queue_pending", self.queue.pending()));
-            let mut new = false;
+            if self.queue.failed_unseen {
+                let at = r.rect.center();
+                ui.painter().text(
+                    at,
+                    Align2::CENTER_CENTER,
+                    icon::CIRCLE_ALERT,
+                    theme::icon_font(),
+                    color::RED,
+                );
+            }
+            let shortcut = self.keymap.shortcut("export");
+            let mut action = None;
             egui::Popup::menu(&r)
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show(|ui| new = self.queue.menu(ui));
-            if new && self.can_export() {
-                egui::Popup::close_all(ui.ctx());
-                self.run_action("export", true);
-            }
+                .show(|ui| action = self.queue.menu(ui, &shortcut));
+            self.queue_action(ui.ctx(), action);
         }
         if self.queue.pending() > 0 {
             ui.ctx().request_repaint();
@@ -515,12 +539,51 @@ impl App {
         } else {
             State::Disabled
         };
+        // While a queue exists, "Exporting 9%" to "Export" keeps the chevron still.
+        let min = if self.queue.is_empty() { 0.0 } else { 112.0 };
         if ui
-            .add(Button::primary(&label).state(state))
+            .add(Button::primary(&label).state(state).width(min))
             .on_disabled_hover_text(tr!("export.nothing"))
             .clicked()
         {
             self.run_action("export", true);
+        }
+    }
+
+    /// What the Export menu or the Render Queue panel asked the app for.
+    fn queue_action(&mut self, ctx: &egui::Context, action: Option<QueueAction>) {
+        match action {
+            Some(QueueAction::New) if self.can_export() => {
+                egui::Popup::close_all(ctx);
+                self.run_action("export", true);
+            }
+            Some(QueueAction::Show) => {
+                egui::Popup::close_all(ctx);
+                self.show_queue();
+            }
+            Some(QueueAction::Close) => {
+                if let Some(path) = self.dock.find_tab(&Tab::RenderQueue) {
+                    self.dock.remove_tab(path);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Focuses the Render Queue panel, first splitting it off the right of Timeline if closed.
+    pub fn show_queue(&mut self) {
+        if self.dock.find_tab(&Tab::RenderQueue).is_none() {
+            match self.dock.find_main_surface_tab(&Tab::Timeline) {
+                Some((node, _)) => {
+                    let tree = self.dock.main_surface_mut();
+                    tree.split_right(node, 0.5, vec![Tab::RenderQueue]);
+                }
+                None => self.dock.push_to_first_leaf(Tab::RenderQueue),
+            }
+            hide_tab_bars(&mut self.dock);
+        }
+        if let Some(path) = self.dock.find_tab(&Tab::RenderQueue) {
+            self.dock.set_focused_node_and_surface(path.node_path());
         }
     }
 
@@ -537,8 +600,14 @@ impl App {
         }
         let project = self.history.project().clone();
         let path = req.path.clone();
+        let preset = match req.lossless {
+            Some(crate::export::Lossless::Copy) => tr!("export.copy").to_owned(),
+            Some(crate::export::Lossless::Smart) => tr!("export.smart").to_owned(),
+            None => crate::export::shown_name(&self.export_dialog.presets, &req.preset).into(),
+        };
+        let duration = req.range.1 - req.range.0;
         let job = crate::export::submit(&self.exports, project, req, gpu);
-        self.queue.push(path, job);
+        self.queue.push(path, preset, duration, job);
     }
 
     /// Takes finished exports' results: each posts a notification, failures also a toast.
@@ -1099,6 +1168,8 @@ impl eframe::App for App {
                 preview: &mut self.preview,
                 timeline: &mut self.timeline,
                 keymap: &self.keymap,
+                queue: &mut self.queue,
+                queue_action: None,
             };
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
@@ -1110,16 +1181,18 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            let (import, command, gesture, relink, open) = (
+            let (import, command, gesture, relink, open, queue) = (
                 viewer.import_clicked,
                 viewer.command,
                 viewer.gesture,
                 viewer.relink,
                 viewer.open,
+                viewer.queue_action,
             );
             if std::mem::take(&mut self.preview.record_clicked) {
                 self.run_action("record", true);
             }
+            self.queue_action(ui.ctx(), queue);
             if let Some(msg) = self.timeline.notice.take() {
                 self.toasts.push((msg, now + TOAST_SECS));
             }
@@ -1259,13 +1332,12 @@ pub fn default_dock() -> DockState<Tab> {
 }
 
 /// Each panel draws its own suite-ui header, so egui_dock's tab bars stay hidden.
-fn hide_tab_bars(mut dock: DockState<Tab>) -> DockState<Tab> {
+fn hide_tab_bars(dock: &mut DockState<Tab>) {
     for (_, node) in dock.iter_all_nodes_mut() {
         if node.is_leaf() {
             node.set_tab_bar_hidden(true);
         }
     }
-    dock
 }
 
 /// egui_dock draws only the 4px Ground gutters; the panels draw everything else.
@@ -1307,6 +1379,8 @@ struct Viewer<'a> {
     preview: &'a mut Preview,
     timeline: &'a mut Timeline,
     keymap: &'a Keymap,
+    queue: &'a mut crate::export::queue::Queue,
+    queue_action: Option<QueueAction>,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -1344,6 +1418,10 @@ impl TabViewer for Viewer<'_> {
             if r.thumbs {
                 self.preview.refresh_thumb();
             }
+            return;
+        }
+        if *tab == Tab::RenderQueue {
+            self.queue_action = self.queue.panel(ui, focused);
             return;
         }
         let source_tab = self.preview_views.get(*self.preview_active) == Some(&"source");
