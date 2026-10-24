@@ -437,6 +437,10 @@ copied.one = "{count} jvid clip"
 copied.other = "{count} jvid clips"
 linked_selection = "Linked Selection"
 track = "Track"
+# The slot that opens above the top track while a video asset is dragged there.
+new_track = "New Track"
+# Tooltip while dragging a clip that sits on, or is linked to one on, a locked track.
+track_locked = "Track Locked"
 empty = "Drag clips here to start editing"
 zoom_tooltip = "Zoom (= and -)"
 target = "Target"
