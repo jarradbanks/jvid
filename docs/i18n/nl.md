@@ -50,7 +50,8 @@ Resolve and Premiere show it.
   lanes have room and use the full compound ("Uitsnijden links", "Omlijningsbreedte"). Fixed-width
   dropdowns forced three short forms: preview quality "Vol" (not "Volledig"), bin sort "Datum"
   (not "Toegevoegd") and blend mode "Vermenigv." (not "Vermenigvuldigen"). The Export dialog's
-  queue button reads "In wachtrij", because "Aan wachtrij toevoegen" ran into the size estimate.
+  queue button has room for the full "Aan wachtrij toevoegen" at its narrowest, 640 points; a
+  short "In wachtrij" would read as a status.
 
 ## Terms
 
@@ -109,7 +110,13 @@ Words outside the glossary that follow an outside source: blend modes as in the 
 for feather, also Photoshop's; "Beweging verminderen" for Reduce Motion, the setting's name in
 Dutch macOS and iOS (there as the imperative "Verminder beweging"); "Uitlichten" and
 "Extraheren" for Lift and Extract, which no Dutch editor translates (Kdenlive's "Verhogen" for
-Lift means "raise" and is a mistranslation).
+Lift means "raise" and is a mistranslation); "Bypass" and "spill" kept in English for an
+effect's bypass and a chroma key's spill, as Kdenlive does ("Bypass", "Spill Suppress");
+"Keykleur" for a chroma key's Key Hue, because "tint" is the Tint property (Kdenlive's word for
+hue) and would clash with it; "fragment" for a stretch of audio Detect Silence finds, not the
+spatial "gebied"; "Sneltoetsenset" for a keymap file, because "toetsenindeling" is the keyboard
+layout (QWERTY, AZERTY) in Dutch Windows; "wissen" for unbinding a shortcut, because
+"ontkoppelen" is Unlink.
 
 ## Sources checked
 
@@ -118,7 +125,8 @@ Lift means "raise" and is a mistranslation).
   Overgang, keyframe, Markering, Beginpunt/Eindpunt, Aaneenvoegen, Rollen, Slippen,
   Snijgereedschap, Vastklikken, Dempen, Audioscrubbing, Tijdcode, Framesnelheid,
   Beeldverhouding, Proxy, Voorinstelling, Bitsnelheid, Ondertitels, Golfvorm, Audiomixer,
-  Ongedaan maken / Opnieuw, Verhogen (Lift), Projectmap, wachtrij, Ondertiteltrack.
+  Ongedaan maken / Opnieuw, Verhogen (Lift), Projectmap, wachtrij, Ondertiteltrack, Bypass,
+  Spill Suppress, Tint (Hue), Naversterking (Post Gain, too wide for the Inspector's column).
 - Adobe's Dutch [Premiere Elements reference](https://help.adobe.com/archive/nl/premiere-elements/12/premiere-elements_reference.pdf),
   searched for each term: tijdlijn, huidige-tijdindicator (CTI), Bronmonitor, inpunt/uitpunt,
   hoofdframe, markeerteken, bijsnijden, Uitsnijden, splitsen, Magnetisch,
