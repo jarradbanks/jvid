@@ -5,8 +5,8 @@ use jvid_core::history::Command;
 use jvid_core::model::{Project, ProjectSettings};
 use jvid_core::time::Rate;
 use suite_ui::theme;
-use suite_ui::tokens::{radius, space};
-use suite_ui::widgets::{Button, Checkbox, DragField, Dropdown, State};
+use suite_ui::tokens::{radius, size, space};
+use suite_ui::widgets::{Button, Checkbox, ColorField, DragField, Dropdown, State};
 
 use crate::i18n::{Label, tr, trn, verbatim};
 
@@ -22,15 +22,17 @@ const RATES: [(&str, Rate); 8] = [
     ("60", Rate::new(60, 1)),
 ];
 
-/// Size presets; picking one sets width and height, editing either shows Custom.
-const SIZES: [(Label, Option<(u32, u32)>); 6] = [
-    (|| tr!("size.custom"), None),
-    (|| verbatim("16:9 · 1080p"), Some((1920, 1080))),
-    (|| verbatim("16:9 · 1440p"), Some((2560, 1440))),
-    (|| verbatim("16:9 · 4K"), Some((3840, 2160))),
-    (|| tr!("size.vertical"), Some((1080, 1920))),
-    (|| tr!("size.square"), Some((1080, 1080))),
+/// Size presets; picking one sets width and height, and any other size shows Custom.
+const SIZES: [(Label, (u32, u32)); 5] = [
+    (|| verbatim("16:9 · 1080p"), (1920, 1080)),
+    (|| verbatim("16:9 · 1440p"), (2560, 1440)),
+    (|| verbatim("16:9 · 4K"), (3840, 2160)),
+    (|| tr!("size.vertical"), (1080, 1920)),
+    (|| tr!("size.square"), (1080, 1080)),
 ];
+
+/// The width of the value column: the two resolution fields and the gap between.
+const FIELD: f32 = 2.0 * 80.0 + space::S8;
 
 /// Edits in progress; `None` while the dialog is closed.
 #[derive(Default)]
@@ -59,6 +61,12 @@ impl SettingsDialog {
             )
             .show(ui.ctx(), |ui| {
                 ui.set_width(360.0);
+                // Menus stay inside the dialog, as it was last frame.
+                let screen = ui.ctx().content_rect();
+                let bounds = ui
+                    .ctx()
+                    .memory(|m| m.area_rect(egui::Id::new("project_settings")))
+                    .unwrap_or(screen);
                 ui.label(egui::RichText::new(tr!("project.title")).font(theme::headline()));
                 ui.add_space(space::S8);
                 egui::Grid::new("project_settings_grid")
@@ -67,19 +75,18 @@ impl SettingsDialog {
                         ui.label(tr!("project.size"));
                         let mut size = SIZES
                             .iter()
-                            .position(|(_, s)| *s == Some((draft.width, draft.height)))
-                            .unwrap_or(0);
-                        if ui
-                            .add(Dropdown::new(&mut size, &SIZES.map(|s| s.0())))
-                            .changed()
-                            && let Some((w, h)) = SIZES[size].1
-                        {
-                            (draft.width, draft.height) = (w, h);
+                            .position(|(_, s)| *s == (draft.width, draft.height))
+                            .unwrap_or(SIZES.len());
+                        let names = SIZES.map(|s| s.0());
+                        let d = Dropdown::new(&mut size, &names).placeholder(tr!("size.custom"));
+                        if ui.add(d.width(FIELD).bounds(bounds)).changed() {
+                            (draft.width, draft.height) = SIZES[size].1;
                         }
                         ui.end_row();
 
                         ui.label(tr!("project.resolution"));
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = space::S8;
                             let (w, h) =
                                 (tr!("project.width_suffix"), tr!("project.height_suffix"));
                             for (v, suffix) in [(&mut draft.width, w), (&mut draft.height, h)] {
@@ -107,23 +114,18 @@ impl SettingsDialog {
                             .position(|(_, r)| *r == draft.frame_rate)
                             .unwrap_or(4);
                         let names = RATES.map(|r| tr!("unit.fps", rate = r.0));
-                        if ui
-                            .add(Dropdown::new(
-                                &mut rate,
-                                &names.each_ref().map(String::as_str),
-                            ))
-                            .changed()
-                        {
+                        let names = names.each_ref().map(String::as_str);
+                        let d = Dropdown::new(&mut rate, &names).width(FIELD);
+                        if ui.add(d.bounds(bounds)).changed() {
                             draft.frame_rate = RATES[rate].1;
                         }
                         ui.end_row();
 
                         ui.label(tr!("project.background"));
-                        let [r, g, b, a] = draft.background;
-                        let mut c = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
-                        if ui.color_edit_button_srgba(&mut c).changed() {
-                            draft.background = c.to_srgba_unmultiplied();
-                        }
+                        let name = tr!("project.background");
+                        ui.allocate_ui(egui::vec2(FIELD, size::CONTROL), |ui| {
+                            ui.add(ColorField::new(&mut draft.background, name))
+                        });
                         ui.end_row();
 
                         ui.label(tr!("project.hdr_output"));
@@ -208,6 +210,46 @@ fn refit_warning(old: &ProjectSettings, new: &ProjectSettings, clips: usize) -> 
 mod tests {
     use super::*;
     use jvid_core::history::History;
+
+    #[test]
+    fn every_dropdown_menu_fits_inside_the_dialog_and_custom_isnt_a_choice() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let project = Project::default();
+        let mut dialog = SettingsDialog::default();
+        dialog.open(&project);
+        let mut fresh = true;
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([1280.0, 720.0])
+            .build_ui_state(
+                move |ui, d: &mut SettingsDialog| {
+                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        d.show(ui, &project);
+                    }
+                },
+                dialog,
+            );
+        h.run_steps(2);
+        let area = |h: &egui_kittest::Harness<'_, SettingsDialog>| {
+            h.ctx
+                .memory(|m| m.area_rect(egui::Id::new("project_settings")))
+                .unwrap()
+        };
+        let rate = tr!("unit.fps", rate = "30");
+        for (l, r) in crate::test_util::menu_rects(&mut h, &["16:9 · 1080p", &rate]) {
+            assert!(area(&h).contains_rect(r), "{l}: {r:?} in {:?}", area(&h));
+        }
+        // An edited size reads Custom, which the menu doesn't offer.
+        h.state_mut().draft.as_mut().unwrap().width = 1000;
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Custom")
+            .click();
+        h.run();
+        assert_eq!(h.query_all_by_label("Custom").count(), 1, "the field alone");
+        h.snapshot("project_settings_size_menu");
+    }
 
     #[test]
     fn aspect_reduces() {
