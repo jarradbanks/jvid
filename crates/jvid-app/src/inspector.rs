@@ -1576,19 +1576,12 @@ fn speed_row(ui: &mut Ui, c: &Clip, t: Time, index: u64, seek: &mut Option<Time>
     let gesture = Some(SPEED_GESTURE ^ c.id.0);
     let speed = if anim { c.speed_at(t) } else { c.speed };
     let (mut pct, mut reverse) = (speed * 100.0, c.reverse);
-    let ((changed, flipped, at), tool) = prop_row(ui, tr!("inspector.speed"), tools, |ui| {
+    let ((changed, at), tool) = prop_row(ui, tr!("inspector.speed"), tools, |ui| {
         let drag = DragField::new(&mut pct)
             .range(1.0..=10000.0)
             .suffix("%")
             .width(64.0);
         let r = ui.add_enabled(c.freeze.is_none(), drag);
-        ui.add_space(space::S4);
-        let b = ui
-            .add(Checkbox::new(&mut reverse, tr!("inspector.reverse")))
-            .changed();
-        ui.add_space(space::S4);
-        ui.add(Checkbox::new(&mut ripple, tr!("inspector.ripple")))
-            .on_hover_text(tr!("inspector.ripple_tooltip"));
         // The ramp moves the playhead's source time as it changes, so a drag keeps keying
         // the one it started on.
         let at = ui.id().with("speed key");
@@ -1596,7 +1589,17 @@ fn speed_row(ui: &mut Ui, c: &Clip, t: Time, index: u64, seek: &mut Option<Time>
             ui.data_mut(|d| d.insert_temp(at, s));
         }
         let at = r.dragged().then(|| ui.data(|d| d.get_temp(at))).flatten();
-        (r.changed(), b, at.unwrap_or(s))
+        (r.changed(), at.unwrap_or(s))
+    });
+    // A row of their own, so a narrow Inspector never clips them under the diamond.
+    let (flipped, _) = prop_row(ui, "", Tools::default(), |ui| {
+        let b = ui
+            .add(Checkbox::new(&mut reverse, tr!("inspector.reverse")))
+            .changed();
+        ui.add_space(space::S4);
+        ui.add(Checkbox::new(&mut ripple, tr!("inspector.ripple")))
+            .on_hover_text(tr!("inspector.ripple_tooltip"));
+        b
     });
     ui.data_mut(|d| d.insert_temp(ripple_id, ripple));
     // Every speed edit is one retime, rippling as the checkbox says.
@@ -2211,6 +2214,9 @@ fn head_tools(ui: &mut Ui, rect: Rect, title: &str, changed: bool, key: bool) ->
 const TOOLS: f32 = 2.0 * size::SMALL_CONTROL + GAP;
 /// Space between tool slots.
 const GAP: f32 = 2.0;
+/// The narrowest a row's field gets, with its prefix and a three-digit value, before the
+/// row wraps.
+const MIN_FIELD: f32 = 44.0;
 
 /// What a row's tool slots show, with names for screen readers. An empty slot keeps its
 /// place, so nothing moves when another appears.
@@ -2257,23 +2263,38 @@ fn prop_row<R>(
     tools: Tools,
     vals: impl FnOnce(&mut Ui) -> R,
 ) -> (R, Clicks) {
-    let (rect, _) =
-        ui.allocate_exact_size(vec2(ui.available_width(), size::CONTROL), Sense::hover());
+    prop_rows(ui, label, tools, 1, vals)
+}
+
+/// Like [`prop_row`], `lines` tall: `vals` wrap onto the lines after the first.
+fn prop_rows<R>(
+    ui: &mut Ui,
+    label: &str,
+    tools: Tools,
+    lines: usize,
+    vals: impl FnOnce(&mut Ui) -> R,
+) -> (R, Clicks) {
+    let n = lines as f32;
+    let h = n * size::CONTROL + (n - 1.0) * space::S4;
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
+    let first = rect.with_max_y(rect.top() + size::CONTROL);
     let layout = Layout::left_to_right(Align::Center);
-    let mut row = ui.new_child(UiBuilder::new().max_rect(rect).layout(layout));
-    row.spacing_mut().item_spacing.x = space::S4;
+    // The label and tools on the first line.
+    let top = Layout::left_to_right(Align::Min);
+    let mut row = ui.new_child(UiBuilder::new().max_rect(rect).layout(top));
+    row.spacing_mut().item_spacing = vec2(space::S4, space::S4);
     row.allocate_ui_with_layout(vec2(size::INSPECTOR_LABEL, size::CONTROL), layout, |ui| {
         ui.set_min_width(size::INSPECTOR_LABEL);
         ui.label(egui::RichText::new(label).color(color::ink_2()))
     });
     let w = rect.right() - TOOLS - space::S4 - row.cursor().left();
     let inner = row
-        .allocate_ui_with_layout(vec2(w, size::CONTROL), layout, |ui| {
+        .allocate_ui_with_layout(vec2(w, h), top.with_main_wrap(lines > 1), |ui| {
             ui.set_max_width(w);
             vals(ui)
         })
         .inner;
-    (inner, slots(&mut row, rect, tools))
+    (inner, slots(&mut row, first, tools))
 }
 
 /// Whether any clip animates `p` or, at `t`, shows a value other than its default.
@@ -2326,7 +2347,16 @@ fn row(
         key: Some((keyed, &key)),
     };
     let mut edit = None;
-    let (_, c) = prop_row(ui, p.label(), tools, |ui| {
+    let n = p.fields.len();
+    // Values' width, as `prop_row` leaves it.
+    let w = ui.available_width() - size::INSPECTOR_LABEL - TOOLS - 2.0 * space::S4;
+    // Too narrow for every field to show its prefix and three digits, two to a line.
+    let lines = match n > 2 && (w - space::S4 * (n - 1) as f32) / (n as f32) < MIN_FIELD {
+        true => n.div_ceil(2),
+        false => 1,
+    };
+    let per = n.div_ceil(lines);
+    let (_, c) = prop_rows(ui, p.label(), tools, lines, |ui| {
         // Each drag is its own undo step, even of the field the last one dragged.
         let drags = ui.id().with("inspector drags");
         let mut put = |ui: &Ui, r: &egui::Response, cmd: Command, slot: usize| {
@@ -2337,11 +2367,10 @@ fn row(
             let key = GESTURE ^ (index << 4 | slot as u64) ^ (drag << 16);
             edit = Some((cmd, r.dragged().then_some(key)));
         };
-        let n = p.fields.len();
         let slider = p.slider();
         let width = match slider {
             Some(_) => 64.0,
-            None => (ui.available_width() - space::S4 * (n - 1) as f32) / n as f32,
+            None => (ui.available_width() - space::S4 * (per - 1) as f32) / per as f32,
         };
         let (lo, hi) = p.range;
         for (i, field) in p.fields.iter().enumerate() {
@@ -3849,6 +3878,32 @@ mod tests {
         h.get_by_label("Keyframe at Playhead").click();
         h.run();
         assert!(!animated(&clip(&h), "scale"));
+    }
+
+    #[test]
+    fn the_crop_and_speed_rows_fit_a_288px_inspector() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness();
+        // A 288px Inspector's content, tall enough for Speed, the Video tab's last section.
+        h.set_size(vec2(264.0, 1600.0));
+        h.run();
+        let rect = |l| h.get_by_label(l).accesskit_node().bounding_box().unwrap();
+        let tools = rect("Animate Speed").x0;
+        for l in ["Reverse", "Ripple"] {
+            assert!(rect(l).x1 < tools, "{l} clear of the tool column");
+        }
+        // Crop's four sides wrap two to a line rather than overlap.
+        let sides = ["L", "T", "R", "B"].map(rect);
+        for (i, a) in sides.iter().enumerate() {
+            assert!(a.x1 < tools && a.x1 - a.x0 >= MIN_FIELD as f64, "{a:?}");
+            for b in &sides[i + 1..] {
+                assert!(a.intersect(*b).is_empty(), "{a:?} {b:?}");
+            }
+        }
+        h.snapshot("inspector_speed_288");
     }
 
     #[test]
