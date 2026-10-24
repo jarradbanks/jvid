@@ -68,11 +68,12 @@ ff -framerate 30 -i "$frames/%05d.png" -c:v libx264 -preset slow -crf 10 -g 15 -
   --workers 1 -o render.mp4)
 
 # The composition ends on its first frame, so both files loop without a cut. The camera moves
-# change every pixel, so the webp drops to 18 fps, 1024 wide and quality 50 to stay under 4 MB.
+# change every pixel, so the webp drops to 15 fps at 880 wide (GitHub's README column) to stay
+# under 4 MB. Below quality ~75, WebP leaves stale blocks on the dark background.
 out="$root/docs/media"
 mkdir -p "$out"
-ff -i "$motion/render.mp4" -filter_complex "split[a][b];[a]format=yuv420p[mp4];[b]fps=18,scale=1024:-1:flags=lanczos[webp]" \
+ff -i "$motion/render.mp4" -filter_complex "split[a][b];[a]format=yuv420p[mp4];[b]fps=15,scale=880:-1:flags=lanczos[webp]" \
   -map '[mp4]' -c:v libx264 -preset veryslow -crf 20 -movflags +faststart -an "$out/preview.mp4" \
-  -map '[webp]' -c:v libwebp_anim -lossless 0 -quality 50 -compression_level 6 -loop 0 -an \
+  -map '[webp]' -c:v libwebp_anim -lossless 0 -preset picture -quality 78 -compression_level 6 -loop 0 -an \
   "$out/preview.webp"
 ls -l "$out/preview.mp4" "$out/preview.webp"
