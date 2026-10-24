@@ -481,6 +481,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#309](https://github.com/jarradbanks/jvid/issues/309) **Translation-only PRs skip the 11-minute CI** — Owner, 2026-10-24: a PR that only changes translation catalogs should not wait on the full build and GPU test suite. A seconds-long check covers what a catalog change can break.
 - [#310](https://github.com/jarradbanks/jvid/issues/310) **UI handles long translated text** — Owner, 2026-10-24: text that is too long is a UI problem, not a translation one. Translators should translate naturally and the layout should cope, as in other editors.
 - [#322](https://github.com/jarradbanks/jvid/issues/322) **README: real UI preview video and current pitch** — Owner, 2026-10-24: the README still leads with the AI-generated prototype and 'first tool in a planned suite'. Replace both with a short, professional, minimal motion preview made from the real UI, and copy that matches what jvid does today.
+- [#323](https://github.com/jarradbanks/jvid/issues/323) **Translation leftovers found in wave 1** — Gaps the wave-1 translators found that sit in code, not catalogs (PRs #301, #302).
 
 ---
 

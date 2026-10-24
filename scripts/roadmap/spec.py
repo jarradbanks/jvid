@@ -1557,3 +1557,11 @@ I("readme-preview", "README: real UI preview video and current pitch", None, ["d
   ac=["The README shows the animated preview at the top on github.com and no prototype image",
       "Re-running the documented command regenerates both files from a clean checkout",
       "Every claim in the README matches a merged feature"])
+I("i18n-wave1-leftovers", "Translation leftovers found in wave 1", None, ["ui", "render"], "S", ["i18n-wave1-foundation"], labels=["later"],
+  summary="Gaps the wave-1 translators found that sit in code, not catalogs (PRs #301, #302).",
+  scope=["Title-preset thumbnails and title rendering draw CJK as boxes on a machine with no system CJK font: jvid-render's FontSystem::new only loads system fonts; register the bundled Noto CJK faces too",
+         "The Export dialog's custom size field appends a hard-coded ' MB'; take the unit from the catalog",
+         "Messages built as '<label>: <reason>' in code force the reason's capital after the colon (fr 'Indisponible : ...'); make the whole message one catalog string with a placeholder",
+         "The ', ' list join near crates/jvid-app/src/timeline.rs:1770 is ASCII; use a catalog separator so ja/zh-Hans/ko get theirs"],
+  ac=["A title preset in ja renders its glyphs, not boxes, with no system CJK font installed (test with the bundled faces only)",
+      "grep finds no user-visible unit, colon join or list separator built in code for these spots"])
