@@ -1,5 +1,22 @@
 # suite-ui strings, Korean. Keep keys and {placeholders} in step with en.toml.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
 
 [language]
 name = "한국어"
+
+[panel]
+more_tabs = "탭 더 보기"
+
+[input]
+search = "검색"
+
+[color]
+# A fully transparent colour.
+none = "없음"
+
+[theme]
+error = "테마 {path}: {error}"
+bad_color = "`{value}`은(는) #RRGGBB 형식이 아닙니다"
+at = "{line}행 {column}열: {error}"
+dark = "어둡게"
+light = "밝게"
+high_contrast = "고대비"
