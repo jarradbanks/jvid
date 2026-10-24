@@ -840,6 +840,16 @@ tour_marks = "Press {mark_in} to set an In point, then {mark_out} further on for
 tour_cut = "Press {key} to split out the section between In and Out and delete it."
 tour_title = "Click a title in Text, then drag it onto the Timeline above your clip."
 tour_export = "Click Export, then Export again to save your video."
+# Markers and Highlights: tap and hold M while playing, jump between markers, name and colour
+# one, then export Highlights. Export, Highlights, Before, After, Add to Queue, Name and Color
+# are the names the editor shows; markers_name is the name Show Me gives a marker.
+markers = "Markers and Highlights"
+markers_tap = "Press {play} to play, then tap {key} at moments you like."
+markers_hold = "While it plays, hold {key} to mark a range."
+markers_jump = "Press {next} and {prev} to jump between markers."
+markers_edit = "Right-click a marker to set its Name and Color."
+markers_name = "Best Moment"
+markers_export = "Click Export, choose Highlights, set Before and After, then click Add to Queue."
 # Masks: spotlight the subject by darkening a copy under a masked one, then key the mask to
 # follow them. Inspector labels (Color, Exposure, Add Mask, Ellipse, Feather, Invert, Mode,
 # Subtract, Position) are the names the Inspector shows. {key} is a shortcut.

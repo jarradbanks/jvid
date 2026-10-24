@@ -22,6 +22,7 @@ use crate::i18n::{tr, verbatim};
 use crate::import::Importer;
 use crate::timeline::Timeline;
 
+mod markers;
 mod masks;
 
 /// One lesson. Its `id` is the progress key in `settings.toml`.
@@ -55,7 +56,7 @@ pub struct Step {
     pub ghost: Option<[[f64; 2]; 2]>,
 }
 
-pub const LESSONS: &[Lesson] = &[TOUR, masks::MASKS];
+pub const LESSONS: &[Lesson] = &[TOUR, masks::MASKS, markers::MARKERS];
 
 /// The sample the tour edits.
 const TOUR_CLIP: &str = "subject.mp4";
