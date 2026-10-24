@@ -1,2 +1,75 @@
 # The suite-ui gallery example's demo labels, Danish. Not shipped in any app.
-# Not translated yet: every key missing here shows in English. See docs/translating.md.
+
+[state]
+default = "Standard"
+hover = "Hover"
+focus = "Synligt fokus"
+pressed = "Trykket"
+disabled = "Deaktiveret"
+loading_error = "Indlæser / fejl"
+
+[panel]
+widgets = "Widgets"
+effects = "Effekter"
+text = "Tekst"
+add = "Tilføj"
+more = "Mere"
+inspector = "Inspektør"
+source = "Kilde"
+program = "Program"
+audio = "Lyd"
+markers = "Markører"
+history = "Historik"
+captions = "Billedtekster"
+overflow = "Faner under 64px flyttes ind i menuen med vinkelpilen."
+type_and_colour = "Skrift og farve"
+
+[row]
+primary = "Primær"
+secondary = "Sekundær"
+ghost = "Spøgelse"
+destructive = "Destruktiv"
+icon = "Ikon"
+input = "Input"
+search = "Søg"
+numeric = "Numerisk"
+dropdown = "Rullemenu"
+colour = "Farve"
+segmented = "Segmenteret"
+checkbox = "Afkrydsningsfelt"
+section = "Sektion"
+slider = "Skyder"
+keyframe = "Keyframe"
+
+[demo]
+delete = "Slet"
+export = "Eksportér"
+width_prefix = "B"
+min_error = "Skal være mindst 2"
+full = "Fuld"
+fit = "Tilpas"
+fill = "Udfyld"
+snap = "Snap"
+live = "Live"
+transform = "Transformation"
+position = "Position"
+scale = "Skalering"
+reset = "Nulstil"
+previous = "Forrige keyframe"
+next = "Næste keyframe"
+animate = "Animér"
+plus_second = "+1 s"
+
+[type]
+display = "Display 22"
+headline = "Overskrift 16"
+title = "Titel 14"
+body_strong = "Brødtekst fed 12"
+body = "Brødtekst 12 · 0123456789 står stille"
+small = "Lille 10 · genvejstip"
+
+[clip]
+video = "Video"
+title = "Titel"
+still = "Stillbillede"
+audio = "Lyd"
