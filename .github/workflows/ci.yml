@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Per event, so a merge to main never cancels the nightly run.
+  # Per event, so an on-demand run never cancels the nightly.
   group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
