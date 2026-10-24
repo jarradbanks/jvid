@@ -2931,6 +2931,7 @@ fn text_fields(ui: &mut Ui, s: &mut Text, id: &str, label: &str) -> bool {
 /// A Text tab row of style `id` in `s`, on the label column: its fields, Reset once it's off
 /// its default or animated, and the diamond for a style that animates. True once a field
 /// changed `s`; the edit a tool made.
+#[allow(clippy::too_many_arguments)]
 fn text_row(
     ui: &mut Ui,
     clips: &[&Clip],
@@ -2939,6 +2940,7 @@ fn text_row(
     t: Time,
     index: u64,
     seek: &mut Option<Time>,
+    dropped: &mut Vec<&'static str>,
 ) -> (bool, Option<Edit>) {
     let names = [id];
     let keys = keyable(id) && !clips.is_empty();
@@ -2958,10 +2960,9 @@ fn text_row(
     };
     let (changed, c) = prop_row(ui, label, tools, |ui| text_fields(ui, s, id, label));
     if c.reset {
-        // shortcut: an animated style's Reset drops its keys, so the asset's value shows and
-        // a second Reset restores the default; one step for both needs a compound command.
+        // An animated style also loses its keys, in the same step as the default.
         if anim {
-            return (false, Some((drop_keys(clips, &names), None)));
+            dropped.push(id);
         }
         restore(s, id);
         return (true, None);
@@ -3034,6 +3035,8 @@ fn text_props(
     let mut changed = content.inner.changed();
     ui.add_space(space::S4);
     let mut tool = None;
+    // Styles whose keys Reset drops.
+    let mut dropped = Vec::new();
     // Apart from the Video tab's rows, for the easing gesture.
     let mut index = 1u64 << 32;
     for (id, rows) in TEXT_SECTIONS {
@@ -3043,14 +3046,9 @@ fn text_props(
         let (open, head) = text_section(ui, id, off, !clips.is_empty(), &summary);
         match head {
             Some(Head::Reset) => {
-                let animated: Vec<&str> = keys.iter().copied().filter(|n| anim(n)).collect();
-                // shortcut: as a row's Reset, animated styles first lose their keys.
-                if animated.is_empty() {
-                    rows.iter().for_each(|(n, _)| restore(&mut s, n));
-                    changed = true;
-                } else {
-                    tool = Some((drop_keys(clips, &animated), None));
-                }
+                dropped.extend(keys.iter().copied().filter(|n| anim(n)));
+                rows.iter().for_each(|(n, _)| restore(&mut s, n));
+                changed = true;
             }
             Some(Head::Key) => {
                 let cmd = rewrite(clips, |c, _, k| {
@@ -3068,7 +3066,8 @@ fn text_props(
         }
         for (n, label) in rows {
             index += 1;
-            let (ch, e) = text_row(ui, clips, &mut s, (n, caption(label)), t, index, seek);
+            let row = (*n, caption(label));
+            let (ch, e) = text_row(ui, clips, &mut s, row, t, index, seek, &mut dropped);
             changed |= ch;
             tool = e.or(tool);
         }
@@ -3078,6 +3077,15 @@ fn text_props(
     }
     if !changed {
         return None;
+    }
+    let anim = |n: &str| anim(n) && !dropped.contains(&n);
+    if !dropped.is_empty() {
+        // Reset: the keys go and the asset takes the default, as one step.
+        for n in text_names().filter(|n| anim(n)) {
+            text_set(&mut s, n, text_get(&base, n).expect("a text name"));
+        }
+        let set = Command::SetText { id: a.id, text: s };
+        return Some((Command::Batch(vec![drop_keys(clips, &dropped), set]), None));
     }
     let keyed: Vec<_> = text_names()
         .filter(|n| anim(n) && text_get(&before, n) != text_get(&s, n))
@@ -4433,6 +4441,34 @@ mod tests {
             h.query_by_label("Reset").is_some(),
             "animated reads as changed"
         );
+    }
+
+    #[test]
+    fn reset_on_an_animated_style_drops_its_keys_and_restores_it_in_one_step() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let style = Text {
+            size: 120.0,
+            ..Text::default()
+        };
+        let mut h = text_harness(264.0, style);
+        let before = h.state().project().clone();
+        h.get_by_label("Animate Size").click();
+        h.run();
+        let keyed = h.state().project().clone();
+        h.get_by_label("Reset").click();
+        h.run();
+        let p = h.state().project();
+        let c = &p.sequence().tracks()[0].clips()[0];
+        assert!(!c.keyframes.contains_key("text_size"), "keys dropped");
+        let size = p.asset(c.asset).and_then(|a| a.text.as_ref()).unwrap().size;
+        assert_eq!(size, Text::default().size, "and the default restored");
+        assert!(h.state_mut().undo());
+        assert_eq!(h.state().project(), &keyed, "one step back to the keys");
+        assert!(h.state_mut().undo());
+        assert_eq!(h.state().project(), &before);
     }
 
     #[test]
