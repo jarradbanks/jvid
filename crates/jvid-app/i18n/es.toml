@@ -254,6 +254,7 @@ general = "General"
 audio = "Audio"
 theme = "Tema"
 open_themes = "Abrir carpeta de temas"
+reduce_motion = "Reducir movimiento"
 input_default = "Predeterminado del sistema"
 
 [size]

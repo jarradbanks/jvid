@@ -58,9 +58,15 @@ fn look(response: &Response, pinned: State) -> Look {
 
 /// Fades a colour towards its hover value over 100ms.
 fn hover_fade(ui: &Ui, id: Id, hover: bool, rest: Color32, hovered: Color32) -> Color32 {
+    // No fade when the app turns animation off, as Reduce Motion does.
+    let time = if ui.style().animation_time == 0.0 {
+        0.0
+    } else {
+        0.1
+    };
     let t = ui
         .ctx()
-        .animate_bool_with_time(id.with("hover"), hover, 0.1);
+        .animate_bool_with_time(id.with("hover"), hover, time);
     rest.lerp_to_gamma(hovered, t)
 }
 

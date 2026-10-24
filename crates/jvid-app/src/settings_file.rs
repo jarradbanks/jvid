@@ -47,10 +47,15 @@ pub fn save_language_to(path: &Path, language: &str) -> io::Result<()> {
     save_string_to(path, "language", language)
 }
 
-/// Sets the string setting `key` in the settings file, keeping every other byte, comments
-/// included. A file that isn't TOML is left as it is and reported, so a hand edit with a typo
-/// isn't overwritten.
+/// Sets the string setting `key` in the settings file; see [`save_value_to`].
 pub fn save_string_to(path: &Path, key: &str, value: &str) -> io::Result<()> {
+    save_value_to(path, key, value.into())
+}
+
+/// Sets setting `key` in the settings file, keeping every other byte, comments included. A
+/// file that isn't TOML, or whose `key` holds another type, is left as it is and reported, so
+/// a hand edit with a typo isn't overwritten.
+pub fn save_value_to(path: &Path, key: &str, value: toml::Value) -> io::Result<()> {
     let old = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
@@ -59,14 +64,14 @@ pub fn save_string_to(path: &Path, key: &str, value: &str) -> io::Result<()> {
     let not_written = || io::Error::other(tr!("settings.not_written"));
     let parsed = toml::de::DeTable::parse(&old).map_err(io::Error::other)?;
     let mut line = toml::Table::new();
-    line.insert(key.into(), value.into());
+    line.insert(key.into(), value.clone());
     // The parser's spans see through quoted keys, multiline strings and comments.
     let found = parsed
         .get_ref()
         .iter()
         .find(|(k, _)| k.get_ref().as_ref() == key);
     let new = match found {
-        Some((_, v)) if matches!(v.get_ref(), toml::de::DeValue::String(_)) => {
+        Some((_, v)) if v.get_ref().type_str() == value.type_str() => {
             let at = v.span();
             let value = line[key].to_string();
             [&old[..at.start], &value, &old[at.end..]].concat()
@@ -79,7 +84,7 @@ pub fn save_string_to(path: &Path, key: &str, value: &str) -> io::Result<()> {
     let mut after: toml::Table = new.parse().map_err(io::Error::other)?;
     let written = after.remove(key);
     before.remove(key);
-    if written.as_ref().and_then(|v| v.as_str()) != Some(value) || before != after {
+    if written.as_ref() != Some(&value) || before != after {
         return Err(not_written());
     }
     if let Some(dir) = path.parent() {
@@ -146,6 +151,21 @@ mod tests {
         fs::write(&path, "theme = \"light").unwrap();
         assert!(save_language_to(&path, "es").is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), "theme = \"light");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_bool_saves_in_place_and_a_string_where_it_was_is_left() {
+        let dir = std::env::temp_dir().join(format!("jvid-bool-{}", std::process::id()));
+        let path = dir.join("settings.toml");
+        save_value_to(&path, "reduce_motion", true.into()).unwrap();
+        assert!(load_from(&path).reduce_motion);
+        fs::write(&path, "theme = \"light\"\nreduce_motion = true # mine\n").unwrap();
+        save_value_to(&path, "reduce_motion", false.into()).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert_eq!(text, "theme = \"light\"\nreduce_motion = false # mine\n");
+        fs::write(&path, "reduce_motion = \"yes\"\n").unwrap();
+        assert!(save_value_to(&path, "reduce_motion", true.into()).is_err());
         fs::remove_dir_all(dir).unwrap();
     }
 

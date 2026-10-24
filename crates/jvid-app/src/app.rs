@@ -114,6 +114,8 @@ pub struct App {
     language: String,
     /// The `input_device` setting: a device name, empty for the system default.
     input_device: String,
+    /// The `reduce_motion` setting.
+    reduce_motion: bool,
     /// The voiceover being recorded.
     take: Option<crate::record::Take>,
     /// The microphone backend, opened on the first take; tests swap in a fake.
@@ -170,6 +172,8 @@ impl App {
         app.theme_setting = settings.theme.clone();
         app.language = settings.language.clone();
         app.input_device = settings.input_device.clone();
+        app.reduce_motion = settings.reduce_motion;
+        crate::preferences::reduce_motion(&cc.egui_ctx, settings.reduce_motion);
         if let Some(auto) = autosave::untitled().as_deref().and_then(autosave::newer) {
             app.prompts.push(Prompt::Restore { path: None, auto });
         }
@@ -223,6 +227,7 @@ impl App {
             preferences: Default::default(),
             language: jvid_core::settings::Settings::default().language,
             input_device: String::new(),
+            reduce_motion: false,
             take: None,
             input: None,
             theme_setting: "dark".into(),
@@ -1249,14 +1254,14 @@ impl eframe::App for App {
                 tracing::warn!("edit failed: {e}");
             }
             let (language, input) = (&mut self.language, &mut self.input_device);
-            let theme = &mut self.theme_setting;
-            let changed = self
-                .preferences
-                .show(ui, language, theme, input, |key, value| {
-                    let path = crate::settings_file::path()
-                        .ok_or_else(|| std::io::Error::other(tr!("settings.no_config_dir")))?;
-                    crate::settings_file::save_string_to(&path, key, value)
-                });
+            let (theme, motion) = (&mut self.theme_setting, &mut self.reduce_motion);
+            let changed =
+                self.preferences
+                    .show(ui, language, theme, motion, input, |key, value| {
+                        let path = crate::settings_file::path()
+                            .ok_or_else(|| std::io::Error::other(tr!("settings.no_config_dir")))?;
+                        crate::settings_file::save_value_to(&path, key, value)
+                    });
             if changed {
                 self.theme = suite_ui::themes::LiveTheme::new(&self.theme_setting);
             }

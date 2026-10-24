@@ -1002,7 +1002,12 @@ impl Timeline {
             && ui
                 .input(|i| i.pointer.interact_pos())
                 .is_some_and(|p| lanes.contains(p) && p.y < top_y + self.slot + SLOT_PX);
-        let t = if open { 0.15 } else { 0.1 };
+        // Reduce Motion zeroes the style's animation time; the slot then snaps.
+        let t = match () {
+            _ if ui.style().animation_time == 0.0 => 0.0,
+            _ if open => 0.15,
+            _ => 0.1,
+        };
         let slot_id = id.with("slot");
         let ease = egui::emath::easing::cubic_out;
         let shown = ui
@@ -2961,9 +2966,18 @@ mod tests {
 
     /// Edits from the timeline go through a real history, as in the app.
     pub(super) fn harness(project: Project) -> egui_kittest::Harness<'static, (Timeline, History)> {
+        harness_at(project, 0.25)
+    }
+
+    /// [`harness`] stepping `dt` seconds a frame.
+    fn harness_at(
+        project: Project,
+        dt: f32,
+    ) -> egui_kittest::Harness<'static, (Timeline, History)> {
         let mut fresh = true;
         let mut h = egui_kittest::Harness::builder()
             .with_size([1000.0, 200.0])
+            .with_step_dt(dt)
             .wgpu()
             .build_ui_state(
                 move |ui, (t, h): &mut (Timeline, History)| {
@@ -3473,6 +3487,38 @@ mod tests {
         let t = tracks(&h);
         assert_eq!(t.len(), 3);
         assert_eq!(t[0].clips()[0].asset, solid);
+    }
+
+    /// With Reduce Motion the New Track slot opens in the frame the drag reaches the edge.
+    #[test]
+    fn reduce_motion_opens_the_new_track_slot_at_once() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut p = History::new(project(2));
+        let _ = p.apply(Command::AddText {
+            name: "Title".into(),
+            text: Default::default(),
+        });
+        let title = p.project().assets()[1].id;
+        for reduce in [false, true] {
+            let mut h = harness_at(p.project().clone(), 1.0 / 60.0);
+            crate::preferences::reduce_motion(&h.ctx, reduce);
+            let v1 = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+            let x = size::TRACK_HEADER + 100.0;
+            h.hover_at(pos2(x, v1));
+            h.run();
+            egui::DragAndDrop::set_payload(&h.ctx, title);
+            h.drag_at(pos2(x, v1));
+            h.run();
+            h.hover_at(pos2(x, 8.0 + size::RULER + 2.0));
+            h.step();
+            let full = h.state().0.slot == Track::default_height();
+            assert_eq!(full, reduce, "reduce motion {reduce}: {}", h.state().0.slot);
+            h.drop_at(pos2(x, 8.0 + size::RULER / 2.0));
+            h.run();
+        }
     }
 
     #[test]

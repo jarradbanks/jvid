@@ -442,8 +442,8 @@ fn settings_picker_switches_at_once_and_saves() {
     let mut h = Harness::builder().with_size([960.0, 600.0]).build_ui_state(
         move |ui, (p, language, theme, input): &mut State| {
             if !install_theme(ui, &mut fresh) {
-                p.show(ui, language, theme, input, |k, v| {
-                    jvid_app::settings_file::save_string_to(&saved, k, v)
+                p.show(ui, language, theme, &mut false, input, |k, v| {
+                    jvid_app::settings_file::save_value_to(&saved, k, v)
                 });
             }
         },

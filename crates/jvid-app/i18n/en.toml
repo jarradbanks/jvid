@@ -270,6 +270,7 @@ general = "General"
 audio = "Audio"
 theme = "Theme"
 open_themes = "Open Themes Folder"
+reduce_motion = "Reduce Motion"
 input_default = "System Default"
 
 # Project size presets, on the welcome screen and in Project Settings.
