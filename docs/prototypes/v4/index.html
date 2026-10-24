@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototypes v4</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* v4 base: copied verbatim into every v4 page. Tokens and chrome from v3/inspector-effects-text.html. */
+:root {
+  --ground: #0A0B0D; --panel: #121416; --raised: #1C1E21; --field: #0D0E11;
+  --border: #232529; --border2: #36383C;
+  --ink: #EDEEF1; --ink2: #ADB1B8; --ink3: #82868E; --ink4: #5A5E63;
+  --blue: #2368C9; --blueh: #2C70D3; --bluel: #7AACF6;
+  --red: #EC5B57; --amber: #F2AF48; --green: #4EBE7D;
+  --shadow: 0 8px 24px rgba(0, 0, 0, .4);
+  color-scheme: dark;
+}
+/* Built-in palettes from crates/suite-ui/src/themes.rs. Ink 2 and Ink 4 aren't palette tokens; these are the derived values. */
+.th-light { --ground: #E6E7EA; --panel: #F6F7F8; --raised: #FFFFFF; --field: #FFFFFF; --border: #D9DBDF; --border2: #B4B7BD;
+  --ink: #16181B; --ink2: #3F434A; --ink3: #5E6269; --ink4: #9A9EA5; --bluel: #1D5BB5; --red: #C03632; --amber: #8A5A00; --green: #1E7A46; --shadow: 0 8px 24px rgba(0, 0, 0, .14); color-scheme: light; }
+.th-hc { --ground: #000; --panel: #000; --raised: #141414; --field: #000; --border: #8A8A8A; --border2: #FFFFFF;
+  --ink: #FFFFFF; --ink2: #E0E0E0; --ink3: #C8C8C8; --ink4: #8A8A8A; --bluel: #9CC4FF; --red: #FF7A75; --amber: #FFC85C; --green: #6BE09A; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ground); color: var(--ink2); }
+body { font: 400 14px/1.55 Inter, system-ui, sans-serif; font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased; }
+::selection { background: rgba(35, 104, 201, .45); color: var(--ink); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+:focus-visible { outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+code { font-size: 12px; color: var(--ink); }
+a { color: var(--bluel); text-underline-offset: 2px; }
+
+/* The page around the mockups */
+.page { max-width: 1320px; margin: 0 auto; padding: 56px 32px 120px; }
+h1 { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); margin: 0 0 12px; }
+h2 { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); margin: 0 0 12px; }
+h3 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); margin: 32px 0 8px; }
+section { margin-top: 88px; }
+p { margin: 0 0 12px; max-width: 68ch; }
+ul.notes { margin: 0; padding-left: 18px; max-width: 68ch; }
+ul.notes li { margin: 6px 0; }
+ul.notes li::marker { color: var(--ink4); }
+.page b { color: var(--ink); font-weight: 500; }
+.compare { display: flex; flex-wrap: wrap; gap: 40px 48px; align-items: flex-start; margin-top: 32px; }
+.stack { display: flex; flex-direction: column; gap: 56px; margin-top: 32px; }
+figure { margin: 0; max-width: 100%; }
+figcaption { margin: 16px 0 6px; color: var(--ink); font-weight: 500; }
+.why { margin: 0; max-width: 60ch; }
+.why span { color: var(--ink3); }
+.stage { overflow-x: auto; }
+.states { display: flex; flex-wrap: wrap; gap: 32px 40px; align-items: flex-start; margin-top: 24px; }
+.state-lbl { font-size: 12px; color: var(--ink3); margin: 0 0 8px; }
+.toggle { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; margin: 8px 0 0; }
+.toggle button { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: var(--ink3); }
+.toggle button.on { background: var(--raised); color: var(--ink); }
+.rec { margin-top: 88px; padding-top: 24px; border-top: 1px solid var(--border); }
+
+/* App chrome, at the app's own scale (egui points = CSS px) */
+.app { font-size: 12px; line-height: 16px; color: var(--ink); user-select: none; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.phead { height: 32px; flex: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; font-weight: 500; }
+.phead.tabs { padding: 0 4px; gap: 4px; }
+.tab { flex: 1 1 0; max-width: 160px; min-width: 64px; height: 24px; border-radius: 6px; color: var(--ink3); font-weight: 500; text-align: center; transition: color .1s, background .1s; }
+.tab:hover { color: var(--ink2); }
+.tab.on { background: var(--raised); color: var(--ink); }
+.pbody { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 12px 12px; scrollbar-gutter: stable; }
+
+.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ib { width: 20px; height: 20px; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); transition: background .1s, color .1s; flex: none; }
+.ib:hover { background: var(--raised); color: var(--ink); }
+.ib.ph { pointer-events: none; }
+.ib[disabled] { color: var(--ink4); pointer-events: none; }
+
+/* Inspector sections and rows */
+.sec + .sec { border-top: 1px solid var(--border); }
+.shead { height: 32px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500; }
+.shead .chev { color: var(--ink2); transition: transform .1s; }
+.sec:not(.open) > .shead .chev { transform: rotate(-90deg); }
+.sec:not(.open) > .sbody { display: none; }
+.sbody { padding-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+.tools { margin-left: auto; display: flex; gap: 2px; flex: none; }
+.row .reset, .shead .reset { visibility: hidden; }
+.row.changed .reset, .sec.changed > .shead .reset { visibility: visible; }
+.dia { width: 8px; height: 8px; transform: rotate(45deg); border: 1px solid var(--ink4); border-radius: 1px; }
+.key:hover .dia { border-color: var(--ink2); }
+.row.anim .dia { border-color: var(--bluel); }
+.row.anim.here .dia { background: var(--bluel); }
+.row { display: flex; align-items: center; gap: 4px; min-height: 24px; }
+.lbl { width: 72px; flex: none; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vals { flex: 1; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.fld { height: 24px; border-radius: 6px; background: var(--field); border: 1px solid var(--border); padding: 0 8px; display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; white-space: nowrap; transition: border-color .1s; color: var(--ink); }
+.fld:hover { border-color: var(--border2); }
+.fld.focus { border-color: var(--blue); outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+.fld.err { border-color: var(--red); }
+.fld.num { cursor: ew-resize; }
+.fld.w56 { flex: 0 0 56px; } .fld.w64 { flex: 0 0 64px; }
+.fld .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pre { color: var(--ink3); }
+.ph-txt { color: var(--ink3); }
+.dd { cursor: pointer; justify-content: space-between; }
+.dd .i { color: var(--ink3); margin-right: -4px; }
+.sl { flex: 1; position: relative; display: flex; align-items: center; margin-left: 4px; min-width: 40px; }
+.sl.bi::before { content: ""; position: absolute; left: 50%; top: 7px; height: 10px; width: 1px; background: var(--border2); }
+.sl input { position: relative; -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; --lo: 0%; --hi: 0%; }
+.sl input:focus-visible { outline: none; }
+.sl input::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: linear-gradient(90deg, var(--border2) var(--lo), var(--ink3) var(--lo) var(--hi), var(--border2) var(--hi)); }
+.sl input::-webkit-slider-thumb { -webkit-appearance: none; width: 6px; height: 14px; border-radius: 2px; background: var(--ink2); margin-top: -6px; }
+.sl input:hover::-webkit-slider-thumb { background: var(--ink); }
+.chk { display: flex; align-items: center; gap: 6px; color: var(--ink2); height: 24px; white-space: nowrap; }
+.box { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border2); background: var(--field); display: grid; place-items: center; }
+.box .i { width: 12px; height: 12px; stroke: var(--ink); visibility: hidden; }
+.chk.on .box { background: var(--raised); }
+.chk.on .box .i { visibility: visible; }
+.seg { display: flex; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); padding: 1px; gap: 1px; }
+.seg button { flex: 1; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); min-width: 24px; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--raised); color: var(--ink); }
+
+/* Buttons */
+.btn { height: 24px; border-radius: 6px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500; color: var(--ink); background: var(--raised); border: 1px solid var(--border); transition: border-color .1s, background .1s; white-space: nowrap; }
+.btn:hover { border-color: var(--border2); }
+.btn .i { color: var(--ink2); }
+.btn.lg { height: 28px; }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.btn.primary:hover { background: var(--blueh); border-color: var(--blueh); }
+.btn.primary .i { color: #fff; }
+.btn.ghost { background: none; border-color: transparent; color: var(--ink2); }
+.btn.ghost:hover { background: var(--raised); color: var(--ink); }
+.btn.danger { color: var(--red); }
+.btn[disabled], .btn.off { background: var(--raised); border-color: var(--border); color: var(--ink4); pointer-events: none; }
+.btn[disabled] .i, .btn.off .i { color: var(--ink4); }
+
+/* Menus, popovers, tooltips, dialogs */
+.menu { background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); }
+.mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 24px; padding: 0 8px; border-radius: 6px; white-space: nowrap; color: var(--ink); }
+.mi:hover, .mi.hover { background: var(--border); }
+.mi .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.mi .ck { width: 12px; height: 12px; stroke: var(--ink); }
+.mi[disabled] { color: var(--ink4); pointer-events: none; }
+.mi .k { margin-left: auto; padding-left: 16px; font-size: 10px; color: var(--ink3); }
+.msep { height: 1px; background: var(--border); margin: 4px 0; }
+.tip { position: absolute; background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; color: var(--ink); white-space: nowrap; box-shadow: var(--shadow); z-index: 5; font-size: 12px; line-height: 16px; }
+.dlg { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.dlg-title { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.help { color: var(--ink3); }
+.errtxt { color: var(--red); }
+
+/* An editor at the minimum window size (960×600, app.rs), for dialogs to sit over. Flat blocks only. */
+.editor { position: relative; width: 960px; height: 600px; background: var(--ground); overflow: hidden; border-radius: 6px; flex: none; }
+.editor .bar { position: absolute; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; padding: 0 12px; gap: 12px; font-weight: 600; color: var(--ink); }
+.editor .bar .x { margin-left: auto; }
+.editor .p { position: absolute; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.editor .p::before { content: ""; position: absolute; left: 0; right: 0; top: 32px; border-top: 1px solid var(--border); }
+.editor .scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); }
+.editor .center { position: absolute; inset: 40px 0 0; display: grid; place-items: center; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+@media (max-width: 600px) { .page { padding: 32px 16px 80px; } }
+.list { margin-top: 32px; max-width: 760px; border-top: 1px solid var(--border); }
+.item { display: flex; gap: 24px; align-items: baseline; padding: 16px 0; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--ink2); }
+.item:hover .name { color: var(--bluel); }
+.item .name { flex: 0 0 200px; color: var(--ink); font-weight: 500; }
+.item .iss { flex: 0 0 96px; color: var(--ink3); font-size: 12px; }
+.item .d { flex: 1; }
+@media (max-width: 600px) { .item { flex-wrap: wrap; gap: 4px 16px; } .item .name { flex-basis: 100%; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <h1>Prototypes v4</h1>
+  <p>Design-only mockups for the owner polish batch. Each page shows three structurally different alternatives, the real states the build has to handle, and a recommendation. Pick one direction per page; the implementation issue then builds that one.</p>
+  <p>Same frame and tokens as <a href="../v3/inspector-effects-text.html">v3 Inspector, Effects and Text</a>. Everything here is drawable in egui: flat fills, 1px strokes, rounded rects and the overlay shadow. Labels are in Title Case, which overrides DESIGN.md's sentence case at the owner's request.</p>
+  <nav class="list">
+    <a class="item" href="preferences.html"><span class="name">Preferences and Themes</span><span class="iss">#257 #258</span><span class="d">Dialog structure, the Theme picker, dropdowns that stay inside the window, a broken theme file, Light and High Contrast.</span></a>
+    <a class="item" href="text-tab.html"><span class="name">Text Tab</span><span class="iss">#259</span><span class="d">Inspector rows for every text field at 288 and 240px, one swatch component, a long multi-line title.</span></a>
+    <a class="item" href="export.html"><span class="name">Export</span><span class="iss">#261</span><span class="d">The Export button's queue menu in every job state, and the Export dialog as it is today and redesigned.</span></a>
+    <a class="item" href="graphic-eq.html"><span class="name">Graphic EQ</span><span class="iss">#263</span><span class="d">The 10-band EQ with Post-Gain, presets for the EQ and Compressor, and the track popover.</span></a>
+  </nav>
+</main>
+</body>
+</html>

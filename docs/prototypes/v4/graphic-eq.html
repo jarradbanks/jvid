@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graphic EQ and Presets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* v4 base: copied verbatim into every v4 page. Tokens and chrome from v3/inspector-effects-text.html. */
+:root {
+  --ground: #0A0B0D; --panel: #121416; --raised: #1C1E21; --field: #0D0E11;
+  --border: #232529; --border2: #36383C;
+  --ink: #EDEEF1; --ink2: #ADB1B8; --ink3: #82868E; --ink4: #5A5E63;
+  --blue: #2368C9; --blueh: #2C70D3; --bluel: #7AACF6;
+  --red: #EC5B57; --amber: #F2AF48; --green: #4EBE7D;
+  --shadow: 0 8px 24px rgba(0, 0, 0, .4);
+  color-scheme: dark;
+}
+/* Built-in palettes from crates/suite-ui/src/themes.rs. Ink 2 and Ink 4 aren't palette tokens; these are the derived values. */
+.th-light { --ground: #E6E7EA; --panel: #F6F7F8; --raised: #FFFFFF; --field: #FFFFFF; --border: #D9DBDF; --border2: #B4B7BD;
+  --ink: #16181B; --ink2: #3F434A; --ink3: #5E6269; --ink4: #9A9EA5; --bluel: #1D5BB5; --red: #C03632; --amber: #8A5A00; --green: #1E7A46; --shadow: 0 8px 24px rgba(0, 0, 0, .14); color-scheme: light; }
+.th-hc { --ground: #000; --panel: #000; --raised: #141414; --field: #000; --border: #8A8A8A; --border2: #FFFFFF;
+  --ink: #FFFFFF; --ink2: #E0E0E0; --ink3: #C8C8C8; --ink4: #8A8A8A; --bluel: #9CC4FF; --red: #FF7A75; --amber: #FFC85C; --green: #6BE09A; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ground); color: var(--ink2); }
+body { font: 400 14px/1.55 Inter, system-ui, sans-serif; font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased; }
+::selection { background: rgba(35, 104, 201, .45); color: var(--ink); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+:focus-visible { outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+code { font-size: 12px; color: var(--ink); }
+a { color: var(--bluel); text-underline-offset: 2px; }
+
+/* The page around the mockups */
+.page { max-width: 1320px; margin: 0 auto; padding: 56px 32px 120px; }
+h1 { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); margin: 0 0 12px; }
+h2 { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); margin: 0 0 12px; }
+h3 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); margin: 32px 0 8px; }
+section { margin-top: 88px; }
+p { margin: 0 0 12px; max-width: 68ch; }
+ul.notes { margin: 0; padding-left: 18px; max-width: 68ch; }
+ul.notes li { margin: 6px 0; }
+ul.notes li::marker { color: var(--ink4); }
+.page b { color: var(--ink); font-weight: 500; }
+.compare { display: flex; flex-wrap: wrap; gap: 40px 48px; align-items: flex-start; margin-top: 32px; }
+.stack { display: flex; flex-direction: column; gap: 56px; margin-top: 32px; }
+figure { margin: 0; max-width: 100%; }
+figcaption { margin: 16px 0 6px; color: var(--ink); font-weight: 500; }
+.why { margin: 0; max-width: 60ch; }
+.why span { color: var(--ink3); }
+.stage { overflow-x: auto; }
+.states { display: flex; flex-wrap: wrap; gap: 32px 40px; align-items: flex-start; margin-top: 24px; }
+.state-lbl { font-size: 12px; color: var(--ink3); margin: 0 0 8px; }
+.toggle { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; margin: 8px 0 0; }
+.toggle button { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: var(--ink3); }
+.toggle button.on { background: var(--raised); color: var(--ink); }
+.rec { margin-top: 88px; padding-top: 24px; border-top: 1px solid var(--border); }
+
+/* App chrome, at the app's own scale (egui points = CSS px) */
+.app { font-size: 12px; line-height: 16px; color: var(--ink); user-select: none; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.phead { height: 32px; flex: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; font-weight: 500; }
+.phead.tabs { padding: 0 4px; gap: 4px; }
+.tab { flex: 1 1 0; max-width: 160px; min-width: 64px; height: 24px; border-radius: 6px; color: var(--ink3); font-weight: 500; text-align: center; transition: color .1s, background .1s; }
+.tab:hover { color: var(--ink2); }
+.tab.on { background: var(--raised); color: var(--ink); }
+.pbody { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 12px 12px; scrollbar-gutter: stable; }
+
+.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ib { width: 20px; height: 20px; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); transition: background .1s, color .1s; flex: none; }
+.ib:hover { background: var(--raised); color: var(--ink); }
+.ib.ph { pointer-events: none; }
+.ib[disabled] { color: var(--ink4); pointer-events: none; }
+
+/* Inspector sections and rows */
+.sec + .sec { border-top: 1px solid var(--border); }
+.shead { height: 32px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500; }
+.shead .chev { color: var(--ink2); transition: transform .1s; }
+.sec:not(.open) > .shead .chev { transform: rotate(-90deg); }
+.sec:not(.open) > .sbody { display: none; }
+.sbody { padding-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+.tools { margin-left: auto; display: flex; gap: 2px; flex: none; }
+.row .reset, .shead .reset { visibility: hidden; }
+.row.changed .reset, .sec.changed > .shead .reset { visibility: visible; }
+.dia { width: 8px; height: 8px; transform: rotate(45deg); border: 1px solid var(--ink4); border-radius: 1px; }
+.key:hover .dia { border-color: var(--ink2); }
+.row.anim .dia { border-color: var(--bluel); }
+.row.anim.here .dia { background: var(--bluel); }
+.row { display: flex; align-items: center; gap: 4px; min-height: 24px; }
+.lbl { width: 72px; flex: none; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vals { flex: 1; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.fld { height: 24px; border-radius: 6px; background: var(--field); border: 1px solid var(--border); padding: 0 8px; display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; white-space: nowrap; transition: border-color .1s; color: var(--ink); }
+.fld:hover { border-color: var(--border2); }
+.fld.focus { border-color: var(--blue); outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+.fld.err { border-color: var(--red); }
+.fld.num { cursor: ew-resize; }
+.fld.w56 { flex: 0 0 56px; } .fld.w64 { flex: 0 0 64px; }
+.fld .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pre { color: var(--ink3); }
+.ph-txt { color: var(--ink3); }
+.dd { cursor: pointer; justify-content: space-between; }
+.dd .i { color: var(--ink3); margin-right: -4px; }
+.sl { flex: 1; position: relative; display: flex; align-items: center; margin-left: 4px; min-width: 40px; }
+.sl.bi::before { content: ""; position: absolute; left: 50%; top: 7px; height: 10px; width: 1px; background: var(--border2); }
+.sl input { position: relative; -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; --lo: 0%; --hi: 0%; }
+.sl input:focus-visible { outline: none; }
+.sl input::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: linear-gradient(90deg, var(--border2) var(--lo), var(--ink3) var(--lo) var(--hi), var(--border2) var(--hi)); }
+.sl input::-webkit-slider-thumb { -webkit-appearance: none; width: 6px; height: 14px; border-radius: 2px; background: var(--ink2); margin-top: -6px; }
+.sl input:hover::-webkit-slider-thumb { background: var(--ink); }
+.chk { display: flex; align-items: center; gap: 6px; color: var(--ink2); height: 24px; white-space: nowrap; }
+.box { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border2); background: var(--field); display: grid; place-items: center; }
+.box .i { width: 12px; height: 12px; stroke: var(--ink); visibility: hidden; }
+.chk.on .box { background: var(--raised); }
+.chk.on .box .i { visibility: visible; }
+.seg { display: flex; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); padding: 1px; gap: 1px; }
+.seg button { flex: 1; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); min-width: 24px; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--raised); color: var(--ink); }
+
+/* Buttons */
+.btn { height: 24px; border-radius: 6px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500; color: var(--ink); background: var(--raised); border: 1px solid var(--border); transition: border-color .1s, background .1s; white-space: nowrap; }
+.btn:hover { border-color: var(--border2); }
+.btn .i { color: var(--ink2); }
+.btn.lg { height: 28px; }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.btn.primary:hover { background: var(--blueh); border-color: var(--blueh); }
+.btn.primary .i { color: #fff; }
+.btn.ghost { background: none; border-color: transparent; color: var(--ink2); }
+.btn.ghost:hover { background: var(--raised); color: var(--ink); }
+.btn.danger { color: var(--red); }
+.btn[disabled], .btn.off { background: var(--raised); border-color: var(--border); color: var(--ink4); pointer-events: none; }
+.btn[disabled] .i, .btn.off .i { color: var(--ink4); }
+
+/* Menus, popovers, tooltips, dialogs */
+.menu { background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); }
+.mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 24px; padding: 0 8px; border-radius: 6px; white-space: nowrap; color: var(--ink); }
+.mi:hover, .mi.hover { background: var(--border); }
+.mi .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.mi .ck { width: 12px; height: 12px; stroke: var(--ink); }
+.mi[disabled] { color: var(--ink4); pointer-events: none; }
+.mi .k { margin-left: auto; padding-left: 16px; font-size: 10px; color: var(--ink3); }
+.msep { height: 1px; background: var(--border); margin: 4px 0; }
+.tip { position: absolute; background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; color: var(--ink); white-space: nowrap; box-shadow: var(--shadow); z-index: 5; font-size: 12px; line-height: 16px; }
+.dlg { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.dlg-title { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.help { color: var(--ink3); }
+.errtxt { color: var(--red); }
+
+/* An editor at the minimum window size (960×600, app.rs), for dialogs to sit over. Flat blocks only. */
+.editor { position: relative; width: 960px; height: 600px; background: var(--ground); overflow: hidden; border-radius: 6px; flex: none; }
+.editor .bar { position: absolute; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; padding: 0 12px; gap: 12px; font-weight: 600; color: var(--ink); }
+.editor .bar .x { margin-left: auto; }
+.editor .p { position: absolute; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.editor .p::before { content: ""; position: absolute; left: 0; right: 0; top: 32px; border-top: 1px solid var(--border); }
+.editor .scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); }
+.editor .center { position: absolute; inset: 40px 0 0; display: grid; place-items: center; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+@media (max-width: 600px) { .page { padding: 32px 16px 80px; } }
+
+/* Graphic EQ page */
+#alts figure { width: 288px; }
+#alts figure:last-child { width: 420px; }
+.fig-c { position: relative; width: 420px; height: 420px; }
+.fig-c > .panel { position: absolute; right: 0; top: 0; }
+.wrap { position: relative; }
+table { border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+th, td { text-align: right; padding: 8px 0 8px 16px; border-top: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--ink3); font-weight: 500; font-size: 12px; }
+th:first-child, td:first-child { text-align: left; padding-left: 0; color: var(--ink); font-weight: 500; }
+td.z { color: var(--ink4); }
+
+/* Effect blocks (from v3) */
+.fx { border-top: 1px solid var(--border); }
+.fxhead { height: 28px; display: flex; align-items: center; gap: 2px; margin-left: -2px; }
+.fxname { font-weight: 500; margin-left: 4px; white-space: nowrap; }
+.fxhead .reset { visibility: hidden; }
+.fx.changed .fxhead .reset { visibility: visible; }
+.fxchev .i { transition: transform .1s; }
+.fx.collapsed .fxchev .i { transform: rotate(-90deg); }
+.fx.collapsed .fxbody { display: none; }
+.fx.off .fxname { color: var(--ink3); }
+.fx.off .fxbody { opacity: .4; pointer-events: none; }
+.fxbody { display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; }
+.row .ib.ph { visibility: hidden; }
+.fld.w64 { padding: 0 6px; }
+.dd .t.custom { color: var(--ink2); }
+
+/* The EQ graph: one SVG, drawn the way egui's painter would (rects, lines, a polyline, text) */
+svg.eq { display: block; touch-action: none; cursor: ns-resize; overflow: visible; }
+svg.eq text { font: 400 10px/12px Inter, system-ui, sans-serif; font-feature-settings: "tnum" 1; text-anchor: middle; }
+.plot { fill: var(--field); stroke: var(--border); }
+.grid { stroke: var(--border); stroke-width: 1; }
+.grid0 { stroke: var(--border2); stroke-width: 1; }
+.area { fill: var(--ink); fill-opacity: .05; }
+.curve { fill: none; stroke: var(--ink3); stroke-width: 1.5; stroke-linejoin: round; }
+.colbg { fill: transparent; }
+.band.hov .colbg { fill: var(--ink); fill-opacity: .04; }
+.band.drag .colbg { fill: var(--bluel); fill-opacity: .08; }
+.trk { stroke: var(--border2); stroke-width: 2; stroke-linecap: round; }
+.fil { stroke: var(--ink3); stroke-width: 2; }
+.thumb { fill: var(--ink2); }
+.band.hov .thumb { fill: var(--ink); }
+.band.drag .thumb, .band.drag .node { fill: var(--bluel); stroke: var(--bluel); }
+.band.drag .fil { stroke: var(--bluel); }
+.ro { fill: var(--ink2); }
+.ro.z { fill: var(--ink3); }
+.band.drag .ro { fill: var(--bluel); font-weight: 500; }
+.fq { fill: var(--ink3); font-feature-settings: "tnum" 0 !important; } /* static labels: proportional digits buy 21px columns room */
+.band.drag .fq, .band.sel .fq { fill: var(--ink); }
+.node { fill: var(--panel); stroke: var(--ink2); stroke-width: 1.5; }
+.band.hov .node { fill: var(--ink); stroke: var(--ink); }
+.band.sel .node { fill: var(--bluel); stroke: var(--bluel); }
+.scale { fill: var(--ink3); text-anchor: end !important; }
+
+/* C: the compact strip and its popover */
+.strip { display: block; width: 100%; height: 40px; border-radius: 6px; background: var(--field); border: 1px solid var(--border); position: relative; transition: border-color .1s; }
+.strip:hover { border-color: var(--border2); }
+.strip.open { border-color: var(--blue); }
+.strip svg { display: block; }
+.bar { fill: var(--ink3); }
+.bar.z { fill: var(--border2); }
+.pop { position: absolute; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); padding: 0 12px 12px; }
+.pop .phd { height: 32px; display: flex; align-items: center; gap: 6px; font-weight: 500; margin: 0 -4px 8px 0; }
+.pop .phd .sub { color: var(--ink3); font-weight: 400; }
+.pop .fld { background: var(--field); }
+
+/* Track popover */
+.tl { position: relative; width: 600px; height: 480px; flex: none; }
+.tl .panel { width: 600px; height: 248px; }
+.tl .ruler { height: 24px; display: flex; border-bottom: 1px solid var(--border); flex: none; }
+.tl .corner { width: 160px; border-right: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; color: var(--bluel); font-weight: 500; }
+.tl .ticks { flex: 1; background: repeating-linear-gradient(90deg, var(--border2) 0 1px, transparent 1px 48px) bottom / 100% 6px no-repeat; }
+.trow { height: 40px; display: flex; border-bottom: 1px solid var(--border); }
+.th { width: 160px; flex: none; border-right: 1px solid var(--border); display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px; }
+.th .id { font-weight: 500; width: 20px; }
+.th .nm { color: var(--ink2); flex: 1; }
+.th.sel { background: var(--raised); }
+.tg { width: 20px; height: 20px; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); font-size: 10px; font-weight: 500; }
+.lane { flex: 1; position: relative; }
+.clip { position: absolute; top: 2px; bottom: 2px; border-radius: 4px; padding: 2px 6px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; }
+.cv { background: #5E589F; } .ca { background: #30715D; }
+.tl .menu { position: absolute; width: 168px; }
+.tl .pop { width: 320px; padding: 0 12px 4px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chev-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 16 16"><path d="M3 3.5v3.5h3.5"/><path d="M3.4 7A5 5 0 1 1 4.6 11.6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 16 16"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 16 16"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/><path d="M2.5 2.5l11 11"/></symbol>
+  <symbol id="i-more" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="12.5" cy="8" r=".9" fill="currentColor"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
+</svg>
+
+<main class="page">
+  <h1>Graphic EQ and Presets</h1>
+  <p>Mockups for <a href="https://github.com/jarradbanks/jvid/issues/263">#263</a>: a 10-band graphic EQ (31 Hz to 16 kHz, ±15 dB, plus Post-Gain) with presets, and the same presets for the Compressor. Every EQ on this page works: drag a band, double-click it to reset, pick a preset.</p>
+  <p>The Inspector is 288px wide at 1280×720 (the <code>default_dock()</code> split) and 240px at the 960×600 minimum window, which leaves 260px and 214px for content. Ten bands have to fit in 214px, so each band column is 21px at the minimum.</p>
+
+  <section id="now">
+    <h2>What's wrong now</h2>
+    <ul class="notes">
+      <li>Seven rows of sliders for three bands. Frequency and Q are numbers to type, and nothing shows the shape they make.</li>
+      <li>Gain runs ±24 dB, so most of each slider's travel is spent on moves nobody makes on voice or game audio.</li>
+      <li>No presets: cleaning up a mic means setting seven values by ear every time, and the Compressor's defaults (Ratio 1:1) do nothing until you know which four values to change.</li>
+      <li>The track's Audio Effects is a 320px submenu of the track menu, so it closes when the pointer crosses another menu item.</li>
+    </ul>
+  </section>
+
+  <section id="alts">
+    <h2>Three directions</h2>
+    <p>All three sit in the Inspector's Audio tab at its default 288px, with the EQ then the Compressor as today, and the same Preset row. Each starts on Voice; drag to compare.</p>
+    <div class="compare">
+      <figure>
+        <div class="stage" id="alt-a"></div>
+        <figcaption>A. Slider Bank</figcaption>
+        <p class="why">Optimises for reading and setting each band: a vertical slider per band, its dB above and its frequency below, with the response curve drawn behind. <span>Tradeoff: at 214px the readouts are 10px in 21px columns, and the curve is context rather than something you grab.</span></p>
+      </figure>
+      <figure>
+        <div class="stage" id="alt-b"></div>
+        <figcaption>B. Curve with Nodes</figcaption>
+        <p class="why">Optimises for the shape: the response curve is the control, with a node per band that drags up and down, and a field row for the selected band to type an exact value. <span>Tradeoff: 8px nodes are small targets, and only one band's value shows at a time.</span></p>
+      </figure>
+      <figure>
+        <div class="fig-c" id="alt-c"></div>
+        <figcaption>C. Compact Strip and Popover</figcaption>
+        <p class="why">Optimises for a short Inspector: a 40px bar strip shows the curve at a glance and opens a 360px editor beside it. <span>Tradeoff: every adjustment is a click away, and the popover covers the Program view's right edge while it's open.</span></p>
+      </figure>
+    </div>
+  </section>
+
+  <section id="states">
+    <h2>States, in direction A</h2>
+    <p>The recommended direction at both widths. Dragged bands turn Light Blue with their value; a manual edit turns the preset to Custom. The bypassed block keeps its settings, greyed, as today.</p>
+    <div class="states">
+      <figure><p class="state-lbl">Flat · 288px</p><div class="stage" id="st-flat"></div></figure>
+      <figure><p class="state-lbl">Voice · 240px, Minimum Window</p><div class="stage" id="st-voice"></div></figure>
+      <figure><p class="state-lbl">Dragging 1K to +6 dB · 288px</p><div class="stage" id="st-drag"></div></figure>
+      <figure><p class="state-lbl">EQ Bypassed · 240px</p><div class="stage" id="st-off"></div></figure>
+      <figure><p class="state-lbl">Compressor Presets Open · 288px</p><div class="wrap" id="st-comp"></div></figure>
+    </div>
+  </section>
+
+  <section id="track">
+    <h2>Track Popover</h2>
+    <p>The track header's Audio Effects item stops being a submenu. It opens a 320px popover beside the track header with the same EQ and Compressor blocks, which stays open until a click outside it or Escape, so a drag can wander.</p>
+    <div class="states">
+      <figure><p class="state-lbl">1. Right-click A1's header</p><div class="tl app" id="tl-menu"></div></figure>
+      <figure><p class="state-lbl">2. Audio Effects opens the popover</p><div class="tl app" id="tl-pop"></div></figure>
+    </div>
+  </section>
+
+  <section id="presets">
+    <h2>Preset values</h2>
+    <p>Starting values for the build to tune by ear. The dropdown names the preset whose values match exactly, and shows Custom otherwise, so no preset name is stored in the project.</p>
+    <table id="eq-table"></table>
+    <table id="comp-table" style="margin-top:32px"></table>
+  </section>
+
+  <section class="rec">
+    <h2>Recommendation: A, Slider Bank</h2>
+    <ul class="notes">
+      <li><b>It is the widget #263 describes</b>, and the one editors and players already know: one slider per band, value above, frequency below, curve behind.</li>
+      <li><b>It fits.</b> Every band is a full-height column, 21px wide at the 240px minimum and 26px at the default, so the whole column is the hit target, not an 8px node. At the minimum, 125, 250 and 500 sit about 3px apart in 10px type with proportional digits; tight, but every band keeps its label. B's nodes are the same columns with smaller targets.</li>
+      <li><b>It keeps every value visible</b> without a click. C saves 110px of height but costs a click per adjustment, in a tab that already scrolls little once it holds only Audio.</li>
+      <li><b>One widget, two places.</b> The Inspector block and the 320px track popover draw the same <code>graphic_eq(ui, &amp;mut bands)</code>; the popover just gets 296px of width.</li>
+      <li><b>Build notes:</b> 0.5 dB steps; Shift-drag for 0.1 dB; double-click resets a band; Up and Down nudge the hovered band. Grid lines at 0 (Border Strong) and ±6, ±12 (Border); the plot edges are ±15. A drag is one undo step, and a preset is one undo step.</li>
+    </ul>
+  </section>
+</main>
+
+<div class="menu app" id="menu" hidden role="menu" style="position:fixed;z-index:50;min-width:140px"></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const I = n => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+
+const HZ = ['31', '62', '125', '250', '500', '1K', '2K', '4K', '8K', '16K'];
+const EQ = {
+  Flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  Voice: [-12, -8, -3, 0, -1, 1, 3, 4, 2, 0],
+  Podcast: [-15, -9, -2, 2, 0, -1, 2, 3, 1, -1],
+  'Bass Boost': [6, 6, 4, 2, 0, 0, 0, 0, 0, 0],
+  'Bass Cut': [-8, -6, -4, -2, 0, 0, 0, 0, 0, 0],
+  'Treble Boost': [0, 0, 0, 0, 0, 1, 2, 4, 6, 6],
+  'Low Cut': [-15, -15, -6, -1, 0, 0, 0, 0, 0, 0],
+  Loudness: [6, 4, 1, 0, -1, -1, 0, 2, 4, 5],
+};
+const POST = { 'Bass Boost': -3, 'Treble Boost': -2, Loudness: -3 };
+const KNOBS = [
+  { l: 'Threshold', min: -60, max: 0, u: ' dB', d: 1 },
+  { l: 'Ratio', min: 1, max: 20, u: ':1', d: 1 },
+  { l: 'Attack', min: .1, max: 200, u: ' ms', d: 1, log: 1 },
+  { l: 'Release', min: 5, max: 2000, u: ' ms', d: 0, log: 1 },
+  { l: 'Makeup', min: 0, max: 24, u: ' dB', d: 1 },
+];
+const COMP_DEF = [-20, 1, 10, 100, 0];
+const COMP = { Gentle: [-18, 2, 20, 200, 2], Voice: [-22, 3, 5, 120, 4], Broadcast: [-26, 4, 2, 80, 6], Limiter: [-3, 20, .1, 50, 0] };
+
+const minus = s => s.replace('-', '−');
+const ro = v => v === 0 ? '0' : (v > 0 ? '+' : '−') + (Number.isInteger(v) ? Math.abs(v) : Math.abs(v).toFixed(1));
+const dbf = v => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(1) + ' dB';
+const same = (a, b) => a.every((v, i) => v === b[i]);
+const eqName = s => Object.keys(EQ).find(k => same(EQ[k], s.b) && (POST[k] || 0) === s.post) || 'Custom';
+const compName = s => same(s.c, COMP_DEF) ? 'None' : Object.keys(COMP).find(k => same(COMP[k], s.c)) || 'Custom';
+const kfmt = (k, v) => minus(v.toFixed(k.d)) + k.u;
+const kfrac = (k, v) => k.log ? Math.log(v / k.min) / Math.log(k.max / k.min) : (v - k.min) / (k.max - k.min);
+const kval = (k, f) => { const v = k.log ? k.min * Math.pow(k.max / k.min, f) : k.min + f * (k.max - k.min); const p = Math.pow(10, k.d); return Math.round(v * p) / p; };
+
+// One state per EQ on the page. kind: A slider bank, B curve with nodes, C strip and popover.
+const S = [];
+function mk(o) {
+  const s = { kind: 'A', w: 260, preset: 'Voice', on: true, eqOpen: true, compOpen: false, comp: 'Gentle', hov: -1, drag: -1, sel: 5, pop: false, ...o };
+  s.b = [...EQ[s.preset]]; s.post = POST[s.preset] || 0;
+  s.c = [...(COMP[s.comp] || COMP_DEF)];
+  if (o.set) o.set(s);
+  S.push(s);
+  return S.length - 1;
+}
+
+function curve(b, xs, y, x0, x1) {
+  const p = [[x0, y(b[0])], [xs[0], y(b[0])]];
+  for (let i = 0; i < 9; i++) for (let t = .125; t <= 1.001; t += .125) {
+    const m = (1 - Math.cos(t * Math.PI)) / 2;
+    p.push([xs[i] + (xs[i + 1] - xs[i]) * t, y(b[i] + (b[i + 1] - b[i]) * m)]);
+  }
+  p.push([x1, y(b[9])]);
+  return p;
+}
+const pts = p => p.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+const hline = (w, y, c) => `<line class="${c}" x1="1" x2="${w - 1}" y1="${Math.round(y) + .5}" y2="${Math.round(y) + .5}"/>`;
+
+// Geometry for each kind, shared by drawing and dragging.
+function geo(kind, w) {
+  if (kind === 'B') {
+    const y0 = 0, h = 112, xs = HZ.map((_, i) => 12 + (w - 24) * i / 9);
+    return { H: 130, y0, h, xs, col: (w - 24) / 9, y: v => y0 + 8 + (15 - v) / 30 * (h - 16) };
+  }
+  const y0 = 16, h = 112, col = w / 10, xs = HZ.map((_, i) => col * (i + .5));
+  return { H: 146, y0, h, xs, col, y: v => y0 + 8 + (15 - v) / 30 * (h - 16) };
+}
+
+function svgEq(i, kind, w) {
+  const s = S[i], g = geo(kind, w), { y0, h, xs, y } = g;
+  let o = `<rect class="plot" x=".5" y="${y0 + .5}" width="${w - 1}" height="${h - 1}" rx="4"/>`;
+  for (const v of [12, 6, -6, -12]) o += hline(w, y(v), 'grid');
+  o += hline(w, y(0), 'grid0');
+  if (kind === 'B') o += [12, -12].map(v => `<text class="scale" x="${w - 4}" y="${Math.round(y(v)) - 3}">${ro(v)}</text>`).join('');
+  const c = curve(s.b, xs, y, 1, w - 1);
+  o += `<polygon class="area" points="${pts([...c, [w - 1, y(0)], [1, y(0)]])}"/><polyline class="curve" points="${pts(c)}"/>`;
+  HZ.forEach((hz, k) => {
+    const v = s.b[k], x = xs[k], st = [k === s.hov && 'hov', k === s.drag && 'drag', kind === 'B' && k === s.sel && 'sel'].filter(Boolean).join(' ');
+    o += `<g class="band ${st}">`;
+    if (kind === 'B') {
+      o += `<circle class="node" cx="${x}" cy="${y(v)}" r="${k === s.drag || k === s.sel ? 5 : 4}"/>`;
+      o += `<text class="fq" x="${x}" y="${g.H - 4}">${hz}</text>`;
+    } else {
+      o += `<rect class="colbg" x="${k * g.col + 1}" y="${y0 + 1}" width="${g.col - 2}" height="${h - 2}" rx="3"/>`;
+      o += `<line class="trk" x1="${x}" x2="${x}" y1="${y0 + 8}" y2="${y0 + h - 8}"/>`;
+      if (v) o += `<line class="fil" x1="${x}" x2="${x}" y1="${y(0)}" y2="${y(v)}"/>`;
+      o += `<rect class="thumb" x="${x - 7}" y="${y(v) - 3}" width="14" height="6" rx="2"/>`;
+      o += `<text class="ro${v ? '' : ' z'}" x="${x}" y="10">${ro(v)}</text>`;
+      o += `<text class="fq" x="${x}" y="${g.H - 4}">${hz}</text>`;
+    }
+    o += '</g>';
+  });
+  return `<svg class="eq" data-i="${i}" data-k="${kind}" data-w="${w}" width="${w}" height="${g.H}" viewBox="0 0 ${w} ${g.H}" aria-label="10-band EQ">${o}</svg>`;
+}
+
+function svgStrip(s, w) {
+  const col = w / 10;
+  return `<svg width="${w}" height="38" viewBox="0 0 ${w} 38" aria-hidden="true">${hline(w, 19, 'grid')}` + s.b.map((v, k) => {
+    const x = col * (k + .5) - 3, hgt = Math.max(1, Math.abs(v) / 15 * 15);
+    return `<rect class="bar${v ? '' : ' z'}" x="${x}" y="${v > 0 ? 19 - hgt : v < 0 ? 19 : 18.5}" width="6" height="${v ? hgt : 1}" rx="1"/>`;
+  }).join('') + '</svg>';
+}
+
+const row = (lbl, vals, reset) => `<div class="row${reset ? ' changed' : ''}"><span class="lbl">${lbl}</span><span class="vals">${vals}</span><span class="tools"><button class="ib reset" title="Reset" data-act="${reset || ''}">${I('reset')}</button></span></div>`;
+const dd = (name, kind) => `<span class="fld dd" role="button" tabindex="0" data-dd="${kind}"><span class="t${name === 'Custom' ? ' custom' : ''}">${name}</span>${I('chev-down')}</span>`;
+const slider = (min, max, step, v, bi, act) => `<span class="sl${bi ? ' bi' : ''}"><input type="range" min="${min}" max="${max}" step="${step}" value="${v}" data-act="${act}" aria-label="${act}"></span>`;
+const fxhead = (name, on, changed, open, act) => `<div class="fxhead"><button class="ib fxchev" data-act="${act}-open" title="Collapse">${I('chev-down')}</button><button class="ib eye" data-act="${act}-on" title="${on ? 'Bypass' : 'Turn On'}">${I(on ? 'eye' : 'eye-off')}</button><span class="fxname">${name}</span><span class="tools"><button class="ib reset" data-act="${act}-reset" title="Reset ${name}">${I('reset')}</button><button class="ib" title="More">${I('more')}</button></span></div>`;
+
+function eqBody(i, kind, w) {
+  const s = S[i];
+  let o = row('Preset', dd(eqName(s), 'eq'));
+  if (kind === 'C') {
+    o += `<button class="strip${s.pop ? ' open' : ''}" data-act="strip" title="Edit EQ">${svgStrip(s, w - 2)}</button>`;
+    return o;
+  }
+  o += `<div style="margin:4px 0">${svgEq(i, kind, w)}</div>`;
+  if (kind === 'B') {
+    const v = s.b[s.sel];
+    o += row(`${HZ[s.sel]} Hz`, `<span class="fld w64 num">${dbf(v)}</span>${slider(-15, 15, .5, v, 1, 'band')}`, v ? 'band' : '');
+  }
+  o += row('Post-Gain', `<span class="fld w64 num">${dbf(s.post)}</span>${slider(-15, 15, .5, s.post, 1, 'post')}`, s.post ? 'post' : '');
+  return o;
+}
+
+function eqBlock(i, kind, w) {
+  const s = S[i], changed = s.b.some(v => v) || s.post;
+  return `<div class="fx${changed ? ' changed' : ''}${s.on ? '' : ' off'}${s.eqOpen ? '' : ' collapsed'}">${fxhead('EQ', s.on, changed, s.eqOpen, 'eq')}<div class="fxbody">${eqBody(i, kind, w)}</div></div>`;
+}
+
+function compBlock(i) {
+  const s = S[i], changed = !same(s.c, COMP_DEF);
+  const rows = KNOBS.map((k, n) => row(k.l, `<span class="fld w64 num">${kfmt(k, s.c[n])}</span>${slider(0, 1, 'any', kfrac(k, s.c[n]), 0, 'k' + n)}`, s.c[n] !== COMP_DEF[n] ? 'k' + n : '')).join('');
+  return `<div class="fx${changed ? ' changed' : ''}${s.compOpen ? '' : ' collapsed'}">${fxhead('Compressor', true, changed, s.compOpen, 'comp')}<div class="fxbody">${row('Preset', dd(compName(s), 'comp'))}${rows}</div></div>`;
+}
+
+const audioSec = `<div class="sec"><div class="shead">${I('chev-down').replace('class="i"', 'class="i chev"')}<span>Audio</span></div></div>`;
+
+function blocks(i) {
+  const s = S[i];
+  return eqBlock(i, s.kind, s.w) + compBlock(i);
+}
+
+function render(i) {
+  $$(`[data-blk="${i}"]`).forEach(el => { el.innerHTML = blocks(i); });
+  $$(`[data-pop="${i}"]`).forEach(el => {
+    el.hidden = !S[i].pop;
+    el.innerHTML = `<div class="phd">EQ<span class="sub">clutch_round_3.mkv</span><span class="tools"><button class="ib" data-act="pop-close" title="Close">${I('x')}</button></span></div>` +
+      row('Preset', dd(eqName(S[i]), 'eq')) + `<div style="margin:8px 0 4px">${svgEq(i, 'A', 334)}</div>` +
+      row('Post-Gain', `<span class="fld w64 num">${dbf(S[i].post)}</span>${slider(-15, 15, .5, S[i].post, 1, 'post')}`, S[i].post ? 'post' : '');
+  });
+  $$(`[data-blk="${i}"] input[type=range], [data-pop="${i}"] input[type=range]`).forEach(paint);
+}
+
+function paint(inp) {
+  const v = +inp.value, min = +inp.min, max = +inp.max, p = (v - min) / (max - min) * 100;
+  const z = inp.closest('.sl').classList.contains('bi') ? 50 : 0;
+  inp.style.setProperty('--lo', `${Math.min(p, z)}%`);
+  inp.style.setProperty('--hi', `${Math.max(p, z)}%`);
+}
+
+function inspector(i, w, h) {
+  return `<div class="panel app" style="width:${w}px;height:${h}px"><div class="phead tabs"><button class="tab">Video</button><button class="tab on">Audio</button><button class="tab">Effects</button></div><div class="pbody">${audioSec}<div data-blk="${i}" data-i="${i}"></div></div></div>`;
+}
+const CW = w => w - 26; // content width: 1px borders, 12px left inset, 4px right, 8px scrollbar gutter
+
+function place(id, o, w = 288, h = 380) {
+  const i = mk({ w: CW(w), ...o });
+  $(id).innerHTML = inspector(i, w, h);
+  render(i);
+  return i;
+}
+
+// The three directions
+place('#alt-a', { kind: 'A' }, 288, 420);
+place('#alt-b', { kind: 'B' }, 288, 420);
+{
+  const i = mk({ kind: 'C', w: CW(288), pop: true });
+  $('#alt-c').innerHTML = inspector(i, 288, 420) + `<div class="pop app" data-pop="${i}" data-i="${i}" style="left:0;top:${32 + 32 + 28 + 28 + 48}px;width:360px"></div>`;
+  render(i);
+}
+
+// States
+place('#st-flat', { preset: 'Flat' });
+place('#st-voice', { preset: 'Voice' }, 240);
+place('#st-drag', { preset: 'Voice', drag: 5, hov: 5, set: s => { s.b[5] = 6; } });
+place('#st-off', { preset: 'Podcast', on: false }, 240);
+{
+  const i = mk({ preset: 'Voice', eqOpen: false, compOpen: true, comp: 'Gentle', w: CW(288) });
+  $('#st-comp').innerHTML = inspector(i, 288, 380);
+  render(i);
+  const m = document.createElement('div');
+  m.className = 'menu app';
+  m.style.cssText = 'position:absolute;width:200px';
+  m.innerHTML = menuItems(['None', ...Object.keys(COMP)], 'Gentle', 'Voice');
+  $('#st-comp').append(m);
+  requestAnimationFrame(() => {
+    const d = $('[data-dd="comp"]', $('#st-comp')), a = d.getBoundingClientRect(), r = $('#st-comp').getBoundingClientRect();
+    m.style.left = `${a.left - r.left}px`; m.style.top = `${a.bottom - r.top + 4}px`; m.style.width = `${a.width}px`;
+  });
+}
+
+function menuItems(list, cur, hover) {
+  return list.map(l => `<button class="mi${l === hover ? ' hover' : ''}" data-pick="${l}"><svg class="i ck" style="visibility:${l === cur ? 'visible' : 'hidden'}"><use href="#i-check"/></svg><span class="t">${l}</span></button>`).join('');
+}
+
+// Track popover
+function timeline(menu) {
+  const lanes = [['V1', 'Gameplay', 'eye', [['cv', 24, 260, 'arena_01.mkv'], ['cv', 288, 150, 'clutch_round_3.mkv']]], ['A1', 'Mic', 'm', [['ca', 40, 300, 'mic']]], ['A2', 'Music', 'm', [['ca', 4, 420, 'music']]]];
+  return `<div class="panel"><div class="phead">Timeline</div><div class="ruler"><div class="corner">00:01:12:08</div><div class="ticks"></div></div>` +
+    lanes.map(([id, nm, t, clips]) => `<div class="trow"><div class="th${menu && id === 'A1' ? ' sel' : ''}"><span class="id">${id}</span><span class="nm">${nm}</span><span class="tg">${I('lock')}</span><span class="tg">${t === 'eye' ? I('eye') : 'M'}</span><span class="tg">S</span></div><div class="lane">${clips.map(([c, x, w, n]) => `<div class="clip ${c}" style="left:${x}px;width:${w}px">${n}</div>`).join('')}</div></div>`).join('') + '</div>';
+}
+$('#tl-menu').innerHTML = timeline(1) + `<div class="menu" style="left:96px;top:${32 + 24 + 40 + 24}px">
+  <button class="mi">Rename</button><button class="mi hover">Audio Effects</button><div class="msep"></div>
+  <button class="mi">Move Up</button><button class="mi">Move Down</button><div class="msep"></div><button class="mi">Remove Track</button></div>`;
+{
+  const i = mk({ preset: 'Podcast', comp: 'Voice', w: 296 });
+  $('#tl-pop').innerHTML = timeline(1) + `<div class="pop app" style="left:164px;top:${32 + 24 + 40}px"><div class="phd">Audio Effects<span class="sub">A1 Mic</span><span class="tools"><button class="ib" title="Close">${I('x')}</button></span></div><div data-blk="${i}" data-i="${i}" style="margin-top:-8px"></div></div>`;
+  render(i);
+}
+
+// Tables
+$('#eq-table').innerHTML = `<thead><tr><th>EQ Preset</th>${HZ.map(h => `<th>${h}</th>`).join('')}<th>Post-Gain</th></tr></thead><tbody>` +
+  Object.entries(EQ).map(([k, b]) => `<tr><td>${k}</td>${b.map(v => `<td${v ? '' : ' class="z"'}>${ro(v)}</td>`).join('')}<td${POST[k] ? '' : ' class="z"'}>${ro(POST[k] || 0)}</td></tr>`).join('') + '</tbody>';
+$('#comp-table').innerHTML = `<thead><tr><th>Compressor Preset</th>${KNOBS.map(k => `<th>${k.l}</th>`).join('')}</tr></thead><tbody>` +
+  [['None (default)', COMP_DEF], ...Object.entries(COMP)].map(([k, c]) => `<tr><td>${k}</td>${c.map((v, n) => `<td>${kfmt(KNOBS[n], v)}</td>`).join('')}</tr>`).join('') + '</tbody>';
+
+// Dragging bands
+let drag = null;
+function bandAt(svg, e) {
+  const s = S[+svg.dataset.i], g = geo(svg.dataset.k, +svg.dataset.w), r = svg.getBoundingClientRect();
+  const x = e.clientX - r.left, yy = e.clientY - r.top;
+  let k = svg.dataset.k === 'B' ? Math.round((x - 12) / g.col) : Math.floor(x / g.col);
+  k = Math.max(0, Math.min(9, k));
+  let v = 15 - (yy - g.y0 - 8) / (g.h - 16) * 30;
+  v = Math.max(-15, Math.min(15, Math.round(v * 2) / 2));
+  return { s, k, v };
+}
+document.addEventListener('pointerdown', e => {
+  const svg = e.target.closest('svg.eq');
+  if (!svg || e.button !== 0) return;
+  const { s, k, v } = bandAt(svg, e), i = +svg.dataset.i;
+  S.forEach((o, n) => { if (o.drag >= 0 && n !== i) { o.drag = -1; o.hov = -1; render(n); } });
+  drag = { svg, i, k };
+  s.drag = k; s.sel = k;
+  if (svg.dataset.k === 'A') s.b[k] = v;
+  render(i);
+  e.preventDefault();
+});
+addEventListener('pointermove', e => {
+  if (drag) {
+    const svg = $(`svg.eq[data-i="${drag.i}"][data-k="${drag.svg.dataset.k}"]`) || drag.svg;
+    const { s, v } = bandAt(svg, e);
+    if (s.b[drag.k] !== v) { s.b[drag.k] = v; render(drag.i); }
+    return;
+  }
+  const svg = e.target.closest && e.target.closest('svg.eq');
+  S.forEach((s, n) => {
+    const k = svg && +svg.dataset.i === n ? bandAt(svg, e).k : -1;
+    if (s.hov !== k && s.drag < 0) { s.hov = k; render(n); }
+  });
+});
+addEventListener('pointerup', () => {
+  if (!drag) return;
+  const s = S[drag.i];
+  s.drag = -1; drag = null;
+  render(S.indexOf(s));
+});
+document.addEventListener('dblclick', e => {
+  const svg = e.target.closest('svg.eq');
+  if (!svg) return;
+  const { s, k } = bandAt(svg, e);
+  s.b[k] = 0; render(+svg.dataset.i);
+});
+
+// Fields, presets, blocks
+const idx = el => +(el.closest('[data-i]') || {}).dataset?.i;
+document.addEventListener('input', e => {
+  const act = e.target.dataset.act, i = idx(e.target);
+  if (!act || isNaN(i)) return;
+  const s = S[i], v = +e.target.value;
+  if (act === 'post') s.post = v;
+  if (act === 'band') s.b[s.sel] = v;
+  if (act[0] === 'k') { const n = +act[1]; s.c[n] = kval(KNOBS[n], v); }
+  render(i);
+});
+
+const menu = $('#menu');
+let onPick = null;
+function openMenu(anchor, html, pick) {
+  menu.innerHTML = html; menu.hidden = false; onPick = pick;
+  const a = anchor.getBoundingClientRect(), m = menu.getBoundingClientRect();
+  menu.style.width = `${a.width}px`;
+  menu.style.left = `${a.left}px`;
+  menu.style.top = `${a.bottom + 4 + m.height > innerHeight - 8 ? a.top - m.height - 4 : a.bottom + 4}px`;
+}
+const closeMenu = () => { menu.hidden = true; onPick = null; };
+addEventListener('scroll', closeMenu, true);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+
+document.addEventListener('click', e => {
+  const t = e.target;
+  const mi = t.closest('#menu .mi');
+  if (mi) { const p = onPick; closeMenu(); p && p(mi.dataset.pick); return; }
+  if (!menu.hidden) { closeMenu(); return; }
+  const d = t.closest('[data-dd]');
+  if (d) {
+    const i = idx(d), s = S[i];
+    if (d.dataset.dd === 'eq') {
+      const cur = eqName(s);
+      return openMenu(d, menuItems(Object.keys(EQ), cur), k => { s.b = [...EQ[k]]; s.post = POST[k] || 0; render(i); });
+    }
+    return openMenu(d, menuItems(['None', ...Object.keys(COMP)], compName(s)), k => { s.c = [...(COMP[k] || COMP_DEF)]; render(i); });
+  }
+  const b = t.closest('[data-act]');
+  if (!b || b.tagName === 'INPUT') return;
+  const i = idx(b), s = S[i], act = b.dataset.act;
+  if (isNaN(i)) return;
+  if (act === 'eq-open') s.eqOpen = !s.eqOpen;
+  else if (act === 'comp-open') s.compOpen = !s.compOpen;
+  else if (act === 'eq-on') s.on = !s.on;
+  else if (act === 'comp-on') return;
+  else if (act === 'eq-reset') { s.b = [...EQ.Flat]; s.post = 0; }
+  else if (act === 'comp-reset') s.c = [...COMP_DEF];
+  else if (act === 'post') s.post = 0;
+  else if (act === 'band') s.b[s.sel] = 0;
+  else if (act[0] === 'k') s.c[+act[1]] = COMP_DEF[+act[1]];
+  else if (act === 'strip') s.pop = !s.pop;
+  else if (act === 'pop-close') s.pop = false;
+  else return;
+  render(i);
+});
+</script>
+</body>
+</html>

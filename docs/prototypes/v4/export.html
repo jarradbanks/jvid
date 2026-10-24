@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Export Queue and Dialog</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* v4 base: copied verbatim into every v4 page. Tokens and chrome from v3/inspector-effects-text.html. */
+:root {
+  --ground: #0A0B0D; --panel: #121416; --raised: #1C1E21; --field: #0D0E11;
+  --border: #232529; --border2: #36383C;
+  --ink: #EDEEF1; --ink2: #ADB1B8; --ink3: #82868E; --ink4: #5A5E63;
+  --blue: #2368C9; --blueh: #2C70D3; --bluel: #7AACF6;
+  --red: #EC5B57; --amber: #F2AF48; --green: #4EBE7D;
+  --shadow: 0 8px 24px rgba(0, 0, 0, .4);
+  color-scheme: dark;
+}
+/* Built-in palettes from crates/suite-ui/src/themes.rs. Ink 2 and Ink 4 aren't palette tokens; these are the derived values. */
+.th-light { --ground: #E6E7EA; --panel: #F6F7F8; --raised: #FFFFFF; --field: #FFFFFF; --border: #D9DBDF; --border2: #B4B7BD;
+  --ink: #16181B; --ink2: #3F434A; --ink3: #5E6269; --ink4: #9A9EA5; --bluel: #1D5BB5; --red: #C03632; --amber: #8A5A00; --green: #1E7A46; --shadow: 0 8px 24px rgba(0, 0, 0, .14); color-scheme: light; }
+.th-hc { --ground: #000; --panel: #000; --raised: #141414; --field: #000; --border: #8A8A8A; --border2: #FFFFFF;
+  --ink: #FFFFFF; --ink2: #E0E0E0; --ink3: #C8C8C8; --ink4: #8A8A8A; --bluel: #9CC4FF; --red: #FF7A75; --amber: #FFC85C; --green: #6BE09A; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ground); color: var(--ink2); }
+body { font: 400 14px/1.55 Inter, system-ui, sans-serif; font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased; }
+::selection { background: rgba(35, 104, 201, .45); color: var(--ink); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+:focus-visible { outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+code { font-size: 12px; color: var(--ink); }
+a { color: var(--bluel); text-underline-offset: 2px; }
+
+/* The page around the mockups */
+.page { max-width: 1320px; margin: 0 auto; padding: 56px 32px 120px; }
+h1 { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); margin: 0 0 12px; }
+h2 { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); margin: 0 0 12px; }
+h3 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); margin: 32px 0 8px; }
+section { margin-top: 88px; }
+p { margin: 0 0 12px; max-width: 68ch; }
+ul.notes { margin: 0; padding-left: 18px; max-width: 68ch; }
+ul.notes li { margin: 6px 0; }
+ul.notes li::marker { color: var(--ink4); }
+.page b { color: var(--ink); font-weight: 500; }
+.compare { display: flex; flex-wrap: wrap; gap: 40px 48px; align-items: flex-start; margin-top: 32px; }
+.stack { display: flex; flex-direction: column; gap: 56px; margin-top: 32px; }
+figure { margin: 0; max-width: 100%; }
+figcaption { margin: 16px 0 6px; color: var(--ink); font-weight: 500; }
+.why { margin: 0; max-width: 60ch; }
+.why span { color: var(--ink3); }
+.stage { overflow-x: auto; }
+.states { display: flex; flex-wrap: wrap; gap: 32px 40px; align-items: flex-start; margin-top: 24px; }
+.state-lbl { font-size: 12px; color: var(--ink3); margin: 0 0 8px; }
+.toggle { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; margin: 8px 0 0; }
+.toggle button { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: var(--ink3); }
+.toggle button.on { background: var(--raised); color: var(--ink); }
+.rec { margin-top: 88px; padding-top: 24px; border-top: 1px solid var(--border); }
+
+/* App chrome, at the app's own scale (egui points = CSS px) */
+.app { font-size: 12px; line-height: 16px; color: var(--ink); user-select: none; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.phead { height: 32px; flex: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; font-weight: 500; }
+.phead.tabs { padding: 0 4px; gap: 4px; }
+.tab { flex: 1 1 0; max-width: 160px; min-width: 64px; height: 24px; border-radius: 6px; color: var(--ink3); font-weight: 500; text-align: center; transition: color .1s, background .1s; }
+.tab:hover { color: var(--ink2); }
+.tab.on { background: var(--raised); color: var(--ink); }
+.pbody { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 12px 12px; scrollbar-gutter: stable; }
+
+.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ib { width: 20px; height: 20px; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); transition: background .1s, color .1s; flex: none; }
+.ib:hover { background: var(--raised); color: var(--ink); }
+.ib.ph { pointer-events: none; }
+.ib[disabled] { color: var(--ink4); pointer-events: none; }
+
+/* Inspector sections and rows */
+.sec + .sec { border-top: 1px solid var(--border); }
+.shead { height: 32px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500; }
+.shead .chev { color: var(--ink2); transition: transform .1s; }
+.sec:not(.open) > .shead .chev { transform: rotate(-90deg); }
+.sec:not(.open) > .sbody { display: none; }
+.sbody { padding-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+.tools { margin-left: auto; display: flex; gap: 2px; flex: none; }
+.row .reset, .shead .reset { visibility: hidden; }
+.row.changed .reset, .sec.changed > .shead .reset { visibility: visible; }
+.dia { width: 8px; height: 8px; transform: rotate(45deg); border: 1px solid var(--ink4); border-radius: 1px; }
+.key:hover .dia { border-color: var(--ink2); }
+.row.anim .dia { border-color: var(--bluel); }
+.row.anim.here .dia { background: var(--bluel); }
+.row { display: flex; align-items: center; gap: 4px; min-height: 24px; }
+.lbl { width: 72px; flex: none; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vals { flex: 1; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.fld { height: 24px; border-radius: 6px; background: var(--field); border: 1px solid var(--border); padding: 0 8px; display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; white-space: nowrap; transition: border-color .1s; color: var(--ink); }
+.fld:hover { border-color: var(--border2); }
+.fld.focus { border-color: var(--blue); outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+.fld.err { border-color: var(--red); }
+.fld.num { cursor: ew-resize; }
+.fld.w56 { flex: 0 0 56px; } .fld.w64 { flex: 0 0 64px; }
+.fld .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pre { color: var(--ink3); }
+.ph-txt { color: var(--ink3); }
+.dd { cursor: pointer; justify-content: space-between; }
+.dd .i { color: var(--ink3); margin-right: -4px; }
+.sl { flex: 1; position: relative; display: flex; align-items: center; margin-left: 4px; min-width: 40px; }
+.sl.bi::before { content: ""; position: absolute; left: 50%; top: 7px; height: 10px; width: 1px; background: var(--border2); }
+.sl input { position: relative; -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; --lo: 0%; --hi: 0%; }
+.sl input:focus-visible { outline: none; }
+.sl input::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: linear-gradient(90deg, var(--border2) var(--lo), var(--ink3) var(--lo) var(--hi), var(--border2) var(--hi)); }
+.sl input::-webkit-slider-thumb { -webkit-appearance: none; width: 6px; height: 14px; border-radius: 2px; background: var(--ink2); margin-top: -6px; }
+.sl input:hover::-webkit-slider-thumb { background: var(--ink); }
+.chk { display: flex; align-items: center; gap: 6px; color: var(--ink2); height: 24px; white-space: nowrap; }
+.box { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border2); background: var(--field); display: grid; place-items: center; }
+.box .i { width: 12px; height: 12px; stroke: var(--ink); visibility: hidden; }
+.chk.on .box { background: var(--raised); }
+.chk.on .box .i { visibility: visible; }
+.seg { display: flex; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); padding: 1px; gap: 1px; }
+.seg button { flex: 1; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); min-width: 24px; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--raised); color: var(--ink); }
+
+/* Buttons */
+.btn { height: 24px; border-radius: 6px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500; color: var(--ink); background: var(--raised); border: 1px solid var(--border); transition: border-color .1s, background .1s; white-space: nowrap; }
+.btn:hover { border-color: var(--border2); }
+.btn .i { color: var(--ink2); }
+.btn.lg { height: 28px; }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.btn.primary:hover { background: var(--blueh); border-color: var(--blueh); }
+.btn.primary .i { color: #fff; }
+.btn.ghost { background: none; border-color: transparent; color: var(--ink2); }
+.btn.ghost:hover { background: var(--raised); color: var(--ink); }
+.btn.danger { color: var(--red); }
+.btn[disabled], .btn.off { background: var(--raised); border-color: var(--border); color: var(--ink4); pointer-events: none; }
+.btn[disabled] .i, .btn.off .i { color: var(--ink4); }
+
+/* Menus, popovers, tooltips, dialogs */
+.menu { background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); }
+.mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 24px; padding: 0 8px; border-radius: 6px; white-space: nowrap; color: var(--ink); }
+.mi:hover, .mi.hover { background: var(--border); }
+.mi .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.mi .ck { width: 12px; height: 12px; stroke: var(--ink); }
+.mi[disabled] { color: var(--ink4); pointer-events: none; }
+.mi .k { margin-left: auto; padding-left: 16px; font-size: 10px; color: var(--ink3); }
+.msep { height: 1px; background: var(--border); margin: 4px 0; }
+.tip { position: absolute; background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; color: var(--ink); white-space: nowrap; box-shadow: var(--shadow); z-index: 5; font-size: 12px; line-height: 16px; }
+.dlg { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.dlg-title { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.help { color: var(--ink3); }
+.errtxt { color: var(--red); }
+
+/* An editor at the minimum window size (960×600, app.rs), for dialogs to sit over. Flat blocks only. */
+.editor { position: relative; width: 960px; height: 600px; background: var(--ground); overflow: hidden; border-radius: 6px; flex: none; }
+.editor .bar { position: absolute; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; padding: 0 12px; gap: 12px; font-weight: 600; color: var(--ink); }
+.editor .bar .x { margin-left: auto; }
+.editor .p { position: absolute; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.editor .p::before { content: ""; position: absolute; left: 0; right: 0; top: 32px; border-top: 1px solid var(--border); }
+.editor .scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); }
+.editor .center { position: absolute; inset: 40px 0 0; display: grid; place-items: center; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+@media (max-width: 600px) { .page { padding: 32px 16px 80px; } }
+
+/* export.html */
+.editor .center.full { inset: 0; padding: 16px; }
+.abar { display: flex; align-items: center; gap: 4px; }
+.abar .ib { width: 24px; height: 24px; border-radius: 6px; color: var(--ink2); }
+.abar .ib.open { background: var(--raised); color: var(--ink); }
+.anchor { position: absolute; z-index: 3; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 8px; font-size: 12px; color: var(--ink3); }
+
+/* Queue rows, alternative A (and the States section) */
+.qmenu { width: 408px; }
+.qhead { height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; font-weight: 500; }
+.qhead .sub { margin-left: auto; color: var(--ink3); font-weight: 400; }
+.qrow { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 92px 24px 24px; align-items: center; gap: 0 8px; height: 44px; padding: 0 4px 0 8px; border-radius: 6px; }
+.qrow:hover, .qrow.hover { background: var(--border); }
+.qtext { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.qname { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qsub { height: 16px; color: var(--ink3); display: flex; align-items: center; gap: 8px; white-space: nowrap; overflow: hidden; min-width: 0; }
+.qsub > span { overflow: hidden; text-overflow: ellipsis; }
+.qsub.err { color: var(--red); }
+.pbar { position: relative; flex: 1; min-width: 40px; height: 4px; border-radius: 2px; background: var(--border2); overflow: hidden; }
+.pbar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink); border-radius: 2px; }
+.pbar.big { height: 6px; border-radius: 3px; }
+.pct { flex: none; color: var(--ink2); }
+.chip { justify-self: start; height: 20px; border-radius: 4px; padding: 0 6px 0 4px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.chip .i { width: 12px; height: 12px; }
+.chip.waiting { color: var(--ink2); background: rgba(173, 177, 184, .10); }
+.chip.rendering { color: var(--ink); background: rgba(237, 238, 241, .10); }
+.chip.done { color: var(--green); background: rgba(78, 190, 125, .14); }
+.chip.failed { color: var(--red); background: rgba(236, 91, 87, .14); }
+.chip.cancelled { color: var(--ink3); background: rgba(130, 134, 142, .10); }
+.qrow .ib, .qfoot .ib, .rail .ib { width: 24px; height: 24px; border-radius: 6px; }
+.qrow .ib:hover { background: var(--raised); }
+.qfoot { display: flex; align-items: center; gap: 4px; padding: 4px 0 0; }
+.qfoot .sp { flex: 1; }
+.qfoot .ask { color: var(--ink); padding: 0 4px; }
+.qempty { padding: 20px 16px 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
+.qempty .t { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); }
+.qempty .d { color: var(--ink3); max-width: 300px; }
+.tip.wrap { white-space: normal; width: 320px; }
+.tip .path { color: var(--ink3); display: block; margin-top: 2px; }
+
+/* Today's queue menu: egui stock rows */
+.today-q { width: 396px; padding: 6px; }
+.tq { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 2px; }
+.tq .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eprog { width: 120px; height: 18px; border-radius: 9px; background: var(--field); position: relative; overflow: hidden; flex: none; }
+.eprog > i { position: absolute; inset: 0 auto 0 0; background: var(--blue); }
+.eprog > b { position: relative; display: block; text-align: center; font-weight: 400; color: #fff; line-height: 18px; font-size: 12px; }
+.tsep { height: 1px; background: var(--border2); margin: 6px 0; }
+
+/* B: hero plus table */
+.qmenu.b { width: 520px; }
+.hero { padding: 8px 8px 10px; display: grid; grid-template-columns: minmax(0, 1fr) 24px; gap: 6px 8px; align-items: center; }
+.hero .nm { font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero .meta { color: var(--ink3); }
+.hero .line { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; color: var(--ink2); }
+.hero .line .l { margin-left: auto; color: var(--ink3); }
+.thead, .trow { display: grid; grid-template-columns: 16px minmax(0, 1fr) 132px 56px 24px 24px; gap: 8px; align-items: center; padding: 0 4px 0 8px; }
+.thead { height: 24px; color: var(--ink3); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin: 0 -4px; padding: 0 8px 0 12px; }
+.trow { height: 24px; border-radius: 6px; color: var(--ink); }
+.trow:hover { background: var(--border); }
+.trow .c { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trow .m { color: var(--ink3); }
+.trow .r { text-align: right; color: var(--ink3); }
+.st-done { color: var(--green); } .st-failed { color: var(--red); } .st-cancelled, .st-waiting { color: var(--ink3); } .st-rendering { color: var(--ink); }
+
+/* C: summary menu and docked panel */
+.qmenu.c { width: 300px; }
+.sum { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.sum .top { display: flex; gap: 8px; color: var(--ink); font-weight: 500; }
+.sum .top .r { margin-left: auto; color: var(--ink2); font-weight: 400; }
+.sum .bot { color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini { display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px; border-radius: 6px; color: var(--ink2); }
+.mini .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock { position: absolute; left: 4px; top: 344px; width: 952px; height: 252px; z-index: 2; }
+.dock .phead.tabs .tab { flex: 0 0 160px; }
+.dock .acts { margin-left: auto; display: flex; gap: 4px; padding-right: 4px; }
+.qtable { display: grid; grid-template-columns: 16px minmax(0, 1.6fr) 150px 70px 80px minmax(0, 1.4fr) 24px 24px; gap: 0 12px; align-items: center; }
+.qtable > div { height: 32px; display: flex; align-items: center; min-width: 0; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.qtable > div > span { overflow: hidden; text-overflow: ellipsis; }
+.qtable .h { height: 28px; color: var(--ink3); }
+.qtable .m { color: var(--ink3); }
+
+/* Dialogs */
+.today-d { width: 452px; padding: 16px; font-size: 12px; }
+.tgrid { display: grid; grid-template-columns: max-content 1fr; gap: 8px; align-items: center; margin-top: 8px; }
+.tgrid > .l { color: var(--ink); }
+.tgrid .h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.radio { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.radio::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--field); border: 1px solid var(--border2); box-sizing: border-box; }
+.radio.on::before { border: 4px solid var(--ink); background: var(--field); }
+.radio.off { color: var(--ink4); }
+.mono { font-family: ui-monospace, monospace; font-size: 11px; }
+.efld { height: 20px; background: var(--field); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; display: inline-flex; align-items: center; }
+.warnch { color: var(--ink); }
+
+.dlg.redo { max-height: 568px; }
+.dhead { padding: 16px 16px 8px; display: flex; align-items: baseline; gap: 8px; flex: none; }
+.dhead .sub { color: var(--ink3); font-size: 12px; }
+.dbody { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 4px 16px; scrollbar-gutter: stable; }
+.dfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px 16px; border-top: 1px solid var(--border); }
+.dfoot .est { color: var(--ink3); margin-right: auto; white-space: nowrap; }
+.dfoot .est b { color: var(--ink); font-weight: 500; }
+.dsec { padding: 4px 0 12px; display: flex; flex-direction: column; gap: 4px; }
+.dsec + .dsec { border-top: 1px solid var(--border); }
+.dsh { height: 28px; display: flex; align-items: center; gap: 6px; font-weight: 500; color: var(--ink); }
+.dsh .sum2 { margin-left: auto; color: var(--ink3); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dsh.click { cursor: pointer; }
+.dsh .chev { color: var(--ink2); transition: transform .1s; }
+.closed .dsh .chev { transform: rotate(-90deg); }
+.closed .more-body { display: none; }
+.more-body { display: flex; flex-direction: column; gap: 4px; }
+.dlg .lbl { width: 96px; }
+.ro { color: var(--ink2); display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.ro .pre { color: var(--ink3); }
+.note { padding-left: 100px; font-size: 12px; line-height: 16px; display: flex; gap: 6px; align-items: flex-start; }
+.note .i { width: 14px; height: 14px; margin-top: 1px; }
+.note.warn { color: var(--amber); }
+.note.err { color: var(--red); }
+.note.help { color: var(--ink3); }
+.seg button { padding: 0 8px; white-space: nowrap; }
+.seg button.off { color: var(--ink4); pointer-events: auto; cursor: default; }
+.seg.wide { flex: 1; }
+.seg:not(.wide) { flex: none; }
+.seg:not(.wide) button { flex: none; }
+.seg.wide button { flex: 1 1 auto; }
+.chk.inl { height: 24px; }
+.hl[hidden] { display: none; }
+.hlist { display: flex; flex-direction: column; gap: 0; }
+.hlist .chk { color: var(--ink); }
+.hlist .chk .d { color: var(--ink3); margin-left: auto; padding-left: 12px; }
+.ampl { color: var(--amber); }
+
+/* B rail */
+.dlg.b { width: 760px; flex-direction: row; }
+.bmain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rail { width: 248px; flex: none; border-left: 1px solid var(--border); display: flex; flex-direction: column; padding: 16px; gap: 12px; }
+.rail .fn { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); word-break: break-all; }
+.rail .dir { color: var(--ink3); margin-top: 2px; }
+.facts { display: grid; grid-template-columns: 64px 1fr; gap: 4px 8px; }
+.facts .k { color: var(--ink3); }
+.facts .v { color: var(--ink); }
+.bigsize { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); }
+.rail .warns { display: flex; flex-direction: column; gap: 8px; color: var(--amber); }
+.rail .warns div { display: flex; gap: 6px; }
+.rail .warns .i { width: 14px; height: 14px; margin-top: 1px; }
+.rail .acts { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+.rail .acts .btn { width: 100%; }
+
+.mini-state { display: flex; flex-direction: column; gap: 8px; }
+.barstrip { display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 12px; background: var(--ground); border: 1px solid var(--border); border-radius: 8px; width: 260px; justify-content: flex-end; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chev-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M2 4.5A1 1 0 0 1 3 3.5h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
+  <symbol id="i-check-c" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M5.5 8.2l1.8 1.8 3.3-3.8"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.5l6 10.5H2z"/><path d="M8 6.5v3M8 11.3v.2"/></symbol>
+  <symbol id="i-alert-c" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5M8 10.8v.2"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 1.5"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M4 12l8-8"/></symbol>
+  <symbol id="i-render" viewBox="0 0 16 16"><path d="M8 2a6 6 0 1 1-6 6"/><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 9.5h12"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 16 16"><path d="M5 4L2.5 6.5 5 9"/><path d="M2.5 6.5H10a3.5 3.5 0 0 1 0 7H7"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 16 16"><path d="M11 4l2.5 2.5L11 9"/><path d="M13.5 6.5H6a3.5 3.5 0 0 0 0 7h3"/></symbol>
+</svg>
+
+<main class="page">
+  <h1>Export Queue and Export Dialog</h1>
+  <p>Mockups for <a href="https://github.com/jarradbanks/jvid/issues/261">#261</a>: the menu under the Export button that lists the render queue, and the Export dialog. Every frame is the app at its minimum window size, 960×600 (<code>with_min_inner_size</code> in <code>app.rs</code>), drawn at 1:1 in egui points.</p>
+  <p>Fields, strings and presets are the real ones from <code>export/queue.rs</code>, <code>export/dialog.rs</code>, <code>jvid-core/src/preset.rs</code> and <code>i18n/en.toml</code>. The dialog redesigns change layout only: the same fields, the same rules for what's enabled, the same buttons.</p>
+
+  <section id="now">
+    <h2>What's Wrong Now</h2>
+    <div class="stack">
+      <figure>
+        <div class="stage" id="today-queue"></div>
+        <figcaption>Today: the queue menu (queue.rs) with one export running, one waiting, one done and one failed</figcaption>
+        <ul class="notes">
+          <li>Every row is one line, and its right side changes shape with the state: a red Cancel button and a 120px egui progress bar, then Reveal and the word Done, then just Failed. The file name's width changes with it, so the list twitches as jobs finish.</li>
+          <li>Nothing says which preset or how long a job is, or how long is left. Waiting is the progress bar at 0% with "Waiting" written in it.</li>
+          <li>A failed row says Failed and nothing else until you happen to hover it.</li>
+          <li>The egui progress bar is the only blue in the menu, and it's the wrong blue: Blue is for selection and the primary action.</li>
+          <li>New Export…, Cancel All and Clear Finished are three equal buttons; Cancel All is red text even when there's nothing to cancel.</li>
+        </ul>
+      </figure>
+    </div>
+  </section>
+
+  <section id="queue">
+    <h2>Queue Menu: Three Directions</h2>
+    <p>Each frame shows the same queue: two finished, one failed, one cancelled, one rendering and one waiting. Only one export runs at a time (<code>Queue::running</code> takes the first live job), so there is always at most one progress bar. The menu still opens from the chevron beside Export, which reads "Exporting 42%" while a job runs.</p>
+    <div class="stack">
+      <figure>
+        <div class="stage" id="qa"></div>
+        <figcaption>A. Two-Line Rows in the Menu</figcaption>
+        <p class="why">Optimises for the issue as written: name over a second line (preset · duration · size, or the progress bar with percent and time left), a status chip, then Reveal and Cancel in fixed 24px columns. Every state has the same four columns, so nothing moves. <span>Tradeoff: 44px rows mean about eight jobs before the menu scrolls; a long highlight batch scrolls sooner.</span></p>
+      </figure>
+      <figure>
+        <div class="stage" id="qb"></div>
+        <figcaption>B. Now Rendering, Then a Table</figcaption>
+        <p class="why">Optimises for the job you're waiting on: it gets a block of its own with a wider bar, and every other job is a one-line table row with Preset and Duration columns. Scans fast with twenty highlight files. <span>Tradeoff: 520px wide, and the running job jumps from the table to the top and back, which is the movement the issue wants gone.</span></p>
+      </figure>
+      <figure>
+        <div class="stage" id="qc"></div>
+        <figcaption>C. Summary Menu, Full Queue in a Docked Panel</figcaption>
+        <p class="why">Optimises for long batches: the menu is a 300px glance (overall progress, the last few results), and Show Render Queue opens a Render Queue tab beside Timeline with room for every column. <span>Tradeoff: a new dockable panel to build and keep in step, for a tool whose principle is one obvious way; most sessions export one clip.</span></p>
+      </figure>
+    </div>
+  </section>
+
+  <section id="dialog">
+    <h2>Export Dialog: Today and Three Directions</h2>
+    <p>Same project in every frame: a 2560×1440 60 fps timeline with In and Out set, a subtitle track, and three ranged markers, exporting with Highlight 1080p60 (1920×1080, so the aspect warning shows) and a 25 MB target. In A and B, click a Range option to see Highlights add its marker list and File Names.</p>
+    <div class="stack">
+      <figure>
+        <div class="stage" id="dt"></div>
+        <figcaption>Today (dialog.rs)</figcaption>
+        <ul class="notes">
+          <li>Fourteen rows in one egui Grid, with no grouping: what you're making (Preset, Video, Audio), what part of the timeline (Range, In, Out, Duration) and where it goes (Output) are interleaved with options most exports never touch (Lossless, Target Size).</li>
+          <li>Warnings are a bare ⚠ character with a tooltip; you only learn the picture will be stretched if you hover it.</li>
+          <li>Range is four stock radio buttons on one line, wider than the 260px field column, so the grid's right edge is wherever the radios end.</li>
+          <li>In, Out and Duration take three rows for one fact, in egui's monospace font rather than Inter's tabular figures.</li>
+          <li>Estimated Size, the number people set Target Size for, is the last row, far from the buttons.</li>
+          <li>Preset names break the Title Case rule: "Screen recording (sharp text)", "ProRes master", "Audio only (WAV)".</li>
+        </ul>
+      </figure>
+      <figure>
+        <div class="stage" id="da"></div>
+        <figcaption>A. Three Groups, One Column</figcaption>
+        <p class="why">Optimises for reading top to bottom: Format, Range and Output sections with the inspector's row standard, segmented controls for Range, Subtitles and Lossless, warnings written out under their row, and Estimated Size beside Export. <span>Tradeoff: still every option visible at once, so it's the tallest; with Highlights on, the body scrolls at 600px (footer stays put).</span></p>
+      </figure>
+      <figure>
+        <div class="stage" id="db"></div>
+        <figcaption>B. Settings With a Summary Rail</figcaption>
+        <p class="why">Optimises for checking before you commit: the read-only facts (file, resolution, codecs, duration, size, warnings) collect in a right rail above the buttons, and the settings column holds only things you can change. <span>Tradeoff: 760px wide, nearly the whole minimum window, and Video and Audio move away from the Preset that sets them.</span></p>
+      </figure>
+      <figure>
+        <div class="stage" id="dc"></div>
+        <figcaption>C. Essentials, With More Options</figcaption>
+        <p class="why">Optimises for the common export: Preset, Range and Output, with Video and Audio as a line under Preset. Loudness, Subtitles, Lossless and Target Size fold under More Options, whose header lists any that aren't Off. <span>Tradeoff: Target Size and Loudness, which highlight exports for Discord and socials often use, are a click away; the fold state is one more thing to remember.</span></p>
+      </figure>
+    </div>
+  </section>
+
+  <section id="states">
+    <h2>States</h2>
+    <p>Drawn in direction A's rows and dialog; the same states apply to B and C.</p>
+
+    <h3>Every Row State, Side by Side</h3>
+    <p>The failed row is hovered, so its tooltip shows the full error and path. Only one job renders at a time; the rest wait their turn. Step through Starting below for the first seconds of a job, before there's enough progress to estimate time left.</p>
+    <div class="states">
+      <div><p class="state-lbl">All states</p><div class="app" id="s-all"></div></div>
+    </div>
+
+    <h3>One Row Through Its Life</h3>
+    <p>Step one job through its states. The name, chip and action columns stay where they are; only the second line and the chip's text change.</p>
+    <div class="toggle" id="life">
+      <button data-s="waiting" class="on">Waiting</button><button data-s="starting">Starting</button><button data-s="rendering">Rendering</button><button data-s="done">Done</button><button data-s="failed">Failed</button><button data-s="cancelled">Cancelled</button>
+    </div>
+    <div class="states"><div class="app" id="s-life"></div></div>
+
+    <h3>Empty, Confirm and Disabled</h3>
+    <div class="states">
+      <div><p class="state-lbl">Empty: the last finished job was just cleared</p><div class="app" id="s-empty"></div></div>
+      <div><p class="state-lbl">Cancel All with more than one job live</p><div class="app" id="s-confirm"></div></div>
+      <div><p class="state-lbl">All finished: Cancel All disabled</p><div class="app" id="s-fin"></div></div>
+    </div>
+    <ul class="notes" style="margin-top:16px">
+      <li>Today the chevron only shows while the queue has jobs, so the empty state appears only when Clear Finished empties the list with the menu open. It keeps the menu's width and offers New Export… rather than closing under the pointer.</li>
+      <li>Disabled footer buttons use the house disabled style (Raised fill, Ink 4 text, no hover), not red text that still looks pressable.</li>
+    </ul>
+
+    <h3>The Export Button</h3>
+    <div class="states">
+      <div class="mini-state"><p class="state-lbl">Nothing queued</p><div class="barstrip app"><span class="btn primary">Export</span></div></div>
+      <div class="mini-state"><p class="state-lbl">Nothing to export (tooltip: "Nothing to export yet")</p><div class="barstrip app"><span class="btn off">Export</span></div></div>
+      <div class="mini-state"><p class="state-lbl">Rendering</p><div class="barstrip app"><span class="ib" style="width:24px;height:24px;border-radius:6px;color:var(--ink2)"><svg class="i"><use href="#i-chev-down"/></svg></span><span class="btn primary" style="min-width:112px">Exporting 42%</span></div></div>
+      <div class="mini-state"><p class="state-lbl">All finished, one failed</p><div class="barstrip app"><span class="ib" style="width:24px;height:24px;border-radius:6px;color:var(--red)"><svg class="i"><use href="#i-alert-c"/></svg></span><span class="btn primary" style="min-width:112px">Export</span></div></div>
+    </div>
+    <ul class="notes" style="margin-top:16px">
+      <li>The Export button keeps a 112px minimum width while a queue exists, so "Exporting 9%" to "Exporting 100%" to "Export" doesn't move the chevron.</li>
+      <li>After a failure the chevron turns into a Red alert icon until the menu is opened, since the failure toast may have gone unseen during a long render.</li>
+    </ul>
+
+    <h3>Dialog States</h3>
+    <div class="states">
+      <div><p class="state-lbl">No file name: Export and Add to Queue disabled, and why</p><div class="app" id="d-noname"></div></div>
+      <div><p class="state-lbl">ProRes preset: Target Size off; a stacked range: Lossless unavailable</p><div class="app" id="d-prores"></div></div>
+      <div><p class="state-lbl">Range options with nothing to export (hover In to Out)</p><div class="app" id="d-range"></div></div>
+    </div>
+  </section>
+
+  <section class="rec" id="rec">
+    <h2>Recommendation</h2>
+    <p><b>Queue menu: A, two-line rows in the menu.</b> It is exactly the scope in #261 and the only one of the three where no row moves as jobs change state: four fixed columns, a second line that swaps content in place, and no job promoted out of the list. It stays a menu, so there's no new panel to dock and maintain. If people start queuing twenty highlights at a time, C's docked Render Queue can be added later on top of A's row component without changing it.</p>
+    <p><b>Dialog: A, three groups in one column.</b> It maps one-to-one onto today's egui Grid (three Grids under section heads), so it's the cheapest to build with no behaviour change, and it still fits 960×600 with the footer pinned. It takes the best idea from B, Estimated Size next to the buttons, without B's 760px width. C's fold hides Target Size and Loudness, which are the reason many highlight exports open this dialog at all.</p>
+    <h3>Decisions for the Owner</h3>
+    <ul class="notes">
+      <li><b>Preset names.</b> The built-ins in <code>preset.rs</code> are in sentence case. The redesigns show them in Title Case ("Screen Recording (Sharp Text)", "ProRes Master", "Audio Only (WAV)"); that is a rename in <code>preset.rs</code> and <code>[inspector]</code> preset strings in <code>en.toml</code>, and user presets keep whatever name they were saved with.</li>
+      <li><b>Time left</b> is new: elapsed time ÷ progress × (1 − progress), shown from 5% and smoothed; before that the row says "Estimating…". The job also needs its preset name and duration (and the file size once done) stored on <code>Job</code>, which today keeps only the path.</li>
+      <li><b>Progress is neutral, not blue.</b> The bar is Ink on Border Strong. Blue stays for the primary action and selection (The One Blue Rule); Green only marks Done.</li>
+      <li><b>New strings</b> for the redesign: Format, Output (section), Estimating…, {time} Left, No Exports Yet and its help line, Show Render Queue (C only), More Options (C only), "Output needs a file name". Everything else reuses <code>[export]</code>.</li>
+    </ul>
+  </section>
+</main>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const I = (n, st = '') => `<svg class="i" aria-hidden="true"${st ? ` style="${st}"` : ''}><use href="#i-${n}"/></svg>`;
+
+// The editor at 960×600, as in editor-snippet.html; `bar` is the right side of the app bar.
+function editor(inner, { scrim = false, bar = '<span class="btn primary">Export</span>', full = false, extra = '' } = {}) {
+  return `<div class="editor app">
+    <div class="bar">jvid<span style="font-weight:400;color:var(--ink2)">ranked-highlights</span>
+      <span class="x abar"><span class="ib">${I('undo')}</span><span class="ib">${I('redo')}</span><span style="width:8px"></span>${bar}</span></div>
+    <div class="p" style="left:4px;top:40px;width:245px;height:300px"></div>
+    <div class="p" style="left:253px;top:40px;width:458px;height:300px"><div style="position:absolute;left:12px;right:12px;top:44px;bottom:44px;background:#040404;border-radius:4px"></div></div>
+    <div class="p" style="left:715px;top:40px;width:241px;height:300px"></div>
+    <div class="p" style="left:4px;top:344px;width:952px;height:252px"></div>
+    ${extra}
+    ${scrim ? '<div class="scrim"></div>' : ''}
+    <div class="center${full ? ' full' : ''}">${scrim ? inner : ''}</div>
+    ${scrim ? '' : inner}
+  </div>`;
+}
+const queueBar = (open = true) => `<span class="ib${open ? ' open' : ''}" title="Render Queue">${I('chev-down')}</span><span class="btn primary" style="min-width:112px">Exporting 42%</span>`;
+
+// The queue, oldest first. Only the first live job runs.
+const JOBS = [
+  { name: 'arena_01.mp4', preset: 'YouTube 1080p', dur: '2:04', size: '186.4 MB', s: 'done' },
+  { name: 'finale.gif', preset: 'GIF 480p', dur: '0:12', s: 'failed', err: "Export failed: couldn't write /home/jarrad/Videos/finale.gif: No space left on device (os error 28)" },
+  { name: 'push.mov', preset: 'ProRes Master', dur: '1:33', s: 'cancelled' },
+  { name: 'clutch_round_3.mp4', preset: 'Highlight 1080p60', dur: '0:42', s: 'rendering', p: .42, left: '1:12 Left' },
+  { name: 'ranked-highlights – 02 – triple kill on overpass, final round.mp4', preset: 'Shorts/Reels 9:16', dur: '0:28', s: 'waiting' },
+];
+const CHIP = { waiting: ['clock', 'Waiting'], starting: ['render', 'Rendering'], rendering: ['render', 'Rendering'], done: ['check-c', 'Done'], failed: ['alert-c', 'Failed'], cancelled: ['ban', 'Cancelled'] };
+
+function qrow(j, opts = {}) {
+  const s = j.s, live = s === 'waiting' || s === 'rendering' || s === 'starting';
+  let sub;
+  if (s === 'rendering') sub = `<span class="pbar"><i style="width:${j.p * 100}%"></i></span><span class="pct">${Math.round(j.p * 100)}% · ${j.left}</span>`;
+  else if (s === 'starting') sub = `<span class="pbar"><i style="width:3%"></i></span><span class="pct">3% · Estimating…</span>`;
+  else if (s === 'failed') sub = `<span>${j.err.replace('Export failed: ', '')}</span>`;
+  else sub = `<span>${[j.preset, j.dur, s === 'done' && j.size].filter(Boolean).join(' · ')}</span>`;
+  const [ic, lab] = CHIP[s];
+  const tip = opts.tip ? `<div class="tip wrap" style="left:calc(100% + 12px);top:2px">${j.err}<span class="path">/home/jarrad/Videos/${j.name}</span></div>` : '';
+  return `<div class="qrow${opts.tip ? ' hover' : ''}" title="${opts.tip ? '' : '/home/jarrad/Videos/' + j.name}">
+    <div class="qtext"><span class="qname">${j.name}</span><span class="qsub${s === 'failed' ? ' err' : ''}">${sub}</span></div>
+    <span class="chip ${s}">${I(ic)}${lab}</span>
+    ${s === 'done' ? `<button class="ib" title="Reveal">${I('folder')}</button>` : '<span class="ib ph"></span>'}
+    ${live ? `<button class="ib" title="Cancel">${I('x')}</button>` : '<span class="ib ph"></span>'}
+    ${tip}
+  </div>`;
+}
+const counts = jobs => {
+  const r = jobs.filter(j => j.s === 'rendering' || j.s === 'starting').length, w = jobs.filter(j => j.s === 'waiting').length;
+  return r || w ? [r && `${r} Rendering`, w && `${w} Waiting`].filter(Boolean).join(' · ') : 'All Finished';
+};
+function qfoot({ live = true, fin = true, confirm = 0 } = {}) {
+  if (confirm) return `<div class="msep"></div><div class="qfoot"><span class="ask">Cancel ${confirm} Exports?</span><span class="sp"></span>
+    <button class="btn ghost">Keep Exporting</button><button class="btn danger">Cancel All</button></div>`;
+  return `<div class="msep"></div><div class="qfoot"><button class="btn primary">${I('plus')}New Export…</button><span class="sp"></span>
+    <button class="btn ghost${fin ? '' : ' off'}">Clear Finished</button><button class="btn${live ? ' danger' : ' off'}">Cancel All</button></div>`;
+}
+function qmenuA(jobs, opts = {}) {
+  return `<div class="menu qmenu" style="${opts.style || ''}">
+    <div class="qhead">Render Queue<span class="sub">${counts(jobs)}</span></div>
+    ${jobs.map(j => qrow(j, { tip: opts.tip && j.s === 'failed' })).join('')}
+    ${qfoot({ live: jobs.some(j => ['waiting', 'rendering', 'starting'].includes(j.s)), fin: jobs.some(j => ['done', 'failed', 'cancelled'].includes(j.s)), confirm: opts.confirm })}
+  </div>`;
+}
+
+// Today
+$('#today-queue').innerHTML = editor(`<div class="menu today-q anchor" style="right:12px;top:36px">
+  ${JOBS.filter(j => j.s !== 'cancelled').map(j => {
+    let right;
+    if (j.s === 'rendering') right = `<span class="eprog"><i style="width:42%"></i><b>42%</b></span><span class="btn danger">Cancel</span>`;
+    else if (j.s === 'waiting') right = `<span class="eprog"><b style="color:var(--ink)">Waiting</b></span><span class="btn danger">Cancel</span>`;
+    else if (j.s === 'done') right = `<span>Done</span><span class="btn">Reveal</span>`;
+    else right = `<span>Failed</span>`;
+    return `<div class="tq"><span class="n">${j.name}</span>${right}</div>`;
+  }).join('')}
+  <div class="tsep"></div>
+  <div class="tq" style="justify-content:flex-start"><span class="btn">New Export…</span><span class="btn danger">Cancel All</span><span class="btn ghost">Clear Finished</span></div>
+</div>`, { bar: queueBar() });
+
+// A
+$('#qa').innerHTML = editor(qmenuA(JOBS).replace('class="menu qmenu"', 'class="menu qmenu anchor"').replace('style=""', 'style="right:12px;top:36px"'), { bar: queueBar() });
+
+// B
+const ST = { done: 'check-c', failed: 'alert-c', cancelled: 'ban', waiting: 'clock', rendering: 'render' };
+const run = JOBS.find(j => j.s === 'rendering');
+$('#qb').innerHTML = editor(`<div class="menu qmenu b anchor" style="right:12px;top:36px">
+  <div class="hero">
+    <span><span class="nm">${run.name}</span> <span class="meta">${run.preset} · ${run.dur}</span></span>
+    <button class="ib" title="Cancel">${I('x')}</button>
+    <div class="line"><span class="pbar big"><i style="width:42%"></i></span></div>
+    <div class="line" style="margin-top:-2px"><span>42%</span><span class="l">1:12 Left</span></div>
+  </div>
+  <div class="thead"><span></span><span>File</span><span>Preset</span><span style="text-align:right">Duration</span><span></span><span></span></div>
+  <div style="padding-top:4px">
+  ${JOBS.filter(j => j !== run).map(j => `<div class="trow" title="${j.err || ''}"><span class="st-${j.s}">${I(ST[j.s])}</span><span class="c">${j.name}</span><span class="c m">${j.preset}</span><span class="r">${j.dur}</span>
+    ${j.s === 'done' ? `<button class="ib" title="Reveal" style="width:24px;height:24px;border-radius:6px">${I('folder')}</button>` : '<span></span>'}
+    ${j.s === 'waiting' ? `<button class="ib" title="Cancel" style="width:24px;height:24px;border-radius:6px">${I('x')}</button>` : '<span></span>'}</div>`).join('')}
+  </div>
+  ${qfoot()}
+</div>`, { bar: queueBar() });
+
+// C: the summary menu, and the Render Queue docked beside Timeline
+const dock = `<div class="panel dock">
+  <div class="phead tabs"><button class="tab">Timeline</button><button class="tab on">Render Queue</button>
+    <span class="acts"><button class="btn ghost">Clear Finished</button><button class="btn danger">Cancel All</button><button class="btn primary">${I('plus')}New Export…</button></span></div>
+  <div style="padding:0 12px" class="qtable">
+    <div class="h"></div><div class="h">File</div><div class="h">Preset</div><div class="h">Duration</div><div class="h">Size</div><div class="h">Status</div><div class="h"></div><div class="h"></div>
+    ${JOBS.map(j => `<div class="st-${j.s}">${I(ST[j.s])}</div><div><span>${j.name}</span></div><div class="m"><span>${j.preset}</span></div><div class="m">${j.dur}</div><div class="m">${j.size || '–'}</div>
+      <div style="gap:8px">${j.s === 'rendering' ? `<span class="pbar"><i style="width:42%"></i></span><span class="pct">42% · 1:12 Left</span>` : j.s === 'failed' ? `<span class="st-failed">${j.err.replace('Export failed: ', '')}</span>` : `<span class="m">${CHIP[j.s][1]}</span>`}</div>
+      <div>${j.s === 'done' ? `<button class="ib" style="width:24px;height:24px;border-radius:6px">${I('folder')}</button>` : ''}</div>
+      <div>${['rendering', 'waiting'].includes(j.s) ? `<button class="ib" style="width:24px;height:24px;border-radius:6px">${I('x')}</button>` : ''}</div>`).join('')}
+  </div></div>`;
+$('#qc').innerHTML = editor(`<div class="menu qmenu c anchor" style="right:12px;top:36px">
+  <div class="sum"><div class="top">Rendering 1 of 2<span class="r">42% · 1:12 Left</span></div><span class="pbar big"><i style="width:42%"></i></span><span class="bot">clutch_round_3.mp4 · Highlight 1080p60</span></div>
+  <div class="msep"></div>
+  ${JOBS.filter(j => ['done', 'failed', 'cancelled'].includes(j.s)).map(j => `<div class="mini"><span class="st-${j.s}">${I(ST[j.s])}</span><span class="t">${j.name}</span>${j.s === 'done' ? `<span class="ib" style="width:20px;height:20px">${I('folder')}</span>` : ''}</div>`).join('')}
+  <div class="msep"></div>
+  <button class="mi"><svg class="i" style="color:var(--ink2)"><use href="#i-panel"/></svg><span class="t">Show Render Queue</span></button>
+  <button class="mi"><svg class="i" style="color:var(--ink2)"><use href="#i-plus"/></svg><span class="t">New Export…</span><span class="k">Ctrl+M</span></button>
+  <div class="msep"></div>
+  <button class="mi"><span class="t">Clear Finished</span></button>
+  <button class="mi" style="color:var(--red)"><span class="t">Cancel All</span></button>
+</div>`, { bar: queueBar(), extra: dock });
+
+// Dialog: today
+const radio = (l, on, off) => `<span class="radio${on ? ' on' : ''}${off ? ' off' : ''}">${l}</span>`;
+$('#dt').innerHTML = editor(`<div class="dlg today-d">
+  <div class="dlg-title">Export</div>
+  <div class="tgrid">
+    <span class="l">Preset</span><span class="fld dd" style="width:260px;flex:none"><span class="t">Highlight 1080p60</span>${I('chev-down')}</span>
+    <span class="l">Video</span><span class="h">1920×1080 · 60 fps · H.264 <span class="warnch" title="Highlight 1080p60 is 1920×1080, which doesn't match the project's 2560×1440; the picture will be stretched">⚠</span></span>
+    <span class="l">Audio</span><span>AAC Stereo</span>
+    <span class="l">Loudness</span><span class="fld dd" style="width:120px;flex:none"><span class="t">Off</span>${I('chev-down')}</span>
+    <span class="l">Subtitles</span><span class="h">${radio('Burn In', 1)}${radio('Sidecar .srt')}</span>
+    <span class="l">Range</span><span class="h">${radio('Entire Timeline')}${radio('In to Out', 1)}${radio('Selected Clips', 0, 1)}${radio('Highlights')}</span>
+    <span class="l">In</span><span class="mono">00:01:12:08</span>
+    <span class="l">Out</span><span class="mono">00:01:54:20</span>
+    <span class="l">Duration</span><span class="mono">00:00:42:12</span>
+    <span class="l">Lossless</span><span class="h">${radio('Off', 1)}${radio('Copy', 0, 1)}${radio('Smart Render', 0, 1)}<span style="color:var(--ink3)">Unavailable: Clips are stacked on more…</span></span>
+    <span class="l">Output</span><span class="h"><span class="efld" style="width:260px">/home/jarrad/Videos/clutch_round_3.mp4</span><span class="btn">Browse…</span></span>
+    <span class="l">Target Size</span><span class="h"><span class="fld dd" style="width:120px;flex:none"><span class="t">25 MB</span>${I('chev-down')}</span></span>
+    <span class="l">Estimated Size</span><span>under 25 MB</span>
+  </div>
+  <div class="dlg-foot" style="margin-top:16px"><span class="btn">Cancel</span><span class="btn">Add to Queue</span><span class="btn primary">Export</span></div>
+</div>`, { scrim: true, full: true, bar: '<span class="btn primary">Export</span>' });
+
+// Redesigns share these rows
+const row = (l, v, cls = '') => `<div class="row ${cls}"><span class="lbl">${l}</span><span class="vals">${v}</span></div>`;
+const dd = (v, w) => `<span class="fld dd"${w ? ` style="flex:0 0 ${w}px"` : ''}><span class="t">${v}</span>${I('chev-down')}</span>`;
+const seg = (opts, on, wide = true) => `<span class="seg${wide ? ' wide' : ''}">${opts.map(([l, off, tip]) => `<button class="${l === on ? 'on' : ''}${off ? ' off' : ''}"${tip ? ` title="${tip}"` : ''} data-v="${l}">${l}</button>`).join('')}</span>`;
+const note = (kind, text) => `<div class="note ${kind}">${kind === 'help' ? '' : I(kind === 'warn' ? 'alert' : 'alert-c')}<span>${text}</span></div>`;
+const RANGE = [['Entire Timeline'], ['In to Out'], ['Selected Clips', 1, 'Select clips on the timeline first'], ['Highlights']];
+const ASPECT = "Highlight 1080p60 is 1920×1080, which doesn't match the project's 2560×1440; the picture will be stretched";
+const readout = `<span class="ro"><span class="pre">In</span>00:01:12:08<span style="width:8px"></span><span class="pre">Out</span>00:01:54:20<span style="width:8px"></span><span class="pre">Duration</span>00:00:42:12</span>`;
+const hl = `<div class="hl" hidden>
+  ${row('Highlights', `<div class="hlist" style="flex:1">${[['Triple Kill', '0:12', 1], ['Overpass Clutch', '0:21', 1], ['Ace, Final Round', '0:34', 0]].map(([n, d, on]) => `<button class="chk${on ? ' on' : ''}"><span class="box">${I('check')}</span>${n}<span class="d">${d}</span></button>`).join('')}</div>`)}
+  <div style="height:4px"></div>
+  ${row('File Names', `<span class="fld" title="{project}, {marker} and {index} are filled in"><span class="t">{project} – {index} – {marker}</span></span>`)}
+  ${note('help', '{project}, {marker} and {index} are filled in')}
+</div>`;
+const fmtRows = (withSummary = true) => `
+  ${row('Preset', dd('Highlight 1080p60'))}
+  ${withSummary ? row('Video', `<span class="ro">1920×1080 · 60 fps · H.264</span>`) + note('warn', ASPECT) + row('Audio', `<span class="ro">AAC Stereo</span>`) : ''}
+  ${row('Loudness', dd('Off', 120))}
+  ${row('Subtitles', seg([['Burn In'], ['Sidecar .srt']], 'Burn In', false))}`;
+const rangeRows = `${row('Range', seg(RANGE, 'In to Out'))}${row('', readout)}${hl}`;
+const outRows = (browse = true) => `
+  ${row('Output', `<span class="fld"><span class="t">~/Videos/clutch_round_3.mp4</span></span>${browse ? '<button class="btn">Browse…</button>' : ''}`)}
+  ${row('Lossless', seg([['Off'], ['Copy', 1, 'No re-encode; cuts snap to the nearest keyframe'], ['Smart Render', 1, 'Re-encodes only the frames around each cut, so cuts are exact']], 'Off', false))}
+  ${note('help', 'Unavailable: Clips are stacked on more than one video track')}
+  ${row('Target Size', dd('25 MB', 120))}`;
+const foot = (est = 'under 25 MB', ok = true) => `<div class="dfoot"><span class="est">Estimated Size <b>${est}</b></span>
+  <button class="btn lg">Cancel</button><button class="btn lg${ok ? '' : ' off'}">Add to Queue</button><button class="btn lg primary${ok ? '' : ' off'}">Export</button></div>`;
+
+$('#da').innerHTML = editor(`<div class="dlg redo" style="width:480px">
+  <div class="dhead"><span class="dlg-title">Export</span></div>
+  <div class="dbody">
+    <div class="dsec"><div class="dsh">Format</div>${fmtRows()}</div>
+    <div class="dsec"><div class="dsh">Range</div>${rangeRows}</div>
+    <div class="dsec"><div class="dsh">Output</div>${outRows()}</div>
+  </div>
+  ${foot()}
+</div>`, { scrim: true, full: true });
+
+$('#db').innerHTML = editor(`<div class="dlg redo b">
+  <div class="bmain">
+    <div class="dhead"><span class="dlg-title">Export</span></div>
+    <div class="dbody" style="padding-bottom:12px">
+      <div class="dsec"><div class="dsh">Format</div>${fmtRows(false)}</div>
+      <div class="dsec"><div class="dsh">Range</div>${rangeRows}</div>
+      <div class="dsec"><div class="dsh">Output</div>${outRows()}</div>
+    </div>
+  </div>
+  <div class="rail">
+    <div><div class="fn">clutch_round_3.mp4</div><div class="dir">~/Videos</div></div>
+    <div class="facts">
+      <span class="k">Video</span><span class="v">1920×1080 · 60 fps · H.264</span>
+      <span class="k">Audio</span><span class="v">AAC Stereo</span>
+      <span class="k">Range</span><span class="v">In to Out</span>
+      <span class="k">Duration</span><span class="v">00:00:42:12</span>
+    </div>
+    <div><div class="help">Estimated Size</div><div class="bigsize">under 25 MB</div></div>
+    <div class="warns"><div>${I('alert')}<span>${ASPECT}</span></div></div>
+    <div class="acts"><button class="btn lg primary">Export</button><button class="btn lg">Add to Queue</button><button class="btn lg ghost">Cancel</button></div>
+  </div>
+</div>`, { scrim: true, full: true });
+
+$('#dc').innerHTML = editor(`<div class="dlg redo" style="width:464px">
+  <div class="dhead"><span class="dlg-title">Export</span></div>
+  <div class="dbody">
+    <div class="dsec">
+      ${row('Preset', dd('Highlight 1080p60'))}
+      ${note('help', '1920×1080 · 60 fps · H.264 · AAC Stereo')}
+      ${note('warn', ASPECT)}
+      <div style="height:4px"></div>
+      ${row('Range', dd('In to Out'))}
+      ${row('', readout)}
+      ${hl}
+      <div style="height:4px"></div>
+      ${row('Output', `<span class="fld"><span class="t">~/Videos/clutch_round_3.mp4</span></span><button class="btn">Browse…</button>`)}
+    </div>
+    <div class="dsec closed" id="more">
+      <div class="dsh click">${I('chev-down').replace('class="i"', 'class="i chev"')}More Options<span class="sum2">Subtitles Burned In · Target 25 MB</span></div>
+      <div class="more-body">
+        ${row('Loudness', dd('Off', 120))}
+        ${row('Subtitles', seg([['Burn In'], ['Sidecar .srt']], 'Burn In', false))}
+        ${row('Lossless', seg([['Off'], ['Copy', 1], ['Smart Render', 1]], 'Off', false))}
+        ${note('help', 'Unavailable: Clips are stacked on more than one video track')}
+        ${row('Target Size', dd('25 MB', 120))}
+      </div>
+    </div>
+  </div>
+  ${foot()}
+</div>`, { scrim: true, full: true });
+
+// States
+const ALL = [JOBS[0], { ...JOBS[1] }, JOBS[2], JOBS[3], JOBS[4]];
+$('#s-all').innerHTML = qmenuA(ALL, { tip: true });
+const LIFE = { name: 'clutch_round_3.mp4', preset: 'Highlight 1080p60', dur: '0:42', size: '38.6 MB', p: .42, left: '1:12 Left', err: "Export failed: encode: Invalid argument" };
+const life = s => { $('#s-life').innerHTML = qmenuA([{ ...LIFE, s }]); };
+life('waiting');
+$('#life').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  $$('button', b.parentElement).forEach(x => x.classList.toggle('on', x === b));
+  life(b.dataset.s);
+});
+$('#s-empty').innerHTML = `<div class="menu qmenu"><div class="qhead">Render Queue</div>
+  <div class="qempty"><span class="t">No Exports Yet</span><span class="d">Exports you start or add to the queue show here with their progress, so you can keep editing while they render.</span></div>
+  ${qfoot({ live: false, fin: false })}</div>`;
+$('#s-confirm').innerHTML = qmenuA([JOBS[3], JOBS[4]], { confirm: 2 });
+$('#s-fin').innerHTML = qmenuA([JOBS[0], JOBS[1]]);
+
+const smallDlg = (body, ok = true, w = 480) => `<div class="dlg" style="width:${w}px"><div class="dhead"><span class="dlg-title">Export</span></div><div class="dbody" style="padding-bottom:8px">${body}</div>${foot(ok ? '≈ 412 MB' : '–', ok)}</div>`;
+$('#d-noname').innerHTML = smallDlg(`<div class="dsec"><div class="dsh">Output</div>
+  ${row('Output', `<span class="fld err"><span class="t">~/Videos/</span></span><button class="btn">Browse…</button>`)}
+  ${note('err', 'Output needs a file name')}</div>`, false);
+$('#d-prores').innerHTML = smallDlg(`<div class="dsec"><div class="dsh">Output</div>
+  ${row('Output', `<span class="fld"><span class="t">~/Videos/clutch_round_3.mov</span></span><button class="btn">Browse…</button>`)}
+  ${row('Lossless', seg([['Off'], ['Copy', 1], ['Smart Render', 1]], 'Off', false))}
+  ${note('help', 'Unavailable: Clips are stacked on more than one video track')}
+  ${row('Target Size', `<span class="fld dd" style="flex:0 0 120px;border-color:transparent;color:var(--ink4)"><span class="t">Off</span>${I('chev-down', 'color:var(--ink4)')}</span>`)}
+  ${note('help', 'Only H.264 and HEVC presets')}</div>`);
+$('#d-range').innerHTML = `<div style="position:relative">${smallDlg(`<div class="dsec"><div class="dsh">Range</div>
+  ${row('Range', seg([['Entire Timeline'], ['In to Out', 1], ['Selected Clips', 1], ['Highlights', 1]], 'Entire Timeline'))}
+  ${row('', readout.replace('00:01:12:08', '00:00:00:00').replace('00:01:54:20', '02:04:31:12').replace('00:00:42:12', '02:04:31:12'))}</div>`)}
+  <div class="tip" style="left:224px;top:112px">Set In or Out on the timeline first</div></div>`;
+
+// Range picks show Highlights' rows; More Options folds.
+document.addEventListener('click', e => {
+  const b = e.target.closest('.seg button');
+  if (b && !b.classList.contains('off')) {
+    $$('button', b.parentElement).forEach(x => x.classList.toggle('on', x === b));
+    const dlg = b.closest('.dlg');
+    if (dlg && b.closest('.seg') === $('.seg.wide', dlg)) $$('.hl', dlg).forEach(h => { h.hidden = b.dataset.v !== 'Highlights'; });
+    return;
+  }
+  const c = e.target.closest('.chk');
+  if (c) { c.classList.toggle('on'); return; }
+  const m = e.target.closest('.dsh.click');
+  if (m) m.parentElement.classList.toggle('closed');
+});
+</script>
+</body>
+</html>

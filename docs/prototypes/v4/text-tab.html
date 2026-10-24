@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text Tab Layout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* v4 base: copied verbatim into every v4 page. Tokens and chrome from v3/inspector-effects-text.html. */
+:root {
+  --ground: #0A0B0D; --panel: #121416; --raised: #1C1E21; --field: #0D0E11;
+  --border: #232529; --border2: #36383C;
+  --ink: #EDEEF1; --ink2: #ADB1B8; --ink3: #82868E; --ink4: #5A5E63;
+  --blue: #2368C9; --blueh: #2C70D3; --bluel: #7AACF6;
+  --red: #EC5B57; --amber: #F2AF48; --green: #4EBE7D;
+  --shadow: 0 8px 24px rgba(0, 0, 0, .4);
+  color-scheme: dark;
+}
+/* Built-in palettes from crates/suite-ui/src/themes.rs. Ink 2 and Ink 4 aren't palette tokens; these are the derived values. */
+.th-light { --ground: #E6E7EA; --panel: #F6F7F8; --raised: #FFFFFF; --field: #FFFFFF; --border: #D9DBDF; --border2: #B4B7BD;
+  --ink: #16181B; --ink2: #3F434A; --ink3: #5E6269; --ink4: #9A9EA5; --bluel: #1D5BB5; --red: #C03632; --amber: #8A5A00; --green: #1E7A46; --shadow: 0 8px 24px rgba(0, 0, 0, .14); color-scheme: light; }
+.th-hc { --ground: #000; --panel: #000; --raised: #141414; --field: #000; --border: #8A8A8A; --border2: #FFFFFF;
+  --ink: #FFFFFF; --ink2: #E0E0E0; --ink3: #C8C8C8; --ink4: #8A8A8A; --bluel: #9CC4FF; --red: #FF7A75; --amber: #FFC85C; --green: #6BE09A; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ground); color: var(--ink2); }
+body { font: 400 14px/1.55 Inter, system-ui, sans-serif; font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased; }
+::selection { background: rgba(35, 104, 201, .45); color: var(--ink); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+:focus-visible { outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+code { font-size: 12px; color: var(--ink); }
+a { color: var(--bluel); text-underline-offset: 2px; }
+
+/* The page around the mockups */
+.page { max-width: 1320px; margin: 0 auto; padding: 56px 32px 120px; }
+h1 { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); margin: 0 0 12px; }
+h2 { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); margin: 0 0 12px; }
+h3 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); margin: 32px 0 8px; }
+section { margin-top: 88px; }
+p { margin: 0 0 12px; max-width: 68ch; }
+ul.notes { margin: 0; padding-left: 18px; max-width: 68ch; }
+ul.notes li { margin: 6px 0; }
+ul.notes li::marker { color: var(--ink4); }
+.page b { color: var(--ink); font-weight: 500; }
+.compare { display: flex; flex-wrap: wrap; gap: 40px 48px; align-items: flex-start; margin-top: 32px; }
+.stack { display: flex; flex-direction: column; gap: 56px; margin-top: 32px; }
+figure { margin: 0; max-width: 100%; }
+figcaption { margin: 16px 0 6px; color: var(--ink); font-weight: 500; }
+.why { margin: 0; max-width: 60ch; }
+.why span { color: var(--ink3); }
+.stage { overflow-x: auto; }
+.states { display: flex; flex-wrap: wrap; gap: 32px 40px; align-items: flex-start; margin-top: 24px; }
+.state-lbl { font-size: 12px; color: var(--ink3); margin: 0 0 8px; }
+.toggle { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; margin: 8px 0 0; }
+.toggle button { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: var(--ink3); }
+.toggle button.on { background: var(--raised); color: var(--ink); }
+.rec { margin-top: 88px; padding-top: 24px; border-top: 1px solid var(--border); }
+
+/* App chrome, at the app's own scale (egui points = CSS px) */
+.app { font-size: 12px; line-height: 16px; color: var(--ink); user-select: none; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.phead { height: 32px; flex: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; font-weight: 500; }
+.phead.tabs { padding: 0 4px; gap: 4px; }
+.tab { flex: 1 1 0; max-width: 160px; min-width: 64px; height: 24px; border-radius: 6px; color: var(--ink3); font-weight: 500; text-align: center; transition: color .1s, background .1s; }
+.tab:hover { color: var(--ink2); }
+.tab.on { background: var(--raised); color: var(--ink); }
+.pbody { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 12px 12px; scrollbar-gutter: stable; }
+
+.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ib { width: 20px; height: 20px; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); transition: background .1s, color .1s; flex: none; }
+.ib:hover { background: var(--raised); color: var(--ink); }
+.ib.ph { pointer-events: none; }
+.ib[disabled] { color: var(--ink4); pointer-events: none; }
+
+/* Inspector sections and rows */
+.sec + .sec { border-top: 1px solid var(--border); }
+.shead { height: 32px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 500; }
+.shead .chev { color: var(--ink2); transition: transform .1s; }
+.sec:not(.open) > .shead .chev { transform: rotate(-90deg); }
+.sec:not(.open) > .sbody { display: none; }
+.sbody { padding-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+.tools { margin-left: auto; display: flex; gap: 2px; flex: none; }
+.row .reset, .shead .reset { visibility: hidden; }
+.row.changed .reset, .sec.changed > .shead .reset { visibility: visible; }
+.dia { width: 8px; height: 8px; transform: rotate(45deg); border: 1px solid var(--ink4); border-radius: 1px; }
+.key:hover .dia { border-color: var(--ink2); }
+.row.anim .dia { border-color: var(--bluel); }
+.row.anim.here .dia { background: var(--bluel); }
+.row { display: flex; align-items: center; gap: 4px; min-height: 24px; }
+.lbl { width: 72px; flex: none; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vals { flex: 1; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.fld { height: 24px; border-radius: 6px; background: var(--field); border: 1px solid var(--border); padding: 0 8px; display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; white-space: nowrap; transition: border-color .1s; color: var(--ink); }
+.fld:hover { border-color: var(--border2); }
+.fld.focus { border-color: var(--blue); outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+.fld.err { border-color: var(--red); }
+.fld.num { cursor: ew-resize; }
+.fld.w56 { flex: 0 0 56px; } .fld.w64 { flex: 0 0 64px; }
+.fld .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pre { color: var(--ink3); }
+.ph-txt { color: var(--ink3); }
+.dd { cursor: pointer; justify-content: space-between; }
+.dd .i { color: var(--ink3); margin-right: -4px; }
+.sl { flex: 1; position: relative; display: flex; align-items: center; margin-left: 4px; min-width: 40px; }
+.sl.bi::before { content: ""; position: absolute; left: 50%; top: 7px; height: 10px; width: 1px; background: var(--border2); }
+.sl input { position: relative; -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; --lo: 0%; --hi: 0%; }
+.sl input:focus-visible { outline: none; }
+.sl input::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: linear-gradient(90deg, var(--border2) var(--lo), var(--ink3) var(--lo) var(--hi), var(--border2) var(--hi)); }
+.sl input::-webkit-slider-thumb { -webkit-appearance: none; width: 6px; height: 14px; border-radius: 2px; background: var(--ink2); margin-top: -6px; }
+.sl input:hover::-webkit-slider-thumb { background: var(--ink); }
+.chk { display: flex; align-items: center; gap: 6px; color: var(--ink2); height: 24px; white-space: nowrap; }
+.box { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--border2); background: var(--field); display: grid; place-items: center; }
+.box .i { width: 12px; height: 12px; stroke: var(--ink); visibility: hidden; }
+.chk.on .box { background: var(--raised); }
+.chk.on .box .i { visibility: visible; }
+.seg { display: flex; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); padding: 1px; gap: 1px; }
+.seg button { flex: 1; border-radius: 4px; display: grid; place-items: center; color: var(--ink3); min-width: 24px; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--raised); color: var(--ink); }
+
+/* Buttons */
+.btn { height: 24px; border-radius: 6px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500; color: var(--ink); background: var(--raised); border: 1px solid var(--border); transition: border-color .1s, background .1s; white-space: nowrap; }
+.btn:hover { border-color: var(--border2); }
+.btn .i { color: var(--ink2); }
+.btn.lg { height: 28px; }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.btn.primary:hover { background: var(--blueh); border-color: var(--blueh); }
+.btn.primary .i { color: #fff; }
+.btn.ghost { background: none; border-color: transparent; color: var(--ink2); }
+.btn.ghost:hover { background: var(--raised); color: var(--ink); }
+.btn.danger { color: var(--red); }
+.btn[disabled], .btn.off { background: var(--raised); border-color: var(--border); color: var(--ink4); pointer-events: none; }
+.btn[disabled] .i, .btn.off .i { color: var(--ink4); }
+
+/* Menus, popovers, tooltips, dialogs */
+.menu { background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); }
+.mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 24px; padding: 0 8px; border-radius: 6px; white-space: nowrap; color: var(--ink); }
+.mi:hover, .mi.hover { background: var(--border); }
+.mi .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.mi .ck { width: 12px; height: 12px; stroke: var(--ink); }
+.mi[disabled] { color: var(--ink4); pointer-events: none; }
+.mi .k { margin-left: auto; padding-left: 16px; font-size: 10px; color: var(--ink3); }
+.msep { height: 1px; background: var(--border); margin: 4px 0; }
+.tip { position: absolute; background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; color: var(--ink); white-space: nowrap; box-shadow: var(--shadow); z-index: 5; font-size: 12px; line-height: 16px; }
+.dlg { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.dlg-title { font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.help { color: var(--ink3); }
+.errtxt { color: var(--red); }
+
+/* An editor at the minimum window size (960×600, app.rs), for dialogs to sit over. Flat blocks only. */
+.editor { position: relative; width: 960px; height: 600px; background: var(--ground); overflow: hidden; border-radius: 6px; flex: none; }
+.editor .bar { position: absolute; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; padding: 0 12px; gap: 12px; font-weight: 600; color: var(--ink); }
+.editor .bar .x { margin-left: auto; }
+.editor .p { position: absolute; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.editor .p::before { content: ""; position: absolute; left: 0; right: 0; top: 32px; border-top: 1px solid var(--border); }
+.editor .scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); }
+.editor .center { position: absolute; inset: 40px 0 0; display: grid; place-items: center; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+@media (max-width: 600px) { .page { padding: 32px 16px 80px; } }
+
+/* ---- Text tab page ---- */
+.insp { position: relative; flex: none; overflow: visible; }
+.alt { width: 340px; }
+.alt .why { max-width: 340px; }
+.alt .stage { overflow: visible; }
+.sec.open > .shead .sum { display: none; }
+.shead .sum { margin-left: 8px; }
+.insp .pbody { overflow: visible; }
+.vals { container-type: inline-size; }
+@container (max-width: 112px) { .sl, .alpha, .fld.num .pre { display: none; } .fld.num { padding: 0 6px; } }
+.tools { gap: 2px; }
+
+/* The fold: how much of the panel shows at 1280×720 */
+.fold { position: absolute; left: -8px; right: -8px; border-top: 1px dashed var(--amber); pointer-events: none; z-index: 3; }
+.fold span { position: absolute; left: calc(100% + 4px); top: -6px; white-space: nowrap; font-size: 10px; line-height: 12px; color: var(--amber); background: var(--ground); padding: 0 4px; }
+
+/* Content box: full width, grows with its lines */
+.tbox { display: block; width: 100%; resize: none; overflow: hidden; margin: 8px 0 0; padding: 4px 8px; min-height: 42px; border-radius: 6px; background: var(--field); border: 1px solid var(--border); color: var(--ink); font: 400 12px/16px Inter, system-ui, sans-serif; transition: border-color .1s; }
+.tbox:hover { border-color: var(--border2); }
+.tbox:focus { outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; border-color: var(--blue); }
+.tbox.tall { min-height: 74px; }
+.tbox.cap { max-height: 136px; overflow-y: auto; }
+.tbox-gap { height: 8px; }
+
+/* Swatch: one component everywhere. Checker only shows through a colour with alpha < 1. */
+.sw { width: 24px; height: 24px; flex: none; border-radius: 6px; border: 1px solid var(--border2); background: var(--c); cursor: pointer; }
+.sw.tr { background: linear-gradient(var(--c), var(--c)), repeating-conic-gradient(#8A8A8A 0 25%, #BDBDBD 0 50%) 0 0 / 8px 8px; }
+.sw:hover { border-color: var(--ink3); }
+.sw.sel { outline: 2px solid rgba(122, 172, 246, .6); outline-offset: 1px; }
+.sw.big { width: 40px; height: 40px; }
+.hex .t { flex: 1; }
+.alpha { color: var(--ink3); margin-left: auto; }
+.cap-none { color: var(--ink3); }
+
+/* Weight ticks: the slider steps by 100 */
+.sl.steps::after { content: ""; position: absolute; left: 3px; right: 3px; top: 15px; height: 3px; background: repeating-linear-gradient(90deg, var(--border2) 0 1px, transparent 1px 12.5%); }
+
+/* A: collapsed section summary */
+.sum { color: var(--ink3); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* B: one row per style layer */
+.subhead { height: 32px; display: flex; align-items: center; font-weight: 500; border-top: 1px solid var(--border); margin-top: 12px; }
+.lchk { width: 72px; flex: none; display: flex; align-items: center; gap: 6px; color: var(--ink2); }
+.lchk .box { cursor: pointer; }
+.lchk.on .box { background: var(--raised); }
+.lchk.on .box .i { visibility: visible; }
+.row.off .vals { opacity: .4; pointer-events: none; }
+.row.off .lchk span { color: var(--ink3); }
+
+/* C: content first, style tiles, popovers */
+.cbar { display: flex; gap: 4px; margin-top: 4px; }
+.cbar .seg { flex: none; width: 76px; }
+.fld .kd { margin-left: auto; width: 7px; height: 7px; transform: rotate(45deg); border: 1px solid var(--ink4); border-radius: 1px; flex: none; }
+.fld .kd.anim { border-color: var(--bluel); }
+.fld .kd.here { background: var(--bluel); }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.tile { position: relative; height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 6px; background: var(--field); border: 1px solid var(--border); text-align: left; transition: border-color .1s; min-width: 0; }
+.tile:hover { border-color: var(--border2); }
+.tile.open { border-color: var(--blue); }
+.tile .tt { display: flex; flex-direction: column; min-width: 0; }
+.tile .tn { font-weight: 500; color: var(--ink); }
+.tile .ts { color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile.none .tn { color: var(--ink2); }
+.tile .kd { position: absolute; right: 8px; top: 8px; width: 7px; height: 7px; transform: rotate(45deg); background: var(--bluel); border-radius: 1px; }
+.ghead { height: 32px; display: flex; align-items: center; font-weight: 500; margin-top: 4px; }
+.pop { position: absolute; z-index: 4; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); padding: 4px 4px 8px 12px; }
+.pop .phd { height: 28px; display: flex; align-items: center; font-weight: 500; gap: 6px; }
+.pop .fld, .pop .seg { background: var(--field); }
+
+/* Colour picker popover (egui's picker, drawn flat) */
+.picker { position: absolute; z-index: 4; width: 232px; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.sv { position: relative; height: 140px; border-radius: 4px; background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(var(--h), 100%, 50%)); }
+.sv .knob { position: absolute; width: 10px; height: 10px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #000; transform: translate(-50%, -50%); }
+.strip { position: relative; height: 12px; border-radius: 4px; }
+.strip.hue { background: linear-gradient(90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.strip.al { background: linear-gradient(90deg, transparent, var(--c)), repeating-conic-gradient(#8A8A8A 0 25%, #BDBDBD 0 50%) 0 0 / 8px 8px; }
+.strip .bar { position: absolute; top: -2px; width: 4px; height: 16px; border-radius: 2px; background: #fff; box-shadow: 0 0 0 1px #000; transform: translateX(-50%); }
+.picker .prow { display: flex; gap: 4px; align-items: center; }
+.picker .prow .sw { cursor: default; }
+
+/* Font menu with search */
+.fmenu { position: absolute; z-index: 4; width: 220px; }
+.fmenu .fld { margin-bottom: 4px; }
+.fmenu .mi { font-size: 12px; }
+
+/* States grid helpers */
+.swcat { display: flex; gap: 24px; flex-wrap: wrap; }
+.swcat .c { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--ink3); width: 128px; }
+.swcat .c b { font-weight: 500; color: var(--ink); }
+.cmp { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; }
+.cmp .old { width: 288px; }
+.oldrow { display: flex; align-items: center; gap: 6px; height: 22px; color: var(--ink); }
+.oldrow .dv { height: 18px; padding: 0 6px; background: #2a2c30; border-radius: 3px; display: inline-flex; align-items: center; }
+.oldrow .half { width: 28px; height: 16px; border-radius: 2px; background: linear-gradient(90deg, var(--c) 50%, transparent 50%), repeating-conic-gradient(#8A8A8A 0 25%, #BDBDBD 0 50%) 0 0 / 8px 8px; }
+.oldrow .sel { padding: 2px 6px; border-radius: 3px; }
+.oldrow .sel.on { background: var(--blue); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chev-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 16 16"><path d="M3 3.5v3.5h3.5"/><path d="M3.4 7A5 5 0 1 1 4.6 11.6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.5l6 10.5H2z"/><path d="M8 6.5v3M8 11.3v.2"/></symbol>
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L13.5 13.5"/></symbol>
+  <symbol id="i-al-left" viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h7M2.5 12h9"/></symbol>
+  <symbol id="i-al-center" viewBox="0 0 16 16"><path d="M2.5 4h11M4.5 8h7M3.5 12h9"/></symbol>
+  <symbol id="i-al-right" viewBox="0 0 16 16"><path d="M2.5 4h11M6.5 8h7M4.5 12h9"/></symbol>
+</svg>
+
+<main class="page">
+  <h1>Text Tab</h1>
+  <p>The Inspector's Text tab for a selected title clip (#259). Every mockup is drawn at the Inspector's real width: 288px, which is what <code>default_dock()</code> gives at 1280×720, with a 240px toggle for the 960×600 minimum window where the panel hits <code>PANEL_MIN</code>. The dashed line marks where a 1280×720 window cuts the panel off.</p>
+  <p>The sample is a long three-line title with every style on: Size changed from 96 to 120, Position animated with a key at the playhead, a 4px black outline, a 60% black shadow and a 50% black box. Sliders drag, sections fold, swatches open the picker, and the boxes grow as you type.</p>
+
+  <section id="now">
+    <h2>What's Wrong Now</h2>
+    <div class="cmp" style="margin-top:20px">
+      <ul class="notes" style="flex:1 1 360px">
+        <li>The text box is a two-row egui <code>TextEdit</code> that doesn't fill the width or grow, so a three-line title scrolls inside a box shorter than the title.</li>
+        <li>Size and Weight share one row, with Size's keyframe toggle wedged between them. Weight has no keyframe and no label column.</li>
+        <li>Left, Center and Right are unlabelled selectable text buttons on a row of their own; nothing says they're alignment.</li>
+        <li>Colours use egui's <code>color_edit_button</code>, which paints half solid and half checkerboard even for opaque white, so every swatch looks partly transparent.</li>
+        <li>Each row is <code>ui.horizontal</code> with its own label width, so fields start at a different x on every row and stock DragValues sit beside house fields.</li>
+        <li>There are no sections: Outline, Outline Color, Shadow, Shadow Color, Box Padding and Box Color are eleven loose rows.</li>
+      </ul>
+      <figure>
+        <div class="panel app old" style="padding:8px 12px 12px">
+          <div style="background:var(--field);border:1px solid var(--border);border-radius:3px;height:36px;width:180px;padding:2px 4px;overflow:hidden;color:var(--ink)">TRIPLE KILL<br>clutch_round_3 — ranked, se…</div>
+          <div class="oldrow">Font <span class="dv">Sans-serif</span></div>
+          <div class="oldrow">Size <span class="dv">120</span> ◇ Weight <span class="dv">700</span></div>
+          <div class="oldrow">Color <span class="half" style="--c:#fff"></span> ◇</div>
+          <div class="oldrow"><span class="sel">Left</span><span class="sel on">Center</span><span class="sel">Right</span></div>
+          <div class="oldrow">Position <span class="dv">0.5</span><span class="dv">0.82</span> ◆</div>
+          <div class="oldrow">Outline <span class="dv">4</span> ◇</div>
+          <div class="oldrow">Outline Color <span class="half" style="--c:#000"></span> ◇</div>
+          <div class="oldrow">Shadow <span class="dv">3</span><span class="dv">3</span> ◇</div>
+          <div class="oldrow">Shadow Color <span class="half" style="--c:rgba(0,0,0,.6)"></span> ◇</div>
+          <div class="oldrow">Box Padding <span class="dv">16</span> ◇</div>
+          <div class="oldrow">Box Color <span class="half" style="--c:rgba(0,0,0,.5)"></span> ◇</div>
+        </div>
+        <figcaption>Today, roughly (sketch, not a screenshot)</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="alts">
+    <h2>Alternatives</h2>
+    <p>All three share the row rules under them. They differ in how the five groups the issue names (Text, Fill, Outline, Shadow, Box) are arranged.</p>
+    <div class="compare">
+      <figure class="alt">
+        <div class="stage"><div class="panel app insp" id="alt-a" style="width:288px"></div></div>
+        <div class="toggle" data-for="alt-a"><button class="on" data-w="288">288px</button><button data-w="240">240px</button></div>
+        <figcaption>A. Sections, Like the Video Tab</figcaption>
+        <p class="why">Optimises for one Inspector: the same collapsible sections, rows, diamonds and remembered open state as Video. Collapsed sections show a one-line summary. <span>Tradeoff: with everything open it scrolls at 720p, and five heads cost 160px.</span></p>
+      </figure>
+      <figure class="alt">
+        <div class="stage"><div class="panel app insp" id="alt-b" style="width:288px"></div></div>
+        <div class="toggle" data-for="alt-b"><button class="on" data-w="288">288px</button><button data-w="240">240px</button></div>
+        <figcaption>B. One List, a Row per Style</figcaption>
+        <p class="why">Optimises for density: Outline, Shadow and Box are one compound row each, with a checkbox that turns the style off and leaves a single dimmed line. <span>Tradeoff: one diamond per compound row, so colour keys move into the picker, and the model has no on/off flag to restore from.</span></p>
+      </figure>
+      <figure class="alt">
+        <div class="stage"><div class="panel app insp" id="alt-c" style="width:288px;min-height:430px"></div></div>
+        <div class="toggle" data-for="alt-c"><button class="on" data-w="288">288px</button><button data-w="240">240px</button></div>
+        <figcaption>C. Words First, Styles in Popovers</figcaption>
+        <p class="why">Optimises for the words: a tall box, type controls on two compact rows, and four style tiles that open popovers. It fits 720p without scrolling. <span>Tradeoff: two clicks per style edit, keyframing hides in right-click menus, and it's a pattern no other tab uses.</span></p>
+      </figure>
+    </div>
+
+    <h3>Row rules for all three</h3>
+    <ul class="notes">
+      <li><b>One label column.</b> 72px, Ink 2. Every field starts at the same x on every row, in every section.</li>
+      <li><b>Two tool slots per row:</b> Reset (shown only when the value differs from its default; the slot stays reserved) and one keyframe diamond. At 288px there's no room for v3's keyframe arrows as well, so Previous and Next Keyframe move into the diamond's right-click menu beside the easing.</li>
+      <li><b>Sliders for ranged values:</b> Size (slider covers 8–400; the field still takes 1–1000), Weight (100–900 in steps of 100, with ticks), Outline Width (0–32) and Box Padding (0–200). When the value column drops under about 112px, as it does at 240px, the sliders give way and the fields still drag and type.</li>
+      <li><b>Align is a labelled segmented control</b> of three icons, with Left, Center and Right as tooltips.</li>
+      <li><b>One swatch:</b> 24px, 6px corners, 1px Border Strong, then the hex in a field. A checkerboard shows only behind a colour with alpha under 100%, and the alpha shows after the hex. A fully transparent colour reads None.</li>
+      <li><b>The text box is full width</b>, at least two lines, grows one line at a time up to eight, then scrolls. Enter adds a line; it isn't in a section, so folding Text never hides the words.</li>
+    </ul>
+  </section>
+
+  <section id="states">
+    <h2>States</h2>
+
+    <h3>Text Box Growth</h3>
+    <div class="states">
+      <div><p class="state-lbl">The default "Title": two lines minimum</p><div style="width:262px"><textarea class="tbox grow" spellcheck="false">Title</textarea></div></div>
+      <div><p class="state-lbl">A long three-line title wraps to four</p><div style="width:262px"><textarea class="tbox grow" spellcheck="false" id="long1"></textarea></div></div>
+      <div><p class="state-lbl">Past eight lines it stops and scrolls</p><div style="width:262px"><textarea class="tbox cap grow" spellcheck="false" id="long2"></textarea></div></div>
+    </div>
+
+    <h3>Swatches</h3>
+    <p>One component for Fill, Outline, Shadow and Box, at row size and at 40px to show the drawing. In egui it's a rounded <code>RectShape</code> filled from a repeating 2×2 checker texture, then the colour on top, then the 1px stroke, so the checker keeps the 6px corners.</p>
+    <div class="swcat" id="swcat" style="margin-top:16px"></div>
+
+    <h3>Colour Picker Open</h3>
+    <p>Clicking a swatch or its hex opens egui's picker as a popover under the row: saturation and value square, hue strip, alpha strip over the checker, and hex and alpha fields. A drag is one undo step. Here it's open on Box Color in A.</p>
+    <div class="states">
+      <div style="position:relative;width:288px;height:370px" id="pick-host"></div>
+    </div>
+
+    <h3>Missing Font and Font Search</h3>
+    <p>A project made on another machine can name a font that isn't installed. At 288px "Bebas Neue (missing)" doesn't fit the field, so the Amber warning icon carries "missing" and the tooltip names the font and the fallback. The family name stays in Ink, untruncated where it fits. Clicking opens the existing search, which previews the highlighted family in the Program view.</p>
+    <div class="states" id="font-states"></div>
+
+    <h3>A at Both Widths</h3>
+    <p>The recommended layout at 288px and at 240px, sections open. At 240 the value column is 92px: sliders hide, the hex field drops the alpha, and Position's and Offset's X and Y prefixes drop so 0.82 fits a 44px field; their tooltips still name them.</p>
+    <div class="states">
+      <div><p class="state-lbl">288px · 1280×720 and up</p><div class="panel app insp" id="a288" style="width:288px"></div></div>
+      <div><p class="state-lbl">240px · 960×600 minimum</p><div class="panel app insp" id="a240" style="width:240px"></div></div>
+    </div>
+  </section>
+
+  <section class="rec">
+    <h2>Recommendation: A, Sections Like the Video Tab</h2>
+    <p>A is the only one that makes the Text tab look like the rest of the Inspector rather than a special case, and it's the cheapest to build: it reuses the inspector rows and section heads that already exist, so Text gains the remembered open state, the reset-when-changed slot and the single diamond for free. The issue asks for exactly these five sections.</p>
+    <p>It takes one idea from the others: a collapsed section shows its summary in Ink 3 (Shadow above reads "3, 3 · 60%"), so folding Outline, Shadow and Box keeps their state visible and A fits a 720p panel. First run opens Text and Fill; the rest remember what the user last did.</p>
+    <p>B's checkbox needs an <code>enabled</code> flag on each style that the <code>Text</code> model doesn't have, and one diamond for two values breaks the per-property keyframes. C is the nicest for typing but hides keyframing and invents a pattern no other tab uses.</p>
+    <h3>Build Notes</h3>
+    <ul class="notes">
+      <li>Text box: <code>TextEdit::multiline</code> at <code>available_width</code>, <code>desired_rows</code> set from the line count (2 to 8), house Field frame.</li>
+      <li>Rows: the existing inspector row helper (72px label, values, tools). Size, Weight, Outline Width and Box Padding use its slider; Weight steps by 100.</li>
+      <li>Align: a three-segment icon control in suite-ui, 24px tall, Raised fill on the chosen segment.</li>
+      <li>Swatch: a suite-ui widget replacing <code>color_edit_button_srgba_unmultiplied</code>; it opens egui's <code>color_picker_color32</code> in a popover. Unchanged undo behaviour: one step per drag.</li>
+      <li>Collapsed summary: Ink 3, truncated with an ellipsis, between the title and the tools.</li>
+    </ul>
+  </section>
+</main>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const I = n => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const LONG = 'TRIPLE KILL\nclutch_round_3 — ranked, season 4 finals, map 2 overtime\nGG WP';
+const LONGER = LONG + '\n\nfeat. the whole squad\nshot on stream\nlast round\nno scope\nthanks for watching';
+
+// The sample clip's style. Defaults from jvid-core model.rs Text::default().
+const ST = {
+  font: '', size: 120, weight: 700, align: 'center', pos: [0.5, 0.82],
+  fill: [255, 255, 255, 1], outline: 4, ocolor: [0, 0, 0, 1],
+  shadow: [3, 3], scolor: [0, 0, 0, .6], pad: 16, bcolor: [0, 0, 0, .5],
+};
+const css = c => `rgba(${c[0]},${c[1]},${c[2]},${c[3]})`;
+const hex = c => c.slice(0, 3).map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+const alpha = c => c[3] < 1 ? `<span class="alpha">${Math.round(c[3] * 100)}%</span>` : '';
+
+const tools = (key = true) => `<span class="tools"><button class="ib reset" title="Reset">${I('reset')}</button>${key ? '<button class="ib key" title="Animate. Right-click for easing and keyframe navigation."><span class="dia"></span></button>' : '<span class="ib ph"></span>'}</span>`;
+const sw = c => `<span class="sw${c[3] < 1 ? ' tr' : ''}" style="--c:${css(c)}" role="button" tabindex="0" title="${c[3] === 0 ? 'None' : '#' + hex(c)}"></span>`;
+const hexf = c => c[3] === 0 ? `<span class="fld hex"><span class="t cap-none">None</span></span>` : `<span class="fld hex"><span class="t">${hex(c)}</span>${alpha(c)}</span>`;
+const cls = o => ['row', o.changed && 'changed', o.anim && 'anim', o.here && 'here', o.off && 'off'].filter(Boolean).join(' ');
+const lbl = l => `<span class="lbl" title="${l}">${l}</span>`;
+
+function num(l, v, o) {
+  return `<div class="${cls(o)}" data-def="${o.def}" data-min="${o.min}" data-max="${o.max}">${o.head || lbl(l)}<span class="vals">${o.pre || ''}<span class="fld num w56"><span class="val">${v}</span></span>
+    <span class="sl${o.steps ? ' steps' : ''}"><input type="range" min="${o.min}" max="${o.max}" step="${o.step || 1}" value="${Math.min(v, o.max)}" aria-label="${l}"></span></span>${tools(o.key !== false)}</div>`;
+}
+const pair = (l, f, o = {}) => `<div class="${cls(o)}">${o.head || lbl(l)}<span class="vals">${o.pre || ''}${f.map(([p, v]) => `<span class="fld num"><span class="pre">${p}</span><span class="t">${v}</span></span>`).join('')}</span>${tools()}</div>`;
+const color = (l, c, o = {}) => `<div class="${cls(o)}">${o.head || lbl(l)}<span class="vals">${sw(c)}${hexf(c)}</span>${tools()}</div>`;
+const font = (name, o = {}) => `<div class="${cls(o)}">${lbl('Font')}<span class="vals"><span class="fld dd" role="button" tabindex="0"${o.missing ? ' title="${name} isn\'t installed here; drawn in the default sans-serif"' : ''}>${o.missing ? `<svg class="i" style="color:var(--amber);margin-right:-2px"><use href="#i-alert"/></svg>` : ''}<span class="t">${name || 'Sans-serif'}</span>${I('chev-down')}</span></span>${tools(false)}</div>`;
+const seg = a => `<span class="seg" role="radiogroup" aria-label="Align">${['left', 'center', 'right'].map(k => `<button class="${k === a ? 'on' : ''}" title="${k[0].toUpperCase() + k.slice(1)}" aria-label="${k}">${I('al-' + k)}</button>`).join('')}</span>`;
+const align = a => `<div class="row${a !== 'center' ? ' changed' : ''}">${lbl('Align')}<span class="vals">${seg(a)}</span>${tools(false)}</div>`;
+const box = (txt, extra = '') => `<textarea class="tbox grow ${extra}" spellcheck="false" aria-label="Text">${txt}</textarea>`;
+
+const sizeRow = () => num('Size', ST.size, { def: 96, min: 8, max: 400, changed: 1 });
+const weightRow = () => num('Weight', ST.weight, { def: 700, min: 100, max: 900, step: 100, steps: 1 });
+const posRow = () => pair('Position', [['X', ST.pos[0].toFixed(2)], ['Y', ST.pos[1].toFixed(2)]], { changed: 1, anim: 1, here: 1 });
+
+function sec(title, body, open, sum, changed = true) {
+  return `<div class="sec${open ? ' open' : ''}${changed ? ' changed' : ''}">
+    <div class="shead" role="button" tabindex="0" aria-expanded="${!!open}">${I('chev-down').replace('class="i"', 'class="i chev"')}<span style="flex:none">${title}</span>${sum ? `<span class="sum">${sum}</span>` : ''}
+      <span class="tools"><button class="ib reset" title="Reset ${title}">${I('reset')}</button><button class="ib key" title="Keyframe All of ${title}"><span class="dia"></span></button></span></div>
+    <div class="sbody">${body}</div></div>`;
+}
+const head = tabs => `<div class="phead tabs">${tabs.map((t, i) => `<button class="tab${i ? '' : ' on'}">${t}</button>`).join('')}</div>`;
+const fold = () => '<div class="fold" style="top:414px"><span>1280×720 fold</span></div>';
+
+function altA(opts = {}) {
+  const shadowSum = `${ST.shadow.join(', ')} · ${Math.round(ST.scolor[3] * 100)}%`;
+  return head(['Text', 'Video', 'Effects']) + `<div class="pbody">${box(LONG)}<div class="tbox-gap"></div>
+    ${sec('Text', font(ST.font) + sizeRow() + weightRow() + align(ST.align) + posRow(), 1, 'Sans-serif · 120')}
+    ${sec('Fill', color('Color', ST.fill), 1, '#FFFFFF', false)}
+    ${sec('Outline', num('Width', ST.outline, { def: 0, min: 0, max: 32, changed: 1 }) + color('Color', ST.ocolor), 1, `${ST.outline} px · #${hex(ST.ocolor)}`)}
+    ${sec('Shadow', pair('Offset', [['X', ST.shadow[0]], ['Y', ST.shadow[1]]], { changed: 1 }) + color('Color', ST.scolor), opts.allOpen, shadowSum)}
+    ${sec('Box', num('Padding', ST.pad, { def: 16, min: 0, max: 200 }) + color('Color', ST.bcolor, { changed: 1, id: 'bc' }), 1, `${ST.pad} px · 50%`)}
+  </div>${opts.nofold ? '' : fold()}`;
+}
+
+function layer(name, on, inner, changed = true) {
+  return inner.replace('<div class="row', `<div class="row${on ? '' : ' off'}${changed ? ' changed' : ''}`).replace('{H}', `<label class="lchk${on ? ' on' : ''}"><span class="box">${I('check')}</span><span>${name}</span></label>`);
+}
+function altB() {
+  return head(['Text', 'Video', 'Effects']) + `<div class="pbody">${box(LONG)}
+    <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px">${font(ST.font)}${sizeRow()}${weightRow()}${align(ST.align)}${posRow()}</div>
+    <div class="subhead">Style</div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      ${color('Fill', ST.fill)}
+      ${layer('Outline', 1, num('Outline', ST.outline, { def: 0, min: 0, max: 32, head: '{H}', pre: sw(ST.ocolor) }))}
+      ${layer('Shadow', 0, pair('Shadow', [['X', ST.shadow[0]], ['Y', ST.shadow[1]]], { head: '{H}', pre: sw(ST.scolor) }), false)}
+      ${layer('Box', 1, num('Box', ST.pad, { def: 16, min: 0, max: 200, head: '{H}', pre: sw(ST.bcolor) }))}
+    </div>
+    <p class="help" style="margin:12px 0 0;font-size:10px;line-height:12px">Unticked styles keep their last values for this session.</p>
+  </div>${fold()}`;
+}
+
+function tile(name, c, sum, o = {}) {
+  return `<button class="tile${o.open ? ' open' : ''}${c[3] === 0 ? ' none' : ''}">${sw(c)}<span class="tt"><span class="tn">${name}</span><span class="ts">${sum}</span></span>${o.anim ? '<span class="kd" title="Animated"></span>' : ''}</button>`;
+}
+function altC() {
+  return head(['Text', 'Video', 'Effects']) + `<div class="pbody">${box(LONG, 'tall')}
+    <div class="cbar" style="margin-top:8px"><span class="fld dd" style="flex:1" role="button" tabindex="0"><span class="pre">Font</span><span class="t" style="flex:1">Sans-serif</span>${I('chev-down')}</span></div>
+    <div class="cbar">
+      <span class="fld num" title="Size"><span class="pre">Size</span><span class="t">120</span></span>
+      <span class="fld dd" title="Weight" role="button" tabindex="0"><span class="t">Bold</span>${I('chev-down')}</span>
+      ${seg(ST.align)}
+    </div>
+    <div class="cbar">
+      <span class="fld num" title="Position X"><span class="pre">X</span><span class="t">0.50</span><span class="kd anim here"></span></span>
+      <span class="fld num" title="Position Y"><span class="pre">Y</span><span class="t">0.82</span><span class="kd anim here"></span></span>
+    </div>
+    <div class="ghead">Style</div>
+    <div class="tiles">
+      ${tile('Fill', ST.fill, '#FFFFFF')}
+      ${tile('Outline', ST.ocolor, `${ST.outline} px`, { open: 1 })}
+      ${tile('Shadow', ST.scolor, '3, 3 · 60%')}
+      ${tile('Box', ST.bcolor, '16 px · 50%')}
+    </div>
+  </div>
+  <div class="pop" style="left:8px;right:8px;top:332px">
+    <div class="phd">Outline<span class="tools" style="margin-right:4px"><button class="ib reset" style="visibility:visible" title="Remove Outline">${I('reset')}</button><button class="ib key" title="Keyframe All of Outline"><span class="dia"></span></button></span></div>
+    <div style="display:flex;flex-direction:column;gap:4px">${num('Width', ST.outline, { def: 0, min: 0, max: 32, changed: 1 })}${color('Color', ST.ocolor)}</div>
+  </div>${fold()}`;
+}
+
+$('#alt-a').innerHTML = altA();
+$('#alt-b').innerHTML = altB();
+$('#alt-c').innerHTML = altC();
+$('#a288').innerHTML = altA({ allOpen: 1, nofold: 1 });
+$('#a240').innerHTML = altA({ allOpen: 1, nofold: 1 });
+$('#long1').value = LONG;
+$('#long2').value = LONGER;
+$$('.insp textarea').forEach(t => { t.value = LONG; });
+
+// Swatch catalogue
+const CAT = [
+  ['Fill', [255, 255, 255, 1], 'Opaque: solid colour, no checker'],
+  ['Fill', [255, 212, 0, 1], 'Opaque, user colour'],
+  ['Shadow Color', [0, 0, 0, .6], 'Default shadow: 60% black'],
+  ['Box Color', [0, 0, 0, .5], '50% black: checker shows through'],
+  ['Box Color', [0, 0, 0, 0], 'Default box: transparent, so no box'],
+];
+$('#swcat').innerHTML = CAT.map(([l, c, d]) => `<div class="c app"><b>${l}</b><span class="sw big${c[3] < 1 ? ' tr' : ''}" style="--c:${css(c)}"></span><div style="display:flex;gap:4px;width:128px">${sw(c)}${hexf(c)}</div><span>${d}</span></div>`).join('');
+
+// Picker, open on Box Color in A
+$('#pick-host').innerHTML = `<div class="panel app insp" style="width:288px;position:absolute;inset:0 auto auto 0">${head(['Text', 'Video', 'Effects'])}<div class="pbody">
+  ${sec('Box', num('Padding', 16, { def: 16, min: 0, max: 200 }) + color('Color', ST.bcolor, { changed: 1 }), 1, '')}</div></div>
+  <div class="menu picker app" style="left:44px;top:132px;--h:220;--c:#000">
+    <div class="sv"><span class="knob" style="left:2%;top:98%"></span></div>
+    <div class="strip hue"><span class="bar" style="left:61%"></span></div>
+    <div class="strip al"><span class="bar" style="left:50%"></span></div>
+    <div class="prow">${sw(ST.bcolor)}<span class="fld"><span class="pre">#</span><span class="t">000000</span></span><span class="fld num" style="flex:0 0 64px"><span class="pre">A</span><span class="t">50%</span></span></div>
+  </div>`;
+$('#pick-host .sw').classList.add('sel');
+
+// Missing font, then the search open on it
+$('#font-states').innerHTML = `
+  <div><p class="state-lbl">Missing font, with its tooltip</p><div class="panel app insp" style="width:288px;padding:8px 12px 44px 12px;position:relative">${font('Bebas Neue', { missing: 1 })}
+    <div class="tip" style="left:40px;top:38px">Bebas Neue isn't installed here; drawn in the default sans-serif</div></div></div>
+  <div><p class="state-lbl">Font search open</p><div class="panel app insp" style="width:288px;height:230px;padding:8px 12px;position:relative;overflow:visible">${font('Inter')}
+    <div class="menu fmenu" style="left:88px;top:36px">
+      <div class="fld focus"><svg class="i" style="color:var(--ink3);margin-left:-2px"><use href="#i-search"/></svg><span class="t">int</span></div>
+      <button class="mi"><span class="t">Inter</span></button>
+      <button class="mi hover"><span class="t">Inter Display</span></button>
+      <button class="mi"><span class="t">Intel One Mono</span></button>
+      <button class="mi"><span class="t">Interstate Condensed Extra Light Italic</span></button>
+    </div></div></div>`;
+
+// Behaviour: sliders, folding, toggles, growing boxes
+function paint(r) {
+  const inp = $('input', r);
+  if (!inp) return;
+  const v = +inp.value, min = +inp.min, max = +inp.max;
+  inp.style.setProperty('--lo', '0%');
+  inp.style.setProperty('--hi', `${(v - min) / (max - min) * 100}%`);
+  $('.val', r).textContent = v;
+  r.classList.toggle('changed', v !== +r.dataset.def);
+}
+function grow(t) {
+  t.style.height = 'auto';
+  const max = t.classList.contains('cap') ? 138 : 9999;
+  t.style.height = `${Math.min(t.scrollHeight + 2, max)}px`;
+}
+function regrow() { $$('textarea.grow').forEach(grow); }
+$$('.row').forEach(paint);
+regrow();
+document.fonts && document.fonts.ready.then(regrow);
+document.addEventListener('input', e => {
+  if (e.target.matches('textarea')) return grow(e.target);
+  const r = e.target.closest('.row');
+  if (r) paint(r);
+});
+document.addEventListener('click', e => {
+  const t = e.target;
+  const tg = t.closest('.toggle button');
+  if (tg) {
+    $$('button', tg.parentElement).forEach(b => b.classList.toggle('on', b === tg));
+    $('#' + tg.parentElement.dataset.for).style.width = tg.dataset.w + 'px';
+    return regrow();
+  }
+  const reset = t.closest('.reset');
+  if (reset) {
+    const r = reset.closest('.row');
+    if (r && $('input', r)) { $('input', r).value = r.dataset.def; paint(r); }
+    else if (r) r.classList.remove('changed', 'anim', 'here');
+    return;
+  }
+  const key = t.closest('.row .key');
+  if (key) {
+    const r = key.closest('.row');
+    if (!r.classList.contains('anim')) r.classList.add('anim', 'here'); else r.classList.toggle('here');
+    return;
+  }
+  const sh = t.closest('.shead');
+  if (sh && !t.closest('.ib')) {
+    const s = sh.closest('.sec');
+    s.classList.toggle('open');
+    sh.setAttribute('aria-expanded', s.classList.contains('open'));
+    return;
+  }
+  const lc = t.closest('.lchk');
+  if (lc) {
+    e.preventDefault();
+    lc.classList.toggle('on');
+    lc.closest('.row').classList.toggle('off', !lc.classList.contains('on'));
+    return;
+  }
+  const sb = t.closest('.seg button');
+  if (sb) $$('button', sb.parentElement).forEach(b => b.classList.toggle('on', b === sb));
+});
+document.addEventListener('keydown', e => {
+  const h = e.target.closest && e.target.closest('.shead');
+  if (h && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); h.click(); }
+});
+</script>
+</body>
+</html>
