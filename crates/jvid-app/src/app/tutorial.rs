@@ -131,10 +131,8 @@ const BASICS: Lesson = Lesson {
 };
 
 /// Sample clip `name`'s path, written out first if needed.
-// shortcut: no clips until #355 adds `crate::samples`; then this returns
-// `crate::samples::path(name)?.ok_or_else(...)`.
-fn sample(_name: &str) -> std::io::Result<PathBuf> {
-    Err(std::io::ErrorKind::NotFound.into())
+fn sample(name: &str) -> std::io::Result<PathBuf> {
+    crate::samples::path(name)?.ok_or_else(|| std::io::ErrorKind::NotFound.into())
 }
 
 fn apply(app: &mut App, c: Command) {
