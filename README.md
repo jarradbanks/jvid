@@ -12,7 +12,7 @@ It's in early development and isn't packaged yet; you [build it from source](#bu
 
 ## What it does
 
-- **Premiere-style editing.** In/out points, J/K/L, insert and overwrite, ripple trims, razor and split, markers. Every shortcut is remappable.
+- **Fast, keyboard-first editing.** In/out points, J/K/L, insert and overwrite, ripple trims, razor and split, markers. Every shortcut is remappable.
 - **Quick to start.** Drag media onto the window; projects are plain JSON, autosaved, with relinking for moved files.
 - **Proxies.** Low-res copies of 4K and HEVC sources made in the background for smooth scrubbing; export uses the originals.
 - **Titles and solids.** Text presets with font, outline, shadow and box in the Inspector.
