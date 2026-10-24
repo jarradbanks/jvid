@@ -224,6 +224,13 @@ impl Keymap {
         self.label(id).1
     }
 
+    /// Whether `id`'s key is down, for actions that finish on release.
+    pub fn held(&self, ctx: &egui::Context, id: &str) -> bool {
+        let i = ACTIONS.iter().position(|a| a.id == id);
+        i.and_then(|i| self.bindings[i])
+            .is_some_and(|b| ctx.input(|i| i.key_down(b.logical_key)))
+    }
+
     /// Pairs of action ids sharing a shortcut where both could fire.
     pub fn conflicts(&self) -> Vec<(&'static str, &'static str)> {
         let mut out = Vec::new();

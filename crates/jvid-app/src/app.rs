@@ -1092,6 +1092,9 @@ impl eframe::App for App {
                 self.run_action(id, false);
             }
         }
+        if !self.keymap.held(&ctx, "add_marker") {
+            self.timeline.release_marker();
+        }
 
         let dropped: Vec<_> = ctx.input(|i| {
             i.raw
