@@ -294,10 +294,11 @@ fn to_i420(f: &frame::Video, hdr: bool) -> Result<Frame, Error> {
     };
     let plane = |i: usize, pw: usize, ph: usize| {
         let (stride, row) = (f.stride(i), pw * bytes);
-        (0..ph)
-            .flat_map(|y| &f.data(i)[y * stride..y * stride + row])
-            .copied()
-            .collect()
+        let mut out = Vec::with_capacity(row * ph);
+        for y in 0..ph {
+            out.extend_from_slice(&f.data(i)[y * stride..y * stride + row]);
+        }
+        out
     };
     let (cw, ch) = (w.div_ceil(2) as usize, h.div_ceil(2) as usize);
     Ok(Frame {
@@ -478,6 +479,27 @@ impl DecoderPool {
 mod tests {
     use super::*;
     use crate::test_media::{corpus, frame_index};
+
+    #[test]
+    fn to_i420_drops_row_padding() {
+        let mut f = frame::Video::new(Pixel::YUV420P, 18, 6);
+        assert!(f.stride(0) > 18 && f.stride(1) > 9, "no padding to drop");
+        for i in 0..3 {
+            for (n, b) in f.data_mut(i).iter_mut().enumerate() {
+                *b = n as u8;
+            }
+        }
+        let got = to_i420(&f, false).unwrap();
+        // The per-byte copy it replaced, which is slow in debug builds.
+        let want = |i: usize, w: usize, h: usize| -> Vec<u8> {
+            let stride = f.stride(i);
+            (0..h)
+                .flat_map(|y| &f.data(i)[y * stride..y * stride + w])
+                .copied()
+                .collect()
+        };
+        assert_eq!(got.planes, [want(0, 18, 6), want(1, 9, 3), want(2, 9, 3)]);
+    }
 
     #[test]
     fn upright_turns_planes_clockwise() {

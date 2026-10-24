@@ -49,6 +49,18 @@ fn project(dir: &Path) -> Project {
     h.project().clone()
 }
 
+/// `p` drawn at 480x270, as the GPU's software adapter is most of an export test's time.
+fn small(p: Project) -> Project {
+    let mut h = History::new(p);
+    let settings = jvid_core::model::ProjectSettings {
+        width: 480,
+        height: 270,
+        ..Default::default()
+    };
+    h.apply(Command::SetSettings(settings)).unwrap();
+    h.project().clone()
+}
+
 fn preset(name: &str) -> Preset {
     let all = jvid_core::preset::builtin();
     all.into_iter().find(|p| p.name == name).expect(name)
@@ -383,14 +395,14 @@ fn a_ramped_clip_exports_its_curve() {
     };
     let mut h = History::new(Project::default());
     let video = dir.join("frame-index-1080p30.mp4");
-    add(&mut h, TrackKind::Video, video, Time(0), secs(10));
+    add(&mut h, TrackKind::Video, video, Time(0), secs(2));
     let id = h.project().sequence().tracks()[0].clips()[0].id;
     let key = |time, v| Keyframe {
         time,
         value: Value::Scalar(v),
         easing: Easing::Linear,
     };
-    let keys = vec![key(Time(0), 1.0), key(secs(10), 2.0)];
+    let keys = vec![key(Time(0), 1.0), key(secs(2), 2.0)];
     h.apply(Command::SetSpeedKeys {
         id,
         speed: 1.0,
@@ -401,7 +413,7 @@ fn a_ramped_clip_exports_its_curve() {
     let c = h.project().sequence().tracks()[0].clips()[0].clone();
     let rate = Rate::new(30, 1);
     let frame = rate.time_floor(1);
-    let expected = 10.0 * 2f64.ln() * FLICKS_PER_SECOND as f64;
+    let expected = 2.0 * 2f64.ln() * FLICKS_PER_SECOND as f64;
     assert!((c.duration().0 as f64 - expected).abs() < frame.0 as f64);
 
     let path = out("ramp.mp4");
@@ -413,7 +425,8 @@ fn a_ramped_clip_exports_its_curve() {
         lossless: None,
         sidecar: false,
     };
-    let info = run_now(h.project(), &req, false).unwrap();
+    // The preset scales back up to 1080p, where frame_index reads the blocks.
+    let info = run_now(&small(h.project().clone()), &req, false).unwrap();
     assert!(
         (info.duration - c.duration()).0.abs() <= frame.0,
         "{:?}",
@@ -434,10 +447,10 @@ fn a_ramped_clip_exports_its_curve() {
             )
         })
         .unzip();
-    assert_eq!(got.len(), 207);
+    assert_eq!(got.len(), 41);
     assert_eq!(got, want);
     // It speeds up: one source frame a frame at the start, two at the end.
-    assert_eq!((got[1] - got[0], got[206] - got[205]), (1, 2));
+    assert_eq!((got[1] - got[0], got[40] - got[39]), (1, 2));
     std::fs::remove_file(&path).unwrap();
 }
 
@@ -631,15 +644,16 @@ fn every_builtin_preset_exports() {
     let (Some(dir), Some(_)) = (corpus(), device()) else {
         return eprintln!("skipping export test: needs the corpus and a software adapter");
     };
-    let p = project(&dir);
+    let p = small(project(&dir));
     for (i, preset) in jvid_core::preset::builtin().into_iter().enumerate() {
         let path = out(&format!("preset{i}.{}", preset.extension));
-        let size = preset.output_size((1920, 1080));
+        let size = preset.output_size((480, 270));
         let has_video = preset.video.is_some();
         let name = preset.name.clone();
         let req = Request {
             path: path.clone(),
-            range: (secs(1), secs(2)),
+            // Not much shorter: MP3 pads to 1152-sample frames, past validate's one-frame slack.
+            range: (secs(1), secs(1) + Time(FLICKS_PER_SECOND / 3)),
             preset,
             loudness: None,
             lossless: None,
@@ -944,51 +958,71 @@ fn queue_reports_cancelled_waiting_job() {
 /// Target-size exports land under the target and within 3% of it, across corpus sources of
 /// different content and sizes, for H.264 in MP4, MKV and MOV. The near-static screen recording
 /// needs less than the target at the encoder's best quality, so it only has to land under.
-#[test]
-fn target_size_lands_within_three_percent() {
+/// One case per test, so the encode passes of each run in parallel.
+fn target_size_lands(src: &str, ext: &str, target: u64, fill: f64) {
     let (Some(dir), Some(_)) = (corpus(), device()) else {
         return eprintln!("skipping export test: needs the corpus and a software adapter");
     };
-    for (src, ext, target, fill) in [
-        ("frame-index-1080p30.mp4", "mp4", 2_500_000, 0.97),
-        ("frame-index-1080p30.mp4", "mkv", 4_000_000, 0.97),
-        ("9x16.mp4", "mp4", 2_000_000, 0.97),
-        ("vfr-phone.mp4", "mov", 1_500_000, 0.97),
-        ("screen-1440p60.mp4", "mp4", 1_000_000, 0.0),
-    ] {
-        let mut h = History::new(Project::default());
-        add(&mut h, TrackKind::Video, dir.join(src), Time(0), secs(2));
-        add(
-            &mut h,
-            TrackKind::Audio,
-            dir.join("tone-1khz.wav"),
-            Time(0),
-            secs(2),
-        );
-        let mut preset = preset("YouTube 1080p");
-        preset.extension = ext.into();
-        preset
-            .options
-            .insert("target_size".into(), target.to_string());
-        let path = out(&format!("target.{ext}"));
-        let req = Request {
-            path: path.clone(),
-            range: (Time(0), secs(2)),
-            preset,
-            loudness: None,
-            lossless: None,
-            sidecar: false,
-        };
-        run_now(h.project(), &req, false).unwrap_or_else(|e| panic!("{src}: {e:?}"));
-        let size = std::fs::metadata(&path).unwrap().len();
-        let off = size as f64 / target as f64;
-        assert!(
-            (fill..=1.0).contains(&off),
-            "{src} {ext}: {size} of {target}"
-        );
-        assert!(!PathBuf::from(format!("{}.best", path.display())).exists());
-        std::fs::remove_file(&path).unwrap();
-    }
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, dir.join(src), Time(0), secs(2));
+    add(
+        &mut h,
+        TrackKind::Audio,
+        dir.join("tone-1khz.wav"),
+        Time(0),
+        secs(2),
+    );
+    // A sixteenth of 1080p, so these targets are the same bits per pixel as 1080p ones 16x the size.
+    let mut preset = preset("YouTube 1080p");
+    preset.extension = ext.into();
+    preset.size = Some([480, 270]);
+    preset
+        .options
+        .insert("target_size".into(), target.to_string());
+    let path = out(&format!("target-{src}.{ext}"));
+    let req = Request {
+        path: path.clone(),
+        range: (Time(0), secs(2)),
+        preset,
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    let p = small(h.project().clone());
+    run_now(&p, &req, false).unwrap_or_else(|e| panic!("{src}: {e:?}"));
+    let size = std::fs::metadata(&path).unwrap().len();
+    let off = size as f64 / target as f64;
+    assert!(
+        (fill..=1.0).contains(&off),
+        "{src} {ext}: {size} of {target}"
+    );
+    assert!(!PathBuf::from(format!("{}.best", path.display())).exists());
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn target_size_lands_within_three_percent_mp4() {
+    target_size_lands("frame-index-1080p30.mp4", "mp4", 156_250, 0.97);
+}
+
+#[test]
+fn target_size_lands_within_three_percent_mkv() {
+    target_size_lands("frame-index-1080p30.mp4", "mkv", 250_000, 0.97);
+}
+
+#[test]
+fn target_size_lands_within_three_percent_portrait() {
+    target_size_lands("9x16.mp4", "mp4", 125_000, 0.97);
+}
+
+#[test]
+fn target_size_lands_within_three_percent_vfr_mov() {
+    target_size_lands("vfr-phone.mp4", "mov", 93_750, 0.97);
+}
+
+#[test]
+fn target_size_lands_under_when_it_cant_fill() {
+    target_size_lands("screen-1440p60.mp4", "mp4", 62_500, 0.0);
 }
 
 #[test]
