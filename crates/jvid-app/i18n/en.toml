@@ -827,3 +827,12 @@ basics_select = "Click the clip on the timeline to select it."
 basics_edit = "Change the title's text in the Inspector."
 # The text Show Me types into the title.
 basics_text = "My First Edit"
+# Keyframes and Easing, a lesson that animates a title in. Position, Opacity, Previous
+# Keyframe, Ease Out and Open Graph Editor are the names the editor shows for them.
+keys = "Keyframes and Easing"
+keys_add = "Key the title's Position and Opacity at its start and one second in."
+keys_previous = "Right-click the Position diamond and choose Previous Keyframe."
+keys_ease = "Right-click the Position diamond and choose Ease Out."
+keys_graph = "Right-click the keyframe lanes, choose Open Graph Editor and drag a handle."
+# {key} is the Play shortcut, such as Space.
+keys_play = "Press {key} to play the title in."

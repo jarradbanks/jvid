@@ -11,6 +11,7 @@ use egui::{
     vec2,
 };
 use jvid_core::history::{Command, History};
+use jvid_core::keyframe::{Easing, Keyframe, Value};
 use jvid_core::model::{AssetId, Project};
 use jvid_core::time::Time;
 use suite_ui::theme;
@@ -50,7 +51,7 @@ pub struct Step {
     pub reveal: Option<fn(&mut App)>,
 }
 
-pub const LESSONS: &[Lesson] = &[BASICS];
+pub const LESSONS: &[Lesson] = &[BASICS, KEYFRAMES];
 
 /// A short test of the engine on a title clip; the real lessons come with the sample media.
 const BASICS: Lesson = Lesson {
@@ -129,6 +130,158 @@ const BASICS: Lesson = Lesson {
         },
     ],
 };
+
+/// Animates a title in: keys, moving between them, easing, the graph editor and playback.
+const KEYFRAMES: Lesson = Lesson {
+    id: "keyframes",
+    title: || tr!("tutorial.keys"),
+    minutes: 5,
+    media: &[],
+    setup: |a| {
+        let [(name, _, text), ..] = crate::media_bin::presets();
+        let name = name.into();
+        apply(a, Command::AddText { name, text });
+        let project = a.history.project();
+        let Some(asset) = project.assets().last() else {
+            return;
+        };
+        if let Some(p) = project.placement(asset.id, Time(0), false, None, false) {
+            apply(a, Command::Place(p));
+        }
+        if let Some(id) = first_clip(a) {
+            a.timeline.select_clip(a.history.project().sequence(), id);
+        }
+        a.timeline.seek(Time(0));
+    },
+    steps: &[
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.keys_add").into(),
+            done: |a| {
+                title(a).is_some_and(|c| {
+                    let n = |p| c.keyframes.get(p).map_or(0, Vec::len);
+                    n("position") >= 2 && n("opacity") >= 2
+                })
+            },
+            show_me: |a| {
+                let Some(c) = title(a) else { return };
+                let (start, second) = (c.source_at(c.start), c.source_at(c.start + SECOND));
+                let x = &c.transform;
+                let [px, py] = x.position;
+                let key = |time, value| Keyframe {
+                    time,
+                    value,
+                    easing: Easing::Linear,
+                };
+                let mut keys = c.keyframes.clone();
+                // Rises 100 px into place as it fades in.
+                keys.insert(
+                    "position".into(),
+                    vec![
+                        key(start, Value::Vec2([px, py + 100.0])),
+                        key(second, Value::Vec2([px, py])),
+                    ],
+                );
+                keys.insert(
+                    "opacity".into(),
+                    vec![
+                        key(start, Value::Scalar(0.0)),
+                        key(second, Value::Scalar(x.opacity)),
+                    ],
+                );
+                let at = c.start + SECOND;
+                apply(a, Command::SetClipProps(vec![(c.id, x.clone(), keys)]));
+                a.timeline.seek(at);
+            },
+            reveal: None,
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.keys_previous").into(),
+            done: |a| first_key(a).is_some_and(|t| a.timeline.playhead() == t),
+            show_me: |a| {
+                if let Some(t) = first_key(a) {
+                    a.timeline.seek(t);
+                }
+            },
+            reveal: None,
+        },
+        Step {
+            anchor: "inspector",
+            text: |_| tr!("tutorial.keys_ease").into(),
+            done: |a| {
+                let eased = |e| e != Easing::Linear;
+                title_keys(a).any(|k| eased(k.easing))
+            },
+            show_me: |a| ease_first(a, Easing::EaseOut),
+            reveal: None,
+        },
+        Step {
+            anchor: "timeline",
+            text: |_| tr!("tutorial.keys_graph").into(),
+            done: |a| {
+                let custom = |e| matches!(e, Easing::Bezier(_));
+                a.timeline.graph_open() && title_keys(a).any(|k| custom(k.easing))
+            },
+            show_me: |a| {
+                if let Some(id) = first_clip(a) {
+                    a.timeline.open_graph(id);
+                }
+                // A steeper ease out than the preset, as dragging its first handle left gives.
+                ease_first(a, Easing::Bezier([0.0, 0.0, 0.2, 1.0]));
+            },
+            reveal: None,
+        },
+        Step {
+            anchor: "preview",
+            text: |a| tr!("tutorial.keys_play", key = a.keymap.shortcut("play_stop")),
+            done: |a| a.preview.playing(),
+            show_me: |a| {
+                if let Some(t) = first_key(a) {
+                    a.timeline.seek(t);
+                }
+                a.preview_active = 1;
+                a.preview.program_action("play_stop");
+            },
+            reveal: None,
+        },
+    ],
+};
+
+const SECOND: Time = Time(jvid_core::time::FLICKS_PER_SECOND);
+
+/// The keyframes lesson's title clip.
+fn title(app: &App) -> Option<&jvid_core::model::Clip> {
+    let id = first_clip(app)?;
+    app.history.project().sequence().clip(id).map(|(_, c)| c)
+}
+
+/// The title's position and opacity keys.
+fn title_keys(app: &App) -> impl Iterator<Item = &Keyframe> {
+    let keys = title(app).map(|c| &c.keyframes);
+    let lane = move |p| keys.and_then(|k| k.get(p)).into_iter().flatten();
+    lane("position").chain(lane("opacity"))
+}
+
+/// The timeline time of the title's first position key.
+fn first_key(app: &App) -> Option<Time> {
+    let c = title(app)?;
+    let k = c.keyframes.get("position")?.first()?;
+    Some(c.timeline_at(k.time))
+}
+
+/// Sets the easing of the title's first position and opacity keys, where it animates in.
+fn ease_first(app: &mut App, e: Easing) {
+    let Some(c) = title(app) else { return };
+    let mut keys = c.keyframes.clone();
+    for p in ["position", "opacity"] {
+        if let Some(k) = keys.get_mut(p).and_then(|k| k.first_mut()) {
+            k.easing = e;
+        }
+    }
+    let cmd = Command::SetClipProps(vec![(c.id, c.transform.clone(), keys)]);
+    apply(app, cmd);
+}
 
 /// Sample clip `name`'s path, written out first if needed.
 fn sample(name: &str) -> std::io::Result<PathBuf> {
@@ -624,15 +777,16 @@ mod tests {
     };
 
     /// Runs frames until the sandbox's media has imported and the card has caught up.
+    /// Playback repaints until it stops, so frames run without waiting for the UI to go idle.
     fn settle(h: &mut Harness<'_, App>) {
         for _ in 0..500 {
-            h.run();
+            h.run_ok();
             if !h.state().importer.is_busy() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        h.run();
+        h.run_ok();
     }
 
     /// Where anchor `name` was drawn in the last frame run.
@@ -646,7 +800,7 @@ mod tests {
 
     fn click(h: &mut Harness<'_, App>, label: &str) {
         h.get_by_label(label).click();
-        h.run();
+        h.run_ok();
         settle(h);
     }
 
@@ -680,7 +834,25 @@ mod tests {
             assert!(h.state().tutorials_done.iter().any(|d| d == lesson.id));
             click(&mut h, tr!("tutorial.exit"));
             assert!(h.state().lesson.is_none());
+            assert!(!h.state().preview.playing(), "{}: still playing", lesson.id);
         }
+    }
+
+    #[test]
+    fn a_custom_curve_waits_for_the_graph_editor() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&KEYFRAMES);
+        settle(&mut h);
+        click(&mut h, tr!("tutorial.show_me"));
+        click(&mut h, tr!("tutorial.show_me"));
+        // Custom in the diamond's easing menu passes the easing step but not the graph step.
+        ease_first(h.state_mut(), Easing::Bezier([0.1, 0.0, 0.3, 1.0]));
+        settle(&mut h);
+        assert_eq!(step(&h), Some(3));
+        let id = first_clip(h.state()).unwrap();
+        h.state_mut().timeline.open_graph(id);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(4));
     }
 
     #[test]
