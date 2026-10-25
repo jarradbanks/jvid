@@ -205,7 +205,8 @@ impl App {
         app.welcome.tour = !settings.tour_offered;
         // Tests never write the real settings file; those that save set their own.
         app.settings_path = crate::settings_file::path().filter(|_| !cfg!(test));
-        app.untitled = autosave::untitled();
+        // Nor the real untitled autosave: one there opens every harness on a Restore prompt.
+        app.untitled = autosave::untitled().filter(|_| !cfg!(test));
         crate::preferences::reduce_motion(&cc.egui_ctx, settings.reduce_motion);
         if let Some(auto) = app.untitled.as_deref().and_then(autosave::newer) {
             app.prompts.push(Prompt::Restore { path: None, auto });
