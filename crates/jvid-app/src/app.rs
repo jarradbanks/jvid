@@ -737,7 +737,7 @@ impl App {
                 Err(ExportError::Failed(e)) => {
                     crate::export::queue::notify(
                         tr!("export.failed_title"),
-                        &format!("{name}: {e}"),
+                        &tr!("export.failed_file", name = name, error = e),
                     );
                     self.toasts
                         .push((tr!("export.failed", error = e), now + TOAST_SECS));
