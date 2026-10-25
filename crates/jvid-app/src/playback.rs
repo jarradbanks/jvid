@@ -65,7 +65,13 @@ type Done = (Key, PathBuf, Duration, Result<Frame, String>);
 type StillDone = (AssetId, PathBuf, u64, Result<Arc<image::RgbaImage>, String>);
 
 /// A finished keyframe stand-in and the path it was decoded from.
-type QuickDone = (Key, PathBuf, Result<Frame, String>);
+type QuickDone = (Key, PathBuf, u64, Result<Frame, String>);
+
+struct QuickRequest {
+    path: PathBuf,
+    generation: u64,
+    handle: Handle,
+}
 
 /// What to draw for one timeline frame.
 pub struct Shown {
@@ -503,7 +509,8 @@ fn open_streams(open: &mut OpenAudio, asset: &MediaAsset, stream: Option<u32>) -
 /// The timeline playback engine. See the module docs.
 pub struct Playback {
     session: u64,
-    quick_handles: Vec<Handle>,
+    quick_handles: HashMap<Key, QuickRequest>,
+    quick_generation: u64,
     pub transport: Transport,
     pub cache: FrameCache,
     stills: HashMap<AssetId, Arc<image::RgbaImage>>,
@@ -512,6 +519,7 @@ pub struct Playback {
     still_done: Receiver<StillDone>,
     jobs: Pool,
     decode: DecodeFn,
+    decode_notify: Option<Arc<dyn Fn() + Send + Sync>>,
     pending: HashMap<Key, Handle>,
     /// Decodes the keyframe before a source time, for stand-ins; `None` shows none.
     pub quick: Option<DecodeFn>,
@@ -547,7 +555,8 @@ impl Playback {
         let (still_tx, still_done) = channel();
         Self {
             session: 0,
-            quick_handles: Vec::new(),
+            quick_handles: HashMap::new(),
+            quick_generation: 0,
             transport: Transport::new(Time(0), Rate::new(30, 1)),
             cache: FrameCache::new(budget),
             stills: HashMap::new(),
@@ -556,6 +565,7 @@ impl Playback {
             still_done,
             jobs: Pool::new(DECODE_THREADS),
             decode,
+            decode_notify: None,
             pending: HashMap::new(),
             quick: None,
             quick_jobs: Pool::new(1),
@@ -573,6 +583,12 @@ impl Playback {
             audio: Audio::new(open_audio),
             sequence: SequenceId::default(),
         }
+    }
+
+    /// Wakes a host event loop after a decode publishes success or failure. The core needs no
+    /// event loop; tests and offline consumers may leave this unset.
+    pub fn set_decode_notify(&mut self, notify: Arc<dyn Fn() + Send + Sync>) {
+        self.decode_notify = Some(notify);
     }
 
     /// Decodes project media from files.
@@ -612,8 +628,8 @@ impl Playback {
         for (_, handle) in self.pending.drain() {
             handle.cancel();
         }
-        for handle in self.quick_handles.drain(..) {
-            handle.cancel();
+        for (_, request) in self.quick_handles.drain() {
+            request.handle.cancel();
         }
         (self.done_tx, self.done) = channel();
         (self.quick_tx, self.quick_done) = channel();
@@ -706,6 +722,13 @@ impl Playback {
                 self.cache.forget(a.id);
                 self.failed.retain(|k, _| k.0 != a.id);
                 self.stand_ins.retain(|k, _| k.0 != a.id);
+                self.quick_handles.retain(|k, request| {
+                    let keep = k.0 != a.id;
+                    if !keep {
+                        request.handle.cancel();
+                    }
+                    keep
+                });
                 self.pending.retain(|k, h| {
                     let keep = k.0 != a.id;
                     if !keep {
@@ -815,10 +838,11 @@ impl Playback {
                     continue;
                 }
                 if still {
-                    let (tx, path, generation) = (
+                    let (tx, path, generation, notify) = (
                         self.still_tx.clone(),
                         asset.path.clone(),
                         self.still_generation,
+                        self.decode_notify.clone(),
                     );
                     let job = format!(
                         "still:{}:{}:{:?}:{:?}",
@@ -827,16 +851,22 @@ impl Playback {
                     let handle = self.jobs.submit(job, Priority::Interactive, move |ctx| {
                         if !ctx.is_cancelled() {
                             let result = stills::cached(&path);
-                            let _ = tx.send((key.0, path, generation, result));
+                            if !ctx.is_cancelled()
+                                && tx.send((key.0, path, generation, result)).is_ok()
+                                && let Some(notify) = notify
+                            {
+                                notify();
+                            }
                         }
                     });
                     self.pending.insert(key, handle);
                     continue;
                 }
-                let (decode, tx, path) = (
+                let (decode, tx, path, notify) = (
                     self.decode.clone(),
                     self.done_tx.clone(),
                     asset.path.clone(),
+                    self.decode_notify.clone(),
                 );
                 // The path too, so a relink isn't handed the old path's job still running.
                 let job = format!(
@@ -850,7 +880,12 @@ impl Playback {
                     if !ctx.is_cancelled() {
                         let start = Instant::now();
                         let r = decode(&path, key.1);
-                        let _ = tx.send((key, path, start.elapsed(), r));
+                        if !ctx.is_cancelled()
+                            && tx.send((key, path, start.elapsed(), r)).is_ok()
+                            && let Some(notify) = notify
+                        {
+                            notify();
+                        }
                     }
                 });
                 self.pending.insert(key, handle);
@@ -868,56 +903,87 @@ impl Playback {
     /// Parked on a frame whose layers aren't decoded, queues each one's keyframe as a stand-in,
     /// since an exact frame deep in a long GOP can take a second. Playing, there are none.
     fn stand_in(&mut self, project: &Project, clock: u64) {
-        while let Ok((k, path, r)) = self.quick_done.try_recv() {
-            if self.paths.get(&k.0) != Some(&path) {
-                continue;
-            }
-            match r {
-                Ok(f) => self.stand_ins.insert(k, Some(Arc::new(f))),
-                Err(_) => self.stand_ins.remove(&k),
-            };
-        }
         let t = &self.transport;
-        let Some(quick) = self.quick.as_ref().filter(|_| t.speed() == 0) else {
-            self.stand_ins.clear();
-            return;
-        };
         let time = t.rate.time_floor(t.frame(clock));
-        let mut want = HashSet::new();
-        for layer in leaves(frame_at(project, time)) {
-            let key = (layer.asset, layer.source_time);
-            let Some(asset) = project
-                .asset(layer.asset)
-                .filter(|a| !a.generated() && !stills::is_still(&a.path))
-            else {
-                continue;
-            };
-            if self.cache.contains(&key) || self.failed.contains_key(&key) {
+        let mut want = HashMap::new();
+        if self.quick.is_some() && t.speed() == 0 {
+            for layer in leaves(frame_at(project, time)) {
+                let key = (layer.asset, layer.source_time);
+                if let Some(asset) = project
+                    .asset(layer.asset)
+                    .filter(|a| !a.generated() && !stills::is_still(&a.path))
+                    && !self.cache.contains(&key)
+                    && !self.failed.contains_key(&key)
+                {
+                    want.insert(key, asset.path.clone());
+                }
+            }
+        }
+        // Cancel obsolete queued work before submitting replacements. A running FFmpeg call
+        // may finish, but checks cancellation before publishing and never replaces a new seek.
+        self.quick_handles.retain(|key, request| {
+            let keep = want.get(key) == Some(&request.path);
+            if !keep {
+                request.handle.cancel();
+            }
+            keep
+        });
+        self.stand_ins.retain(|key, _| want.contains_key(key));
+        while let Ok((key, path, generation, result)) = self.quick_done.try_recv() {
+            if !self
+                .quick_handles
+                .get(&key)
+                .is_some_and(|request| request.path == path && request.generation == generation)
+            {
                 continue;
             }
-            want.insert(key);
+            let request = self.quick_handles.remove(&key).expect("matched request");
+            request.handle.cancel();
+            // A failed stand-in is attempted once per wanted set. Exact decode still runs,
+            // and seeking away and back allows another stand-in attempt without a repaint loop.
+            self.stand_ins.insert(key, result.ok().map(Arc::new));
+        }
+        for (key, path) in want {
             if self.stand_ins.contains_key(&key) {
                 continue;
             }
             self.stand_ins.insert(key, None);
-            let (quick, tx, path) = (quick.clone(), self.quick_tx.clone(), asset.path.clone());
+            self.quick_generation += 1;
+            let generation = self.quick_generation;
+            let quick = self.quick.as_ref().expect("wanted stand-in").clone();
+            let tx = self.quick_tx.clone();
+            let notify = self.decode_notify.clone();
+            let source = path.clone();
             let job = format!(
-                "keyframe:{}:{}:{}:{}",
+                "keyframe:{}:{}:{}:{}:{generation}",
                 self.session,
                 key.0.0,
                 key.1.0,
                 path.display()
             );
-            self.quick_handles.retain(|h| !h.is_finished());
             let handle = self
                 .quick_jobs
-                .submit(job, Priority::Interactive, move |_| {
-                    let r = quick(&path, key.1);
-                    let _ = tx.send((key, path, r));
+                .submit(job, Priority::Interactive, move |ctx| {
+                    if ctx.is_cancelled() {
+                        return;
+                    }
+                    let result = quick(&source, key.1);
+                    if !ctx.is_cancelled()
+                        && tx.send((key, source, generation, result)).is_ok()
+                        && let Some(notify) = notify
+                    {
+                        notify();
+                    }
                 });
-            self.quick_handles.push(handle);
+            self.quick_handles.insert(
+                key,
+                QuickRequest {
+                    path,
+                    generation,
+                    handle,
+                },
+            );
         }
-        self.stand_ins.retain(|k, _| want.contains(k));
     }
 
     /// The frame at the clock, once all its layers are decoded (or stood in for) and if it isn't

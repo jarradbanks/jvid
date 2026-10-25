@@ -1766,3 +1766,197 @@ fn still_versions_are_checked_on_explicit_media_refresh_without_repaint_io() {
     assert_eq!(next.get_pixel(0, 0).0, [0, 255, 0, 128]);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// Block A inside the decoder while seeks B..Z queue behind it. Only Z remains useful.
+#[test]
+fn obsolete_stand_ins_are_cancelled_before_decode() {
+    for playing in [false, true] {
+        let mut h = History::new(Project::default());
+        add(&mut h, TrackKind::Video, "scrub.mp4", secs(30));
+        let (started_tx, started_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let release_rx = Mutex::new(release_rx);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let recorded = calls.clone();
+        let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), silent(), DEFAULT_BUDGET);
+        pb.quick = Some(Arc::new(move |_, t| {
+            recorded.lock().unwrap().push(t);
+            if t == Time(0) {
+                started_tx.send(()).unwrap();
+                release_rx.lock().unwrap().recv_timeout(HUNG).unwrap();
+            }
+            Ok(tiny(t))
+        }));
+        pb.sync(h.project());
+        pb.stand_in(h.project(), 0);
+        started_rx.recv_timeout(HUNG).unwrap();
+        for i in 1..=25 {
+            pb.transport.seek(secs(i), 0);
+            pb.stand_in(h.project(), 0);
+        }
+        if playing {
+            pb.transport.toggle(0);
+            pb.stand_in(h.project(), 0);
+        }
+        release_tx.send(()).unwrap();
+        let barrier = pb.quick_jobs.submit("drain", Priority::Interactive, |_| {});
+        let deadline = Instant::now() + HUNG;
+        while !barrier.is_finished() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let want = if playing {
+            vec![Time(0)]
+        } else {
+            vec![Time(0), secs(25)]
+        };
+        assert_eq!(*calls.lock().unwrap(), want, "playing={playing}");
+        // The in-flight A was allowed to finish, but must never publish its obsolete pixels.
+        let completed: Vec<_> = pb.quick_done.try_iter().collect();
+        assert_eq!(completed.len(), usize::from(!playing));
+        if !playing {
+            assert_eq!(completed[0].0.1, secs(25));
+        }
+    }
+}
+
+fn gated_decode(fail: bool) -> (DecodeFn, Receiver<()>, Sender<()>) {
+    let (started_tx, started_rx) = channel();
+    let (release_tx, release_rx) = channel();
+    let release_rx = Mutex::new(release_rx);
+    let decode: DecodeFn = Arc::new(move |_, t| {
+        started_tx.send(()).unwrap();
+        release_rx.lock().unwrap().recv_timeout(HUNG).unwrap();
+        if fail {
+            Err("fake decode failure".into())
+        } else {
+            Ok(tiny(t))
+        }
+    });
+    (decode, started_rx, release_tx)
+}
+
+fn wake_counter(pb: &mut Playback) -> (Arc<std::sync::atomic::AtomicUsize>, Receiver<()>) {
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = count.clone();
+    let (tx, rx) = channel();
+    pb.set_decode_notify(Arc::new(move || {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        tx.send(()).unwrap();
+    }));
+    (count, rx)
+}
+
+#[test]
+fn parked_exact_completion_wakes_once_for_success_or_failure() {
+    for fail in [false, true] {
+        let mut h = History::new(Project::default());
+        add(&mut h, TrackKind::Video, "parked.mp4", FPS30.time_floor(1));
+        let (decode, started, release) = gated_decode(fail);
+        let mut pb = Playback::new(decode, silent(), DEFAULT_BUDGET);
+        let (count, wakes) = wake_counter(&mut pb);
+        assert!(pb.park(h.project()).is_none());
+        started.recv_timeout(HUNG).unwrap();
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
+        release.send(()).unwrap();
+        // No tick, poll, or UI input between the release and event-loop notification.
+        wakes
+            .recv_timeout(HUNG)
+            .expect("parked decode did not wake the UI");
+        let shown = pb.park(h.project()).expect("completion display pass");
+        assert!(shown.exact);
+        assert_eq!(shown.layers.len(), usize::from(!fail));
+        assert!(pb.pending.is_empty());
+        for _ in 0..10 {
+            assert!(pb.park(h.project()).is_none());
+        }
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(wakes.try_recv().is_err(), "idle repaint loop");
+    }
+}
+
+#[test]
+fn parked_stand_in_and_exact_each_wake_and_converge() {
+    for quick_fails in [false, true] {
+        let mut h = History::new(Project::default());
+        add(&mut h, TrackKind::Video, "parked.mp4", FPS30.time_floor(1));
+        let (decode, exact_started, exact_release) = gated_decode(false);
+        let (quick, quick_started, quick_release) = gated_decode(quick_fails);
+        let mut pb = Playback::new(decode, silent(), DEFAULT_BUDGET);
+        pb.quick = Some(quick);
+        let (count, wakes) = wake_counter(&mut pb);
+        assert!(pb.park(h.project()).is_none());
+        exact_started.recv_timeout(HUNG).unwrap();
+        quick_started.recv_timeout(HUNG).unwrap();
+        quick_release.send(()).unwrap();
+        wakes
+            .recv_timeout(HUNG)
+            .expect("stand-in did not wake the UI");
+        let first = pb.park(h.project());
+        if quick_fails {
+            assert!(first.is_none());
+        } else {
+            assert!(!first.unwrap().exact);
+        }
+        exact_release.send(()).unwrap();
+        wakes
+            .recv_timeout(HUNG)
+            .expect("exact frame did not replace stand-in");
+        assert!(pb.park(h.project()).unwrap().exact);
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(pb.park(h.project()).is_none());
+        assert!(wakes.try_recv().is_err());
+    }
+}
+
+#[test]
+fn cancelled_and_relinked_decodes_do_not_wake_for_obsolete_results() {
+    for reset in [false, true] {
+        let mut h = History::new(Project::default());
+        add(&mut h, TrackKind::Video, "old.mp4", FPS30.time_floor(1));
+        let asset = h.project().assets()[0].id;
+        let (started_tx, started_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let release_rx = Mutex::new(release_rx);
+        let decode: DecodeFn = Arc::new(move |path, t| {
+            if path == Path::new("old.mp4") {
+                started_tx.send(()).unwrap();
+                release_rx.lock().unwrap().recv_timeout(HUNG).unwrap();
+            }
+            Ok(tiny(t))
+        });
+        let mut pb = Playback::new(decode.clone(), silent(), DEFAULT_BUDGET);
+        pb.quick = Some(decode);
+        let (count, wakes) = wake_counter(&mut pb);
+        assert!(pb.park(h.project()).is_none());
+        for _ in 0..2 {
+            started_rx.recv_timeout(HUNG).unwrap();
+        }
+        if reset {
+            pb.reset_session();
+        } else {
+            h.apply(Command::RelinkAssets(vec![(asset, "new.mp4".into())]))
+                .unwrap();
+            pb.park(h.project());
+        }
+        // The old calls finish without interruption, and must not publish or repaint.
+        for _ in 0..2 {
+            release_tx.send(()).unwrap();
+        }
+        let deadline = Instant::now() + HUNG;
+        while !pb.jobs.is_idle() || !pb.quick_jobs.is_idle() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            count.load(std::sync::atomic::Ordering::SeqCst),
+            if reset { 0 } else { 2 }
+        );
+        if !reset {
+            let shown = pb.park(h.project()).unwrap();
+            assert!(shown.exact);
+            assert_eq!(shown.layers.len(), 1);
+        }
+        assert_eq!(wakes.try_iter().count(), if reset { 0 } else { 2 });
+    }
+}
