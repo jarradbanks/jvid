@@ -56,6 +56,7 @@ copy_grade = "复制调色"
 paste_grade = "粘贴调色"
 clean_up_voice = "清理人声"
 detect_silence = "检测静音…"
+find_highlights = "查找精彩片段…"
 nest = "嵌套"
 crossfade = "添加交叉淡化"
 dip_to_black = "添加黑场过渡"
@@ -515,6 +516,19 @@ speed_up_tooltip = "以上方的速度播放每个区域"
 # Unit suffixes after the Threshold and length fields.
 db_suffix = " dB"
 seconds_suffix = " 秒"
+
+[highlights]
+title = "查找精彩片段"
+loud = "响亮时刻"
+scenes = "场景切换"
+sensitivity = "灵敏度"
+padding = "保留余量"
+scanning = "正在读取视频… {percent}%"
+none = "此灵敏度下没有精彩片段"
+found.one = "{count} 个精彩片段"
+found.other = "{count} 个精彩片段"
+add = "添加标记"
+marker_name = "精彩片段 {n}"
 
 [zoom]
 label = "缩放"

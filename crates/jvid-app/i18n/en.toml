@@ -54,6 +54,7 @@ copy_grade = "Copy Grade"
 paste_grade = "Paste Grade"
 clean_up_voice = "Clean Up Voice"
 detect_silence = "Detect Silence…"
+find_highlights = "Find Highlights…"
 nest = "Nest"
 crossfade = "Add Crossfade"
 dip_to_black = "Add Dip to Black"
@@ -541,6 +542,22 @@ speed_up_tooltip = "Play every region at the speed above"
 # Unit suffixes after the Threshold and length fields.
 db_suffix = " dB"
 seconds_suffix = " s"
+
+# Find Highlights: marks loud moments and scene changes in the selected clips.
+[highlights]
+title = "Find Highlights"
+loud = "Loud Moments"
+scenes = "Scene Changes"
+sensitivity = "Sensitivity"
+padding = "Padding"
+# While the video is read for scene changes; {percent} is 0 to 100.
+scanning = "Reading video… {percent}%"
+none = "No highlights at this sensitivity"
+found.one = "{count} highlight"
+found.other = "{count} highlights"
+add = "Add Markers"
+# The name of each marker it adds, and its row in the list; {n} counts from 1.
+marker_name = "Highlight {n}"
 
 # Zoom to region, drawn with Alt-drag on the preview.
 [zoom]
