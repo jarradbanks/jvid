@@ -375,12 +375,16 @@ impl Subtitles {
             }
         }
         let (tx, rx) = channel();
+        let language = (self.language.checked_sub(1)).map(|i| whisper_code(LANGUAGES[i]));
+        // Edit by Text keeps the fillers so Fillers can find them; Auto guesses the UI language's.
+        let fillers = (self.transcribe.as_ref()).map(|_| {
+            crate::transcript::fillers::prompt(language.unwrap_or(whisper_code(i18n::language())))
+        });
         let mut run = Run {
             model: self.model(),
             opts: Options {
-                language: (self.language.checked_sub(1))
-                    .map(|i| whisper_code(LANGUAGES[i]).to_owned()),
-                initial_prompt: None,
+                language: language.map(str::to_owned),
+                initial_prompt: fillers.map(str::to_owned),
                 translate: self.translate,
             },
             done: vec![None; sources.len()],
@@ -646,6 +650,45 @@ mod tests {
 
     fn texts(cues: &[Cue]) -> Vec<&str> {
         cues.iter().map(|c| c.text.as_str()).collect()
+    }
+
+    struct Silent;
+
+    impl Transcriber for Silent {
+        fn transcribe(
+            &self,
+            _: Vec<f32>,
+            _: &Options,
+            _: &jvid_jobs::Ctx,
+        ) -> Result<Transcript, Error> {
+            Ok(Transcript::default())
+        }
+    }
+
+    /// Transcribe for Edit by Text keeps the fillers, in the chosen language; subtitles don't.
+    #[test]
+    fn transcribe_prompts_for_fillers_and_subtitles_do_not() {
+        let mut s = Subtitles {
+            engine: Some((Model::Base, Arc::new(Silent))),
+            ..Subtitles::default()
+        };
+        let source = Source {
+            path: PathBuf::from("missing.mp4"),
+            nth: 0,
+            range: 0..i64::MAX,
+        };
+        s.open_transcribe(vec![source]);
+        s.language = 1 + LANGUAGES.iter().position(|&l| l == "de").unwrap();
+        let none = HashSet::new();
+        s.start(&Project::default(), &none);
+        let prompt = s.run.as_ref().unwrap().opts.initial_prompt.clone();
+        assert_eq!(
+            prompt.as_deref(),
+            Some(crate::transcript::fillers::prompt("de"))
+        );
+        s.open();
+        s.start(&Project::default(), &none);
+        assert!(s.run.as_ref().unwrap().opts.initial_prompt.is_none());
     }
 
     /// Acceptance: lines of at most 42 characters, at most two, at most about 7 s, breaking

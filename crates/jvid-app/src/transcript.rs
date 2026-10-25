@@ -3,7 +3,9 @@
 //! the project). Words are placed through the clips every frame, so they follow timeline edits
 //! and undo. Clicking a word seeks to it, the word under the playhead is lit, Find picks out
 //! matches, and Delete ripple deletes the selected words from their clips and linked clips as
-//! one undo step.
+//! one undo step. Fillers lists the um, uh and long pauses to cut the same way ([`fillers`]).
+
+pub mod fillers;
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -22,7 +24,7 @@ use jvid_transcribe::{Source, Transcript, Word};
 use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, TextInput};
+use suite_ui::widgets::{Button, Checkbox, State, TextInput};
 
 use crate::i18n::tr;
 use crate::subtitles::targets;
@@ -58,12 +60,13 @@ impl Cache {
         }
     }
 
-    /// Changes whenever the file is moved, resized or rewritten.
+    /// Changes whenever the file is moved, resized or rewritten, or the filler prompts change.
     // shortcut: DefaultHasher may change between Rust releases, which only costs a re-transcribe.
     fn file(&self, path: &Path, nth: usize) -> Option<PathBuf> {
         let m = fs::metadata(path).ok()?;
         let mut h = DefaultHasher::new();
         (VERSION, path, m.len(), m.modified().ok()).hash(&mut h);
+        fillers::prompts().for_each(|p| p.hash(&mut h));
         Some(
             self.dir
                 .as_ref()?
@@ -193,6 +196,8 @@ pub struct TranscriptPanel {
     selection: Option<(Time, Time)>,
     /// The start of the word last lit, to scroll to the next one.
     lit: Option<Time>,
+    /// While Fillers lists the hits: the starts of those unticked.
+    unticked: Option<HashSet<Time>>,
 }
 
 impl TranscriptPanel {
@@ -231,9 +236,34 @@ impl TranscriptPanel {
                     let row = vec2(ui.available_width(), size::CONTROL);
                     ui.allocate_ui_with_layout(row, rtl, |ui| {
                         ui.spacing_mut().item_spacing.x = space::S8;
+                        let listing = self.unticked.is_some();
+                        let button = Button::secondary(tr!("transcript.fillers")).on(listing);
+                        if ui.add(button).clicked() {
+                            self.unticked = (!listing).then(HashSet::new);
+                        }
                         let button = Button::secondary(tr!("transcript.transcribe"));
                         if !missing.is_empty() && ui.add(button).clicked() {
                             out.transcribe = Some(missing.clone());
+                        }
+                        if let Some(unticked) = &self.unticked {
+                            let hits = fillers::find(words);
+                            let ready = match hits.is_empty() {
+                                true => State::Disabled,
+                                false => State::Live,
+                            };
+                            let remove = Button::primary(tr!("transcript.remove"));
+                            let remove = ui.add(remove.state(ready));
+                            let all = Button::secondary(tr!("transcript.remove_all"));
+                            let all = ui.add(all.state(ready));
+                            if all.clicked() {
+                                out.command = fillers::cut(&hits, &HashSet::new());
+                            } else if remove.clicked() {
+                                out.command = fillers::cut(&hits, unticked);
+                            }
+                            if remove.clicked() || all.clicked() {
+                                self.unticked = None;
+                            }
+                            return;
                         }
                         let find = TextInput::search(&mut self.query).hint(tr!("transcript.find"));
                         let find = ui.add(find.width(ui.available_width()));
@@ -249,7 +279,10 @@ impl TranscriptPanel {
                     .show(ui, |ui| {
                         let frame = egui::Frame::NONE
                             .inner_margin(Margin::symmetric(space::INSET as i8, space::S4 as i8));
-                        frame.show(ui, |ui| self.text(ui, words, playhead, &mut out));
+                        frame.show(ui, |ui| match self.unticked.is_some() {
+                            true => self.hits(ui, words, &mut out),
+                            false => self.text(ui, words, playhead, &mut out),
+                        });
                     });
             });
         out.close = r.action == Some(0);
@@ -264,6 +297,31 @@ impl TranscriptPanel {
             }
         }
         out
+    }
+
+    /// Fillers' list: a row per hit with its context, ticked unless unticked; ticking one
+    /// seeks to it.
+    fn hits(&mut self, ui: &mut Ui, words: &[(ClipId, Word)], out: &mut Output) {
+        let hits = fillers::find(words);
+        let Some(unticked) = &mut self.unticked else {
+            return;
+        };
+        if hits.is_empty() {
+            ui.label(egui::RichText::new(tr!("transcript.none")).color(color::ink_3()));
+        }
+        for h in &hits {
+            let seconds = format!("{:.1}", (h.end - h.start).0 as f64 / S as f64);
+            let pause = tr!("transcript.pause", seconds = seconds);
+            let label = fillers::context(words, h, &pause);
+            let mut on = !unticked.contains(&h.start);
+            if ui.add(Checkbox::new(&mut on, &label)).clicked() {
+                match on {
+                    true => unticked.remove(&h.start),
+                    false => unticked.insert(h.start),
+                };
+                out.seek = Some(h.start);
+            }
+        }
     }
 
     /// Enter in Find: picks and seeks to the next match after the playhead, from the top
@@ -603,6 +661,75 @@ mod tests {
         h.apply(Command::AddClip { track, clip }).unwrap();
         let (words, _) = super::words(h.project(), &HashSet::new(), &mut panel.cache);
         assert_eq!(words.len(), 10);
+    }
+
+    /// Acceptance: a fake transcript with four fillers and one long pause loses all five
+    /// ranges from video and audio in one undo step; an unticked hit stays in the edit.
+    #[test]
+    fn four_fillers_and_a_long_pause_are_cut_unless_unticked() {
+        let dir = tmp("fillers");
+        let (mut h, mut panel) = project(&dir);
+        let spoken = [
+            ("So", 10.0),
+            ("um,", 10.4),
+            ("I", 10.8),
+            ("uh", 11.1),
+            ("think.", 11.5),
+            ("Er,", 14.0),
+            ("this", 14.4),
+            ("Hmm,", 14.8),
+            ("works.", 15.2),
+        ];
+        let source = Source {
+            path: h.project().assets()[0].path.clone(),
+            nth: 0,
+            range: 0..i64::MAX,
+        };
+        let words = spoken.iter().map(|&(w, s)| word(w, s, s + 0.3)).collect();
+        let heard = Transcript {
+            language: Some("en".into()),
+            words,
+        };
+        panel.cache.insert(&source, heard);
+        let none = HashSet::new();
+        let (words, _) = super::words(h.project(), &none, &mut panel.cache);
+        let hits = fillers::find(&words);
+        let fillers: Vec<_> = hits
+            .iter()
+            .filter(|h| !h.pause)
+            .map(|h| words[h.at].1.text.as_str())
+            .collect();
+        assert_eq!(fillers, ["um,", "uh", "Er,", "Hmm,"]);
+        // The pause, 11.8 s to 14 s in the source, keeps an eighth of a second each side.
+        let pause: Vec<_> = hits
+            .iter()
+            .filter(|h| h.pause)
+            .map(|h| (h.start, h.end))
+            .collect();
+        assert_eq!(pause, [(t(3.8) + Time(S / 8), t(6.0) - Time(S / 8))]);
+        let length = |h: &History| {
+            ranges(h)
+                .iter()
+                .map(|tr| tr.iter().fold(Time(0), |a, c| a + (c.2 - c.1)))
+                .collect::<Vec<_>>()
+        };
+        let before = h.project().clone();
+
+        h.apply(fillers::cut(&hits, &HashSet::new()).unwrap())
+            .unwrap();
+        let (after, _) = super::words(h.project(), &none, &mut panel.cache);
+        assert_eq!(texts(&after), ["So", "I", "think.", "this", "works."]);
+        // Ten seconds less four 0.3 s fillers and 1.95 s of pause.
+        assert_eq!(length(&h), [t(6.85), t(6.85)]);
+        assert!(fillers::find(&after).is_empty());
+        h.undo();
+        assert_eq!(h.project(), &before);
+
+        let uh = HashSet::from([hits[1].start]);
+        h.apply(fillers::cut(&hits, &uh).unwrap()).unwrap();
+        let (after, _) = super::words(h.project(), &none, &mut panel.cache);
+        assert_eq!(texts(&after), ["So", "I", "uh", "think.", "this", "works."]);
+        assert_eq!(length(&h), [t(7.15), t(7.15)]);
     }
 
     #[test]
