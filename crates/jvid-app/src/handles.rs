@@ -21,6 +21,8 @@ const HANDLE: f32 = 8.0;
 const STEM: f32 = 24.0;
 /// Shift snaps rotation to this many degrees.
 const SNAP: f64 = 15.0;
+/// How much the viewer black covers the wide shot outside a reframe box.
+const WIDE_DIM: f32 = 0.6;
 
 /// What a drag changes.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -333,6 +335,7 @@ pub fn show(
     selected: &HashSet<ClipId>,
     t: Time,
     frame: Rect,
+    wide: &dyn Fn(&Clip) -> Option<egui::TextureId>,
 ) -> Option<Edit> {
     let seq = project.sequence();
     let c = selected
@@ -462,6 +465,29 @@ pub fn show(
     let stroke = Stroke::new(1.0, DARK.ink);
     p.add(egui::Shape::closed_line(vec![tl, tr, br, bl], stroke));
     if reframe {
+        // The wide shot outside the frame, dimmed, to show what the frame crops away.
+        let wide = wide(c);
+        for r in crate::app::tutorial::shaded(viewer, &[frame]) {
+            if let Some(tex) = wide {
+                let mut mesh = egui::Mesh::with_texture(tex);
+                for (p, uv) in [
+                    (tl, [0.0, 0.0]),
+                    (tr, [1.0, 0.0]),
+                    (br, [1.0, 1.0]),
+                    (bl, [0.0, 1.0]),
+                ] {
+                    mesh.vertices.push(egui::epaint::Vertex {
+                        pos: p,
+                        uv: uv.into(),
+                        color: egui::Color32::WHITE,
+                    });
+                }
+                mesh.add_triangle(0, 1, 2);
+                mesh.add_triangle(0, 2, 3);
+                ui.painter().with_clip_rect(r).add(mesh);
+            }
+            p.rect_filled(r, 0.0, color::VIEWER.gamma_multiply(WIDE_DIM));
+        }
         p.rect_stroke(
             frame,
             0.0,
@@ -613,7 +639,14 @@ pub(crate) mod tests {
             .build_ui_state(
                 move |ui, h: &mut History| {
                     let frame = Rect::from_min_size(Pos2::ZERO, vec2(960.0, 540.0));
-                    let edit = show(ui, h.project(), &HashSet::from([id]), Time(S), frame);
+                    let edit = show(
+                        ui,
+                        h.project(),
+                        &HashSet::from([id]),
+                        Time(S),
+                        frame,
+                        &|_| None,
+                    );
                     if let Some((c, Some(k))) = edit {
                         h.apply_coalesced(k, c).unwrap();
                     }
@@ -669,13 +702,60 @@ pub(crate) mod tests {
             .with_size([960.0, 540.0])
             .build_ui(move |ui| {
                 let frame = Rect::from_min_size(Pos2::ZERO, vec2(960.0, 540.0));
-                show(ui, h.project(), &HashSet::from([id]), Time(0), frame);
+                show(
+                    ui,
+                    h.project(),
+                    &HashSet::from([id]),
+                    Time(0),
+                    frame,
+                    &|_| None,
+                );
             });
         harness.run();
         let img = harness.render().unwrap();
         assert!(!has_amber(&img), "amber in the overlay");
         // The Ink outline is drawn.
         assert!(img.pixels().any(|p| p.0[..3].iter().all(|c| *c > 200)));
+    }
+
+    #[test]
+    fn a_reframe_box_dims_the_wide_shot_outside_it() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let (h, id) = history();
+        let tall = h.project().reframed(1080, 1920, |_, _| None);
+        let frame = Rect::from_center_size(pos2(480.0, 270.0), vec2(303.75, 540.0));
+        let mut tex = None;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([960.0, 540.0])
+            .wgpu()
+            .build_ui(move |ui| {
+                // A white wide shot, so its dimmed edges read against the black viewer.
+                let t = tex.get_or_insert_with(|| {
+                    let img = egui::ColorImage::new([16, 9], vec![egui::Color32::WHITE; 144]);
+                    ui.ctx().load_texture("wide", img, Default::default())
+                });
+                let id_ = t.id();
+                show(ui, &tall, &HashSet::from([id]), Time(0), frame, &|_| {
+                    Some(id_)
+                });
+            });
+        harness.run();
+        let img = harness.render().unwrap();
+        // Outside the box, the shot shows dimmed: neither black nor white.
+        let outside = img.get_pixel(100, 270).0;
+        assert!(
+            outside[..3].iter().all(|c| (40..200).contains(c)),
+            "{outside:?}"
+        );
+        // Inside, the overlay leaves the program frame alone.
+        assert_eq!(
+            img.get_pixel(400, 200).0[3],
+            0,
+            "nothing painted in the frame"
+        );
+        harness.snapshot("reframe_wide_dimmed");
     }
 
     #[test]
@@ -690,7 +770,7 @@ pub(crate) mod tests {
             .with_size([960.0, 540.0])
             .build_ui_state(
                 move |ui, (h, t): &mut (History, Time)| {
-                    let edit = show(ui, h.project(), &HashSet::from([id]), *t, frame);
+                    let edit = show(ui, h.project(), &HashSet::from([id]), *t, frame, &|_| None);
                     if let Some((c, Some(k))) = edit {
                         h.apply_coalesced(k, c).unwrap();
                     }
@@ -789,7 +869,14 @@ pub(crate) mod tests {
             .with_size([960.0, 540.0])
             .build_ui_state(
                 move |ui, h: &mut History| {
-                    let edit = show(ui, h.project(), &HashSet::from([id]), Time(0), frame);
+                    let edit = show(
+                        ui,
+                        h.project(),
+                        &HashSet::from([id]),
+                        Time(0),
+                        frame,
+                        &|_| None,
+                    );
                     if let Some((c, _)) = edit {
                         h.apply(c).unwrap();
                     }
@@ -950,9 +1037,14 @@ pub(crate) mod tests {
                         *clicks += 1;
                     }
                     let frame = Rect::from_min_size(Pos2::ZERO, vec2(960.0, 540.0 - size::HEADER));
-                    if let Some((c, _)) =
-                        show(ui, h.project(), &HashSet::from([id]), Time(0), frame)
-                    {
+                    if let Some((c, _)) = show(
+                        ui,
+                        h.project(),
+                        &HashSet::from([id]),
+                        Time(0),
+                        frame,
+                        &|_| None,
+                    ) {
                         h.apply(c).unwrap();
                     }
                 },

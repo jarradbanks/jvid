@@ -1721,7 +1721,12 @@ impl TabViewer for Viewer<'_> {
                     }
                     return;
                 }
-                if let Some((c, g)) = crate::handles::show(ui, self.project, selected, t, frame) {
+                if let Some((c, g)) =
+                    crate::handles::show(ui, self.project, selected, t, frame, &|c| {
+                        let a = self.project.asset(c.asset)?;
+                        self.timeline.strip_frame(a, c.source_at(t))
+                    })
+                {
                     (self.command, self.gesture) = (Some(c), g);
                 }
                 // After the handles, so an Alt-drag draws a zoom instead of moving the clip.
