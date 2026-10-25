@@ -197,6 +197,15 @@ impl Fixture {
     }
 
     fn retry(&mut self) {
+        // Drain the terminal's own repaint chain before a later UI paint retries.
+        let mut delay = Duration::ZERO;
+        for _ in 0..8 {
+            delay = self.paint_clips(true, true, 1);
+            if delay == Duration::MAX {
+                break;
+            }
+        }
+        assert_eq!(delay, Duration::MAX, "failed source never returned to idle");
         self.ui_time += crate::media_bin::filmstrips::RETRY_DELAY.as_secs_f64() + 1.0;
         self.paint(true, true);
         self.finish();
