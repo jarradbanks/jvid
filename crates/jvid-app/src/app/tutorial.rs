@@ -41,13 +41,14 @@ pub struct Lesson {
 }
 
 pub struct Step {
-    /// The [`anchor`] the step points at.
+    /// The [`anchor`] the step points at. An Inspector row's, `inspector.<row>`, falls back to
+    /// the whole panel while the row isn't drawn.
     pub anchor: &'static str,
     /// The instruction, one or two short sentences. Shortcuts come from `app.keymap`, so a
     /// remapped key reads right.
     pub text: fn(&App) -> String,
-    /// Whether the step's goal holds in the project or UI. Checked every frame; once it passes,
-    /// the lesson moves on.
+    /// Whether the step's goal holds in the project or UI. Checked every frame; while it passes,
+    /// the card shows the step done and Next moves on.
     pub done: fn(&App) -> bool,
     /// Does the step the way the user would.
     pub show_me: fn(&mut App),
@@ -122,7 +123,7 @@ const TOUR: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["media"],
         },
         Step {
             anchor: "preview",
@@ -189,7 +190,7 @@ const TOUR: Lesson = Lesson {
             show_me: add_title,
             reveal: Some(|a| a.bin.tab = 2),
             ghost: None,
-            also: &[],
+            also: &["timeline"],
         },
         Step {
             anchor: "export",
@@ -268,7 +269,7 @@ const SCREEN: Lesson = Lesson {
             also: &[],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.scale",
             text: |_| tr!("tutorial.screen_zoom").into(),
             done: zoomed,
             show_me: |a| {
@@ -304,7 +305,7 @@ const SCREEN: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["timeline"],
         },
         Step {
             anchor: "bin.titles",
@@ -313,7 +314,7 @@ const SCREEN: Lesson = Lesson {
             show_me: add_title,
             reveal: Some(|a| a.bin.tab = 2),
             ghost: None,
-            also: &[],
+            also: &["timeline"],
         },
     ],
 };
@@ -397,10 +398,10 @@ const GREEN_SCREEN: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["media"],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.add_effect",
             text: |_| tr!("tutorial.green_screen_key").into(),
             done: |a| key_index(a).is_some(),
             show_me: |a| {
@@ -411,10 +412,10 @@ const GREEN_SCREEN: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["timeline"],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.effect",
             text: |_| tr!("tutorial.green_screen_tune").into(),
             done: |a| {
                 let (Some(i), Some(shader)) = (key_index(a), chroma_key()) else {
@@ -455,7 +456,7 @@ const GREEN_SCREEN: Lesson = Lesson {
             also: &[],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.add_mask",
             text: |_| tr!("tutorial.green_screen_mask").into(),
             done: |a| {
                 let Some((_, id)) = keyed_clip(a) else {
@@ -475,7 +476,7 @@ const GREEN_SCREEN: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["preview"],
         },
     ],
 };
@@ -637,7 +638,7 @@ const KEYFRAMES: Lesson = Lesson {
     },
     steps: &[
         Step {
-            anchor: "inspector",
+            anchor: "inspector.position",
             text: |_| tr!("tutorial.keys_add").into(),
             done: |a| {
                 title(a).is_some_and(|c| {
@@ -677,10 +678,10 @@ const KEYFRAMES: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["inspector.opacity", "timeline"],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.position",
             text: |_| tr!("tutorial.keys_previous").into(),
             done: |a| first_key(a).is_some_and(|t| a.timeline.playhead() == t),
             show_me: |a| {
@@ -693,7 +694,7 @@ const KEYFRAMES: Lesson = Lesson {
             also: &[],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.position",
             text: |_| tr!("tutorial.keys_ease").into(),
             done: |a| {
                 let eased = |e| e != Easing::Linear;
@@ -834,6 +835,43 @@ pub fn anchor_rect(ctx: &egui::Context, name: &str) -> Option<Rect> {
     })
 }
 
+/// The Inspector row a step wants scrolled into view, once it's drawn.
+const SCROLL: &str = "lesson_scroll";
+
+/// Records the rows `ui` laid out below `top` as anchor `name`, cut to what shows of them.
+/// The first time a step wants them, they scroll into view.
+pub fn anchor_below(ui: &egui::Ui, name: &'static str, top: f32) {
+    let ctx = ui.ctx();
+    if !running(ctx) {
+        return;
+    }
+    let r = ui.min_rect();
+    let rows = Rect::from_x_y_ranges(r.x_range(), top..=r.bottom());
+    if ctx.data(|d| d.get_temp::<&'static str>(Id::new(SCROLL))) == Some(name) {
+        ui.scroll_to_rect(rows, Some(Align::Center));
+        ctx.data_mut(|d| d.remove::<&'static str>(Id::new(SCROLL)));
+    }
+    let rows = rows.intersect(ui.clip_rect());
+    if rows.is_positive() {
+        anchor(ui.ctx(), name, rows);
+    }
+}
+
+/// The row in an Inspector row's anchor, `inspector.<row>`.
+fn row_name(anchor: &str) -> Option<&str> {
+    anchor.strip_prefix("inspector.")
+}
+
+/// The Inspector tab Inspector row `row` is on.
+fn pane_of(row: &str) -> crate::inspector::Pane {
+    use crate::inspector::Pane;
+    match row {
+        "add_effect" | "effect" => Pane::Effects,
+        "volume" | "eq" => Pane::Audio,
+        _ => Pane::Video,
+    }
+}
+
 /// The current step's [`Step::ghost`], for [`ghost`] to draw.
 const GHOST: &str = "lesson_ghost";
 
@@ -872,8 +910,8 @@ pub struct Run {
     pub lesson: &'static Lesson,
     /// The current step; `steps.len()` once finished.
     pub step: usize,
-    /// A passing check moves on. Off after Back, so the step stays until its check fails.
-    armed: bool,
+    /// The current step's check passed last frame, so Next shows and Enter presses it.
+    done: bool,
     /// The lesson's `setup` ran; the steps wait for it.
     set_up: bool,
     /// The current step's reveal ran. Once per visit, so a missing anchor can't repaint every
@@ -897,7 +935,7 @@ pub struct Baseline {
 impl Run {
     fn go(&mut self, step: usize) {
         self.step = step.min(self.lesson.steps.len());
-        (self.revealed, self.warned) = (false, false);
+        (self.revealed, self.warned, self.done) = (false, false, false);
     }
 }
 
@@ -917,6 +955,7 @@ struct Stash {
 
 #[derive(Clone, Copy)]
 enum Click {
+    Next,
     Back,
     ShowMe,
     Skip,
@@ -958,7 +997,7 @@ impl App {
         self.lesson = Some(Run {
             lesson,
             step: 0,
-            armed: true,
+            done: false,
             set_up: false,
             revealed: false,
             warned: false,
@@ -992,8 +1031,8 @@ impl App {
         self.on_welcome = s.on_welcome;
     }
 
-    /// Esc exits the lesson unless a dialog, menu or text field would take it. Runs before
-    /// anything else this frame, so it sees what was open last frame.
+    /// Esc exits the lesson and Enter presses Next, unless a dialog, menu or text field would
+    /// take them. Runs before anything else this frame, so it sees what was open last frame.
     pub(super) fn lesson_keys(&mut self, ctx: &egui::Context) {
         if self.lesson.is_none() {
             return;
@@ -1001,12 +1040,19 @@ impl App {
         let free = ctx.memory(|m| m.top_modal_layer().is_none() && m.focused().is_none())
             && !egui::Popup::is_any_open(ctx);
         if free && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
-            self.end_lesson();
+            return self.end_lesson();
+        }
+        let done = self.lesson.as_ref().is_some_and(|r| r.done);
+        if free && done && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
+            let mut run = self.lesson.take().expect("checked above");
+            self.next_step(&mut run);
+            self.lesson = Some(run);
+            ctx.request_repaint();
         }
     }
 
-    /// Runs the lesson a frame, after the panels drew their anchors: moves on when the step's
-    /// check passes, reveals a hidden anchor, and draws the overlay and step card.
+    /// Runs the lesson a frame, after the panels drew their anchors: checks the step, reveals a
+    /// hidden anchor, and draws the overlay and step card.
     pub(super) fn lesson_frame(&mut self, ctx: &egui::Context) {
         let recorded = running(ctx);
         if recorded != self.lesson.is_some() {
@@ -1036,12 +1082,10 @@ impl App {
             self.lesson = Some(run);
             let done = (step.done)(self);
             run = self.lesson.take().expect("the check can't end the lesson");
-            if done && run.armed {
-                run.completed = true;
-                self.next_step(&mut run);
+            if done != run.done {
+                run.done = done;
                 ctx.request_repaint();
             }
-            run.armed |= !done;
         }
         let step = steps.get(run.step);
         let ghost = step.and_then(|s| s.ghost);
@@ -1054,22 +1098,30 @@ impl App {
             });
             ctx.request_repaint();
         }
-        let target = step.and_then(|s| anchor_rect(ctx, s.anchor));
-        if let Some(s) = step.filter(|_| target.is_none()) {
+        let exact = step.and_then(|s| anchor_rect(ctx, s.anchor));
+        let panel = || row_name(step?.anchor).and(anchor_rect(ctx, Tab::Inspector.anchor()));
+        let target = exact.or_else(panel);
+        if let Some(s) = step {
             let queue =
                 (s.anchor == Tab::RenderQueue.anchor()).then_some(App::show_queue as fn(&mut App));
-            match s.reveal.or(queue) {
-                Some(reveal) if !run.revealed => {
-                    run.revealed = true;
+            let reveal = s.reveal.or(queue).filter(|_| exact.is_none());
+            // A hidden Inspector row the step names: its tab shows, and it scrolls into view.
+            let mut names = std::iter::once(s.anchor).chain(s.also.iter().copied());
+            let row = names.find(|a| row_name(a).is_some() && anchor_rect(ctx, a).is_none());
+            if !run.revealed && (reveal.is_some() || row.is_some()) {
+                run.revealed = true;
+                if let Some(reveal) = reveal {
                     reveal(self);
-                    ctx.request_repaint();
                 }
-                _ if !run.warned => {
-                    run.warned = true;
-                    let (id, n, anchor) = (run.lesson.id, run.step, s.anchor);
-                    tracing::warn!("lesson {id} step {n}: anchor `{anchor}` isn't drawn");
+                if let Some(row) = row {
+                    crate::inspector::choose(ctx, pane_of(row_name(row).unwrap_or_default()));
+                    ctx.data_mut(|d| d.insert_temp(Id::new(SCROLL), row));
                 }
-                _ => {}
+                ctx.request_repaint();
+            } else if target.is_none() && !run.warned {
+                run.warned = true;
+                let (id, n, anchor) = (run.lesson.id, run.step, s.anchor);
+                tracing::warn!("lesson {id} step {n}: anchor `{anchor}` isn't drawn");
             }
         }
         if let Some(t) = target {
@@ -1085,16 +1137,17 @@ impl App {
         };
         ctx.request_repaint();
         match click {
-            Click::Back => {
-                run.go(run.step.saturating_sub(1));
-                run.armed = false;
-            }
+            Click::Next => self.next_step(&mut run),
+            Click::Back => run.go(run.step.saturating_sub(1)),
             Click::ShowMe => {
                 if let Some(s) = step {
                     (s.show_me)(self);
                 }
             }
-            Click::Skip => self.next_step(&mut run),
+            Click::Skip => {
+                run.done = false;
+                self.next_step(&mut run);
+            }
             Click::Keep => {
                 self.save(true);
             }
@@ -1106,9 +1159,10 @@ impl App {
         self.lesson = Some(run);
     }
 
+    /// Next, or Skip Step once `run.done` is cleared: only a step done counts as completed.
     fn next_step(&mut self, run: &mut Run) {
+        run.completed |= run.done;
         run.go(run.step + 1);
-        run.armed = true;
         // Skipping every step isn't finishing the lesson.
         if run.step == run.lesson.steps.len() && run.completed {
             self.lesson_done(run.lesson.id);
@@ -1271,6 +1325,12 @@ fn card(
                         ui.label(title);
                         if step.is_some() {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if run.done {
+                                    let mark = egui::RichText::new(theme::icon::CIRCLE_CHECK)
+                                        .font(theme::icon_font())
+                                        .color(color::green());
+                                    ui.label(mark);
+                                }
                                 let n = tr!("tutorial.step", n = run.step + 1, total = steps.len());
                                 let n = egui::RichText::new(n)
                                     .font(theme::small())
@@ -1287,11 +1347,21 @@ fn card(
                     ui.add_space(space::S12);
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = vec2(space::S4, space::S4);
+                        // A clicked button lets go of focus, so Space or Delete reach the editor.
                         let mut button = |b: Button<'_>, c: Click| {
-                            if ui.add(b).clicked() {
+                            let r = ui.add(b);
+                            if r.clicked() {
+                                r.surrender_focus();
                                 click = Some(c);
                             }
                         };
+                        if step.is_some() && run.done {
+                            let next = match run.step + 1 == steps.len() {
+                                true => tr!("tutorial.finish"),
+                                false => tr!("tutorial.next"),
+                            };
+                            button(Button::primary(next), Click::Next);
+                        }
                         if step.is_some() {
                             button(Button::secondary(tr!("tutorial.show_me")), Click::ShowMe);
                             let back = if run.step == 0 {
@@ -1300,7 +1370,9 @@ fn card(
                                 State::Live
                             };
                             button(Button::ghost(tr!("tutorial.back")).state(back), Click::Back);
-                            button(Button::ghost(tr!("tutorial.skip_step")), Click::Skip);
+                            if !run.done {
+                                button(Button::ghost(tr!("tutorial.skip_step")), Click::Skip);
+                            }
                         } else {
                             button(Button::secondary(tr!("tutorial.keep_project")), Click::Keep);
                         }
@@ -1498,6 +1570,21 @@ mod tests {
         settle(h);
     }
 
+    /// Clicks Next, or Finish on the last step.
+    fn next(h: &mut Harness<'_, App>) {
+        let label = match h.query_by_label(tr!("tutorial.finish")) {
+            Some(_) => tr!("tutorial.finish"),
+            None => tr!("tutorial.next"),
+        };
+        click(h, label);
+    }
+
+    /// Show Me, then Next once it passes.
+    fn show_me(h: &mut Harness<'_, App>) {
+        click(h, tr!("tutorial.show_me"));
+        next(h);
+    }
+
     /// Exports need a GPU, so the tour's last step does too.
     #[test]
     fn every_lesson_runs_by_show_me_and_draws_each_steps_anchor() {
@@ -1512,12 +1599,18 @@ mod tests {
             h.state_mut().start_lesson(lesson);
             for (i, step) in lesson.steps.iter().enumerate() {
                 settle(&mut h);
-                let at = h.state().lesson.as_ref().map(|r| r.step);
-                assert_eq!(at, Some(i), "{}: on step {i}", lesson.id);
+                assert_eq!(
+                    h.state().lesson.as_ref().map(|r| r.step),
+                    Some(i),
+                    "{}: on step {i}",
+                    lesson.id
+                );
                 // A renamed or removed control fails here instead of in the lesson.
+                // A row waiting on a selection lights the whole Inspector meanwhile.
                 for anchor in [step.anchor].iter().chain(step.also) {
+                    let row = row_name(anchor).is_some();
                     assert!(
-                        drawn(&h, anchor).is_some(),
+                        drawn(&h, anchor).is_some() || row && drawn(&h, "inspector").is_some(),
                         "{} step {i}: `{anchor}` never drawn",
                         lesson.id,
                     );
@@ -1543,8 +1636,29 @@ mod tests {
                     "{} step {i}: Show Me didn't pass",
                     lesson.id
                 );
+                settle(&mut h);
+                assert_eq!(
+                    h.state().lesson.as_ref().map(|r| r.step),
+                    Some(i),
+                    "{} step {i}: moved on",
+                    lesson.id
+                );
+                // A step about one Inspector control lights that row, not the panel.
+                let rows = [step.anchor].into_iter().chain(step.also.iter().copied());
+                for anchor in rows.filter(|a| row_name(a).is_some()) {
+                    let (row, panel) = (drawn(&h, anchor), drawn(&h, "inspector"));
+                    let Some(row) = row else {
+                        panic!("{} step {i}: `{anchor}` never drawn", lesson.id);
+                    };
+                    let panel = panel.unwrap();
+                    assert!(
+                        panel.contains_rect(row) && row.area() < panel.area() / 2.0,
+                        "{} step {i}: `{anchor}` {row:?} in the Inspector {panel:?}",
+                        lesson.id,
+                    );
+                }
+                next(&mut h);
             }
-            settle(&mut h);
             let at = h.state().lesson.as_ref().map(|r| r.step);
             assert_eq!(at, Some(lesson.steps.len()), "{}: finished", lesson.id);
             assert!(h.state().tutorials_done.iter().any(|d| d == lesson.id));
@@ -1644,8 +1758,12 @@ mod tests {
         h.state_mut().start_lesson(&EXPORT);
         settle(&mut h);
         assert_eq!(step(&h), Some(0));
+        assert!(
+            h.query_by_label(tr!("tutorial.finish")).is_none(),
+            "the old export passed"
+        );
         click(&mut h, tr!("tutorial.show_me"));
-        settle(&mut h);
+        click(&mut h, tr!("tutorial.finish"));
         assert_eq!(step(&h), Some(1));
     }
 
@@ -1666,16 +1784,19 @@ mod tests {
         let mut h = harness();
         h.state_mut().start_lesson(&KEYFRAMES);
         settle(&mut h);
-        click(&mut h, tr!("tutorial.show_me"));
-        click(&mut h, tr!("tutorial.show_me"));
+        show_me(&mut h);
+        show_me(&mut h);
         // Custom in the diamond's easing menu passes the easing step but not the graph step.
         ease_first(h.state_mut(), Easing::Bezier([0.1, 0.0, 0.3, 1.0]));
         settle(&mut h);
+        next(&mut h);
+        let done = |h: &Harness<'_, App>| h.state().lesson.as_ref().is_some_and(|r| r.done);
         assert_eq!(step(&h), Some(3));
+        assert!(!done(&h));
         let id = first_clip(h.state()).unwrap();
         h.state_mut().timeline.open_graph(id);
         settle(&mut h);
-        assert_eq!(step(&h), Some(4));
+        assert!(done(&h));
     }
 
     #[test]
@@ -1701,8 +1822,7 @@ mod tests {
 
         state.start_lesson(&BASICS);
         settle(&mut h);
-        click(&mut h, tr!("tutorial.show_me"));
-        settle(&mut h);
+        show_me(&mut h);
         assert_eq!(h.state().lesson.as_ref().map(|r| r.step), Some(1));
         assert_ne!(h.state().history.project(), &before);
         click(&mut h, tr!("tutorial.exit"));
@@ -1721,18 +1841,77 @@ mod tests {
     }
 
     #[test]
-    fn back_stays_on_a_done_step_and_skip_moves_on() {
+    fn back_shows_a_done_step_and_skip_moves_on() {
         let mut h = harness();
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
-        click(&mut h, tr!("tutorial.show_me"));
-        let step = |h: &Harness<'_, App>| h.state().lesson.as_ref().map(|r| r.step);
+        show_me(&mut h);
         assert_eq!(step(&h), Some(1));
         click(&mut h, tr!("tutorial.back"));
         assert_eq!(step(&h), Some(0), "a done step waits after Back");
-        click(&mut h, tr!("tutorial.skip_step"));
+        assert!(h.query_by_label(tr!("tutorial.skip_step")).is_none());
+        next(&mut h);
         click(&mut h, tr!("tutorial.skip_step"));
         assert_eq!(step(&h), Some(2));
+    }
+
+    #[test]
+    fn a_passing_check_waits_for_next_or_enter() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&BASICS);
+        settle(&mut h);
+        assert!(h.query_by_label(tr!("tutorial.next")).is_none());
+        click(&mut h, tr!("tutorial.show_me"));
+        for _ in 0..10 {
+            h.run_ok();
+        }
+        assert_eq!(step(&h), Some(0), "Show Me waits for Next");
+        assert!(h.query_by_label(tr!("tutorial.next")).is_some());
+        h.key_press(Key::Enter);
+        h.run_ok();
+        assert_eq!(step(&h), Some(1), "Enter presses Next");
+        // Not done yet, so Enter does nothing.
+        h.key_press(Key::Enter);
+        h.run_ok();
+        assert_eq!(step(&h), Some(1));
+        for _ in 1..BASICS.steps.len() {
+            show_me(&mut h);
+        }
+        assert_eq!(step(&h), Some(BASICS.steps.len()), "Finish ends the lesson");
+        assert!(h.state().tutorials_done.iter().any(|d| d == BASICS.id));
+    }
+
+    #[test]
+    fn space_after_show_me_plays_instead_of_pressing_it_again() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&BASICS);
+        settle(&mut h);
+        show_me(&mut h);
+        click(&mut h, tr!("tutorial.show_me"));
+        let clips = |h: &Harness<'_, App>| {
+            let seq = h.state().history.project().sequence();
+            seq.tracks().iter().map(|t| t.clips().len()).sum::<usize>()
+        };
+        assert_eq!(clips(&h), 1);
+        assert!(
+            h.ctx.memory(|m| m.focused()).is_none(),
+            "Show Me kept focus"
+        );
+        let playing = h.state().preview.playing();
+        // Where the user's click on the timeline leaves focus.
+        let state = h.state_mut();
+        if let Some(path) = state.dock.find_tab(&Tab::Timeline) {
+            state.dock.set_focused_node_and_surface(path.node_path());
+        }
+        h.key_press(Key::Space);
+        h.run_ok();
+        assert_eq!(clips(&h), 1, "Space pressed Show Me again");
+        assert_ne!(
+            h.state().preview.playing(),
+            playing,
+            "Space didn't reach playback"
+        );
+        h.state_mut().end_lesson();
     }
 
     #[test]
@@ -1765,7 +1944,7 @@ mod tests {
             Some(LESSONS[0].id)
         );
         settle(&mut h);
-        click(&mut h, tr!("tutorial.show_me"));
+        show_me(&mut h);
         for _ in &LESSONS[0].steps[1..] {
             click(&mut h, tr!("tutorial.skip_step"));
         }
@@ -1833,7 +2012,7 @@ mod tests {
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         for _ in 0..3 {
-            click(&mut h, tr!("tutorial.show_me"));
+            show_me(&mut h);
         }
         assert!(!h.state().timeline.selected().is_empty());
         assert!(h.state().bin.selected.is_some());
@@ -1866,7 +2045,7 @@ mod tests {
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         assert_eq!(h.state().bin.tab, 2);
-        click(&mut h, tr!("tutorial.show_me"));
+        show_me(&mut h);
         assert_eq!(step(&h), Some(1));
         h.state_mut().bin.tab = 3;
         click(&mut h, tr!("tutorial.back"));

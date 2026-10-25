@@ -80,7 +80,7 @@ pub const MASKS: Lesson = Lesson {
             also: &[],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.exposure",
             text: |_| tr!("tutorial.masks_darken").into(),
             done: |a| lower(a).is_some_and(|c| c.transform.exposure <= DARK),
             show_me: |a| {
@@ -93,10 +93,10 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["timeline"],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.add_mask",
             text: |_| tr!("tutorial.masks_add").into(),
             done: |a| {
                 top(a).is_some_and(|c| {
@@ -114,7 +114,7 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["timeline"],
         },
         Step {
             anchor: "preview",
@@ -126,7 +126,7 @@ pub const MASKS: Lesson = Lesson {
             also: &[],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.feather",
             text: |_| tr!("tutorial.masks_feather").into(),
             done: |a| mask(a).is_some_and(|m| m.feather >= SOFT),
             show_me: |a| edit_mask(a, |m| m.feather = SOFT * 2.0),
@@ -135,7 +135,7 @@ pub const MASKS: Lesson = Lesson {
             also: &[],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.invert",
             text: |_| tr!("tutorial.masks_invert").into(),
             // On one mask, Subtract cuts it out as Invert does, so both together spotlight
             // the subject again.
@@ -147,10 +147,10 @@ pub const MASKS: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["preview"],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.mask_position",
             text: |_| tr!("tutorial.masks_key").into(),
             done: |a| !key_times(a).is_empty(),
             show_me: |a| {

@@ -54,7 +54,7 @@ pub const AUDIO: Lesson = Lesson {
     },
     steps: &[
         Step {
-            anchor: "inspector",
+            anchor: "inspector.volume",
             text: |_| tr!("tutorial.audio_levels").into(),
             done: |a| clip_of(a, MUSIC).is_some_and(|c| c.transform.volume < 1.0),
             show_me: |a| {
@@ -66,7 +66,7 @@ pub const AUDIO: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["timeline"],
         },
         Step {
             anchor: "timeline",
@@ -99,7 +99,7 @@ pub const AUDIO: Lesson = Lesson {
             also: &[],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.eq",
             text: |_| tr!("tutorial.audio_eq").into(),
             done: |a| {
                 clip_of(a, VOICE).is_some_and(|c| {
@@ -118,7 +118,7 @@ pub const AUDIO: Lesson = Lesson {
             },
             reveal: None,
             ghost: None,
-            also: &[],
+            also: &["timeline"],
         },
         // Needs a microphone, so the Show Me test skips it; without one the user skips it too.
         Step {
