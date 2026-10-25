@@ -1709,6 +1709,262 @@ impl Widget for ColorWheel<'_> {
     }
 }
 
+/// What a curve editor's untouched curve looks like, drawn as its guide line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CurveNeutral {
+    /// Output equals input: the diagonal.
+    #[default]
+    Diagonal,
+    /// 0.5 changes nothing: a flat line across the middle.
+    Middle,
+}
+
+/// A grading curve on a small graph: a recessed Field box with a 1px Border edge (Border Strong
+/// on hover), quarter gridlines, the neutral line, the curve in Ink and its points. Pressing
+/// adds a point there, or picks up the nearest within reach; dragging moves it between its
+/// neighbours; double-clicking removes it. With focus, the arrow keys nudge the last point
+/// touched 1% and Delete removes it. `points` are x ascending, both axes 0..=1, y up; `at`
+/// evaluates the curve through them.
+#[must_use = "add it with `ui.add(..)`"]
+pub struct CurveEditor<'a> {
+    points: &'a mut Vec<[f64; 2]>,
+    at: &'a dyn Fn(&[[f64; 2]], f64) -> f64,
+    size: Vec2,
+    name: &'a str,
+    neutral: CurveNeutral,
+    hue: bool,
+    max: usize,
+    state: State,
+}
+
+impl<'a> CurveEditor<'a> {
+    /// `name` is for screen readers.
+    pub fn new(
+        points: &'a mut Vec<[f64; 2]>,
+        at: &'a dyn Fn(&[[f64; 2]], f64) -> f64,
+        size: Vec2,
+        name: &'a str,
+    ) -> Self {
+        Self {
+            points,
+            at,
+            size,
+            name,
+            neutral: CurveNeutral::Diagonal,
+            hue: false,
+            max: usize::MAX,
+            state: State::Live,
+        }
+    }
+
+    pub fn neutral(mut self, neutral: CurveNeutral) -> Self {
+        self.neutral = neutral;
+        self
+    }
+
+    /// The x axis is hue: a muted spectrum along the bottom edge.
+    pub fn hue(mut self, hue: bool) -> Self {
+        self.hue = hue;
+        self
+    }
+
+    /// The most points a press may add up to.
+    pub fn max_points(mut self, max: usize) -> Self {
+        self.max = max;
+        self
+    }
+
+    pub fn state(mut self, state: State) -> Self {
+        self.state = state;
+        self
+    }
+}
+
+/// Points closer in x than this stay apart while dragging.
+const CURVE_GAP: f64 = 0.01;
+/// How near, in points, a press picks up an existing point.
+const CURVE_REACH: f32 = 8.0;
+
+/// Where point `i` may go in x: between its neighbours, `CURVE_GAP` clear of them.
+fn curve_room(points: &[[f64; 2]], i: usize) -> (f64, f64) {
+    let lo = i.checked_sub(1).map_or(0.0, |j| points[j][0] + CURVE_GAP);
+    let hi = points.get(i + 1).map_or(1.0, |p| p[0] - CURVE_GAP);
+    (lo, hi.max(lo))
+}
+
+/// Moves point `i` to `to`, kept in the graph and between its neighbours.
+fn curve_move(points: &mut [[f64; 2]], i: usize, [x, y]: [f64; 2]) {
+    let (lo, hi) = curve_room(points, i);
+    points[i] = [x.clamp(lo, hi), y.clamp(0.0, 1.0)];
+}
+
+/// Adds a point at `p` in x order, or replaces one already within `CURVE_GAP`; its index.
+fn curve_insert(points: &mut Vec<[f64; 2]>, p: [f64; 2]) -> usize {
+    let i = points.partition_point(|q| q[0] < p[0]);
+    let near = [i, i.wrapping_sub(1)].into_iter().find(|&j| {
+        points
+            .get(j)
+            .is_some_and(|q| (q[0] - p[0]).abs() < CURVE_GAP)
+    });
+    match near {
+        Some(j) => points[j] = p,
+        None => points.insert(i, p),
+    }
+    near.unwrap_or(i)
+}
+
+impl Widget for CurveEditor<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let (rect, mut response) = allocate(ui, self.size, self.state, Sense::click_and_drag());
+        // The points' travel, inset so a point on the edge stays whole.
+        let graph = rect.shrink(4.0);
+        // Hue wraps, so its 1 is its 0: keep points short of it.
+        let right = if self.hue { 1.0 - CURVE_GAP } else { 1.0 };
+        let to_value = |p: egui::Pos2| {
+            let v = (p - graph.left_bottom()) / graph.size();
+            [
+                f64::from(v.x).clamp(0.0, right),
+                f64::from(-v.y).clamp(0.0, 1.0),
+            ]
+        };
+        let to_screen = |[x, y]: [f64; 2]| {
+            graph.left_bottom() + vec2(x as f32 * graph.width(), -(y as f32) * graph.height())
+        };
+        let active_id = response.id.with("active");
+        let mut active: Option<usize> = ui.data(|d| d.get_temp(active_id)).flatten();
+        let points = self.points;
+        active = active.filter(|i| *i < points.len());
+        let pressed =
+            response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed());
+        if let Some(p) = response.interact_pointer_pos() {
+            if pressed {
+                let near = points
+                    .iter()
+                    .map(|q| to_screen(*q).distance(p))
+                    .enumerate()
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .filter(|(_, d)| *d <= CURVE_REACH);
+                active = match near {
+                    Some((i, _)) => Some(i),
+                    None if points.len() < self.max => {
+                        response.mark_changed();
+                        Some(curve_insert(points, to_value(p)))
+                    }
+                    None => None,
+                };
+            } else if response.dragged()
+                && let Some(i) = active
+            {
+                let before = points[i];
+                curve_move(points, i, to_value(p));
+                if points[i] != before {
+                    response.mark_changed();
+                }
+            }
+        }
+        if response.double_clicked()
+            && let Some(i) = active.take()
+        {
+            points.remove(i);
+            response.mark_changed();
+        }
+        if response.has_focus()
+            && let Some(i) = active
+        {
+            let (x, y, del) = ui.input(|i| {
+                let k = |a, b| f64::from(i32::from(i.key_pressed(a)) - i32::from(i.key_pressed(b)));
+                (
+                    k(Key::ArrowRight, Key::ArrowLeft),
+                    k(Key::ArrowUp, Key::ArrowDown),
+                    i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace),
+                )
+            });
+            if del {
+                points.remove(i);
+                active = None;
+                response.mark_changed();
+            } else if x != 0.0 || y != 0.0 {
+                let [px, py] = points[i];
+                curve_move(points, i, [px + 0.01 * x, py + 0.01 * y]);
+                response.mark_changed();
+            }
+        }
+        ui.data_mut(|d| d.insert_temp(active_id, active));
+        response.widget_info(|| {
+            WidgetInfo::labeled(WidgetType::Slider, self.state != State::Disabled, self.name)
+        });
+
+        let l = look(&response, self.state);
+        let painter = ui.painter_at(rect.expand(4.0));
+        let corner = radius::CONTROL;
+        painter.rect_filled(rect, CornerRadius::same(corner), color::field());
+        let grid = hairline(ui.ctx(), color::border());
+        for q in [0.25, 0.5, 0.75] {
+            painter.vline(graph.left() + q * graph.width(), graph.y_range(), grid);
+            painter.hline(graph.x_range(), graph.bottom() - q * graph.height(), grid);
+        }
+        if self.hue {
+            // A muted spectrum: hue x at full saturation, faded into the Field.
+            let n = 48;
+            let fade = if l.disabled { 0.3 } else { 0.6 };
+            for i in 0..n {
+                let (a, b) = (i as f32 / n as f32, (i + 1) as f32 / n as f32);
+                let hue = egui::ecolor::Hsva::new((a + b) / 2.0, 0.8, 0.9, 1.0);
+                let c = color::field().lerp_to_gamma(hue.into(), fade);
+                let y = graph.bottom() + 1.0;
+                let (x0, x1) = (
+                    graph.left() + a * graph.width(),
+                    graph.left() + b * graph.width(),
+                );
+                painter.line_segment([pos2(x0, y), pos2(x1, y)], Stroke::new(2.0, c));
+            }
+        }
+        let guide = hairline(ui.ctx(), color::border_strong());
+        match self.neutral {
+            CurveNeutral::Diagonal => {
+                painter.line_segment([graph.left_bottom(), graph.right_top()], guide);
+            }
+            CurveNeutral::Middle => {
+                painter.hline(graph.x_range(), graph.center().y, guide);
+            }
+        }
+        let ink = if l.disabled {
+            color::ink_4()
+        } else {
+            color::ink()
+        };
+        let n = graph.width().ceil().max(2.0) as usize;
+        let line: Vec<_> = (0..=n)
+            .map(|i| {
+                let x = i as f64 / n as f64;
+                to_screen([x, (self.at)(points, x)])
+            })
+            .collect();
+        painter.add(Shape::line(line, Stroke::new(1.5, ink)));
+        let edge = hover_fade(
+            ui,
+            response.id,
+            l.hover || response.dragged(),
+            color::border(),
+            color::border_strong(),
+        );
+        painter.add(border(ui, rect, corner, edge));
+        for (i, p) in points.iter().enumerate() {
+            let lit = active == Some(i) && (l.focus || response.dragged());
+            let fill = match () {
+                _ if l.disabled => color::ink_4(),
+                _ if lit => color::light_blue(),
+                _ => color::ink_2(),
+            };
+            painter.circle(to_screen(*p), 3.5, fill, Stroke::new(1.0, color::field()));
+        }
+        if l.focus {
+            ui.painter().add(focus_ring(rect, corner));
+        }
+        response
+    }
+}
+
 /// A colour: a 24px swatch with a Border Strong edge and a checkerboard behind it only when
 /// it isn't opaque, then its hex in a field, with the alpha after it when that fits, or None
 /// once fully transparent. Clicking either opens egui's picker under it. Takes the width left
@@ -2003,8 +2259,25 @@ impl Widget for Timecode {
 
 #[cfg(test)]
 mod tests {
-    use super::{RectAlign, menu_place, timecode, wheel_hue, wheel_value};
+    use super::{
+        RectAlign, curve_insert, curve_move, menu_place, timecode, wheel_hue, wheel_value,
+    };
     use egui::{Rect, pos2, vec2};
+
+    #[test]
+    fn curve_points_insert_in_order_and_drag_between_their_neighbours() {
+        let mut p = vec![[0.0, 0.0], [1.0, 1.0]];
+        assert_eq!(curve_insert(&mut p, [0.5, 0.7]), 1);
+        assert_eq!(p, [[0.0, 0.0], [0.5, 0.7], [1.0, 1.0]]);
+        // A press right by a point replaces it rather than crowding it.
+        assert_eq!(curve_insert(&mut p, [0.995, 0.9]), 2);
+        assert_eq!(p.len(), 3);
+        // Dragging past a neighbour stops short of it; y stays in the graph.
+        curve_move(&mut p, 1, [2.0, -1.0]);
+        assert!((p[1][0] - 0.985).abs() < 1e-9 && p[1][1] == 0.0, "{p:?}");
+        curve_move(&mut p, 0, [0.99, 0.2]);
+        assert!((p[0][0] - 0.975).abs() < 1e-9, "{p:?}");
+    }
 
     #[test]
     fn wheel_puck_follows_the_pointer_inside_the_disc_with_y_up() {

@@ -3,18 +3,20 @@
 use std::collections::{BTreeMap, HashSet};
 
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
+use jvid_core::curve::Kind as CurveKind;
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value};
 use jvid_core::model::{
-    AudioFx, Blend, Clip, ClipId, Compressor, Effect, Equalizer, HighPass, Mask, MaskMode,
-    MaskShape, MediaAsset, NoiseReduction, Project, Text, TrackKind, Transform, Wheels,
+    AudioFx, Blend, Clip, ClipId, Compressor, Curve, Curves, Effect, Equalizer, HighPass, Mask,
+    MaskMode, MaskShape, MediaAsset, NoiseReduction, Project, Text, TrackKind, Transform, Wheels,
 };
 use jvid_core::time::Time;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{
-    Button, Checkbox, ColorField, ColorWheel, DragField, Dropdown, KeyButton, Keyed, MenuRow,
-    SectionHeader, Segmented, Slider, State, TextInput, fit_text, paint_fit,
+    Button, Checkbox, ColorField, ColorWheel, CurveEditor, CurveNeutral, DragField, Dropdown,
+    KeyButton, Keyed, MenuRow, SectionHeader, Segmented, Slider, State, TextInput, fit_text,
+    paint_fit,
 };
 
 use crate::i18n::{CATALOG, Label, tr, verbatim};
@@ -239,6 +241,10 @@ fn get(x: &Transform, name: &str) -> Value {
             }
         };
     }
+    let mut curves = x.curves;
+    if let Some((c, _)) = curves.get_mut(name) {
+        return Value::Curve(*c);
+    }
     let mut wheels = x.wheels;
     if let Some((w, master)) = wheels.param(name) {
         return match master {
@@ -292,6 +298,12 @@ fn set(x: &mut Transform, name: &str, v: Value) {
         }
         return;
     }
+    if let Some((c, kind)) = x.curves.get_mut(name) {
+        if let Value::Curve(v) = v {
+            *c = Curve::new(v.points(), kind);
+        }
+        return;
+    }
     if let Some((w, master)) = x.wheels.param(name) {
         match v {
             Value::Scalar(v) if master => w.master = v,
@@ -332,6 +344,7 @@ fn fields(v: Value) -> Vec<f64> {
         Value::Scalar(s) => vec![s],
         Value::Vec2(v) => v.to_vec(),
         Value::Color(c) => c.to_vec(),
+        Value::Curve(_) => Vec::new(),
     }
 }
 
@@ -346,6 +359,7 @@ fn with_field(v: Value, i: usize, n: f64) -> Value {
             c[i] = n;
             Value::Color(c)
         }
+        Value::Curve(_) => v,
     }
 }
 
@@ -739,6 +753,12 @@ pub fn show(
     {
         edit = Some(e);
     }
+    if pane == Pane::Video
+        && !clips.is_empty()
+        && let Some(e) = curves_rows(ui, clips, t, &mut index, &mut seek)
+    {
+        edit = Some(e);
+    }
     if pane == Pane::Effects
         && let Some(e) = effects_rows(ui, clips, t, &mut index, &mut seek)
     {
@@ -890,6 +910,115 @@ fn wheel_row(
                 let v = shown / 100.0;
                 put(ui, &r, set_field(clips, master, 0, |_| v, t), slot);
             }
+        }
+    });
+    if c.reset {
+        edit = Some((reset(clips, &names), None));
+    }
+    key_clicks(clips, &names, c, t, index, seek).or(edit)
+}
+
+/// The Curves section: a picker for one of [`Curves::NAMES`] and its graph under it.
+fn curves_rows(
+    ui: &mut Ui,
+    clips: &[&Clip],
+    t: Time,
+    index: &mut u64,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
+    let names = Curves::NAMES;
+    let changed =
+        any_animated(clips, &names) || clips.iter().any(|c| !c.transform_at(t).curves.is_default());
+    let (open, head) = section(ui, "curves", Some(changed));
+    let edit = match head {
+        Some(Head::Reset) => Some((reset(clips, &names), None)),
+        Some(Head::Key) => Some((key_all(clips, &names, t), None)),
+        None => None,
+    };
+    *index += 1;
+    match open {
+        true => curve_row(ui, clips, t, *index, seek).or(edit),
+        false => edit,
+    }
+}
+
+/// Lines under the curve picker that the graph takes.
+const CURVE_LINES: usize = 5;
+
+/// The picked curve's row: the picker, then the graph, with reset and a diamond for that curve.
+/// Shows the first clip's curve; an edit sets every clip to it.
+fn curve_row(
+    ui: &mut Ui,
+    clips: &[&Clip],
+    t: Time,
+    index: u64,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
+    let pick = ui.id().with("inspector curve");
+    let mut i = ui.data(|d| d.get_temp(pick).unwrap_or(0usize));
+    let name = Curves::NAMES[i];
+    let names = [name];
+    let anim = any_animated(clips, &names);
+    let keyed = match () {
+        _ if !anim => Keyed::Static,
+        _ if all_keyed(clips, &names, t) => Keyed::Here,
+        _ => Keyed::Animated,
+    };
+    let key = match keyed {
+        Keyed::Static => tr!("inspector.animate", name = caption(name)),
+        _ => tr!("inspector.key_here").to_owned(),
+    };
+    let off = clips
+        .iter()
+        .any(|c| value(c, name, t) != Value::Curve(Curve::default()));
+    let tools = Tools {
+        reset: (anim || off).then_some(tr!("inspector.reset")),
+        key: Some((keyed, &key)),
+    };
+    let mut edit = None;
+    let (_, c) = prop_rows(ui, tr!("inspector.curve"), tools, 1 + CURVE_LINES, |ui| {
+        let max = ui.max_rect();
+        let ui = &mut ui.new_child(
+            UiBuilder::new()
+                .max_rect(max)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        ui.spacing_mut().item_spacing.y = space::S4;
+        let captions = Curves::NAMES.map(caption);
+        if ui
+            .add(Dropdown::new(&mut i, &captions).width(max.width()))
+            .changed()
+        {
+            ui.data_mut(|d| d.insert_temp(pick, i));
+        }
+        let (name, kind) = (Curves::NAMES[i], Curves::KINDS[i]);
+        let mut points = match value(clips[0], name, t) {
+            Value::Curve(c) if !c.points().is_empty() => c.points().to_vec(),
+            _ => kind.seed().points().to_vec(),
+        };
+        let at = |p: &[[f64; 2]], x: f64| Curve::new(p, kind).at(x, kind);
+        let neutral = match kind {
+            CurveKind::Level => CurveNeutral::Diagonal,
+            _ => CurveNeutral::Middle,
+        };
+        let size = vec2(max.width(), ui.available_height());
+        let graph = CurveEditor::new(&mut points, &at, size, caption(name))
+            .neutral(neutral)
+            .hue(kind == CurveKind::Hue)
+            .max_points(Curve::MAX);
+        // Each curve keeps its own picked point.
+        let r = ui.push_id(name, |ui| ui.add(graph)).inner;
+        if r.changed() {
+            // Each drag is its own undo step, as in `row`.
+            let drags = ui.id().with("inspector drags");
+            if r.drag_started() {
+                ui.data_mut(|d| *d.get_temp_mut_or(drags, 0u64) += 1);
+            }
+            let drag = ui.data(|d| d.get_temp(drags).unwrap_or(0u64));
+            let key = GESTURE ^ (index << 4) ^ (drag << 16);
+            let v = Value::Curve(Curve::new(&points, kind));
+            let cmd = rewrite(clips, |c, x, keys| put(c, x, keys, name, t, v));
+            edit = Some((cmd, r.dragged().then_some(key)));
         }
     });
     if c.reset {
@@ -3431,7 +3560,8 @@ mod tests {
         let ids = SECTIONS
             .iter()
             .flat_map(|(id, props)| std::iter::once(*id).chain(props.iter().map(|p| p.name)))
-            .chain(["effects", "speed", "text"])
+            .chain(["effects", "speed", "text", "curves", "curve"])
+            .chain(Curves::NAMES)
             .chain(
                 AUDIO_FX
                     .iter()
@@ -3452,6 +3582,28 @@ mod tests {
                 assert!(CATALOG.get_in(lang, &key).is_some(), "{lang} lacks {key}");
             }
         }
+    }
+
+    #[test]
+    fn curves_set_key_and_reset_like_other_props() {
+        let mut clips = vec![clip(1, 0)];
+        let level = |y| Curve::new(&[[0.0, 0.0], [0.3, y], [1.0, 1.0]], CurveKind::Level);
+        let put_at = |t, y| {
+            move |c: &[&Clip]| {
+                rewrite(c, |c, x, keys| {
+                    put(c, x, keys, "curve_red", Time(t), Value::Curve(level(y)))
+                })
+            }
+        };
+        apply(&mut clips, put_at(0, 0.2));
+        assert_eq!(clips[0].transform.curves.red, level(0.2));
+        apply(&mut clips, |c| toggle_animate(c, &["curve_red"], Time(0)));
+        apply(&mut clips, put_at(50, 0.6));
+        assert_eq!(clips[0].keyframes["curve_red"].len(), 2);
+        let mid = clips[0].transform_at(Time(25)).curves.red;
+        assert!((mid.points()[1][1] - 0.4).abs() < 1e-9, "{mid:?}");
+        apply(&mut clips, |c| reset(c, &Curves::NAMES));
+        assert!(clips[0].transform.curves.is_default() && clips[0].keyframes.is_empty());
     }
 
     #[test]

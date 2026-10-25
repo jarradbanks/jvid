@@ -1,7 +1,7 @@
 //! The compositor: a layer stack from [`jvid_core::eval::video_at`] blended over the project
 //! background into one project-sized frame, at preview scale for the viewer or full size for export.
 
-use jvid_core::model::{Blend, Effect, Transform};
+use jvid_core::model::{Blend, Curves, Effect, Transform};
 use wgpu::util::DeviceExt;
 
 use crate::preview::{place, scaled};
@@ -50,6 +50,8 @@ pub struct Compositor {
     /// Uploaded LUTs by [`Transform::lut`] path, and the stand-in bound for layers without one.
     luts: std::collections::HashMap<String, wgpu::Texture>,
     no_lut: wgpu::Texture,
+    /// Bound for layers whose curves are neutral; the shader skips it.
+    no_curves: wgpu::Texture,
     /// Effect pipelines by [`Effect::shader`], with their parameters in uniform order and pass
     /// count; layers naming an effect not set skip it.
     effects:
@@ -131,6 +133,7 @@ impl Compositor {
                 usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             }),
+            no_curves: device.create_texture(&curve_desc(1, 1)),
             effects: Default::default(),
             effect_layout: device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("effect"),
@@ -457,6 +460,12 @@ impl Compositor {
                     p.extend(w.rgb().map(|v| v as f32));
                     p.push(0.0);
                 }
+                // shortcut: bakes and uploads a 2x256 table per curved layer per frame; cache by curves if it profiles hot.
+                let curved = !t.curves.is_neutral();
+                let table = curved
+                    .then(|| curve_texture(device, queue, &t.curves.bake(), Curves::SIZE as u32));
+                let table = table.as_ref().unwrap_or(&self.no_curves);
+                p.extend([f32::from(u8::from(curved)), table.width() as f32, 0.0, 0.0]);
                 let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("layer"),
                     contents: &p.iter().flat_map(|f| f.to_ne_bytes()).collect::<Vec<_>>(),
@@ -467,6 +476,7 @@ impl Compositor {
                     ..Default::default()
                 });
                 let lut = lut.create_view(&Default::default());
+                let curves = table.create_view(&Default::default());
                 let blended = t.blend != Blend::Normal;
                 let pipeline = if blended { &self.blend } else { &self.pipeline };
                 let mut entries = vec![
@@ -485,6 +495,10 @@ impl Compositor {
                     wgpu::BindGroupEntry {
                         binding: 4,
                         resource: wgpu::BindingResource::TextureView(&lut),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::TextureView(&curves),
                     },
                 ];
                 if blended {
@@ -698,3 +712,37 @@ pub fn export_png(
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+/// `rows` of baked curve samples, `width` to a row, as an unfilterable float texture the shader
+/// reads with `textureLoad`.
+fn curve_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    rows: &[[f32; 4]],
+    width: u32,
+) -> wgpu::Texture {
+    let data: Vec<u8> = rows
+        .iter()
+        .flatten()
+        .flat_map(|f| f.to_ne_bytes())
+        .collect();
+    let desc = curve_desc(width, rows.len() as u32 / width);
+    device.create_texture_with_data(queue, &desc, Default::default(), &data)
+}
+
+fn curve_desc(width: u32, height: u32) -> wgpu::TextureDescriptor<'static> {
+    wgpu::TextureDescriptor {
+        label: Some("curves"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    }
+}

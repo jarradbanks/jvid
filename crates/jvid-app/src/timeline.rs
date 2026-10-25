@@ -2812,6 +2812,7 @@ mod tests {
         let mut graded = v[0].transform.clone();
         graded.exposure = 1.0;
         graded.wheels.lift.master = 0.4;
+        graded.curves.master = jvid_core::curve::Kind::Level.seed();
         let key = Keyframe {
             time: v[1].source_in,
             value: Value::Scalar(-2.0),
@@ -2837,6 +2838,7 @@ mod tests {
                 (c.transform.exposure, c.transform.wheels),
                 (1.0, graded.wheels)
             );
+            assert_eq!(c.transform.curves, graded.curves, "curves paste too");
             assert!(c.keyframes.is_empty(), "the pasted grade is static");
         }
         let a = seq(&h).clip(audio).unwrap().1.clone();

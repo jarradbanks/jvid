@@ -115,6 +115,7 @@ fn parts(v: &mut Value) -> &mut [f64] {
         Value::Scalar(x) => std::slice::from_mut(x),
         Value::Vec2(a) => a,
         Value::Color(a) => a,
+        Value::Curve(_) => &mut [],
     }
 }
 
