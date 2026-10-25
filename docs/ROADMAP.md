@@ -529,6 +529,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#408](https://github.com/jarradbanks/jvid/issues/408) **Viewer: remaining amber strokes** — From #400 (PR #407): the on-picture text-edit caret and selection highlight, and the stroke in zoom.rs, are still amber, against DESIGN.md's Neutral Viewer Rule.
 - [#411](https://github.com/jarradbanks/jvid/issues/411) **Reframe: dim the wide shot outside the frame** — From #352 (PR #396), owner's call: while aiming a reframed clip, show the wide shot outside the new frame dimmed, so you can see what's being cropped away.
 - [#413](https://github.com/jarradbanks/jvid/issues/413) **Fonts: bundle the common CJK characters** — Owner's call (2026-10-25): every PR that adds UI strings regenerates the CJK font subsets, binary files that conflict between parallel PRs (6 so far). Bundling the common characters up front makes the subsets rarely change, at about 3-4 MB more in the app.
+- [#415](https://github.com/jarradbanks/jvid/issues/415) **Markers: own lane above the ruler, drag to move** — Owner's request (2026-10-25): markers get their own slim bar above the timeline ruler instead of sitting in it, and you can drag them to adjust.
 
 ---
 

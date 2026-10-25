@@ -1897,3 +1897,12 @@ I("cjk-common-sets", "Fonts: bundle the common CJK characters", None, ["suite-ui
          "The output is byte-identical when the character set hasn't changed, and the script leaves the file untouched then",
          "Raise the per-face budget in docs/translating.md (Fonts and binary size) to fit, staying near 3-4 MB in total"],
   ac=["Running subset-cjk.py twice in a row changes no file (test or CI check)", "A catalog edit using only common characters leaves the .otf files unchanged"])
+
+I("marker-lane", "Markers: own lane above the ruler, drag to move", None, ["ui", "timeline"], "M", ["marker-popup-style"], labels=["later"],
+  summary="Owner's request (2026-10-25): markers get their own slim bar above the timeline ruler instead of sitting in it, and you can drag them to adjust.",
+  scope=["A slim Markers lane directly above the timeline ruler holds the flags and range bands; the ruler is left for scrubbing",
+         "Drag a flag to move its marker, and drag either end of a range to resize it, snapping like clip drags; each drag is one undo step (SetMarker)",
+         "Click still seeks, right-click still opens the marker popup, and the tutorial 'marker' anchor and the Markers lesson keep working"],
+  ac=["Test: dragging a flag moves the marker by the dragged time, and one undo restores it",
+      "Test: dragging a range's end changes only its duration; a range can't go below zero length",
+      "A kittest snapshot shows the lane above the ruler with a point and a range marker"])
