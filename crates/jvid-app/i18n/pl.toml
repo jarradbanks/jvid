@@ -967,3 +967,7 @@ remove = "Usuń"
 remove_all = "Usuń wszystko"
 pause = "Pauza {seconds} s"
 none = "Brak wypełniaczy i pauz"
+
+[analysis]
+audio_source = "Źródło Dźwięku"
+source_stream = "{name} · Strumień {number}"

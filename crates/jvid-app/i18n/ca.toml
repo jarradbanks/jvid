@@ -955,3 +955,7 @@ remove = "Elimina"
 remove_all = "Elimina-ho tot"
 pause = "Pausa de {seconds} s"
 none = "No hi ha crosses ni pauses"
+
+[analysis]
+audio_source = "Font d’Àudio"
+source_stream = "{name} · Pista {number}"

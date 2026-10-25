@@ -943,3 +943,7 @@ remove = "Ta bort"
 remove_all = "Ta bort alla"
 pause = "Paus {seconds} s"
 none = "Inga utfyllnadsord eller pauser"
+
+[analysis]
+audio_source = "Ljudkälla"
+source_stream = "{name} · Ström {number}"

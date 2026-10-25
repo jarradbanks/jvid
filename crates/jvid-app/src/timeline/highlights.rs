@@ -19,6 +19,7 @@ use suite_ui::tokens::{color, radius, size, space};
 use suite_ui::widgets::{Button, Checkbox, DragField, State};
 
 use crate::i18n::{tr, trn};
+use crate::subtitles::AudioSources;
 
 /// How far apart the scene scan samples frames.
 const STEP: Time = Time(FLICKS_PER_SECOND / 5);
@@ -44,6 +45,8 @@ pub(super) struct Highlights {
     scenes: bool,
     /// One audio clip per link group, as Detect Silence reads.
     audio: Vec<ClipId>,
+    selected: HashSet<ClipId>,
+    sources: AudioSources,
     video: Vec<ClipId>,
     pub(super) scan: Option<Scan>,
 }
@@ -61,6 +64,9 @@ impl Highlights {
     /// Reads the clips among `selected` and their linked partners; `None` if none has audio
     /// or video to scan.
     pub(super) fn open(seq: &Sequence, selected: &HashSet<ClipId>) -> Option<Self> {
+        if selected.is_empty() {
+            return None;
+        }
         let mut clips: Vec<(TrackKind, &Clip)> = selected
             .iter()
             .flat_map(|&id| seq.linked(id))
@@ -69,11 +75,11 @@ impl Highlights {
             .collect();
         clips.sort_by_key(|(_, c)| (c.start, c.id.0));
         clips.dedup_by_key(|(_, c)| c.id);
-        let mut links = HashSet::new();
-        let audio: Vec<_> = clips
+        let sources = AudioSources::default();
+        let audio: Vec<_> = sources
+            .clips(seq, selected, true)
             .iter()
-            .filter(|(k, c)| *k == TrackKind::Audio && c.link.is_none_or(|l| links.insert(l)))
-            .map(|(_, c)| c.id)
+            .map(|c| c.id)
             .collect();
         let video: Vec<_> = clips
             .iter()
@@ -86,6 +92,8 @@ impl Highlights {
             loud: !audio.is_empty(),
             scenes: audio.is_empty(),
             audio,
+            selected: selected.clone(),
+            sources,
             video,
             scan: None,
         })
@@ -213,6 +221,7 @@ impl Highlights {
         &mut self,
         ui: &Ui,
         at: Pos2,
+        seq: &Sequence,
         rate: Rate,
         ranges: Option<&[(Time, Time)]>,
     ) -> (Option<Command>, bool) {
@@ -233,6 +242,16 @@ impl Highlights {
                 ui.set_width(280.0);
                 ui.label(egui::RichText::new(tr!("highlights.title")).font(theme::headline()));
                 ui.add_space(space::S8);
+                let changed = self.sources.show(ui, seq, &self.selected, true);
+                if changed {
+                    self.audio = self
+                        .sources
+                        .clips(seq, &self.selected, true)
+                        .iter()
+                        .map(|c| c.id)
+                        .collect();
+                }
+                let ranges = if changed { None } else { ranges };
                 let audio = if self.audio.is_empty() {
                     State::Disabled
                 } else {

@@ -27,7 +27,7 @@ use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, Checkbox, State, TextInput};
 
 use crate::i18n::tr;
-use crate::subtitles::targets;
+use crate::subtitles::{AudioSources, targets};
 
 /// Bumped when the file format or the word timing changes, so older transcripts are redone.
 const VERSION: u32 = 2;
@@ -190,6 +190,7 @@ pub struct Output {
 
 #[derive(Default)]
 pub struct TranscriptPanel {
+    sources: AudioSources,
     pub cache: Cache,
     pub(crate) query: String,
     /// The first and last words picked, by start time, so it outlives edits elsewhere.
@@ -203,6 +204,7 @@ pub struct TranscriptPanel {
 impl TranscriptPanel {
     /// Whole-file transcript caches are reusable; word selections and searches are not.
     pub fn reset_session(&mut self) {
+        self.sources = AudioSources::default();
         self.query.clear();
         self.selection = None;
         self.lit = None;
@@ -226,16 +228,27 @@ impl TranscriptPanel {
         playhead: Time,
         focused: bool,
     ) -> Output {
+        let selected_input = selected;
         let mut out = Output::default();
         // Before Find draws, which may let go of the focus this frame.
         let typing = ui.ctx().text_edit_focused();
-        let placed = self.cache.placed(project, selected);
+        let selected = self.sources.selection(project.sequence(), selected);
+        let placed = self.cache.placed(project, &selected);
         let (words, missing) = &*placed;
         let close = [(icon::X, tr!("transcript.close"))];
         let r = Panel::titled(tr!("panel.transcript"))
             .actions(&close)
             .focused(focused)
             .show(ui, |ui| {
+                if self
+                    .sources
+                    .show(ui, project.sequence(), selected_input, false)
+                {
+                    self.selection = None;
+                    self.unticked = None;
+                    ui.ctx().request_repaint();
+                    return;
+                }
                 let bar = egui::Frame::NONE
                     .inner_margin(Margin::symmetric(space::INSET as i8, space::S8 as i8));
                 bar.show(ui, |ui| {
@@ -334,7 +347,8 @@ impl TranscriptPanel {
 
     /// The streams Transcribe would transcribe, for a lesson's Show Me.
     pub(crate) fn missing(&mut self, project: &Project, selected: &HashSet<ClipId>) -> Vec<Source> {
-        self.cache.placed(project, selected).1.clone()
+        let selected = self.sources.selection(project.sequence(), selected);
+        self.cache.placed(project, &selected).1.clone()
     }
 
     /// Whether audio stream `nth` of `path` has a transcript loaded.
@@ -353,7 +367,8 @@ impl TranscriptPanel {
         selected: &HashSet<ClipId>,
         picked: Range<usize>,
     ) -> Option<Command> {
-        let placed = self.cache.placed(project, selected);
+        let selected = self.sources.selection(project.sequence(), selected);
+        let placed = self.cache.placed(project, &selected);
         let n = placed.0.len();
         cut(&placed.0, picked.start.min(n)..picked.end.min(n))
     }

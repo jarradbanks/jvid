@@ -966,3 +966,7 @@ remove = "Supprimer"
 remove_all = "Tout supprimer"
 pause = "Pause de {seconds} s"
 none = "Aucune hésitation ni pause"
+
+[analysis]
+audio_source = "Source Audio"
+source_stream = "{name} · Piste {number}"

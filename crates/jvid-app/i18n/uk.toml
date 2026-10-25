@@ -967,3 +967,7 @@ remove = "Видалити"
 remove_all = "Видалити всі"
 pause = "Пауза {seconds} с"
 none = "Немає слів-паразитів і пауз"
+
+[analysis]
+audio_source = "Джерело Звуку"
+source_stream = "{name} · Потік {number}"

@@ -1049,3 +1049,7 @@ remove = "Remove"
 remove_all = "Remove All"
 pause = "Pause {seconds} s"
 none = "No fillers or pauses"
+
+[analysis]
+audio_source = "Audio Source"
+source_stream = "{name} · Stream {number}"

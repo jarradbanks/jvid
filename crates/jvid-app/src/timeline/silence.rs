@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use egui::{Align2, Key, Pos2, Ui};
 use jvid_core::history::Command;
-use jvid_core::model::{Clip, ClipId, Sequence, TrackKind};
+use jvid_core::model::{Clip, ClipId, Sequence};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use jvid_media::audio::SAMPLE_RATE;
 use jvid_media::silence;
@@ -16,6 +16,7 @@ use suite_ui::tokens::{radius, space};
 use suite_ui::widgets::{Button, DragField, State};
 
 use crate::i18n::{tr, trn};
+use crate::subtitles::AudioSources;
 
 /// A timeline span to cut from a clip and its linked clips.
 pub(super) type Span = (ClipId, Time, Time);
@@ -32,34 +33,27 @@ pub(super) struct Silence {
     speed: f64,
     /// One audio clip per link group; cuts carry its linked clips along.
     clips: Vec<ClipId>,
+    selected: HashSet<ClipId>,
+    sources: AudioSources,
 }
 
 impl Silence {
     /// Reads the audio clips among `selected` and their linked partners; `None` if there are
     /// none.
     pub(super) fn open(seq: &Sequence, selected: &HashSet<ClipId>) -> Option<Self> {
-        let audio = |id: ClipId| {
-            seq.linked(id).into_iter().filter(|(t, c)| {
-                c.freeze.is_none() && seq.track(*t).is_some_and(|t| t.kind == TrackKind::Audio)
-            })
-        };
-        let mut clips: Vec<&Clip> = selected
-            .iter()
-            .flat_map(|&id| audio(id))
-            .map(|(_, c)| c)
-            .collect();
-        clips.sort_by_key(|c| (c.start, c.id.0));
-        clips.dedup_by_key(|c| c.id);
-        // shortcut: a group with several audio clips (game and mic streams) reads only its
-        // first; let the dialog pick the stream if mixed recordings miss silences.
-        let mut links = HashSet::new();
-        clips.retain(|c| c.link.is_none_or(|l| links.insert(l)));
+        if selected.is_empty() {
+            return None;
+        }
+        let sources = AudioSources::default();
+        let clips = sources.clips(seq, selected, true);
         (!clips.is_empty()).then(|| Self {
             threshold: -40.0,
             min_len: 1.0,
             pad: 0.15,
             speed: 400.0,
             clips: clips.iter().map(|c| c.id).collect(),
+            selected: selected.clone(),
+            sources,
         })
     }
 
@@ -105,6 +99,7 @@ impl Silence {
         &mut self,
         ui: &Ui,
         at: Pos2,
+        seq: &Sequence,
         spans: Option<&[Span]>,
     ) -> (Option<Command>, bool) {
         let mut command = None;
@@ -124,6 +119,16 @@ impl Silence {
                 ui.set_width(280.0);
                 ui.label(egui::RichText::new(tr!("silence.title")).font(theme::headline()));
                 ui.add_space(space::S8);
+                let changed = self.sources.show(ui, seq, &self.selected, true);
+                if changed {
+                    self.clips = self
+                        .sources
+                        .clips(seq, &self.selected, true)
+                        .iter()
+                        .map(|c| c.id)
+                        .collect();
+                }
+                let spans = if changed { None } else { spans };
                 egui::Grid::new("silence_grid")
                     .spacing([space::S8, space::S8])
                     .show(ui, |ui| {
@@ -221,12 +226,50 @@ impl Silence {
 #[cfg(test)]
 mod tests {
     use jvid_core::history::History;
+    use jvid_core::model::TrackKind;
     use jvid_core::time::FLICKS_PER_SECOND as S;
     use jvid_media::waveforms::{BUCKET, Pyramid};
 
     use super::super::Timeline;
     use super::super::tests::project;
     use super::*;
+
+    #[test]
+    fn audit_442_silence_uses_selected_mic_and_cuts_linked_video() {
+        for mic_first in [false, true] {
+            let (p, mic, game) = crate::subtitles::test_support::two_streams(mic_first);
+            let quiet = vec![[0.0; 2]; 6 * SAMPLE_RATE as usize / BUCKET as usize];
+            let mut speech = quiet.clone();
+            // Speech is only on Mic, apart from one known silent second.
+            for (i, peak) in speech.iter_mut().enumerate() {
+                let sec = i as i64 * BUCKET / SAMPLE_RATE as i64;
+                if sec != 3 {
+                    *peak = [-0.5, 0.5];
+                }
+            }
+            let mut s = Silence::open(p.sequence(), &HashSet::from([mic])).unwrap();
+            (s.min_len, s.pad) = (0.5, 0.0);
+            assert_eq!(s.clips(), &[mic]);
+            let spans = s
+                .spans(p.sequence(), &|c| {
+                    Some(if c.id == mic { &speech } else { &quiet })
+                })
+                .unwrap();
+            assert_eq!(spans.len(), 1);
+            assert_eq!(spans[0].0, mic);
+            let mut h = History::new(p.clone());
+            h.apply(Command::CutSpans { spans, speed: None }).unwrap();
+            for t in h.project().sequence().tracks() {
+                assert_eq!(t.clips().len(), 2);
+            }
+            assert!(h.undo());
+            assert_eq!(h.project(), &p);
+            let h = super::super::highlights::Highlights::open(p.sequence(), &HashSet::from([mic]))
+                .unwrap();
+            assert_eq!(h.audio(), &[mic]);
+            assert_ne!(mic, game);
+        }
+    }
 
     /// Acceptance: Cut leaves two adjacent clips with the silence gone, undone in one step,
     /// and Speed Up shortens the timeline by what the speed saves.

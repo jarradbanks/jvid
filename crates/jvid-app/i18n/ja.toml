@@ -945,3 +945,7 @@ remove = "削除"
 remove_all = "すべて削除"
 pause = "間 {seconds} 秒"
 none = "フィラーや間はありません"
+
+[analysis]
+audio_source = "音声ソース"
+source_stream = "{name} · ストリーム {number}"

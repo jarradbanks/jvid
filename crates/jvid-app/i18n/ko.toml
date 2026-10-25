@@ -945,3 +945,7 @@ remove = "제거"
 remove_all = "모두 제거"
 pause = "멈춤 {seconds}초"
 none = "군더더기나 멈춤이 없습니다"
+
+[analysis]
+audio_source = "오디오 소스"
+source_stream = "{name} · 스트림 {number}"
