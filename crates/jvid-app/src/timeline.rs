@@ -325,6 +325,15 @@ fn visible(clips: &[Clip], start: Time, end: Time) -> &[Clip] {
 }
 
 impl Timeline {
+    /// The loaded filmstrip frame of `a` nearest `source`, as the reframe overlay's wide shot.
+    pub fn strip_frame(&self, a: &MediaAsset, source: Time) -> Option<egui::TextureId> {
+        let probe = a.probe.as_ref()?;
+        let texs = self.media.strips.get(&a.path)?.as_ref()?;
+        // Same spacing `Media::filmstrip` reads at.
+        let step = FLICKS_PER_SECOND.max(probe.duration.0 / thumbnails::STRIP_MAX);
+        texs.get((source.0 / step).max(0) as usize).map(|t| t.id())
+    }
+
     pub fn playhead(&self) -> Time {
         self.transport.position(0)
     }

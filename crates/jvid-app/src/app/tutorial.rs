@@ -1247,7 +1247,7 @@ fn dim(ctx: &egui::Context, targets: &[Rect]) {
 
 /// `screen` less `holes`, as rects: in each band between hole edges, the gaps between the
 /// holes crossing it.
-fn shaded(screen: Rect, holes: &[Rect]) -> Vec<Rect> {
+pub(crate) fn shaded(screen: Rect, holes: &[Rect]) -> Vec<Rect> {
     let edges = holes.iter().flat_map(|h| [h.top(), h.bottom()]);
     let mut ys: Vec<f32> = edges.chain([screen.top(), screen.bottom()]).collect();
     ys.sort_by(f32::total_cmp);
