@@ -22,6 +22,94 @@ const BARS: [[u8; 3]; 8] = [
 /// In 8-bit codes: limited-range rounding and 4:2:0 chroma cost a level or two.
 const TOLERANCE: i32 = 3;
 
+/// A Program RGB image exported and reopened in the viewer keeps its colors at HD sizes.
+/// Flat patch centers exclude 4:2:0 edges; four codes cover codec and YUV quantization.
+#[test]
+fn sdr_export_round_trips_the_program_colors() {
+    if !gpu() {
+        return;
+    }
+    jvid_media::ffmpeg::init().unwrap();
+    let (device, queue) = device().unwrap();
+    let patches = [
+        [255, 0, 0],
+        [0, 255, 0],
+        [0, 0, 255],
+        [128; 3],
+        [0; 3],
+        [255; 3],
+    ];
+    for (w, h) in [(1280, 720), (1920, 1080)] {
+        let rgba: Vec<_> = (0..h)
+            .flat_map(|_| {
+                (0..w).flat_map(|x| {
+                    let [r, g, b] = patches[(x * patches.len() as u32 / w) as usize];
+                    [r, g, b, 255]
+                })
+            })
+            .collect();
+        let path =
+            std::env::temp_dir().join(format!("jvid-program-sdr-{h}-{}.mov", std::process::id()));
+        let preset = jvid_core::preset::Preset {
+            name: "SDR color regression".into(),
+            extension: "mov".into(),
+            // FFmpeg's built-in ProRes encoder is available without GPL or hardware support,
+            // and keeps this regression independent of H.264 family fallback policy.
+            video: Some(jvid_core::preset::VideoCodec::ProRes),
+            audio: None,
+            size: None,
+            frame_rate: None,
+            options: std::collections::BTreeMap::from([
+                ("encoder".into(), "software".into()),
+                ("crf".into(), "12".into()),
+            ]),
+        };
+        let mut enc = jvid_media::encode::Encoder::create(
+            &path,
+            (w, h),
+            jvid_core::time::Rate::new(30, 1),
+            &preset,
+        )
+        .unwrap();
+        for _ in 0..3 {
+            enc.video(&rgba).unwrap();
+        }
+        enc.finish().unwrap();
+        let f = VideoDecoder::open(&path)
+            .unwrap()
+            .frame_at(Time(0))
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        preview.upload(
+            &device,
+            &queue,
+            &Yuv {
+                width: f.width,
+                height: f.height,
+                planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
+                bt709: f.bt709,
+                full_range: f.full_range,
+                hdr: f.hdr,
+            },
+            1,
+        );
+        let got = read_back(&device, &queue, preview.image().unwrap());
+        for (i, want) in patches.iter().enumerate() {
+            let x = (2 * i + 1) * w as usize / (2 * patches.len());
+            let px = (h as usize / 2 * w as usize + x) * 4;
+            assert!(
+                got[px..px + 3]
+                    .iter()
+                    .zip(want)
+                    .all(|(g, w)| g.abs_diff(*w) <= 4),
+                "{w}x{h} patch {i}: {:?}, want {want:?}",
+                &got[px..px + 3]
+            );
+        }
+    }
+}
+
 #[test]
 fn corpus_colour_bars_match_reference_rgb() {
     let Some(dir) = corpus() else { return };
