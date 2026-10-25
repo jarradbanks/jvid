@@ -7,8 +7,12 @@ use jvid_audio::{InputBackend, Recorder};
 use jvid_core::history::{Command, History};
 use jvid_core::model::{AudioInfo, ProbeInfo, StreamInfo, TrackId};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
+use jvid_media::waveforms::Pyramid;
 
 use crate::i18n::tr;
+use crate::timeline::Live;
+
+const _: () = assert!(jvid_audio::PEAK_FRAMES as i64 == jvid_media::waveforms::BUCKET);
 
 /// `media` beside a saved project; the app data folder's `recordings` for an untitled one.
 pub fn media_dir(project: Option<&Path>) -> Option<PathBuf> {
@@ -74,15 +78,35 @@ impl Take {
         Ok(self.level)
     }
 
-    /// Closes the file and places it on the track at the record start, as one undo step. On
-    /// failure the project is unchanged; the file stays on disk unless it is empty.
-    pub fn finish(self, history: &mut History) -> Result<(), String> {
+    /// Brings `live`, the timeline's drawing of this take, up to what's been written.
+    pub fn show(&self, live: &mut Option<Live>) {
+        let live = live.get_or_insert_with(|| Live {
+            start: self.start,
+            name: self
+                .path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into(),
+            rate: self.recorder.format.rate,
+            peaks: Vec::new(),
+        });
+        let peaks = self.recorder.peaks();
+        // Only the new peaks are copied; the last one shown may have grown since.
+        live.peaks.truncate(live.peaks.len().saturating_sub(1));
+        live.peaks.extend_from_slice(&peaks[live.peaks.len()..]);
+    }
+
+    /// Closes the file and places it on the track at the record start, as one undo step, and
+    /// returns its waveform when it's in the cache's sample rate. On failure the project is
+    /// unchanged; the file stays on disk unless it is empty.
+    pub fn finish(self, history: &mut History) -> Result<Option<Pyramid>, String> {
         let format = self.recorder.format;
-        let frames = self.recorder.finish().map_err(|e| e.to_string())?;
+        let (frames, peaks) = self.recorder.finish().map_err(|e| e.to_string())?;
         let path = self.path;
         if frames == 0 {
             let _ = std::fs::remove_file(&path);
-            return Ok(());
+            return Ok(None);
         }
         let duration = (frames as i128 * FLICKS_PER_SECOND as i128 / format.rate as i128) as i64;
         let probe = ProbeInfo {
@@ -116,7 +140,9 @@ impl Take {
             Ok(_) => history.commit(),
             Err(_) => history.rollback(),
         }
-        placed.map(|_| ())
+        // shortcut: another rate's peaks aren't resampled, so its clip scans the file instead.
+        let shown = (format.rate == jvid_media::audio::SAMPLE_RATE).then(|| Pyramid::new(peaks));
+        placed.map(|_| shown)
     }
 }
 

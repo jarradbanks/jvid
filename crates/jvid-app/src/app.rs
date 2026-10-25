@@ -878,14 +878,18 @@ impl App {
             return;
         };
         self.timeline.level = None;
+        self.timeline.live = None;
         self.preview.program_action("shuttle_stop");
-        if let Err(e) = take.finish(&mut self.history) {
-            self.timeline.notice = Some(tr!("timeline.record_save_failed", error = e));
+        let path = take.path.clone();
+        match take.finish(&mut self.history) {
+            Ok(Some(peaks)) => self.timeline.recorded(path, peaks),
+            Ok(None) => {}
+            Err(e) => self.timeline.notice = Some(tr!("timeline.record_save_failed", error = e)),
         }
     }
 
-    /// Runs the take a frame: feeds the header meter, and ends it when the track is disarmed
-    /// or the device fails.
+    /// Runs the take a frame: feeds the header meter and the live clip, and ends it when the
+    /// track is disarmed or the device fails.
     fn poll_take(&mut self, ctx: &egui::Context) {
         let Some(take) = &mut self.take else {
             return;
@@ -896,6 +900,7 @@ impl App {
         match take.poll() {
             Ok(level) => {
                 self.timeline.level = Some(level);
+                take.show(&mut self.timeline.live);
                 ctx.request_repaint();
             }
             Err(e) => {

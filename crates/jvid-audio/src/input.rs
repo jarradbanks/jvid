@@ -14,6 +14,8 @@ use rtrb::{Consumer, Producer, RingBuffer};
 
 /// Ring capacity in seconds: how long the UI may stall before samples drop.
 const RING_SECS: usize = 4;
+/// Sample frames per [`Recorder::peaks`] entry; jvid-media's waveform `BUCKET`.
+pub const PEAK_FRAMES: u64 = 256;
 
 /// State shared between the capture callback and the [`Recorder`].
 pub struct Capture {
@@ -78,6 +80,8 @@ pub struct Recorder {
     pub format: Format,
     /// Samples written so far.
     samples: u64,
+    /// Lowest and highest sample of each [`PEAK_FRAMES`] frames written, the last one partial.
+    peaks: Vec<[f32; 2]>,
 }
 
 impl Recorder {
@@ -112,6 +116,7 @@ impl Recorder {
                 file,
                 format,
                 samples: 0,
+                peaks: Vec::new(),
             }),
             Err(e) => {
                 drop(file);
@@ -128,10 +133,26 @@ impl Recorder {
             return Ok(());
         };
         let (a, b) = chunk.as_slices();
-        let bytes: Vec<u8> = a.iter().chain(b).flat_map(|&s| pcm16(s)).collect();
+        let per_peak = PEAK_FRAMES * u64::from(self.format.channels.max(1));
+        let mut bytes = Vec::with_capacity(n * 2);
+        for (i, &s) in a.iter().chain(b).enumerate() {
+            let s = s.clamp(-1.0, 1.0);
+            let at = ((self.samples + i as u64) / per_peak) as usize;
+            if at == self.peaks.len() {
+                self.peaks.push([f32::MAX, f32::MIN]);
+            }
+            let p = &mut self.peaks[at];
+            *p = [p[0].min(s), p[1].max(s)];
+            bytes.extend_from_slice(&pcm16(s));
+        }
         chunk.commit_all();
         self.samples += n as u64;
         self.file.write_all(&bytes)
+    }
+
+    /// The waveform of what's been written, for drawing the take as it records.
+    pub fn peaks(&self) -> &[[f32; 2]] {
+        &self.peaks
     }
 
     /// Peak absolute sample since the last call, 0..=1 (1 is full scale).
@@ -144,8 +165,9 @@ impl Recorder {
         self.capture.lost.load(Ordering::Acquire)
     }
 
-    /// Stops the stream, writes the rest and the final sizes. Returns the sample frames recorded.
-    pub fn finish(mut self) -> io::Result<u64> {
+    /// Stops the stream, writes the rest and the final sizes. Returns the sample frames recorded
+    /// and their [`Self::peaks`].
+    pub fn finish(mut self) -> io::Result<(u64, Vec<[f32; 2]>)> {
         drop(std::mem::replace(&mut self.stream, Box::new(())));
         self.poll()?;
         let dropped = self.capture.dropped.load(Ordering::Relaxed);
@@ -161,7 +183,7 @@ impl Recorder {
         file.seek(SeekFrom::Start(0))?;
         file.write_all(&wav_header(self.format, bytes))?;
         file.sync_all()?;
-        Ok(frames)
+        Ok((frames, self.peaks))
     }
 }
 
@@ -334,7 +356,9 @@ mod tests {
         assert_eq!(r.level(), 0.0, "the peak resets once read");
         // Out of range is clipped; the trailing half frame is dropped.
         mic.feed(&[-2.0, 0.25, 0.75]);
-        assert_eq!(r.finish().unwrap(), 3);
+        let (frames, peaks) = r.finish().unwrap();
+        assert_eq!(frames, 3);
+        assert_eq!(peaks, [[-1.0, 1.0]], "clipped like the file");
 
         let b = std::fs::read(&path).unwrap();
         assert_eq!(b.len(), 44 + 3 * 2 * 2);
@@ -373,6 +397,22 @@ mod tests {
         mic.feed(&vec![0.1; cap + 10]);
         mic.capture.lock().unwrap().as_ref().unwrap().lose();
         assert!(r.lost());
-        assert_eq!(r.finish().unwrap(), cap as u64 / 2);
+        assert_eq!(r.finish().unwrap().0, cap as u64 / 2);
+    }
+
+    #[test]
+    fn peaks_cover_peak_frames_across_channels_and_polls() {
+        let path = temp("peaks.wav");
+        let mic = FakeMic::default();
+        let mut r = Recorder::start(&mut mic.clone(), None, &path).unwrap();
+        // Stereo: a peak is 512 samples. Fed in odd sizes so polls split peaks.
+        mic.feed(&vec![0.5; 300]);
+        r.poll().unwrap();
+        assert_eq!(r.peaks(), [[0.5, 0.5]]);
+        mic.feed(&vec![-0.25; 300]);
+        r.poll().unwrap();
+        assert_eq!(r.peaks(), [[-0.25, 0.5], [-0.25, -0.25]]);
+        assert_eq!(PEAK_FRAMES as i64, jvid_media::waveforms::BUCKET);
+        r.finish().unwrap();
     }
 }

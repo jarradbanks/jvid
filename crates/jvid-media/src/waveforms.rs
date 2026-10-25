@@ -56,23 +56,29 @@ impl Pyramid {
             .rev()
             .find(|&l| (BUCKET << l) as f64 <= spp)
             .unwrap_or(0);
-        let (level, size) = (&self.levels[l], BUCKET << l);
-        (0..width)
-            .map(|x| {
-                let lo = start + (x as f64 * spp) as i64;
-                let hi = (start + ((x + 1) as f64 * spp) as i64).max(lo + 1);
-                let a = lo.div_euclid(size).clamp(0, level.len() as i64) as usize;
-                let b = (hi + size - 1)
-                    .div_euclid(size)
-                    .clamp(0, level.len() as i64) as usize;
-                if a >= b {
-                    [0.0; 2]
-                } else {
-                    merge(&level[a..b])
-                }
-            })
-            .collect()
+        query(&self.levels[l], BUCKET << l, start, end, width)
     }
+}
+
+/// [`Pyramid::query`] on one level whose peaks span `size` sample frames each, such as a
+/// recording's finest peaks while they grow.
+pub fn query(level: &[Peak], size: i64, start: i64, end: i64, width: usize) -> Vec<Peak> {
+    let spp = (end - start) as f64 / width.max(1) as f64;
+    (0..width)
+        .map(|x| {
+            let lo = start + (x as f64 * spp) as i64;
+            let hi = (start + ((x + 1) as f64 * spp) as i64).max(lo + 1);
+            let a = lo.div_euclid(size).clamp(0, level.len() as i64) as usize;
+            let b = (hi + size - 1)
+                .div_euclid(size)
+                .clamp(0, level.len() as i64) as usize;
+            if a >= b {
+                [0.0; 2]
+            } else {
+                merge(&level[a..b])
+            }
+        })
+        .collect()
 }
 
 fn merge(p: &[Peak]) -> Peak {

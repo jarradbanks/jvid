@@ -25,7 +25,7 @@ use jvid_core::model::{
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_jobs::Priority;
 use jvid_media::thumbnails;
-use jvid_media::waveforms::Pyramid;
+use jvid_media::waveforms::{self, BUCKET, Peak, Pyramid};
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
 use suite_ui::widgets::{Button, TextInput};
@@ -134,6 +134,18 @@ pub struct Timeline {
     pub armed: Option<TrackId>,
     /// The input level while a take records onto `armed`, 0..=1; the app sets it.
     pub level: Option<f32>,
+    /// The take recording onto `armed`, drawn as a clip; the app keeps it up to date.
+    pub live: Option<Live>,
+}
+
+/// A voiceover take while it records: drawn on the armed track, not in the project.
+pub struct Live {
+    pub start: Time,
+    /// The file's name, as its clip will show it.
+    pub name: String,
+    /// The input's sample rate; each peak spans [`BUCKET`] of its frames.
+    pub rate: u32,
+    pub peaks: Vec<Peak>,
 }
 
 /// Snap reach in points.
@@ -204,6 +216,7 @@ impl Default for Timeline {
             silence: None,
             armed: None,
             level: None,
+            live: None,
         }
     }
 }
@@ -300,6 +313,17 @@ fn visible(clips: &[Clip], start: Time, end: Time) -> &[Clip] {
 impl Timeline {
     pub fn playhead(&self) -> Time {
         self.transport.position(0)
+    }
+
+    /// The recording take and where it ends: at the playhead, which plays on as it records.
+    fn live_span(&self) -> Option<(&Live, Time)> {
+        let live = self.live.as_ref().filter(|_| self.armed.is_some())?;
+        Some((live, self.playhead().max(live.start)))
+    }
+
+    /// The waveform a finished take showed, kept for its clip at `path` instead of a rescan.
+    pub fn recorded(&mut self, path: PathBuf, peaks: Pyramid) {
+        self.media.peaks.insert((path, 0), Some(peaks));
     }
 
     pub fn selected(&self) -> &HashSet<ClipId> {
@@ -1204,6 +1228,15 @@ impl Timeline {
                 } else if cr.dragged() || cr.drag_stopped() {
                     held = Some((clip, track, cr));
                 }
+            }
+            if self.armed == Some(track.id)
+                && let Some((live, end)) = self.live_span()
+            {
+                let (l, r) = (lanes.left() - 8.0, lanes.right() + 8.0);
+                let x = view.x(live.start).clamp(l, r)..=view.x(end).clamp(l, r);
+                let rows = lane.top()..=lane.top() + track.height;
+                let r = Rect::from_x_y_ranges(x, rows).shrink2(vec2(1.0, 2.0));
+                paint_live(&clip_painter, r, lanes, view, live);
             }
         }
         // After the clips, so the release frame still reaches an off-screen held clip.
@@ -2525,20 +2558,57 @@ impl Media {
             sample(source(rect.right())),
             width,
         );
-        let (mid, half) = (rect.center().y, rect.height() / 2.0 - 1.0);
         let tint = color::CLIP_GREEN.lerp_to_gamma(color::ink(), 0.45);
-        for (i, [lo, hi]) in peaks.into_iter().enumerate() {
-            let x = rect.left() + i as f32 + 0.5;
-            let (y0, y1) = (
-                mid - hi.clamp(-1.0, 1.0) * half,
-                mid - lo.clamp(-1.0, 1.0) * half,
-            );
-            painter.line_segment(
-                [pos2(x, y0), pos2(x, y1.max(y0 + 1.0))],
-                Stroke::new(1.0, tint),
-            );
-        }
+        peak_lines(painter, rect, peaks, tint);
     }
+}
+
+/// One min/max line per pixel column of `rect`, from its left edge.
+fn peak_lines(painter: &egui::Painter, rect: Rect, peaks: Vec<Peak>, tint: egui::Color32) {
+    let (mid, half) = (rect.center().y, rect.height() / 2.0 - 1.0);
+    for (i, [lo, hi]) in peaks.into_iter().enumerate() {
+        let x = rect.left() + i as f32 + 0.5;
+        let (y0, y1) = (
+            mid - hi.clamp(-1.0, 1.0) * half,
+            mid - lo.clamp(-1.0, 1.0) * half,
+        );
+        painter.line_segment(
+            [pos2(x, y0), pos2(x, y1.max(y0 + 1.0))],
+            Stroke::new(1.0, tint),
+        );
+    }
+}
+
+/// A take as it records, at `r`: a clip in the recording colour, Red, with the waveform of
+/// what's come in so far.
+fn paint_live(painter: &egui::Painter, r: Rect, lanes: Rect, view: View, live: &Live) {
+    let fill = color::red().lerp_to_gamma(color::field(), 0.55);
+    painter.rect_filled(r, CornerRadius::same(radius::SMALL), fill);
+    let shown = r.intersect(lanes);
+    let content = Rect::from_x_y_ranges(shown.x_range(), r.top() + NAME_STRIP..=r.bottom());
+    let clipped = painter.with_clip_rect(r.intersect(painter.clip_rect()));
+    if content.height() >= 8.0 && content.width() >= 1.0 {
+        let frame = |x: f32| {
+            ((view.time(x) - live.start).0 as i128 * live.rate as i128 / FLICKS_PER_SECOND as i128)
+                as i64
+        };
+        let width = content.width().ceil() as usize;
+        let (a, b) = (frame(content.left()), frame(content.right()));
+        let peaks = waveforms::query(&live.peaks, BUCKET, a, b, width);
+        peak_lines(
+            &clipped,
+            content,
+            peaks,
+            fill.lerp_to_gamma(color::ink(), 0.45),
+        );
+    }
+    clipped.text(
+        pos2(shown.left().max(r.left()) + 6.0, r.top() + NAME_STRIP / 2.0),
+        Align2::LEFT_CENTER,
+        &live.name,
+        theme::body_strong(),
+        color::ink(),
+    );
 }
 
 #[cfg(test)]
@@ -3210,6 +3280,66 @@ mod tests {
         assert_eq!(snap_height(999.0), Track::MAX_HEIGHT);
     }
 
+    /// #326: a take draws as a clip from its start to the playhead, its waveform growing with
+    /// the input; on stop the clip lands where it was drawn, with that waveform, in one undo.
+    #[test]
+    fn a_take_grows_with_the_playhead_and_lands_where_it_was_drawn() {
+        use crate::record::{Take, tests::FakeMic};
+        let dir = std::env::temp_dir().join(format!("jvid-live-take-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut h = History::new(project(2));
+        let a1 = h.project().sequence().tracks()[1].id;
+        let mut t = Timeline::default();
+        t.sync(h.project());
+        t.armed = Some(a1);
+        let start = Time(10 * S);
+        t.seek(start);
+        let mic = FakeMic::default();
+        let mut take = Take::start(&mut mic.clone(), None, &dir, a1, start).unwrap();
+        let feed = mic.0.lock().unwrap().clone().unwrap();
+        // Two seconds at 30 frames a second: 1600 samples a frame at 48 kHz mono.
+        for frame in 1..=60 {
+            let level = frame as f32 / 60.0;
+            feed.push(&[level, -level].repeat(800));
+            take.poll().unwrap();
+            take.show(&mut t.live);
+            t.seek(start + Time(frame * S / 30));
+            let (live, end) = t.live_span().unwrap();
+            assert_eq!(live.start, start);
+            assert_eq!(end - start, Time(frame * S / 30), "frame {frame}");
+            assert_eq!(live.peaks.len(), (frame as usize * 1600).div_ceil(256));
+            assert_eq!(live.peaks.last(), Some(&[-level, level]));
+        }
+        let shown = t.live.take().unwrap().peaks;
+        let path = take.path.clone();
+        let rev = h.rev();
+        let peaks = take.finish(&mut h).unwrap().expect("48 kHz peaks");
+        assert_eq!(peaks.finest(), shown);
+        t.recorded(path.clone(), peaks.clone());
+
+        let a1_clips = |h: &History| h.project().sequence().track(a1).unwrap().clips().to_vec();
+        let clip = a1_clips(&h).into_iter().find(|c| c.start == start).unwrap();
+        assert_eq!(clip.end(), start + Time(2 * S), "where the live clip ended");
+        let asset = h.project().asset(clip.asset).unwrap().path.clone();
+        assert_eq!(t.media.peaks[&(asset, 0)], Some(peaks.clone()));
+        // A rescan of the file next session draws the same waveform, to 16-bit rounding.
+        let scanned = jvid_media::waveforms::Cache::new(dir.join("cache"), 1 << 30)
+            .load(&path, 0)
+            .unwrap();
+        assert_eq!(scanned.finest().len(), shown.len());
+        for (a, b) in scanned.finest().iter().zip(&shown) {
+            assert!(
+                (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4,
+                "{a:?} {b:?}"
+            );
+        }
+
+        assert!(h.undo());
+        assert_eq!(h.rev(), rev);
+        assert!(a1_clips(&h).iter().all(|c| c.start != start));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn audio_headers_arm_one_track_for_recording() {
         use egui_kittest::kittest::Queryable;
@@ -3227,8 +3357,20 @@ mod tests {
         let a1 = h.state().1.project().sequence().tracks()[1].id;
         assert_eq!(h.state().0.armed, Some(a1));
         assert!(!h.state().1.can_undo(), "arming isn't an edit");
-        // While a take records, the toggle stops it.
+        // While a take records, the toggle stops it, and the take draws from 4s to the playhead.
         h.state_mut().0.level = Some(0.5);
+        h.state_mut().0.live = Some(Live {
+            start: Time(4 * S),
+            name: "Voiceover 1.wav".into(),
+            rate: 48_000,
+            peaks: (0..3 * 48_000 / BUCKET)
+                .map(|i| {
+                    let v = 0.2 + 0.6 * ((i as f32 / 40.0).sin() * 0.5 + 0.5);
+                    [-v, v]
+                })
+                .collect(),
+        });
+        h.state_mut().0.seek(Time(7 * S));
         h.run();
         h.snapshot("timeline_recording");
         h.get_by_label("Stop Recording").click();
