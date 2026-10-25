@@ -1,0 +1,20 @@
+[package]
+name = "jvid-updater"
+description = "Authenticated GitHub release updates and an independent installer helper."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+semver.workspace = true
+sha2.workspace = true
+ed25519-dalek.workspace = true
+tempfile.workspace = true
+ureq.workspace = true
+
+[lints]
+workspace = true

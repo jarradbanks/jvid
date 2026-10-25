@@ -15,6 +15,7 @@ jvid-log.workspace = true
 jvid-media.workspace = true
 jvid-transcribe.workspace = true
 jvid-paths.workspace = true
+jvid-updater.workspace = true
 same-file.workspace = true
 tracing.workspace = true
 image.workspace = true
@@ -31,6 +32,7 @@ toml.workspace = true
 gpl-ffmpeg = ["jvid-media/gpl-ffmpeg"]
 
 [dev-dependencies]
+tempfile.workspace = true
 egui_kittest = { workspace = true, features = ["eframe"] }
 suite-ui = { workspace = true, features = ["test-support"] }
 jvid-media = { workspace = true, features = ["test-support"] }

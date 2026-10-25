@@ -57,7 +57,9 @@ begin
   Result := True;
   if (CurPageID = wpSelectDir) and FileExists(ExpandConstant('{app}\jvid.portable')) then
   begin
-    MsgBox('Choose a different folder. This folder contains a portable copy of jvid.', mbError, MB_OK);
+    Log('Refusing to install over a portable copy.');
+    if not WizardSilent then
+      MsgBox('Choose a different folder. This folder contains a portable copy of jvid.', mbError, MB_OK);
     Result := False;
   end;
 end;
@@ -65,7 +67,7 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
-  { Also enforce this for silent installs, which skip NextButtonClick. }
+  { Also enforce this if the directory wizard page was skipped. }
   if FileExists(ExpandConstant('{app}\jvid.portable')) then
     Result := 'Cannot install over a portable copy. Choose a different folder.';
 end;

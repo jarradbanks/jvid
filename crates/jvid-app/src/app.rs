@@ -101,15 +101,31 @@ pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
             .and_then(|_| jvid_paths::config_dir().map(|d| d.join("window.ron"))),
         ..Default::default()
     };
-    eframe::run_native(
+    let update_install = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let pending = update_install.clone();
+    let result = eframe::run_native(
         "jvid",
         options,
         Box::new(move |cc| {
             let mut app = App::new(cc, &settings);
             app.components.offer();
+            app.updates
+                .init(settings.automatic_update_checks, app.settings_path.clone());
+            app.update_install = pending.clone();
             Ok(Box::new(app))
         }),
-    )
+    );
+    if result.is_ok()
+        && let Some(prepared) = update_install.lock().expect("update request").take()
+        && let Err(e) = prepared.launch()
+    {
+        tracing::error!("Could not launch update helper: {e}");
+        // The existing installation has not been changed; keep the failure visible next launch.
+        if let Some(path) = crate::settings_file::path() {
+            let _ = std::fs::write(path.with_file_name("update-result.txt"), e);
+        }
+    }
+    result
 }
 
 pub struct App {
@@ -140,6 +156,8 @@ pub struct App {
     settings_dialog: crate::project_settings::SettingsDialog,
     components: crate::components::Components,
     preferences: crate::preferences::Preferences,
+    updates: crate::updates::Updates,
+    update_install: std::sync::Arc<std::sync::Mutex<Option<jvid_updater::install::Prepared>>>,
     /// The `language` setting: `system` or a language code.
     language: String,
     /// The `input_device` setting: a device name, empty for the system default.
@@ -226,6 +244,8 @@ impl App {
         app.welcome.tour = !settings.tour_offered;
         // Tests never write the real settings file; those that save set their own.
         app.settings_path = crate::settings_file::path().filter(|_| !cfg!(test));
+        // Native startup owns network checks; constructing an embedded editor stays offline.
+        app.updates.automatic = settings.automatic_update_checks;
         // Nor the real untitled autosave: one there opens every harness on a Restore prompt.
         app.untitled = autosave::untitled().filter(|_| !cfg!(test));
         crate::preferences::reduce_motion(&cc.egui_ctx, settings.reduce_motion);
@@ -286,6 +306,8 @@ impl App {
             settings_dialog: Default::default(),
             components: Default::default(),
             preferences: Default::default(),
+            updates: Default::default(),
+            update_install: Default::default(),
             language: jvid_core::settings::Settings::default().language,
             input_device: String::new(),
             reduce_motion: false,
@@ -612,6 +634,14 @@ impl App {
             if ui.button(tr!("components.title")).clicked() {
                 self.components.open = true;
             }
+            if ui.button(tr!("updates.check")).clicked() {
+                // A prepared download stays available when reopening the update window.
+                if matches!(self.updates.state, jvid_updater::state::State::Ready(_)) {
+                    self.updates.open = true;
+                } else {
+                    self.updates.check(true);
+                }
+            }
             if ui.button(tr!("menu.about")).clicked() {
                 self.prompts.push(Prompt::About);
             }
@@ -891,6 +921,7 @@ impl App {
             || self.export_dialog.is_open()
             || self.preferences.is_open()
             || self.components.open
+            || self.updates.open
             || self.keymap_editor.is_open()
             || self.subtitles.is_open()
             || !self.prompts.is_empty()
@@ -1251,6 +1282,37 @@ impl App {
         self.prompts.push(Prompt::Error(message));
     }
 
+    fn update_work(&self) -> jvid_updater::state::Work {
+        jvid_updater::state::Work {
+            unsaved: self.history.is_dirty(),
+            recording: self.take.is_some(),
+            exporting: self.queue.unsettled() || !self.exports.is_idle(),
+            other_job: self.lesson.is_some()
+                || self.components.is_busy()
+                || self.subtitles.jobs.as_ref().is_some_and(|p| !p.is_idle())
+                || !self.prompts.is_empty(),
+        }
+    }
+
+    fn install_update(&mut self, ctx: &egui::Context) {
+        let mut work = self.update_work();
+        work.unsaved = false;
+        if !work.can_install() {
+            return;
+        }
+        if self.history.is_dirty() && !self.save(false) {
+            if !self.prompts.is_empty() {
+                self.updates.open = false;
+            }
+            return;
+        }
+        if let Some(prepared) = self.updates.prepare(self.update_work()) {
+            *self.update_install.lock().expect("update request") = Some(prepared);
+            self.closing = true;
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+        }
+    }
+
     /// Shows the first waiting prompt and acts on its answer.
     fn show_prompt(&mut self, ctx: &egui::Context) {
         let Some(prompt) = self.prompts.first() else {
@@ -1294,7 +1356,7 @@ impl App {
                 verbatim("jvid"),
                 format!(
                     "{}\n\n{}\n{}",
-                    tr!("about.version", version = env!("CARGO_PKG_VERSION")),
+                    tr!("about.version", version = jvid_updater::VERSION),
                     tr!("about.samples"),
                     crate::samples::credits().join("\n")
                 )
@@ -1364,6 +1426,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.editor_context = Some(ctx.clone());
+        self.updates.poll(&ctx);
         // A control key identifies coalescing within one pointer interaction only.
         if ctx.input(|i| i.pointer.any_pressed()) {
             self.history.end_gesture();
@@ -1642,6 +1705,10 @@ impl eframe::App for App {
                     });
             if changed {
                 self.theme = suite_ui::themes::LiveTheme::new(&self.theme_setting);
+            }
+            let work = self.update_work();
+            if self.updates.show(ui, work, self.settings_path.as_deref()) {
+                self.install_update(&ctx);
             }
         });
 

@@ -1,0 +1,37 @@
+name: Updater
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/updater.yml'
+      - 'crates/jvid-updater/**'
+      - 'packaging/windows.iss'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-inno:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: updater-native-inno
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Ensure Inno compiler
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - run: cargo test --locked -p jvid-updater
+      - name: Real Inno upgrade in an isolated temporary tree
+        run: cargo test --locked -p jvid-updater --lib native_inno_upgrade -- --ignored --nocapture
+        env:
+          JVID_INNO_ISCC: 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'

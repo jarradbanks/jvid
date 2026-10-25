@@ -7,6 +7,9 @@ on:
       - 'packaging/**'
       - 'scripts/packaging/**'
       - 'crates/jvid-paths/**'
+      - 'crates/jvid-updater/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'crates/jvid-app/src/components.rs'
       - 'crates/jvid-app/src/package_smoke.rs'
   workflow_dispatch:
@@ -24,6 +27,7 @@ env:
   CARGO_TERM_COLOR: always
   GGML_NATIVE: 'OFF'
   GGML_METAL: 'OFF'
+  # One workflow-scope trust root for every native build and the protected generator.
   JVID_UPDATE_PUBLIC_KEY: ${{ vars.JVID_UPDATE_PUBLIC_KEY }}
 
 jobs:
@@ -101,23 +105,20 @@ jobs:
           }
       - name: Build editor with required codecs
         run: cargo build --locked --release -p jvid-app --features gpl-ffmpeg
-      # #477 owns this executable and the metadata generator. Conditional until its PR
-      # lands; a release with updater support must ship the helper with the same key.
-      - name: Build updater helper when available
+      # Global public key and JVID_UPDATE_VERSION also apply to this build.
+      - name: Build updater helper
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          if (Test-Path crates/jvid-updater/Cargo.toml) {
-            cargo build --locked --release -p jvid-updater --bin jvid-update-helper
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+          cargo build --locked --release -p jvid-updater --bin jvid-update-helper
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Assemble Windows installer and portable ZIP
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $helperArgs = @()
-          if (Test-Path target/x86_64-pc-windows-msvc/release/jvid-update-helper.exe) { $helperArgs = @('--helper', 'target/x86_64-pc-windows-msvc/release/jvid-update-helper.exe') }
-          python scripts/packaging/build.py --target windows-x86_64 --binary target/x86_64-pc-windows-msvc/release/jvid-app.exe --ffmpeg-dir "$env:FFMPEG_DIR" @helperArgs
+          $helper = 'target/x86_64-pc-windows-msvc/release/jvid-update-helper.exe'
+          if (!(Test-Path -PathType Leaf $helper)) { throw 'Updater helper is required in Windows packages' }
+          python scripts/packaging/build.py --target windows-x86_64 --binary target/x86_64-pc-windows-msvc/release/jvid-app.exe --ffmpeg-dir "$env:FFMPEG_DIR" --helper $helper
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $zip = (Get-ChildItem dist/*-portable.zip).FullName
           $setup = (Get-ChildItem dist/*-setup.exe).FullName
@@ -172,7 +173,7 @@ jobs:
   # Disabled unless explicitly configured by the maintainer; manual/PR runs never publish.
   # A draft gives the maintainer a final signing/source/clean-machine review boundary.
   release-draft:
-    if: startsWith(github.ref, 'refs/tags/') && vars.JVID_RELEASE_ENABLED == 'true'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && vars.JVID_RELEASE_ENABLED == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment: release
@@ -196,17 +197,14 @@ jobs:
         run: python scripts/packaging/collect.py packages release-assets
       - name: Assert complete artifact contract
         run: python scripts/packaging/assert_assets.py release-assets
-      - name: Sign updater metadata when updater is integrated
+      - name: Sign final updater metadata
         env:
           JVID_UPDATE_SIGNING_KEY: ${{ secrets.JVID_UPDATE_SIGNING_KEY }}
-          JVID_UPDATE_PUBLIC_KEY: ${{ vars.JVID_UPDATE_PUBLIC_KEY }}
         run: |
-          if test -f crates/jvid-updater/Cargo.toml; then
-            test -n "$JVID_UPDATE_SIGNING_KEY" && test -n "$JVID_UPDATE_PUBLIC_KEY"
-            cargo run --release --locked -p jvid-updater --bin jvid-update-metadata -- "${GITHUB_REF_NAME#v}" packaging/release-notes.md release-assets
-            test -s release-assets/jvid-update.json
-            test "$(wc -c < release-assets/jvid-update.json.sig)" -eq 64
-          fi
+          test -n "$JVID_UPDATE_SIGNING_KEY" && test -n "$JVID_UPDATE_PUBLIC_KEY"
+          cargo run --release --locked -p jvid-updater --bin jvid-update-metadata -- "${GITHUB_REF_NAME#v}" packaging/release-notes.md release-assets
+          test -s release-assets/jvid-update.json
+          test "$(wc -c < release-assets/jvid-update.json.sig)" -eq 64
       - name: Create reviewable draft release
         env:
           GH_TOKEN: ${{ github.token }}

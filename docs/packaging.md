@@ -99,11 +99,13 @@ Inno Setup uses the stable AppId `{E8D1AB61-17F0-4C1B-8822-82A410FE435A}` across
 versions, remembers the chosen folder, and replaces installer-owned files.
 Installed user data, models and projects are not registered as installer files and
 are retained by upgrades and uninstall. A setup cannot target a folder marked as
-portable, including when invoked silently. Installers support `/DIR=<folder>`,
+portable, including when invoked silently. Silent portable rejection writes its
+reason to the installer log and exits without waiting for a dialog. Installers
+support `/DIR=<folder>`,
 `/VERYSILENT`, `/SUPPRESSMSGBOXES`, `/NORESTART`, `/NOCLOSEAPPLICATIONS` and
 `/NORESTARTAPPLICATIONS`. The #477 helper waits for the app to exit, invokes the
 verified setup, and handles restart; `/RESTARTAPPLICATIONS` alone is not a restart
-contract. No updater is implemented in this packaging change.
+contract. The updater flow and release activation steps are in [updating.md](updating.md).
 
 Portable updates are manual: close jvid, keep `jvid-data`, and replace the program
 files with the new package's files. For macOS, replace only the `.app`, keeping its
@@ -119,7 +121,7 @@ not an authenticity or trust signal.
 
 | Artifact | Target | Marker | Payload |
 | --- | --- | --- | --- |
-| `jvid-{version}-windows-x86_64-setup.exe` | `windows-x86_64` | `windows-installer` | Inno setup; installed root `jvid-app.exe`, FFmpeg DLLs, notices, optional updater helper |
+| `jvid-{version}-windows-x86_64-setup.exe` | `windows-x86_64` | `windows-installer` | Inno setup; installed root `jvid-app.exe`, FFmpeg DLLs, notices, required updater helper |
 | `jvid-{version}-windows-x86_64-portable.zip` | `windows-x86_64` | `windows-portable` | `jvid-{version}-windows-x86_64/` with executable, DLLs, both markers |
 | `jvid-{version}-macos-aarch64.dmg` | `macos-aarch64` | `macos-dmg` | `jvid.app`, Applications link and inventory |
 | `jvid-{version}-macos-aarch64-portable.zip` | `macos-aarch64` | `macos-portable` | `jvid-{version}-macos-aarch64/jvid.app` and inventory; both markers in `Contents/MacOS` |
@@ -136,7 +138,7 @@ package includes `THIRD-PARTY-NOTICES.txt`, jvid's licenses, runtime license tex
 `SOURCE-INFO.txt`, installation instructions and a `package-files.json` inventory.
 Portable data is never part of an archive's payload or inventory.
 
-When #477 is integrated, Windows packaging builds
+Windows packaging builds
 `cargo build --release --locked -p jvid-updater --bin jvid-update-helper --target x86_64-pc-windows-msvc` and puts
 `jvid-update-helper.exe` beside the editor. The same repository variable
 `JVID_UPDATE_PUBLIC_KEY` is passed at build time to the app and helper, along with
@@ -144,7 +146,7 @@ When #477 is integrated, Windows packaging builds
 is a hex-encoded raw 32-byte Ed25519 key; absent configuration must never
 permit an install. #477 owns `jvid-update.json`, its detached `.sig`, the signed
 schema and generator. The generation hook belongs after collecting final native
-assets (and signing/notarization) and before checksums/release creation; the protected release job calls this exact hook once the updater crate exists:
+assets (and signing/notarization) and before checksums/release creation; the protected release job requires this exact hook:
 
 ```sh
 # JVID_UPDATE_SIGNING_KEY: secret 64-hex raw Ed25519 seed.
@@ -156,9 +158,10 @@ cargo run --release --locked -p jvid-updater --bin jvid-update-metadata -- \
 The pipeline asserts the complete five-artifact contract before signing, then
 uploads `jvid-update.json` and its 64-byte raw `jvid-update.json.sig` alongside the
 exact native assets and their checksums. No signed metadata is fabricated by
-packaging alone. At integration, #477's `App::update_work().other_job` must include
-`self.components.is_busy()`: it stays true while cancelled downloads unwind as
-well as during active model transfers.
+packaging alone. The editor's update guard includes `self.components.is_busy()`:
+it stays true while cancelled downloads unwind as well as during active model
+transfers. The draft-release job runs only for enabled tag pushes; PR and manual
+runs, including manual runs against a tag, never create a release.
 
 ## Building candidates and release controls
 
