@@ -19,19 +19,29 @@ pub struct Cut {
     pub end: Time,
 }
 
-/// Writes `cuts` back to back into `out`. `progress` gets 0..=1 and returns `false` to stop,
-/// which fails the export with "cancelled". Call `ffmpeg::init` first.
+/// Writes `cuts` back to back into a new `out`; an existing path is never overwritten.
+/// Callers publish this owned temporary output after validation. `progress` gets 0..=1 and
+/// returns `false` to stop, which fails with "cancelled". Call `ffmpeg::init` first.
 pub fn export(
     cuts: &[Cut],
     out: &Path,
     smart: bool,
     progress: &mut dyn FnMut(f32) -> bool,
 ) -> Result<(), String> {
+    if !progress(0.0) {
+        return Err("cancelled".into());
+    }
     let first = cuts.first().ok_or("nothing to export")?;
     let input = format::input(&first.path).map_err(|e| e.to_string())?;
-    let mut output = format::output(out).map_err(|e| e.to_string())?;
-    // From here `out` is ours: a failure or panic removes it, never a file that was there before.
+    // Reserve ownership before FFmpeg can truncate anything, including a source alias.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(out)
+        .map_err(|e| e.to_string())?;
+    // Declare the guard first so FFmpeg closes the output before cleanup, also on Windows.
     let mut written = Created(out, false);
+    let mut output = format::output(out).map_err(|e| e.to_string())?;
     // Input stream index to output stream index, for video and audio only.
     let mut map = BTreeMap::new();
     let mut src = BTreeMap::new();
@@ -836,6 +846,7 @@ mod tests {
 
         export(&[cut(&src, 40, 140)], &out, false, &mut |_| true).unwrap();
         assert_eq!(indices(&out), range(30, 150));
+        std::fs::remove_file(&out).unwrap();
         if SMART_ENCODER.is_none() {
             return std::fs::remove_dir_all(&tmp).unwrap();
         }
@@ -847,6 +858,7 @@ mod tests {
         let info = crate::probe::probe(&out).unwrap();
         let secs = info.duration.0 as f64 / FLICKS_PER_SECOND as f64;
         assert!((secs - want.len() as f64 / 30.0).abs() < 0.05, "{secs}");
+        std::fs::remove_file(&out).unwrap();
 
         let err = export(&cuts, &out, true, &mut |_| false).unwrap_err();
         assert_eq!(err, "cancelled");
@@ -890,6 +902,59 @@ mod tests {
         assert!(export(&[missing], &out, false, &mut |_| true).is_err());
         assert_eq!(std::fs::read(&out).unwrap(), b"mine");
         std::fs::remove_file(&out).unwrap();
+    }
+
+    #[test]
+    fn never_claims_an_existing_output_or_source_alias() {
+        let Some(dir) = corpus() else { return };
+        crate::ffmpeg::init().unwrap();
+        let fixture = tmp("ownership").with_extension("");
+        std::fs::create_dir(&fixture).unwrap();
+        let source = fixture.join("source.mp4");
+        std::fs::copy(dir.join("frame-index-1080p30.mp4"), &source).unwrap();
+        let original = std::fs::read(&source).unwrap();
+        let out = fixture.join("out.mp4");
+        let alias = fixture.join("alias.mp4");
+        std::fs::hard_link(&source, &alias).unwrap();
+        for smart in [false, true] {
+            std::fs::write(&out, b"previous export").unwrap();
+            for destination in [&out, &source, &alias] {
+                assert!(export(&[cut(&source, 0, 30)], destination, smart, &mut |_| true).is_err());
+            }
+            assert_eq!(std::fs::read(&out).unwrap(), b"previous export");
+            assert_eq!(std::fs::read(&source).unwrap(), original);
+            assert_eq!(std::fs::read(&alias).unwrap(), original);
+        }
+        std::fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn cancellation_failure_and_panic_remove_only_owned_outputs() {
+        let Some(dir) = corpus() else { return };
+        crate::ffmpeg::init().unwrap();
+        let source = dir.join("frame-index-1080p30.mp4");
+        let out = tmp("owned-cleanup");
+        for smart in [false, true] {
+            // On keyframe boundaries Smart can copy on every FFmpeg build.
+            let cuts = [cut(&source, 0, 60)];
+            let error = export(&cuts, &out, smart, &mut |f| f < 0.25).unwrap_err();
+            assert_eq!(error, "cancelled");
+            assert!(!out.exists(), "late cancellation left an owned file");
+            let panicked = std::panic::catch_unwind(|| {
+                let _ = export(&cuts, &out, smart, &mut |f| {
+                    assert!(f < 0.25, "injected packet callback panic");
+                    true
+                });
+            });
+            assert!(panicked.is_err());
+            assert!(!out.exists(), "panic left an owned file");
+            let unsupported = out.with_extension("unsupported-format");
+            assert!(export(&cuts, &unsupported, smart, &mut |_| true).is_err());
+            assert!(
+                !unsupported.exists(),
+                "mux setup failure left a reserved file"
+            );
+        }
     }
 
     /// Video packet pts of `path` in presentation order.
@@ -1014,7 +1079,7 @@ mod tests {
             eprintln!("lossless minute, smart {smart}: {took:?}");
             // Smart render re-encodes up to two of this file's 10 s GOPs, so only copy is timed.
             assert!(smart || took.as_secs_f64() < 3.0, "{took:?}");
+            std::fs::remove_file(&out).unwrap();
         }
-        std::fs::remove_file(&out).unwrap();
     }
 }

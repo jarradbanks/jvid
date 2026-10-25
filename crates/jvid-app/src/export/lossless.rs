@@ -6,7 +6,7 @@ use jvid_core::time::Time;
 use jvid_jobs::Ctx;
 use jvid_media::remux::{self, Cut};
 
-use super::{Error, Partial, Request};
+use super::{Error, Request, replay};
 use crate::i18n::tr;
 
 /// How a lossless export handles cut points.
@@ -165,6 +165,18 @@ pub(super) fn run(
     mode: Lossless,
     ctx: &Ctx,
 ) -> Result<ProbeInfo, Error> {
+    replay(project, req, ctx, |req| {
+        attempt(project, req, mode, ctx).map_err(Into::into)
+    })
+}
+
+/// Remux and probe only a private attempt output; the shared transaction publishes it.
+fn attempt(
+    project: &Project,
+    req: &Request,
+    mode: Lossless,
+    ctx: &Ctx,
+) -> Result<ProbeInfo, Error> {
     let cuts = check(project, req.range).map_err(|why| why.join("; "))?;
     let ext = |p: &std::path::Path| p.extension().map(|e| e.to_ascii_lowercase());
     if ext(&req.path) != ext(&cuts[0].path) {
@@ -184,12 +196,12 @@ pub(super) fn run(
         Err(_) if ctx.is_cancelled() => return Err(Error::Cancelled),
         r => r?,
     }
-    // remux removes its own output on failure; from here a bad file is ours to remove.
-    let partial = Partial(&req.path);
+    if ctx.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
     ctx.set_progress(1.0);
     let info = jvid_media::probe::probe(&req.path)
         .map_err(|e| tr!("export.output_error", error = crate::import::describe(&e)))?;
-    std::mem::forget(partial);
     Ok(info)
 }
 

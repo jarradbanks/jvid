@@ -238,6 +238,8 @@ gb = "{value} GB"
 # Why an export failed; shown after "Export failed:".
 no_file_name = "输出路径没有文件名"
 attempt_error = "无法创建导出任务：{error}"
+source_collision = "输出文件 {path} 是源媒体（{source}）；请选择其他输出文件"
+identity_error = "无法检查 {path} 是否为源媒体：{error}"
 publish_error = "无法生成最终文件 {path}：{error}"
 write_error = "无法写入 {path}：{error}"
 empty_range = "导出范围为空"
