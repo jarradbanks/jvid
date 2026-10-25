@@ -59,6 +59,8 @@ jobs:
           sys.path.insert(0, 'scripts/packaging')
           from build import version
           ref = os.environ['GITHUB_REF']
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('JVID_UPDATE_VERSION=' + version() + '\n')
           if ref.startswith('refs/tags/') and ref != 'refs/tags/v' + version():
               raise SystemExit('Release tag must match workspace.package.version')
           PY
@@ -74,8 +76,10 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          brew install ffmpeg@8 pkg-config
-          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg@8)/lib/pkgconfig" >> "$GITHUB_ENV"
+          brew install ffmpeg pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig" >> "$GITHUB_ENV"
+          major=$(PKG_CONFIG_PATH="$(brew --prefix ffmpeg)/lib/pkgconfig" pkg-config --modversion libavcodec | cut -d. -f1)
+          test "$major" -ge 58 && test "$major" -le 62
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
       - name: Windows build environment
@@ -190,7 +194,19 @@ jobs:
           printf '%s  %s\n' "$SOURCE_SHA256" "jvid-${GITHUB_REF_NAME#v}-corresponding-source.tar.gz" | sha256sum --check
       - name: Prepare downloads
         run: python scripts/packaging/collect.py packages release-assets
-      # #477 supplies its metadata generator; its CLI hook is documented in packaging.md.
+      - name: Assert complete artifact contract
+        run: python scripts/packaging/assert_assets.py release-assets
+      - name: Sign updater metadata when updater is integrated
+        env:
+          JVID_UPDATE_SIGNING_KEY: ${{ secrets.JVID_UPDATE_SIGNING_KEY }}
+          JVID_UPDATE_PUBLIC_KEY: ${{ vars.JVID_UPDATE_PUBLIC_KEY }}
+        run: |
+          if test -f crates/jvid-updater/Cargo.toml; then
+            test -n "$JVID_UPDATE_SIGNING_KEY" && test -n "$JVID_UPDATE_PUBLIC_KEY"
+            cargo run --release --locked -p jvid-updater --bin jvid-update-metadata -- "${GITHUB_REF_NAME#v}" packaging/release-notes.md release-assets
+            test -s release-assets/jvid-update.json
+            test "$(wc -c < release-assets/jvid-update.json.sig)" -eq 64
+          fi
       - name: Create reviewable draft release
         env:
           GH_TOKEN: ${{ github.token }}

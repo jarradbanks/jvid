@@ -5,10 +5,11 @@ use jvid_app::{app, settings_file};
 fn main() -> eframe::Result {
     let mut args = std::env::args_os().skip(1);
     if args.next().as_deref() == Some(std::ffi::OsStr::new("--smoke-test")) {
-        let result = args
-            .next()
-            .ok_or_else(|| "--smoke-test requires an output directory".into())
-            .and_then(|dir| jvid_app::package_smoke::run(std::path::Path::new(&dir)));
+        let Some(dir) = args.next() else {
+            eprintln!("--smoke-test requires an output directory");
+            std::process::exit(2);
+        };
+        let result = jvid_app::package_smoke::run(std::path::Path::new(&dir));
         match result {
             Ok(()) => return Ok(()),
             Err(error) => {

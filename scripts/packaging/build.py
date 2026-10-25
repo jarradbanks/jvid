@@ -161,7 +161,21 @@ def native_licenses(stage, sources, target, ffmpeg):
     elif target.startswith("linux"):
         for source in sources:
             # Resolve symlinks as dpkg may own only the versioned filename.
-            owner = run("dpkg-query", "-S", source.resolve()).split(": /", 1)[0].splitlines()[0]
+            # Ubuntu's merged /usr has packages registered under either /lib or
+            # /usr/lib. Query both spellings of the exact versioned file.
+            resolved = source.resolve()
+            candidates = [source, resolved]
+            if str(resolved).startswith("/usr/lib/"):
+                candidates.append(Path(str(resolved).removeprefix("/usr")))
+            owner = None
+            for candidate in candidates:
+                try:
+                    owner = run("dpkg-query", "-S", candidate).split(": /", 1)[0].splitlines()[0]
+                    break
+                except subprocess.CalledProcessError:
+                    pass
+            if owner is None:
+                raise RuntimeError(f"no Debian package provenance for {source}")
             package = owner.split(":", 1)[0]
             doc = Path("/usr/share/doc") / package
             if not (doc / "copyright").is_file():
@@ -196,7 +210,7 @@ def native_licenses(stage, sources, target, ffmpeg):
 
 
 def marker(bin_dir, value, portable):
-    (bin_dir / "jvid-distribution").write_text(value + "\n", encoding="utf-8")
+    (bin_dir / "jvid-distribution").write_bytes((value + "\n").encode("utf-8"))
     (bin_dir / "jvid.portable").unlink(missing_ok=True)
     if portable:
         (bin_dir / "jvid.portable").write_text("Portable data: see INSTALL.md\n", encoding="utf-8")

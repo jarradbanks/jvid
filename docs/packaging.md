@@ -132,14 +132,28 @@ package includes `THIRD-PARTY-NOTICES.txt`, jvid's licenses, runtime license tex
 Portable data is never part of an archive's payload or inventory.
 
 When #477 is integrated, Windows packaging builds
-`cargo build --release -p jvid-updater --bin jvid-update-helper` and puts
+`cargo build --release --locked -p jvid-updater --bin jvid-update-helper --target x86_64-pc-windows-msvc` and puts
 `jvid-update-helper.exe` beside the editor. The same repository variable
-`JVID_UPDATE_PUBLIC_KEY` is passed at build time to the app and helper. Its value
-is a hex-encoded raw 32-byte Ed25519 public key; absent configuration must never
+`JVID_UPDATE_PUBLIC_KEY` is passed at build time to the app and helper, along with
+`JVID_UPDATE_VERSION` set to the canonical version without `v`. The public key
+is a hex-encoded raw 32-byte Ed25519 key; absent configuration must never
 permit an install. #477 owns `jvid-update.json`, its detached `.sig`, the signed
 schema and generator. The generation hook belongs after collecting final native
-assets (and signing/notarization) and before checksums/release creation; no signed
-metadata is fabricated by packaging alone.
+assets (and signing/notarization) and before checksums/release creation; the protected release job calls this exact hook once the updater crate exists:
+
+```sh
+# JVID_UPDATE_SIGNING_KEY: secret 64-hex raw Ed25519 seed.
+# JVID_UPDATE_PUBLIC_KEY: matching public key used to compile app and helper.
+cargo run --release --locked -p jvid-updater --bin jvid-update-metadata -- \
+  "$version" packaging/release-notes.md release-assets
+```
+
+The pipeline asserts the complete five-artifact contract before signing, then
+uploads `jvid-update.json` and its 64-byte raw `jvid-update.json.sig` alongside the
+exact native assets and their checksums. No signed metadata is fabricated by
+packaging alone. At integration, #477's `App::update_work().other_job` must include
+`self.components.is_busy()`: it stays true while cancelled downloads unwind as
+well as during active model transfers.
 
 ## Building candidates and release controls
 
@@ -157,7 +171,7 @@ Linux assembly requires `patchelf`, `ldd`, `ldconfig`, dpkg copyright files, and
 runtime client libraries listed in the workflow. It recursively copies dependency
 libraries and rewrites their relative loader paths; development prefix references
 must not be needed at runtime. macOS assembly requires `otool`,
-`install_name_tool`, `codesign`, `ditto`, `hdiutil` and Homebrew `ffmpeg@8`.
+`install_name_tool`, `codesign`, `ditto`, `hdiutil` and Homebrew FFmpeg (the workflow rejects versions outside the supported 4.4–8.x range).
 Windows requires Inno Setup 6 and `--ffmpeg-dir`; `fetch_ffmpeg.py` downloads the
 reviewed GPL shared build and verifies `packaging/ffmpeg-windows.json`'s SHA-256.
 The upstream daily URL has finite retention: review and update the lock if it

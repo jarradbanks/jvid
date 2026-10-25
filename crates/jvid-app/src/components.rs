@@ -28,6 +28,12 @@ impl Components {
             jvid_paths::config_dir().is_some_and(|d| !d.join("components-offered").is_file());
     }
 
+    /// Includes cancelled jobs until their bounded network wait has unwound. The
+    /// updater must wait for this before exiting to run an installer.
+    pub fn is_busy(&self) -> bool {
+        self.jobs.as_ref().is_some_and(|jobs| !jobs.is_idle())
+    }
+
     fn cancel(&mut self) {
         if let Some((job, _)) = self.download.take() {
             job.cancel();
@@ -59,6 +65,9 @@ impl Components {
     }
 
     pub fn show(&mut self, ctx: &egui::Context) {
+        if self.is_busy() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
         if !self.open {
             return;
         }
@@ -136,9 +145,40 @@ mod tests {
     use egui_kittest::kittest::Queryable;
 
     #[test]
+    fn cancelled_transfer_remains_busy_until_its_worker_exits() {
+        let (started_tx, started_rx) = channel();
+        let (finish_tx, finish_rx) = channel();
+        let jobs = Pool::new(1);
+        let job = jobs.submit(
+            "blocked-model",
+            jvid_jobs::Priority::Interactive,
+            move |_| {
+                started_tx.send(()).unwrap();
+                finish_rx.recv().unwrap();
+            },
+        );
+        let (_, receiver) = channel();
+        let mut components = Components {
+            jobs: Some(jobs),
+            download: Some((job.clone(), receiver)),
+            ..Default::default()
+        };
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        components.cancel();
+        assert!(job.is_cancelled());
+        assert!(components.is_busy());
+        finish_tx.send(()).unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(2);
+        while components.is_busy() && std::time::Instant::now() < until {
+            std::thread::yield_now();
+        }
+        assert!(!components.is_busy());
+    }
+
+    #[test]
     fn optional_models_offer_sizes_and_can_be_dismissed_without_download() {
-        let mut h = egui_kittest::Harness::new_state(
-            |ctx, c: &mut Components| c.show(ctx),
+        let mut h = egui_kittest::Harness::new_ui_state(
+            |ui, c: &mut Components| c.show(ui.ctx()),
             Components {
                 open: true,
                 ..Default::default()
