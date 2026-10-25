@@ -997,6 +997,9 @@ impl Timeline {
         missing: &HashSet<PathBuf>,
         keymap: &Keymap,
     ) -> Option<Edit> {
+        self.media
+            .strip_requests
+            .on_focus(ui.ctx(), self.media.caches.as_deref());
         let mut edit = self.pending.take().map(|c| (c, None));
         if std::mem::take(&mut self.copied) {
             // Ctrl+V only reaches us as a paste event when the system clipboard has text.

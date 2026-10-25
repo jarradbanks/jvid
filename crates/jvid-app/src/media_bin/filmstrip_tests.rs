@@ -31,6 +31,14 @@ impl BinConsumer {
         );
     }
 
+    pub(crate) fn on_focus(&mut self, ctx: &egui::Context) {
+        self.0.strip_requests.on_focus(ctx, self.0.cache.as_deref());
+    }
+
+    pub(crate) fn texture(&self, path: &std::path::Path) -> egui::TextureId {
+        self.0.strips[path].as_ref().unwrap()[0].id()
+    }
+
     pub(crate) fn frames(&self, path: &std::path::Path) -> usize {
         self.0
             .strips

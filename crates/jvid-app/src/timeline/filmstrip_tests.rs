@@ -103,6 +103,10 @@ impl Fixture {
     }
 
     fn paint(&mut self, bin: bool, timeline: bool) {
+        self.paint_clips(bin, timeline, 1);
+    }
+
+    fn paint_clips(&mut self, bin: bool, timeline: bool, clips: usize) -> Duration {
         let mut output = self.ctx.run_ui(
             egui::RawInput {
                 time: Some(self.ui_time),
@@ -112,7 +116,7 @@ impl Fixture {
                 if bin {
                     self.bin.paint(ui, &self.asset);
                 }
-                if timeline {
+                for _ in 0..if timeline { clips } else { 0 } {
                     self.media.filmstrip(
                         ui,
                         ui.painter(),
@@ -124,13 +128,30 @@ impl Fixture {
                 }
             },
         );
+        let delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
         output.textures_delta.clear();
+        delay
     }
 
     fn grab(&self) -> Grab {
         self.started
             .recv_timeout(TIMEOUT)
             .expect("decode did not start")
+    }
+
+    fn block_pool(&self) -> Sender<()> {
+        let (release, wait) = mpsc::channel();
+        let (started, ready) = mpsc::channel();
+        self.caches.jobs.submit(
+            "refresh-gate",
+            jvid_jobs::Priority::Interactive,
+            move |_| {
+                started.send(()).unwrap();
+                wait.recv_timeout(TIMEOUT).expect("refresh gate timed out");
+            },
+        );
+        ready.recv_timeout(TIMEOUT).unwrap();
+        release
     }
 
     fn idle(&self) {
@@ -191,6 +212,225 @@ impl Fixture {
             .filter(|entry| entry.file_name().to_string_lossy().ends_with(".strip.png"))
             .count()
     }
+}
+
+#[test]
+fn repeated_pending_paints_do_no_metadata_reads_or_new_requests() {
+    let mut f = Fixture::new("pending-hotpath");
+    f.paint(true, true);
+    let first = f.grab();
+    let reads = crate::media_bin::filmstrips::metadata_reads();
+    let worker_reads = f.caches.filmstrips.metadata_reads();
+    let checks = crate::media_bin::filmstrips::generation_checks();
+    let requests = f.caches.filmstrips.requests_started();
+    let refreshes = f.caches.filmstrips.refreshes_started();
+    let mut repaint_delay = Duration::ZERO;
+    for _ in 0..10 {
+        repaint_delay = f.paint_clips(true, true, 500);
+    }
+    let worker_reads_after = f.caches.filmstrips.metadata_reads();
+    // Release the gate before asserting, so a failed regression cannot strand the worker.
+    first.finish.send(Ok(())).unwrap();
+    for _ in 0..2 {
+        f.grab().finish.send(Ok(())).unwrap();
+    }
+    f.idle();
+    assert_eq!(crate::media_bin::filmstrips::metadata_reads(), reads);
+    assert_eq!(worker_reads_after, worker_reads);
+    assert_eq!(
+        crate::media_bin::filmstrips::generation_checks() - checks,
+        20
+    );
+    assert_eq!(f.caches.filmstrips.requests_started(), requests);
+    assert_eq!(f.caches.filmstrips.refreshes_started(), refreshes);
+    assert_eq!(
+        repaint_delay,
+        Duration::MAX,
+        "pending strips keep repainting"
+    );
+}
+
+#[test]
+fn non_hovered_bin_tiles_never_request_filmstrip_metadata() {
+    let mut f = Fixture::new("non-hovered-hotpath");
+    let reads = crate::media_bin::filmstrips::metadata_reads();
+    for _ in 0..10 {
+        let mut output = f.ctx.run_ui(Default::default(), |ui| {
+            for _ in 0..500 {
+                f.bin.poster(ui, &f.asset);
+            }
+        });
+        output.textures_delta.clear();
+    }
+    assert_eq!(crate::media_bin::filmstrips::metadata_reads(), reads);
+    assert_eq!(f.caches.filmstrips.metadata_reads(), 0);
+    assert_eq!(f.caches.filmstrips.requests_started(), 0);
+    assert_eq!(f.caches.filmstrips.refreshes_started(), 0);
+    assert_eq!(f.grabs.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn repeated_completed_paints_do_no_metadata_reads_or_new_requests() {
+    let mut f = Fixture::new("completed-hotpath");
+    f.paint(true, true);
+    f.finish();
+    f.paint(true, true);
+    let reads = crate::media_bin::filmstrips::metadata_reads();
+    let worker_reads = f.caches.filmstrips.metadata_reads();
+    let checks = crate::media_bin::filmstrips::generation_checks();
+    let requests = f.caches.filmstrips.requests_started();
+    let refreshes = f.caches.filmstrips.refreshes_started();
+    let mut repaint_delay = Duration::ZERO;
+    for _ in 0..10 {
+        repaint_delay = f.paint_clips(true, true, 500);
+    }
+    // Leaving hover is also paint-only. Keep the non-hovered tiles stable across frames.
+    for _ in 0..10 {
+        let mut output = f.ctx.run_ui(Default::default(), |ui| {
+            for _ in 0..500 {
+                f.bin.poster(ui, &f.asset);
+            }
+        });
+        output.textures_delta.clear();
+    }
+    assert_eq!(crate::media_bin::filmstrips::metadata_reads(), reads);
+    assert_eq!(f.caches.filmstrips.metadata_reads(), worker_reads);
+    assert_eq!(
+        crate::media_bin::filmstrips::generation_checks() - checks,
+        30
+    );
+    assert_eq!(f.caches.filmstrips.requests_started(), requests);
+    assert_eq!(f.caches.filmstrips.refreshes_started(), refreshes);
+    assert_eq!(
+        repaint_delay,
+        Duration::MAX,
+        "completed strips keep repainting"
+    );
+    assert_eq!(f.grabs.load(Ordering::SeqCst), 3);
+    f.assert_terminal();
+}
+
+#[test]
+fn explicit_source_refresh_replaces_both_completed_consumers() {
+    let mut f = Fixture::new("completed-replacement");
+    f.paint(true, true);
+    f.finish();
+    f.paint(true, true);
+    f.assert_terminal();
+    let before = (
+        f.bin.texture(&f.asset.path),
+        f.media.strips[&f.asset.path].as_ref().unwrap()[0].id(),
+    );
+    let reads = crate::media_bin::filmstrips::metadata_reads();
+    std::fs::write(
+        &f.asset.path,
+        b"a longer completed replacement generation B",
+    )
+    .unwrap();
+    // Both panels use this same explicit refresh boundary. Even if the first check
+    // finishes immediately, a second caller in this pass must not enqueue another stat.
+    for _ in 0..2 {
+        f.caches
+            .filmstrips
+            .refresh_source(&f.caches, &f.asset.path, &f.ctx);
+        f.idle();
+    }
+    assert_eq!(crate::media_bin::filmstrips::metadata_reads(), reads);
+    assert_eq!(f.caches.filmstrips.refreshes_started(), 1);
+    f.paint(true, true);
+    assert_eq!(f.frames(), (0, 0), "old textures survived invalidation");
+    f.finish();
+    f.paint(true, true);
+    assert_eq!(f.frames(), (3, 3));
+    assert_ne!(f.bin.texture(&f.asset.path), before.0);
+    assert_ne!(
+        f.media.strips[&f.asset.path].as_ref().unwrap()[0].id(),
+        before.1
+    );
+    assert_eq!(f.grabs.load(Ordering::SeqCst), 6);
+    assert_eq!(f.caches.filmstrips.requests_started(), 2);
+    f.assert_terminal();
+}
+
+#[test]
+fn hover_reentry_checks_completed_source_and_reloads_only_after_replacement() {
+    let mut f = Fixture::new("hover-replacement");
+    f.paint(true, true);
+    f.finish();
+    f.paint(true, true);
+    for replaced in [false, true] {
+        if replaced {
+            std::fs::write(&f.asset.path, b"a longer hover replacement generation B").unwrap();
+        }
+        let reads = crate::media_bin::filmstrips::metadata_reads();
+        // Hold the refresh until both real consumers have painted the old generation.
+        let release = f.block_pool();
+        let mut output = f
+            .ctx
+            .run_ui(Default::default(), |ui| f.bin.poster(ui, &f.asset));
+        output.textures_delta.clear();
+        f.paint(true, true);
+        assert_eq!(f.frames(), (3, 3));
+        release.send(()).unwrap();
+        f.idle();
+        assert_eq!(crate::media_bin::filmstrips::metadata_reads(), reads);
+        assert_eq!(
+            f.caches.filmstrips.refreshes_started(),
+            if replaced { 2 } else { 1 }
+        );
+        f.paint(true, true);
+        if replaced {
+            assert_eq!(f.frames(), (0, 0));
+            f.finish();
+            f.paint(true, true);
+        }
+        assert_eq!(f.frames(), (3, 3));
+        assert_eq!(f.grabs.load(Ordering::SeqCst), if replaced { 6 } else { 3 });
+        assert_eq!(
+            f.caches.filmstrips.requests_started(),
+            if replaced { 2 } else { 1 }
+        );
+        f.assert_terminal();
+    }
+}
+
+#[test]
+fn focus_return_checks_shared_completed_source_once_and_refreshes_both_panels() {
+    let mut f = Fixture::new("focus-replacement");
+    f.paint(true, true);
+    f.finish();
+    f.paint(true, true);
+    std::fs::write(
+        &f.asset.path,
+        b"a longer focus-return replacement generation B",
+    )
+    .unwrap();
+    let reads = crate::media_bin::filmstrips::metadata_reads();
+    for focused in [false, true] {
+        let mut output = f.ctx.run_ui(
+            egui::RawInput {
+                focused,
+                ..Default::default()
+            },
+            |_ui| {
+                f.bin.on_focus(&f.ctx);
+                f.media
+                    .strip_requests
+                    .on_focus(&f.ctx, f.media.caches.as_deref());
+            },
+        );
+        output.textures_delta.clear();
+    }
+    f.idle();
+    assert_eq!(crate::media_bin::filmstrips::metadata_reads(), reads);
+    assert_eq!(f.caches.filmstrips.refreshes_started(), 1);
+    f.paint(true, true);
+    assert_eq!(f.frames(), (0, 0));
+    f.finish();
+    f.paint(true, true);
+    assert_eq!(f.frames(), (3, 3));
+    assert_eq!(f.grabs.load(Ordering::SeqCst), 6);
+    f.assert_terminal();
 }
 
 impl Drop for Fixture {

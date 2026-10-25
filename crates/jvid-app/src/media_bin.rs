@@ -255,6 +255,9 @@ impl MediaBin {
         importing: bool,
         missing: &HashSet<PathBuf>,
     ) -> BinResponse {
+        self.thumbs
+            .strip_requests
+            .on_focus(ui.ctx(), self.thumbs.cache.as_deref());
         let mut out = BinResponse::default();
         if let Some((n, dragged)) = self.new_text
             && let Some(a) = project.assets().get(n)
@@ -758,6 +761,8 @@ struct Thumbs {
     /// Filmstrips, loaded on first hover and skimmed from memory after.
     strip_requests: FilmstripRequests,
     strips: HashMap<PathBuf, Option<Vec<TextureHandle>>>,
+    /// Re-entering a tile checks its source off-thread, including a completed strip.
+    hovered: Option<PathBuf>,
 }
 
 /// The filmstrip frame under the cursor, `frac` of the way across a tile, of `n` frames.
@@ -837,6 +842,16 @@ impl Thumbs {
             return;
         }
         let Some(probe) = &asset.probe else { return };
+        if skim.is_some() && self.hovered.as_deref() != Some(&asset.path) {
+            self.hovered = Some(asset.path.clone());
+            if let Some(caches) = &self.cache {
+                caches
+                    .filmstrips
+                    .refresh_source(caches, &asset.path, ui.ctx());
+            }
+        } else if skim.is_none() && self.hovered.as_deref() == Some(&asset.path) {
+            self.hovered = None;
+        }
         for (path, img) in self.done.lock().unwrap().drain(..) {
             let tex = ui
                 .ctx()
