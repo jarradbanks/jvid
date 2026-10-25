@@ -1927,7 +1927,11 @@ impl Timeline {
         );
         target.widget_info(|| {
             let name = match fx {
-                true => format!("{}, {}", tr!("timeline.target"), tr!("timeline.fx_on")),
+                true => tr!(
+                    "timeline.target_fx",
+                    target = tr!("timeline.target"),
+                    fx = tr!("timeline.fx_on")
+                ),
                 false => tr!("timeline.target").to_owned(),
             };
             egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, track.target, name)
