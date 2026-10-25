@@ -1064,13 +1064,16 @@ mod tests {
                         "{name} {w}x{h}: {got:?}, want {want:?}"
                     );
                 }
-                // Inspect the actual muxed bitstream, not only the encoder context.
-                let input = format::input(&path).unwrap();
+                // Inspect both stream tags and an actual decoded frame. MOV's nclc atom
+                // carries no range flag; FFmpeg 6.1 exposes ProRes's implicit limited range
+                // on the frame rather than copying it back into the decoder context.
+                let mut input = format::input(&path).unwrap();
                 let stream = input
                     .streams()
                     .best(ffmpeg_next::media::Type::Video)
                     .unwrap();
-                let decoder = codec::Context::from_parameters(stream.parameters())
+                let index = stream.index();
+                let mut decoder = codec::Context::from_parameters(stream.parameters())
                     .unwrap()
                     .decoder()
                     .video()
@@ -1078,9 +1081,46 @@ mod tests {
                 assert_eq!(
                     (
                         decoder.color_space(),
-                        decoder.color_range(),
                         decoder.color_primaries(),
                         decoder.color_transfer_characteristic()
+                    ),
+                    (
+                        Space::BT709,
+                        Primaries::BT709,
+                        TransferCharacteristic::BT709
+                    ),
+                    "{name} {w}x{h}"
+                );
+                if ext == "mp4" {
+                    assert_eq!(decoder.color_range(), Range::MPEG, "{name} {w}x{h}");
+                }
+                let mut decoded = frame::Video::empty();
+                let mut received = false;
+                for (stream, packet) in input.packets() {
+                    if stream.index() != index {
+                        continue;
+                    }
+                    decoder.send_packet(&packet).unwrap();
+                    match decoder.receive_frame(&mut decoded) {
+                        Ok(()) => {
+                            received = true;
+                            break;
+                        }
+                        Err(Error::Other { errno })
+                            if errno == ffmpeg_next::util::error::EAGAIN => {}
+                        Err(error) => panic!("{name} {w}x{h}: {error}"),
+                    }
+                }
+                if !received {
+                    decoder.send_eof().unwrap();
+                    decoder.receive_frame(&mut decoded).unwrap();
+                }
+                assert_eq!(
+                    (
+                        decoded.color_space(),
+                        decoded.color_range(),
+                        decoded.color_primaries(),
+                        decoded.color_transfer_characteristic()
                     ),
                     (
                         Space::BT709,
@@ -1088,7 +1128,7 @@ mod tests {
                         Primaries::BT709,
                         TransferCharacteristic::BT709
                     ),
-                    "{name} {w}x{h}"
+                    "decoded {name} {w}x{h}"
                 );
                 drop((decoder, input));
                 std::fs::remove_file(path).unwrap();
