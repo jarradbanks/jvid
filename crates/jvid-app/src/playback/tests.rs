@@ -122,10 +122,10 @@ impl Decodes {
                 return;
             }
             assert!(!pb.pending.is_empty(), "nothing left to decode");
-            let (k, _, r) = self.decoded.recv_timeout(HUNG).unwrap_or_else(|_| {
+            let (k, path, _, r) = self.decoded.recv_timeout(HUNG).unwrap_or_else(|_| {
                 panic!("no decode finished in {HUNG:?}: {:?}", pb.pending.keys())
             });
-            self.to_pb.send((k, Duration::ZERO, r)).unwrap();
+            self.to_pb.send((k, path, Duration::ZERO, r)).unwrap();
         }
         panic!("decodes never settled");
     }
@@ -307,17 +307,17 @@ fn play_stepped(
             q.contains_key(k) || r.iter().any(|r| r.1.0 == *k)
         };
         while !pb.pending.keys().all(|k| held(k, &queued, &running)) {
-            let (k, _, r) = d.decoded.recv().unwrap();
-            queued.insert(k, r);
+            let (k, path, _, r) = d.decoded.recv().unwrap();
+            queued.insert(k, (path, r));
         }
         // A decode cancelled before a thread took it never runs.
         queued.retain(|k, _| pb.pending.contains_key(k));
         while running.len() < DECODE_THREADS
-            && let Some((k, r)) = queued.pop_first()
+            && let Some((k, (path, r))) = queued.pop_first()
         {
             let took = cost(&k);
             let frames = (took.as_micros() * 30).div_ceil(1_000_000).max(1) as u64;
-            running.push((step + frames, (k, took, r)));
+            running.push((step + frames, (k, path, took, r)));
         }
         if !playing {
             primed |= shown.is_some();
@@ -507,6 +507,58 @@ fn failed_decodes_retry_and_relink_redecodes() {
         .unwrap();
     assert_eq!(layers(&mut pb, h.project(), held), Some(1), "relinked");
     assert!(paths.lock().unwrap().contains(&"new.mp4".into()));
+}
+
+/// Decodes, exact and stand-in, still pending from an asset's old path when it's relinked are
+/// dropped, so only frames from the new file are cached or stood in (#394).
+#[test]
+fn relink_drops_old_path_decodes_still_pending() {
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, "old.mp4", secs(1));
+    let asset = h.project().assets()[0].id;
+    // Each frame's U byte says which file it came from.
+    let from = |path: &Path, t| {
+        let mut f = tiny(t);
+        f.planes[1][0] = u8::from(path == Path::new("new.mp4"));
+        f
+    };
+    let mut pb = Playback::new(
+        Arc::new(move |p, t| Ok(from(p, t))),
+        silent(),
+        DEFAULT_BUDGET,
+    );
+    pb.quick = Some(Arc::new(move |p, t| Ok(from(p, t))));
+    let d = Decodes::take(&mut pb);
+    pb.sync(h.project());
+    pb.decode_ahead(h.project(), 0);
+    let old: Vec<_> = (0..pb.pending.len())
+        .map(|_| d.decoded.recv_timeout(HUNG).unwrap())
+        .collect();
+    let old_stand_in = pb.quick_done.recv_timeout(HUNG).unwrap();
+    h.apply(Command::RelinkAssets(vec![(asset, "new.mp4".into())]))
+        .unwrap();
+    pb.sync(h.project());
+    old.into_iter().for_each(|r| d.to_pb.send(r).unwrap());
+    pb.quick_tx.send(old_stand_in).unwrap();
+    pb.decode_ahead(h.project(), 0);
+    let new_stand_in = pb.quick_done.recv_timeout(HUNG).unwrap();
+    pb.quick_tx.send(new_stand_in).unwrap();
+    pb.decode_ahead(h.project(), 0);
+    let is_new = |f: &Frame| f.planes[1][0] == 1;
+    // Checked before the exact frames land, which retire the stand-ins.
+    assert!(!pb.stand_ins.is_empty());
+    assert!(
+        pb.stand_ins
+            .values()
+            .all(|f| f.as_deref().is_some_and(is_new)),
+        "stale stand-in"
+    );
+    d.settle(&mut pb, h.project(), 0);
+    assert!(!pb.cache.frames.is_empty());
+    assert!(
+        pb.cache.frames.values().all(|(f, _)| is_new(f)),
+        "stale frame cached"
+    );
 }
 
 /// A frame retried the moment its failure is taken is decoded again: its job is still live in the

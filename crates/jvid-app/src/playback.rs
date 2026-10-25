@@ -58,8 +58,10 @@ pub type OpenAudio = Box<dyn FnMut(&Path, usize) -> ClipAudio>;
 
 /// A frame of an asset at a source time.
 type Key = (AssetId, Time);
-/// A finished decode and how long decoding took.
-type Done = (Key, Duration, Result<Frame, String>);
+/// A finished decode, the path it was decoded from and how long decoding took.
+type Done = (Key, PathBuf, Duration, Result<Frame, String>);
+/// A finished keyframe stand-in and the path it was decoded from.
+type QuickDone = (Key, PathBuf, Result<Frame, String>);
 
 /// What to draw for one timeline frame.
 pub struct Shown {
@@ -450,8 +452,8 @@ pub struct Playback {
     quick_jobs: Pool,
     /// Keyframe stand-ins for the parked frame's layers, `None` while decoding.
     stand_ins: HashMap<Key, Option<Arc<Frame>>>,
-    quick_tx: Sender<(Key, Result<Frame, String>)>,
-    quick_done: Receiver<(Key, Result<Frame, String>)>,
+    quick_tx: Sender<QuickDone>,
+    quick_done: Receiver<QuickDone>,
     /// Smoothed time a decode takes.
     latency: Duration,
     /// Frames that failed to decode and when, so they're left out until [`RETRY`].
@@ -585,6 +587,14 @@ impl Playback {
             if self.paths.get(&a.id).is_some_and(|p| *p != a.path) {
                 self.cache.forget(a.id);
                 self.failed.retain(|k, _| k.0 != a.id);
+                self.stand_ins.retain(|k, _| k.0 != a.id);
+                self.pending.retain(|k, h| {
+                    let keep = k.0 != a.id;
+                    if !keep {
+                        h.cancel();
+                    }
+                    keep
+                });
                 // Clips are reopened on the new path as they're next heard.
                 self.audio.reset();
             }
@@ -595,7 +605,11 @@ impl Playback {
     /// Takes finished decodes, then queues every layer of the next [`AHEAD`] frames that isn't
     /// cached or queued, nearest first, and cancels queued frames no longer ahead.
     fn decode_ahead(&mut self, project: &Project, clock: u64) {
-        while let Ok((k, took, r)) = self.done.try_recv() {
+        while let Ok((k, path, took, r)) = self.done.try_recv() {
+            // Decoded from the asset's path before a relink: its job was already dropped (#394).
+            if self.paths.get(&k.0) != Some(&path) {
+                continue;
+            }
             // The job stays live in the pool until its worker gets back to it, so a retry or relink
             // queued this tick would be handed its spent handle and never decode (#371).
             if let Some(h) = self.pending.remove(&k) {
@@ -665,12 +679,13 @@ impl Playback {
                     self.done_tx.clone(),
                     asset.path.clone(),
                 );
-                let job = format!("playback:{}:{}", key.0.0, key.1.0);
+                // The path too, so a relink isn't handed the old path's job still running.
+                let job = format!("playback:{}:{}:{}", key.0.0, key.1.0, path.display());
                 let handle = self.jobs.submit(job, Priority::Interactive, move |ctx| {
                     if !ctx.is_cancelled() {
                         let start = Instant::now();
                         let r = decode(&path, key.1);
-                        let _ = tx.send((key, start.elapsed(), r));
+                        let _ = tx.send((key, path, start.elapsed(), r));
                     }
                 });
                 self.pending.insert(key, handle);
@@ -688,7 +703,10 @@ impl Playback {
     /// Parked on a frame whose layers aren't decoded, queues each one's keyframe as a stand-in,
     /// since an exact frame deep in a long GOP can take a second. Playing, there are none.
     fn stand_in(&mut self, project: &Project, clock: u64) {
-        while let Ok((k, r)) = self.quick_done.try_recv() {
+        while let Ok((k, path, r)) = self.quick_done.try_recv() {
+            if self.paths.get(&k.0) != Some(&path) {
+                continue;
+            }
             match r {
                 Ok(f) => self.stand_ins.insert(k, Some(Arc::new(f))),
                 Err(_) => self.stand_ins.remove(&k),
@@ -715,10 +733,11 @@ impl Playback {
             }
             self.stand_ins.insert(key, None);
             let (quick, tx, path) = (quick.clone(), self.quick_tx.clone(), asset.path.clone());
-            let job = format!("keyframe:{}:{}", key.0.0, key.1.0);
+            let job = format!("keyframe:{}:{}:{}", key.0.0, key.1.0, path.display());
             self.quick_jobs
                 .submit(job, Priority::Interactive, move |_| {
-                    let _ = tx.send((key, quick(&path, key.1)));
+                    let r = quick(&path, key.1);
+                    let _ = tx.send((key, path, r));
                 });
         }
         self.stand_ins.retain(|k, _| want.contains(k));
