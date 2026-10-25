@@ -171,6 +171,34 @@ impl Mixer {
         self.master_ramp.set((gain, gain));
     }
 
+    pub fn tracks(&self) -> usize {
+        self.strips.len()
+    }
+
+    /// Pulls each track through its latency-compensated effects before applying the strip and
+    /// master gains. Track lookahead composes with the reader's clip lookahead, so cascaded
+    /// effects retain their timeline position without delaying any other track.
+    pub fn render(
+        &mut self,
+        start: i64,
+        out: &mut [f32],
+        mut read: impl FnMut(usize, i64, &mut [f32]),
+    ) {
+        out.fill(0.0);
+        let mut scratch = std::mem::take(&mut self.scratch);
+        scratch.resize(out.len(), 0.0);
+        for i in 0..self.strips.len() {
+            self.fx[i].render(&self.strips[i].fx, start, &mut scratch, |at, buf| {
+                read(i, at, buf)
+            });
+            let peak = apply(&mut self.ramps[i], &scratch, out);
+            Meters::raise(&self.meters.tracks[i], peak);
+        }
+        self.scratch = scratch;
+        let peak = apply_in_place(&mut self.master_ramp, out);
+        Meters::raise(&self.meters.master, peak);
+    }
+
     fn target(&self, i: usize) -> (f32, f32) {
         let s = &self.strips[i];
         if !audible(s, self.strips.iter().any(|s| s.solo)) {
@@ -252,6 +280,45 @@ mod tests {
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-5
+    }
+
+    #[test]
+    fn rendered_tracks_with_different_latency_stay_aligned() {
+        let mut cleanup = AudioFx::default();
+        cleanup.noise_reduction.amount = 25.0;
+        let strips = [
+            Strip {
+                pan: -1.0,
+                fx: cleanup,
+                ..Strip::default()
+            },
+            Strip {
+                pan: 1.0,
+                ..Strip::default()
+            },
+        ];
+        let mut mixer = Mixer::with_strips(&strips);
+        let mut out = vec![0.0; 2000 * 2];
+        for start in [0, 2000, 0] {
+            mixer.render(start, &mut out, |_, at, buf| {
+                for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                    f.fill(if at + i as i64 == 1500 { 0.5 } else { 0.0 });
+                }
+            });
+            if start == 0 {
+                for channel in 0..2 {
+                    let peak = out
+                        .iter()
+                        .skip(channel)
+                        .step_by(2)
+                        .enumerate()
+                        .max_by(|(_, a), (_, b)| a.abs().total_cmp(&b.abs()))
+                        .unwrap()
+                        .0;
+                    assert_eq!(peak, 1500, "channel {channel}");
+                }
+            }
+        }
     }
 
     #[test]
