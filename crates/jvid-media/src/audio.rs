@@ -65,7 +65,8 @@ impl AudioDecoder {
         })
     }
 
-    /// Positions the decoder so the next chunk starts exactly at sample frame `sample`.
+    /// Drops samples before `sample`. A delayed stream can start later: callers must place each
+    /// chunk at [`Chunk::start`], leaving the gap silent.
     pub fn seek(&mut self, sample: i64) -> Result<(), Error> {
         let from = (sample - PREROLL_SAMPLES).max(0) * 1_000_000 / SAMPLE_RATE as i64;
         self.input.seek(from, ..from)?;
@@ -284,10 +285,117 @@ fn gcd(a: i64, b: i64) -> i64 {
     if b == 0 { a } else { gcd(b, a % b) }
 }
 
+/// Generated, lossless offset streams shared by decoder and app regressions.
+#[cfg(feature = "test-support")]
+pub mod offset_fixture {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    pub struct Fixture(pub PathBuf);
+
+    impl Fixture {
+        /// A tone on a positive DC level keeps its onset unambiguous and detects incorrect
+        /// seeks to a different tone phase. Returned samples use the source's timeline clock.
+        pub fn sample(nth: usize, frame: i64) -> f32 {
+            let (offset, level, hz) = if nth == 0 {
+                (24_000, 0.25, 997.0)
+            } else {
+                (36_000, 0.5, 1777.0)
+            };
+            if !(offset..96_000).contains(&frame) {
+                return 0.0;
+            }
+            (level
+                + 0.125 * (std::f64::consts::TAU * hz * (frame - offset) as f64 / 48_000.0).sin())
+                as f32
+        }
+    }
+
+    impl Default for Fixture {
+        fn default() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "jvid-offset-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            // MOV keeps PCM timestamps in sample units; MKV's millisecond time base cannot
+            // distinguish the tone phase at arbitrary PCM seek positions.
+            let path = dir.join("offset.mov");
+            let result = std::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-itsoffset",
+                    "0.5",
+                    "-i",
+                    "aevalsrc=0.25+0.125*sin(2*PI*997*t):s=48000:d=1.5",
+                    "-f",
+                    "lavfi",
+                    "-itsoffset",
+                    "0.75",
+                    "-i",
+                    "aevalsrc=0.5+0.125*sin(2*PI*1777*t):s=48000:d=1.25",
+                    "-map",
+                    "0:a",
+                    "-map",
+                    "1:a",
+                    "-c:a",
+                    "pcm_s16le",
+                    "-copyts",
+                    "-avoid_negative_ts",
+                    "disabled",
+                ])
+                .arg(&path)
+                .output()
+                .expect("offset regression requires ffmpeg");
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            Self(path)
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(self.0.parent().unwrap());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_media::corpus;
+
+    #[test]
+    fn independently_offset_streams_keep_timestamps_across_seeks() {
+        crate::ffmpeg::init().unwrap();
+        let fixture = offset_fixture::Fixture::default();
+        for (nth, offset) in [(0, 24_000), (1, 36_000)] {
+            let mut d = AudioDecoder::open(&fixture.0, nth).unwrap();
+            for target in [0, 12_000, 40_000, 0] {
+                d.seek(target).unwrap();
+                let c = d.next_chunk().unwrap().unwrap();
+                assert_eq!(c.start, target.max(offset));
+                for (i, pair) in c.samples.as_chunks::<2>().0.iter().enumerate() {
+                    let want = offset_fixture::Fixture::sample(nth, c.start + i as i64);
+                    assert!(
+                        pair.iter().all(|x| (x - want).abs() <= 1.0 / 32768.0),
+                        "stream {nth}, seek {target}, sample {}: {pair:?} vs {want}",
+                        c.start + i as i64
+                    );
+                }
+            }
+        }
+    }
 
     fn decode_all(path: &Path, nth: usize) -> Vec<f32> {
         let mut d = AudioDecoder::open(path, nth).unwrap();

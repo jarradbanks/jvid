@@ -15,6 +15,97 @@ fn secs(s: i64) -> Time {
     Time(s * FLICKS_PER_SECOND)
 }
 
+#[test]
+fn delayed_stream_reads_keep_silence_and_match_waveforms() {
+    jvid_media::ffmpeg::init().unwrap();
+    let fixture = jvid_media::audio::offset_fixture::Fixture::default();
+    for (nth, offset) in [(0, 24_000), (1, 36_000)] {
+        let mut read = blocking(&fixture.0, nth);
+        for (start, frames) in [
+            (0, 48_000),
+            (12_000, 24_000),
+            (36_000, 4096),
+            (40_096, 4096),
+            (0, 1024),
+        ] {
+            let mut got = vec![1.0; frames * 2];
+            read(start, &mut got);
+            for (i, pair) in got.as_chunks::<2>().0.iter().enumerate() {
+                let want =
+                    jvid_media::audio::offset_fixture::Fixture::sample(nth, start + i as i64);
+                assert!(
+                    pair.iter().all(|x| (x - want).abs() <= 1.0 / 32768.0),
+                    "stream {nth}, sample {}: {pair:?} vs {want}",
+                    start + i as i64
+                );
+            }
+        }
+        let cache =
+            jvid_media::waveforms::Cache::new(fixture.0.parent().unwrap().join("peaks"), 1_000_000);
+        let peaks = cache.load(&fixture.0, nth).unwrap();
+        let first = peaks.finest().iter().position(|p| p[1] > 0.0).unwrap();
+        assert_eq!(first as i64, offset / jvid_media::waveforms::BUCKET);
+    }
+}
+
+#[test]
+fn independently_delayed_streams_export_at_their_source_positions() {
+    jvid_media::ffmpeg::init().unwrap();
+    let fixture = jvid_media::audio::offset_fixture::Fixture::default();
+    let mut h = History::new(Project::default());
+    add(
+        &mut h,
+        TrackKind::Audio,
+        fixture.0.clone(),
+        Time(0),
+        secs(2),
+    );
+    let id = h.project().assets()[0].id;
+    h.apply(Command::SetAssetProbe {
+        id,
+        probe: Some(jvid_media::probe::probe(&fixture.0).unwrap()),
+    })
+    .unwrap();
+    let track = &h.project().sequence().tracks()[0];
+    let (track_id, mut clip) = (track.id, track.clips()[0].clone());
+    h.apply(Command::RemoveClip(clip.id)).unwrap();
+    clip.stream = None;
+    h.apply(Command::Paste {
+        clips: vec![(track_id, clip)],
+        at: Time(0),
+    })
+    .unwrap();
+    let path = fixture.0.parent().unwrap().join("export.wav");
+    let req = Request {
+        path: path.clone(),
+        range: (Time(0), secs(2)),
+        preset: preset("Audio Only (WAV)"),
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    run_now(h.project(), &req, false).unwrap();
+    let mut decoded = blocking(&path, 0);
+    let mut got = vec![0.0; 96_000 * 2];
+    decoded(0, &mut got);
+    let gain = std::f32::consts::FRAC_1_SQRT_2;
+    for (i, pair) in got.as_chunks::<2>().0.iter().enumerate() {
+        let want = (jvid_media::audio::offset_fixture::Fixture::sample(0, i as i64)
+            + jvid_media::audio::offset_fixture::Fixture::sample(1, i as i64))
+            * gain;
+        assert!(
+            pair.iter().all(|x| (x - want).abs() < 3.0 / 32768.0),
+            "sample {i}: {pair:?}"
+        );
+    }
+    let mut d = AudioDecoder::open(&path, 0).unwrap();
+    let mut frames = 0;
+    while let Some(c) = d.next_chunk().unwrap() {
+        frames += c.samples.len() / 2;
+    }
+    assert_eq!(frames, 96_000);
+}
+
 /// Adds `path` on a new track as one clip of source `[0, len)` starting at `start`.
 fn add(h: &mut History, kind: TrackKind, path: PathBuf, start: Time, len: Time) {
     let Ok(Created::Asset(asset)) = h.apply(Command::AddAsset(path)) else {
