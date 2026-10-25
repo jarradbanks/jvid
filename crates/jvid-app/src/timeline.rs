@@ -23,7 +23,6 @@ use jvid_core::model::{
     Sequence, SequenceId, StreamInfo, Track, TrackId, TrackKind, Transform,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
-use jvid_jobs::Priority;
 use jvid_media::thumbnails;
 use jvid_media::waveforms::{self, BUCKET, Peak, Pyramid};
 use suite_ui::theme::{self, icon};
@@ -32,10 +31,12 @@ use suite_ui::widgets::{Button, Slider, TextInput};
 
 use crate::i18n::{tr, trn, verbatim};
 use crate::keymap::Keymap;
-use crate::media_bin::Caches;
+use crate::media_bin::{Caches, filmstrips::FilmstripRequests};
 use crate::transport::Transport;
 
 mod fades;
+#[cfg(test)]
+mod filmstrip_tests;
 mod graph;
 mod highlights;
 mod keyframes;
@@ -2620,7 +2621,7 @@ fn source_stamp(path: &std::path::Path) -> SourceStamp {
 struct Media {
     /// `None` in tests, which then load nothing.
     caches: Option<Arc<Caches>>,
-    strip_done: Done<Vec<egui::ColorImage>>,
+    strip_requests: FilmstripRequests,
     strips: HashMap<PathBuf, Option<Vec<TextureHandle>>>,
     peaks_done: Done<Pyramid, ((PathBuf, usize), SourceStamp)>,
     peaks_stamps: HashMap<(PathBuf, usize), SourceStamp>,
@@ -2639,67 +2640,22 @@ impl Media {
         a: &MediaAsset,
         source: &dyn Fn(f32) -> Time,
     ) {
-        for (path, imgs) in self.strip_done.lock().unwrap().drain(..) {
-            // shortcut: a failed decode retries on the next paint with no backoff; add one if
-            // broken files show up as busy job pools.
-            let Some(imgs) = imgs else {
-                self.strips.remove(&path);
-                continue;
-            };
-            // Frames arrive in order as they're made; each batch extends the strip.
-            let texs = self
-                .strips
-                .entry(path.clone())
-                .or_default()
-                .get_or_insert_default();
-            for img in imgs {
-                let name = format!("{}#{}", path.display(), texs.len());
-                texs.push(ui.ctx().load_texture(name, img, Default::default()));
-            }
-        }
+        self.strip_requests.poll(ui.ctx(), &mut self.strips);
         let Some(probe) = &a.probe else { return };
-        let texs = match self.strips.get(&a.path) {
-            Some(Some(t)) if !t.is_empty() => t,
-            Some(_) => return,
-            None => {
-                let Some(caches) = &self.caches else { return };
-                self.strips.insert(a.path.clone(), None);
-                let (done, ctx) = (self.strip_done.clone(), ui.ctx().clone());
-                let cache = caches.thumbs.clone();
-                let (path, duration) = (a.path.clone(), probe.duration);
-                let key = format!("strip:{}", path.display());
-                caches.jobs.submit(key, Priority::Preview, move |c| {
-                    if c.is_cancelled() {
-                        return;
-                    }
-                    let color = |img: &image::RgbaImage| {
-                        let size = [img.width() as usize, img.height() as usize];
-                        egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw())
-                    };
-                    let mut sent = 0;
-                    let r = cache.filmstrip_with(&path, duration, |img| {
-                        done.lock()
-                            .unwrap()
-                            .push((path.clone(), Some(vec![color(img)])));
-                        ctx.request_repaint();
-                        sent += 1;
-                    });
-                    match r {
-                        // From the disk cache, nothing was sent as it was made.
-                        Ok(v) => {
-                            let rest = v[sent..].iter().map(color).collect();
-                            done.lock().unwrap().push((path, Some(rest)));
-                            ctx.request_repaint();
-                        }
-                        Err(e) => {
-                            tracing::warn!("filmstrip for {}: {e}", path.display());
-                            done.lock().unwrap().push((path, None));
-                        }
-                    }
-                });
-                return;
-            }
+        self.strip_requests.refresh(
+            ui.ctx(),
+            self.caches.as_deref(),
+            &a.path,
+            probe.duration,
+            &mut self.strips,
+            true,
+        );
+        let Some(Some(texs)) = self.strips.get(&a.path) else {
+            return;
         };
+        if texs.is_empty() {
+            return;
+        }
         // Same spacing `thumbnails::Cache::filmstrip` samples at.
         let step = FLICKS_PER_SECOND.max(probe.duration.0 / thumbnails::STRIP_MAX);
         let n = (probe.duration.0 / step).max(1);

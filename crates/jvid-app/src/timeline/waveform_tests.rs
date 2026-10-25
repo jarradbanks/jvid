@@ -55,6 +55,7 @@ impl Fixture {
             thumbs: Arc::new(thumbnails::Cache::new(dir.join("thumbs"), u64::MAX)),
             proxies: Arc::new(jvid_media::proxy::Proxies::new(dir.join("proxies"))),
             transcripts: dir.join("transcripts"),
+            filmstrips: Default::default(),
         });
         let mut history = History::new(tests::project(4));
         let asset = history.project().assets()[0].id;

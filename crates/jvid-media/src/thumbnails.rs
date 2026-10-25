@@ -72,15 +72,33 @@ impl Cache {
         &self,
         path: &Path,
         duration: Time,
+        progress: impl FnMut(&RgbaImage),
+    ) -> Result<Vec<RgbaImage>, String> {
+        self.filmstrip_until(path, duration, progress, || false)
+    }
+
+    /// Incremental filmstrip with cooperative cancellation between grabs and before disk
+    /// publication. A single in-progress grab must return before cancellation can stop it.
+    pub fn filmstrip_until(
+        &self,
+        path: &Path,
+        duration: Time,
         mut progress: impl FnMut(&RgbaImage),
+        cancelled: impl Fn() -> bool,
     ) -> Result<Vec<RgbaImage>, String> {
         let step = FLICKS_PER_SECOND.max(duration.0 / STRIP_MAX);
         let n = (duration.0 / step).max(1);
         let exact = step < KEYFRAME_STEP.0;
-        let strip = self.cached(path, "strip", || {
+        let strip = self.cached_until(path, "strip", &cancelled, || {
             let frames = (0..n)
                 .map(|i| {
+                    if cancelled() {
+                        return Err("filmstrip cancelled".into());
+                    }
                     let f = (self.grab)(path, Time(i * step), exact)?;
+                    if cancelled() {
+                        return Err("filmstrip cancelled".into());
+                    }
                     progress(&f);
                     Ok(f)
                 })
@@ -120,6 +138,19 @@ impl Cache {
         kind: &str,
         make: impl FnOnce() -> Result<RgbaImage, String>,
     ) -> Result<RgbaImage, String> {
+        self.cached_until(path, kind, &|| false, make)
+    }
+
+    fn cached_until(
+        &self,
+        path: &Path,
+        kind: &str,
+        cancelled: &impl Fn() -> bool,
+        make: impl FnOnce() -> Result<RgbaImage, String>,
+    ) -> Result<RgbaImage, String> {
+        if cancelled() {
+            return Err("filmstrip cancelled".into());
+        }
         let file = self.dir.join(format!("{}.{kind}.png", key(path)?));
         if let Ok(img) = image::open(&file) {
             // The file's mtime is its last use, for LRU eviction.
@@ -130,18 +161,33 @@ impl Cache {
             return Ok(img.into_rgba8());
         }
         let img = make()?;
-        if let Err(e) = self.store(&file, &img) {
+        if cancelled() {
+            return Err("filmstrip cancelled".into());
+        }
+        if let Err(e) = self.store(&file, &img, cancelled) {
+            if cancelled() {
+                return Err(e);
+            }
             tracing::warn!("thumbnails: can't write {}: {e}", file.display());
         }
         Ok(img)
     }
 
-    fn store(&self, file: &Path, img: &RgbaImage) -> Result<(), String> {
+    fn store(
+        &self,
+        file: &Path,
+        img: &RgbaImage,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), String> {
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         // Write then rename, so a crash never leaves a half-written entry.
         let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
         img.save_with_format(&tmp, ImageFormat::Png)
             .map_err(|e| e.to_string())?;
+        if cancelled() {
+            let _ = fs::remove_file(&tmp);
+            return Err("filmstrip cancelled".into());
+        }
         fs::rename(&tmp, file).map_err(|e| e.to_string())?;
         evict(&self.dir, self.cap_bytes);
         Ok(())
@@ -419,6 +465,43 @@ mod tests {
         assert_eq!(strip.len(), 10);
         // Cached: all at once, nothing to report.
         c.filmstrip_with(&p, SECS, |_| panic!("cached")).unwrap();
+    }
+
+    #[test]
+    fn cancellation_after_last_frame_skips_publication_and_permits_retry() {
+        let d = tmp("cancel-publication");
+        let p = d.join("source.mov");
+        fs::write(&p, b"source").unwrap();
+        let (cache, grabs) = counting(d.join("cache"), u64::MAX);
+        let cancel = std::cell::Cell::new(false);
+        let mut seen = 0;
+        assert!(
+            cache
+                .filmstrip_until(
+                    &p,
+                    SECS,
+                    |_| {
+                        seen += 1;
+                        if seen == 10 {
+                            cancel.set(true);
+                        }
+                    },
+                    || cancel.get()
+                )
+                .is_err()
+        );
+        assert_eq!(seen, 10);
+        assert_eq!(grabs.load(Ordering::SeqCst), 10);
+        assert!(!d.join("cache").exists());
+        assert_eq!(cache.filmstrip(&p, SECS).unwrap().len(), 10);
+        assert_eq!(grabs.load(Ordering::SeqCst), 20);
+        // A cancelled cache-only request must not deliver frames or decode anything.
+        assert!(
+            cache
+                .filmstrip_until(&p, SECS, |_| panic!("cancelled"), || true)
+                .is_err()
+        );
+        assert_eq!(grabs.load(Ordering::SeqCst), 20);
     }
 
     #[test]
