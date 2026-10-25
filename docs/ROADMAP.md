@@ -524,6 +524,8 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#385](https://github.com/jarradbanks/jvid/issues/385) **Per-effect masks** — From #351 (PR #374): limit an effect to a mask region without duplicating the clip.
 - [#394](https://github.com/jarradbanks/jvid/issues/394) **Playback: no stale frame after relink** — From #371 (PR #393): decode jobs are keyed without the media path, so an old-path decode still pending at relink can cache a stale frame; the keyframe stand-in path has the same race.
 - [#395](https://github.com/jarradbanks/jvid/issues/395) **Find Highlights: fast scene scan on long recordings** — From #347 (PR #392): the scene scan decodes every frame at full size, so a two-hour recording takes many minutes.
+- [#399](https://github.com/jarradbanks/jvid/issues/399) **Reframe: honour crop, rotation and title keys** — From #352 (PR #396): Reframe ignores a clip's crop and rotation and a title's own position and text_size keys, so those clips can end up with bars or a title outside title-safe.
+- [#400](https://github.com/jarradbanks/jvid/issues/400) **Transform overlay: DESIGN.md lines instead of amber** — From #352 (PR #396): the Program monitor's transform overlay draws an amber outline, but DESIGN.md's Neutral Viewer Rule asks for 1px Ink or Light Blue lines.
 
 ---
 

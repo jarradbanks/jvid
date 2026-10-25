@@ -1870,3 +1870,13 @@ I("highlights-fast-scan", "Find Highlights: fast scene scan on long recordings",
   summary="From #347 (PR #392): the scene scan decodes every frame at full size, so a two-hour recording takes many minutes.",
   scope=["Scan with keyframe-only or downscaled decode (or both), keeping the scene accuracy the tests check"],
   ac=["The long-2h-1440p60 corpus file scans at least 5x faster than PR #392's scan, with the same scene test passing"])
+
+I("reframe-keys", "Reframe: honour crop, rotation and title keys", None, ["core"], "S", ["reframe"], labels=["later"],
+  summary="From #352 (PR #396): Reframe ignores a clip's crop and rotation and a title's own position and text_size keys, so those clips can end up with bars or a title outside title-safe.",
+  scope=["Project::reframed takes crop, rotation, and a title's position and text_size keys into account when it fills and keeps titles safe"],
+  ac=["Tests: a cropped clip and a rotated clip fill the reframed frame with no bars; a title with position and text_size keys stays inside title-safe at every key"])
+
+I("overlay-design-lines", "Transform overlay: DESIGN.md lines instead of amber", None, ["ui"], "S", ["reframe"], labels=["later"],
+  summary="From #352 (PR #396): the Program monitor's transform overlay draws an amber outline, but DESIGN.md's Neutral Viewer Rule asks for 1px Ink or Light Blue lines.",
+  scope=["Draw the transform overlay's outline and handles in the DESIGN.md viewer colours, keeping the reframe box distinct"],
+  ac=["A kittest snapshot of a selected clip shows no amber in the overlay"])
