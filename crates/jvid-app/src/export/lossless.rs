@@ -3,10 +3,9 @@
 
 use jvid_core::model::{Clip, ProbeInfo, Project, StreamInfo, TrackKind, Transform};
 use jvid_core::time::Time;
-use jvid_jobs::Ctx;
 use jvid_media::remux::{self, Cut};
 
-use super::{Error, Request, replay};
+use super::{Context, Error, Phase, Request, replay};
 use crate::i18n::tr;
 
 /// How a lossless export handles cut points.
@@ -163,7 +162,7 @@ pub(super) fn run(
     project: &Project,
     req: &Request,
     mode: Lossless,
-    ctx: &Ctx,
+    ctx: &dyn Context,
 ) -> Result<ProbeInfo, Error> {
     replay(project, req, ctx, |req| {
         attempt(project, req, mode, ctx).map_err(Into::into)
@@ -175,7 +174,7 @@ fn attempt(
     project: &Project,
     req: &Request,
     mode: Lossless,
-    ctx: &Ctx,
+    ctx: &dyn Context,
 ) -> Result<ProbeInfo, Error> {
     let cuts = check(project, req.range).map_err(|why| why.join("; "))?;
     let ext = |p: &std::path::Path| p.extension().map(|e| e.to_ascii_lowercase());
@@ -188,6 +187,7 @@ fn attempt(
         return Err(tr!("lossless.container", extension = ext).into());
     }
     jvid_media::ffmpeg::init().map_err(|e| e.to_string())?;
+    ctx.set_phase(Phase::Copying);
     let mut progress = |f| {
         ctx.set_progress(f);
         !ctx.is_cancelled()
@@ -199,7 +199,7 @@ fn attempt(
     if ctx.is_cancelled() {
         return Err(Error::Cancelled);
     }
-    ctx.set_progress(1.0);
+    ctx.set_phase(Phase::Finalizing);
     let info = jvid_media::probe::probe(&req.path)
         .map_err(|e| tr!("export.output_error", error = crate::import::describe(&e)))?;
     Ok(info)

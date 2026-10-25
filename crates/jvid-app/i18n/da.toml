@@ -139,6 +139,12 @@ about = "Om jvid…"
 tutorials = "Selvstudier"
 
 [export]
+phase_preparing = "Forbereder"
+phase_analysis = "Analyserer Lyd"
+phase_encoding = "Kodning · Gennemløb {pass}"
+phase_retry = "Prøver Igen via Software"
+phase_finalizing = "Afslutter"
+phase_copying = "Kopierer"
 sidecar_file_target = "Outputmålet er ikke en almindelig fil."
 sidecar_separate = "Medier og undertekster skal have separate outputfiler."
 sidecar_recovery = "{error}; gendannelseskopier bevaret i {path} ({details})"

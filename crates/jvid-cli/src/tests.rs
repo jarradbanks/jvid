@@ -182,3 +182,24 @@ fn cpu_exports_never_acquire_a_gpu_and_video_reports_code_four() {
     assert_eq!(std::fs::read(path).unwrap(), b"existing output");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn json_progress_names_phases_passes_retries_and_only_phase_eta() {
+    let mut status = export::Snapshot {
+        phase: export::Phase::Encoding { pass: 2 },
+        progress: Some(0.5),
+        retry: 1,
+        phase_seconds: 10.0,
+    };
+    assert_eq!(
+        progress_line(&status, true),
+        "{\"progress\":0.5000,\"phase\":\"encoding\",\"pass\":2,\"retry\":1,\"phase_eta_seconds\":10.0000}"
+    );
+    status.phase = export::Phase::Finalizing;
+    status.progress = None;
+    assert_eq!(
+        progress_line(&status, true),
+        "{\"progress\":null,\"phase\":\"finalizing\",\"pass\":null,\"retry\":1,\"phase_eta_seconds\":null}"
+    );
+    assert!(!progress_line(&status, false).contains("100"));
+}

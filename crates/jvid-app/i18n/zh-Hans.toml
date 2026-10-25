@@ -146,6 +146,12 @@ about = "关于 jvid…"
 tutorials = "教程"
 
 [export]
+phase_preparing = "准备中"
+phase_analysis = "分析音频"
+phase_encoding = "编码 · 第 {pass} 遍"
+phase_retry = "使用软件重试"
+phase_finalizing = "正在完成"
+phase_copying = "复制中"
 sidecar_file_target = "输出目标不是普通文件。"
 sidecar_separate = "媒体和字幕必须输出到不同的文件。"
 sidecar_recovery = "{error}；恢复副本保留在 {path}（{details}）"

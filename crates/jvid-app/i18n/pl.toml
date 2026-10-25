@@ -139,6 +139,12 @@ about = "O programie jvid…"
 tutorials = "Samouczki"
 
 [export]
+phase_preparing = "Przygotowanie"
+phase_analysis = "Analiza Dźwięku"
+phase_encoding = "Kodowanie · Przebieg {pass}"
+phase_retry = "Ponawianie Programowe"
+phase_finalizing = "Finalizowanie"
+phase_copying = "Kopiowanie"
 sidecar_file_target = "Cel wyjściowy nie jest zwykłym plikiem."
 sidecar_separate = "Media i napisy muszą mieć osobne pliki wyjściowe."
 sidecar_recovery = "{error}; kopie odzyskiwania zachowano w {path} ({details})"

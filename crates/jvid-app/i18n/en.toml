@@ -148,6 +148,12 @@ tutorials = "Tutorials"
 
 # Exporting: the Export button, its dialog and the render queue.
 [export]
+phase_preparing = "Preparing"
+phase_analysis = "Analyzing Audio"
+phase_encoding = "Encoding · Pass {pass}"
+phase_retry = "Retrying in Software"
+phase_finalizing = "Finalizing"
+phase_copying = "Copying"
 sidecar_file_target = "Output target is not a regular file."
 sidecar_separate = "Media and subtitle outputs must be separate files."
 sidecar_recovery = "{error}; output recovery copies retained at {path} ({details})"

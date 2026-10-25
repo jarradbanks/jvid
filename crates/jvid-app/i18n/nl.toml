@@ -142,6 +142,12 @@ about = "Over jvid…"
 tutorials = "Tutorials"
 
 [export]
+phase_preparing = "Voorbereiden"
+phase_analysis = "Audio Analyseren"
+phase_encoding = "Coderen · Ronde {pass}"
+phase_retry = "Opnieuw via Software"
+phase_finalizing = "Afronden"
+phase_copying = "Kopiëren"
 sidecar_file_target = "Het uitvoerdoel is geen gewoon bestand."
 sidecar_separate = "Media en ondertitels moeten aparte uitvoerbestanden hebben."
 sidecar_recovery = "{error}; herstelkopieën bewaard in {path} ({details})"

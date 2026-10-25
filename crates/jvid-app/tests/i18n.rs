@@ -664,7 +664,9 @@ fn long_text_fits_export_dialog_and_render_queue() {
         row(
             "Main Edit.mp4",
             Status::Rendering {
-                progress: 0.42,
+                phase: jvid_app::export::Phase::Encoding { pass: 1 },
+                retry: 0,
+                progress: Some(0.42),
                 left: Some(95.0),
             },
         ),

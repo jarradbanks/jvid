@@ -11,11 +11,17 @@ use jvid_core::eval::frame_at;
 use jvid_core::model::{ProbeInfo, Project};
 use jvid_core::preset::{Preset, VideoCodec};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
-use jvid_jobs::{Ctx, Handle, Pool, Priority};
+#[cfg(test)]
+use jvid_jobs::Handle;
+use jvid_jobs::{Ctx, Pool, Priority};
 use jvid_media::audio::AudioDecoder;
 use jvid_media::decode::DecoderPool;
 use jvid_media::encode::{CreateError, EncodeError, Encoder};
 use jvid_render::composite::Readback;
+
+mod progress;
+use progress::{Context, Progress, Tracked};
+pub use progress::{ExportHandle, Phase, Snapshot};
 
 use crate::i18n::tr;
 use crate::playback::{Audio, ClipAudio, Gpu, Pixels, Shown, resolve, sample};
@@ -108,19 +114,27 @@ pub fn submit(
     project: Project,
     req: Request,
     gpu: impl Into<Option<GpuContext>>,
-) -> (Handle, Receiver<Result<ProbeInfo, Error>>) {
+) -> (ExportHandle, Receiver<Result<ProbeInfo, Error>>) {
     let gpu = gpu.into();
     let (tx, rx) = channel();
     let key = format!("export:{}", req.path.display());
+    let status = Progress::default();
+    let report = status.clone();
     let handle = pool.submit(key, Priority::Interactive, move |ctx| {
-        let _ = tx.send(run_with_gpu(
-            &project,
-            &req,
-            gpu.as_ref().map(|(d, q)| (d, q)),
-            ctx,
-        ));
+        let ctx = Tracked {
+            job: ctx,
+            status: &report,
+        };
+        ctx.set_phase(Phase::Preparing);
+        let result = run_export(&project, &req, gpu.as_ref().map(|(d, q)| (d, q)), &ctx);
+        ctx.set_phase(match &result {
+            Ok(_) => Phase::Completed,
+            Err(Error::Cancelled) => Phase::Cancelled,
+            Err(Error::Failed(_)) => Phase::Failed,
+        });
+        let _ = tx.send(result);
     });
-    (handle, rx)
+    (ExportHandle::new(handle, status), rx)
 }
 
 /// A device for exporting without a window: the default adapter, else a software one.
@@ -285,7 +299,7 @@ fn check_destination(project: &Project, destination: &Path) -> Result<(), Error>
 fn replay<T>(
     project: &Project,
     req: &Request,
-    ctx: &Ctx,
+    ctx: &dyn Context,
     mut attempt: impl FnMut(&Request) -> Result<T, AttemptError>,
 ) -> Result<T, Error> {
     check_destination(project, &req.path)?;
@@ -303,6 +317,7 @@ fn replay<T>(
         }
         match result {
             Ok(info) => {
+                ctx.set_phase(Phase::Finalizing);
                 // The destination may have become a source alias while the job ran.
                 check_destination(project, &req.path)?;
                 if ctx.is_cancelled() {
@@ -326,7 +341,7 @@ fn replay<T>(
                     .preset
                     .options
                     .insert("encoder".into(), "software".into());
-                ctx.set_progress(0.0);
+                ctx.set_phase(Phase::Retrying);
             }
             Err(AttemptError::Vaapi(error)) => return Err(Error::Failed(err(error))),
             Err(AttemptError::Export(error)) => return Err(error),
@@ -369,6 +384,19 @@ pub fn run_with_gpu(
     req: &Request,
     gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
     ctx: &Ctx,
+) -> Result<ProbeInfo, Error> {
+    let result = run_export(project, req, gpu, ctx);
+    if result.is_ok() {
+        ctx.set_progress(1.0);
+    }
+    result
+}
+
+fn run_export(
+    project: &Project,
+    req: &Request,
+    gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
+    ctx: &dyn Context,
 ) -> Result<ProbeInfo, Error> {
     if req.needs_gpu() && gpu.is_none() {
         return Err(tr!("export.no_gpu").to_string().into());
@@ -431,9 +459,10 @@ fn publish_sidecar(
     project: &Project,
     req: &Request,
     files: &mut AttemptFiles,
-    ctx: &Ctx,
+    ctx: &dyn Context,
     mut publish: impl FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<(), Error> {
+    ctx.set_phase(Phase::Finalizing);
     check_sidecar_destinations(project, req)?;
     if ctx.is_cancelled() {
         return Err(Error::Cancelled);
@@ -507,7 +536,7 @@ fn encode(
     project: &Project,
     req: &Request,
     gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
-    ctx: &Ctx,
+    ctx: &dyn Context,
 ) -> Result<ProbeInfo, Error> {
     if let Some(mode) = req.lossless {
         return lossless::run(project, req, mode, ctx);
@@ -526,7 +555,7 @@ fn encode_attempt(
     project: &Project,
     req: &Request,
     gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
-    ctx: &Ctx,
+    ctx: &dyn Context,
 ) -> Result<ProbeInfo, AttemptError> {
     let s = project.settings();
     let (first, end) = frames(project, req);
@@ -547,62 +576,85 @@ fn encode_attempt(
     };
     let limiter = || gain.map(|g| Limiter::new(g as f32, CEILING));
     match sized(project, req)? {
-        None => render(project, req, enc, limiter(), gpu, ctx)?,
-        Some((target, audio, mut bits)) => {
+        None => {
+            ctx.set_phase(Phase::Encoding { pass: 1 });
+            render(project, req, enc, limiter(), gpu, ctx)?;
+        }
+        Some((target, audio, bits)) => {
             drop(enc);
-            // Encoders only roughly hit an average bit rate, so each pass rescales the video rate
-            // by how far the last file missed, until one lands in the window.
-            // shortcut: progress restarts each pass; weight it by pass if users notice.
-            let want = target as f64 * (1.0 - OVERHEAD) - audio;
-            // The fullest pass under the target so far, moved aside so later passes can't lose it.
-            let best = PathBuf::from(format!("{}.best", req.path.display()));
-            let _best = Partial(&best);
-            let (mut under, mut over) = (None::<(u64, f64)>, None::<(u64, f64)>);
-            for pass in 1..=PASSES {
-                let mut preset = req.preset.clone();
-                preset.options.remove("target_size");
-                preset.options.remove("crf");
-                preset.options.insert("b".into(), bits.to_string());
-                let req = Request {
-                    preset,
-                    ..req.clone()
-                };
+            size_passes(req, target, audio, bits, ctx, |req| {
                 let enc =
                     Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
                         .map_err(|e| create_error(&req.path, e))?;
-                render(project, &req, enc, limiter(), gpu, ctx)?;
-                let size = std::fs::metadata(&req.path)
-                    .map_err(|e| e.to_string())?
-                    .len() as f64;
-                tracing::info!(pass, bits, size, target, "target-size pass");
-                if size > target as f64 {
-                    over = Some((bits, size - audio));
-                } else {
-                    if size >= MIN_FILL * target as f64 {
-                        break;
-                    }
-                    // No bigger for more bits: the encoder is at its best quality, as simple
-                    // content can't use the whole rate.
-                    if under.is_some_and(|(b, v)| b < bits && size - audio < v * 1.01) {
-                        break;
-                    }
-                    under = Some((bits, size - audio));
-                    std::fs::rename(&req.path, &best).map_err(|e| e.to_string())?;
-                }
-                if pass == PASSES {
-                    if under.is_none() {
-                        return Err(tr!("export.over_target", size = size).into());
-                    }
-                    std::fs::rename(&best, &req.path).map_err(|e| e.to_string())?;
-                    break;
-                }
-                bits = next_bits(under, over, want);
-            }
+                render(project, req, enc, limiter(), gpu, ctx)
+            })?;
         }
     }
     let info = validate(project, req)?;
     std::mem::forget(partial);
     Ok(info)
+}
+
+/// Each size attempt has its own progress/clock; the number of further attempts is unknown.
+fn size_passes(
+    req: &Request,
+    target: u64,
+    audio: f64,
+    mut bits: u64,
+    ctx: &dyn Context,
+    mut encode: impl FnMut(&Request) -> Result<(), AttemptError>,
+) -> Result<(), AttemptError> {
+    let want = target as f64 * (1.0 - OVERHEAD) - audio;
+    let best = PathBuf::from(format!("{}.best", req.path.display()));
+    let _best = Partial(&best);
+    let (mut under, mut over) = (None::<(u64, f64)>, None::<(u64, f64)>);
+    for pass in 1..=PASSES {
+        if ctx.is_cancelled() {
+            return Err(Error::Cancelled.into());
+        }
+        ctx.set_phase(Phase::Encoding { pass });
+        if ctx.is_cancelled() {
+            return Err(Error::Cancelled.into());
+        }
+        let mut preset = req.preset.clone();
+        preset.options.remove("target_size");
+        preset.options.remove("crf");
+        preset.options.insert("b".into(), bits.to_string());
+        let req = Request {
+            preset,
+            ..req.clone()
+        };
+        encode(&req)?;
+        if ctx.is_cancelled() {
+            return Err(Error::Cancelled.into());
+        }
+        ctx.set_phase(Phase::Finalizing);
+        let size = std::fs::metadata(&req.path)
+            .map_err(|e| e.to_string())?
+            .len() as f64;
+        tracing::info!(pass, bits, size, target, "target-size pass");
+        if size > target as f64 {
+            over = Some((bits, size - audio));
+        } else {
+            if size >= MIN_FILL * target as f64 {
+                break;
+            }
+            if under.is_some_and(|(b, v)| b < bits && size - audio < v * 1.01) {
+                break;
+            }
+            under = Some((bits, size - audio));
+            std::fs::rename(&req.path, &best).map_err(|e| e.to_string())?;
+        }
+        if pass == PASSES {
+            if under.is_none() {
+                return Err(Error::from(tr!("export.over_target", size = size)).into());
+            }
+            std::fs::rename(&best, &req.path).map_err(|e| e.to_string())?;
+            break;
+        }
+        bits = next_bits(under, over, want);
+    }
+    Ok(())
 }
 
 /// Share of a target size kept back for container headers and indexes, which run well under 1%
@@ -686,11 +738,13 @@ fn spans(project: &Project, req: &Request) -> impl Iterator<Item = (i64, Time, i
 }
 
 /// First pass for normalization: the range's integrated loudness, or `None` if it's silent.
-fn measure(project: &Project, req: &Request, ctx: &Ctx) -> Result<Option<f64>, Error> {
+fn measure(project: &Project, req: &Request, ctx: &dyn Context) -> Result<Option<f64>, Error> {
+    ctx.set_phase(Phase::AnalyzingAudio);
+    let (first, end) = frames(project, req);
     let mut audio = Audio::new(Box::new(blocking));
     let mut meter = Meter::default();
     let mut mix = Vec::new();
-    for (_, time, a, b) in spans(project, req) {
+    for (k, time, a, b) in spans(project, req) {
         if ctx.is_cancelled() {
             return Err(Error::Cancelled);
         }
@@ -699,6 +753,7 @@ fn measure(project: &Project, req: &Request, ctx: &Ctx) -> Result<Option<f64>, E
         audio.prime(project, time);
         audio.mix(project, a, &mut mix);
         meter.push(&mix);
+        ctx.set_progress((k + 1 - first) as f32 / (end - first) as f32);
     }
     Ok(meter.integrated())
 }
@@ -822,7 +877,7 @@ fn render(
     mut enc: Encoder,
     mut limiter: Option<Limiter>,
     gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
-    ctx: &Ctx,
+    ctx: &dyn Context,
 ) -> Result<(), AttemptError> {
     let (first, end) = frames(project, req);
     let mut audio = Audio::new(Box::new(blocking));
@@ -861,6 +916,7 @@ fn render(
         }
         ctx.set_progress((k + 1 - first) as f32 / (end - first) as f32);
     }
+    ctx.set_phase(Phase::Finalizing);
     if let Some((device, _)) = gpu
         && let Some(rgba) = readback.take(device)
     {
