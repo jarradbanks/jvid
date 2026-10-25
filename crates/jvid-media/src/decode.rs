@@ -615,10 +615,11 @@ mod tests {
     fn random_seeks_match_ffmpeg_pts_across_the_corpus() {
         let Some(dir) = corpus() else { return };
         crate::ffmpeg::init().unwrap();
-        // One file per codec and container (H.264 VFR mp4, HEVC mp4, ProRes mov, mkv);
-        // the other corpus clips repeat these paths at other rates or sizes.
+        // One file per codec and container (H.264 VFR mp4, HEVC mp4, ProRes mov, mkv)
+        // plus open GOPs; the other corpus clips repeat these paths at other rates or sizes.
         for file in [
             "vfr-phone.mp4",
+            "open-gop.mp4",
             "4k-hevc.mp4",
             "prores.mov",
             "three-audio.mkv",

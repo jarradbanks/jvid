@@ -95,7 +95,7 @@ ff -f concat -safe 0 -i "$tmp/list.txt" -c copy long-2h-1440p60.mp4
 # FFmpeg's own answers, which the decoder tests check against: every video frame's best-effort pts
 # (stream time base ticks), and the rotated clip's first frame as the CLI shows it (autorotated, I420).
 for f in vfr-phone.mp4 23.976fps.mp4 59.94fps.mp4 144fps.mp4 4k-hevc.mp4 prores.mov 9x16.mp4 \
-  no-audio.mp4 rotated-phone.mp4 three-audio.mkv screen-1440p60.mp4; do
+  no-audio.mp4 rotated-phone.mp4 three-audio.mkv screen-1440p60.mp4 open-gop.mp4; do
   ffprobe -v error -select_streams v:0 -show_entries frame=best_effort_timestamp -of csv=p=0 "$f" >"$f.pts"
 done
 ff -i rotated-phone.mp4 -frames:v 1 -f rawvideo -pix_fmt yuv420p rotated-phone.first.yuv
