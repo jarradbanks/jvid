@@ -1,3 +1,12 @@
+fn visible_text(project: &Project, layers: &[crate::eval::Layer<'_>], out: &mut Vec<String>) {
+    for layer in layers {
+        if let Some(text) = project.asset(layer.asset).and_then(|a| a.text.as_ref()) {
+            out.push(text.content.clone());
+        }
+        visible_text(project, &layer.nested, out);
+    }
+}
+
 use super::*;
 use crate::srt::{self, Cue};
 use crate::time::FLICKS_PER_SECOND as S;
@@ -180,14 +189,6 @@ fn nested_sidecar_copy_hides_all_subtitles_and_keeps_ordinary_titles() {
             );
         }
     }
-    fn visible_text(project: &Project, layers: &[crate::eval::Layer<'_>], out: &mut Vec<String>) {
-        for layer in layers {
-            if let Some(text) = project.asset(layer.asset).and_then(|a| a.text.as_ref()) {
-                out.push(text.content.clone());
-            }
-            visible_text(project, &layer.nested, out);
-        }
-    }
     let mut texts = Vec::new();
     visible_text(
         &copy,
@@ -300,4 +301,87 @@ fn nested_subtitle_cues_preserve_timing_and_nest_undo() {
         srt::write(&h.project().subtitle_cues(), (sec(6), sec(8))),
         "1\n00:00:00,000 --> 00:00:01,000\nCaption\n\n"
     );
+}
+
+#[test]
+fn sidecar_render_preserves_non_subtitle_content_when_nest_lands_on_subtitle_track() {
+    let (_, before, _, _) = nested_captions();
+    let mut h = History::new(before);
+    let caption_track = h
+        .project()
+        .sequence()
+        .tracks()
+        .iter()
+        .find(|t| t.subtitles)
+        .unwrap()
+        .id;
+    h.apply(Command::MoveTrack {
+        id: caption_track,
+        index: 0,
+    })
+    .unwrap();
+    let ids = h
+        .project()
+        .sequence()
+        .tracks()
+        .iter()
+        .flat_map(|t| t.clips().iter().map(|c| c.id))
+        .collect();
+    let Created::Clip(nest) = h
+        .apply(Command::Nest {
+            ids,
+            name: "Section".into(),
+            outer: "Root".into(),
+        })
+        .unwrap()
+    else {
+        panic!("nest")
+    };
+    let track = h.project().sequence().clip(nest).unwrap().0;
+    assert!(h.project().sequence().track(track).unwrap().subtitles);
+    let caption_asset = h
+        .project()
+        .assets()
+        .iter()
+        .find(|a| a.text.as_ref().is_some_and(|t| t.content == "Caption"))
+        .unwrap()
+        .id;
+    add_clip(&mut h, track, caption_asset, sec(11), sec(0), sec(1));
+    let original = h.project().clone();
+    let copy = original.without_subtitles();
+    for seq in std::iter::once(&copy.sequence).chain(&copy.sequences) {
+        assert!(
+            seq.tracks()
+                .iter()
+                .filter(|t| t.subtitles
+                    && t.clips()
+                        .iter()
+                        .all(|c| copy.asset(c.asset).is_some_and(|a| a.text.is_some())))
+                .all(|t| t.hidden)
+        );
+    }
+    let mut texts = Vec::new();
+    visible_text(
+        &copy,
+        &crate::eval::frame_at(&copy, Time(3 * S / 2)),
+        &mut texts,
+    );
+    assert_eq!(texts, ["Ordinary title"]);
+    assert_eq!(
+        copy.sequence().track(track).unwrap().settings(),
+        original.sequence().track(track).unwrap().settings()
+    );
+    assert_eq!(copy.sequence().clip(nest).unwrap().0, track);
+    let mut later = Vec::new();
+    visible_text(
+        &copy,
+        &crate::eval::frame_at(&copy, Time(23 * S / 2)),
+        &mut later,
+    );
+    assert!(
+        later.is_empty(),
+        "direct captions on the mixed track are suppressed"
+    );
+    assert_eq!(h.project(), &original);
+    assert!(copy.subtitle_cues().is_empty());
 }

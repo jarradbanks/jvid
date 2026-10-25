@@ -2907,9 +2907,27 @@ impl Project {
     /// A copy with subtitle tracks hidden, for exporting them as a sidecar instead of burnt in.
     pub fn without_subtitles(&self) -> Project {
         let mut p = self.clone();
+        let text_assets: std::collections::BTreeSet<_> = p
+            .assets
+            .iter()
+            .filter(|a| a.text.is_some())
+            .map(|a| a.id)
+            .collect();
         for sequence in std::iter::once(&mut p.sequence).chain(&mut p.sequences) {
             for track in sequence.tracks.iter_mut().filter(|t| t.subtitles) {
-                track.hidden = true;
+                // Nesting can put a whole section on a subtitle-marked outer track. Keep
+                // its container/media clips on that exact track with their original settings.
+                if track.clips.iter().any(|c| !text_assets.contains(&c.asset)) {
+                    for clip in track
+                        .clips
+                        .iter_mut()
+                        .filter(|c| text_assets.contains(&c.asset))
+                    {
+                        clip.enabled = false;
+                    }
+                } else {
+                    track.hidden = true;
+                }
             }
         }
         p

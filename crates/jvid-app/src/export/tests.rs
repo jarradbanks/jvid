@@ -421,7 +421,7 @@ fn with_context<T: Send + 'static>(work: impl FnOnce(&Ctx) -> T + Send + 'static
 }
 
 /// A disposable, generated source: these safety tests need neither the corpus nor a GPU.
-fn lossless_fixture(name: &str) -> (AttemptFiles, Project, Request) {
+pub(super) fn lossless_fixture(name: &str) -> (AttemptFiles, Project, Request) {
     jvid_media::ffmpeg::init().unwrap();
     let files = AttemptFiles::new(&out(name)).unwrap();
     let source = files.dir.join("source.mov");

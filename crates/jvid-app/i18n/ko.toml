@@ -141,6 +141,10 @@ about = "jvid 정보…"
 tutorials = "튜토리얼"
 
 [export]
+sidecar_file_target = "출력 대상이 일반 파일이 아닙니다."
+sidecar_separate = "미디어와 자막은 별도의 파일로 출력해야 합니다."
+sidecar_recovery = "{error}; 복구 사본을 {path}에 보관했습니다 ({details})"
+no_gpu = "GPU 어댑터가 없습니다. 합성 영상에는 렌더링 장치가 필요합니다. 그래픽 드라이버나 소프트웨어 Vulkan 어댑터(Linux의 Mesa lavapipe)를 설치하세요."
 codec_no_encoder = "이 내보내기 설정에 사용할 수 있는 {codec} 인코더가 없습니다. 지원되는 하드웨어를 사용하거나, {encoders}이(가) 포함된 빌드를 설치하거나, 다른 코덱 프리셋을 선택하세요."
 codec_wrong = "{expected}을(를) 요청했지만 인코딩된 동영상은 {actual}입니다. 출력 파일이 게시되지 않았습니다."
 encoder = "시도할 인코더"

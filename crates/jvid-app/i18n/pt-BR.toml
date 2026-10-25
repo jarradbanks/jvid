@@ -139,6 +139,10 @@ about = "Sobre o jvid…"
 tutorials = "Tutoriais"
 
 [export]
+sidecar_file_target = "O destino não é um arquivo comum."
+sidecar_separate = "Mídia e legendas precisam de arquivos de saída separados."
+sidecar_recovery = "{error}; cópias de recuperação mantidas em {path} ({details})"
+no_gpu = "Nenhum adaptador GPU: vídeo composto precisa de um dispositivo de renderização. Instale um driver gráfico ou um adaptador Vulkan por software (Mesa lavapipe no Linux)."
 codec_no_encoder = "Nenhum codificador {codec} utilizável com estas configurações de exportação. Use hardware compatível, instale uma versão com {encoders} ou escolha uma predefinição com outro codec."
 codec_wrong = "Foi solicitado {expected}, mas o vídeo codificado é {actual}. O arquivo de saída não foi publicado."
 encoder = "Codificadores a Testar"

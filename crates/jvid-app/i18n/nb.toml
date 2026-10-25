@@ -139,6 +139,10 @@ about = "Om jvid…"
 tutorials = "Opplæring"
 
 [export]
+sidecar_file_target = "Utdatamålet er ikke en vanlig fil."
+sidecar_separate = "Medier og undertekster må ha separate utdatafiler."
+sidecar_recovery = "{error}; gjenopprettingskopier beholdt i {path} ({details})"
+no_gpu = "Ingen GPU-adapter: sammensatt video trenger en renderingsenhet. Installer en grafikkdriver eller en Vulkan-programvareadapter (Mesa lavapipe på Linux)."
 codec_no_encoder = "Ingen brukbar {codec}-koder for disse eksportinnstillingene. Bruk støttet maskinvare, installer en versjon med {encoders}, eller velg en forhåndsinnstilling med en annen kodek."
 codec_wrong = "{expected} ble forespurt, men den kodede videoen er {actual}. Utdatafilen ble ikke publisert."
 encoder = "Kodere å Prøve"
