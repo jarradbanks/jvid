@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use ffmpeg_next::codec::discard::Discard;
 use ffmpeg_next::color::{Range, Space};
 use ffmpeg_next::format::{self, Pixel};
 use ffmpeg_next::software::scaling;
@@ -38,6 +39,7 @@ pub struct VideoDecoder {
     rotation: u32,
     hwaccel: Option<&'static str>,
     hdr: bool,
+    keyframes: bool,
     /// Last decoded frame at or before the previous target, and the one after it.
     cur: Option<frame::Video>,
     next: Option<frame::Video>,
@@ -93,6 +95,7 @@ impl VideoDecoder {
             time_base: stream.time_base(),
             rotation: crate::probe::rotation(&stream),
             hdr: false,
+            keyframes: false,
             decoder,
             input,
             cur: None,
@@ -112,7 +115,34 @@ impl VideoDecoder {
     }
 
     fn frame_at_once(&mut self, t: Time) -> Result<Frame, Error> {
-        let target = self.to_ticks(t);
+        self.land(self.to_ticks(t))?;
+        self.current()
+    }
+
+    /// Decodes keyframes only from now on, so [`Self::frame_after`] steps keyframe to keyframe
+    /// without decoding the frames between.
+    pub fn keyframes_only(&mut self) {
+        self.keyframes = true;
+        self.decoder.skip_frame(Discard::NonKey);
+    }
+
+    /// The first frame after `t`, for stepping through a file in order.
+    pub fn frame_after(&mut self, t: Time) -> Result<Frame, Error> {
+        self.or_software(|d| {
+            d.land(d.to_ticks(t))?;
+            // Ticks floor, so the landed frame can sit exactly at `t`: step past it.
+            while d.cur.as_ref().is_none_or(|c| d.to_time(pts(c)) <= t) {
+                if d.next.is_none() {
+                    d.next = d.decode_one()?;
+                }
+                d.cur = Some(d.next.take().ok_or(Error::Eof)?);
+            }
+            d.current()
+        })
+    }
+
+    /// Leaves `cur` on the last frame at or before `target` ticks.
+    fn land(&mut self, target: i64) -> Result<(), Error> {
         // Decoding forward up to a second beats a seek, which restarts at a keyframe.
         let near = self.to_ticks(Time(FLICKS_PER_SECOND));
         match self.cur.as_ref().map(pts) {
@@ -128,7 +158,7 @@ impl VideoDecoder {
                 _ => break,
             }
         }
-        self.current()
+        Ok(())
     }
 
     /// The keyframe at or before `t`: one seek and one decode, so a stand-in shows at once while
@@ -150,10 +180,14 @@ impl VideoDecoder {
         match f(self) {
             Err(e) if self.hwaccel.is_some() && e != Error::Eof => {
                 tracing::warn!(error = %e, path = %self.path.display(), "hw decode failed; using software");
+                let keyframes = self.keyframes;
                 *self = Self {
                     hdr: self.hdr,
                     ..Self::open_with(&self.path, false)?
                 };
+                if keyframes {
+                    self.keyframes_only();
+                }
                 f(self)
             }
             r => r,
