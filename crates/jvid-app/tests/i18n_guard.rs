@@ -174,6 +174,11 @@ const TRANSLATION_MACROS: &[&str] = &["tr", "trn"];
 /// Whole items exempt from the prose rule, by file and name.
 const EXEMPT_ITEMS: &[(&str, &str, &str)] = &[
     (
+        "jvid-app/src/package_smoke.rs",
+        "run",
+        "headless packaging diagnostics and machine-readable evidence, never UI text",
+    ),
+    (
         "jvid-app/src/transcript/fillers.rs",
         "LANGS",
         "whisper prompts and filler sounds in each spoken language, never shown in the UI",

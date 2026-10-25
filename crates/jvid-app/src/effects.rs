@@ -18,7 +18,7 @@ pub fn dir() -> Option<PathBuf> {
     if cfg!(test) {
         return None;
     }
-    directories::ProjectDirs::from("", "", "jvid").map(|d| d.config_dir().join("effects"))
+    jvid_paths::config_dir().map(|d| d.join("effects"))
 }
 
 type Stamp = (Option<std::time::SystemTime>, u64);

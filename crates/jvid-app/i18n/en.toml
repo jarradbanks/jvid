@@ -1072,5 +1072,13 @@ none = "No fillers or pauses"
 audio_source = "Audio Source"
 source_stream = "{name} · Stream {number}"
 
+[components]
+title = "Optional Components"
+purpose = "Whisper models enable local speech-to-text and subtitles. Downloads are optional; you can edit and export without them, and add them later from Help. Choose Done to skip."
+download = "Download"
+installed = "Installed"
+location = "Models: {path}"
+portable_error = "This portable copy cannot write its data. Move the whole folder to a writable location and try again. Your profile has not been used.\n\n{error}"
+
 [framing]
 target = "{track} · {clip}"

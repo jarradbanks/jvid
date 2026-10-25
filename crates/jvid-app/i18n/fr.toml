@@ -989,5 +989,13 @@ none = "Aucune hésitation ni pause"
 audio_source = "Source Audio"
 source_stream = "{name} · Piste {number}"
 
+[components]
+title = "Composants facultatifs"
+purpose = "Les modèles Whisper permettent la transcription et les sous-titres en local. Ils sont facultatifs ; vous pouvez monter et exporter sans eux, puis les ajouter depuis Aide. Choisissez Terminé pour passer."
+download = "Télécharger"
+installed = "Installé"
+location = "Modèles : {path}"
+portable_error = "Cette copie portable ne peut pas écrire ses données. Déplacez tout le dossier vers un emplacement accessible en écriture, puis réessayez.\n\n{error}"
+
 [framing]
 target = "{track} · {clip}"

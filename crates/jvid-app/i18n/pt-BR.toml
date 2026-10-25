@@ -982,5 +982,13 @@ none = "Nenhum vício ou pausa"
 audio_source = "Fonte de Áudio"
 source_stream = "{name} · Faixa {number}"
 
+[components]
+title = "Componentes opcionais"
+purpose = "Os modelos Whisper permitem transcrição e legendas locais. São opcionais: você pode editar e exportar sem eles e adicioná-los depois em Ajuda. Escolha Concluído para pular."
+download = "Baixar"
+installed = "Instalado"
+location = "Modelos: {path}"
+portable_error = "Esta cópia portátil não pode gravar seus dados. Mova toda a pasta para um local com permissão de gravação e tente novamente.\n\n{error}"
+
 [framing]
 target = "{track} · {clip}"

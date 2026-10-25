@@ -2238,7 +2238,6 @@ dependencies = [
 name = "jvid-app"
 version = "0.1.0"
 dependencies = [
- "directories",
  "eframe",
  "egui",
  "egui_dock",
@@ -2249,6 +2248,7 @@ dependencies = [
  "jvid-jobs",
  "jvid-log",
  "jvid-media",
+ "jvid-paths",
  "jvid-render",
  "jvid-transcribe",
  "proc-macro2",
@@ -2306,7 +2306,7 @@ version = "0.1.0"
 name = "jvid-log"
 version = "0.1.0"
 dependencies = [
- "directories",
+ "jvid-paths",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -2322,6 +2322,13 @@ dependencies = [
  "jvid-jobs",
  "jvid-media",
  "tracing",
+]
+
+[[package]]
+name = "jvid-paths"
+version = "0.1.0"
+dependencies = [
+ "directories",
 ]
 
 [[package]]
@@ -2341,10 +2348,10 @@ dependencies = [
 name = "jvid-transcribe"
 version = "0.1.0"
 dependencies = [
- "directories",
  "jvid-core",
  "jvid-jobs",
  "jvid-media",
+ "jvid-paths",
  "sha2",
  "tracing",
  "ureq",

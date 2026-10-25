@@ -68,9 +68,7 @@ impl Caches {
         let dir = s
             .cache_dir
             .clone()
-            .or_else(|| {
-                directories::ProjectDirs::from("", "", "jvid").map(|d| d.cache_dir().to_owned())
-            })
+            .or_else(jvid_paths::cache_dir)
             .unwrap_or_else(std::env::temp_dir);
         // shortcut: proxies aren't under the cache cap; evict them too if disk use complains.
         let proxies = Arc::new(Proxies::new(dir.join("proxies")));

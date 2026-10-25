@@ -978,5 +978,13 @@ none = "Nessun riempitivo o pausa"
 audio_source = "Sorgente Audio"
 source_stream = "{name} · Traccia {number}"
 
+[components]
+title = "Componenti facoltativi"
+purpose = "I modelli Whisper consentono la trascrizione e i sottotitoli in locale. Sono facoltativi: puoi montare ed esportare senza di essi e aggiungerli in seguito da Aiuto. Scegli Fine per saltare."
+download = "Scarica"
+installed = "Installato"
+location = "Modelli: {path}"
+portable_error = "Questa copia portatile non può scrivere i dati. Sposta tutta la cartella in una posizione scrivibile e riprova.\n\n{error}"
+
 [framing]
 target = "{track} · {clip}"

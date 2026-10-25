@@ -18,9 +18,7 @@ const _: () = assert!(jvid_audio::PEAK_FRAMES as i64 == jvid_media::waveforms::B
 pub fn media_dir(project: Option<&Path>) -> Option<PathBuf> {
     match project.and_then(Path::parent) {
         Some(dir) => Some(dir.join("media")),
-        None => {
-            directories::ProjectDirs::from("", "", "jvid").map(|d| d.data_dir().join("recordings"))
-        }
+        None => jvid_paths::data_dir().map(|d| d.join("recordings")),
     }
 }
 

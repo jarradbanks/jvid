@@ -981,5 +981,13 @@ none = "Geen stopwoorden of pauzes"
 audio_source = "Audiobron"
 source_stream = "{name} · Stream {number}"
 
+[components]
+title = "Optionele onderdelen"
+purpose = "Whisper-modellen maken lokale spraakherkenning en ondertitels mogelijk. Ze zijn optioneel. Je kunt zonder modellen bewerken en exporteren en ze later via Help toevoegen. Kies Gereed om over te slaan."
+download = "Downloaden"
+installed = "Geïnstalleerd"
+location = "Modellen: {path}"
+portable_error = "Deze draagbare kopie kan geen gegevens schrijven. Verplaats de hele map naar een beschrijfbare locatie en probeer opnieuw.\n\n{error}"
+
 [framing]
 target = "{track} · {clip}"

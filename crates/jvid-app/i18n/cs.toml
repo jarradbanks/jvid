@@ -983,5 +983,13 @@ none = "Žádné vycpávky ani pauzy"
 audio_source = "Zdroj Zvuku"
 source_stream = "{name} · Stopa {number}"
 
+[components]
+title = "Volitelné součásti"
+purpose = "Modely Whisper umožňují místní přepis řeči a titulky. Jsou volitelné: upravovat a exportovat lze i bez nich. Později je přidáte v Nápovědě. Tlačítkem Hotovo tento krok přeskočíte."
+download = "Stáhnout"
+installed = "Nainstalováno"
+location = "Modely: {path}"
+portable_error = "Tato přenosná kopie nemůže zapisovat data. Přesuňte celou složku na zapisovatelné místo a zkuste to znovu.\n\n{error}"
+
 [framing]
 target = "{track} · {clip}"

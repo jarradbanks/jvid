@@ -94,7 +94,7 @@ impl Model {
 /// `<local data folder>/models`, or `None` if the platform has no data folder. Local, so hundreds
 /// of MB don't roam with a Windows profile.
 pub fn dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "jvid").map(|d| d.data_local_dir().join("models"))
+    jvid_paths::data_local_dir().map(|d| d.join("models"))
 }
 
 /// Every network wait is bounded, so a stalled download fails and sees Cancel within 30 s.

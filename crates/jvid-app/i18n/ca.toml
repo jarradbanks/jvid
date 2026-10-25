@@ -978,5 +978,13 @@ none = "No hi ha crosses ni pauses"
 audio_source = "Font d’Àudio"
 source_stream = "{name} · Pista {number}"
 
+[components]
+title = "Components opcionals"
+purpose = "Els models Whisper permeten transcripció de veu i subtítols locals. Són opcionals: pots editar i exportar sense ells i afegir-los després des d’Ajuda. Tria Fet per ometre."
+download = "Baixa"
+installed = "Instal·lat"
+location = "Models: {path}"
+portable_error = "Aquesta còpia portable no pot escriure dades. Mou tota la carpeta a una ubicació amb permís d’escriptura i torna-ho a provar.\n\n{error}"
+
 [framing]
 target = "{track} · {clip}"
