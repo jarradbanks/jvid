@@ -14,7 +14,7 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{
     Button, Checkbox, ColorField, ColorWheel, DragField, Dropdown, KeyButton, Keyed, MenuRow,
-    SectionHeader, Segmented, Slider, TextInput, fit_text, paint_fit,
+    SectionHeader, Segmented, Slider, State, TextInput, fit_text, paint_fit,
 };
 
 use crate::i18n::{CATALOG, Label, tr, verbatim};
@@ -216,7 +216,7 @@ pub(crate) fn fx_param(name: &str) -> Option<(usize, &str)> {
 }
 
 /// The mask index and parameter of a mask keyframe name (see [`Mask::key`]).
-fn mask_param(name: &str) -> Option<(usize, &str)> {
+pub(crate) fn mask_param(name: &str) -> Option<(usize, &str)> {
     let (i, p) = name.strip_prefix("mask")?.split_once('.')?;
     Some((i.parse().ok()?, p))
 }
@@ -1149,6 +1149,16 @@ fn effects_rows(
     if let Some(e) = add_menu(ui, clips) {
         edit = Some(e);
     }
+    let state = match crate::hide_region::blur() {
+        Some(_) => State::Live,
+        None => State::Disabled,
+    };
+    let hide = Button::secondary(tr!("action.hide_region"))
+        .with_icon(icon::EYE_OFF)
+        .state(state);
+    if ui.add(hide.width(ui.available_width())).clicked() {
+        crate::hide_region::request(ui.ctx(), clips[0].id);
+    }
     edit
 }
 
@@ -1365,8 +1375,9 @@ fn menu_entry(ui: &mut Ui, row: &crate::effects::Row) -> egui::Response {
     r
 }
 
-fn push_effect(clips: &[&Clip], stem: &str, shader: &jvid_render::effect::Shader) -> Command {
-    let fx = Effect {
+/// Effect `stem` with `shader`'s defaults.
+pub(crate) fn new_effect(stem: &str, shader: &jvid_render::effect::Shader) -> Effect {
+    Effect {
         shader: stem.to_owned(),
         params: shader
             .params
@@ -1374,7 +1385,11 @@ fn push_effect(clips: &[&Clip], stem: &str, shader: &jvid_render::effect::Shader
             .map(|q| (q.name.clone(), q.default))
             .collect(),
         enabled: true,
-    };
+    }
+}
+
+fn push_effect(clips: &[&Clip], stem: &str, shader: &jvid_render::effect::Shader) -> Command {
+    let fx = new_effect(stem, shader);
     rewrite(clips, |_, x, _| x.effects.push(fx.clone()))
 }
 
@@ -1452,13 +1467,17 @@ fn reset_mask(clips: &[&Clip], i: usize) -> Command {
     })
 }
 
-/// A rectangle or ellipse of `shape` on every clip, centred and half its fitted image's size.
+/// A rectangle or ellipse of `shape`, centred and half a `[w, h]` fitted image's size.
+pub(crate) fn new_mask(shape: MaskShape, [w, h]: [f64; 2]) -> Mask {
+    Mask::new(shape, vec![[0.0, 0.0], [w / 2.0, h / 2.0]])
+}
+
+/// A [`new_mask`] of `shape` on every clip.
 fn push_mask(clips: &[&Clip], fitted: &[[f64; 2]], shape: MaskShape) -> Command {
     let mut size = fitted.iter();
     rewrite(clips, |_, x, _| {
-        let [w, h] = size.next().copied().unwrap_or([100.0; 2]);
-        let points = vec![[0.0, 0.0], [w / 2.0, h / 2.0]];
-        x.masks.push(Mask::new(shape, points));
+        let size = size.next().copied().unwrap_or([100.0; 2]);
+        x.masks.push(new_mask(shape, size));
     })
 }
 

@@ -91,6 +91,7 @@ Work while the timeline has focus.
 | Clean Up Voice | `Ctrl+Alt+U` |
 | Detect Silence… | `Ctrl+Alt+S` |
 | Find Highlights… | `Ctrl+Alt+H` |
+| Hide Region | `Ctrl+Alt+R` |
 | Nest | `Alt+N` |
 | Add Crossfade | `Ctrl+D` |
 | Add Dip to Black | `Ctrl+Alt+B` |

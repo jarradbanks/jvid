@@ -1370,6 +1370,21 @@ impl eframe::App for App {
             if let Some(r) = &applied {
                 self.timeline.applied(r.is_ok());
             }
+            let hide = self.timeline.hide_region.take();
+            if let Some(id) = hide.or(crate::hide_region::requested(ui.ctx()))
+                && let Some(blur) = crate::hide_region::blur()
+                && let Some(copy) = crate::hide_region::apply(&mut self.history, id, &blur)
+                && let Some((_, c)) = self.history.project().sequence().clip(copy)
+            {
+                // Selected, with the playhead in it, so the mask's handles show to place it.
+                let (start, end) = (c.start, c.end());
+                self.timeline
+                    .select_clip(self.history.project().sequence(), copy);
+                let t = self.timeline.playhead();
+                if !(start <= t && t < end) {
+                    self.timeline.seek(start);
+                }
+            }
             if let Some(Err(e)) = applied {
                 tracing::warn!("edit failed: {e}");
                 // Refusals a bin drop or delete can meet, which nothing else explains.

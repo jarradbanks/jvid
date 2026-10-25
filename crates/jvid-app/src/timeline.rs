@@ -123,6 +123,8 @@ pub struct Timeline {
     pub reveal: Option<AssetId>,
     /// A message for the app to show, such as why a transition couldn't be added.
     pub notice: Option<String>,
+    /// Hide Region asked for this clip; the app takes it.
+    pub hide_region: Option<ClipId>,
     /// The sequence picked in the header to show instead; the app opens it.
     pub open_sequence: Option<SequenceId>,
     /// The sequence shown last frame, to drop a selection made in another.
@@ -213,6 +215,7 @@ impl Default for Timeline {
             mark_drag: None,
             reveal: None,
             notice: None,
+            hide_region: None,
             open_sequence: None,
             shown_sequence: SequenceId::default(),
             keys: keyframes::Keys::default(),
@@ -462,6 +465,9 @@ impl Timeline {
             }
             "find_highlights" => {
                 self.highlights = highlights::Highlights::open(project.sequence(), &self.selected);
+            }
+            "hide_region" => {
+                self.hide_region = self.video_chosen(project.sequence()).first().map(|c| c.id);
             }
             "crossfade" | "dip_to_black" | "dip_to_white" => {
                 match self.transition_action(id, project) {
