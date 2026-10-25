@@ -24,6 +24,7 @@ use crate::import::Importer;
 use crate::keymap::{self, Keymap};
 use crate::media_bin::MediaBin;
 use crate::preview::{PROGRAM_ACTIONS, Preview, SOURCE_ACTIONS};
+use crate::subtitles::Done;
 use crate::timeline::{MARK_ACTIONS, Timeline, menus};
 use crate::welcome::{self, Recent, Welcome};
 use crate::{autosave, project_file, relink};
@@ -47,6 +48,8 @@ pub enum Tab {
     Timeline,
     /// Opened from the Export menu's Show Render Queue; closable, unlike the others.
     RenderQueue,
+    /// Opened from Timeline > Transcript; closable.
+    Transcript,
 }
 
 impl Tab {
@@ -58,6 +61,7 @@ impl Tab {
             Tab::Inspector => tr!("panel.inspector"),
             Tab::Timeline => tr!("panel.timeline"),
             Tab::RenderQueue => tr!("export.queue"),
+            Tab::Transcript => tr!("panel.transcript"),
         }
     }
 
@@ -69,6 +73,7 @@ impl Tab {
             Tab::Inspector => "inspector",
             Tab::Timeline => "timeline",
             Tab::RenderQueue => "render_queue",
+            Tab::Transcript => "transcript",
         }
     }
 }
@@ -144,6 +149,7 @@ pub struct App {
     autosave: crate::autosave::Autosave,
     queue: crate::export::queue::Queue,
     subtitles: crate::subtitles::Subtitles,
+    transcript: crate::transcript::TranscriptPanel,
     /// Dialogs waiting to be answered, the first one showing.
     prompts: Vec<Prompt>,
     /// The user chose to quit; the next close request goes through.
@@ -195,6 +201,7 @@ impl App {
         app.bin = MediaBin::new(caches.clone());
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
         app.preview.set_proxies(caches.proxies.clone());
+        app.transcript.cache = crate::transcript::Cache::new(caches.transcripts.clone());
         app.timeline = Timeline::new(caches);
         app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
         app.theme_setting = settings.theme.clone();
@@ -225,6 +232,7 @@ impl App {
                     .into_iter()
                     .all(|t| count(t) == 1)
                     && count(Tab::RenderQueue) <= 1
+                    && count(Tab::Transcript) <= 1
             })
             .unwrap_or_else(default_dock);
         let exports = jvid_jobs::Pool::new(1);
@@ -272,6 +280,7 @@ impl App {
             autosave: Default::default(),
             queue: Default::default(),
             subtitles: Default::default(),
+            transcript: Default::default(),
             prompts: Vec::new(),
             closing: false,
             lesson: None,
@@ -508,13 +517,17 @@ impl App {
     /// The Timeline menu, its left edge at `left`. Returns its right edge.
     fn timeline_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
         let button = menu_button(ui, tr!("menu.timeline"), left);
-        let mut picked = false;
+        let (mut picked, mut transcript) = (false, false);
         egui::Popup::menu(&button).show(|ui| {
             let can = self.can_generate_subtitles();
             picked = menus::item(ui, &self.keymap, "generate_subtitles", None, can);
+            transcript = ui.button(tr!("menu.transcript")).clicked();
         });
         if picked {
             self.run_action("generate_subtitles", true);
+        }
+        if transcript {
+            self.show_panel(Tab::Transcript);
         }
         button.rect.right()
     }
@@ -680,29 +693,36 @@ impl App {
                 egui::Popup::close_all(ctx);
                 self.show_queue();
             }
-            Some(QueueAction::Close) => {
-                if let Some(path) = self.dock.find_tab(&Tab::RenderQueue) {
-                    self.dock.remove_tab(path);
-                }
-            }
+            Some(QueueAction::Close) => self.close_panel(Tab::RenderQueue),
             _ => {}
         }
     }
 
     /// Focuses the Render Queue panel, first splitting it off the right of Timeline if closed.
     pub fn show_queue(&mut self) {
-        if self.dock.find_tab(&Tab::RenderQueue).is_none() {
+        self.show_panel(Tab::RenderQueue);
+    }
+
+    /// Focuses a closable panel, first splitting it off the right of Timeline if closed.
+    fn show_panel(&mut self, tab: Tab) {
+        if self.dock.find_tab(&tab).is_none() {
             match self.dock.find_main_surface_tab(&Tab::Timeline) {
                 Some((node, _)) => {
                     let tree = self.dock.main_surface_mut();
-                    tree.split_right(node, 0.5, vec![Tab::RenderQueue]);
+                    tree.split_right(node, 0.5, vec![tab]);
                 }
-                None => self.dock.push_to_first_leaf(Tab::RenderQueue),
+                None => self.dock.push_to_first_leaf(tab),
             }
             hide_tab_bars(&mut self.dock);
         }
-        if let Some(path) = self.dock.find_tab(&Tab::RenderQueue) {
+        if let Some(path) = self.dock.find_tab(&tab) {
             self.dock.set_focused_node_and_surface(path.node_path());
+        }
+    }
+
+    fn close_panel(&mut self, tab: Tab) {
+        if let Some(path) = self.dock.find_tab(&tab) {
+            self.dock.remove_tab(path);
         }
     }
 
@@ -1349,6 +1369,8 @@ impl eframe::App for App {
                 keymap: &self.keymap,
                 queue: &mut self.queue,
                 queue_action: None,
+                transcript: &mut self.transcript,
+                transcript_out: Default::default(),
             };
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
@@ -1360,14 +1382,21 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            let (import, command, gesture, relink, open, queue) = (
+            let (import, command, gesture, relink, open, queue, transcript) = (
                 viewer.import_clicked,
                 viewer.command,
                 viewer.gesture,
                 viewer.relink,
                 viewer.open,
                 viewer.queue_action,
+                viewer.transcript_out,
             );
+            if transcript.close {
+                self.close_panel(Tab::Transcript);
+            }
+            if let Some(sources) = transcript.transcribe {
+                self.subtitles.open_transcribe(sources);
+            }
             if std::mem::take(&mut self.preview.record_clicked) {
                 self.run_action("record", true);
             }
@@ -1453,10 +1482,18 @@ impl eframe::App for App {
                 tracing::warn!("edit failed: {e}");
             }
             let selected = self.timeline.selected();
-            if let Some(c) = self.subtitles.show(ui, self.history.project(), selected)
-                && let Err(e) = self.history.apply(c)
-            {
-                tracing::warn!("subtitles failed: {e}");
+            match self.subtitles.show(ui, self.history.project(), selected) {
+                Some(Done::Edit(c)) => {
+                    if let Err(e) = self.history.apply(*c) {
+                        tracing::warn!("subtitles failed: {e}");
+                    }
+                }
+                Some(Done::Transcribed(done)) => {
+                    for (source, t) in done {
+                        self.transcript.cache.insert(&source, t);
+                    }
+                }
+                None => {}
             }
             let (language, input) = (&mut self.language, &mut self.input_device);
             let (theme, motion) = (&mut self.theme_setting, &mut self.reduce_motion);
@@ -1585,6 +1622,8 @@ struct Viewer<'a> {
     keymap: &'a Keymap,
     queue: &'a mut crate::export::queue::Queue,
     queue_action: Option<QueueAction>,
+    transcript: &'a mut crate::transcript::TranscriptPanel,
+    transcript_out: crate::transcript::Output,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -1627,6 +1666,16 @@ impl TabViewer for Viewer<'_> {
         }
         if *tab == Tab::RenderQueue {
             self.queue_action = self.queue.panel(ui, focused);
+            return;
+        }
+        if *tab == Tab::Transcript {
+            let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
+            let mut out = self.transcript.show(ui, self.project, selected, t, focused);
+            if let Some(t) = out.seek.take() {
+                self.timeline.seek(t);
+            }
+            self.command = out.command.take().or(self.command.take());
+            self.transcript_out = out;
             return;
         }
         let source_tab = self.preview_views.get(*self.preview_active) == Some(&"source");
