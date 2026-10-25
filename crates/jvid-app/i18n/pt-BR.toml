@@ -959,3 +959,7 @@ remove = "Remover"
 remove_all = "Remover tudo"
 pause = "Pausa de {seconds} s"
 none = "Nenhum vício ou pausa"
+
+[analysis]
+audio_source = "Fonte de Áudio"
+source_stream = "{name} · Faixa {number}"

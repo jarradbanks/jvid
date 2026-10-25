@@ -1624,7 +1624,7 @@ impl Timeline {
         let rate = self.transport.rate;
         if let Some(h) = &mut self.highlights {
             let at = pos2(area.right() - space::S16, area.top() - space::S8);
-            let (cmd, open) = h.show(ui, at, rate, ranges.as_deref());
+            let (cmd, open) = h.show(ui, at, seq, rate, ranges.as_deref());
             if !open {
                 self.highlights = None;
             }
@@ -1632,7 +1632,7 @@ impl Timeline {
         }
         if let Some(s) = &mut self.silence {
             let at = pos2(area.right() - space::S16, area.top() - space::S8);
-            let (cmd, open) = s.show(ui, at, spans.as_deref());
+            let (cmd, open) = s.show(ui, at, seq, spans.as_deref());
             if !open {
                 self.silence = None;
             }

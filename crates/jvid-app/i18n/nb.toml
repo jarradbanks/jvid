@@ -943,3 +943,7 @@ remove = "Fjern"
 remove_all = "Fjern alle"
 pause = "Pause {seconds} s"
 none = "Ingen fyllord eller pauser"
+
+[analysis]
+audio_source = "Lydkilde"
+source_stream = "{name} · Strøm {number}"

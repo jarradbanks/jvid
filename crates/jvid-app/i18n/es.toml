@@ -957,3 +957,7 @@ remove = "Quitar"
 remove_all = "Quitar todo"
 pause = "Pausa de {seconds} s"
 none = "No hay muletillas ni pausas"
+
+[analysis]
+audio_source = "Fuente de Audio"
+source_stream = "{name} · Pista {number}"

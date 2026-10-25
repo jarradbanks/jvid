@@ -958,3 +958,7 @@ remove = "Verwijderen"
 remove_all = "Alles verwijderen"
 pause = "Pauze {seconds} s"
 none = "Geen stopwoorden of pauzes"
+
+[analysis]
+audio_source = "Audiobron"
+source_stream = "{name} · Stream {number}"

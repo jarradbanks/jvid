@@ -960,3 +960,7 @@ remove = "Odstranit"
 remove_all = "Odstranit vše"
 pause = "Pauza {seconds} s"
 none = "Žádné vycpávky ani pauzy"
+
+[analysis]
+audio_source = "Zdroj Zvuku"
+source_stream = "{name} · Stopa {number}"

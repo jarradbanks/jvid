@@ -946,3 +946,7 @@ remove = "Kaldır"
 remove_all = "Tümünü Kaldır"
 pause = "{seconds} sn Duraklama"
 none = "Dolgu sözcüğü veya duraklama yok"
+
+[analysis]
+audio_source = "Ses Kaynağı"
+source_stream = "{name} · Akış {number}"
