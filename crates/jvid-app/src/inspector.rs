@@ -787,6 +787,7 @@ pub fn show(
         }
         for p in props {
             index += 1;
+            let top = ui.cursor().top();
             if p.name == "lut_intensity"
                 && let Some(e) = lut_row(ui, clips)
             {
@@ -796,6 +797,9 @@ pub fn show(
                 && let Some(e) = row(ui, clips, p, t, index, &mut seek)
             {
                 edit = Some(e);
+            }
+            if let Some(name) = row_anchor(p.name) {
+                crate::app::tutorial::anchor_below(ui, name, top);
             }
         }
         if id == "opacity"
@@ -860,6 +864,22 @@ pub fn show(
         edit = Some(e);
     }
     (edit, seek)
+}
+
+/// The [`crate::app::tutorial::anchor`] of the rows lessons point at, by property. LUT covers
+/// its button and LUT Mix.
+fn row_anchor(prop: &str) -> Option<&'static str> {
+    Some(match prop {
+        "position" => "inspector.position",
+        "scale" => "inspector.scale",
+        "opacity" => "inspector.opacity",
+        "exposure" => "inspector.exposure",
+        "temperature" => "inspector.temperature",
+        "tint" => "inspector.tint",
+        "lut_intensity" => "inspector.lut",
+        "volume" => "inspector.volume",
+        _ => return None,
+    })
 }
 
 /// The Color Wheels section: Lift, Gamma, Gain and Offset, each a wheel beside its master.
@@ -1298,7 +1318,8 @@ fn effects_rows(
     // Each block's top, then the stack's bottom: the gaps a dragged block drops into.
     let mut gaps = Vec::with_capacity(n + 1);
     for (i, e) in effects.iter().enumerate() {
-        gaps.push(ui.cursor().top());
+        let top = ui.cursor().top();
+        gaps.push(top);
         if i > 0 {
             let y = ui.cursor().top() - ui.spacing().item_spacing.y / 2.0;
             let line = egui::Stroke::new(1.0 / ui.pixels_per_point(), color::border());
@@ -1376,6 +1397,9 @@ fn effects_rows(
                     }
                 }
             });
+        }
+        if i == 0 {
+            crate::app::tutorial::anchor_below(ui, "inspector.effect", top);
         }
     }
     gaps.push(ui.cursor().top());
@@ -1534,6 +1558,7 @@ fn add_menu(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
     let w = ui.available_width();
     let add = Button::secondary(tr!("inspector.add_effect")).with_icon(icon::PLUS);
     let r = ui.add(add.width(w));
+    crate::app::tutorial::anchor_below(ui, "inspector.add_effect", r.rect.top());
     let query = ui.id().with("inspector fx query");
     if r.clicked() {
         ui.data_mut(|d| d.remove::<String>(query));
@@ -1837,10 +1862,21 @@ fn masks_rows(
             // Shape rows take first + 1 and 2 (a Path row only 1), so props start at 3.
             let rows = (first + 1..).zip(shape).chain((first + 3..).zip(&props));
             for (k, p) in rows {
+                let top = ui.cursor().top();
                 if let Some(e) = row(ui, clips, p, t, k, seek) {
                     edit = Some(e);
                 }
+                let name = match k - first {
+                    1 => "inspector.mask_position",
+                    3 => "inspector.feather",
+                    _ => continue,
+                };
+                if i == 0 {
+                    crate::app::tutorial::anchor_below(ui, name, top);
+                }
             }
+            // Mode and Invert, which one step names together.
+            let top = ui.cursor().top();
             let modes = [MaskMode::Add, MaskMode::Subtract];
             let mut k = usize::from(m.mode == MaskMode::Subtract);
             let labels = [tr!("inspector.mask_add"), tr!("inspector.mask_subtract")];
@@ -1859,6 +1895,9 @@ fn masks_rows(
             });
             if changed {
                 edit = Some((edit_mask(clips, i, |m| m.invert = invert), None));
+            }
+            if i == 0 {
+                crate::app::tutorial::anchor_below(ui, "inspector.invert", top);
             }
         });
     }
@@ -1915,6 +1954,7 @@ fn add_mask_menu(
     let w = ui.available_width();
     let add = Button::secondary(tr!("inspector.add_mask")).with_icon(icon::PLUS);
     let r = ui.add(add.width(w));
+    crate::app::tutorial::anchor_below(ui, "inspector.add_mask", r.rect.top());
     let mut pick = None;
     egui::Popup::menu(&r).width(w).show(|ui| {
         for s in [MaskShape::Rectangle, MaskShape::Ellipse, MaskShape::Bezier] {
@@ -2554,7 +2594,10 @@ pub(crate) fn audio_fx(ui: &mut Ui, fxs: &[AudioFx]) -> Option<(FxEdit, Option<G
             }
             if *block == "eq" {
                 ui.add_space(space::S4);
-                if let Some((k, v, r)) = slider_bank(ui, &first.eq) {
+                let top = ui.cursor().top();
+                let bank = slider_bank(ui, &first.eq);
+                crate::app::tutorial::anchor_below(ui, "inspector.eq", top);
+                if let Some((k, v, r)) = bank {
                     if r.drag_started() {
                         ui.data_mut(|d| *d.get_temp_mut_or(drags, 0u64) += 1);
                     }

@@ -937,6 +937,9 @@ step = "Step {n} of {total}"
 show_me = "Show Me"
 back = "Back"
 skip_step = "Skip Step"
+# Moves on once a step is done; the last step's reads finish.
+next = "Next"
+finish = "Finish"
 exit = "Exit"
 keep_project = "Keep Project"
 # The step card once the last step is done.

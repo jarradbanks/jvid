@@ -49,7 +49,7 @@ pub const COLOUR: Lesson = Lesson {
             show_me: |a| grade(a, |x| x.exposure = 1.0),
             reveal: Some(open_scopes),
             ghost: None,
-            also: &["inspector"],
+            also: &["inspector.exposure"],
         },
         Step {
             anchor: "scope.vectorscope",
@@ -58,7 +58,7 @@ pub const COLOUR: Lesson = Lesson {
             show_me: |a| grade(a, |x| (x.temperature, x.tint) = (-0.4, 0.0)),
             reveal: Some(open_scopes),
             ghost: None,
-            also: &["inspector"],
+            also: &["inspector.temperature", "inspector.tint"],
         },
         Step {
             anchor: "scope.histogram",
@@ -67,10 +67,10 @@ pub const COLOUR: Lesson = Lesson {
             show_me: |a| grade(a, |x| (x.temperature, x.tint) = (-0.7, -0.25)),
             reveal: Some(open_scopes),
             ghost: None,
-            also: &["inspector"],
+            also: &["inspector.temperature", "inspector.tint"],
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.lut",
             text: |_| {
                 let none = tr!("inspector.lut_none");
                 tr!("tutorial.color_look", none = none, file = verbatim(LOOK))
