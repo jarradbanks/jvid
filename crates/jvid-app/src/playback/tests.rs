@@ -1960,3 +1960,54 @@ fn cancelled_and_relinked_decodes_do_not_wake_for_obsolete_results() {
         assert_eq!(wakes.try_iter().count(), if reset { 0 } else { 2 });
     }
 }
+
+#[test]
+fn program_composition_reuses_upload_resources_and_retains_uploads() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let settings = ProjectSettings {
+        width: 2,
+        height: 2,
+        ..ProjectSettings::default()
+    };
+    let mut gpu = Gpu::new(&device);
+    let mut warm = None;
+    for i in 0..8 {
+        let mut frame = tiny(Time(i));
+        frame.planes = [vec![32 + 20 * i as u8; 4], vec![128], vec![128]];
+        let shown = Shown {
+            index: i,
+            exact: true,
+            layers: vec![(Pixels::Frame(Arc::new(frame)), Transform::default())],
+        };
+        gpu.draw(&device, &queue, &settings, 1, &shown);
+        let allocations = gpu.layers[0].upload_allocations();
+        if let Some(warm) = warm {
+            assert_eq!(allocations, warm);
+        }
+        warm = Some(allocations);
+    }
+    let retained = gpu.layers[0].image().unwrap();
+    let expected = jvid_render::composite::read_back(&device, &queue, &retained);
+    let shown = Shown {
+        index: 8,
+        exact: true,
+        layers: vec![(Pixels::Frame(Arc::new(tiny(Time(8)))), Transform::default())],
+    };
+    gpu.draw(&device, &queue, &settings, 1, &shown);
+    assert_eq!(
+        jvid_render::composite::read_back(&device, &queue, &retained),
+        expected
+    );
+    let shown = Shown {
+        index: 9,
+        exact: true,
+        layers: Vec::new(),
+    };
+    gpu.draw(&device, &queue, &settings, 1, &shown);
+    assert!(
+        gpu.layers.is_empty(),
+        "unused upload pools should be released"
+    );
+}
