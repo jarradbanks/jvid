@@ -2,8 +2,10 @@
 //! thumbnails (same key and LRU cap, see [`crate::thumbnails`]).
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use jvid_jobs::{Handle, Priority};
@@ -21,10 +23,49 @@ const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 /// Lowest and highest sample (over both channels) in a span.
 pub type Peak = [f32; 2];
 
-/// Returns the finest-level peaks of audio stream `nth` of `path`, showing each partial result
-/// to the callback as it grows.
-pub type Scan =
-    dyn Fn(&Path, usize, &mut dyn FnMut(&[Peak])) -> Result<Vec<Peak>, String> + Send + Sync;
+/// A cancelled scan is not corrupt media and must not publish a cache entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanError {
+    Cancelled,
+    Failed(String),
+}
+
+impl std::fmt::Display for ScanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cancelled => f.write_str("waveform scan cancelled"),
+            Self::Failed(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ScanError {}
+
+impl From<String> for ScanError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+impl From<std::io::Error> for ScanError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Failed(error.to_string())
+    }
+}
+
+/// Returns the finest-level peaks, polling cancellation between decoded chunks and before
+/// handing partial results to the callback.
+pub type Scan = dyn Fn(&Path, usize, &dyn Fn() -> bool, &mut dyn FnMut(&[Peak])) -> Result<Vec<Peak>, ScanError>
+    + Send
+    + Sync;
+
+fn check_cancelled(cancelled: &dyn Fn() -> bool) -> Result<(), ScanError> {
+    if cancelled() {
+        Err(ScanError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pyramid {
@@ -118,12 +159,26 @@ impl Cache {
         &self,
         path: &Path,
         nth: usize,
-        mut progress: impl FnMut(Pyramid),
+        progress: impl FnMut(Pyramid),
     ) -> Result<Pyramid, String> {
+        self.load_cancellable(path, nth, || false, progress)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Like [`Self::load_with`], stopping cooperatively without publishing cancelled work.
+    pub fn load_cancellable(
+        &self,
+        path: &Path,
+        nth: usize,
+        cancelled: impl Fn() -> bool,
+        mut progress: impl FnMut(Pyramid),
+    ) -> Result<Pyramid, ScanError> {
+        check_cancelled(&cancelled)?;
         let file = self
             .dir
             .join(format!("{}.{nth}.v{VERSION}.peaks", key(path)?));
         if let Ok(bytes) = fs::read(&file) {
+            check_cancelled(&cancelled)?;
             // The file's mtime is its last use, for LRU eviction.
             let _ = fs::File::options()
                 .write(true)
@@ -135,19 +190,31 @@ impl Cache {
                 .iter()
                 .map(|b| f32::from_le_bytes(*b))
                 .collect();
-            return Ok(Pyramid::new(f.as_chunks::<2>().0.to_vec()));
+            check_cancelled(&cancelled)?;
+            let pyramid = Pyramid::new(f.as_chunks::<2>().0.to_vec());
+            check_cancelled(&cancelled)?;
+            return Ok(pyramid);
         }
+        check_cancelled(&cancelled)?;
         let mut last = Instant::now();
-        let finest = (self.scan)(path, nth, &mut |partial| {
-            if last.elapsed() >= PROGRESS_EVERY {
-                progress(Pyramid::new(partial.to_vec()));
+        let finest = (self.scan)(path, nth, &cancelled, &mut |partial| {
+            if !cancelled() && last.elapsed() >= PROGRESS_EVERY {
+                let pyramid = Pyramid::new(partial.to_vec());
+                if !cancelled() {
+                    progress(pyramid);
+                }
                 last = Instant::now();
             }
         })?;
-        if let Err(e) = self.store(&file, &finest) {
-            tracing::warn!("waveforms: can't write {}: {e}", file.display());
+        check_cancelled(&cancelled)?;
+        let pyramid = Pyramid::new(finest);
+        check_cancelled(&cancelled)?;
+        match self.store(&file, pyramid.finest(), &cancelled) {
+            Err(ScanError::Cancelled) => return Err(ScanError::Cancelled),
+            Err(error) => tracing::warn!("waveforms: can't write {}: {error}", file.display()),
+            Ok(()) => {}
         }
-        Ok(Pyramid::new(finest))
+        Ok(pyramid)
     }
 
     /// Loads on `jobs` at preview priority and hands the pyramid to `done` there: partial ones
@@ -162,33 +229,92 @@ impl Cache {
         let cache = self.clone();
         let key = format!("peaks:{}:{nth}", path.display());
         jobs.submit(key, Priority::Preview, move |ctx| {
+            let result = cache.load_cancellable(
+                &path,
+                nth,
+                || ctx.is_cancelled(),
+                |p| {
+                    if !ctx.is_cancelled() {
+                        done(Ok(p));
+                    }
+                },
+            );
             if !ctx.is_cancelled() {
-                let r = cache.load_with(&path, nth, |p| done(Ok(p)));
-                done(r);
+                match result {
+                    Ok(pyramid) => done(Ok(pyramid)),
+                    Err(ScanError::Failed(error)) => done(Err(error)),
+                    Err(ScanError::Cancelled) => {}
+                }
             }
         })
     }
 
-    fn store(&self, file: &Path, finest: &[Peak]) -> Result<(), String> {
-        fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
+    fn store(
+        &self,
+        file: &Path,
+        finest: &[Peak],
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), ScanError> {
+        check_cancelled(cancelled)?;
+        fs::create_dir_all(&self.dir)?;
         let bytes: Vec<u8> = finest
             .iter()
             .flatten()
             .flat_map(|v| v.to_le_bytes())
             .collect();
         // Write then rename, so a crash never leaves a half-written entry.
-        let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
-        fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-        fs::rename(&tmp, file).map_err(|e| e.to_string())?;
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let tmp = file.with_extension(format!(
+            "{}.{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        check_cancelled(cancelled)?;
+        let mut output = fs::File::options()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        let tmp = Pending(tmp);
+        let written = (|| -> Result<(), ScanError> {
+            for chunk in bytes.chunks(64 * 1024) {
+                check_cancelled(cancelled)?;
+                output.write_all(chunk)?;
+            }
+            Ok(())
+        })();
+        drop(output);
+        written?;
+        check_cancelled(cancelled)?;
+        fs::rename(&tmp.0, file)?;
         evict(&self.dir, self.cap_bytes);
         Ok(())
     }
 }
 
-fn scan(path: &Path, nth: usize, progress: &mut dyn FnMut(&[Peak])) -> Result<Vec<Peak>, String> {
+/// Removes only the temporary entry owned by this write, including after cancellation.
+struct Pending(PathBuf);
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn scan(
+    path: &Path,
+    nth: usize,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(&[Peak]),
+) -> Result<Vec<Peak>, ScanError> {
+    check_cancelled(cancelled)?;
     let mut d = AudioDecoder::open(path, nth).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
-    while let Some(c) = d.next_chunk().map_err(|e| e.to_string())? {
+    loop {
+        check_cancelled(cancelled)?;
+        let Some(c) = d.next_chunk().map_err(|e| e.to_string())? else {
+            break;
+        };
+        check_cancelled(cancelled)?;
         for (i, f) in c.samples.as_chunks::<2>().0.iter().enumerate() {
             let b = ((c.start + i as i64) / BUCKET) as usize;
             if b >= out.len() {
@@ -197,6 +323,7 @@ fn scan(path: &Path, nth: usize, progress: &mut dyn FnMut(&[Peak])) -> Result<Ve
             let p = &mut out[b];
             *p = [p[0].min(f[0]).min(f[1]), p[1].max(f[0]).max(f[1])];
         }
+        check_cancelled(cancelled)?;
         progress(&out);
     }
     Ok(out)
@@ -204,7 +331,9 @@ fn scan(path: &Path, nth: usize, progress: &mut dyn FnMut(&[Peak])) -> Result<Ve
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, mpsc};
     use std::time::{Duration, Instant};
 
     use super::*;
@@ -224,11 +353,130 @@ mod tests {
     fn counting(dir: PathBuf, cap: u64) -> (Cache, Arc<AtomicUsize>) {
         let n = Arc::new(AtomicUsize::new(0));
         let c = n.clone();
-        let scan = Box::new(move |_: &Path, _, _: &mut dyn FnMut(&[Peak])| {
-            c.fetch_add(1, Ordering::SeqCst);
-            Ok(ramp(1000))
-        });
+        let scan = Box::new(
+            move |_: &Path, _, _: &dyn Fn() -> bool, _: &mut dyn FnMut(&[Peak])| {
+                c.fetch_add(1, Ordering::SeqCst);
+                Ok(ramp(1000))
+            },
+        );
         (Cache::with_scan(dir, cap, scan), n)
+    }
+
+    #[test]
+    fn cancelled_job_stops_at_next_chunk_without_publishing_and_can_retry() {
+        let dir = tmp("cancel-job");
+        let source = dir.join("source.wav");
+        fs::write(&source, b"fake source").unwrap();
+        let cache_dir = dir.join("cache");
+        let steps = Arc::new(AtomicUsize::new(0));
+        let scanned = steps.clone();
+        let (started, start) = mpsc::channel();
+        let (resume, resumed) = mpsc::channel();
+        let resumed = Mutex::new(resumed);
+        let scanner = Box::new(
+            move |_: &Path, _, cancelled: &dyn Fn() -> bool, progress: &mut dyn FnMut(&[Peak])| {
+                let mut peaks = Vec::new();
+                for _ in 0..64 {
+                    check_cancelled(cancelled)?;
+                    if scanned.fetch_add(1, Ordering::SeqCst) == 0 {
+                        started.send(()).unwrap();
+                        resumed
+                            .lock()
+                            .unwrap()
+                            .recv_timeout(Duration::from_secs(10))
+                            .unwrap();
+                    }
+                    peaks.push([-0.1, 0.1]);
+                    check_cancelled(cancelled)?;
+                    progress(&peaks);
+                }
+                Ok(peaks)
+            },
+        );
+        let cache = Arc::new(Cache::with_scan(cache_dir.clone(), u64::MAX, scanner));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let published = calls.clone();
+        let pool = jvid_jobs::Pool::new(1);
+        let handle = cache.submit(&pool, source.clone(), 0, move |_| {
+            published.fetch_add(1, Ordering::SeqCst);
+        });
+        start.recv_timeout(Duration::from_secs(10)).unwrap();
+        handle.cancel();
+        resume.send(()).unwrap();
+        // Shutdown joins the job; the gate makes remaining work deterministic, without timing
+        // assertions that depend on runner speed.
+        drop(pool);
+        assert!(handle.is_finished());
+        assert_eq!(steps.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(!cache_dir.exists());
+        assert_eq!(cache.load(&source, 0).unwrap().finest().len(), 64);
+        assert_eq!(steps.load(Ordering::SeqCst), 65);
+        assert_eq!(fs::read_dir(&cache_dir).unwrap().count(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cancellation_during_cache_write_removes_owned_temporary_file() {
+        let dir = tmp("cancel-write");
+        let (cache, _) = counting(dir.clone(), u64::MAX);
+        let file = dir.join("finished.peaks");
+        let result = cache.store(&file, &ramp(10_000), &|| {
+            fs::read_dir(&dir).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "tmp")
+            })
+        });
+        assert_eq!(result, Err(ScanError::Cancelled));
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cancellation_is_distinct_from_bad_media_and_preserves_existing_cache() {
+        let dir = tmp("cancel-hit");
+        let source = dir.join("source.wav");
+        fs::write(&source, b"fake source").unwrap();
+        let (cache, scans) = counting(dir.join("cache"), u64::MAX);
+        let expected = cache.load(&source, 0).unwrap();
+        let result = cache.load_cancellable(&source, 0, || true, |_| panic!("cancelled progress"));
+        assert_eq!(result, Err(ScanError::Cancelled));
+        assert_eq!(cache.load(&source, 0).unwrap(), expected);
+        assert_eq!(scans.load(Ordering::SeqCst), 1);
+        let bad = Cache::new(dir.join("bad"), u64::MAX);
+        assert!(matches!(
+            bad.load_cancellable(&source, 0, || false, |_| {}),
+            Err(ScanError::Failed(_))
+        ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn real_audio_cancellation_publishes_no_cache_and_can_retry() {
+        let Some(corpus) = crate::test_media::corpus() else {
+            return;
+        };
+        crate::ffmpeg::init().unwrap();
+        let dir = tmp("cancel-audio");
+        let cache = Cache::new(dir.join("cache"), u64::MAX);
+        let polls = Cell::new(0);
+        let result = cache.load_cancellable(
+            &corpus.join("tone-1khz.wav"),
+            0,
+            || {
+                polls.set(polls.get() + 1);
+                polls.get() >= 8
+            },
+            |_| panic!("cancelled audio published progress"),
+        );
+        assert_eq!(result, Err(ScanError::Cancelled));
+        assert!(!cache.dir.exists());
+        let finished = cache.load(&corpus.join("tone-1khz.wav"), 0).unwrap();
+        assert!(finished.finest().iter().any(|p| p[1] > 0.09));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -264,14 +512,16 @@ mod tests {
         let a = d.join("a.wav");
         fs::write(&a, b"x").unwrap();
         // Grows by 100 peaks every 100 ms (or more, on a loaded machine), short of the whole.
-        let scan = Box::new(|_: &Path, _, progress: &mut dyn FnMut(&[Peak])| {
-            let all = ramp(1000);
-            for n in (100..1000).step_by(100) {
-                std::thread::sleep(Duration::from_millis(100));
-                progress(&all[..n]);
-            }
-            Ok(all)
-        });
+        let scan = Box::new(
+            |_: &Path, _, _: &dyn Fn() -> bool, progress: &mut dyn FnMut(&[Peak])| {
+                let all = ramp(1000);
+                for n in (100..1000).step_by(100) {
+                    std::thread::sleep(Duration::from_millis(100));
+                    progress(&all[..n]);
+                }
+                Ok(all)
+            },
+        );
         let c = Cache::with_scan(d.join("cache"), u64::MAX, scan);
         let mut partials = Vec::new();
         let mut at = Vec::new();
