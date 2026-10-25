@@ -90,6 +90,7 @@ Work while the timeline has focus.
 | Paste Grade | `Ctrl+Alt+V` |
 | Clean Up Voice | `Ctrl+Alt+U` |
 | Detect Silence… | `Ctrl+Alt+S` |
+| Find Highlights… | `Ctrl+Alt+H` |
 | Nest | `Alt+N` |
 | Add Crossfade | `Ctrl+D` |
 | Add Dip to Black | `Ctrl+Alt+B` |

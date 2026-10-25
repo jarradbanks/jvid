@@ -37,6 +37,7 @@ use crate::transport::Transport;
 
 mod fades;
 mod graph;
+mod highlights;
 mod keyframes;
 mod markers;
 pub mod menus;
@@ -130,6 +131,8 @@ pub struct Timeline {
     keys: keyframes::Keys,
     /// The Detect Silence dialog, while open.
     silence: Option<silence::Silence>,
+    /// The Find Highlights dialog, while open.
+    highlights: Option<highlights::Highlights>,
     /// The audio track a voiceover records onto; disarming it ends a take.
     pub armed: Option<TrackId>,
     /// The input level while a take records onto `armed`, 0..=1; the app sets it.
@@ -214,6 +217,7 @@ impl Default for Timeline {
             shown_sequence: SequenceId::default(),
             keys: keyframes::Keys::default(),
             silence: None,
+            highlights: None,
             armed: None,
             level: None,
             live: None,
@@ -455,6 +459,9 @@ impl Timeline {
             }
             "detect_silence" => {
                 self.silence = silence::Silence::open(project.sequence(), &self.selected);
+            }
+            "find_highlights" => {
+                self.highlights = highlights::Highlights::open(project.sequence(), &self.selected);
             }
             "crossfade" | "dip_to_black" | "dip_to_white" => {
                 match self.transition_action(id, project) {
@@ -1508,6 +1515,16 @@ impl Timeline {
             );
             playhead_head(&painter, pos2(x + line / 2.0, ruler.top()));
         }
+        let ranges = self.highlight_ranges(project, ui.ctx());
+        let rate = self.transport.rate;
+        if let Some(h) = &mut self.highlights {
+            let at = pos2(area.right() - space::S16, area.top() - space::S8);
+            let (cmd, open) = h.show(ui, at, rate, ranges.as_deref());
+            if !open {
+                self.highlights = None;
+            }
+            edit = edit.or(cmd.map(|c| (c, None)));
+        }
         if let Some(s) = &mut self.silence {
             let at = pos2(area.right() - space::S16, area.top() - space::S8);
             let (cmd, open) = s.show(ui, at, spans.as_deref());
@@ -1543,6 +1560,33 @@ impl Timeline {
         // shortcut: rescans every clip's peaks each frame; cache by settings if hour-long
         // recordings make the dialog lag.
         s.spans(seq, &|c| {
+            let (a, nth) = key(c)?;
+            let p = media.peaks.get(&(a.path.clone(), nth))?.as_ref()?;
+            Some(p.finest())
+        })
+    }
+
+    /// The open Find Highlights dialog's ranges, loading the peaks and starting the scene scan
+    /// it reads; `None` while it's closed or they load.
+    fn highlight_ranges(
+        &mut self,
+        project: &Project,
+        ctx: &egui::Context,
+    ) -> Option<Vec<(Time, Time)>> {
+        let h = self.highlights.as_mut()?;
+        let seq = project.sequence();
+        let key = |c: &Clip| Some((project.asset(c.asset)?, c.stream.unwrap_or(0) as usize));
+        if let Some(caches) = &self.media.caches {
+            let path = |c: &Clip| Some(project.asset(c.asset)?.path.clone());
+            h.start_scan(seq, &caches.jobs, &path, ctx);
+        }
+        for &id in h.audio() {
+            if let Some((a, nth)) = seq.clip(id).and_then(|(_, c)| key(c)) {
+                self.media.pyramid(ctx, a, nth);
+            }
+        }
+        let media = &self.media;
+        h.ranges(seq, &|c| {
             let (a, nth) = key(c)?;
             let p = media.peaks.get(&(a.path.clone(), nth))?.as_ref()?;
             Some(p.finest())

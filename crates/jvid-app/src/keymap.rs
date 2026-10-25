@@ -99,6 +99,7 @@ pub const ACTIONS: &[Action] = &[
     t("paste_grade", "Ctrl+Alt+V"),
     t("clean_up_voice", "Ctrl+Alt+U"),
     t("detect_silence", "Ctrl+Alt+S"),
+    t("find_highlights", "Ctrl+Alt+H"),
     t("nest", "Alt+N"),
     t("crossfade", "Ctrl+D"),
     t("dip_to_black", "Ctrl+Alt+B"),

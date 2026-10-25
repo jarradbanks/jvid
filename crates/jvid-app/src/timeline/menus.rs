@@ -74,6 +74,7 @@ const CLIP: &[&str] = &[
     "reverse",
     "freeze_frame",
     "detect_silence",
+    "find_highlights",
     "",
     "copy_grade",
     "paste_grade",
@@ -116,6 +117,7 @@ impl Timeline {
             "copy" | "cut" | "duplicate" | "link" | "enable" | "reverse" | "nest" => any,
             "freeze_frame" | "clean_up_voice" => self.clip_action(id, seq).is_some(),
             "detect_silence" => super::silence::Silence::open(seq, &self.selected).is_some(),
+            "find_highlights" => super::highlights::Highlights::open(seq, &self.selected).is_some(),
             // cut_action's only side effect is Q's seek, put back after.
             "add_edit" | "ripple_trim_prev" | "ripple_trim_next" => {
                 let seek = self.seek_after;

@@ -54,6 +54,7 @@ copy_grade = "Copier l'étalonnage"
 paste_grade = "Coller l'étalonnage"
 clean_up_voice = "Nettoyer la voix"
 detect_silence = "Détecter les silences…"
+find_highlights = "Trouver les temps forts…"
 nest = "Imbriquer"
 crossfade = "Ajouter un fondu enchaîné"
 dip_to_black = "Ajouter un fondu au noir"
@@ -505,6 +506,20 @@ speed_up_tooltip = "Lire chaque zone à la vitesse ci-dessus"
 # Unit suffixes after the Threshold and length fields.
 db_suffix = " dB"
 seconds_suffix = " s"
+
+[highlights]
+title = "Trouver les temps forts"
+loud = "Moments sonores forts"
+scenes = "Changements de scène"
+sensitivity = "Sensibilité"
+padding = "Marge"
+scanning = "Lecture de la vidéo… {percent} %"
+none = "Aucun temps fort à cette sensibilité"
+found.one = "{count} temps fort"
+found.many = "{count} temps forts"
+found.other = "{count} temps forts"
+add = "Ajouter les marqueurs"
+marker_name = "Temps fort {n}"
 
 [zoom]
 label = "Zoom"

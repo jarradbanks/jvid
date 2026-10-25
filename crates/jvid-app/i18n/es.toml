@@ -53,6 +53,7 @@ copy_grade = "Copiar etalonaje"
 paste_grade = "Pegar etalonaje"
 clean_up_voice = "Limpiar voz"
 detect_silence = "Detectar silencio…"
+find_highlights = "Buscar momentos destacados…"
 nest = "Anidar"
 crossfade = "Añadir fundido cruzado"
 dip_to_black = "Añadir fundido a negro"
@@ -500,6 +501,19 @@ speed_up_tooltip = "Reproducir cada región a la velocidad indicada"
 # Unit suffixes after the Threshold and length fields.
 db_suffix = " dB"
 seconds_suffix = " s"
+
+[highlights]
+title = "Buscar momentos destacados"
+loud = "Momentos fuertes"
+scenes = "Cambios de escena"
+sensitivity = "Sensibilidad"
+padding = "Margen"
+scanning = "Leyendo el vídeo… {percent} %"
+none = "Ningún momento destacado con esta sensibilidad"
+found.one = "{count} momento destacado"
+found.other = "{count} momentos destacados"
+add = "Añadir marcadores"
+marker_name = "Momento destacado {n}"
 
 [zoom]
 label = "Zoom"
