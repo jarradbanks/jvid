@@ -41,7 +41,10 @@ impl Dialog<'_> {
                     ui.label(self.body);
                 }
                 ui.add_space(space::S16);
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // Zero height: a plain with_layout claims all the height the Modal offers.
+                let size = egui::vec2(ui.available_width(), 0.0);
+                let layout = Layout::right_to_left(Align::Center);
+                ui.allocate_ui_with_layout(size, layout, |ui| {
                     ui.spacing_mut().item_spacing.x = space::S8;
                     for (i, &(label, kind)) in self.buttons.iter().enumerate() {
                         let r = ui.add(Button::new(kind, label));
