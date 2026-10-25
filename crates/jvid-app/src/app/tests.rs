@@ -1870,3 +1870,185 @@ fn up_over_an_eq_band_nudges_it_and_not_the_playhead() {
     assert_eq!(band(&h), 0.5);
     assert_eq!(h.state().timeline.playhead(), Time(5 * S));
 }
+
+/// Speech-to-text stand-in: "Hello there. This is a test." from 0.1 s, or, when `slow`, no
+/// words until cancelled. Keeps the options it was asked with.
+struct FakeTranscriber {
+    slow: bool,
+    asked: std::sync::Mutex<Vec<jvid_transcribe::Options>>,
+}
+
+impl jvid_transcribe::Transcriber for FakeTranscriber {
+    fn transcribe(
+        &self,
+        _: Vec<f32>,
+        opts: &jvid_transcribe::Options,
+        ctx: &jvid_jobs::Ctx,
+    ) -> Result<jvid_transcribe::Transcript, jvid_transcribe::Error> {
+        use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
+        self.asked.lock().unwrap().push(opts.clone());
+        while self.slow && !ctx.is_cancelled() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        if ctx.is_cancelled() {
+            return Err(jvid_transcribe::Error::Cancelled);
+        }
+        let words = "Hello there. This is a test.".split(' ').enumerate();
+        let words = words.map(|(i, w)| jvid_transcribe::Word {
+            text: w.into(),
+            start: Time(S / 10 + i as i64 * S / 4),
+            end: Time(S / 10 + (i + 1) as i64 * S / 4),
+            confidence: 1.0,
+        });
+        Ok(jvid_transcribe::Transcript {
+            language: Some("en".into()),
+            words: words.collect(),
+        })
+    }
+}
+
+/// The voice sample on an audio track, selected, with `fake` as the loaded Fast model.
+fn subtitles_harness(
+    fake: std::sync::Arc<dyn jvid_transcribe::Transcriber>,
+) -> Harness<'static, App> {
+    use jvid_core::history::Created;
+    use jvid_core::model::{NewClip, TrackKind};
+    use jvid_core::time::Time;
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/samples/voice.m4a");
+    jvid_media::ffmpeg::init().unwrap();
+    let probe = jvid_media::probe::probe(&path).unwrap();
+    let mut h = plain_harness();
+    let app = h.state_mut();
+    app.on_welcome = false;
+    let duration = probe.duration;
+    app.history
+        .apply(Command::Import(vec![(path, probe)]))
+        .unwrap();
+    let (kind, name) = (TrackKind::Audio, String::new());
+    let Ok(Created::Track(track)) = app.history.apply(Command::AddTrack { kind, name }) else {
+        panic!("track")
+    };
+    let clip = NewClip {
+        asset: app.history.project().assets()[0].id,
+        source_in: Time(0),
+        source_out: duration,
+        start: Time(0),
+        link: None,
+    };
+    let Ok(Created::Clip(id)) = app.history.apply(Command::AddClip { track, clip }) else {
+        panic!("clip")
+    };
+    app.timeline
+        .select_clip(app.history.project().sequence(), id);
+    app.subtitles.engine = Some((jvid_transcribe::models::Model::Base, fake));
+    h.run();
+    h.get_by_label("Timeline").click();
+    h.run();
+    h.get_by_label("Generate Subtitles… Ctrl+Alt+G").click();
+    h.run();
+    assert!(h.state().subtitles.is_open());
+    h
+}
+
+/// Acceptance: a fake transcriber drives Timeline > Generate Subtitles end to end, the
+/// dialog's choices reach it, and one undo removes the track.
+#[test]
+fn generate_subtitles_adds_a_caption_track_that_one_undo_removes() {
+    let fake = std::sync::Arc::new(FakeTranscriber {
+        slow: false,
+        asked: Default::default(),
+    });
+    let mut h = subtitles_harness(fake.clone());
+    let before = h.state().history.project().clone();
+    h.get_by_label("Translate to English").click();
+    h.run();
+    h.get_by_label("Generate").click();
+    h.step();
+    let start = std::time::Instant::now();
+    while h.state().subtitles.is_open() {
+        assert!(start.elapsed().as_secs() < 30, "never finished");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    let asked = fake.asked.lock().unwrap().clone();
+    let [opts] = &asked[..] else {
+        panic!("{asked:?}")
+    };
+    assert!(opts.translate && opts.language.is_none());
+
+    let project = h.state().history.project();
+    let track = project.sequence().tracks().iter().find(|t| t.subtitles);
+    assert_eq!(track.expect("a subtitle track").name, "Subtitles");
+    let cues: Vec<String> = project
+        .subtitle_cues()
+        .into_iter()
+        .map(|c| c.text)
+        .collect();
+    assert_eq!(cues, ["Hello there.", "This is a test."]);
+    assert!(h.state_mut().history.undo());
+    assert_eq!(h.state().history.project(), &before);
+}
+
+/// Closing the dialog mid-run cancels the job: nothing keeps running and nothing lands.
+#[test]
+fn closing_generate_subtitles_cancels_the_job() {
+    let fake = std::sync::Arc::new(FakeTranscriber {
+        slow: true,
+        asked: Default::default(),
+    });
+    let mut h = subtitles_harness(fake.clone());
+    let before = h.state().history.project().clone();
+    h.get_by_label("Generate").click();
+    h.step();
+    let start = std::time::Instant::now();
+    while fake.asked.lock().unwrap().is_empty() {
+        assert!(start.elapsed().as_secs() < 30, "never started");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    assert!(h.query_by_label("Transcribing").is_some());
+    h.get_by_label("Cancel").click();
+    h.step();
+    assert!(!h.state().subtitles.is_open());
+    // The job winds down and its pool goes idle.
+    let jobs = h.state().subtitles.jobs.as_ref().unwrap();
+    let start = std::time::Instant::now();
+    while !jobs.is_idle() {
+        assert!(start.elapsed().as_secs() < 1, "still running");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(h.state().history.project(), &before);
+}
+
+struct CrashingTranscriber;
+
+impl jvid_transcribe::Transcriber for CrashingTranscriber {
+    fn transcribe(
+        &self,
+        _: Vec<f32>,
+        _: &jvid_transcribe::Options,
+        _: &jvid_jobs::Ctx,
+    ) -> Result<jvid_transcribe::Transcript, jvid_transcribe::Error> {
+        panic!("engine crashed")
+    }
+}
+
+/// A job that dies without a result ends the run with an error instead of spinning forever.
+#[test]
+fn a_crashed_transcription_shows_an_error() {
+    let mut h = subtitles_harness(std::sync::Arc::new(CrashingTranscriber));
+    let before = h.state().history.project().clone();
+    h.get_by_label("Generate").click();
+    h.step();
+    let start = std::time::Instant::now();
+    while h
+        .query_by_label("Couldn't generate subtitles: crashed")
+        .is_none()
+    {
+        assert!(start.elapsed().as_secs() < 30, "never gave up");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    assert!(h.state().subtitles.is_open());
+    assert_eq!(h.state().history.project(), &before);
+}

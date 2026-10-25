@@ -101,6 +101,7 @@ pub const ACTIONS: &[Action] = &[
     t("detect_silence", "Ctrl+Alt+S"),
     t("find_highlights", "Ctrl+Alt+H"),
     t("hide_region", "Ctrl+Alt+R"),
+    a("generate_subtitles", "Ctrl+Alt+G"),
     t("nest", "Alt+N"),
     t("crossfade", "Ctrl+D"),
     t("dip_to_black", "Ctrl+Alt+B"),

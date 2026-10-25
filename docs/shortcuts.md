@@ -42,6 +42,7 @@ Work in any panel except while typing in a text field.
 | Undo | `Ctrl+Z` |
 | Redo | `Ctrl+Shift+Z` |
 | Redo (Alternate) | `Ctrl+Y` |
+| Generate Subtitles… | `Ctrl+Alt+G` |
 | Razor Tool | `C` |
 | Selection Tool | `V` |
 | Step Back One Frame | `Left` |
