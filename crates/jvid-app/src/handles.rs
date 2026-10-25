@@ -9,6 +9,7 @@ use jvid_core::history::GestureKey;
 use jvid_core::model::{Clip, ClipId, Project, Text, TrackKind, Transform};
 use jvid_core::time::Time;
 use jvid_render::text;
+use suite_ui::themes::DARK;
 use suite_ui::tokens::color;
 
 use crate::timeline::Edit;
@@ -460,13 +461,14 @@ pub fn show(
     }
 
     let p = ui.painter().with_clip_rect(clip);
-    let stroke = Stroke::new(1.0, color::ink());
+    // The viewer is black in every theme, so its overlay keeps the dark palette.
+    let stroke = Stroke::new(1.0, DARK.ink);
     p.add(egui::Shape::closed_line(vec![tl, tr, br, bl], stroke));
     if reframe {
         p.rect_stroke(
             frame,
             0.0,
-            Stroke::new(1.0, color::light_blue()),
+            Stroke::new(1.0, DARK.light_blue),
             egui::StrokeKind::Inside,
         );
     }
@@ -485,7 +487,7 @@ pub fn show(
         p.rect_filled(
             Rect::from_center_size(h, Vec2::splat(HANDLE)),
             0.0,
-            color::ink(),
+            DARK.ink,
         );
     }
     p.circle_stroke(anchor, HANDLE, stroke);
