@@ -2,18 +2,17 @@ name: CI
 
 on:
   pull_request:
-    # Translation-only PRs run i18n.yml instead (#309); the nightly still runs everything.
-    paths-ignore:
-      - 'crates/*/i18n/**'
-      - 'docs/i18n/**'
   # main is checked nightly (and on demand) on all three OSes instead of on every merge.
   schedule:
     - cron: '0 17 * * *'
   workflow_dispatch:
-  # Dependency changes on main still run (Linux), so PRs restore a cache built from the new lockfile.
+  # Dependency changes refresh main's Linux cache; workflow changes also validate CI itself.
   push:
     branches: [main]
-    paths: ['Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml']
+    paths: ['Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml', '.github/workflows/**']
+
+permissions:
+  contents: read
 
 concurrency:
   # Per event, so an on-demand run never cancels the nightly.
@@ -26,8 +25,52 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      i18n: ${{ steps.filter.outputs.i18n }}
+    steps:
+      - uses: actions/github-script@v8
+        id: filter
+        with:
+          script: |
+            // Keep translation-only PRs lightweight (#309), but always report CI required.
+            if (context.eventName !== 'pull_request') {
+              core.setOutput('rust', 'true');
+              core.setOutput('i18n', 'false');
+              return;
+            }
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              ...context.repo,
+              pull_number: context.issue.number,
+              per_page: 100,
+            });
+            // Renames must account for the old path too (for example, moving Rust into i18n).
+            const paths = files.flatMap(file => [file.filename, file.previous_filename].filter(Boolean));
+            const translation = /^(crates\/[^/]+\/i18n\/|docs\/i18n\/)/;
+            // The API returns at most 3,000 files; run everything if the list may be incomplete.
+            const all = files.length >= 3000 || paths.length === 0;
+            core.setOutput('rust', all || paths.some(path => !translation.test(path)));
+            core.setOutput('i18n', all || paths.some(path =>
+              translation.test(path) ||
+              /^crates\/suite-ui\/assets\/NotoSansCJK-/.test(path) ||
+              [
+                'scripts/i18n_check.py',
+                'scripts/test_i18n_check.py',
+                'crates/suite-ui/assets/subset-cjk.py',
+                '.github/workflows/i18n.yml',
+                '.github/workflows/ci.yml',
+              ].includes(path)
+            ));
+
   check:
     name: check (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -160,7 +203,46 @@ jobs:
 
   deny:
     name: cargo-deny
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  i18n:
+    needs: changes
+    if: needs.changes.outputs.i18n == 'true'
+    uses: ./.github/workflows/i18n.yml
+
+  # Require this one check in branch protection; the individual jobs may legitimately skip.
+  required:
+    name: CI required
+    needs: [changes, check, deny, i18n]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@v8
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const needs = JSON.parse(process.env.NEEDS);
+            if (needs.changes.result !== 'success') {
+              core.setFailed(`Change detection ${needs.changes.result}`);
+              return;
+            }
+            for (const [output, jobs] of Object.entries({rust: ['check', 'deny'], i18n: ['i18n']})) {
+              const enabled = needs.changes.outputs[output];
+              if (!['true', 'false'].includes(enabled)) {
+                core.setFailed(`Missing or invalid ${output} change detection output`);
+                continue;
+              }
+              const expected = enabled === 'true' ? 'success' : 'skipped';
+              for (const job of jobs) {
+                if (needs[job].result !== expected) {
+                  core.setFailed(`${job}: expected ${expected}, got ${needs[job].result}`);
+                }
+              }
+            }

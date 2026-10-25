@@ -1,15 +1,8 @@
 name: i18n
 
-# The seconds-long check for PRs that ci.yml skips (#309); the Rust parity tests still run on main.
+# Called by CI so its required check also waits for translation and CJK font validation (#309).
 on:
-  pull_request:
-    paths:
-      - 'crates/*/i18n/**'
-      - 'docs/i18n/**'
-      - 'scripts/i18n_check.py'
-      - 'scripts/test_i18n_check.py'
-      - 'crates/suite-ui/assets/NotoSansCJK-*'
-      - 'crates/suite-ui/assets/subset-cjk.py'
+  workflow_call:
 
 jobs:
   catalogs:
