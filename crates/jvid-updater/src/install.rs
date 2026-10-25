@@ -212,6 +212,9 @@ fn run_helper_with_key(dir: &Path, key: &[u8; 32]) -> Result<()> {
     result
 }
 
+#[cfg(all(test, windows))]
+mod inno_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

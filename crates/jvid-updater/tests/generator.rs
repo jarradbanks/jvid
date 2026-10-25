@@ -57,3 +57,34 @@ fn pipeline_generator_signs_exact_final_artifacts_and_rejects_a_mismatched_key()
     assert_eq!(fs::read(dir.path().join(MANIFEST)).unwrap(), bytes);
     assert_eq!(fs::read(dir.path().join(SIGNATURE)).unwrap(), sig);
 }
+
+#[test]
+fn pipeline_generator_without_production_configuration_never_emits_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let notes = dir.path().join("notes.txt");
+    fs::write(&notes, "Release notes").unwrap();
+    for (seed, public) in [
+        (None, None),
+        (Some("2b".repeat(32)), None),
+        (None, Some("00".repeat(32))),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jvid-update-metadata"));
+        command
+            .args(["1.2.0"])
+            .arg(&notes)
+            .arg(dir.path())
+            .env_remove("JVID_UPDATE_SIGNING_KEY")
+            .env_remove("JVID_UPDATE_PUBLIC_KEY");
+        if let Some(seed) = seed {
+            command.env("JVID_UPDATE_SIGNING_KEY", seed);
+        }
+        if let Some(public) = public {
+            command.env("JVID_UPDATE_PUBLIC_KEY", public);
+        }
+        let output = command.output().unwrap();
+        assert!(!output.status.success());
+        assert!(!dir.path().join(MANIFEST).exists());
+        assert!(!dir.path().join(SIGNATURE).exists());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(&"2b".repeat(32)));
+    }
+}
