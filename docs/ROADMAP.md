@@ -532,6 +532,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#415](https://github.com/jarradbanks/jvid/issues/415) **Markers: own lane above the ruler, drag to move** — Owner's request (2026-10-25): markers get their own slim bar above the timeline ruler instead of sitting in it, and you can drag them to adjust.
 - [#417](https://github.com/jarradbanks/jvid/issues/417) **Tutorials: Next button, tighter spotlight, Space fix** — Owner's tutorial feedback (2026-10-25): steps jump ahead on their own, a focused card button eats Space, the spotlight hides what a step needs, and Inspector steps light up the whole panel.
 - [#418](https://github.com/jarradbanks/jvid/issues/418) **Confirm dialogs stretch to full window height** — Owner report (2026-10-25): Unsaved Changes opens as a tall empty panel with the buttons halfway down. In suite-ui dialog.rs the button row is ui.with_layout(Layout::right_to_left(Align::Center)) inside the auto-sized Modal, so it claims all the available height.
+- [#420](https://github.com/jarradbanks/jvid/issues/420) **Transitions work on untrimmed clips** — Owner report (2026-10-25): a Crossfade between two full-length clips fails with 'no media handles at that cut'. Transitions are centred on the cut and need spare media past it on both sides, which untrimmed clips don't have. A gap between the clips gives the same error.
 
 ---
 

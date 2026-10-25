@@ -1923,3 +1923,13 @@ I("dialog-height", "Confirm dialogs stretch to full window height", None, ["suit
   scope=["The button row takes only its own height (for example, allocate_ui_with_layout with a zero-height size, or Align::Min); every Dialog, long or short, hugs its content"],
   ac=["Test: in a tall harness (1920x1080), a short Dialog's rect is under 200 px high and its buttons sit directly below the body",
       "Existing dialog snapshots are updated, and every Dialog caller still renders"])
+
+I("transition-freeze", "Transitions work on untrimmed clips", None, ["core", "render", "ui"], "M", [], labels=["later"],
+  summary="Owner report (2026-10-25): a Crossfade between two full-length clips fails with 'no media handles at that cut'. Transitions are centred on the cut and need spare media past it on both sides, which untrimmed clips don't have. A gap between the clips gives the same error.",
+  scope=["When a side has too little media, the transition holds that clip's first or last frame for the missing part instead of refusing; the timeline, clip lengths and audio sync don't change",
+         "transition_room gives the requested or default length whenever the clips touch, held to half of each clip's length",
+         "Clips that don't touch show a separate message saying the clips must touch, and every transition message is plain user-facing copy",
+         "Export and preview render the held frames identically"],
+  ac=["Test: a Crossfade between two untrimmed clips is added, and rendering at the cut blends A's last frame with B's first",
+      "Test: with handles present, rendering is unchanged (bit-identical to before)",
+      "Test: two clips with a gap give the 'must touch' error, not the handles one"])

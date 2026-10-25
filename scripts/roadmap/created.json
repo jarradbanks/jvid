@@ -836,6 +836,10 @@
     "dialog-height": {
       "number": 418,
       "id": 6020158780
+    },
+    "transition-freeze": {
+      "number": 420,
+      "id": 6020279033
     }
   },
   "links": [
