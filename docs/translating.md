@@ -243,16 +243,22 @@ have. There is no fallback to system fonts.
   Cyrillic language, including Polish „quotes”. Romanian's ș ț (Latin Extended-B) and Serbian or
   Kazakh extras are outside it: widen the README's `pyftsubset` ranges for those.
 - **CJK**: one Noto Sans CJK Regular face per language (JP, SC, KR), used for every weight, within
-  a budget the owner set: **at most 600 KB per CJK language**. A full face is over 15 MB, so each
-  is subset to just the characters its language's catalogs use, by
-  `crates/suite-ui/assets/subset-cjk.py`; re-run it after every change to a `ja`, `zh-Hans` or `ko`
-  catalog and commit the face it writes. It fails past the budget, and so does
-  `cjk_faces_stay_within_budget`. A language's face is Inter's fallback only while that language
-  is shown, because Japanese, Chinese and Korean draw some of the same Han characters differently;
-  a 3 KB face of just 日本語, 简体中文 and 한국어 is always loaded for the language picker. The
-  script downloads the source faces on the developer's machine; jvid itself never downloads fonts:
-  it works offline and makes no network requests it doesn't need. User text (clip names,
-  subtitles) in characters a catalog doesn't use still shows as boxes.
+  a budget the owner set: **at most 1 MB per CJK language**, about 1.9 MB for all three. A full
+  face is over 15 MB, so each is subset by `crates/suite-ui/assets/subset-cjk.py` to its
+  language's common characters plus whatever else its catalogs use. The common sets come from
+  Python's own codecs: JIS X 0208 through level 1 kanji (with kana and punctuation) for `ja`,
+  GB 2312 through level 1 hanzi for `zh-Hans`, and KS X 1001 through its 2,350 Hangul syllables
+  for `ko`. A catalog edit in those characters needs no new font: the script writes
+  byte-identical output for the same characters and leaves the file untouched, and the i18n
+  workflow fails if a committed face differs from what it writes. Re-run it after a `ja`,
+  `zh-Hans` or `ko` catalog change and commit any face it rewrites. It fails past the budget, and
+  so does `cjk_faces_stay_within_budget`. A language's face is Inter's fallback only while that
+  language is shown, because Japanese, Chinese and Korean draw some of the same Han characters
+  differently; a 3 KB face of just 日本語, 简体中文 and 한국어 is always loaded for the language
+  picker. Title layers draw from the same three faces (jvid-app hands them to jvid-render), so
+  the binary holds one copy. The script downloads the source faces on the developer's machine;
+  jvid itself never downloads fonts: it works offline and makes no network requests it doesn't
+  need. User text (clip names, subtitles) in rarer characters still shows as boxes.
 - **Right-to-left scripts** (Arabic, Hebrew) need shaping and bidirectional layout, which egui
   doesn't do yet.
 

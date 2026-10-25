@@ -8,6 +8,8 @@ on:
       - 'docs/i18n/**'
       - 'scripts/i18n_check.py'
       - 'scripts/test_i18n_check.py'
+      - 'crates/suite-ui/assets/NotoSansCJK-*'
+      - 'crates/suite-ui/assets/subset-cjk.py'
 
 jobs:
   catalogs:
@@ -18,3 +20,22 @@ jobs:
       # ubuntu-latest's Python 3.12 has tomllib.
       - run: python3 -m unittest discover -s scripts
       - run: python3 scripts/i18n_check.py
+
+  # A catalog edit in common characters leaves the CJK faces as committed; a rarer one needs the
+  # rebuilt face in the PR. Two runs also prove the script is deterministic.
+  cjk-fonts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/jvid-fonts
+          key: noto-cjk-Sans2.004
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install fonttools==4.65.0
+      - run: python3 crates/suite-ui/assets/subset-cjk.py
+      - run: python3 crates/suite-ui/assets/subset-cjk.py
+      - run: git diff --exit-code crates/suite-ui/assets

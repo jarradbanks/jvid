@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Subsets Noto Sans CJK to each language's common characters plus what jvid's catalogs use.
 
-    pip install fonttools
+    pip install fonttools==4.65.0
     python3 crates/suite-ui/assets/subset-cjk.py [ja zh-Hans ko]
 
 Downloads the pinned Noto Sans CJK Regular faces into a cache folder (once), then writes, next
-to this script, NotoSansCJK-<code>.otf with that language's common set (COMMON) and every character of its
-three catalogs, and NotoSansCJK-names.otf with just the language names the Settings picker
-lists. A file whose bytes wouldn't change is left untouched, so a catalog edit in common
-characters changes no font. Only these outputs are committed; jvid itself never downloads
+to this script, NotoSansCJK-<code>.otf with that language's common set (COMMON) and every
+character of its three catalogs, and NotoSansCJK-names.otf with just the language names the
+Settings picker lists. Equal characters give equal bytes, and a file whose bytes wouldn't change
+is left untouched, so a catalog edit in common characters changes no font. Only these outputs are committed; jvid itself never downloads
 anything. Each language face must stay within 1 MB (docs/translating.md, Fonts and binary size).
 """
 

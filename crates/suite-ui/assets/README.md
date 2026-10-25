@@ -26,10 +26,10 @@ pyftsubset lucide.ttf --unicodes="U+E071,U+E073,U+E155,U+E070,U+E1B2,U+E141,U+E0
 
 To add an icon, look up its code point in lucide-static's `font/info.json`, add it to the last command, and add a constant to `icon` in `src/theme.rs`.
 
-The CJK faces hold only the characters their language's catalogs use, so they're rebuilt whenever a Japanese, Chinese or Korean catalog changes. `subset-cjk.py` downloads the pinned source faces into `~/.cache/jvid-fonts` the first time (about 16 MB each), subsets them and fails if a face passes the 600 KB budget:
+The CJK faces hold each language's common characters plus any others their language's catalogs use (docs/translating.md, Fonts and binary size), so most catalog edits leave them unchanged. `subset-cjk.py` downloads the pinned source faces into `~/.cache/jvid-fonts` the first time (about 16 MB each), subsets them, leaves a face untouched when its bytes wouldn't change and fails if a face passes the 1 MB budget:
 
 ```sh
-pip install fonttools
+pip install fonttools==4.65.0  # the version the i18n workflow pins
 python3 crates/suite-ui/assets/subset-cjk.py ja        # or zh-Hans, ko; no argument does all three
 ```
 

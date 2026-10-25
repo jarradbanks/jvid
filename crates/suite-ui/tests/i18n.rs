@@ -213,6 +213,6 @@ fn japanese_loads_its_face_only_while_active() {
 #[test]
 fn cjk_faces_stay_within_budget() {
     for (lang, face) in suite_ui::theme::CJK_FACES {
-        assert!(face.len() <= 600_000, "{lang} is {} bytes", face.len());
+        assert!(face.len() <= 1_000_000, "{lang} is {} bytes", face.len());
     }
 }
