@@ -104,7 +104,11 @@ pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
     eframe::run_native(
         "jvid",
         options,
-        Box::new(move |cc| Ok(Box::new(App::new(cc, &settings)))),
+        Box::new(move |cc| {
+            let mut app = App::new(cc, &settings);
+            app.components.offer();
+            Ok(Box::new(app))
+        }),
     )
 }
 
@@ -220,9 +224,6 @@ impl App {
         ));
         app.tutorials_done = settings.tutorials_done.clone();
         app.welcome.tour = !settings.tour_offered;
-        if !cfg!(test) {
-            app.components.offer();
-        }
         // Tests never write the real settings file; those that save set their own.
         app.settings_path = crate::settings_file::path().filter(|_| !cfg!(test));
         // Nor the real untitled autosave: one there opens every harness on a Restore prompt.

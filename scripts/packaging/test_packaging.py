@@ -28,6 +28,23 @@ class PackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "mismatch"):
                 smoke.verify_inventory(stage)
 
+    def test_macos_preserves_leptonica_nonstandard_license_and_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            keg = root / "Cellar/leptonica/1.87.0"
+            (keg / "lib").mkdir(parents=True)
+            (keg / "INSTALL_RECEIPT.json").write_text('{}')
+            (keg / "leptonica-license.txt").write_text('Copyright and distribution terms')
+            source = keg / "lib/liblept.dylib"
+            source.write_bytes(b'dylib')
+            stage = root / "package"
+            stage.mkdir()
+            providers = build.native_licenses(stage, [source], "macos-aarch64", None)
+            self.assertEqual(providers, [str(keg)])
+            copied = stage / "runtime-licenses/leptonica"
+            self.assertTrue((copied / "INSTALL_RECEIPT.json").is_file())
+            self.assertIn('Copyright and distribution terms', '\n'.join(p.read_text() for p in copied.iterdir()))
+
     def test_archives_cannot_escape_extraction_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

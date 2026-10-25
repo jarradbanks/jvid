@@ -178,8 +178,14 @@ mod tests {
 
     #[test]
     fn optional_models_offer_sizes_and_can_be_dismissed_without_download() {
+        let mut fresh = true;
         let mut h = egui_kittest::Harness::new_ui_state(
-            |ui, c: &mut Components| c.show(ui.ctx()),
+            move |ui, c: &mut Components| {
+                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                c.show(ui.ctx());
+            },
             Components {
                 open: true,
                 jobs: None,

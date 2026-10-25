@@ -197,7 +197,7 @@ def native_licenses(stage, sources, target, ffmpeg):
             if target_dir.exists():
                 continue
             target_dir.mkdir()
-            licenses = [p for p in keg.rglob("*") if p.is_file() and re.match(r"^(COPYING|LICEN[CS]E|NOTICE|COPYRIGHT)(\.|$|-)", p.name, re.I)]
+            licenses = [p for p in keg.rglob("*") if p.is_file() and re.match(r"^(COPYING|LICEN[CS]E|NOTICE|COPYRIGHT|leptonica-license)(\.|$|-)", p.name, re.I)]
             if not licenses:
                 raise RuntimeError(f"no license text for {keg}")
             for index, path in enumerate(licenses):
