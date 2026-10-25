@@ -2226,7 +2226,7 @@ impl Timeline {
             if h != track.height {
                 let mut s = track.settings();
                 s.height = h;
-                edit = Some((Command::SetTrack(s), Some(RESIZE_GESTURE)));
+                edit = Some((Command::SetTrack(s), Some(RESIZE_GESTURE ^ track.id.0)));
             }
         }
         edit

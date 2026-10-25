@@ -856,6 +856,7 @@ impl History {
     }
 
     pub fn mark_saved(&mut self) {
+        self.end_gesture();
         self.saved_rev = self.rev;
     }
 
@@ -2702,5 +2703,24 @@ mod audit_b04 {
         assert_eq!(h.project(), &p);
         assert!(!h.can_undo());
         assert_eq!(h.project().sequence().track(v).unwrap().clips().len(), 3);
+    }
+
+    #[test]
+    fn save_finishes_a_coalesced_gesture() {
+        let (mut h, v, _, _, _, _) = fixture();
+        let setting = |h: &History, volume| {
+            let mut t = h.project().sequence().track(v).unwrap().settings();
+            t.volume = volume;
+            Command::SetTrack(t)
+        };
+        h.apply_coalesced(123, setting(&h, 0.7)).unwrap();
+        h.mark_saved();
+        h.apply_coalesced(123, setting(&h, 0.9)).unwrap();
+        assert!(h.is_dirty());
+        assert!(h.undo());
+        assert_eq!(h.project().sequence().track(v).unwrap().volume, 0.7);
+        assert!(!h.is_dirty());
+        assert!(h.undo());
+        assert_eq!(h.project().sequence().track(v).unwrap().volume, 1.0);
     }
 }

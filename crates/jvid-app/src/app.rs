@@ -1334,6 +1334,10 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.editor_context = Some(ctx.clone());
+        // A control key identifies coalescing within one pointer interaction only.
+        if ctx.input(|i| i.pointer.any_pressed()) {
+            self.history.end_gesture();
+        }
         if let Some(e) = self.theme.poll(&ctx) {
             let until = ctx.input(|i| i.time) + TOAST_SECS;
             self.toasts.push((e, until));
@@ -1599,6 +1603,11 @@ impl eframe::App for App {
             }
         });
 
+        // Apply the release frame's final value before closing its undo gesture. This
+        // also closes cancelled drags and controls that disappeared while held.
+        if ctx.input(|i| !i.pointer.any_down()) {
+            self.history.end_gesture();
+        }
         self.lesson_frame(&ctx);
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             drop_overlay(&ctx);
