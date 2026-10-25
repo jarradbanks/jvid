@@ -255,6 +255,7 @@ ok = "D'acord"
 [about]
 version = "Versió {version}"
 samples = "Mitjans de mostra"
+notices = "Avisos de tercers"
 
 [settings]
 title = "Preferències"

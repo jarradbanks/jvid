@@ -256,6 +256,7 @@ ok = "확인"
 [about]
 version = "버전 {version}"
 samples = "샘플 미디어"
+notices = "타사 고지 사항"
 
 [settings]
 title = "환경 설정"

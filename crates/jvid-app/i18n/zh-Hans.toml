@@ -263,6 +263,7 @@ ok = "确定"
 [about]
 version = "版本 {version}"
 samples = "示例媒体"
+notices = "第三方声明"
 
 [settings]
 title = "偏好设置"
