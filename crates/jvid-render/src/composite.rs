@@ -52,6 +52,8 @@ pub struct Compositor {
     no_lut: wgpu::Texture,
     /// Bound for layers whose curves are neutral; the shader skips it.
     no_curves: wgpu::Texture,
+    /// Bound for layers whose secondary isn't limited by masks; the shader skips it.
+    no_cover: wgpu::Texture,
     /// Effect pipelines by [`Effect::shader`], with their parameters in uniform order and pass
     /// count; layers naming an effect not set skip it.
     effects:
@@ -64,6 +66,9 @@ pub struct Compositor {
     masks: crate::mask::Masker,
     /// The timeline frame number effects see as `fx.frame`.
     pub frame: u32,
+    /// How much of the frame, from the left, draws with no grade: the Program monitor's
+    /// before/after. 0 (export's) grades it all and 1 bypasses the grade.
+    pub before: f32,
     /// By layer index: the layer is premultiplied, as a nested sequence's frame from another
     /// `Compositor` is. Unlisted layers are straight alpha.
     pub premultiplied: Vec<bool>,
@@ -134,6 +139,20 @@ impl Compositor {
                 view_formats: &[],
             }),
             no_curves: device.create_texture(&curve_desc(1, 1)),
+            no_cover: device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("no cover"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: FORMAT,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            }),
             effects: Default::default(),
             effect_layout: device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("effect"),
@@ -169,6 +188,7 @@ impl Compositor {
             fx_pool: Vec::new(),
             masks: crate::mask::Masker::new(device),
             frame: 0,
+            before: 0.0,
             premultiplied: Vec::new(),
         }
     }
@@ -386,12 +406,18 @@ impl Compositor {
             .enumerate()
             .map(|(i, (tex, t))| {
                 let sizes = ([size.0 as f32, size.1 as f32], [w as f32, h as f32]);
-                let masked = self
-                    .masks
-                    .apply(device, queue, &mut encoder, i, tex, &t.masks, sizes);
+                // Masks that limit the secondary leave the image whole and give their coverage.
+                let cover = t.secondary.masked;
+                let masked =
+                    self.masks
+                        .apply(device, queue, &mut encoder, i, tex, &t.masks, sizes, cover);
+                if cover {
+                    let fx = self.apply_effects(device, queue, &mut encoder, i, tex, &t.effects);
+                    return (fx, masked);
+                }
                 let tex = masked.as_ref().unwrap_or(tex);
                 let fx = self.apply_effects(device, queue, &mut encoder, i, tex, &t.effects);
-                fx.or(masked)
+                (fx.or(masked), None)
             })
             .collect();
         if self
@@ -440,10 +466,18 @@ impl Compositor {
             .iter()
             .zip(&effected)
             .enumerate()
-            .map(|(i, ((tex, t), fx))| (fx.as_ref().unwrap_or(tex), t, self.premultiplied.get(i)))
+            .map(|(i, ((tex, t), (fx, cover)))| {
+                let cover = cover.as_ref().unwrap_or(&self.no_cover);
+                (
+                    fx.as_ref().unwrap_or(tex),
+                    t,
+                    self.premultiplied.get(i),
+                    cover,
+                )
+            })
             .rev()
-            .filter(|(_, t, _)| t.opacity > 0.0)
-            .filter_map(|(tex, t, pre)| {
+            .filter(|(_, t, ..)| t.opacity > 0.0)
+            .filter_map(|(tex, t, pre, cover)| {
                 let corners = quad([tex.width() as f32, tex.height() as f32], frame, t)?;
                 let mut p = corners.concat();
                 let mode = Blend::ALL.iter().position(|b| *b == t.blend).unwrap_or(0);
@@ -466,6 +500,17 @@ impl Compositor {
                     .then(|| curve_texture(device, queue, &t.curves.bake(), Curves::SIZE as u32));
                 let table = table.as_ref().unwrap_or(&self.no_curves);
                 p.extend([f32::from(u8::from(curved)), table.width() as f32, 0.0, 0.0]);
+                let s = &t.secondary;
+                let on = f32::from(u8::from(!s.is_neutral()));
+                p.extend([s.hue, s.hue_width, s.softness].map(|v| v as f32));
+                p.push(on);
+                p.extend([s.sat, s.luma].as_flattened().iter().map(|v| *v as f32));
+                p.extend([s.hue_shift, s.saturation, s.exposure].map(|v| v as f32));
+                p.extend([
+                    f32::from(u8::from(s.masked)),
+                    self.before.clamp(0.0, 1.0) * w as f32,
+                ]);
+                p.extend([0.0; 3]);
                 let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("layer"),
                     contents: &p.iter().flat_map(|f| f.to_ne_bytes()).collect::<Vec<_>>(),
@@ -477,6 +522,7 @@ impl Compositor {
                 });
                 let lut = lut.create_view(&Default::default());
                 let curves = table.create_view(&Default::default());
+                let cover = cover.create_view(&Default::default());
                 let blended = t.blend != Blend::Normal;
                 let pipeline = if blended { &self.blend } else { &self.pipeline };
                 let mut entries = vec![
@@ -499,6 +545,10 @@ impl Compositor {
                     wgpu::BindGroupEntry {
                         binding: 5,
                         resource: wgpu::BindingResource::TextureView(&curves),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(&cover),
                     },
                 ];
                 if blended {

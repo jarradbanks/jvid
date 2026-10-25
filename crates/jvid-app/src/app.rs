@@ -1688,6 +1688,12 @@ impl TabViewer for Viewer<'_> {
             _ => Panel::titled(tab.title()),
         };
         let panel = panel.focused(focused);
+        let (actions, on) = self.preview.compare_actions();
+        let panel = if *tab == Tab::Preview && !source_tab {
+            panel.actions(&actions).on(&on)
+        } else {
+            panel
+        };
         if *tab == Tab::Preview && source_tab {
             panel.show(ui, |ui| {
                 if let Some(c) = self.preview.show_source(ui, self.project, self.missing) {
@@ -1705,7 +1711,7 @@ impl TabViewer for Viewer<'_> {
                 Some((a.path.as_path(), t, video))
             });
             let offline = trim.is_some_and(|(p, ..)| self.missing.contains(p));
-            panel.show(ui, |ui| {
+            let r = panel.show(ui, |ui| {
                 let frame = self.preview.project_rect(ui, self.project.settings());
                 let head = self.timeline.playhead();
                 let shown = self
@@ -1740,6 +1746,10 @@ impl TabViewer for Viewer<'_> {
                     crate::handles::start_editing(ui.ctx(), self.project, id, at);
                 }
             });
+            if let Some(i) = r.action {
+                self.preview.toggle_compare(i);
+                ui.ctx().request_repaint();
+            }
             return;
         }
         if *tab == Tab::Timeline {

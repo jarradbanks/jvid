@@ -666,6 +666,95 @@ fn identity_curves_change_nothing_and_an_s_curve_adds_contrast() {
     assert!(c[0] < 20 && c[1] > 235 && c[2] > 235, "{c:?}");
 }
 
+#[test]
+fn a_red_qualifier_desaturates_red_and_leaves_blue_and_grey_alone() {
+    use jvid_core::model::{Mask, MaskShape, Secondary};
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping secondary test: no software adapter on this platform");
+        return;
+    };
+    // Red, blue, grey and a paler red, 16 px each.
+    let patches = [[255, 0, 0], [0, 0, 255], [128, 128, 128], [255, 64, 64]];
+    let px = |x: u32, _| {
+        let [r, g, b] = patches[x as usize / 16];
+        [r, g, b, 255]
+    };
+    let img = image(&device, &queue, (64, 4), px);
+    let mut comp = Compositor::new(&device);
+    let mut run = |t: Transform, before: f32| {
+        comp.before = before;
+        let tex = comp.render(&device, &queue, (64, 4), 1, [0, 0, 0, 255], &[(&img, t)]);
+        read_back(&device, &queue, tex)
+    };
+    let want: Vec<u8> = (0..64 * 4).flat_map(|i| px(i % 64, i / 64)).collect();
+    let at = |rgba: &[u8], x: usize| [rgba[x * 4], rgba[x * 4 + 1], rgba[x * 4 + 2]];
+    let grey = |c: [u8; 3]| c.iter().all(|v| (*v as i32 - c[0] as i32).abs() <= 1);
+    let secondary = |s: Secondary| Transform {
+        secondary: s,
+        ..Default::default()
+    };
+    let red = Secondary {
+        hue_width: 0.1,
+        saturation: -1.0,
+        ..Default::default()
+    };
+    assert_eq!(run(Transform::default(), 0.0), want);
+    let qualified = Secondary {
+        saturation: 0.0,
+        ..red
+    };
+    assert_eq!(
+        run(secondary(qualified), 0.0),
+        want,
+        "no correction, no change"
+    );
+
+    let out = run(secondary(red), 0.0);
+    for x in (0..64).filter(|x| (16..48).contains(x)) {
+        assert_eq!(at(&out, x), at(&want, x), "blue and grey untouched at {x}");
+    }
+    assert!(grey(at(&out, 2)) && grey(at(&out, 56)), "{:?}", at(&out, 2));
+    // Exposure on the reds doesn't brighten the grey, whose hue means nothing.
+    let bright = run(
+        secondary(Secondary {
+            exposure: 1.0,
+            ..red
+        }),
+        0.0,
+    );
+    assert_eq!(at(&bright, 40), at(&want, 40));
+    assert!(at(&bright, 56)[1] > 64, "{:?}", at(&bright, 56));
+
+    // Limited by a mask over the first 8 px, the rest of the red stays and nothing is cut.
+    let mut t = secondary(Secondary {
+        masked: true,
+        ..red
+    });
+    t.masks = vec![Mask::new(
+        MaskShape::Rectangle,
+        vec![[-28.0, 0.0], [8.0, 8.0]],
+    )];
+    let out = run(t.clone(), 0.0);
+    assert!(grey(at(&out, 2)), "{:?}", at(&out, 2));
+    assert_eq!((at(&out, 12), at(&out, 56)), (at(&want, 12), at(&want, 56)));
+    assert!(
+        out.chunks(4).all(|p| p[3] == 255),
+        "the masks don't cut the image"
+    );
+    t.secondary.masked = false;
+    assert_eq!(
+        at(&run(t, 0.0), 12),
+        [0; 3],
+        "unless they're not the secondary's"
+    );
+
+    // The Program monitor's before/after: bypassed whole, or graded right of the split.
+    assert_eq!(run(secondary(red), 1.0), want, "bypass");
+    let split = run(secondary(red), 0.5);
+    assert_eq!(at(&split, 2), at(&want, 2), "before");
+    assert!(grey(at(&split, 56)), "after");
+}
+
 /// Trilinear lookup on the CPU, the reference the shader must match.
 fn lut_reference(lut: &crate::lut::Lut, c: [f32; 3]) -> [f32; 3] {
     let n = lut.size as usize;

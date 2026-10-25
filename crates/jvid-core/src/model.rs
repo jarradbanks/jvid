@@ -548,6 +548,9 @@ pub struct Transform {
     /// Level, hue and luma curves, in display light after the wheels and before the LUT.
     #[serde(skip_serializing_if = "Curves::is_default")]
     pub curves: Curves,
+    /// A correction limited to one colour range, after the curves and before the LUT.
+    #[serde(skip_serializing_if = "Secondary::is_default")]
+    pub secondary: Secondary,
     /// Fade lengths from the clip's start and end; they scale opacity and gain, and trims keep
     /// them since they hang off the edges. Longer than the clip clamps to it.
     pub fade_in: Time,
@@ -648,6 +651,112 @@ impl Wheels {
         };
         let i = Self::NAMES.iter().position(|n| *n == wheel)?;
         Some((self.all_mut().into_iter().nth(i)?, master))
+    }
+}
+
+/// A secondary grade: a correction limited to the pixels a qualifier picks by hue, saturation
+/// and luma (and, when `masked`, by the clip's masks). A zero correction changes nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Secondary {
+    /// The picked hue's centre in turns from red, and the width picked around it; 1 picks all.
+    pub hue: f64,
+    pub hue_width: f64,
+    /// Saturation and luma ranges, low then high, 0..=1.
+    pub sat: [f64; 2],
+    pub luma: [f64; 2],
+    /// How far past each range's edges the pick fades out, 0..=1.
+    pub softness: f64,
+    /// The clip's masks limit the pick instead of cutting the image.
+    pub masked: bool,
+    /// The correction: a hue shift in turns, saturation -1..=1 and exposure in stops.
+    pub hue_shift: f64,
+    pub saturation: f64,
+    pub exposure: f64,
+}
+
+impl Default for Secondary {
+    fn default() -> Self {
+        Self {
+            hue: 0.0,
+            hue_width: 1.0,
+            sat: [0.0, 1.0],
+            luma: [0.0, 1.0],
+            softness: 0.1,
+            masked: false,
+            hue_shift: 0.0,
+            saturation: 0.0,
+            exposure: 0.0,
+        }
+    }
+}
+
+impl Secondary {
+    /// Every keyframe name the secondary animates, all scalars.
+    pub const KEYS: [&str; 10] = [
+        "sec_hue",
+        "sec_hue_width",
+        "sec_sat_low",
+        "sec_sat_high",
+        "sec_luma_low",
+        "sec_luma_high",
+        "sec_softness",
+        "sec_hue_shift",
+        "sec_saturation",
+        "sec_exposure",
+    ];
+    /// Each key's bounds, in [`Secondary::KEYS`] order.
+    pub const RANGES: [(f64, f64); 10] = [
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (0.0, 1.0),
+        (-0.5, 0.5),
+        (-1.0, 1.0),
+        (-4.0, 4.0),
+    ];
+
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// No correction, so the compositor skips it whatever the qualifier picks.
+    pub fn is_neutral(&self) -> bool {
+        [self.hue_shift, self.saturation, self.exposure] == [0.0; 3]
+    }
+
+    fn fields_mut(&mut self) -> [&mut f64; 10] {
+        let [sl, sh] = &mut self.sat;
+        let [ll, lh] = &mut self.luma;
+        [
+            &mut self.hue,
+            &mut self.hue_width,
+            sl,
+            sh,
+            ll,
+            lh,
+            &mut self.softness,
+            &mut self.hue_shift,
+            &mut self.saturation,
+            &mut self.exposure,
+        ]
+    }
+
+    /// The field for a keyframe name in [`Secondary::KEYS`].
+    pub fn param(&mut self, name: &str) -> Option<&mut f64> {
+        let i = Self::KEYS.iter().position(|k| *k == name)?;
+        self.fields_mut().into_iter().nth(i)
+    }
+
+    /// Pulls every field into its [`Secondary::RANGES`] bounds.
+    pub fn clamped(mut self) -> Self {
+        for (v, (lo, hi)) in self.fields_mut().into_iter().zip(Self::RANGES) {
+            *v = v.clamp(lo, hi);
+        }
+        self
     }
 }
 
@@ -1106,6 +1215,7 @@ impl Default for Transform {
             lut_intensity: 1.0,
             wheels: Wheels::default(),
             curves: Curves::default(),
+            secondary: Secondary::default(),
             fade_in: Time(0),
             fade_out: Time(0),
             fade_curve: FadeCurve::Linear,
@@ -1133,7 +1243,7 @@ impl Transform {
     }
 
     /// Keyframe names of everything Paste Grade carries.
-    pub const GRADE_KEYS: [&str; 21] = [
+    pub const GRADE_KEYS: [&str; 31] = [
         "exposure",
         "contrast",
         "saturation",
@@ -1155,9 +1265,20 @@ impl Transform {
         "hue_vs_sat",
         "hue_vs_hue",
         "luma_vs_sat",
+        "sec_hue",
+        "sec_hue_width",
+        "sec_sat_low",
+        "sec_sat_high",
+        "sec_luma_low",
+        "sec_luma_high",
+        "sec_softness",
+        "sec_hue_shift",
+        "sec_saturation",
+        "sec_exposure",
     ];
 
-    /// Copies `from`'s color adjustments, LUT, wheels and curves, the grade Copy Grade carries.
+    /// Copies `from`'s color adjustments, LUT, wheels, curves and secondary, the grade Copy
+    /// Grade carries.
     pub fn paste_grade(&mut self, from: &Transform) {
         self.exposure = from.exposure;
         self.contrast = from.contrast;
@@ -1168,6 +1289,7 @@ impl Transform {
         self.lut_intensity = from.lut_intensity;
         self.wheels = from.wheels;
         self.curves = from.curves;
+        self.secondary = from.secondary;
     }
 }
 
@@ -1380,6 +1502,14 @@ impl Clip {
                 *c = v;
             }
         }
+        for name in Secondary::KEYS {
+            if let Some(Scalar(n)) = self.value_at(name, t)
+                && let Some(v) = x.secondary.param(name)
+            {
+                *v = n;
+            }
+        }
+        x.secondary = x.secondary.clamped();
         for (i, e) in x.effects.iter_mut().enumerate() {
             for (name, v) in &mut e.params {
                 if let Some(Scalar(n)) = self.value_at(&Effect::key(i, name), t) {
@@ -3301,8 +3431,10 @@ mod tests {
         };
         from.wheels.lift.master = 0.3;
         from.curves.hue_sat = crate::curve::Kind::Hue.seed();
+        from.secondary.saturation = -1.0;
         let mut to = Transform::default();
         to.paste_grade(&from);
+        assert_eq!(to.secondary, from.secondary);
         assert_eq!((to.exposure, to.lut.as_deref()), (1.0, Some("a.cube")));
         assert_eq!((to.wheels, to.opacity), (from.wheels, 1.0));
         assert_eq!(to.curves, from.curves);
@@ -3388,6 +3520,15 @@ mod tests {
         assert!(
             (red.points()[1][1] - 0.4).abs() < 1e-9,
             "curves key point by point"
+        );
+        let sat = vec![key(100, Value::Scalar(-3.0)), key(120, Value::Scalar(-1.0))];
+        c.keyframes.insert("sec_saturation".into(), sat);
+        let s = c.transform_at(Time(10)).secondary;
+        assert_eq!(s.saturation, -1.0, "keyed and clamped");
+        assert!(
+            Secondary::KEYS
+                .iter()
+                .all(|k| Transform::GRADE_KEYS.contains(k))
         );
         c.keyframes
             .insert("scale".into(), vec![key(0, Value::Vec2([0.5, 2.0]))]);

@@ -798,6 +798,8 @@ pub struct Gpu {
     pub pin_effects: bool,
     /// Effects named by a layer but not loaded, already warned about.
     missing: HashSet<String>,
+    /// The Program monitor's ungraded part (see `Compositor::before`); export leaves it 0.
+    pub before: f32,
     /// By layer index, what composites a nested sequence's layers.
     nested: HashMap<usize, Gpu>,
 }
@@ -812,6 +814,7 @@ impl Gpu {
             effects: Default::default(),
             pin_effects: false,
             missing: HashSet::new(),
+            before: 0.0,
             nested: HashMap::new(),
         }
     }
@@ -851,11 +854,12 @@ impl Gpu {
             let f = match px {
                 Pixels::Frame(f) => f,
                 Pixels::Nested(inner) => {
-                    let pin = self.pin_effects;
+                    let (pin, before) = (self.pin_effects, self.before);
                     let gpu = self.nested.entry(i).or_insert_with(|| Gpu {
                         pin_effects: pin,
                         ..Gpu::new(device)
                     });
+                    gpu.before = before;
                     let tex = gpu.composite(device, queue, s, scale, [0; 4], index, inner);
                     solids.push(tex.clone());
                     continue;
@@ -932,6 +936,7 @@ impl Gpu {
             }
         }
         self.compositor.frame = index;
+        self.compositor.before = self.before;
         self.compositor.premultiplied = layers
             .iter()
             .map(|(px, _)| matches!(px, Pixels::Nested(_)))

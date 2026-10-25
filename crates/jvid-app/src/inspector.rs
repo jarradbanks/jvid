@@ -8,7 +8,8 @@ use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value};
 use jvid_core::model::{
     AudioFx, Blend, Clip, ClipId, Compressor, Curve, Curves, Effect, Equalizer, HighPass, Mask,
-    MaskMode, MaskShape, MediaAsset, NoiseReduction, Project, Text, TrackKind, Transform, Wheels,
+    MaskMode, MaskShape, MediaAsset, NoiseReduction, Project, Secondary, Text, TrackKind,
+    Transform, Wheels,
 };
 use jvid_core::time::Time;
 use suite_ui::theme::{self, icon};
@@ -190,6 +191,52 @@ const SECTIONS: [(&str, &[Prop<'static>]); 4] = [
     ),
 ];
 
+const RANGE: &[Label] = &[
+    || tr!("inspector.range_low"),
+    || tr!("inspector.range_high"),
+];
+
+/// A hue in turns, shown in degrees.
+const fn turns(name: &'static str, range: (f64, f64)) -> Prop<'static> {
+    Prop {
+        display: 360.0,
+        decimals: 0,
+        suffix: "°",
+        range,
+        ..prop(name, ONE)
+    }
+}
+
+/// A 0..100% part of the secondary's qualifier; `parts` makes it a low and high pair.
+const fn percent(name: &'static str, parts: &'static [&'static str]) -> Prop<'static> {
+    Prop {
+        display: 100.0,
+        decimals: 0,
+        suffix: "%",
+        range: (0.0, 1.0),
+        parts,
+        fields: if parts.is_empty() { ONE } else { RANGE },
+        ..prop(name, ONE)
+    }
+}
+
+/// The Secondary section's rows: the qualifier, then the correction it limits.
+const SECONDARY: &[Prop<'static>] = &[
+    turns("sec_hue", (0.0, 1.0)),
+    turns("sec_hue_width", (0.0, 1.0)),
+    percent("sec_sat", &["sec_sat_low", "sec_sat_high"]),
+    percent("sec_luma", &["sec_luma_low", "sec_luma_high"]),
+    percent("sec_softness", &[]),
+    turns("sec_hue_shift", (-0.5, 0.5)),
+    grade("sec_saturation"),
+    Prop {
+        speed: 0.02,
+        decimals: 2,
+        range: (-4.0, 4.0),
+        ..prop("sec_exposure", ONE)
+    },
+];
+
 /// A -100..100% color adjustment.
 const fn grade(name: &'static str) -> Prop<'static> {
     Prop {
@@ -245,6 +292,9 @@ fn get(x: &Transform, name: &str) -> Value {
     if let Some((c, _)) = curves.get_mut(name) {
         return Value::Curve(*c);
     }
+    if let Some(v) = x.secondary.clone().param(name) {
+        return Value::Scalar(*v);
+    }
     let mut wheels = x.wheels;
     if let Some((w, master)) = wheels.param(name) {
         return match master {
@@ -296,6 +346,13 @@ fn set(x: &mut Transform, name: &str, v: Value) {
             }
             _ => {}
         }
+        return;
+    }
+    if let Some(s) = x.secondary.param(name) {
+        if let Value::Scalar(v) = v {
+            *s = v;
+        }
+        x.secondary = x.secondary.clamped();
         return;
     }
     if let Some((c, kind)) = x.curves.get_mut(name) {
@@ -759,6 +816,12 @@ pub fn show(
     {
         edit = Some(e);
     }
+    if pane == Pane::Video
+        && !clips.is_empty()
+        && let Some(e) = secondary_rows(ui, clips, t, &mut index, &mut seek)
+    {
+        edit = Some(e);
+    }
     if pane == Pane::Effects
         && let Some(e) = effects_rows(ui, clips, t, &mut index, &mut seek)
     {
@@ -940,6 +1003,50 @@ fn curves_rows(
         true => curve_row(ui, clips, t, *index, seek).or(edit),
         false => edit,
     }
+}
+
+/// The Secondary section: the qualifier and correction rows, then whether masks limit it.
+fn secondary_rows(
+    ui: &mut Ui,
+    clips: &[&Clip],
+    t: Time,
+    index: &mut u64,
+    seek: &mut Option<Time>,
+) -> Option<Edit> {
+    let names = Secondary::KEYS;
+    let changed = SECONDARY.iter().any(|p| differs(clips, p, t))
+        || clips.iter().any(|c| c.transform.secondary.masked);
+    let (open, head) = section(ui, "secondary", Some(changed));
+    let mut edit = match head {
+        // Reset takes Inside Masks back too.
+        Some(Head::Reset) => Some((
+            Command::Batch(vec![
+                reset(clips, &names),
+                rewrite(clips, |_, x, _| x.secondary.masked = false),
+            ]),
+            None,
+        )),
+        Some(Head::Key) => Some((key_all(clips, &names, t), None)),
+        None => None,
+    };
+    for p in SECONDARY {
+        *index += 1;
+        if open && let Some(e) = row(ui, clips, p, t, *index, seek) {
+            edit = Some(e);
+        }
+    }
+    if !open {
+        return edit;
+    }
+    let mut masked = clips[0].transform.secondary.masked;
+    let (flipped, _) = prop_row(ui, "", Tools::default(), |ui| {
+        ui.add(Checkbox::new(&mut masked, tr!("inspector.sec_masked")))
+            .changed()
+    });
+    if flipped {
+        edit = Some((rewrite(clips, |_, x, _| x.secondary.masked = masked), None));
+    }
+    edit
 }
 
 /// Lines under the curve picker that the graph takes.
@@ -3562,6 +3669,8 @@ mod tests {
             .flat_map(|(id, props)| std::iter::once(*id).chain(props.iter().map(|p| p.name)))
             .chain(["effects", "speed", "text", "curves", "curve"])
             .chain(Curves::NAMES)
+            .chain(["secondary", "sec_masked", "range_low", "range_high"])
+            .chain(SECONDARY.iter().map(|p| p.name))
             .chain(
                 AUDIO_FX
                     .iter()
@@ -3582,6 +3691,34 @@ mod tests {
                 assert!(CATALOG.get_in(lang, &key).is_some(), "{lang} lacks {key}");
             }
         }
+    }
+
+    #[test]
+    fn secondary_props_set_clamp_and_key_like_other_props() {
+        let mut clips = vec![clip(1, 0)];
+        let put_at = |name, t, v| {
+            move |c: &[&Clip]| {
+                rewrite(c, |c, x, keys| {
+                    put(c, x, keys, name, Time(t), Value::Scalar(v))
+                })
+            }
+        };
+        apply(&mut clips, put_at("sec_sat_low", 0, 0.4));
+        apply(&mut clips, put_at("sec_hue_shift", 0, 2.0));
+        let s = clips[0].transform.secondary;
+        assert_eq!((s.sat, s.hue_shift), ([0.4, 1.0], 0.5), "clamped");
+        let sat = SECONDARY.iter().find(|p| p.name == "sec_sat").unwrap();
+        let luma = SECONDARY.iter().find(|p| p.name == "sec_luma").unwrap();
+        assert!(differs(&refs(&clips), sat, Time(0)) && !differs(&refs(&clips), luma, Time(0)));
+        assert_eq!(sat.default("sec_sat_high", 0), 1.0);
+        apply(&mut clips, |c| {
+            toggle_animate(c, &["sec_saturation"], Time(0))
+        });
+        apply(&mut clips, put_at("sec_saturation", 50, -1.0));
+        assert_eq!(clips[0].keyframes["sec_saturation"].len(), 2);
+        assert_eq!(clips[0].transform_at(Time(25)).secondary.saturation, -0.5);
+        apply(&mut clips, |c| reset(c, &Secondary::KEYS));
+        assert!(clips[0].transform.secondary.is_default() && clips[0].keyframes.is_empty());
     }
 
     #[test]

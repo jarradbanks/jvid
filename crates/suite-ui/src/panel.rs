@@ -36,6 +36,7 @@ pub struct PanelResponse<R> {
 pub struct Panel<'a> {
     header: Header<'a>,
     actions: &'a [(&'static str, &'a str)],
+    on: &'a [bool],
     focused: bool,
     wide: bool,
 }
@@ -53,6 +54,7 @@ impl<'a> Panel<'a> {
         Self {
             header,
             actions: &[],
+            on: &[],
             focused: false,
             wide: false,
         }
@@ -61,6 +63,12 @@ impl<'a> Panel<'a> {
     /// Icon buttons at the header's right: a glyph from [`icon`] and its accessible name.
     pub fn actions(mut self, actions: &'a [(&'static str, &'a str)]) -> Self {
         self.actions = actions;
+        self
+    }
+
+    /// Which of the actions are toggles that are on, by index.
+    pub fn on(mut self, on: &'a [bool]) -> Self {
+        self.on = on;
         self
     }
 
@@ -109,7 +117,9 @@ impl<'a> Panel<'a> {
                 ),
                 Vec2::splat(size::CONTROL),
             );
-            if ui.put(r, Button::icon(glyph, name)).clicked() {
+            let on = self.on.get(i).copied().unwrap_or(false);
+            let b = ui.put(r, Button::icon(glyph, name).on(on));
+            if b.on_hover_text(*name).clicked() {
                 action = Some(i);
             }
             right = r.left() - space::S4;

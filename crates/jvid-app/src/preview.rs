@@ -86,6 +86,35 @@ impl Overlays {
     }
 }
 
+/// The Program monitor's grade compare. It reaches only the Program view, never an export.
+struct Compare {
+    bypass: bool,
+    split: bool,
+    /// Where the split sits across the frame, 0..=1; left of it is before the grade.
+    at: f32,
+}
+
+impl Default for Compare {
+    fn default() -> Self {
+        Self {
+            bypass: false,
+            split: false,
+            at: 0.5,
+        }
+    }
+}
+
+impl Compare {
+    /// How much of the frame, from the left, draws ungraded (see `Compositor::before`).
+    fn before(&self) -> f32 {
+        match (self.bypass, self.split) {
+            (true, _) => 1.0,
+            (false, true) => self.at,
+            (false, false) => 0.0,
+        }
+    }
+}
+
 type Decoded = (PathBuf, Time, Result<Frame, String>);
 
 /// Keymap actions the Source tab handles while it's showing a clip.
@@ -162,6 +191,7 @@ pub struct Preview {
     zoom: usize,
     quality: usize,
     overlays: Overlays,
+    compare: Compare,
     player: Option<Player>,
     /// Opened on first play, so tests and idle sessions never touch the audio device.
     output: Option<Output>,
@@ -227,6 +257,7 @@ impl Preview {
             zoom: 0,
             quality: 0,
             overlays: Overlays::default(),
+            compare: Compare::default(),
             player: None,
             output: None,
             program: Playback::from_files(playback::DEFAULT_BUDGET),
@@ -860,6 +891,7 @@ impl Preview {
                         settings: s.clone(),
                         // Source and program counters overlap; the source flag keeps them apart.
                         generation: (g, scale, source),
+                        before: if source { 0.0 } else { self.compare.before() },
                         clip,
                         thumb: !source && std::mem::take(&mut self.thumb.copy),
                         scope: !source && std::mem::take(&mut self.scopes.copy),
@@ -886,6 +918,9 @@ impl Preview {
             }
             for l in lines {
                 painter.line_segment(l, stroke);
+            }
+            if program.is_some() && !source && self.compare.split && !self.compare.bypass {
+                self.drag_split(ui, image);
             }
         }
 
@@ -999,6 +1034,41 @@ impl Preview {
             });
         }
         action
+    }
+
+    /// The Program row's Bypass Grade and before/after split toggles.
+    /// The Program header's compare toggles, each a glyph and name, and which are on.
+    pub fn compare_actions(&self) -> ([(&'static str, &'static str); 2], [bool; 2]) {
+        let actions = [
+            (icon::EYE_OFF, tr!("preview.bypass_grade")),
+            (icon::COMPARE, tr!("preview.split")),
+        ];
+        (actions, [self.compare.bypass, self.compare.split])
+    }
+
+    /// Flips the [`Self::compare_actions`] toggle at `i`.
+    pub fn toggle_compare(&mut self, i: usize) {
+        let c = &mut self.compare;
+        let on = if i == 0 { &mut c.bypass } else { &mut c.split };
+        *on = !*on;
+    }
+
+    /// The before/after split's line over `image` (the frame's on-screen rect), dragged sideways.
+    fn drag_split(&mut self, ui: &Ui, image: Rect) {
+        let x = image.left() + image.width() * self.compare.at;
+        let hit = Rect::from_x_y_ranges(x - space::S4..=x + space::S4, image.y_range());
+        let r = ui.interact(hit, ui.id().with("compare split"), egui::Sense::drag());
+        if let Some(p) = r.interact_pointer_pos().filter(|_| r.dragged()) {
+            self.compare.at = ((p.x - image.left()) / image.width()).clamp(0.0, 1.0);
+        }
+        if r.hovered() || r.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        let x = image.left() + image.width() * self.compare.at;
+        let line = [pos2(x, image.top()), pos2(x, image.bottom())];
+        ui.painter()
+            .with_clip_rect(viewer_rect(ui))
+            .line_segment(line, Stroke::new(1.0, color::ink()));
     }
 
     fn dropdowns(&mut self, ui: &mut Ui) {
@@ -1135,8 +1205,8 @@ struct Gpu {
     shown: Option<u64>,
     program: playback::Gpu,
     program_view: render::Preview,
-    /// The program generation and preview scale last composited.
-    program_drawn: Option<(u64, u32, bool)>,
+    /// The program generation and preview scale last composited, and its compare split.
+    program_drawn: Option<((u64, u32, bool), f32)>,
     thumbs: Thumbs,
     scopes: Scopes,
 }
@@ -1146,6 +1216,8 @@ struct ProgramPaint {
     shown: Arc<Shown>,
     settings: ProjectSettings,
     generation: (u64, u32, bool),
+    /// The frame's ungraded part, from [`Compare::before`].
+    before: f32,
     clip: [f32; 4],
     /// Copy the frame into the thumbnail frame too.
     thumb: bool,
@@ -1163,9 +1235,10 @@ impl CallbackTrait for ProgramPaint {
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         if let Some(gpu) = resources.get_mut::<Gpu>() {
-            if gpu.program_drawn != Some(self.generation) {
-                gpu.program_drawn = Some(self.generation);
+            if gpu.program_drawn != Some((self.generation, self.before)) {
+                gpu.program_drawn = Some((self.generation, self.before));
                 let scale = self.generation.1;
+                gpu.program.before = self.before;
                 let tex = gpu
                     .program
                     .draw(device, queue, &self.settings, scale, &self.shown);
