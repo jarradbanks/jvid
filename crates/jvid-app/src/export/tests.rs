@@ -15,6 +15,302 @@ fn secs(s: i64) -> Time {
     Time(s * FLICKS_PER_SECOND)
 }
 
+#[test]
+fn delayed_stream_reads_keep_silence_and_match_waveforms() {
+    jvid_media::ffmpeg::init().unwrap();
+    let fixture = jvid_media::audio::offset_fixture::Fixture::default();
+    for (nth, offset) in [(0, 24_000), (1, 36_000)] {
+        let mut read = blocking(&fixture.0, nth);
+        for (start, frames) in [
+            (0, 48_000),
+            (12_000, 24_000),
+            (36_000, 4096),
+            (40_096, 4096),
+            (0, 1024),
+        ] {
+            let mut got = vec![1.0; frames * 2];
+            read(start, &mut got);
+            for (i, pair) in got.as_chunks::<2>().0.iter().enumerate() {
+                let want =
+                    jvid_media::audio::offset_fixture::Fixture::sample(nth, start + i as i64);
+                assert!(
+                    pair.iter().all(|x| (x - want).abs() <= 1.0 / 32768.0),
+                    "stream {nth}, sample {}: {pair:?} vs {want}",
+                    start + i as i64
+                );
+            }
+        }
+        let cache =
+            jvid_media::waveforms::Cache::new(fixture.0.parent().unwrap().join("peaks"), 1_000_000);
+        let peaks = cache.load(&fixture.0, nth).unwrap();
+        let first = peaks.finest().iter().position(|p| p[1] > 0.0).unwrap();
+        assert_eq!(first as i64, offset / jvid_media::waveforms::BUCKET);
+    }
+}
+
+#[test]
+fn independently_delayed_streams_export_at_their_source_positions() {
+    jvid_media::ffmpeg::init().unwrap();
+    let fixture = jvid_media::audio::offset_fixture::Fixture::default();
+    let mut h = History::new(Project::default());
+    add(
+        &mut h,
+        TrackKind::Audio,
+        fixture.0.clone(),
+        Time(0),
+        secs(2),
+    );
+    let id = h.project().assets()[0].id;
+    h.apply(Command::SetAssetProbe {
+        id,
+        probe: Some(jvid_media::probe::probe(&fixture.0).unwrap()),
+    })
+    .unwrap();
+    let track = &h.project().sequence().tracks()[0];
+    let (track_id, mut clip) = (track.id, track.clips()[0].clone());
+    h.apply(Command::RemoveClip(clip.id)).unwrap();
+    clip.stream = None;
+    h.apply(Command::Paste {
+        clips: vec![(track_id, clip)],
+        at: Time(0),
+    })
+    .unwrap();
+    let path = fixture.0.parent().unwrap().join("export.wav");
+    let req = Request {
+        path: path.clone(),
+        range: (Time(0), secs(2)),
+        preset: preset("Audio Only (WAV)"),
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    run_now(h.project(), &req, false).unwrap();
+    let mut decoded = blocking(&path, 0);
+    let mut got = vec![0.0; 96_000 * 2];
+    decoded(0, &mut got);
+    let gain = std::f32::consts::FRAC_1_SQRT_2;
+    for (i, pair) in got.as_chunks::<2>().0.iter().enumerate() {
+        let want = (jvid_media::audio::offset_fixture::Fixture::sample(0, i as i64)
+            + jvid_media::audio::offset_fixture::Fixture::sample(1, i as i64))
+            * gain;
+        assert!(
+            pair.iter().all(|x| (x - want).abs() < 3.0 / 32768.0),
+            "sample {i}: {pair:?}"
+        );
+    }
+    let mut d = AudioDecoder::open(&path, 0).unwrap();
+    let mut frames = 0;
+    while let Some(c) = d.next_chunk().unwrap() {
+        frames += c.samples.len() / 2;
+    }
+    assert_eq!(frames, 96_000);
+}
+
+fn cleanup_project(path: PathBuf, clip_fx: bool, track_fx: bool) -> Project {
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Audio, path, Time(0), secs(1));
+    let t = &h.project().sequence().tracks()[0];
+    let c = &t.clips()[0];
+    let (id, mut x, keys, mut settings) =
+        (c.id, c.transform.clone(), c.keyframes.clone(), t.settings());
+    // Leave enough dry signal to measure timing even when RNNoise suppresses an isolated impulse.
+    x.audio_fx.noise_reduction.amount = if clip_fx { 25.0 } else { 0.0 };
+    settings.fx.noise_reduction.amount = if track_fx { 25.0 } else { 0.0 };
+    h.apply(Command::SetClipProps(vec![(id, x, keys)])).unwrap();
+    h.apply(Command::SetTrack(settings)).unwrap();
+    h.project().clone()
+}
+
+fn impulses(start: i64, out: &mut [f32]) {
+    for (i, f) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+        let at = start + i as i64;
+        f.fill(if [7200, 47_760].contains(&at) {
+            0.5
+        } else {
+            0.0
+        });
+    }
+}
+
+fn impulse_audio() -> Audio {
+    Audio::new(Box::new(|_, _| Box::new(impulses)))
+}
+
+#[test]
+fn cleanup_prime_opens_sources_before_effect_history() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    for (clip, track) in [(false, false), (true, false), (false, true), (true, true)] {
+        let p = cleanup_project("impulses.wav".into(), clip, track);
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let record = calls.clone();
+        let mut audio = Audio::new(Box::new(move |_, _| {
+            let record = record.clone();
+            Box::new(move |at, out| {
+                record.borrow_mut().push((at, out.is_empty()));
+                impulses(at, out);
+            })
+        }));
+        audio.prime(&p, Time(FLICKS_PER_SECOND / 2));
+        audio.mix(&p, 24_000, &mut [0.0; 1024]);
+        let calls = calls.borrow();
+        let from = 24_000 - (i64::from(clip) + i64::from(track)) * jvid_audio::Fx::PREROLL as i64;
+        assert_eq!(calls[0], (from, true));
+        assert_eq!(calls[1], (from, false));
+        assert!(calls.iter().all(|(at, _)| *at >= from));
+    }
+}
+
+fn peak_frame(buf: &[f32]) -> usize {
+    buf.as_chunks::<2>()
+        .0
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a[0].abs().total_cmp(&b[0].abs()))
+        .unwrap()
+        .0
+}
+
+#[test]
+fn cleanup_impulses_align_at_clip_track_and_cascade() {
+    for (clip, track) in [(true, false), (false, true), (true, true)] {
+        let p = cleanup_project("impulses.wav".into(), clip, track);
+        let mut audio = impulse_audio();
+        let mut whole = vec![0.0; 48_000 * 2];
+        audio.mix(&p, 0, &mut whole);
+        assert_eq!(
+            peak_frame(&whole[..24_000]),
+            7200,
+            "clip {clip} track {track}"
+        );
+        assert_eq!(
+            peak_frame(&whole[47_000 * 2..]) + 47_000,
+            47_760,
+            "tail: clip {clip} track {track}"
+        );
+        assert!(whole[47_760 * 2].abs() > 0.1, "tail survived");
+        let mut audio = impulse_audio();
+        let mut blocks = vec![0.0; whole.len()];
+        let mut at = 0;
+        for frames in [137, 509, 1600].into_iter().cycle() {
+            if at == 48_000 {
+                break;
+            }
+            let end = (at + frames).min(48_000);
+            audio.prime(
+                &p,
+                Time(at as i64 * (FLICKS_PER_SECOND / jvid_audio::SAMPLE_RATE as i64)),
+            );
+            audio.mix(&p, at as i64, &mut blocks[at * 2..end * 2]);
+            at = end;
+        }
+        let max = blocks
+            .iter()
+            .zip(&whole)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
+        assert!(
+            max < 1e-5,
+            "partition difference {max}: clip {clip} track {track}"
+        );
+        // Forward and backward non-contiguous requests reset and prime both effect stages.
+        for start in [47000, 4800, 0, 4800] {
+            let mut got = vec![0.0; 1000 * 2];
+            if start == 4800 {
+                got.resize(4000 * 2, 0.0);
+            }
+            audio.mix(&p, start, &mut got);
+            let want = if start == 47000 {
+                760
+            } else if start == 4800 {
+                2400
+            } else {
+                continue;
+            };
+            assert_eq!(
+                peak_frame(&got),
+                want,
+                "seek {start}: clip {clip} track {track}"
+            );
+        }
+    }
+}
+
+#[test]
+fn cleanup_export_retains_tail_and_duration_from_inside_clip() {
+    jvid_media::ffmpeg::init().unwrap();
+    let fixture = jvid_media::audio::offset_fixture::Fixture::default();
+    let source = fixture.0.parent().unwrap().join("impulses.wav");
+    let mut enc = Encoder::create(
+        &source,
+        (64, 64),
+        Rate::new(30, 1),
+        &preset("Audio Only (WAV)"),
+    )
+    .unwrap();
+    let mut input = vec![0.0; 48_000 * 2];
+    impulses(0, &mut input);
+    enc.audio(&input).unwrap();
+    enc.finish().unwrap();
+    for (clip, track) in [(true, false), (false, true), (true, true)] {
+        let p = cleanup_project(source.clone(), clip, track);
+        for first in [0, 4800] {
+            let path = fixture
+                .0
+                .parent()
+                .unwrap()
+                .join(format!("cleanup-{clip}-{track}-{first}.wav"));
+            let req = Request {
+                path: path.clone(),
+                range: (
+                    Time(first * (FLICKS_PER_SECOND / jvid_audio::SAMPLE_RATE as i64)),
+                    secs(1),
+                ),
+                preset: preset("Audio Only (WAV)"),
+                loudness: None,
+                lossless: None,
+                sidecar: false,
+            };
+            run_now(&p, &req, false).unwrap();
+            let mut got = Vec::new();
+            let mut d = AudioDecoder::open(&path, 0).unwrap();
+            while let Some(c) = d.next_chunk().unwrap() {
+                got.extend(c.samples);
+            }
+            assert_eq!(got.len() / 2, (48_000 - first) as usize);
+            assert_eq!(
+                peak_frame(&got[..(12000 - first) as usize * 2]),
+                (7200 - first) as usize
+            );
+            let tail_start = (47000 - first) as usize;
+            assert_eq!(
+                peak_frame(&got[tail_start * 2..]) + tail_start,
+                (47760 - first) as usize
+            );
+            assert!(got[(47760 - first) as usize * 2].abs() > 0.1);
+            let mut playback = Audio::new(Box::new(blocking));
+            let mut want = vec![0.0; got.len()];
+            for (i, block) in want.chunks_mut(512 * 2).enumerate() {
+                playback.mix(&p, first + (i * 512) as i64, block);
+            }
+            let (index, max) = got
+                .iter()
+                .zip(&want)
+                .enumerate()
+                .map(|(i, (a, b))| (i, (a - b).abs()))
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .unwrap();
+            assert!(
+                max <= 1.0 / 32768.0 + 1e-7,
+                "playback/export mismatch: clip {clip} track {track} first {first}, sample {}, error {max}, got {} want {}",
+                index / 2,
+                got[index],
+                want[index]
+            );
+        }
+    }
+}
+
 /// Adds `path` on a new track as one clip of source `[0, len)` starting at `start`.
 fn add(h: &mut History, kind: TrackKind, path: PathBuf, start: Time, len: Time) {
     let Ok(Created::Asset(asset)) = h.apply(Command::AddAsset(path)) else {

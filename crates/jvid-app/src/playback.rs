@@ -21,8 +21,8 @@ use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Fx, Mixer, Output, SAMPLE_RATE, Strip, automate};
 use jvid_core::eval::{AudioSegment, Layer, audio_in, frame_at, gains};
 use jvid_core::model::{
-    AssetId, ClipId, MediaAsset, Project, ProjectSettings, Sequence, SequenceId, TrackKind,
-    Transform,
+    AssetId, ClipId, MediaAsset, Project, ProjectSettings, Sequence, SequenceId, TrackId,
+    TrackKind, Transform,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Handle, Pool, Priority};
@@ -223,9 +223,8 @@ pub(crate) struct Audio {
     seg: Vec<f32>,
     /// Source samples for a clip not at 100% speed, before resampling.
     stretch: Vec<f32>,
-    mixer: Mixer,
-    /// One buffer per audio track, reused across blocks.
-    inputs: Vec<Vec<f32>>,
+    /// Taken temporarily while its readers borrow the clip sources.
+    mixer: Option<Mixer>,
 }
 
 impl Audio {
@@ -242,8 +241,7 @@ impl Audio {
             scratch: Vec::new(),
             seg: Vec::new(),
             stretch: Vec::new(),
-            mixer: Mixer::new(0),
-            inputs: Vec::new(),
+            mixer: None,
         }
     }
 
@@ -252,6 +250,7 @@ impl Audio {
         self.clips.clear();
         self.fx.clear();
         self.nested.clear();
+        self.mixer = None;
     }
 
     /// Opens and seeks clips heard within [`AUDIO_AHEAD`] of `pos`, so they start on time, and
@@ -261,7 +260,19 @@ impl Audio {
     }
 
     fn prime_in(&mut self, project: &Project, seq: &Sequence, pos: Time) {
-        let segs = audio_in(seq, pos, pos + AUDIO_AHEAD);
+        // Open at the earliest input the effect readers will request. Otherwise the first
+        // render after a seek immediately seeks the asynchronous feeder backwards again.
+        let tracks = seq.tracks().iter().filter(|t| t.kind == TrackKind::Audio);
+        let track_fx = tracks.clone().any(|t| !t.fx.is_default());
+        let clip_fx = tracks
+            .flat_map(|t| t.clips())
+            .any(|c| !c.transform.audio_fx.is_default());
+        let history = (usize::from(track_fx) + usize::from(clip_fx)) * Fx::PREROLL;
+        let segs = audio_in(
+            seq,
+            pos - Time(history as i64 * FLICKS_PER_SAMPLE),
+            pos + AUDIO_AHEAD,
+        );
         self.clips.retain(|c, _| segs.iter().any(|s| s.clip == *c));
         self.fx.retain(|c, _| segs.iter().any(|s| s.clip == *c));
         self.nested.retain(|c, _| segs.iter().any(|s| s.clip == *c));
@@ -318,28 +329,96 @@ impl Audio {
                 fx: t.fx,
             })
             .collect();
-        if self.inputs.len() != tracks.len() {
-            self.mixer = Mixer::with_strips(&strips);
-            self.inputs = vec![Vec::new(); tracks.len()];
-        }
-        for b in &mut self.inputs {
-            b.clear();
-            b.resize(out.len(), 0.0);
-        }
+        let mut mixer = self
+            .mixer
+            .take()
+            .filter(|m| m.tracks() == tracks.len())
+            .unwrap_or_else(|| Mixer::with_strips(&strips));
+        mixer.set_strips(&strips);
+        mixer.render(start, out, |i, at, buf| {
+            self.track_input(project, seq, tracks[i].id, at, buf);
+        });
+        self.mixer = Some(mixer);
+    }
+
+    /// Builds one track at the timeline positions requested by its effects. Each clip's effect
+    /// reader independently pulls its own lookahead, then gain is applied at the output time.
+    fn track_input(
+        &mut self,
+        project: &Project,
+        seq: &Sequence,
+        track_id: TrackId,
+        start: i64,
+        out: &mut [f32],
+    ) {
+        out.fill(0.0);
         let frames = out.len() as i64 / 2;
         let span = |t: Time| (sample(t) - start).clamp(0, frames) as usize * 2;
         let end = Time((start + frames) * FLICKS_PER_SAMPLE);
-        for s in audio_in(seq, Time(start * FLICKS_PER_SAMPLE), end) {
-            let (Some(i), Some(asset)) = (
-                tracks.iter().position(|t| t.id == s.track),
-                project.asset(s.asset),
-            ) else {
+        let mut segment = std::mem::take(&mut self.seg);
+        for s in audio_in(seq, Time(start * FLICKS_PER_SAMPLE), end)
+            .into_iter()
+            .filter(|s| s.track == track_id)
+        {
+            let Some((t, c)) = seq.clip(s.clip) else {
                 continue;
             };
+            let Some(track) = seq.track(t) else { continue };
             let range = span(s.start)..span(s.end);
-            let out = &mut self.seg;
-            out.clear();
-            out.resize(range.len(), 0.0);
+            segment.clear();
+            segment.resize(range.len(), 0.0);
+            let mut fx = self.fx.remove(&s.clip).unwrap_or_default();
+            fx.render(
+                &c.transform.audio_fx,
+                sample(s.start),
+                &mut segment,
+                |at, buf| {
+                    self.clip_input(project, seq, s.clip, at, buf);
+                },
+            );
+            self.fx.insert(s.clip, fx);
+            let (first, gain) = (sample(s.start), gains(track, c));
+            let at = |i: usize| {
+                let t = Time((first + i as i64) * FLICKS_PER_SAMPLE);
+                let (v, p) = c.gain_at(t);
+                ((v * gain(t)) as f32, p as f32)
+            };
+            if c.gain_animated() || s.crossfade {
+                automate(&mut segment, at);
+            } else if c.transform.volume != 1.0 || c.transform.pan != 0.0 {
+                let g = at(0);
+                automate(&mut segment, |_| g);
+            }
+            out[range]
+                .iter_mut()
+                .zip(&segment)
+                .for_each(|(m, x)| *m += x);
+        }
+        self.seg = segment;
+    }
+
+    /// Raw clip input in timeline samples, including silence before/after its evaluated span.
+    /// Keeping trim/speed/transition evaluation here also bounds effect flushes to the clip.
+    fn clip_input(
+        &mut self,
+        project: &Project,
+        seq: &Sequence,
+        clip: ClipId,
+        start: i64,
+        out: &mut [f32],
+    ) {
+        out.fill(0.0);
+        let frames = out.len() as i64 / 2;
+        let span = |t: Time| (sample(t) - start).clamp(0, frames) as usize * 2;
+        let end = Time((start + frames) * FLICKS_PER_SAMPLE);
+        for s in audio_in(seq, Time(start * FLICKS_PER_SAMPLE), end)
+            .into_iter()
+            .filter(|s| s.clip == clip)
+        {
+            let Some(asset) = project.asset(s.asset) else {
+                continue;
+            };
+            let out = &mut out[span(s.start)..span(s.end)];
             if let Some(n) = project.nested(asset.id) {
                 let open = &self.open;
                 let child = self.nested.entry(s.clip);
@@ -362,33 +441,7 @@ impl Audio {
                     out.iter_mut().zip(&self.scratch).for_each(|(o, x)| *o += x);
                 }
             }
-            if let Some((t, c)) = seq.clip(s.clip)
-                && let Some(track) = seq.track(t)
-            {
-                // Effects before gain, so fades and automation don't change how it compresses.
-                if !c.transform.audio_fx.is_default() {
-                    let fx = self.fx.entry(s.clip).or_default();
-                    fx.process(&c.transform.audio_fx, out);
-                }
-                let (first, gain) = (sample(s.start), gains(track, c));
-                let at = |i: usize| {
-                    let t = Time((first + i as i64) * FLICKS_PER_SAMPLE);
-                    let (v, p) = c.gain_at(t);
-                    ((v * gain(t)) as f32, p as f32)
-                };
-                if c.gain_animated() || s.crossfade {
-                    automate(out, at);
-                } else if c.transform.volume != 1.0 || c.transform.pan != 0.0 {
-                    let g = at(0);
-                    automate(out, |_| g);
-                }
-            }
-            let mixed = &mut self.inputs[i][range];
-            mixed.iter_mut().zip(&*out).for_each(|(m, x)| *m += x);
         }
-        self.mixer.set_strips(&strips);
-        let inputs: Vec<&[f32]> = self.inputs.iter().map(Vec::as_slice).collect();
-        self.mixer.mix(&inputs, out);
     }
 }
 

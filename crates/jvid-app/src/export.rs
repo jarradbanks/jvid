@@ -676,27 +676,25 @@ fn blocking(path: &Path, nth: usize) -> ClipAudio {
     let mut dec = AudioDecoder::open(path, nth)
         .map_err(|e| tracing::debug!("export audio of {}: {e}", path.display()))
         .ok();
-    let (mut buf, mut at) = (Vec::<f32>::new(), i64::MAX);
+    let mut buf = crate::transport::AudioBuffer::default();
     Box::new(move |start, out| {
+        out.fill(0.0);
         let Some(d) = &mut dec else { return };
-        if start < at || start > at + buf.len() as i64 / 2 {
+        if buf.needs_seek(start, 0) {
             if let Err(e) = d.seek(start) {
                 return tracing::warn!("export audio seek: {e}");
             }
-            buf.clear();
-            at = start;
+            buf.reset(start);
         }
-        buf.drain(..(start - at) as usize * 2);
-        at = start;
-        while buf.len() < out.len() {
+        buf.discard_before(start);
+        while buf.end() < start.saturating_add(out.len() as i64 / 2) {
             match d.next_chunk() {
-                Ok(Some(c)) => buf.extend(c.samples),
+                Ok(Some(c)) => buf.push(c),
                 Ok(None) => break,
                 Err(e) => return tracing::warn!("export audio decode: {e}"),
             }
         }
-        let n = out.len().min(buf.len());
-        out[..n].copy_from_slice(&buf[..n]);
+        buf.copy(start, out);
     })
 }
 
