@@ -349,6 +349,14 @@ impl Timeline {
         self.media.peaks.insert((path, 0), Some(peaks));
     }
 
+    #[cfg(test)]
+    pub fn recorded_waveform(&self, path: &std::path::Path) -> Option<&Pyramid> {
+        self.media
+            .peaks
+            .get(&(path.to_owned(), 0))
+            .and_then(Option::as_ref)
+    }
+
     pub fn selected(&self) -> &HashSet<ClipId> {
         &self.selected
     }

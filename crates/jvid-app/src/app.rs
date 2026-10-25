@@ -294,7 +294,9 @@ impl App {
 
     /// Replaces the project with an empty one; `None` settings is Match source.
     fn new_project(&mut self, settings: Option<ProjectSettings>) {
-        self.leave_project();
+        if !self.leave_project() {
+            return;
+        }
         self.history = History::new(Project::default());
         if let Some(s) = &settings {
             // Setting up isn't an edit: no undo step, nothing to save yet.
@@ -310,9 +312,11 @@ impl App {
     fn open(&mut self, path: PathBuf) {
         match project_file::load(&path) {
             Ok(project) => {
+                if !self.leave_project() {
+                    return;
+                }
                 welcome::remember(&mut self.welcome.recent, Recent::of(&path, &project));
                 self.missing = relink::missing(&project);
-                self.leave_project();
                 self.history = History::new(project);
                 if let Some(auto) = autosave::newer(&path) {
                     let path = Some(path.clone());
@@ -574,6 +578,9 @@ impl App {
     /// Saves to the current path, asking for one first if there is none or `as_new`.
     /// Returns false if cancelled or the save failed.
     fn save(&mut self, as_new: bool) -> bool {
+        if !self.finalize_take() {
+            return false;
+        }
         let path = match (&self.path, as_new) {
             (Some(p), false) => p.clone(),
             _ => {
@@ -617,6 +624,9 @@ impl App {
 
     /// Saves the project to `path`, which becomes its path. Returns false if the save failed.
     fn save_to(&mut self, path: PathBuf) -> bool {
+        if !self.finalize_take() {
+            return false;
+        }
         match project_file::save(self.history.project(), &path) {
             Ok(()) => {
                 self.history.mark_saved();
@@ -814,7 +824,8 @@ impl App {
     fn run_action(&mut self, id: &str, menu: bool) {
         // Space and K stop the take along with playback, wherever focus is.
         if self.take.is_some() && matches!(id, "play_stop" | "shuttle_stop" | "record") {
-            return self.end_take();
+            self.end_take();
+            return;
         }
         match id {
             "record" => return self.start_take(),
@@ -914,7 +925,7 @@ impl App {
         let seq = self.history.project().sequence();
         let armed = self.timeline.armed.and_then(|id| seq.track(id));
         let armed = armed.filter(|t| t.kind == TrackKind::Audio).map(|t| t.id);
-        // One undo step with the track, rolled back if the device won't open.
+        // Track creation is a short transaction, rolled back if the device will not open.
         let txn = self.history.begin();
         let track = match armed {
             Some(id) => Ok(id),
@@ -959,20 +970,33 @@ impl App {
         }
     }
 
-    /// Ends the take, stops playback and places the recording.
+    /// Stops recording from a transport or tutorial action.
     fn end_take(&mut self) {
+        self.finalize_take();
+    }
+
+    /// Finalizes before dirty checking or saving. Cancel keeps this completed, undoable edit;
+    /// failure prevents navigation and leaves the WAV on disk for recovery.
+    fn finalize_take(&mut self) -> bool {
         let Some(take) = self.take.take() else {
-            return;
+            return true;
         };
         self.timeline.level = None;
         self.timeline.live = None;
+        self.preview.recording = None;
+        self.preview.record_clicked = false;
         self.preview.program_action("shuttle_stop");
         let path = take.path.clone();
-        match take.finish(&mut self.history) {
+        let finished = take.finish(&mut self.history);
+        match finished {
             Ok(Some(peaks)) => self.timeline.recorded(path, peaks),
             Ok(None) => {}
-            Err(e) => self.timeline.notice = Some(tr!("timeline.record_save_failed", error = e)),
+            Err(e) => {
+                self.error(tr!("timeline.record_save_failed", error = e));
+                return false;
+            }
         }
+        true
     }
 
     /// Runs the take a frame: feeds the header meter and the live clip, and ends it when the
@@ -982,7 +1006,8 @@ impl App {
             return;
         };
         if self.timeline.armed != Some(take.track) {
-            return self.end_take();
+            self.end_take();
+            return;
         }
         match take.poll() {
             Ok(level) => {
@@ -998,9 +1023,12 @@ impl App {
     }
 
     /// Before the project is replaced: a take in progress lands in the old one.
-    fn leave_project(&mut self) {
-        self.end_take();
+    fn leave_project(&mut self) -> bool {
+        if !self.finalize_take() {
+            return false;
+        }
         self.timeline.armed = None;
+        true
     }
 
     /// Asks for media files and queues them for import.
@@ -1109,6 +1137,9 @@ impl App {
     /// Runs `then` now if the project is clean, else once the user saves or discards it.
     fn discard_then(&mut self, then: Then) {
         // The question is about the user's project, not the lesson's.
+        if !self.finalize_take() {
+            return;
+        }
         self.end_lesson();
         if self.history.is_dirty() {
             self.prompts.push(Prompt::Discard(then));
@@ -1230,7 +1261,9 @@ impl App {
                     if path.is_none() {
                         self.new_project(Some(project.settings().clone()));
                     }
-                    self.leave_project();
+                    if !self.leave_project() {
+                        return;
+                    }
                     self.history = History::new(project);
                     self.history.mark_unsaved();
                 }
@@ -1254,17 +1287,18 @@ impl eframe::App for App {
             let until = ctx.input(|i| i.time) + TOAST_SECS;
             self.toasts.push((e, until));
         }
-        if ctx.input(|i| i.viewport().close_requested()) {
-            self.end_lesson();
-        }
-        self.lesson_keys(&ctx);
-        if ctx.input(|i| i.viewport().close_requested()) && !self.closing && self.history.is_dirty()
-        {
+        if ctx.input(|i| i.viewport().close_requested()) && !self.closing {
+            // Cancel this OS request even if finalization fails. Only an approved request is
+            // reissued; no recording is left with an unfinalized WAV header on normal close.
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             if !self.prompts.contains(&Prompt::Discard(Then::Close)) {
-                self.prompts.push(Prompt::Discard(Then::Close));
+                self.discard_then(Then::Close);
+            }
+            if self.closing {
+                ctx.send_viewport_cmd(ViewportCommand::Close);
             }
         }
+        self.lesson_keys(&ctx);
         let was_closing = self.closing;
         self.show_prompt(&ctx);
         if self.closing && !was_closing {
@@ -1275,13 +1309,15 @@ impl eframe::App for App {
             .dock
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
-        let pressed =
-            if self.keymap_editor.is_open() || self.subtitles.is_open() || !self.prompts.is_empty()
-            {
-                Vec::new()
-            } else {
-                self.keymap.pressed(&ctx, timeline)
-            };
+        let pressed = if self.closing
+            || self.keymap_editor.is_open()
+            || self.subtitles.is_open()
+            || !self.prompts.is_empty()
+        {
+            Vec::new()
+        } else {
+            self.keymap.pressed(&ctx, timeline)
+        };
         for id in pressed {
             if id == "quit" {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -1399,7 +1435,7 @@ impl eframe::App for App {
             if let Some(sources) = transcript.transcribe {
                 self.subtitles.open_transcribe(sources);
             }
-            if std::mem::take(&mut self.preview.record_clicked) {
+            if std::mem::take(&mut self.preview.record_clicked) && !self.closing {
                 self.run_action("record", true);
             }
             self.queue_action(ui.ctx(), queue);
