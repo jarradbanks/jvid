@@ -52,6 +52,9 @@ link = "연결/연결 해제"
 enable = "활성화/비활성화"
 reverse = "역재생"
 freeze_frame = "재생 헤드에서 프레임 고정"
+fit_to_frame = "프레임에 맞추기"
+fill_frame = "프레임 채우기"
+stretch_to_fit = "프레임에 늘려 맞추기"
 copy_grade = "그레이드 복사"
 paste_grade = "그레이드 붙여넣기"
 hide_region = "영역 숨기기"
@@ -964,3 +967,6 @@ none = "군더더기나 멈춤이 없습니다"
 [analysis]
 audio_source = "오디오 소스"
 source_stream = "{name} · 스트림 {number}"
+
+[framing]
+target = "{track} · {clip}"

@@ -72,7 +72,7 @@ pub struct Compositor {
     /// By layer index: the layer is premultiplied, as a nested sequence's frame from another
     /// `Compositor` is. Unlisted layers are straight alpha.
     pub premultiplied: Vec<bool>,
-    /// Original image dimensions by layer, independent of proxy and preview texture sizes.
+    /// Square-pixel display dimensions by layer, independent of proxy/preview texture sizes.
     /// Missing entries keep the texture dimensions for direct renderer callers.
     pub logical_sizes: Vec<[f32; 2]>,
 }

@@ -52,6 +52,9 @@ link = "链接/取消链接"
 enable = "启用/停用"
 reverse = "倒放"
 freeze_frame = "在播放头处定格帧"
+fit_to_frame = "适应画面"
+fill_frame = "填充画面"
+stretch_to_fit = "拉伸以适应"
 copy_grade = "复制调色"
 paste_grade = "粘贴调色"
 hide_region = "隐藏区域"
@@ -995,3 +998,6 @@ none = "没有填充词或停顿"
 [analysis]
 audio_source = "音频源"
 source_stream = "{name} · 音轨 {number}"
+
+[framing]
+target = "{track} · {clip}"

@@ -3,7 +3,7 @@
 //! [`Timeline::action`], the code its shortcut runs, so it undoes the same way.
 
 use egui::{Rect, Ui, Vec2, pos2};
-use jvid_core::model::{AssetId, Project, Sequence};
+use jvid_core::model::{ClipId, Project, Sequence};
 use suite_ui::theme::icon;
 use suite_ui::tokens::{size, space};
 use suite_ui::widgets::{Button, Dropdown, State};
@@ -116,6 +116,7 @@ impl Timeline {
         }
         let any = !self.selected.is_empty();
         match id {
+            "fit_to_frame" | "fill_frame" | "stretch_to_fit" => !self.video_chosen(seq).is_empty(),
             "paste" => !self.clipboard.is_empty(),
             "copy_grade" => !self.video_chosen(seq).is_empty(),
             "paste_grade" => self.grade.is_some() && self.clip_action(id, seq).is_some(),
@@ -161,13 +162,18 @@ impl Timeline {
         ui: &mut Ui,
         seq: &Sequence,
         keymap: &Keymap,
-        asset: AssetId,
-    ) {
+        project: &Project,
+        clip: ClipId,
+    ) -> Option<jvid_core::history::Command> {
+        let c = seq.clip(clip).expect("clicked clip").1;
         self.items(ui, seq, keymap, CLIP);
         ui.separator();
+        let edit = crate::framing::menu(ui, project, Some(clip), self.playhead());
+        ui.separator();
         if ui.button(tr!("timeline.reveal_in_bin")).clicked() {
-            self.reveal = Some(asset);
+            self.reveal = Some(c.asset);
         }
+        edit
     }
 
     /// Right-click on empty lane space; the caller has picked the gap under it, if any.
@@ -287,6 +293,7 @@ mod tests {
             .chain(CLIP)
             .copied()
             .chain(TOOLBAR.iter().map(|(id, _)| *id))
+            .chain(crate::framing::ACTIONS)
             .collect();
         let tools = ["undo", "redo", "razor_tool", "selection_tool"];
         for a in ACTIONS {
@@ -355,5 +362,80 @@ mod tests {
         assert_eq!(h.state().1.project(), key.project());
         assert!(h.state_mut().1.undo() && key.undo());
         assert_eq!(h.state().1.project(), &p);
+    }
+    #[test]
+    fn framing_actions_run_the_shared_command_and_skip_ineligible_clips() {
+        use jvid_core::framing::Framing;
+        let (mut h, ids) = crate::framing::tests::fixture(2);
+        let mut t = Timeline::default();
+        t.action("select_all", h.project());
+        for action in crate::framing::ACTIONS {
+            assert!(t.action(action, h.project()));
+            let cmd = t.pending.take().unwrap();
+            let want = crate::framing::command(
+                h.project(),
+                &ids,
+                crate::framing::mode(action).unwrap(),
+                Time(0),
+            )
+            .unwrap();
+            let mut expected = History::new(h.project().clone());
+            expected.apply(want).unwrap();
+            h.apply(cmd).unwrap();
+            assert_eq!(h.project(), expected.project());
+            assert!(h.undo());
+        }
+        let mut settings = h.project().sequence().tracks()[0].settings();
+        settings.locked = true;
+        h.apply(jvid_core::history::Command::SetTrack(settings))
+            .unwrap();
+        assert!(
+            crate::framing::command(h.project(), &[ids[0]], Framing::Stretch, Time(0)).is_none()
+        );
+        let audio = project(2);
+        let id = audio.sequence().tracks()[1].clips()[0].id;
+        assert!(crate::framing::command(&audio, &[id], Framing::Stretch, Time(0)).is_none());
+    }
+
+    #[test]
+    fn timeline_framing_context_menu_changes_only_the_clicked_clip() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let (history, ids) = crate::framing::tests::fixture(2);
+        let mut h = harness(history.project().clone());
+        h.set_size(Vec2::new(1000.0, 800.0));
+        h.run();
+        h.state_mut().0.action("select_all", history.project());
+        h.run();
+        let lane_y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let at = pos2(8.0 + size::TRACK_HEADER + 20.0, lane_y);
+        h.hover_at(at);
+        h.run();
+        for pressed in [true, false] {
+            h.event(Event::PointerButton {
+                pos: at,
+                button: PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+            h.run();
+        }
+        h.get_by_label("Fit to Frame");
+        h.get_by_label("Fill Frame");
+        h.get_by_label("Stretch to Fit").click();
+        h.run();
+        h.run();
+        let p = h.state().1.project();
+        assert_eq!(
+            p.sequence().clip(ids[0]).unwrap().1.transform.scale,
+            [4.0 / 3.0, 1.0]
+        );
+        assert_eq!(
+            p.sequence().clip(ids[1]).unwrap().1.transform.scale,
+            [1.0; 2]
+        );
+        assert!(h.state_mut().1.undo());
+        assert_eq!(h.state().1.project(), history.project());
     }
 }

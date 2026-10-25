@@ -50,6 +50,9 @@ link = "Зв’язати/роз’єднати"
 enable = "Увімкнути/вимкнути"
 reverse = "Реверс"
 freeze_frame = "Стоп-кадр у позиції вказівника"
+fit_to_frame = "Вписати в кадр"
+fill_frame = "Заповнити кадр"
+stretch_to_fit = "Розтягнути до кадру"
 copy_grade = "Копіювати грейд"
 paste_grade = "Вставити грейд"
 hide_region = "Приховати область"
@@ -986,3 +989,6 @@ none = "Немає слів-паразитів і пауз"
 [analysis]
 audio_source = "Джерело Звуку"
 source_stream = "{name} · Потік {number}"
+
+[framing]
+target = "{track} · {clip}"

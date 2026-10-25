@@ -1675,7 +1675,10 @@ fn real_proxy_playback_keeps_original_pixel_effect_units() {
             std::thread::sleep(Duration::from_millis(5));
         };
         if proxy {
-            assert!(matches!(shown.layers[0].0, Pixels::Sampled(_, (192, 128))));
+            assert!(matches!(
+                shown.layers[0].0,
+                Pixels::Sampled(_, (192.0, 128.0))
+            ));
         }
         for quality in [1, 2, 4] {
             let rgba = composite::read_back(

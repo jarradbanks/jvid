@@ -2368,3 +2368,185 @@ fn cpu_exports_accept_absent_gpu_and_composited_video_preserves_output() {
     assert_eq!(std::fs::read(path).unwrap(), b"prior completed video");
     assert_no_attempts(&files.dir);
 }
+
+/// #479: decode real 4:3, anamorphic and rotated files, frame them, then compare Program,
+/// the full-resolution export renderer and decoded encoded output. Preview quality and
+/// viewer zoom must not change the logical composition.
+#[test]
+fn framing_program_export_and_metadata_agree() {
+    use crate::playback::Playback;
+    use jvid_core::framing::Framing;
+    use jvid_core::model::ProjectSettings;
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    jvid_media::ffmpeg::init().unwrap();
+    let dir = out("479-framing");
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("square.mov");
+    // Bright full image with distinguishable horizontal/vertical patches: bars, crops and
+    // whole-source stretch produce observably different pixels.
+    let pixels = image::RgbaImage::from_fn(144, 108, |x, y| {
+        let v = if !(9..99).contains(&y) {
+            220
+        } else if !(36..108).contains(&x) {
+            160
+        } else {
+            80
+        };
+        image::Rgba([v, v, v, 255])
+    });
+    let rate = Rate::new(30, 1);
+    let mut enc = Encoder::create(&source, (144, 108), rate, &preset("ProRes Master")).unwrap();
+    for _ in 0..3 {
+        enc.video(pixels.as_raw()).unwrap();
+    }
+    enc.finish().unwrap();
+    let anamorphic = dir.join("anamorphic.mov");
+    let rotated = dir.join("rotated.mov");
+    let help = std::process::Command::new("ffmpeg")
+        .args(["-h", "full"])
+        .output()
+        .unwrap();
+    let modern_rotation = String::from_utf8_lossy(&help.stdout).contains("-display_rotation");
+    let rotation_options = if modern_rotation {
+        (&rotated, vec!["-display_rotation", "-90"], vec![])
+    } else {
+        (&rotated, vec![], vec!["-metadata:s:v:0", "rotate=90"])
+    };
+    for (dst, input_flags, flags) in [
+        (&anamorphic, vec![], vec!["-aspect", "16:9"]),
+        rotation_options,
+    ] {
+        let result = std::process::Command::new("ffmpeg")
+            .args(["-nostdin", "-v", "error", "-y"])
+            .args(input_flags)
+            .arg("-i")
+            .arg(&source)
+            .args(["-c", "copy"])
+            .args(flags)
+            .arg(dst)
+            .output()
+            .expect("FFmpeg CLI for metadata fixtures");
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    for (source, expected_size) in [
+        (&source, [144.0, 108.0]),
+        (&anamorphic, [192.0, 108.0]),
+        (&rotated, [108.0, 144.0]),
+    ] {
+        let probe = jvid_media::probe::probe(source).unwrap();
+        assert_eq!(
+            probe.display_size(),
+            Some(expected_size),
+            "{}",
+            source.display()
+        );
+        let mut h = History::new(Project::default());
+        h.apply(Command::SetSettings(ProjectSettings {
+            width: 192,
+            height: 108,
+            ..Default::default()
+        }))
+        .unwrap();
+        add(
+            &mut h,
+            TrackKind::Video,
+            source.clone(),
+            Time(0),
+            rate.time_floor(3),
+        );
+        let clip = h.project().sequence().tracks()[0].clips()[0].clone();
+        let id = clip.id;
+        h.apply(Command::SetAssetProbe {
+            id: clip.asset,
+            probe: Some(probe),
+        })
+        .unwrap();
+        for mode in [Framing::Fit, Framing::Fill, Framing::Stretch] {
+            h.apply(crate::framing::command(h.project(), &[id], mode, Time(0)).unwrap())
+                .unwrap();
+            let mut pb = Playback::from_files(1 << 20);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            let shown = loop {
+                if let Some(s) = pb.park(h.project())
+                    && s.exact
+                {
+                    break s;
+                }
+                assert!(std::time::Instant::now() < deadline, "decode timed out");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            let mut gpu = Gpu::new(&device);
+            let program = jvid_render::composite::read_back(
+                &device,
+                &queue,
+                gpu.draw(&device, &queue, h.project().settings(), 1, &shown),
+            );
+            let mut renderer = FrameRenderer::new(&device);
+            let export = jvid_render::composite::read_back(
+                &device,
+                &queue,
+                renderer
+                    .render(h.project(), Time(0), &device, &queue)
+                    .unwrap(),
+            );
+            assert_eq!(program, export, "{mode:?} {}", source.display());
+            let image = image::RgbaImage::from_raw(192, 108, program.clone()).unwrap();
+            if mode == Framing::Fit && expected_size == [144.0, 108.0] {
+                assert_eq!(image.get_pixel(10, 54).0, [0, 0, 0, 255]);
+                assert!(image.get_pixel(25, 54)[0] > 100);
+            } else if mode != Framing::Fit || expected_size == [192.0, 108.0] {
+                assert!(image.get_pixel(1, 1)[0] > 50, "frame is covered");
+            }
+            if expected_size == [144.0, 108.0] {
+                assert!(
+                    (image.get_pixel(96, 1)[0] > 200) == (mode != Framing::Fill),
+                    "Fill crops the bright top strip"
+                );
+            }
+            // Program's reduced quality uses the same project geometry.
+            let half = jvid_render::composite::read_back(
+                &device,
+                &queue,
+                gpu.draw(&device, &queue, h.project().settings(), 2, &shown),
+            );
+            let half = image::RgbaImage::from_raw(96, 54, half).unwrap();
+            for (x, y) in [(5, 27), (48, 27), (48, 2)] {
+                assert!(half.get_pixel(x, y)[0].abs_diff(image.get_pixel(x * 2, y * 2)[0]) < 12);
+            }
+            let request = Request {
+                path: dir.join(format!(
+                    "{}-{mode:?}.mov",
+                    source.file_stem().unwrap().to_string_lossy()
+                )),
+                range: (Time(0), rate.time_floor(3)),
+                preset: Preset {
+                    size: Some([192, 108]),
+                    frame_rate: Some(rate),
+                    ..preset("ProRes Master")
+                },
+                loudness: None,
+                lossless: None,
+                sidecar: false,
+            };
+            run_now(h.project(), &request, false).unwrap();
+            let encoded = VideoDecoder::open(&request.path)
+                .unwrap()
+                .frame_at(Time(0))
+                .unwrap()
+                .view_rgba((192, 108));
+            for (x, y) in [(10, 54), (96, 54), (96, 2), (180, 90)] {
+                assert!(
+                    encoded.get_pixel(x, y)[0].abs_diff(image.get_pixel(x, y)[0]) < 15,
+                    "encoded {mode:?} pixel ({x},{y})"
+                );
+            }
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

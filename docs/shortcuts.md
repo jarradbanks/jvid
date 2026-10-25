@@ -87,6 +87,9 @@ Work while the timeline has focus.
 | Enable/Disable | `Shift+E` |
 | Reverse | `Ctrl+R` |
 | Freeze Frame at Playhead | `Shift+F` |
+| Fit to Frame | — |
+| Fill Frame | — |
+| Stretch to Fit | — |
 | Copy Grade | `Ctrl+Alt+C` |
 | Paste Grade | `Ctrl+Alt+V` |
 | Clean Up Voice | `Ctrl+Alt+U` |

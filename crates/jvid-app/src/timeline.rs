@@ -375,6 +375,13 @@ impl Timeline {
         self.select(seq, id, egui::Modifiers::NONE);
     }
 
+    /// Selects exactly the visual layer clicked in Program, even if it has linked clips.
+    pub fn select_program_clip(&mut self, id: ClipId) {
+        self.keys.clear_focus();
+        self.selected = HashSet::from([id]);
+        self.gap = None;
+    }
+
     pub fn seek(&mut self, t: Time) {
         let r = self.transport.rate;
         self.transport.seek(r.time_floor(r.index_nearest(t)), 0);
@@ -528,6 +535,15 @@ impl Timeline {
                 }
             }
             "nest" => {}
+            "fit_to_frame" | "fill_frame" | "stretch_to_fit" => {
+                let ids: Vec<_> = self.selected.iter().copied().collect();
+                self.pending = crate::framing::command(
+                    project,
+                    &ids,
+                    crate::framing::mode(id).expect("framing action"),
+                    self.playhead(),
+                );
+            }
             "copy_grade" => {
                 let seq = project.sequence();
                 if let Some(c) = self.video_chosen(seq).first() {
@@ -1301,7 +1317,11 @@ impl Timeline {
                 if cr.secondary_clicked() && !self.selected.contains(&clip.id) {
                     self.select(seq, clip.id, egui::Modifiers::NONE);
                 }
-                cr.context_menu(|ui| self.clip_menu(ui, seq, keymap, clip.asset));
+                cr.context_menu(|ui| {
+                    if let Some(cmd) = self.clip_menu(ui, seq, keymap, project, clip.id) {
+                        edit = Some((cmd, None));
+                    }
+                });
                 if let Some(e) = self.trim_handles(ui, project, view, clip, r) {
                     edit = Some(e);
                 }

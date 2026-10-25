@@ -49,6 +49,9 @@ link = "Vincular/Desvincular"
 enable = "Activar/Desactivar"
 reverse = "Invertir"
 freeze_frame = "Congelar fotograma en el cabezal"
+fit_to_frame = "Ajustar al fotograma"
+fill_frame = "Rellenar fotograma"
+stretch_to_fit = "Estirar para ajustar"
 copy_grade = "Copiar etalonaje"
 paste_grade = "Pegar etalonaje"
 hide_region = "Ocultar región"
@@ -976,3 +979,6 @@ none = "No hay muletillas ni pausas"
 [analysis]
 audio_source = "Fuente de Audio"
 source_stream = "{name} · Pista {number}"
+
+[framing]
+target = "{track} · {clip}"

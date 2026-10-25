@@ -50,6 +50,9 @@ link = "Sammenkæd/fjern sammenkædning"
 enable = "Aktivér/deaktivér"
 reverse = "Baglæns"
 freeze_frame = "Frys billede ved afspilningshoved"
+fit_to_frame = "Tilpas til billedramme"
+fill_frame = "Udfyld billedramme"
+stretch_to_fit = "Stræk til billedramme"
 copy_grade = "Kopiér grading"
 paste_grade = "Sæt grading ind"
 hide_region = "Skjul område"
@@ -962,3 +965,6 @@ none = "Ingen fyldord eller pauser"
 [analysis]
 audio_source = "Lydkilde"
 source_stream = "{name} · Strøm {number}"
+
+[framing]
+target = "{track} · {clip}"

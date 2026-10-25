@@ -67,6 +67,12 @@ Select a clip and use the Inspector. It holds Transform (position, scale, rotati
 
 On the timeline, an animated clip has a toggle in its name strip that shows a lane per animated property. Keys there click and marquee select, drag (snapping to frames, the playhead, clip edges and markers), delete, copy and paste at the playhead. Right-click a key to open the easing editor.
 
+**Frame a clip.** Right-click the image in Program or a clip in the timeline and choose **Fit to Frame** (whole image with bars), **Fill Frame** (preserve proportions and crop overflow), or **Stretch to Fit** (fill the project with the whole image, changing proportions). For example, Stretch turns 4:3 gameplay into the stretched widescreen look. These commands affect the composition and export; the monitor's **Fit**/percentage dropdown only changes viewing zoom.
+
+Program targets the top visible clip under the pointer and selects it. To frame a lower layer, right-click that clip in the timeline. A context command changes only the clicked clip, even within a multi-selection. Locked tracks and audio clips cannot be framed.
+
+Each preset centers the whole source, clears crop and anchor offsets, and resets clip rotation. Source orientation and pixel aspect are respected. Grade, effects, masks and opacity stay as set. If any spatial property is animated, the preset adds a grouped spatial key at the playhead using the Inspector's existing rules; other keys remain. Each command is one undo step. The Inspector shows **Scale X/Y** independently, and dragging a transform handle preserves their current ratio.
+
 **Zoom to a region.** Select a video clip, hold `Alt` and drag a rectangle on the Program monitor. From the playhead the clip zooms in on it, holds for 2 seconds and zooms back out. The rectangle keeps the project's shape. Pick **Quick** or **Smooth** in the bar that appears while `Alt` is held. The zoom is one undo step, made of scale and position keyframes you can edit like any others.
 
 ## Effects

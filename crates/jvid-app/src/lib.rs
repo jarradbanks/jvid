@@ -5,6 +5,7 @@ mod autosave;
 mod easing;
 mod effects;
 pub mod export;
+mod framing;
 mod handles;
 mod hide_region;
 pub mod i18n;

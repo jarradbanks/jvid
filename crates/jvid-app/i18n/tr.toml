@@ -52,6 +52,9 @@ link = "Bağla/Bağlantıyı Kaldır"
 enable = "Etkinleştir/Devre Dışı Bırak"
 reverse = "Tersten Oynat"
 freeze_frame = "Oynatma Kafasında Kareyi Dondur"
+fit_to_frame = "Kareye Sığdır"
+fill_frame = "Kareyi Doldur"
+stretch_to_fit = "Kareye Esnet"
 copy_grade = "Renk Ayarını Kopyala"
 paste_grade = "Renk Ayarını Yapıştır"
 hide_region = "Bölgeyi Gizle"
@@ -965,3 +968,6 @@ none = "Dolgu sözcüğü veya duraklama yok"
 [analysis]
 audio_source = "Ses Kaynağı"
 source_stream = "{name} · Akış {number}"
+
+[framing]
+target = "{track} · {clip}"
