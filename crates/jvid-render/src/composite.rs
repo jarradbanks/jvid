@@ -1,7 +1,7 @@
 //! The compositor: a layer stack from [`jvid_core::eval::video_at`] blended over the project
 //! background into one project-sized frame, at preview scale for the viewer or full size for export.
 
-use jvid_core::model::{Blend, Curves, Effect, Transform};
+use jvid_core::model::{Blend, Curves, Effect, Mask, Transform};
 use wgpu::util::DeviceExt;
 
 use crate::preview::{place, scaled};
@@ -62,7 +62,7 @@ pub struct Compositor {
     effect_layout: wgpu::BindGroupLayout,
     /// Per layer index: a ping-pong texture pair and one uniform per effect pass, reused across
     /// frames.
-    fx_pool: Vec<(Option<[wgpu::Texture; 2]>, Vec<wgpu::Buffer>)>,
+    fx_pool: Vec<(Vec<wgpu::Texture>, Vec<wgpu::Buffer>)>,
     masks: crate::mask::Masker,
     /// The timeline frame number effects see as `fx.frame`.
     pub frame: u32,
@@ -256,46 +256,69 @@ impl Compositor {
     }
 
     /// `tex` with `effects` applied in order into `encoder`, or `None` when none of them is set;
-    /// bypassed ones are skipped.
-    /// `slot` (the layer index) picks the pooled textures and uniforms, so layers don't share them.
+    /// bypassed ones are skipped. One limited to a mask of `masks` (sized as [`Masker::apply`]
+    /// takes `sizes`) mixes back into its input by that mask's coverage.
+    /// `slot` (the layer index of `layers`) picks the pooled textures and uniforms, so layers
+    /// don't share them.
+    ///
+    /// [`Masker::apply`]: crate::mask::Masker::apply
+    #[allow(clippy::too_many_arguments)]
     fn apply_effects(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        slot: usize,
+        (slot, layers): (usize, usize),
         tex: &wgpu::Texture,
         effects: &[Effect],
+        masks: &[Mask],
+        sizes: ([f32; 2], [f32; 2]),
     ) -> Option<wgpu::Texture> {
         if self.fx_pool.len() <= slot {
             self.fx_pool.resize_with(slot + 1, Default::default);
         }
-        let (pair, uniforms) = &mut self.fx_pool[slot];
-        if pair.as_ref().is_none_or(|p| p[0].size() != tex.size()) {
-            *pair = Some([0, 1].map(|_| {
-                device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("effect"),
-                    size: tex.size(),
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: FORMAT,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                })
-            }));
+        let (pool, uniforms) = &mut self.fx_pool[slot];
+        if pool.first().is_some_and(|p| p.size() != tex.size()) {
+            pool.clear();
         }
-        let pair = pair.as_ref().unwrap();
-        let mut out: Option<&wgpu::Texture> = None;
+        // A pooled texture that's neither of `busy`, made when there's none: two ping-pong, and
+        // a masked effect's input needs a third.
+        let mut free = |busy: [Option<&wgpu::Texture>; 2]| {
+            if let Some(t) = pool.iter().find(|t| !busy.contains(&Some(*t))) {
+                return t.clone();
+            }
+            let t = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("effect"),
+                size: tex.size(),
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            pool.push(t.clone());
+            t
+        };
+        let mut out: Option<wgpu::Texture> = None;
         // `i` counts applied passes, so it never skips past `uniforms.len()`.
         let mut i = 0;
-        for e in effects.iter().filter(|e| e.enabled) {
+        for (k, e) in effects.iter().enumerate().filter(|(_, e)| e.enabled) {
             let Some((pipeline, params, passes)) = self.effects.get(&e.shader) else {
                 continue;
             };
+            // Its own mask slot past every layer's, so no two coverages share a texture.
+            let cover = masks.iter().find(|m| e.mask == Some(m.id)).and_then(|m| {
+                let at = layers * (k + 1) + slot;
+                let m = std::slice::from_ref(m);
+                self.masks
+                    .apply(device, queue, encoder, at, tex, m, sizes, true)
+            });
+            let before = out.clone();
+            let keep = cover.as_ref().and(before.as_ref());
             for pass in 0..*passes {
-                let input = out.unwrap_or(tex);
+                let input = out.as_ref().unwrap_or(tex);
                 let mut p = vec![
                     input.width() as f32,
                     input.height() as f32,
@@ -347,8 +370,7 @@ impl Compositor {
                         },
                     ],
                 });
-                // Ping-pong: write whichever of the pair isn't the input.
-                let next = &pair[usize::from(out.is_some_and(|o| *o == pair[0]))];
+                let next = free([out.as_ref(), keep]);
                 let target = next.create_view(&Default::default());
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("effect"),
@@ -370,8 +392,14 @@ impl Compositor {
                 out = Some(next);
                 i += 1;
             }
+            if let (Some(cover), Some(fx)) = (cover, &out) {
+                let next = free([Some(fx), before.as_ref()]);
+                let orig = before.as_ref().unwrap_or(tex);
+                self.masks.mix(device, encoder, [orig, fx, &cover], &next);
+                out = Some(next);
+            }
         }
-        out.cloned()
+        out
     }
 
     /// Uploads `lut` for layers whose [`Transform::lut`] is `path`; layers naming a path not
@@ -406,17 +434,25 @@ impl Compositor {
             .enumerate()
             .map(|(i, (tex, t))| {
                 let sizes = ([size.0 as f32, size.1 as f32], [w as f32, h as f32]);
+                // Masks an effect is limited to only limit it.
+                let own: Vec<Mask> = (t.masks.iter())
+                    .filter(|m| m.id == 0 || !t.effects.iter().any(|e| e.mask == Some(m.id)))
+                    .cloned()
+                    .collect();
                 // Masks that limit the secondary leave the image whole and give their coverage.
                 let cover = t.secondary.masked;
                 let masked =
                     self.masks
-                        .apply(device, queue, &mut encoder, i, tex, &t.masks, sizes, cover);
+                        .apply(device, queue, &mut encoder, i, tex, &own, sizes, cover);
+                let slot = (i, layers.len());
+                let (fx, t) = (&t.effects, &t.masks);
                 if cover {
-                    let fx = self.apply_effects(device, queue, &mut encoder, i, tex, &t.effects);
+                    let fx =
+                        self.apply_effects(device, queue, &mut encoder, slot, tex, fx, t, sizes);
                     return (fx, masked);
                 }
                 let tex = masked.as_ref().unwrap_or(tex);
-                let fx = self.apply_effects(device, queue, &mut encoder, i, tex, &t.effects);
+                let fx = self.apply_effects(device, queue, &mut encoder, slot, tex, fx, t, sizes);
                 (fx.or(masked), None)
             })
             .collect();

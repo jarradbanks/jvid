@@ -105,6 +105,7 @@ fn bypassed_effects_are_saved_with_their_keyframes() {
         shader: "vignette".into(),
         params: [("strength".to_owned(), 0.25)].into(),
         enabled,
+        mask: None,
     };
     let mut x = c.transform.clone();
     x.effects = vec![fx(true), fx(false)];

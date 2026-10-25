@@ -704,6 +704,8 @@ add_effect = "添加效果"
 search_effects = "搜索效果"
 masks = "蒙版"
 add_mask = "添加蒙版"
+fx_mask = "蒙版"
+fx_mask_none = "无"
 mixed_masks = "所选片段的蒙版不同"
 # A mask block's title: its shape, then which mask it is, counting from 1.
 mask_title = "{shape} {n}"

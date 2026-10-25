@@ -1068,6 +1068,10 @@ pub struct Effect {
     /// A bypassed effect keeps its settings and keyframes but doesn't render.
     #[serde(default = "enabled", skip_serializing_if = "is_enabled")]
     pub enabled: bool,
+    /// The [`Mask::id`] of the clip's mask the effect is limited to; that mask then doesn't
+    /// cut the image. One that isn't there or is bypassed limits nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<u32>,
 }
 
 impl Effect {
@@ -1082,6 +1086,9 @@ impl Effect {
 /// moves with its clip.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Mask {
+    /// Unique within its clip once an effect refers to it, 0 until then; see [`Transform::mask_id`].
+    #[serde(default, skip_serializing_if = "is_zero_id")]
+    pub id: u32,
     pub shape: MaskShape,
     /// A rectangle or ellipse: its centre, then its width and height. A bezier: each vertex
     /// then its in and out handles, relative to it; the path closes back to the first vertex.
@@ -1118,6 +1125,7 @@ impl Mask {
     /// A hard-edged, opaque mask.
     pub fn new(shape: MaskShape, points: Vec<[f64; 2]>) -> Self {
         Self {
+            id: 0,
             shape,
             points,
             feather: 0.0,
@@ -1229,6 +1237,26 @@ impl Default for Transform {
 impl Transform {
     fn is_default(&self) -> bool {
         *self == Self::default()
+    }
+
+    /// Mask `i`'s [`Mask::id`], giving it a new one first if it has none.
+    pub fn mask_id(&mut self, i: usize) -> Option<u32> {
+        let next = self.masks.iter().map(|m| m.id).max().unwrap_or(0) + 1;
+        let m = self.masks.get_mut(i)?;
+        if m.id == 0 {
+            m.id = next;
+        }
+        Some(m.id)
+    }
+
+    /// Clears effects' references to masks no longer on the clip.
+    pub fn drop_stale_mask_refs(&mut self) {
+        let Self { effects, masks, .. } = self;
+        for e in effects {
+            if e.mask.is_some_and(|id| !masks.iter().any(|m| m.id == id)) {
+                e.mask = None;
+            }
+        }
     }
 
     /// Exposure, contrast, saturation, temperature and tint, the compositor's grade uniform.
@@ -2318,6 +2346,10 @@ pub struct Project {
 pub const MAX_NEST_DEPTH: usize = 16;
 
 fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+fn is_zero_id(n: &u32) -> bool {
     *n == 0
 }
 
@@ -3733,6 +3765,32 @@ mod tests {
         // Projects from before audio effects load with the default.
         let none: AudioFx = serde_json::from_str("{}").unwrap();
         assert_eq!(none, AudioFx::default());
+    }
+
+    #[test]
+    fn effect_mask_refs_are_ids_that_old_files_lack_and_stale_ones_clear() {
+        // Written before masks had ids and effects mask refs.
+        let old = r#"{"masks":[{"shape":"rectangle","points":[[0,0],[10,10]],"feather":0,"opacity":1,"invert":false,"mode":"add"}],"effects":[{"shader":"blur","params":{}}]}"#;
+        let mut x: Transform = serde_json::from_str(old).unwrap();
+        assert_eq!((x.masks[0].id, x.effects[0].mask), (0, None));
+        let json = serde_json::to_string(&x).unwrap();
+        assert!(
+            !json.contains("\"id\"") && !json.contains("\"mask\""),
+            "{json}"
+        );
+        x.masks.push(x.masks[0].clone());
+        assert_eq!(x.mask_id(1), Some(1));
+        assert_eq!(x.mask_id(0), Some(2), "a new id, not a taken one");
+        assert_eq!(x.mask_id(1), Some(1), "kept");
+        assert_eq!(x.mask_id(2), None);
+        x.effects[0].mask = Some(1);
+        let back: Transform = serde_json::from_str(&serde_json::to_string(&x).unwrap()).unwrap();
+        assert_eq!(back, x);
+        x.drop_stale_mask_refs();
+        assert_eq!(x.effects[0].mask, Some(1));
+        x.masks.remove(1);
+        x.drop_stale_mask_refs();
+        assert_eq!(x.effects[0].mask, None);
     }
 
     #[test]

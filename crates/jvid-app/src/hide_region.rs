@@ -59,6 +59,7 @@ pub fn apply(history: &mut History, id: ClipId, blur: &Shader) -> Option<ClipId>
     copy.transform
         .effects
         .push(crate::inspector::new_effect(BLUR, blur));
+    copy.transform.drop_stale_mask_refs();
     let above = above.map(|t| t.id);
     let txn = history.begin();
     let created = (|| {

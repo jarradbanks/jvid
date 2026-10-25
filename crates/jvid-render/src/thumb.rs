@@ -249,6 +249,7 @@ mod tests {
             shader: "vignette".into(),
             params: Default::default(),
             enabled: true,
+            mask: None,
         };
         let out = read_back(&device, &queue, &thumbs.effect(&device, &queue, &effect));
         let changed = frame
@@ -279,6 +280,7 @@ mod tests {
                 shader: file.to_string(),
                 params: Default::default(),
                 enabled: true,
+                mask: None,
             };
             let out = read_back(&device, &queue, &thumbs.effect(&device, &queue, &effect));
             // Visibly: pixels that move by more than a rounding step.
