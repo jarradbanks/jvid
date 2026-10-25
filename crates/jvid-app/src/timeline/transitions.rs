@@ -126,7 +126,7 @@ impl Timeline {
         let start = cut - Time(x.duration.0 / 2);
         let (l, rt) = (view.x(start), view.x(start + x.duration));
         let block = Rect::from_x_y_ranges(l..=rt.max(l + 6.0), r.top()..=r.center().y);
-        let fill = color::amber().gamma_multiply(0.6);
+        let fill = color::ink_2().gamma_multiply(0.6);
         painter.rect_filled(block, CornerRadius::same(2), fill);
         painter.line_segment(
             [block.left_bottom(), block.right_top()],
