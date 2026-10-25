@@ -142,6 +142,9 @@ about = "Over jvid…"
 tutorials = "Tutorials"
 
 [export]
+codec_no_encoder = "Geen bruikbare {codec}-encoder voor deze exportinstellingen. Gebruik ondersteunde hardware, installeer een versie met {encoders} of kies een voorinstelling met een andere codec."
+codec_wrong = "Er is {expected} aangevraagd, maar de gecodeerde video is {actual}. Het uitvoerbestand is niet gepubliceerd."
+encoder = "Te Proberen Encoders"
 queue = "Renderwachtrij"
 queue_pending.one = "{count} in de renderwachtrij"
 queue_pending.other = "{count} in de renderwachtrij"

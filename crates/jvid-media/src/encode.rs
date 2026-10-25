@@ -62,12 +62,61 @@ impl std::fmt::Display for EncodeError {
 
 impl std::error::Error for EncodeError {}
 
+/// Creation failures retain actionable codec information without enabling a hardware retry.
+#[derive(Debug)]
+pub enum CreateError {
+    Ffmpeg(Error),
+    NoVideoEncoder(VideoCodec),
+}
+
+impl From<Error> for CreateError {
+    fn from(error: Error) -> Self {
+        Self::Ffmpeg(error)
+    }
+}
+
+impl std::fmt::Display for CreateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ffmpeg(error) => error.fmt(f),
+            Self::NoVideoEncoder(codec) => write!(
+                f,
+                "No usable {} encoder for these export settings. Install an FFmpeg build with {} or use a supported hardware encoder; libx264/libx265 require a GPL FFmpeg build and jvid's gpl-ffmpeg feature. You can also choose a different codec preset, such as ProRes Master or GIF.",
+                video_codec_id(*codec).name(),
+                software_encoder_hint(*codec)
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CreateError {}
+
+/// FFmpeg's stream family identifier, independent of a particular encoder implementation.
+pub fn video_codec_id(codec: VideoCodec) -> codec::Id {
+    match codec {
+        VideoCodec::H264 => codec::Id::H264,
+        VideoCodec::Hevc => codec::Id::HEVC,
+        VideoCodec::ProRes => codec::Id::PRORES,
+        VideoCodec::Gif => codec::Id::GIF,
+    }
+}
+
+/// Installation choices, including encoders requiring the explicit GPL build feature.
+pub fn software_encoder_hint(codec: VideoCodec) -> &'static str {
+    match codec {
+        VideoCodec::H264 => "OpenH264 (libopenh264)",
+        VideoCodec::Hevc => "libx265",
+        VideoCodec::ProRes => "prores_ks / prores",
+        VideoCodec::Gif => "gif",
+    }
+}
+
 /// Software H.264: libx264 only with the `gpl-ffmpeg` feature, per the licensing ADR; OpenH264
-/// otherwise; then MPEG-4 Part 2, which every FFmpeg build has.
+/// otherwise. A missing H.264 encoder must never select another codec family.
 #[cfg(feature = "gpl-ffmpeg")]
-const H264_CODECS: &[&str] = &["libx264", "libopenh264", "mpeg4"];
+const H264_CODECS: &[&str] = &["libx264", "libopenh264"];
 #[cfg(not(feature = "gpl-ffmpeg"))]
-const H264_CODECS: &[&str] = &["libopenh264", "mpeg4"];
+const H264_CODECS: &[&str] = &["libopenh264"];
 /// Software HEVC is x265 only, so a permissive build needs a hardware encoder for HEVC. Tests
 /// try x265 too, so HDR export runs where FFmpeg has it.
 #[cfg(any(feature = "gpl-ffmpeg", test))]
@@ -147,6 +196,41 @@ fn candidates(
         .map(|n| (*n, hw_pixel))
         .chain(software.iter().map(|n| (*n, pixel)))
         .collect()
+}
+
+/// Registered requested-family encoders, respecting licensing and software-only selection.
+/// Hardware candidates have already passed the device probe. Call `ffmpeg::init` first.
+pub fn video_encoders(codec: VideoCodec, options: &BTreeMap<String, String>) -> Vec<&'static str> {
+    candidates(codec, hardware(), options)
+        .into_iter()
+        .filter(|(name, _)| {
+            encoder::find_by_name(name).is_some_and(|c| c.id() == video_codec_id(codec))
+        })
+        .map(|(name, _)| name)
+        .collect()
+}
+
+fn available_with(
+    codec: VideoCodec,
+    hardware: &[&str],
+    options: &BTreeMap<String, String>,
+    mut registered: impl FnMut(&str) -> bool,
+) -> bool {
+    candidates(codec, hardware, options)
+        .iter()
+        .any(|(name, _)| registered(name))
+}
+
+fn select_video<T>(
+    codec: VideoCodec,
+    hardware: &[&str],
+    options: &BTreeMap<String, String>,
+    mut open: impl FnMut(&str, Pixel) -> Option<T>,
+) -> Result<(&'static str, Pixel, T), CreateError> {
+    candidates(codec, hardware, options)
+        .into_iter()
+        .find_map(|(name, pixel)| open(name, pixel).map(|enc| (name, pixel, enc)))
+        .ok_or(CreateError::NoVideoEncoder(codec))
 }
 
 /// Whether an HDR10 export has an encoder to try: x265 in this build, or a working hardware HEVC
@@ -233,7 +317,7 @@ fn rate_control(
             ("qp_b", q),
             zero,
         ],
-        // x264/x265 use crf; VideoToolbox, OpenH264 and MPEG-4 use the bit rate.
+        // x264/x265 use crf; VideoToolbox and OpenH264 use the bit rate.
         _ => vec![("crf", q), ("b", format!("{}", bits as u64))],
     }
 }
@@ -480,6 +564,8 @@ struct Stream<E> {
     enc: E,
     index: usize,
     time_base: Rational,
+    /// Fixed-rate video packets without a duration still occupy one encoder time-base tick.
+    packet_duration: Option<i64>,
 }
 
 /// One output file. Push every frame and sample in order, then [`Encoder::finish`].
@@ -504,8 +590,33 @@ impl Encoder {
         src: (u32, u32),
         rate: Rate,
         preset: &Preset,
-    ) -> Result<Self, Error> {
-        Self::create_with(path, src, rate, preset, hardware(), open_video)
+    ) -> Result<Self, CreateError> {
+        Self::create_with(
+            path,
+            src,
+            rate,
+            preset,
+            hardware(),
+            |name| {
+                encoder::find_by_name(name)
+                    .is_some_and(|c| preset.video.is_none_or(|vc| c.id() == video_codec_id(vc)))
+            },
+            open_video,
+        )
+    }
+
+    /// Inject registration/device availability without changing candidate or licensing rules.
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn create_with_availability(
+        path: &Path,
+        src: (u32, u32),
+        rate: Rate,
+        preset: &Preset,
+        hardware: &[&str],
+        registered: impl FnMut(&str) -> bool,
+    ) -> Result<Self, CreateError> {
+        Self::create_with(path, src, rate, preset, hardware, registered, open_video)
     }
 
     fn create_with(
@@ -514,6 +625,7 @@ impl Encoder {
         rate: Rate,
         preset: &Preset,
         available: &[&str],
+        registered: impl FnMut(&str) -> bool,
         mut open: impl FnMut(
             &str,
             Pixel,
@@ -523,7 +635,13 @@ impl Encoder {
             bool,
             &BTreeMap<String, String>,
         ) -> Option<(ffmpeg_next::Codec, encoder::Video)>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, CreateError> {
+        // Reject unavailable families before FFmpeg opens (and truncates) the destination.
+        if let Some(vc) = preset.video
+            && !available_with(vc, available, &preset.options, registered)
+        {
+            return Err(CreateError::NoVideoEncoder(vc));
+        }
         let mut out = format::output(path)?;
         let global = out.format().flags().contains(format::Flags::GLOBAL_HEADER);
         let rate = preset.frame_rate.unwrap_or(rate);
@@ -533,11 +651,10 @@ impl Encoder {
             None => None,
             Some(vc) => {
                 let hdr = is_hdr10(vc, &preset.options);
-                let (name, pixel, codec, enc) = candidates(vc, available, &preset.options)
-                    .into_iter()
-                    .find_map(|(n, pixel)| {
-                        let (c, e) = open(
-                            n,
+                let (name, pixel, (codec, enc)) =
+                    select_video(vc, available, &preset.options, |name, pixel| {
+                        let (codec, enc) = open(
+                            name,
                             pixel,
                             (width, height),
                             rate,
@@ -545,14 +662,24 @@ impl Encoder {
                             hdr,
                             &preset.options,
                         )?;
-                        Some((n, pixel, c, e))
-                    })
-                    .ok_or(Error::EncoderNotFound)?;
+                        let expected = video_codec_id(vc);
+                        if codec.id() != expected || enc.id() != expected {
+                            tracing::warn!(
+                                name,
+                                requested = expected.name(),
+                                actual = enc.id().name(),
+                                "rejecting encoder from another codec family"
+                            );
+                            return None;
+                        }
+                        Some((codec, enc))
+                    })?;
                 tracing::info!(encoder = name, "video encoder");
                 let stream = Stream {
                     index: add(&mut out, codec, frame_tb, &enc)?,
                     enc,
                     time_base: frame_tb,
+                    packet_duration: Some(1),
                 };
                 let flags = if (width, height) == src {
                     scaling::Flags::POINT
@@ -596,10 +723,17 @@ impl Encoder {
                     index: add(&mut out, c, time_base, &enc)?,
                     enc,
                     time_base,
+                    packet_duration: None,
                 })
             }
         };
         let mut opts = Dictionary::new();
+        if out.format().name() == "matroska" {
+            // FFmpeg 4.4's automatic negative-timestamp shift can move only part of a
+            // B-frame stream when AAC priming arrives first. Preserve the caller's PTS;
+            // Matroska can represent the encoder's preroll without shifting the timeline.
+            opts.set("avoid_negative_ts", "disabled");
+        }
         if preset.video == Some(VideoCodec::Gif) {
             opts.set("loop", preset.options.get("loop").map_or("0", |l| l));
         }
@@ -820,6 +954,12 @@ fn drain<E>(
             Err(e) => return Err(EncodeError::video(e, vaapi)),
         }
         p.set_stream(s.index);
+        // ProRes can omit this, leaving a one-frame MOV with zero duration and decoder EOF.
+        if p.duration() == 0
+            && let Some(duration) = s.packet_duration
+        {
+            p.set_duration(duration);
+        }
         // The muxer may have changed the stream's time base in write_header.
         let to = out.stream(s.index).expect("added").time_base();
         p.rescale_ts(s.time_base, to);
@@ -845,7 +985,7 @@ mod tests {
             [0; 3],
             [255; 3],
         ];
-        let mut codecs = vec![("mpeg4", Pixel::YUV420P, "mp4")];
+        let mut codecs = Vec::new();
         for (name, pixel, ext) in [
             ("libopenh264", Pixel::YUV420P, "mp4"),
             ("libx264", Pixel::YUV420P, "mp4"),
@@ -888,6 +1028,7 @@ mod tests {
                     Rate::new(30, 1),
                     &preset,
                     &[name],
+                    |_| true,
                     |_, candidate_pixel, size, rate, global, hdr, options| {
                         assert_eq!(
                             candidate_pixel, pixel,
@@ -974,54 +1115,107 @@ mod tests {
     }
 
     #[test]
-    fn startup_upload_failure_selects_software_before_header() {
+    fn startup_upload_failure_selects_only_same_family_software() {
+        let mut attempted = Vec::new();
+        let (name, _, ()) =
+            select_video(VideoCodec::H264, &["h264_vaapi"], &opts(&[]), |name, _| {
+                attempted.push(name.to_owned());
+                ready_video(name, (), |_| Err(Error::External))
+            })
+            .unwrap();
+        assert_eq!(attempted[0], "h264_vaapi");
+        assert!(H264_CODECS.contains(&name));
+        assert!(!attempted.iter().any(|name| name == "mpeg4"));
+    }
+
+    #[test]
+    fn unavailable_h264_and_software_retry_preserve_existing_output() {
         crate::ffmpeg::init().unwrap();
-        let path =
-            std::env::temp_dir().join(format!("jvid-startup-upload-{}.mp4", std::process::id()));
-        let mut probed = false;
-        let mut enc = Encoder::create_with(
-            &path,
-            (64, 64),
-            Rate::new(30, 1),
-            &small_preset(),
-            &["h264_vaapi"],
-            |name, pixel, size, rate, global, hdr, options| {
-                if !hwenc::is_vaapi(name) {
-                    return open_video(name, pixel, size, rate, global, hdr, options);
+        let path = std::env::temp_dir().join(format!("jvid-no-h264-{}.mp4", std::process::id()));
+        let sentinel = b"existing output must survive";
+        for software in [false, true] {
+            let mut preset = small_preset();
+            if software {
+                preset.options.insert("encoder".into(), "software".into());
+            }
+            for existing in [false, true] {
+                if existing {
+                    std::fs::write(&path, sentinel).unwrap();
                 }
-                // Use a real software codec context to inject the upload result on any host.
-                let (codec, encoder) =
-                    open_video("mpeg4", Pixel::YUV420P, size, rate, global, hdr, options)?;
-                ready_video(name, encoder, |_| {
-                    probed = true;
-                    assert_eq!(
-                        std::fs::metadata(&path).unwrap().len(),
-                        0,
-                        "header is not committed"
-                    );
-                    Err(Error::External)
-                })
-                .map(|encoder| (codec, encoder))
-            },
-        )
-        .unwrap();
-        assert!(probed);
-        assert!(H264_CODECS.contains(&enc.video_encoder().unwrap()));
-        for _ in 0..5 {
-            enc.video(&[128; 64 * 64 * 4]).unwrap();
+                let mut checked = Vec::new();
+                let result = Encoder::create_with(
+                    &path,
+                    (64, 64),
+                    Rate::new(30, 1),
+                    &preset,
+                    &[],
+                    |name| {
+                        checked.push(name.to_owned());
+                        name == "mpeg4"
+                    },
+                    |_, _, _, _, _, _, _| panic!("unavailable encoder must not be opened"),
+                );
+                let Err(CreateError::NoVideoEncoder(VideoCodec::H264)) = result else {
+                    panic!("missing H.264 must fail rather than select MPEG-4 Part 2");
+                };
+                assert_eq!(checked, H264_CODECS);
+                let message = CreateError::NoVideoEncoder(VideoCodec::H264).to_string();
+                for actionable in [
+                    "FFmpeg",
+                    "gpl-ffmpeg",
+                    "hardware encoder",
+                    "different codec preset",
+                ] {
+                    assert!(message.contains(actionable), "{message}");
+                }
+                if existing {
+                    assert_eq!(std::fs::read(&path).unwrap(), sentinel);
+                    std::fs::remove_file(&path).unwrap();
+                } else {
+                    assert!(!path.exists());
+                }
+            }
         }
-        enc.finish().unwrap();
-        let info = crate::probe::probe(&path).unwrap();
-        assert_eq!(info.width, Some(64));
-        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn failed_hardware_open_never_tries_mpeg4() {
+        let mut attempted = Vec::new();
+        let result =
+            select_video::<()>(VideoCodec::H264, &["h264_vaapi"], &opts(&[]), |name, _| {
+                attempted.push(name.to_owned());
+                None
+            });
+        assert!(matches!(
+            result,
+            Err(CreateError::NoVideoEncoder(VideoCodec::H264))
+        ));
+        assert_eq!(attempted[0], "h264_vaapi");
+        assert_eq!(&attempted[1..], H264_CODECS);
+        let mut retried = Vec::new();
+        let result = select_video::<()>(
+            VideoCodec::H264,
+            &["h264_vaapi"],
+            &opts(&[("encoder", "software")]),
+            |name, _| {
+                retried.push(name.to_owned());
+                None
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(CreateError::NoVideoEncoder(VideoCodec::H264))
+        ));
+        assert_eq!(retried, H264_CODECS);
     }
 
     #[test]
     fn in_progress_upload_and_receive_failures_keep_their_origin() {
         crate::ffmpeg::init().unwrap();
         let path =
-            std::env::temp_dir().join(format!("jvid-progress-upload-{}.mp4", std::process::id()));
+            std::env::temp_dir().join(format!("jvid-progress-upload-{}.mov", std::process::id()));
         let mut preset = small_preset();
+        preset.video = Some(VideoCodec::ProRes);
         preset.options.insert("encoder".into(), "software".into());
         let mut enc = Encoder::create(&path, (64, 64), Rate::new(30, 1), &preset).unwrap();
         for _ in 0..3 {
@@ -1053,6 +1247,19 @@ mod tests {
         );
         drop(enc);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn h264_candidates_never_include_mpeg4_part2() {
+        for options in [opts(&[]), opts(&[("encoder", "software")])] {
+            let names: Vec<_> = candidates(VideoCodec::H264, &["h264_vaapi"], &options)
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            assert!(!names.contains(&"mpeg4"), "H.264 candidates: {names:?}");
+            #[cfg(not(feature = "gpl-ffmpeg"))]
+            assert!(!names.contains(&"libx264"), "GPL gate must be preserved");
+        }
     }
 
     #[test]
@@ -1134,7 +1341,7 @@ mod tests {
             ..small_preset()
         };
         let mut enc = match Encoder::create(&path, (64, 64), Rate::new(30, 1), &preset) {
-            Err(Error::EncoderNotFound) => {
+            Err(CreateError::NoVideoEncoder(_)) => {
                 // CI sets this where its FFmpeg has x265, so it can't pass by skipping.
                 assert!(
                     !std::env::var("JVID_X265_TESTS").is_ok_and(|v| v == "required"),
@@ -1245,28 +1452,192 @@ mod tests {
         );
     }
 
-    /// CI has no hardware encoder, so this exports through the software fallback.
+    /// A software H.264 export either has an H.264 stream or explains its absence.
     #[test]
     fn exports_without_hardware() {
         crate::ffmpeg::init().unwrap();
         let path = std::env::temp_dir().join(format!("jvid-hwenc-{}.mp4", std::process::id()));
-        let preset = jvid_core::preset::builtin()
-            .into_iter()
-            .find(|p| p.video == Some(VideoCodec::H264))
-            .unwrap();
-        let mut enc = Encoder::create(&path, (64, 64), Rate::new(30, 1), &preset).unwrap();
-        let name = enc.video_encoder().unwrap();
-        assert!(
-            hardware().contains(&name) || H264_CODECS.contains(&name),
-            "{name}"
+        let preset = small_preset();
+        let result = Encoder::create_with(
+            &path,
+            (64, 64),
+            Rate::new(30, 1),
+            &preset,
+            &[],
+            |name| encoder::find_by_name(name).is_some(),
+            open_video,
         );
+        let mut enc = match result {
+            Ok(enc) => enc,
+            Err(CreateError::NoVideoEncoder(VideoCodec::H264)) => {
+                assert!(!path.exists(), "no encoder must fail before opening output");
+                assert!(
+                    H264_CODECS
+                        .iter()
+                        .all(|name| encoder::find_by_name(name).is_none())
+                );
+                return;
+            }
+            Err(error) => panic!("{error}"),
+        };
+        assert!(H264_CODECS.contains(&enc.video_encoder().unwrap()));
         for _ in 0..10 {
             enc.video(&[128; 64 * 64 * 4]).unwrap();
         }
         enc.finish().unwrap();
+        let input = format::input(&path).unwrap();
+        assert_eq!(
+            input
+                .streams()
+                .best(ffmpeg_next::media::Type::Video)
+                .unwrap()
+                .parameters()
+                .id(),
+            codec::Id::H264
+        );
+        drop(input);
         let info = crate::probe::probe(&path).unwrap();
-        std::fs::remove_file(&path).unwrap();
         assert!(info.width.is_some());
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    /// B-frame reordering plus AAC priming must not change only some video timestamps.
+    #[cfg(feature = "gpl-ffmpeg")]
+    #[test]
+    fn h264_aac_preserves_uniform_presentation_times() {
+        crate::ffmpeg::init().unwrap();
+        let rate = Rate::new(30, 1);
+        for extension in ["mp4", "mov", "mkv"] {
+            let path = std::env::temp_dir().join(format!(
+                "jvid-h264-timestamps-{}.{}",
+                std::process::id(),
+                extension
+            ));
+            let mut preset = small_preset();
+            preset.audio = Some(AudioCodec::Aac);
+            preset.options.insert("encoder".into(), "software".into());
+            let mut enc = Encoder::create(&path, (64, 64), rate, &preset).unwrap();
+            assert_eq!(enc.video_encoder(), Some("libx264"));
+            for i in 0..10 {
+                enc.video(&[(i * 20) as u8; 64 * 64 * 4]).unwrap();
+                enc.audio(&[if i < 4 { 0.0 } else { 0.1 }; 1600 * 2])
+                    .unwrap();
+            }
+            enc.finish().unwrap();
+            let mut input = format::input(&path).unwrap();
+            let stream = input
+                .streams()
+                .best(ffmpeg_next::media::Type::Video)
+                .unwrap();
+            let (index, tb) = (stream.index(), stream.time_base());
+            let mut pts: Vec<_> = input
+                .packets()
+                .filter(|(s, _)| s.index() == index)
+                .map(|(_, p)| p.pts().unwrap())
+                .collect();
+            pts.sort_unstable();
+            eprintln!("{extension}: video PTS {pts:?} at {tb}");
+            assert_eq!(pts.len(), 10);
+            let origin = pts[0];
+            for (i, pts) in pts.iter().enumerate() {
+                let seconds = (pts - origin) as f64 * tb.0 as f64 / tb.1 as f64;
+                assert!(
+                    (seconds - i as f64 / 30.0).abs() <= 0.001,
+                    "{extension} frame {i}: {seconds}"
+                );
+            }
+            drop(input);
+            let mut decoder = crate::decode::VideoDecoder::open(&path).unwrap();
+            let origin = decoder.frame_at(jvid_core::time::Time(0)).unwrap().pts;
+            let mut previous = None;
+            for i in 0..10 {
+                let want = origin + rate.time_floor(i);
+                let frame = decoder
+                    .frame_at(
+                        want + jvid_core::time::Time(jvid_core::time::FLICKS_PER_SECOND / 1000),
+                    )
+                    .unwrap();
+                assert!(
+                    (frame.pts - want).0.abs() <= jvid_core::time::FLICKS_PER_SECOND / 1000,
+                    "{extension} decoded frame {i}: {:?}, want {want:?}",
+                    frame.pts
+                );
+                let value = frame.planes[0][0];
+                if let Some(previous) = previous {
+                    assert!(value > previous, "{extension} frame {i}");
+                }
+                previous = Some(value);
+            }
+            let mut audio = crate::audio::AudioDecoder::open(&path, 0).unwrap();
+            let mut samples = Vec::new();
+            while let Some(chunk) = audio.next_chunk().unwrap() {
+                samples.extend(chunk.samples);
+            }
+            let onset = samples
+                .iter()
+                .position(|sample| sample.abs() > 0.02)
+                .unwrap()
+                / 2;
+            assert!(
+                onset.abs_diff(6400) <= 1600,
+                "{extension} audio onset {onset}"
+            );
+            assert!(
+                (samples.len() / 2).abs_diff(16_000) <= 1024,
+                "{extension} audio length {}",
+                samples.len() / 2
+            );
+            let info = crate::probe::probe(&path).unwrap();
+            assert!(
+                (info.duration - rate.time_floor(10)).0.abs() <= rate.time_floor(1).0,
+                "{extension} duration {:?}",
+                info.duration
+            );
+            drop((decoder, audio));
+            std::fs::remove_file(&path).unwrap();
+        }
+    }
+
+    #[test]
+    fn one_frame_prores_has_duration_and_decodes() {
+        crate::ffmpeg::init().unwrap();
+        let path =
+            std::env::temp_dir().join(format!("jvid-one-frame-prores-{}.mov", std::process::id()));
+        let mut preset = small_preset();
+        preset.video = Some(VideoCodec::ProRes);
+        let rate = Rate::new(30, 1);
+        let mut enc = Encoder::create(&path, (64, 64), rate, &preset).unwrap();
+        enc.video(&[128; 64 * 64 * 4]).unwrap();
+        enc.finish().unwrap();
+        let mut input = format::input(&path).unwrap();
+        let stream = input
+            .streams()
+            .best(ffmpeg_next::media::Type::Video)
+            .unwrap();
+        let (index, duration, tb) = (stream.index(), stream.duration(), stream.time_base());
+        let packets: Vec<_> = input
+            .packets()
+            .filter(|(s, _)| s.index() == index)
+            .map(|(_, p)| p.duration())
+            .collect();
+        eprintln!(
+            "one-frame ProRes: stream duration {duration}, time base {tb}, packet durations {packets:?}"
+        );
+        assert!(
+            duration > 0,
+            "one video frame must have positive stream duration"
+        );
+        assert_eq!(packets.len(), 1);
+        assert!(packets[0] > 0);
+        let info = crate::probe::probe(&path).unwrap();
+        assert!(
+            (info.duration - rate.time_floor(1)).0.abs()
+                < jvid_core::time::FLICKS_PER_SECOND / 1000
+        );
+        let mut decoder = crate::decode::VideoDecoder::open(&path).unwrap();
+        decoder.frame_at(jvid_core::time::Time(0)).unwrap();
+        drop((decoder, input));
+        std::fs::remove_file(&path).unwrap();
     }
 
     /// #380: an MP3 lasts the samples pushed in, not its whole 1152-sample frames with the

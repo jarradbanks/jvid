@@ -139,6 +139,9 @@ about = "Quant a jvid…"
 tutorials = "Tutorials"
 
 [export]
+codec_no_encoder = "No hi ha cap codificador {codec} utilitzable amb aquests paràmetres d’exportació. Fes servir maquinari compatible, instal·la una compilació amb {encoders} o tria un preajust amb un altre còdec."
+codec_wrong = "S’ha sol·licitat {expected}, però el vídeo codificat és {actual}. No s’ha publicat el fitxer de sortida."
+encoder = "Codificadors per Provar"
 queue = "Cua de renderització"
 queue_pending.one = "{count} a la cua de renderització"
 queue_pending.other = "{count} a la cua de renderització"

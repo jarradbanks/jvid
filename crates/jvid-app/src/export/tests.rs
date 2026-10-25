@@ -7,6 +7,7 @@ use jvid_core::time::Rate;
 use jvid_media::decode::VideoDecoder;
 use jvid_media::test_media::{corpus, frame_index};
 
+use super::audit_b10a::{check_codec_result, rendering_preset};
 use super::*;
 use crate::export::Lossless;
 use crate::playback::tests::device;
@@ -815,6 +816,9 @@ fn lossless_smart_partial_gops_replace_validated_destination() {
 fn in_progress_hardware_failure_replays_fresh_software_output() {
     jvid_media::ffmpeg::init().unwrap();
     let mut req = retry_request("retry-fresh.mkv");
+    // This fixture tests replay and timing; request ProRes explicitly on every host.
+    req.preset = rendering_preset();
+    req.preset.size = None;
     req.preset.audio = Some(jvid_core::preset::AudioCodec::Aac);
     let destination = req.path.clone();
     let unrelated = req.path.with_extension("mkv.best");
@@ -1029,47 +1033,57 @@ fn export_matches_range_with_audio_in_sync() {
         let req = Request {
             path: path.clone(),
             range: (secs(1), secs(2)),
-            preset: preset("YouTube 1080p"),
+            preset: if ext == "mp4" {
+                preset("YouTube 1080p")
+            } else {
+                rendering_preset()
+            },
             loudness: None,
             lossless: None,
             sidecar: false,
         };
-        let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{ext}: {e:?}"));
-        assert_eq!((info.width, info.height), (Some(1920), Some(1080)), "{ext}");
-        let off = (info.duration - secs(1)).0.abs();
-        assert!(off <= rate.time_floor(1).0, "{ext}: {:?}", info.duration);
+        check_codec_result(
+            &req,
+            || run_now(&p, &req, false),
+            |info| {
+                assert_eq!((info.width, info.height), (Some(1920), Some(1080)), "{ext}");
+                let off = (info.duration - secs(1)).0.abs();
+                assert!(off <= rate.time_floor(1).0, "{ext}: {:?}", info.duration);
 
-        let mut v = VideoDecoder::open(&path).unwrap();
-        // MKV shifts every stream by AAC's priming (21 ms), so allow up to a frame of offset.
-        let frame = rate.time_floor(1);
-        let first = v.frame_at(Time(0)).unwrap();
-        assert!(
-            first.pts.0.abs() <= frame.0,
-            "{ext}: starts at {:?}",
-            first.pts
-        );
-        let last = v.frame_at(secs(10)).unwrap();
-        assert!((last.pts - secs(1) + frame).0.abs() <= frame.0, "{ext}");
-        let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
-        assert_eq!((index(&first), index(&last)), (30, 59), "{ext}");
+                let mut v = VideoDecoder::open(&path).unwrap();
+                // MKV shifts every stream by AAC's priming (21 ms), so allow up to a frame of offset.
+                let frame = rate.time_floor(1);
+                let first = v.frame_at(Time(0)).unwrap();
+                assert!(
+                    first.pts.0.abs() <= frame.0,
+                    "{ext}: starts at {:?}",
+                    first.pts
+                );
+                let last = v.frame_at(secs(10)).unwrap();
+                assert!((last.pts - secs(1) + frame).0.abs() <= frame.0, "{ext}");
+                let index =
+                    |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
+                assert_eq!((index(&first), index(&last)), (30, 59), "{ext}");
 
-        let mut a = AudioDecoder::open(&path, 0).unwrap();
-        let mut samples = Vec::new();
-        while let Some(c) = a.next_chunk().unwrap() {
-            samples.extend(c.samples);
-        }
-        let onset = samples.iter().position(|s| s.abs() > 0.02).unwrap() as i64 / 2;
-        let frame_samples = 48_000 / 30;
-        assert!(
-            (onset - 24_000).abs() <= frame_samples,
-            "{ext}: onset {onset}"
+                let mut a = AudioDecoder::open(&path, 0).unwrap();
+                let mut samples = Vec::new();
+                while let Some(c) = a.next_chunk().unwrap() {
+                    samples.extend(c.samples);
+                }
+                let onset = samples.iter().position(|s| s.abs() > 0.02).unwrap() as i64 / 2;
+                let frame_samples = 48_000 / 30;
+                assert!(
+                    (onset - 24_000).abs() <= frame_samples,
+                    "{ext}: onset {onset}"
+                );
+                let len = samples.len() as i64 / 2;
+                assert!(
+                    (len - 48_000).abs() <= frame_samples,
+                    "{ext}: {len} samples"
+                );
+                std::fs::remove_file(&path).unwrap();
+            },
         );
-        let len = samples.len() as i64 / 2;
-        assert!(
-            (len - 48_000).abs() <= frame_samples,
-            "{ext}: {len} samples"
-        );
-        std::fs::remove_file(&path).unwrap();
     }
 }
 
@@ -1104,11 +1118,11 @@ fn a_ramped_clip_exports_its_curve() {
     let expected = 2.0 * 2f64.ln() * FLICKS_PER_SECOND as f64;
     assert!((c.duration().0 as f64 - expected).abs() < frame.0 as f64);
 
-    let path = out("ramp.mp4");
+    let path = out("ramp.mov");
     let req = Request {
         path: path.clone(),
         range: (Time(0), c.duration()),
-        preset: preset("YouTube 1080p"),
+        preset: rendering_preset(),
         loudness: None,
         lossless: None,
         sidecar: false,
@@ -1122,8 +1136,7 @@ fn a_ramped_clip_exports_its_curve() {
     );
     let mut v = VideoDecoder::open(&path).unwrap();
     let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
-    // The mp4 drops a final part frame at any speed (its edit list ends at the last frame's
-    // start), so this compares the whole frames.
+    // Compare every complete frame in the ramp's range.
     let whole = rate.index_floor(c.duration());
     let (got, want): (Vec<_>, Vec<_>) = (0..whole)
         .map(|n| {
@@ -1182,11 +1195,11 @@ fn untrimmed_crossfade_blends_the_end_frames() {
     h.apply(Command::SetClipProps(vec![(a.id, t, a.keyframes.clone())]))
         .unwrap();
 
-    let path = out("untrimmed-crossfade.mp4");
+    let path = out("untrimmed-crossfade.mov");
     let req = Request {
         path: path.clone(),
         range: (len - half(1), len + half(1)),
-        preset: preset("YouTube 1080p"),
+        preset: rendering_preset(),
         loudness: None,
         lossless: None,
         sidecar: false,
@@ -1231,11 +1244,11 @@ fn in_to_out_exports_the_marked_range() {
     )
     .unwrap();
     assert_eq!(range, (secs(1), half(5)));
-    let path = out("in-out.mp4");
+    let path = out("in-out.mov");
     let req = Request {
         path: path.clone(),
         range,
-        preset: preset("YouTube 1080p"),
+        preset: rendering_preset(),
         loudness: None,
         lossless: None,
         sidecar: false,
@@ -1278,11 +1291,11 @@ fn ten_highlights_export_as_ten_trimmed_files() {
     let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
     for (i, m) in chosen.iter().enumerate() {
         let name = dialog::file_name(dialog::TEMPLATE, "hl", m, i + 1);
-        let path = out(&format!("{name}.mp4"));
+        let path = out(&format!("{name}.mov"));
         let req = Request {
             path: path.clone(),
             range: (m.time, m.time + m.duration),
-            preset: preset("YouTube 1080p"),
+            preset: rendering_preset(),
             loudness: None,
             lossless: None,
             sidecar: false,
@@ -1319,11 +1332,11 @@ fn two_point_markers_export_as_two_padded_files() {
     let frame = Rate::new(30, 1).time_floor(1);
     let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
     for (i, m) in chosen.iter().enumerate() {
-        let path = out(&format!("point-{i}.mp4"));
+        let path = out(&format!("point-{i}.mov"));
         let req = Request {
             path: path.clone(),
             range: dialog::highlight(m, (secs(2), secs(1)), seq.duration()),
-            preset: preset("YouTube 1080p"),
+            preset: rendering_preset(),
             loudness: None,
             lossless: None,
             sidecar: false,
@@ -1414,15 +1427,20 @@ fn every_builtin_preset_exports() {
             lossless: None,
             sidecar: false,
         };
-        let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
-        if has_video {
-            assert_eq!(
-                (info.width, info.height),
-                (Some(size.0), Some(size.1)),
-                "{name}"
-            );
-        }
-        std::fs::remove_file(&path).unwrap();
+        check_codec_result(
+            &req,
+            || run_now(&p, &req, false),
+            |info| {
+                if has_video {
+                    assert_eq!(
+                        (info.width, info.height),
+                        (Some(size.0), Some(size.1)),
+                        "{name}"
+                    );
+                }
+                std::fs::remove_file(&path).unwrap();
+            },
+        );
     }
 }
 
@@ -1452,26 +1470,31 @@ fn screen_recording_keeps_text_sharp() {
         lossless: None,
         sidecar: false,
     };
-    run_now(h.project(), &req, false).unwrap();
-    let got = VideoDecoder::open(&path)
-        .unwrap()
-        .frame_at(Time(0))
-        .unwrap();
-    let want = VideoDecoder::open(&src).unwrap().frame_at(secs(1)).unwrap();
-    assert_eq!((got.width, got.height), (2560, 1440));
-    // The text line: rows 195..215, columns 70..600.
-    let (mut sum, mut n) = (0u64, 0u64);
-    for y in 195..215 {
-        for x in 70..600 {
-            let i = y * 2560 + x;
-            sum += got.planes[0][i].abs_diff(want.planes[0][i]) as u64;
-            n += 1;
-        }
-    }
-    let diff = sum as f64 / n as f64;
-    eprintln!("text luma diff {diff}");
-    assert!(diff < 2.0, "mean luma difference over the text {diff}");
-    std::fs::remove_file(&path).unwrap();
+    check_codec_result(
+        &req,
+        || run_now(h.project(), &req, false),
+        |_| {
+            let got = VideoDecoder::open(&path)
+                .unwrap()
+                .frame_at(Time(0))
+                .unwrap();
+            let want = VideoDecoder::open(&src).unwrap().frame_at(secs(1)).unwrap();
+            assert_eq!((got.width, got.height), (2560, 1440));
+            // The text line: rows 195..215, columns 70..600.
+            let (mut sum, mut n) = (0u64, 0u64);
+            for y in 195..215 {
+                for x in 70..600 {
+                    let i = y * 2560 + x;
+                    sum += got.planes[0][i].abs_diff(want.planes[0][i]) as u64;
+                    n += 1;
+                }
+            }
+            let diff = sum as f64 / n as f64;
+            eprintln!("text luma diff {diff}");
+            assert!(diff < 2.0, "mean luma difference over the text {diff}");
+            std::fs::remove_file(&path).unwrap();
+        },
+    );
 }
 
 /// Normalized exports land within 0.5 LU of the target, under the true-peak ceiling.
@@ -1637,18 +1660,18 @@ fn editing_after_queueing_doesnt_change_the_export() {
     pool.submit("busy", Priority::Interactive, move |_| {
         let _ = wait.recv();
     });
-    let path = out("snapshot.mp4");
+    let path = out("snapshot.mov");
     let req = Request {
         path: path.clone(),
         range: (secs(1), secs(2)),
-        preset: preset("YouTube 1080p"),
+        preset: rendering_preset(),
         loudness: None,
         lossless: None,
         sidecar: false,
     };
     let mut q = queue::Queue::default();
     let job = submit(&pool, h.project().clone(), req.clone(), gpu);
-    assert!(q.push(path.clone(), "YouTube 1080p".into(), secs(1), job));
+    assert!(q.push(path.clone(), req.preset.name.clone(), secs(1), job));
     assert!(!q.writing(&out("other.mp4")) && q.writing(&path));
     let video = h.project().sequence().tracks()[0].clips()[0].id;
     h.apply(Command::RemoveClip(video)).unwrap();
@@ -1745,15 +1768,20 @@ fn target_size_lands(src: &str, ext: &str, target: u64, fill: f64) {
         sidecar: false,
     };
     let p = small(h.project().clone());
-    run_now(&p, &req, false).unwrap_or_else(|e| panic!("{src}: {e:?}"));
-    let size = std::fs::metadata(&path).unwrap().len();
-    let off = size as f64 / target as f64;
-    assert!(
-        (fill..=1.0).contains(&off),
-        "{src} {ext}: {size} of {target}"
+    check_codec_result(
+        &req,
+        || run_now(&p, &req, false),
+        |_| {
+            let size = std::fs::metadata(&path).unwrap().len();
+            let off = size as f64 / target as f64;
+            assert!(
+                (fill..=1.0).contains(&off),
+                "{src} {ext}: {size} of {target}"
+            );
+            assert!(!PathBuf::from(format!("{}.best", path.display())).exists());
+            std::fs::remove_file(&path).unwrap();
+        },
     );
-    assert!(!PathBuf::from(format!("{}.best", path.display())).exists());
-    std::fs::remove_file(&path).unwrap();
 }
 
 #[test]

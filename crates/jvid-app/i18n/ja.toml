@@ -141,6 +141,9 @@ about = "jvid について…"
 tutorials = "チュートリアル"
 
 [export]
+codec_no_encoder = "この書き出し設定で使用できる {codec} エンコーダーがありません。対応ハードウェアを使用するか、{encoders} を含むビルドをインストールするか、別のコーデックのプリセットを選択してください。"
+codec_wrong = "{expected} が指定されましたが、エンコードされた動画は {actual} です。出力ファイルは公開されませんでした。"
+encoder = "試行するエンコーダー"
 queue = "レンダーキュー"
 queue_pending.one = "レンダーキューに {count} 件"
 queue_pending.other = "レンダーキューに {count} 件"

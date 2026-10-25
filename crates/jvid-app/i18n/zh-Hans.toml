@@ -146,6 +146,9 @@ about = "关于 jvid…"
 tutorials = "教程"
 
 [export]
+codec_no_encoder = "没有可用于这些导出设置的 {codec} 编码器。请使用支持的硬件、安装包含 {encoders} 的构建版本，或选择使用其他编解码器的预设。"
+codec_wrong = "请求的格式为 {expected}，但编码后的视频格式为 {actual}。输出文件未发布。"
+encoder = "待尝试的编码器"
 queue = "渲染队列"
 queue_pending.one = "渲染队列中有 {count} 项"
 queue_pending.other = "渲染队列中有 {count} 项"

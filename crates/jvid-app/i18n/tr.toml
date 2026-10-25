@@ -141,6 +141,9 @@ about = "jvid Hakkında…"
 tutorials = "Eğitimler"
 
 [export]
+codec_no_encoder = "Bu dışa aktarma ayarları için kullanılabilir bir {codec} kodlayıcısı yok. Desteklenen donanım kullanın, {encoders} içeren bir derleme yükleyin veya başka kodek kullanan bir hazır ayar seçin."
+codec_wrong = "{expected} istendi, ancak kodlanan video {actual} biçiminde. Çıktı dosyası yayımlanmadı."
+encoder = "Denenecek Kodlayıcılar"
 queue = "Render Kuyruğu"
 queue_pending.one = "Render kuyruğunda {count} iş"
 queue_pending.other = "Render kuyruğunda {count} iş"
