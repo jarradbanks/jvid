@@ -352,7 +352,7 @@ impl Timeline {
 
     /// The waveform a finished take showed, kept for its clip at `path` instead of a rescan.
     pub fn recorded(&mut self, path: PathBuf, peaks: Pyramid) {
-        self.media.peaks.insert((path, 0), Some(peaks));
+        self.media.peaks.insert((path, 0), Some(Arc::new(peaks)));
     }
 
     #[cfg(test)]
@@ -360,7 +360,7 @@ impl Timeline {
         self.media
             .peaks
             .get(&(path.to_owned(), 0))
-            .and_then(Option::as_ref)
+            .and_then(Option::as_deref)
     }
 
     pub fn selected(&self) -> &HashSet<ClipId> {
@@ -1652,23 +1652,27 @@ impl Timeline {
         project: &Project,
         ctx: &egui::Context,
     ) -> Option<Vec<silence::Span>> {
-        let s = self.silence.as_ref()?;
+        let s = self.silence.as_mut()?;
         let seq = project.sequence();
-        // shortcut: a merged clip reads its first stream, as its waveform draws.
         let key = |c: &Clip| Some((project.asset(c.asset)?, c.stream.unwrap_or(0) as usize));
+        let mut loaded = HashSet::new();
         for &id in s.clips() {
-            if let Some((a, nth)) = seq.clip(id).and_then(|(_, c)| key(c)) {
+            if let Some((a, nth)) = seq.clip(id).and_then(|(_, c)| key(c))
+                && loaded.insert((a.path.clone(), nth))
+            {
+                self.media.refresh_peaks(&a.path, nth);
                 self.media.pyramid(ctx, a, nth);
             }
         }
         let media = &self.media;
-        // shortcut: rescans every clip's peaks each frame; cache by settings if hour-long
-        // recordings make the dialog lag.
-        s.spans(seq, &|c| {
-            let (a, nth) = key(c)?;
-            let p = media.peaks.get(&(a.path.clone(), nth))?.as_ref()?;
-            Some(p.finest())
-        })
+        s.spans(
+            project,
+            &|c| {
+                let (a, nth) = key(c)?;
+                media.peaks.get(&(a.path.clone(), nth))?.clone()
+            },
+            ctx,
+        )
     }
 
     /// The open Find Highlights dialog's ranges, loading the peaks and starting the scene scan
@@ -2600,6 +2604,14 @@ fn playhead_head(painter: &egui::Painter, top_center: Pos2) {
 /// Results finished off-thread, per path, waiting for the UI thread; `None` is a failure.
 type Done<T, K = PathBuf> = Arc<Mutex<Vec<(K, Option<T>)>>>;
 
+/// File identity used to reject waveform results from a superseded source generation.
+type SourceStamp = Option<(u64, Option<std::time::SystemTime>)>;
+
+fn source_stamp(path: &std::path::Path) -> SourceStamp {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()))
+}
+
 /// Filmstrips and waveform pyramids per asset, loaded on a job pool the first time a clip
 /// using it is in view. `None` while loading; a failure is forgotten so the next paint retries.
 #[derive(Default)]
@@ -2608,9 +2620,10 @@ struct Media {
     caches: Option<Arc<Caches>>,
     strip_done: Done<Vec<egui::ColorImage>>,
     strips: HashMap<PathBuf, Option<Vec<TextureHandle>>>,
-    peaks_done: Done<Pyramid, (PathBuf, usize)>,
+    peaks_done: Done<Pyramid, ((PathBuf, usize), SourceStamp)>,
+    peaks_stamps: HashMap<(PathBuf, usize), SourceStamp>,
     /// By file and audio stream.
-    peaks: HashMap<(PathBuf, usize), Option<Pyramid>>,
+    peaks: HashMap<(PathBuf, usize), Option<Arc<Pyramid>>>,
 }
 
 impl Media {
@@ -2710,11 +2723,28 @@ impl Media {
         }
     }
 
+    /// Called once per analyzed source per frame, rather than once per selected cut.
+    fn refresh_peaks(&mut self, path: &std::path::Path, nth: usize) {
+        let key = (path.to_owned(), nth);
+        let stamp = source_stamp(path);
+        if self.peaks_stamps.get(&key).is_some_and(|old| *old != stamp) {
+            self.peaks.remove(&key);
+        }
+        self.peaks_stamps.insert(key, stamp);
+    }
+
     /// The peaks of audio stream `nth` of `a`, starting to load them if they aren't yet.
     fn pyramid(&mut self, ctx: &egui::Context, a: &MediaAsset, nth: usize) -> Option<&Pyramid> {
-        for (path, p) in self.peaks_done.lock().unwrap().drain(..) {
+        for ((path, stamp), p) in self.peaks_done.lock().unwrap().drain(..) {
+            if self.peaks_stamps.get(&path) != Some(&stamp) {
+                continue;
+            }
+            if source_stamp(&path.0) != stamp {
+                self.peaks.remove(&path);
+                continue;
+            }
             match p {
-                Some(p) => self.peaks.insert(path, Some(p)),
+                Some(p) => self.peaks.insert(path, Some(Arc::new(p))),
                 None => self.peaks.remove(&path),
             };
         }
@@ -2722,7 +2752,9 @@ impl Media {
         if !self.peaks.contains_key(&path) {
             let caches = self.caches.as_ref()?;
             self.peaks.insert(path.clone(), None);
-            let (done, ctx, key) = (self.peaks_done.clone(), ctx.clone(), path.clone());
+            let stamp = source_stamp(&path.0);
+            self.peaks_stamps.insert(path.clone(), stamp);
+            let (done, ctx, key) = (self.peaks_done.clone(), ctx.clone(), (path.clone(), stamp));
             caches
                 .peaks
                 .submit(&caches.jobs, path.0.clone(), nth, move |r| match r {
@@ -2731,12 +2763,12 @@ impl Media {
                         ctx.request_repaint();
                     }
                     Err(e) => {
-                        tracing::warn!("waveform for {}: {e}", key.0.display());
+                        tracing::warn!("waveform for {}: {e}", key.0.0.display());
                         done.lock().unwrap().push((key.clone(), None));
                     }
                 });
         }
-        self.peaks.get(&path)?.as_ref()
+        self.peaks.get(&path)?.as_deref()
     }
 
     /// One min/max line per point across `rect`, in a lighter tint of the clip colour.
@@ -3621,7 +3653,7 @@ mod tests {
         let clip = a1_clips(&h).into_iter().find(|c| c.start == start).unwrap();
         assert_eq!(clip.end(), start + Time(2 * S), "where the live clip ended");
         let asset = h.project().asset(clip.asset).unwrap().path.clone();
-        assert_eq!(t.media.peaks[&(asset, 0)], Some(peaks.clone()));
+        assert_eq!(t.media.peaks[&(asset, 0)].as_deref(), Some(&peaks));
         // A rescan of the file next session draws the same waveform, to 16-bit rounding.
         let scanned = jvid_media::waveforms::Cache::new(dir.join("cache"), 1 << 30)
             .load(&path, 0)
@@ -4596,7 +4628,7 @@ mod tests {
             (0..750).map(|i| [-(i as f32 * 0.1).sin().abs(), (i as f32 * 0.1).sin().abs()]);
         t.media
             .peaks
-            .insert((path, 0), Some(Pyramid::new(finest.collect())));
+            .insert((path, 0), Some(Arc::new(Pyramid::new(finest.collect()))));
         let input = || egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1920.0, 400.0))),
             ..Default::default()
