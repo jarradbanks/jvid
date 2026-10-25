@@ -622,6 +622,9 @@ impl Preview {
         }
         self.proxy_sources(project);
         let dragging = ui.input(|i| i.pointer.primary_down());
+        let ctx = ui.ctx().clone();
+        self.program
+            .set_decode_notify(Arc::new(move || ctx.request_repaint()));
         let follow = self.sync_program(project, playhead, dragging);
         if self.update_thumb(false, dragging) {
             ui.ctx().request_repaint();

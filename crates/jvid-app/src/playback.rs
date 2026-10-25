@@ -519,6 +519,7 @@ pub struct Playback {
     still_done: Receiver<StillDone>,
     jobs: Pool,
     decode: DecodeFn,
+    decode_notify: Option<Arc<dyn Fn() + Send + Sync>>,
     pending: HashMap<Key, Handle>,
     /// Decodes the keyframe before a source time, for stand-ins; `None` shows none.
     pub quick: Option<DecodeFn>,
@@ -564,6 +565,7 @@ impl Playback {
             still_done,
             jobs: Pool::new(DECODE_THREADS),
             decode,
+            decode_notify: None,
             pending: HashMap::new(),
             quick: None,
             quick_jobs: Pool::new(1),
@@ -581,6 +583,12 @@ impl Playback {
             audio: Audio::new(open_audio),
             sequence: SequenceId::default(),
         }
+    }
+
+    /// Wakes a host event loop after a decode publishes success or failure. The core needs no
+    /// event loop; tests and offline consumers may leave this unset.
+    pub fn set_decode_notify(&mut self, notify: Arc<dyn Fn() + Send + Sync>) {
+        self.decode_notify = Some(notify);
     }
 
     /// Decodes project media from files.
@@ -830,10 +838,11 @@ impl Playback {
                     continue;
                 }
                 if still {
-                    let (tx, path, generation) = (
+                    let (tx, path, generation, notify) = (
                         self.still_tx.clone(),
                         asset.path.clone(),
                         self.still_generation,
+                        self.decode_notify.clone(),
                     );
                     let job = format!(
                         "still:{}:{}:{:?}:{:?}",
@@ -842,16 +851,22 @@ impl Playback {
                     let handle = self.jobs.submit(job, Priority::Interactive, move |ctx| {
                         if !ctx.is_cancelled() {
                             let result = stills::cached(&path);
-                            let _ = tx.send((key.0, path, generation, result));
+                            if !ctx.is_cancelled()
+                                && tx.send((key.0, path, generation, result)).is_ok()
+                                && let Some(notify) = notify
+                            {
+                                notify();
+                            }
                         }
                     });
                     self.pending.insert(key, handle);
                     continue;
                 }
-                let (decode, tx, path) = (
+                let (decode, tx, path, notify) = (
                     self.decode.clone(),
                     self.done_tx.clone(),
                     asset.path.clone(),
+                    self.decode_notify.clone(),
                 );
                 // The path too, so a relink isn't handed the old path's job still running.
                 let job = format!(
@@ -865,7 +880,12 @@ impl Playback {
                     if !ctx.is_cancelled() {
                         let start = Instant::now();
                         let r = decode(&path, key.1);
-                        let _ = tx.send((key, path, start.elapsed(), r));
+                        if !ctx.is_cancelled()
+                            && tx.send((key, path, start.elapsed(), r)).is_ok()
+                            && let Some(notify) = notify
+                        {
+                            notify();
+                        }
                     }
                 });
                 self.pending.insert(key, handle);
@@ -932,6 +952,7 @@ impl Playback {
             let generation = self.quick_generation;
             let quick = self.quick.as_ref().expect("wanted stand-in").clone();
             let tx = self.quick_tx.clone();
+            let notify = self.decode_notify.clone();
             let source = path.clone();
             let job = format!(
                 "keyframe:{}:{}:{}:{}:{generation}",
@@ -947,8 +968,11 @@ impl Playback {
                         return;
                     }
                     let result = quick(&source, key.1);
-                    if !ctx.is_cancelled() {
-                        let _ = tx.send((key, source, generation, result));
+                    if !ctx.is_cancelled()
+                        && tx.send((key, source, generation, result)).is_ok()
+                        && let Some(notify) = notify
+                    {
+                        notify();
                     }
                 });
             self.quick_handles.insert(
