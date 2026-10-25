@@ -174,6 +174,11 @@ const TRANSLATION_MACROS: &[&str] = &["tr", "trn"];
 /// Whole items exempt from the prose rule, by file and name.
 const EXEMPT_ITEMS: &[(&str, &str, &str)] = &[
     (
+        "jvid-app/src/transcript/fillers.rs",
+        "LANGS",
+        "whisper prompts and filler sounds in each spoken language, never shown in the UI",
+    ),
+    (
         "jvid-app/src/keymap.rs",
         "ACTIONS",
         "default bindings in shortcut notation; names come from action.<id> keys",
