@@ -19,8 +19,8 @@ use egui::{
 };
 use jvid_core::history::{Command, GestureKey, History};
 use jvid_core::model::{
-    AssetId, Clip, ClipId, Edge, MediaAsset, ModelError, Placement, ProbeInfo, Project, Sequence,
-    SequenceId, StreamInfo, Track, TrackId, TrackKind, Transform,
+    AssetId, Clip, ClipId, Edge, Marker, MediaAsset, ModelError, Placement, ProbeInfo, Project,
+    Sequence, SequenceId, StreamInfo, Track, TrackId, TrackKind, Transform,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_jobs::Priority;
@@ -123,6 +123,8 @@ pub struct Timeline {
     menu: Option<&'static str>,
     /// The in (true) or out flag being dragged, and where it is.
     mark_drag: Option<(bool, Time)>,
+    /// The marker being dragged, by which grip, and where it is.
+    marker_drag: Option<(markers::Grip, Marker)>,
     /// "Reveal in Media Bin" asked for this asset; the app takes it.
     pub reveal: Option<AssetId>,
     /// A message for the app to show, such as why a transition couldn't be added.
@@ -217,6 +219,7 @@ impl Default for Timeline {
             snapped: None,
             menu: None,
             mark_drag: None,
+            marker_drag: None,
             reveal: None,
             notice: None,
             hide_region: None,
@@ -794,7 +797,8 @@ impl Timeline {
         if flag != Some(false) {
             targets.extend(seq.out_point());
         }
-        for m in seq.markers() {
+        let dragging = self.marker_drag.as_ref().map(|(_, m)| m.id);
+        for m in seq.markers().iter().filter(|m| Some(m.id) != dragging) {
             targets.extend([m.time, m.time + m.duration]);
         }
         for t in seq.tracks() {
@@ -954,9 +958,13 @@ impl Timeline {
         let ppp = ui.pixels_per_point();
         let line = 1.0 / ppp;
         let lanes_left = area.left() + size::TRACK_HEADER;
+        let marker_lane = Rect::from_x_y_ranges(
+            lanes_left..=area.right(),
+            area.top()..=area.top() + markers::LANE,
+        );
         let ruler = Rect::from_x_y_ranges(
             lanes_left..=area.right(),
-            area.top()..=area.top() + size::RULER,
+            marker_lane.bottom()..=marker_lane.bottom() + size::RULER,
         );
         let lanes =
             Rect::from_x_y_ranges(lanes_left..=area.right(), ruler.bottom()..=area.bottom());
@@ -1469,7 +1477,13 @@ impl Timeline {
             let band = Rect::from_x_y_ranges(r.x_range(), ruler.y_range());
             ruler_painter.rect_filled(band, 0.0, color::light_blue().gamma_multiply(0.25));
         }
-        edit = edit.or(self.markers(ui, seq, view, ruler, id));
+        painter.rect_filled(marker_lane, 0.0, color::panel());
+        painter.rect_filled(
+            Rect::from_x_y_ranges(area.x_range(), ruler.top() - line..=ruler.top()),
+            0.0,
+            color::border(),
+        );
+        edit = edit.or(self.markers(ui, seq, view, marker_lane, id));
         // Flags: a bracket at each set mark, opening toward the range.
         for (mark, dir) in [(mark_in, 1.0), (mark_out, -1.0)] {
             if let Some(t) = mark {
@@ -3670,7 +3684,7 @@ mod tests {
         // One clip over 0..2s at 20pt/s; In at 1s, Out at 3s, playhead well clear.
         let fifth = Rate::new(30, 1).time_floor(6);
         let x = |t: f32| 8.0 + size::TRACK_HEADER + t * 20.0;
-        let y = 8.0 + size::RULER / 2.0;
+        let y = 8.0 + markers::LANE + size::RULER / 2.0;
         let cases = [
             // (flag, drop at secs, snapping, want): 4pt from a boundary snaps, 12pt doesn't.
             (true, 0.2, true, Time(0)),
@@ -3934,11 +3948,11 @@ mod tests {
             egui::DragAndDrop::set_payload(&h.ctx, title);
             h.drag_at(pos2(x, v1));
             h.run();
-            h.hover_at(pos2(x, 8.0 + size::RULER + 2.0));
+            h.hover_at(pos2(x, 8.0 + markers::LANE + size::RULER + 2.0));
             h.step();
             let full = h.state().0.slot == Track::default_height();
             assert_eq!(full, reduce, "reduce motion {reduce}: {}", h.state().0.slot);
-            h.drop_at(pos2(x, 8.0 + size::RULER / 2.0));
+            h.drop_at(pos2(x, 8.0 + markers::LANE + size::RULER / 2.0));
             h.run();
         }
     }
@@ -3961,7 +3975,7 @@ mod tests {
             h.state().1.project().sequence().tracks().to_vec()
         };
         let v1 = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
-        let edge = 8.0 + size::RULER + 2.0;
+        let edge = 8.0 + markers::LANE + size::RULER + 2.0;
         let at = |s: i64, y| pos2(size::TRACK_HEADER + s as f32 * 20.0, y);
         let start = |h: &mut egui_kittest::Harness<'_, (Timeline, History)>, p| {
             h.hover_at(p);
@@ -3976,7 +3990,7 @@ mod tests {
         h.hover_at(at(5, edge));
         h.run();
         assert_eq!(h.state().0.slot, Track::default_height());
-        let ruler = 8.0 + size::RULER / 2.0;
+        let ruler = 8.0 + markers::LANE + size::RULER / 2.0;
         h.hover_at(at(5, ruler));
         h.run();
         assert_eq!(h.state().0.slot, 0.0);
@@ -4071,7 +4085,7 @@ mod tests {
         assert!(!h.state().0.keys.expanded.contains(&c.id), "no lanes");
         let before = h.state().1.project().clone();
         // V1's clip sits 2px into the lane under the ruler.
-        let top = 8.0 + size::RULER + 2.0;
+        let top = 8.0 + markers::LANE + size::RULER + 2.0;
         let view = h.state().0.view(8.0 + size::TRACK_HEADER);
         // The fade-in handle: a 7px square on the clip's top edge at the fade's end.
         let at = pos2(view.x(c.start + Time(S)), top + 3.5);
@@ -4116,7 +4130,7 @@ mod tests {
         assert!(h.state().0.keys.expanded.contains(&c.id), "lanes");
         let v1 = h.state().1.project().sequence().tracks()[0].height;
         // A1's clip sits 2px into its lane, under the ruler and V1.
-        let top = 8.0 + size::RULER + v1 + 2.0;
+        let top = 8.0 + markers::LANE + size::RULER + v1 + 2.0;
         let view = h.state().0.view(8.0 + size::TRACK_HEADER);
         // The fade-in handle: a 7px square on the clip's top-left corner while there's no fade.
         let at = pos2(view.x(c.start) + 3.5, top + 3.5);

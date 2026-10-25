@@ -108,6 +108,7 @@ Panels sit in the standard editor layout: media bin on the left, preview in the 
 | App bar | 40px | The window's top bar |
 | Header | 32px | Every panel header and tab bar, inspector section heads, the preview's transport row |
 | Ruler | 24px | The timeline ruler and the corner cell beside it |
+| Marker lane | 16px | The Markers lane directly above the timeline ruler |
 | Control | 24px | Buttons, inputs, dropdowns, tab pills, list rows, menu rows, inspector property rows |
 | Tab | up to 160px | Tab width; tabs share the header equally up to this, at least 64px |
 | Small control | 20px | Track-header toggles |
@@ -194,7 +195,7 @@ A 72px label column (Body, Ink 2), then inputs 4px apart, then a keyframe toggle
 - **Playhead:** a 1px Light Blue line through the ruler and every lane, with a 10×12 Light Blue head in the ruler (rounded top, pointed bottom). The current time shows in Timecode type in the preview's transport row and in Body Strong in the timeline's corner cell.
 - **Ruler:** Panel fill, Border Strong ticks, Small labels in Ink 3.
 - **In/out:** the ruler between in and out is filled with Blue at 25%, and the lanes between them are lifted by Ink at 3%. The in and out points are 1px Light Blue brackets.
-- **Markers:** small Ink flags in the ruler. A ranged marker adds a 2px Ink bar along its length.
+- **Markers:** small flags in their own 16px lane (Panel fill) directly above the ruler, which is left for scrubbing. A ranged marker fills its length in the lane and marks its end with a 1px line. Drag a flag or a range's body to move it, a range's end to resize it.
 
 ### Track headers
 A 160px column on Panel. The track ID (V1, A1) in Body Strong and Ink, the name in Body and Ink 2, then 20px ghost toggles (lock, hide or mute, solo). A toggle that's on shows Ink on Raised; solo uses an Amber fill, because it silences everything else.
