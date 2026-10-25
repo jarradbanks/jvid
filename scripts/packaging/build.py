@@ -199,7 +199,17 @@ def native_licenses(stage, sources, target, ffmpeg):
             target_dir.mkdir()
             licenses = [p for p in keg.rglob("*") if p.is_file() and re.match(r"^(COPYING|LICEN[CS]E|NOTICE|COPYRIGHT|leptonica-license)(\.|$|-)", p.name, re.I)]
             if not licenses:
-                raise RuntimeError(f"no license text for {keg}")
+                # Some Homebrew bottles omit upstream's nonstandard licence name.
+                # Only use explicitly reviewed text for that exact provider version.
+                license_root = ROOT / "packaging/licenses"
+                fallback = json.loads((license_root / "catalog.json").read_text()).get(f"{name}/{keg.name}")
+                if fallback is None:
+                    raise RuntimeError(f"no license text for {keg}")
+                path = license_root / fallback["file"]
+                if sha256(path) != fallback["sha256"]:
+                    raise RuntimeError(f"license checksum mismatch: {path}")
+                licenses = [path]
+                (target_dir / "license-source.json").write_text(json.dumps(fallback, indent=2) + "\n")
             for index, path in enumerate(licenses):
                 shutil.copy2(path, target_dir / f"{index}-{path.name}")
             for path in (keg / ".brew").glob("*.rb"):

@@ -185,7 +185,10 @@ use dynamically linked **GPL FFmpeg with x264/x265**, and the explicit
 `gpl-ffmpeg` feature. The separate LGPL developer build option is unchanged.
 There is no silent codec fallback and no nonfree FFmpeg variant. Runtime-specific
 license/provenance files are collected in addition to the generated Rust/font/
-Whisper/sample notices. Their full corresponding source and build scripts must
+Whisper/sample notices. Where a Homebrew bottle omits a nonstandard upstream
+license (currently Leptonica 1.87.0), the version-pinned, checksum-checked text in
+`packaging/licenses` is included with its exact upstream source URL; an unknown
+missing notice still fails assembly. Their full corresponding source and build scripts must
 be reviewed before public distribution. Native package-manager provenance and
 upstream links alone are not treated as the completed corresponding-source offer.
 

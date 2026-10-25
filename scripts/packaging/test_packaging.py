@@ -44,6 +44,14 @@ class PackagingTests(unittest.TestCase):
             copied = stage / "runtime-licenses/leptonica"
             self.assertTrue((copied / "INSTALL_RECEIPT.json").is_file())
             self.assertIn('Copyright and distribution terms', '\n'.join(p.read_text() for p in copied.iterdir()))
+            # Actual Homebrew bottle omits this file: use the reviewed version-pinned
+            # upstream text and retain its source/checksum, never silently omit it.
+            import shutil
+            shutil.rmtree(stage / "runtime-licenses")
+            (keg / "leptonica-license.txt").unlink()
+            build.native_licenses(stage, [source], "macos-aarch64", None)
+            self.assertTrue((copied / "license-source.json").is_file())
+            self.assertTrue(list(copied.glob('*-leptonica-1.87.0.txt')))
 
     def test_archives_cannot_escape_extraction_root(self):
         with tempfile.TemporaryDirectory() as tmp:
