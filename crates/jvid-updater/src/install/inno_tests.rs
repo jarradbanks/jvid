@@ -208,12 +208,42 @@ fn native_inno_upgrade_waits_replaces_restarts_preserves_and_rejects_portable() 
     );
     // Inno itself must reject a portable directory even when invoked silently.
     fs::write(root.join("jvid.portable"), b"portable").unwrap();
-    let status = Command::new(setup)
+    let rejection_log = dir.path().join("portable-rejection.log");
+    let mut rejection = Command::new(setup)
         .args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
         .arg(format!("/DIR={}", root.display()))
-        .status()
+        .arg(format!("/LOG={}", rejection_log.display()))
+        .spawn()
         .unwrap();
-    assert!(!status.success());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = rejection.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            // Kill only this test's disposable installer tree; a hidden message box
+            // must fail the test rather than wait for input on a developer/CI desktop.
+            let taskkill = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+                .join("System32/taskkill.exe");
+            let _ = Command::new(taskkill)
+                .args(["/PID", &rejection.id().to_string(), "/T", "/F"])
+                .output();
+            let _ = rejection.wait();
+            panic!(
+                "Silent portable rejection waited for input or timed out:\n{}",
+                fs::read_to_string(&rejection_log).unwrap_or_default()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let log = fs::read_to_string(&rejection_log).unwrap();
+    // Initialization/mutex failures must not masquerade as portable rejection.
+    assert!(!status.success(), "{status}:\n{log}");
+    assert!(
+        log.contains("Refusing to install over a portable copy.")
+            || log.contains("Cannot install over a portable copy. Choose a different folder."),
+        "{status}:\n{log}"
+    );
     // The helper also refuses it before invoking any installer or restarting the app.
     fs::remove_file(root.join("restarted")).unwrap();
     assert!(run_helper_with_key(&stage, &key.verifying_key().to_bytes()).is_err());

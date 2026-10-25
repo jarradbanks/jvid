@@ -99,7 +99,9 @@ Inno Setup uses the stable AppId `{E8D1AB61-17F0-4C1B-8822-82A410FE435A}` across
 versions, remembers the chosen folder, and replaces installer-owned files.
 Installed user data, models and projects are not registered as installer files and
 are retained by upgrades and uninstall. A setup cannot target a folder marked as
-portable, including when invoked silently. Installers support `/DIR=<folder>`,
+portable, including when invoked silently. Silent portable rejection writes its
+reason to the installer log and exits without waiting for a dialog. Installers
+support `/DIR=<folder>`,
 `/VERYSILENT`, `/SUPPRESSMSGBOXES`, `/NORESTART`, `/NOCLOSEAPPLICATIONS` and
 `/NORESTARTAPPLICATIONS`. The #477 helper waits for the app to exit, invokes the
 verified setup, and handles restart; `/RESTARTAPPLICATIONS` alone is not a restart

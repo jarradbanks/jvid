@@ -246,7 +246,10 @@ It compiles the production `packaging/windows.iss` file-copy and portable-guard 
 two real setup executables, verifies a disposable signed stage, waits for the installed
 fixture process to exit, upgrades it, and verifies that the newer executable restarts.
 Project/settings/model/portable-data sentinels survive, and both Inno and the helper reject
-a portable tree. To keep it safe on a personal machine, the fixture isolates its installer
+a portable tree. Silent rejection is bounded to 30 seconds and must return a rejection
+exit code with a portable reason in the log; initialization/mutex failures cannot pass.
+The installer skips its interactive directory-error dialog in silent mode. To keep it
+safe on a personal machine, the fixture isolates its installer
 identity, disables uninstall registration and shortcuts, and installs only under temp.
 It tests a tiny app fixture, not the editor or real Known Folder data. The production
 installer lifecycle/shortcuts/uninstall test remains restricted to a disposable account.
