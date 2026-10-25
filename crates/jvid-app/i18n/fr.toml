@@ -781,6 +781,7 @@ reset_all = "Tout réinitialiser"
 file_type = "Configuration clavier"
 
 [preview]
+more = "Plus"
 fit = "Ajuster"
 full = "Totale"
 no_frame = "il n'y a aucune image à exporter"

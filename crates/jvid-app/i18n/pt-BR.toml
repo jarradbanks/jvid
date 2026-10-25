@@ -772,6 +772,7 @@ reset_all = "Redefinir tudo"
 file_type = "Mapa de teclas"
 
 [preview]
+more = "Mais"
 fit = "Ajustar"
 full = "Total"
 no_frame = "não há quadro para exportar"

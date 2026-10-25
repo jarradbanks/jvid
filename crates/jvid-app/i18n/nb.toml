@@ -760,6 +760,7 @@ reset_all = "Tilbakestill alle"
 file_type = "Tastaturoppsett"
 
 [preview]
+more = "Mer"
 fit = "Tilpass"
 full = "Full"
 no_frame = "det finnes ikke noe bilde å eksportere"

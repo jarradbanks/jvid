@@ -773,6 +773,7 @@ reset_all = "Restablecer todo"
 file_type = "Mapa de teclas"
 
 [preview]
+more = "Más"
 fit = "Ajustar"
 full = "Total"
 no_frame = "no hay ningún fotograma que exportar"

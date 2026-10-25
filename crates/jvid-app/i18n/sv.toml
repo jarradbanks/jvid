@@ -760,6 +760,7 @@ reset_all = "Återställ alla"
 file_type = "Tangentmappning"
 
 [preview]
+more = "Mer"
 fit = "Anpassa"
 full = "Full"
 no_frame = "det finns ingen bildruta att exportera"

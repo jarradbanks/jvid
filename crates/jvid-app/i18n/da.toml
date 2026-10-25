@@ -760,6 +760,7 @@ reset_all = "Nulstil alle"
 file_type = "Tastaturgenveje"
 
 [preview]
+more = "Mere"
 fit = "Tilpas"
 full = "Fuld"
 no_frame = "der er intet billede at eksportere"

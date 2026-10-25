@@ -773,6 +773,7 @@ reset_all = "Alles resetten"
 file_type = "Sneltoetsenset"
 
 [preview]
+more = "Meer"
 fit = "Passend"
 full = "Volledig"
 no_frame = "er is geen frame om te exporteren"

@@ -831,6 +831,7 @@ file_type = "Keymap"
 
 # The Preview panel.
 [preview]
+more = "More"
 fit = "Fit"
 full = "Full"
 no_frame = "there's no frame to export"

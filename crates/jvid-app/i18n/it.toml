@@ -771,6 +771,7 @@ reset_all = "Reimposta tutto"
 file_type = "Mappa tasti"
 
 [preview]
+more = "Altro"
 fit = "Adatta"
 full = "Intera"
 no_frame = "non c'è nessun fotogramma da esportare"

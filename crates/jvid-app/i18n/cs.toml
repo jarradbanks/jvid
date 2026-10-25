@@ -775,6 +775,7 @@ reset_all = "Obnovit vše"
 file_type = "Klávesová mapa"
 
 [preview]
+more = "Další"
 fit = "Vcelku"
 full = "Plné"
 no_frame = "není žádný snímek k exportu"

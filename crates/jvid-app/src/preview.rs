@@ -1018,6 +1018,38 @@ impl Preview {
         if let Some(r) = row {
             r.marks(ui, viewer);
             let inner = bar.shrink2(vec2(space::INSET, 0.0));
+            let time_width = ui
+                .painter()
+                .layout_no_wrap(
+                    format_timecode(r.frame as u64, r.rate),
+                    theme::timecode(),
+                    color::ink(),
+                )
+                .size()
+                .x;
+            let record_extra = if records { 32.0 } else { 0.0 };
+            let take_extra = if records {
+                self.recording.map_or(0.0, |take| take_width(ui, take.0))
+            } else {
+                0.0
+            };
+            // Dropdowns have fixed widths except for the translated checkbox label.
+            // Reserve its measured text plus the box, guides and all intervening gaps.
+            let proxy_text = ui
+                .painter()
+                .layout_no_wrap(tr!("preview.proxies").into(), theme::body(), color::ink())
+                .size()
+                .x;
+            let secondary_width = 88.0 + 72.0 + proxy_text + 24.0 + 32.0 + 5.0 * space::S8;
+            let full_width = time_width
+                + 5.0 * 28.0
+                + record_extra
+                + take_extra
+                + secondary_width
+                + 3.0 * space::S8;
+            if inner.width() < full_width {
+                return self.compact_transport(ui, inner, r, records);
+            }
             let timecode = ui.painter().text(
                 inner.left_center(),
                 Align2::LEFT_CENTER,
@@ -1029,7 +1061,7 @@ impl Preview {
             // Five buttons, then Record after a wider gap; a take adds its time and meter.
             let width = 5.0 * 28.0 + records.map_or(0.0, |_| 28.0 + space::S4);
             let extra = match records {
-                Some(Some(_)) => TAKE_WIDTH,
+                Some(Some(take)) => take_width(ui, take.0),
                 _ => 0.0,
             };
             // The dropdowns first, so the buttons can stay clear of them in a narrow panel.
@@ -1063,42 +1095,14 @@ impl Preview {
                 pos2(x - width / 2.0, bar.top()),
                 vec2(width + extra, bar.height()),
             );
-            ui.scope_builder(UiBuilder::new().max_rect(buttons), |ui| {
-                ui.horizontal_centered(|ui| {
+            ui.scope_builder(
+                UiBuilder::new()
+                    .id_salt("transport_controls")
+                    .max_rect(buttons)
+                    .layout(Layout::left_to_right(Align::Center)),
+                |ui| {
                     ui.spacing_mut().item_spacing.x = space::S4;
-                    let play = if r.playing {
-                        (icon::PAUSE, tr!("preview.stop"))
-                    } else {
-                        (icon::PLAY, tr!("preview.play"))
-                    };
-                    // Keycaps stay English, like shortcuts everywhere.
-                    for (glyph, name, key, id) in [
-                        (
-                            icon::SKIP_BACK,
-                            tr!("action.go_to_start"),
-                            verbatim("Home"),
-                            "go_to_start",
-                        ),
-                        (
-                            icon::REWIND,
-                            tr!("action.shuttle_left"),
-                            verbatim("J"),
-                            "shuttle_left",
-                        ),
-                        (play.0, play.1, verbatim("Space"), "play_stop"),
-                        (
-                            icon::FAST_FORWARD,
-                            tr!("action.shuttle_right"),
-                            verbatim("L"),
-                            "shuttle_right",
-                        ),
-                        (
-                            icon::SKIP_FORWARD,
-                            tr!("action.go_to_end"),
-                            verbatim("End"),
-                            "go_to_end",
-                        ),
-                    ] {
+                    for (glyph, name, key, id) in transport_actions(r.playing) {
                         let name = tr!("preview.with_key", action = name, key = key);
                         if ui
                             .add(Button::icon(glyph, &name))
@@ -1110,10 +1114,10 @@ impl Preview {
                     }
                     if let Some(take) = records {
                         ui.add_space(space::S4);
-                        self.record_clicked |= record_button(ui, take);
+                        self.record_clicked |= record_button(ui, take, true);
                     }
-                });
-            });
+                },
+            );
         } else {
             ui.scope_builder(UiBuilder::new().max_rect(bar), |ui| {
                 ui.horizontal_centered(|ui| {
@@ -1160,6 +1164,98 @@ impl Preview {
             .line_segment(line, Stroke::new(1.0, color::ink()));
     }
 
+    /// A bounded row: keep the primary controls visible and move secondary controls
+    /// into the same discoverable menu at every compact width.
+    fn compact_transport(
+        &mut self,
+        ui: &mut Ui,
+        inner: Rect,
+        row: &SourceRow,
+        records: bool,
+    ) -> Option<&'static str> {
+        let timecode = format_timecode(row.frame as u64, row.rate);
+        let time_width = ui
+            .painter()
+            .layout_no_wrap(timecode.clone(), theme::timecode(), color::ink())
+            .size()
+            .x;
+        let navigation =
+            inner.width() >= time_width + 5.0 * 28.0 + if records { 32.0 } else { 0.0 } + 48.0;
+        let buttons_width =
+            if navigation { 5.0 * 28.0 } else { 24.0 } + if records { 32.0 } else { 0.0 };
+        let controls_width = buttons_width + space::S8 + size::CONTROL;
+        let info = inner.with_max_x(inner.right() - controls_width - space::S8);
+        let take = records.then_some(self.recording).flatten();
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(info)
+                .layout(Layout::left_to_right(Align::Center)),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = space::S8;
+                let show_timecode =
+                    take.is_none() || info.width() >= time_width + TAKE_WIDTH + space::S8;
+                if show_timecode {
+                    ui.add_sized(
+                        vec2(time_width.min(info.width()), size::CONTROL),
+                        egui::Label::new(egui::RichText::new(&timecode).font(theme::timecode()))
+                            .truncate(),
+                    );
+                }
+                if let Some(take) = take {
+                    let width = ui.available_width().max(0.0);
+                    take_readout(ui, take, width);
+                }
+            },
+        );
+        let controls = inner.with_min_x(inner.right() - controls_width);
+        let mut action = None;
+        ui.scope_builder(
+            UiBuilder::new()
+                .id_salt("transport_controls")
+                .max_rect(controls)
+                .layout(Layout::left_to_right(Align::Center)),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = space::S4;
+                for (glyph, name, key, id) in transport_actions(row.playing) {
+                    if navigation || id == "play_stop" {
+                        let hint = tr!("preview.with_key", action = name, key = key);
+                        if ui
+                            .add(Button::icon(glyph, &hint))
+                            .on_hover_text(&hint)
+                            .clicked()
+                        {
+                            action = Some(id);
+                        }
+                    }
+                }
+                if records {
+                    ui.add_space(space::S4);
+                    self.record_clicked |= record_button(ui, self.recording, false);
+                }
+                ui.add_space(space::S4);
+                let more = ui
+                    .add(Button::icon(icon::ELLIPSIS, tr!("preview.more")))
+                    .on_hover_text(tr!("preview.more"));
+                egui::Popup::menu(&more).show(|ui| {
+                    if !navigation {
+                        for (_, name, key, id) in transport_actions(row.playing) {
+                            if id != "play_stop" {
+                                let hint = tr!("preview.with_key", action = name, key = key);
+                                if ui.add(Button::ghost(&hint)).clicked() {
+                                    action = Some(id);
+                                    ui.close();
+                                }
+                            }
+                        }
+                        ui.separator();
+                    }
+                    self.dropdowns(ui);
+                });
+            },
+        );
+        action
+    }
+
     fn dropdowns(&mut self, ui: &mut Ui) {
         let zooms = ZOOMS.map(|z| z.0());
         ui.add(Dropdown::new(&mut self.zoom, &zooms).width(88.0))
@@ -1189,7 +1285,7 @@ impl Preview {
             self.requested = None;
         }
         let glyph = egui::RichText::new(icon::GRID).font(theme::icon_font());
-        ui.menu_button(glyph, |ui| {
+        let guides = ui.menu_button(glyph, |ui| {
             let o = &mut self.overlays;
             ui.add(Checkbox::new(&mut o.safe, tr!("preview.safe_areas")));
             ui.add(Checkbox::new(&mut o.thirds, tr!("preview.thirds")));
@@ -1200,10 +1296,89 @@ impl Preview {
                     &tr!("preview.aspect_guide", ratio = ratio),
                 ));
             }
-        })
-        .response
-        .on_hover_text(tr!("preview.guides"));
+        });
+        guides.response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("preview.guides"))
+        });
+        guides.response.on_hover_text(tr!("preview.guides"));
     }
+}
+
+/// Shared transport actions, in visual and keyboard-navigation order.
+fn transport_actions(
+    playing: bool,
+) -> [(&'static str, &'static str, &'static str, &'static str); 5] {
+    [
+        (
+            icon::SKIP_BACK,
+            tr!("action.go_to_start"),
+            verbatim("Home"),
+            "go_to_start",
+        ),
+        (
+            icon::REWIND,
+            tr!("action.shuttle_left"),
+            verbatim("J"),
+            "shuttle_left",
+        ),
+        (
+            if playing { icon::PAUSE } else { icon::PLAY },
+            if playing {
+                tr!("preview.stop")
+            } else {
+                tr!("preview.play")
+            },
+            verbatim("Space"),
+            "play_stop",
+        ),
+        (
+            icon::FAST_FORWARD,
+            tr!("action.shuttle_right"),
+            verbatim("L"),
+            "shuttle_right",
+        ),
+        (
+            icon::SKIP_FORWARD,
+            tr!("action.go_to_end"),
+            verbatim("End"),
+            "go_to_end",
+        ),
+    ]
+}
+
+fn take_width(ui: &Ui, elapsed: std::time::Duration) -> f32 {
+    let s = elapsed.as_secs();
+    ui.painter()
+        .layout_no_wrap(
+            format!("{}:{:02}", s / 60, s % 60),
+            theme::body(),
+            color::ink(),
+        )
+        .size()
+        .x
+        + 32.0
+        + 3.0 * space::S4
+}
+
+/// Truncate the elapsed label within its budget; the full time remains in its hint.
+fn take_readout(ui: &mut Ui, (elapsed, level): (std::time::Duration, f32), width: f32) {
+    let s = elapsed.as_secs();
+    let text = format!("{}:{:02}", s / 60, s % 60);
+    let meter_width = 32.0_f32.min(width * 0.3);
+    let text_width = (width - meter_width - space::S4).max(0.0);
+    ui.spacing_mut().item_spacing.x = space::S4;
+    ui.add_sized(
+        vec2(text_width, size::CONTROL),
+        egui::Label::new(
+            egui::RichText::new(&text)
+                .font(theme::body())
+                .color(color::ink()),
+        )
+        .truncate(),
+    )
+    .on_hover_text(&text);
+    let (bar, _) = ui.allocate_exact_size(vec2(meter_width, 4.0), egui::Sense::hover());
+    crate::timeline::meter(ui.painter(), bar, level);
 }
 
 /// Room for a take's elapsed time and meter after the Record button.
@@ -1211,7 +1386,7 @@ const TAKE_WIDTH: f32 = 84.0;
 
 /// The Program row's Record button: a dot, or while `take` records a Red stop square with its
 /// elapsed time and input meter. Returns whether it was clicked.
-fn record_button(ui: &mut Ui, take: Option<(std::time::Duration, f32)>) -> bool {
+fn record_button(ui: &mut Ui, take: Option<(std::time::Duration, f32)>, readout: bool) -> bool {
     let name = match take {
         Some(_) => tr!("timeline.stop_recording"),
         None => tr!("action.record"),
@@ -1233,6 +1408,9 @@ fn record_button(ui: &mut Ui, take: Option<(std::time::Duration, f32)>) -> bool 
     let square = Rect::from_center_size(c, vec2(10.0, 10.0));
     ui.painter()
         .rect_filled(square, egui::CornerRadius::same(2), color::red());
+    if !readout {
+        return b.clicked();
+    }
     let s = elapsed.as_secs();
     let text = egui::RichText::new(format!("{}:{:02}", s / 60, s % 60))
         .font(theme::body())
@@ -2092,5 +2270,202 @@ mod frame_export_tests {
             }
         }
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod audit_transport_tests {
+    use super::*;
+    use egui_kittest::{Harness, kittest::Queryable};
+
+    struct RowState {
+        preview: Preview,
+        bounds: Rect,
+        program: bool,
+        playing: bool,
+    }
+
+    fn row_harness(
+        width: f32,
+        scale: f32,
+        program: bool,
+        playing: bool,
+        take: Option<(std::time::Duration, f32)>,
+    ) -> Harness<'static, RowState> {
+        let mut preview = Preview::new(None);
+        preview.recording = take;
+        let mut fresh = true;
+        let mut h = Harness::builder()
+            .with_size([width, 300.0])
+            .with_pixels_per_point(scale)
+            .build_ui_state(
+                move |ui, s: &mut RowState| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    s.bounds = ui.max_rect();
+                    let rate = jvid_core::time::Rate::new(30, 1);
+                    let row = SourceRow {
+                        frame: 12345,
+                        end: 54000,
+                        rate,
+                        playing: s.playing,
+                        in_point: None,
+                        out_point: None,
+                        duration: Time(1800 * jvid_core::time::FLICKS_PER_SECOND),
+                        position: rate.time_floor(12345),
+                    };
+                    s.preview.show(
+                        ui,
+                        None,
+                        false,
+                        Some(&row),
+                        Some((&ProjectSettings::default(), !s.program)),
+                    );
+                },
+                RowState {
+                    preview,
+                    bounds: Rect::NOTHING,
+                    program,
+                    playing,
+                },
+            );
+        h.run_steps(4);
+        h
+    }
+
+    #[test]
+    fn audit_454_transport_hit_bounds_fit_without_intersections() {
+        for width in [240.0, 480.0, 640.0, 800.0] {
+            for scale in [1.0, 1.5] {
+                for program in [false, true] {
+                    for (playing, take) in [
+                        (false, None),
+                        (true, None),
+                        (
+                            true,
+                            Some((std::time::Duration::from_secs(99_999_999), 0.75)),
+                        ),
+                    ] {
+                        let h = row_harness(width, scale, program, playing, take);
+                        let mut controls = Vec::new();
+                        for role in [
+                            egui::accesskit::Role::Button,
+                            egui::accesskit::Role::ComboBox,
+                            egui::accesskit::Role::CheckBox,
+                        ] {
+                            controls.extend(h.query_all_by_role(role).map(|n| n.rect()));
+                        }
+                        for (i, a) in controls.iter().enumerate() {
+                            assert!(
+                                h.state().bounds.expand(0.01).contains_rect(*a),
+                                "{width}@{scale} program={program} take={take:?}: {a:?} outside {:?}",
+                                h.state().bounds
+                            );
+                            for b in &controls[i + 1..] {
+                                let overlap = a.intersect(*b);
+                                assert!(
+                                    overlap.width() <= 0.01 || overlap.height() <= 0.01,
+                                    "{width}@{scale} program={program} take={take:?}: {a:?} overlaps {b:?}"
+                                );
+                            }
+                        }
+                        let play = tr!(
+                            "preview.with_key",
+                            action = if playing {
+                                tr!("preview.stop")
+                            } else {
+                                tr!("preview.play")
+                            },
+                            key = verbatim("Space")
+                        );
+                        assert!(h.state().bounds.contains_rect(h.get_by_label(&play).rect()));
+                        if program && let Some((elapsed, _)) = take {
+                            let seconds = elapsed.as_secs();
+                            let label = h
+                                .get_by_label(&format!("{}:{:02}", seconds / 60, seconds % 60))
+                                .rect();
+                            assert!(h.state().bounds.contains_rect(label), "elapsed: {label:?}");
+                            for control in &controls {
+                                let overlap = label.intersect(*control);
+                                assert!(
+                                    overlap.width() <= 0.01 || overlap.height() <= 0.01,
+                                    "elapsed overlaps {control:?}"
+                                );
+                            }
+                        }
+                        if program {
+                            let record = tr!(
+                                "preview.with_key",
+                                action = if take.is_some() {
+                                    tr!("timeline.stop_recording")
+                                } else {
+                                    tr!("action.record")
+                                },
+                                key = verbatim("Shift+R")
+                            );
+                            assert!(
+                                h.state()
+                                    .bounds
+                                    .contains_rect(h.get_by_label(&record).rect())
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn audit_454_compact_overflow_and_record_controls_remain_clickable() {
+        for width in [240.0, 640.0] {
+            for take in [
+                None,
+                Some((std::time::Duration::from_secs(99_999_999), 0.8)),
+            ] {
+                let mut h = row_harness(width, 1.0, true, take.is_some(), take);
+                let name = tr!(
+                    "preview.with_key",
+                    action = if take.is_some() {
+                        tr!("timeline.stop_recording")
+                    } else {
+                        tr!("action.record")
+                    },
+                    key = verbatim("Shift+R")
+                );
+                h.get_by_label(&name).click();
+                h.run_steps(2);
+                assert!(h.state().preview.record_clicked);
+                if let Some(more) = h.query_by_label(tr!("preview.more")) {
+                    more.click();
+                    h.run_steps(2);
+                } else {
+                    assert_eq!(width, 640.0, "the minimum width must use overflow");
+                }
+                h.get_by_label(tr!("preview.proxies"));
+                h.get_by_label(tr!("preview.full"));
+                h.get_by_label(tr!("preview.fit"));
+                h.get_by_label(tr!("preview.guides"));
+            }
+        }
+    }
+
+    // Locale changes are process-global; explicitly run in isolation alongside #472's test.
+    #[test]
+    #[ignore = "changes global locale; run this test in isolation"]
+    fn audit_454_translated_transport_hit_bounds() {
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                suite_ui::i18n::set_pseudo(false);
+                suite_ui::i18n::set_language("en");
+            }
+        }
+        let _restore = Restore;
+        for language in ["de", "fr", "pt-BR", "en"] {
+            suite_ui::i18n::set_language(language);
+            suite_ui::i18n::set_pseudo(language == "en");
+            audit_454_transport_hit_bounds_fit_without_intersections();
+        }
     }
 }
