@@ -40,7 +40,7 @@ class PackagingTests(unittest.TestCase):
             stage = root / "package"
             stage.mkdir()
             providers = build.native_licenses(stage, [source], "macos-aarch64", None)
-            self.assertEqual(providers, [str(keg)])
+            self.assertEqual(providers, [str(keg.resolve())])
             copied = stage / "runtime-licenses/leptonica"
             self.assertTrue((copied / "INSTALL_RECEIPT.json").is_file())
             self.assertIn('Copyright and distribution terms', '\n'.join(p.read_text() for p in copied.iterdir()))
