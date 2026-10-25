@@ -41,6 +41,7 @@ fn header_errors_name_the_line() {
     assert!(bad("// @param a float 1..0 = 0").contains("less than"));
     assert!(bad("// @param a float NaN..1 = 0").contains("less than"));
     assert!(bad("// @param size float 0..1 = 0").contains("taken"));
+    assert!(bad("// @param pass_index float 0..1 = 0").contains("taken"));
 }
 
 #[test]
@@ -66,4 +67,13 @@ fn loops_are_rejected_with_their_line() {
         let e = parse(&src).unwrap_err();
         assert!(e.starts_with("line 3:") && e.contains("loops"), "{l}: {e}");
     }
+}
+
+#[test]
+fn passes_default_to_one_and_are_bounded() {
+    assert_eq!(parse(INVERT).unwrap().passes, 1);
+    let with = |n: &str| parse(&INVERT.replacen('\n', &format!("\n// @passes {n}\n"), 1));
+    assert_eq!(with("2").unwrap().passes, 2);
+    assert!(with("0").unwrap_err().starts_with("line 2:"));
+    assert!(with("9").unwrap_err().contains("1 to 8"));
 }
