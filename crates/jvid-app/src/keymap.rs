@@ -97,6 +97,7 @@ pub const ACTIONS: &[Action] = &[
     t("freeze_frame", "Shift+F"),
     t("copy_grade", "Ctrl+Alt+C"),
     t("paste_grade", "Ctrl+Alt+V"),
+    t("clean_up_voice", "Ctrl+Alt+U"),
     t("detect_silence", "Ctrl+Alt+S"),
     t("nest", "Alt+N"),
     t("crossfade", "Ctrl+D"),

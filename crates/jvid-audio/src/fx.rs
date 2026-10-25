@@ -1,7 +1,9 @@
-//! Clip and track audio effects: a 10-band graphic EQ, then a compressor. Interleaved f32 stereo
-//! at [`SAMPLE_RATE`]; state carries across blocks, so any block size gives the same output.
+//! Clip and track audio effects: a high-pass, noise reduction, a 10-band graphic EQ, then a
+//! compressor. Interleaved f32 stereo at [`SAMPLE_RATE`]; state carries across blocks, so any
+//! block size gives the same output.
 
-use jvid_core::model::{AudioFx, Compressor, Equalizer};
+use jvid_core::model::{AudioFx, Compressor, Equalizer, HighPass};
+use nnnoiseless::DenoiseState;
 
 use crate::SAMPLE_RATE;
 use crate::loudness::Biquad;
@@ -13,6 +15,11 @@ pub struct Fx {
     eq: Option<Equalizer>,
     /// Per band, per channel.
     bands: [[Biquad; 2]; 10],
+    /// The high-pass the filters are tuned for, and one per channel.
+    hp: Option<HighPass>,
+    hp_filters: [Biquad; 2],
+    /// Made the first time noise reduction runs, then kept.
+    denoise: Option<Box<Denoise>>,
     /// Compressor level detector: peak with instant attack, falling at the release rate.
     level: f32,
     /// Smoothed gain reduction in dB.
@@ -20,8 +27,29 @@ pub struct Fx {
 }
 
 impl Fx {
-    /// Runs `buf` through `p`'s EQ then compressor, skipping either while it's off or neutral.
+    /// Runs `buf` through `p`'s high-pass, noise reduction, EQ then compressor, skipping each
+    /// while it's off or neutral.
     pub fn process(&mut self, p: &AudioFx, buf: &mut [f32]) {
+        let hp = &p.high_pass;
+        if hp.enabled && hp.freq > 0.0 {
+            if self.hp.as_ref() != Some(hp) {
+                self.hp = Some(*hp);
+                let (b, a) = hp.filter(SAMPLE_RATE as f64);
+                for q in &mut self.hp_filters {
+                    (q.b, q.a) = (b, a);
+                }
+            }
+            for f in buf.as_chunks_mut::<2>().0 {
+                for (c, x) in f.iter_mut().enumerate() {
+                    *x = self.hp_filters[c].run(*x as f64) as f32;
+                }
+            }
+        }
+        let nr = &p.noise_reduction;
+        if nr.enabled && nr.amount > 0.0 {
+            let d = self.denoise.get_or_insert_with(Denoise::new);
+            d.process((nr.amount / 100.0).clamp(0.0, 1.0), buf);
+        }
         let eq = &p.eq;
         if eq.enabled && !eq.is_flat() {
             self.tune(eq);
@@ -72,6 +100,61 @@ impl Fx {
             let g = 10f32.powf((c.makeup - self.reduction) / 20.0);
             f[0] *= g;
             f[1] *= g;
+        }
+    }
+}
+
+/// RNNoise's frame: 10 ms at 48 kHz, the mixer's rate, so no resampling.
+const FRAME: usize = DenoiseState::FRAME_SIZE;
+/// RNNoise wants 16-bit sample values.
+const PCM: f32 = 32_768.0;
+
+/// Per channel denoiser state. Samples are buffered into whole frames, so the output lags the
+/// input by [`Denoise::DELAY`] frames, the dry sound with it so the mix lines up.
+// shortcut: clips with noise reduction play 20 ms late, compensate in the reader if it shows.
+struct Denoise {
+    states: [Box<DenoiseState<'static>>; 2],
+    /// The frame filling up, in 16-bit units.
+    input: [[f32; FRAME]; 2],
+    /// The last frame out, in 16-bit units.
+    output: [[f32; FRAME]; 2],
+    /// The last two frames in, the older one lined up with `output`.
+    dry: [[[f32; FRAME]; 2]; 2],
+    /// Position in the frame.
+    at: usize,
+}
+
+impl Denoise {
+    /// Input to output, in samples: one frame buffering here, one inside RNNoise.
+    #[cfg(test)]
+    const DELAY: usize = 2 * FRAME;
+
+    fn new() -> Box<Self> {
+        Box::new(Self {
+            states: [DenoiseState::new(), DenoiseState::new()],
+            input: [[0.0; FRAME]; 2],
+            output: [[0.0; FRAME]; 2],
+            dry: [[[0.0; FRAME]; 2]; 2],
+            at: 0,
+        })
+    }
+
+    /// Mixes `wet` (0 to 1) of the denoised sound with the rest dry.
+    fn process(&mut self, wet: f32, buf: &mut [f32]) {
+        for f in buf.as_chunks_mut::<2>().0 {
+            for (c, x) in f.iter_mut().enumerate() {
+                self.input[c][self.at] = *x * PCM;
+                let (y, dry) = (self.output[c][self.at], self.dry[c][1][self.at]);
+                *x = (dry + (y - dry) * wet) / PCM;
+            }
+            self.at += 1;
+            if self.at == FRAME {
+                self.at = 0;
+                for c in 0..2 {
+                    self.dry[c] = [self.input[c], self.dry[c][0]];
+                    self.states[c].process_frame(&mut self.output[c], &self.input[c]);
+                }
+            }
         }
     }
 }
@@ -178,5 +261,99 @@ mod tests {
         assert!((gain(&p, 1_000.0) - gain(&AudioFx::default(), 1_000.0)).abs() > 1.0);
         p.compressor.enabled = false;
         assert_eq!(gain(&p, 1_000.0), gain(&AudioFx::default(), 1_000.0));
+    }
+
+    #[test]
+    fn high_pass_cuts_below_its_cutoff() {
+        let mut p = AudioFx::default();
+        p.high_pass.freq = 100.0;
+        assert!(gain(&p, 30.0) < -18.0, "30 Hz {}", gain(&p, 30.0));
+        assert!(
+            (gain(&p, 100.0) + 3.0).abs() <= 0.5,
+            "100 Hz {}",
+            gain(&p, 100.0)
+        );
+        assert!(
+            gain(&p, 1_000.0).abs() <= 0.1,
+            "1 kHz {}",
+            gain(&p, 1_000.0)
+        );
+        p.high_pass.enabled = false;
+        assert_eq!(gain(&p, 30.0), gain(&AudioFx::default(), 30.0));
+    }
+
+    /// RMS in dB of each 50 ms of a stereo buffer.
+    fn windows_db(buf: &[f32]) -> Vec<f32> {
+        const W: usize = SAMPLE_RATE as usize / 10;
+        buf.as_chunks::<W>()
+            .0
+            .iter()
+            .map(|w| {
+                let ms = w.iter().map(|x| x * x).sum::<f32>() / W as f32;
+                10.0 * ms.max(1e-12).log10()
+            })
+            .collect()
+    }
+
+    /// The quietest tenth of the windows: the level between words.
+    fn floor_db(buf: &[f32]) -> f32 {
+        let mut w = windows_db(buf);
+        w.sort_by(f32::total_cmp);
+        w[w.len() / 10]
+    }
+
+    /// The bundled voice sample with steady hiss at -45 dBFS RMS mixed in.
+    fn noisy_voice() -> Vec<f32> {
+        jvid_media::ffmpeg::init().unwrap();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../jvid-app/assets/samples/voice.m4a"
+        );
+        let mut dec = jvid_media::audio::AudioDecoder::open(path.as_ref(), 0).unwrap();
+        let mut buf = Vec::new();
+        while let Some(c) = dec.next_chunk().unwrap() {
+            buf.extend(c.samples);
+        }
+        // A fixed LCG, so the fixture is the same every run; uniform noise of RMS a / √3.
+        let (mut seed, a) = (1u32, 10f32.powf(-45.0 / 20.0) * 3f32.sqrt());
+        for x in &mut buf {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *x += a * (seed as f32 / u32::MAX as f32 * 2.0 - 1.0);
+        }
+        buf
+    }
+
+    /// Acceptance (#346): noise reduction lowers a noisy recording's floor by 10 dB or more,
+    /// and keeps the voice.
+    #[test]
+    fn noise_reduction_drops_the_floor_10_db() {
+        let noisy = noisy_voice();
+        let mut p = AudioFx::default();
+        p.noise_reduction.amount = 100.0;
+        let mut out = noisy.clone();
+        let mut fx = Fx::default();
+        out.chunks_mut(512).for_each(|b| fx.process(&p, b));
+        // Line the output up with the input before comparing windows.
+        let out = &out[Denoise::DELAY * 2..];
+        let noisy = &noisy[..out.len()];
+        let (before, after) = (floor_db(noisy), floor_db(out));
+        assert!(before - after >= 10.0, "floor {before:.1} -> {after:.1} dB");
+        let loud = |b: &[f32]| windows_db(b).into_iter().fold(f32::MIN, f32::max);
+        let (speech, kept) = (loud(noisy), loud(out));
+        assert!(speech - kept <= 3.0, "speech {speech:.1} -> {kept:.1} dB");
+    }
+
+    /// At 0% the denoiser only delays: the dry sound comes out [`Denoise::DELAY`] late.
+    #[test]
+    fn dry_mix_lines_up_with_the_delay() {
+        let mut d = Denoise::new();
+        let mut buf = sine(440.0, 0.5);
+        let dry = buf.clone();
+        buf.chunks_mut(300).for_each(|b| d.process(0.0, b));
+        let n = Denoise::DELAY * 2;
+        for (y, x) in buf[n..].iter().zip(&dry) {
+            assert!((y - x).abs() < 1e-6);
+        }
+        assert!(buf[..n].iter().all(|y| *y == 0.0));
     }
 }

@@ -651,6 +651,8 @@ impl Wheels {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AudioFx {
+    pub high_pass: HighPass,
+    pub noise_reduction: NoiseReduction,
     pub eq: Equalizer,
     pub compressor: Compressor,
 }
@@ -658,6 +660,54 @@ pub struct AudioFx {
 impl AudioFx {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
+    }
+}
+
+/// A 12 dB per octave Butterworth high-pass. The default 0 Hz leaves the sound alone.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HighPass {
+    /// Off bypasses it, keeping the settings.
+    pub enabled: bool,
+    /// Cutoff in Hz; 0 is off.
+    pub freq: f32,
+}
+
+impl Default for HighPass {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            freq: 0.0,
+        }
+    }
+}
+
+impl HighPass {
+    /// The biquad at `rate` Hz: `(b, a)` with `a0` divided out (RBJ cookbook, Q 1/√2).
+    pub fn filter(&self, rate: f64) -> ([f64; 3], [f64; 2]) {
+        let (cos, sin) = omega(self.freq as f64, rate);
+        let alpha = sin / SQRT_2;
+        let b = (1.0 + cos) / 2.0;
+        normalized([b, -(1.0 + cos), b], [1.0 + alpha, -2.0 * cos, 1.0 - alpha])
+    }
+}
+
+/// RNNoise-style noise suppression, mixed with the dry sound. The default 0% leaves it alone.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NoiseReduction {
+    /// Off bypasses it, keeping the settings.
+    pub enabled: bool,
+    /// How much of the denoised sound plays, 0 to 100 %.
+    pub amount: f32,
+}
+
+impl Default for NoiseReduction {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            amount: 0.0,
+        }
     }
 }
 

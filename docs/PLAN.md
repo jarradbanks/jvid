@@ -154,6 +154,7 @@ Multicam, node compositing, 3D, motion tracking, collaboration, built-in AI.
 | Serialization | `serde` (JSON project files, TOML config) |
 | Speech-to-text | whisper.cpp via `whisper-rs`, CPU (owner-approved, #342) |
 | Model downloads | `ureq` (rustls only) and `sha2` (owner-approved, #342) |
+| Noise reduction | `nnnoiseless` (owner-approved, #346) |
 
 ### Cargo workspace
 
