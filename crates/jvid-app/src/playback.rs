@@ -596,7 +596,11 @@ impl Playback {
     /// cached or queued, nearest first, and cancels queued frames no longer ahead.
     fn decode_ahead(&mut self, project: &Project, clock: u64) {
         while let Ok((k, took, r)) = self.done.try_recv() {
-            self.pending.remove(&k);
+            // The job stays live in the pool until its worker gets back to it, so a retry or relink
+            // queued this tick would be handed its spent handle and never decode (#371).
+            if let Some(h) = self.pending.remove(&k) {
+                h.cancel();
+            }
             self.latency = (self.latency * 3 + took) / 4;
             match r {
                 Ok(f) => self.cache.insert(k, Arc::new(f)),
