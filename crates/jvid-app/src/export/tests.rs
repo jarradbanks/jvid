@@ -123,6 +123,395 @@ fn with_context<T: Send + 'static>(work: impl FnOnce(&Ctx) -> T + Send + 'static
     rx.recv().unwrap()
 }
 
+/// A disposable, generated source: these safety tests need neither the corpus nor a GPU.
+fn lossless_fixture(name: &str) -> (AttemptFiles, Project, Request) {
+    jvid_media::ffmpeg::init().unwrap();
+    let files = AttemptFiles::new(&out(name)).unwrap();
+    let source = files.dir.join("source.mov");
+    let mut p = preset("ProRes Master");
+    p.size = None;
+    p.audio = None;
+    p.options.insert("encoder".into(), "software".into());
+    let mut encoder = Encoder::create(&source, (64, 64), Rate::new(30, 1), &p).unwrap();
+    for i in 0..60 {
+        encoder.video(&vec![i as u8; 64 * 64 * 4]).unwrap();
+    }
+    encoder.finish().unwrap();
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, source.clone(), Time(0), secs(2));
+    let id = h.project().assets()[0].id;
+    let probe = Some(jvid_media::probe::probe(&source).unwrap());
+    h.apply(Command::SetAssetProbe { id, probe }).unwrap();
+    let req = Request {
+        path: files.dir.join("destination.mov"),
+        range: (Time(0), secs(1)),
+        preset: p,
+        loudness: None,
+        lossless: Some(Lossless::Copy),
+        sidecar: false,
+    };
+    (files, h.project().clone(), req)
+}
+
+fn assert_no_attempts(dir: &Path) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        assert!(
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".jvid-export-"),
+            "owned attempt directory was left behind"
+        );
+    }
+}
+
+#[test]
+fn lossless_cancel_preserves_destination() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let (files, project, mut req) = lossless_fixture("safety-cancel.mov");
+        req.lossless = Some(mode);
+        std::fs::write(&req.path, b"previous export: preserve every byte").unwrap();
+        let original = std::fs::read(&project.assets()[0].path).unwrap();
+        let destination = req.path.clone();
+        let pool = Pool::new(1);
+        let (ready_tx, ready_rx) = channel();
+        let (go_tx, go_rx) = channel();
+        let (tx, rx) = channel();
+        let handle = pool.submit("cancel lossless", Priority::Interactive, move |ctx| {
+            ready_tx.send(()).unwrap();
+            go_rx
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap();
+            tx.send(lossless::run(&project, &req, mode, ctx)).unwrap();
+        });
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        handle.cancel();
+        go_tx.send(()).unwrap();
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap(),
+            Err(Error::Cancelled)
+        );
+        assert_eq!(
+            std::fs::read(destination).unwrap(),
+            b"previous export: preserve every byte"
+        );
+        assert_eq!(
+            std::fs::read(files.dir.join("source.mov")).unwrap(),
+            original
+        );
+        assert_no_attempts(&files.dir);
+    }
+}
+
+#[test]
+fn lossless_later_failure_preserves_destination() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let (files, project, mut req) = lossless_fixture("safety-failure.mov");
+        let original = std::fs::read(&project.assets()[0].path).unwrap();
+        let mut h = History::new(project);
+        let track = h.project().sequence().tracks()[0].id;
+        let probe = h.project().assets()[0].probe.clone();
+        let missing = files.dir.join("unreadable.mov");
+        std::fs::write(&missing, b"not a media file").unwrap();
+        let Ok(Created::Asset(asset)) = h.apply(Command::AddAsset(missing.clone())) else {
+            panic!("asset")
+        };
+        h.apply(Command::SetAssetProbe { id: asset, probe })
+            .unwrap();
+        h.apply(Command::AddClip {
+            track,
+            clip: NewClip {
+                asset,
+                source_in: Time(0),
+                source_out: secs(1),
+                start: secs(2),
+                link: None,
+            },
+        })
+        .unwrap();
+        req.range.1 = secs(3);
+        req.lossless = Some(mode);
+        let destination = req.path.clone();
+        std::fs::write(&destination, b"previous export").unwrap();
+        let project = h.project().clone();
+        let (p, r) = (project.clone(), req.clone());
+        let result = with_context(move |ctx| lossless::run(&p, &r, mode, ctx));
+        assert!(matches!(result, Err(Error::Failed(_))), "{result:?}");
+        assert_eq!(std::fs::read(destination).unwrap(), b"previous export");
+        assert_eq!(
+            std::fs::read(files.dir.join("source.mov")).unwrap(),
+            original
+        );
+        assert_eq!(std::fs::read(&missing).unwrap(), b"not a media file");
+        // The destination must also be checked against later inputs, before copying the first.
+        req.path = missing.clone();
+        let result = with_context(move |ctx| lossless::run(&project, &req, mode, ctx));
+        let Err(Error::Failed(error)) = result else {
+            panic!("{result:?}")
+        };
+        assert!(error.contains(&missing.display().to_string()), "{error}");
+        assert_eq!(std::fs::read(missing).unwrap(), b"not a media file");
+        assert_eq!(
+            std::fs::read(files.dir.join("source.mov")).unwrap(),
+            original
+        );
+        assert_no_attempts(&files.dir);
+    }
+}
+
+#[test]
+fn lossless_success_replaces_destination() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let (files, project, mut req) = lossless_fixture("safety-success.mov");
+        req.lossless = Some(mode);
+        let source = project.assets()[0].path.clone();
+        let original = std::fs::read(&source).unwrap();
+        let destination = req.path.clone();
+        std::fs::write(&destination, b"previous export").unwrap();
+        let (p, r) = (project.clone(), req.clone());
+        let info = with_context(move |ctx| lossless::run(&p, &r, mode, ctx)).unwrap();
+        assert_eq!(info.duration, secs(1));
+        assert_eq!(jvid_media::probe::probe(&destination).unwrap(), info);
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+        assert_no_attempts(&files.dir);
+        // A fresh destination goes through the same identity checks and publication path.
+        std::fs::remove_file(&destination).unwrap();
+        with_context(move |ctx| lossless::run(&project, &req, mode, ctx)).unwrap();
+        assert_no_attempts(&files.dir);
+    }
+}
+
+#[test]
+fn lossless_source_aliases_are_rejected_before_writing() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let (files, project, req) = lossless_fixture("safety-alias.mov");
+        let source = project.assets()[0].path.clone();
+        let original = std::fs::read(&source).unwrap();
+        let hardlink = files.dir.join("hardlink.mov");
+        std::fs::hard_link(&source, &hardlink).unwrap();
+        let mut aliases = vec![
+            source.clone(),
+            files.dir.join(".").join("source.mov"),
+            hardlink,
+        ];
+        #[cfg(unix)]
+        {
+            let symlink = files.dir.join("symlink.mov");
+            std::os::unix::fs::symlink(&source, &symlink).unwrap();
+            aliases.push(symlink);
+        }
+        #[cfg(windows)]
+        {
+            let symlink = files.dir.join("symlink.mov");
+            match std::os::windows::fs::symlink_file(&source, &symlink) {
+                Ok(()) => aliases.push(symlink),
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    eprintln!("symlink alias unverified: Windows symlink permission unavailable");
+                }
+                Err(e) => panic!("creating source symlink: {e}"),
+            }
+        }
+        for alias in aliases {
+            let (project, mut req) = (project.clone(), req.clone());
+            req.path = alias.clone();
+            req.lossless = Some(mode);
+            let result = with_context(move |ctx| lossless::run(&project, &req, mode, ctx));
+            let Err(Error::Failed(error)) = result else {
+                panic!("{result:?}")
+            };
+            assert!(error.contains(&source.display().to_string()), "{error}");
+            assert!(error.contains(&alias.display().to_string()), "{error}");
+            assert_eq!(std::fs::read(&source).unwrap(), original);
+            assert_eq!(std::fs::read(alias).unwrap(), original);
+            assert_no_attempts(&files.dir);
+        }
+        // Rendered exports share the same guard and must reject an alias before encoding.
+        let mut req = req;
+        req.path = source;
+        req.lossless = None;
+        let result: Result<(), _> = with_context(move |ctx| {
+            replay(&project, &req, ctx, |_| {
+                panic!("source collision reached encoder")
+            })
+        });
+        assert!(matches!(result, Err(Error::Failed(_))));
+    }
+}
+
+#[test]
+fn lossless_late_cancel_preserves_destination() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let (files, project, mut req) = lossless_fixture("safety-late-cancel.mov");
+        req.lossless = Some(mode);
+        let source = project.assets()[0].path.clone();
+        let original = std::fs::read(&source).unwrap();
+        let destination = req.path.clone();
+        std::fs::write(&destination, b"previous export").unwrap();
+        let pool = Pool::new(1);
+        let (ready_tx, ready_rx) = channel();
+        let (go_tx, go_rx) = channel();
+        let (tx, rx) = channel();
+        let handle = pool.submit("cancel after packets", Priority::Interactive, move |ctx| {
+            let result: Result<(), _> = replay(&project, &req, ctx, |attempt| {
+                let cuts = lossless::check(&project, req.range).unwrap();
+                let mut paused = false;
+                jvid_media::remux::export(
+                    &cuts,
+                    &attempt.path,
+                    mode == Lossless::Smart,
+                    &mut |f| {
+                        if f > 0.25 && !paused {
+                            paused = true;
+                            ready_tx.send(()).unwrap();
+                            go_rx
+                                .recv_timeout(std::time::Duration::from_secs(10))
+                                .unwrap();
+                        }
+                        !ctx.is_cancelled()
+                    },
+                )?;
+                Ok(())
+            });
+            tx.send(result).unwrap();
+        });
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"previous export");
+        handle.cancel();
+        go_tx.send(()).unwrap();
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap(),
+            Err(Error::Cancelled)
+        );
+        assert_eq!(std::fs::read(destination).unwrap(), b"previous export");
+        assert_eq!(std::fs::read(source).unwrap(), original);
+        assert_no_attempts(&files.dir);
+    }
+}
+
+#[test]
+fn lossless_mux_and_probe_failures_preserve_destination() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        for probe_failure in [false, true] {
+            let (files, project, mut req) = lossless_fixture("safety-validation.mov");
+            req.lossless = Some(mode);
+            if !probe_failure {
+                // WAVE cannot mux the generated ProRes video: fail during header writing.
+                req.path.set_extension("wav");
+            }
+            let source = project.assets()[0].path.clone();
+            let original = std::fs::read(&source).unwrap();
+            let destination = req.path.clone();
+            std::fs::write(&destination, b"previous export").unwrap();
+            let result: Result<(), _> = with_context(move |ctx| {
+                replay(&project, &req, ctx, |attempt| {
+                    let cuts = lossless::check(&project, req.range).unwrap();
+                    jvid_media::remux::export(
+                        &cuts,
+                        &attempt.path,
+                        mode == Lossless::Smart,
+                        &mut |_| true,
+                    )?;
+                    assert!(
+                        probe_failure,
+                        "unsupported muxer unexpectedly accepted ProRes"
+                    );
+                    // Inject damage between mux completion and the real validation probe.
+                    std::fs::write(&attempt.path, b"damaged output").unwrap();
+                    jvid_media::probe::probe(&attempt.path).map_err(|e| e.to_string())?;
+                    Ok(())
+                })
+            });
+            assert!(matches!(result, Err(Error::Failed(_))), "{result:?}");
+            assert_eq!(std::fs::read(destination).unwrap(), b"previous export");
+            assert_eq!(std::fs::read(source).unwrap(), original);
+            assert_no_attempts(&files.dir);
+        }
+    }
+}
+
+#[test]
+fn lossless_panic_preserves_destination_and_cleans_attempt() {
+    let (files, project, req) = lossless_fixture("safety-panic.mov");
+    let destination = req.path.clone();
+    std::fs::write(&destination, b"previous export").unwrap();
+    let panicked = with_context(move |ctx| {
+        std::panic::catch_unwind(|| {
+            let _: Result<(), _> = replay(&project, &req, ctx, |attempt| {
+                std::fs::write(&attempt.path, b"partial output").unwrap();
+                panic!("injected remux panic");
+            });
+        })
+        .is_err()
+    });
+    assert!(panicked);
+    assert_eq!(std::fs::read(destination).unwrap(), b"previous export");
+    assert_no_attempts(&files.dir);
+}
+
+#[test]
+fn lossless_rechecks_source_identity_before_publication() {
+    let (files, project, req) = lossless_fixture("safety-recheck.mov");
+    let source = project.assets()[0].path.clone();
+    let original = std::fs::read(&source).unwrap();
+    let destination = req.path.clone();
+    let result: Result<(), _> = with_context(move |ctx| {
+        replay(&project, &req, ctx, |attempt| {
+            std::fs::write(&attempt.path, b"finished output").unwrap();
+            // The destination was absent at preflight, then became an alias while encoding.
+            std::fs::hard_link(&source, &req.path).unwrap();
+            Ok(())
+        })
+    });
+    assert!(matches!(result, Err(Error::Failed(_))));
+    assert_eq!(std::fs::read(destination).unwrap(), original);
+    assert_eq!(
+        std::fs::read(files.dir.join("source.mov")).unwrap(),
+        original
+    );
+    assert_no_attempts(&files.dir);
+}
+
+#[cfg(feature = "gpl-ffmpeg")]
+#[test]
+fn lossless_smart_partial_gops_replace_validated_destination() {
+    let Some(corpus) = corpus() else { return };
+    let files = AttemptFiles::new(&out("smart-edges.mp4")).unwrap();
+    let source = files.dir.join("source.mp4");
+    std::fs::copy(corpus.join("frame-index-1080p30.mp4"), &source).unwrap();
+    let original = std::fs::read(&source).unwrap();
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, source.clone(), Time(0), secs(10));
+    let id = h.project().assets()[0].id;
+    let probe = Some(jvid_media::probe::probe(&source).unwrap());
+    h.apply(Command::SetAssetProbe { id, probe }).unwrap();
+    let destination = files.dir.join("destination.mp4");
+    std::fs::write(&destination, b"previous export").unwrap();
+    let req = Request {
+        path: destination.clone(),
+        range: (half(3), half(5)),
+        preset: preset("YouTube 1080p"),
+        loudness: None,
+        lossless: Some(Lossless::Smart),
+        sidecar: false,
+    };
+    let info =
+        with_context(move |ctx| lossless::run(h.project(), &req, Lossless::Smart, ctx)).unwrap();
+    assert!((info.duration - secs(1)).0.abs() <= Rate::new(30, 1).time_floor(1).0);
+    assert_eq!(jvid_media::probe::probe(&destination).unwrap(), info);
+    let mut decoder = VideoDecoder::open(&destination).unwrap();
+    for (time, index) in [(Time(0), 45), (half(1), 60)] {
+        let frame = decoder.frame_at(time).unwrap();
+        assert_eq!(frame_index(&frame.planes[0], frame.width as usize), index);
+    }
+    assert_eq!(std::fs::read(source).unwrap(), original);
+    assert_no_attempts(&files.dir);
+}
+
 #[test]
 fn in_progress_hardware_failure_replays_fresh_software_output() {
     jvid_media::ffmpeg::init().unwrap();
@@ -135,7 +524,7 @@ fn in_progress_hardware_failure_replays_fresh_software_output() {
     let original_options = req.preset.options.clone();
     let (result, paths) = with_context(move |ctx| {
         let mut paths = Vec::new();
-        let result = replay(&req, ctx, |attempt| {
+        let result = replay(&Project::default(), &req, ctx, |attempt| {
             if let Some(previous) = paths.last() {
                 assert!(
                     !Path::new(previous).exists(),
@@ -277,7 +666,7 @@ fn hardware_retry_is_bounded_and_unrelated_errors_do_not_retry() {
             std::fs::write(&req.path, b"keep").unwrap();
             let mut calls = 0;
             let mut attempt_paths = Vec::new();
-            let result: Result<(), _> = replay(&req, ctx, |attempt| {
+            let result: Result<(), _> = replay(&Project::default(), &req, ctx, |attempt| {
                 calls += 1;
                 attempt_paths.push(attempt.path.clone());
                 std::fs::write(&attempt.path, b"partial").unwrap();
@@ -309,7 +698,7 @@ fn cancellation_during_hardware_failure_prevents_retry() {
     let (done_tx, done_rx) = channel();
     let handle = pool.submit("cancel hardware retry", Priority::Interactive, move |ctx| {
         let mut calls = 0;
-        let result: Result<(), _> = replay(&req, ctx, |attempt| {
+        let result: Result<(), _> = replay(&Project::default(), &req, ctx, |attempt| {
             calls += 1;
             assert_eq!(calls, 1);
             std::fs::write(&attempt.path, b"partial").unwrap();

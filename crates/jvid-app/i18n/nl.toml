@@ -233,6 +233,8 @@ gb = "{value} GB"
 # Why an export failed; shown after "Export mislukt:".
 no_file_name = "uitvoerpad heeft geen bestandsnaam"
 attempt_error = "kan exportpoging niet aanmaken: {error}"
+source_collision = "het uitvoerbestand {path} is bronmedia ({source}); kies een ander uitvoerbestand"
+identity_error = "kan niet controleren of {path} bronmedia is: {error}"
 publish_error = "kan {path} niet publiceren: {error}"
 write_error = "kan {path} niet schrijven: {error}"
 empty_range = "het exportbereik is leeg"

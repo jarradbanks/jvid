@@ -242,6 +242,8 @@ gb = "{value} GB"
 # Why an export failed; shown after "Export failed:".
 no_file_name = "output path has no file name"
 attempt_error = "couldn't create export attempt: {error}"
+source_collision = "the output {path} is source media ({source}); choose a different output file"
+identity_error = "could not check whether {path} is source media: {error}"
 publish_error = "couldn't publish {path}: {error}"
 write_error = "couldn't write {path}: {error}"
 empty_range = "the export range is empty"

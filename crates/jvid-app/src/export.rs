@@ -220,13 +220,61 @@ impl Drop for AttemptFiles {
     }
 }
 
+/// Refuse both path aliases (including symlinks) and existing-file aliases such as hard links.
+/// Check every project asset, including nested sequences' sources, before creating any output.
+fn check_destination(project: &Project, destination: &Path) -> Result<(), Error> {
+    let identity_error = |error| {
+        Error::Failed(tr!(
+            "export.identity_error",
+            path = destination.display(),
+            error = error
+        ))
+    };
+    let destination_identity = match same_file::Handle::from_path(destination) {
+        Ok(handle) => Some(handle),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(identity_error(e)),
+    };
+    let destination_path = std::fs::canonicalize(destination).ok();
+    for asset in project
+        .assets()
+        .iter()
+        .filter(|a| !a.path.as_os_str().is_empty())
+    {
+        let same_path = destination == asset.path
+            || destination_path.as_ref().is_some_and(|path| {
+                std::fs::canonicalize(&asset.path).is_ok_and(|source| source == *path)
+            });
+        let same_file = match &destination_identity {
+            Some(destination) => match same_file::Handle::from_path(&asset.path) {
+                Ok(source) => source == *destination,
+                // An offline asset cannot alias an existing destination.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                Err(e) => return Err(identity_error(e)),
+            },
+            None => false,
+        };
+        if same_path || same_file {
+            return Err(tr!(
+                "export.source_collision",
+                path = destination.display(),
+                source = asset.path.display()
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
 /// Replays the entire shared job once in software, with fresh encoder/render/audio state.
 /// Preset overrides live in a request clone and never affect project or saved dialog settings.
 fn replay<T>(
+    project: &Project,
     req: &Request,
     ctx: &Ctx,
     mut attempt: impl FnMut(&Request) -> Result<T, AttemptError>,
 ) -> Result<T, Error> {
+    check_destination(project, &req.path)?;
     let mut request = req.clone();
     for retry in 0..=1 {
         if ctx.is_cancelled() {
@@ -241,6 +289,11 @@ fn replay<T>(
         }
         match result {
             Ok(info) => {
+                // The destination may have become a source alias while the job ran.
+                check_destination(project, &req.path)?;
+                if ctx.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
                 std::fs::rename(&files.output, &req.path).map_err(|e| {
                     tr!("export.publish_error", path = req.path.display(), error = e)
                 })?;
@@ -289,6 +342,7 @@ pub fn run(
     if !req.sidecar {
         return encode(project, req, device, queue, ctx);
     }
+    check_destination(project, &req.path.with_extension("srt"))?;
     let info = encode(&project.without_subtitles(), req, device, queue, ctx)?;
     let srt = jvid_core::srt::write(&project.subtitle_cues(), req.range);
     let path = req.path.with_extension("srt");
@@ -312,7 +366,7 @@ fn encode(
     if project.settings().hdr_output {
         req.preset = req.preset.hdr();
     }
-    replay(&req, ctx, |req| {
+    replay(project, &req, ctx, |req| {
         encode_attempt(project, req, device, queue, ctx)
     })
 }
