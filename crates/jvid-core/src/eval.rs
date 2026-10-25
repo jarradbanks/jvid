@@ -200,14 +200,18 @@ pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
 }
 
 /// [`video_at`] on the open sequence, with each sequence clip's layers in
-/// [`Layer::nested`] however deep; edits refuse cycles, so it ends. Playback, export and the
-/// CLI draw this.
+/// [`Layer::nested`] however deep; edits refuse cycles, so it ends. A transition past the end
+/// of a clip's media holds its last frame (before its start, [`Clip::source_beyond`] holds the
+/// first). Playback, export and the CLI draw this.
 pub fn frame_at(p: &Project, t: Time) -> Vec<Layer<'_>> {
     nest(p, video_at(p.sequence(), t))
 }
 
 fn nest<'a>(p: &'a Project, mut layers: Vec<Layer<'a>>) -> Vec<Layer<'a>> {
     for l in &mut layers {
+        if let Some(len) = p.media_len(l.asset) {
+            l.source_time = l.source_time.min(Time(len.0 - 1));
+        }
         if let Some(s) = p.nested(l.asset) {
             l.nested = nest(p, video_at(s, l.source_time));
         }
@@ -248,7 +252,13 @@ pub fn audio_in(seq: &Sequence, start: Time, end: Time) -> Vec<AudioSegment> {
             clips_in(tr, start, end)
                 .filter(|(c, ..)| c.freeze.is_none())
                 .map(move |w @ (c, before, after)| {
-                    let (cs, ce) = span(w);
+                    let (mut cs, ce) = span(w);
+                    // Silent before the media starts, so the clip stays in sync after the cut.
+                    // shortcut: a reversed clip's head runs past its media's end, unknown here;
+                    // it reads past the file, pass media lengths in if that drifts.
+                    if before.is_some() && !c.reverse {
+                        cs = cs.max(c.timeline_at(Time(0)));
+                    }
                     let (s, e) = (start.max(cs), end.min(ce));
                     AudioSegment {
                         track: tr.id,
@@ -267,6 +277,7 @@ pub fn audio_in(seq: &Sequence, start: Time, end: Time) -> Vec<AudioSegment> {
                         pan: tr.pan,
                     }
                 })
+                .filter(|g| g.start < g.end)
         })
         .collect()
 }
@@ -650,32 +661,140 @@ mod tests {
     }
 
     #[test]
-    fn transition_room_needs_handles_and_splits_keep_it_at_the_cut() {
+    fn transition_room_needs_touching_clips_and_splits_keep_it_at_the_cut() {
         use crate::model::Project;
+        let sec = crate::time::FLICKS_PER_SECOND;
         let mut p = Project::default();
         let mut s = p.sequence().clone();
         let v = s.add_track(TrackKind::Video, "V1");
         let a = s.add_clip(v, clip(0, 100)).unwrap();
-        let mut from_zero = clip(100, 100);
-        from_zero.source_in = Time(0);
-        let b = s.add_clip(v, from_zero).unwrap();
-        let lone = s.add_clip(v, clip(300, 10)).unwrap();
+        let b = s.add_clip(v, clip(100, 100)).unwrap();
+        let lone = s.add_clip(v, clip(10 * sec, 10)).unwrap();
         p.sequence = s.clone();
-        assert_eq!(p.transition_room(a), Err(ModelError::NoHandles(a)));
-        assert_eq!(p.transition_room(lone), Err(ModelError::NoHandles(lone)));
-        let sec = crate::time::FLICKS_PER_SECOND;
-        s.set_clip_range(b, Time(100), Time(sec), Time(sec + 100))
+        assert_eq!(p.transition_room(a), Err(ModelError::TooShort(a)));
+        assert_eq!(p.transition_room(b), Err(ModelError::NotTouching(b)));
+        assert_eq!(p.transition_room(lone), Err(ModelError::NotTouching(lone)));
+        assert_ne!(
+            ModelError::NotTouching(b).to_string(),
+            ModelError::TooShort(a).to_string()
+        );
+        // Untrimmed and seconds long: no media past the cut, held to half the shorter clip.
+        s.set_clip_range(b, Time(3 * sec), Time(0), Time(5 * sec))
+            .unwrap();
+        s.set_clip_range(a, Time(0), Time(0), Time(3 * sec))
             .unwrap();
         p.sequence = s.clone();
         let room = p.transition_room(a).unwrap();
-        assert!(room > Time(0) && room <= Time(2 * sec));
+        assert!(room > Time(0) && room <= Time(3 * sec / 2), "{room:?}");
         let r = p.settings().frame_rate;
-        assert_eq!(r.time_floor(r.index_floor(room)), room, "whole frames");
+        let frames = r.index_floor(room);
+        assert_eq!(r.time_floor(frames), room, "whole frames");
+        assert_eq!(frames % 2, 0, "even frames");
 
         transition(&mut s, b, TransitionKind::Crossfade, 4);
-        s.split_at(&[b], Time(150)).unwrap();
+        let mid = Time(3 * sec + sec);
+        s.split_at(&[b], mid).unwrap();
         let clips = s.tracks()[0].clips();
         assert_eq!(clips[1].transform.transition, None);
         assert!(clips[2].transform.transition.is_some());
+    }
+
+    /// Two whole 4 s files cut together with a 1 s crossfade.
+    fn untrimmed(kind: TrackKind) -> (crate::model::Project, ClipId, ClipId) {
+        use crate::model::{ProbeInfo, Project};
+        let sec = crate::time::FLICKS_PER_SECOND;
+        let mut p = Project::default();
+        let t = p.sequence.add_track(kind, "1");
+        let ids = [0, 1].map(|i| {
+            let asset = p.add_asset(format!("{i}.mkv"));
+            p.asset_mut(asset).unwrap().probe = Some(ProbeInfo {
+                duration: Time(4 * sec),
+                ..Default::default()
+            });
+            let c = NewClip {
+                asset,
+                source_in: Time(0),
+                source_out: Time(4 * sec),
+                start: Time(i * 4 * sec),
+                link: None,
+            };
+            p.sequence.add_clip(t, c).unwrap()
+        });
+        let room = p.transition_room(ids[0]).unwrap();
+        assert_eq!(room, Time(2 * sec), "half of either clip");
+        transition(&mut p.sequence, ids[0], TransitionKind::Crossfade, sec);
+        (p, ids[0], ids[1])
+    }
+
+    #[test]
+    fn untrimmed_crossfade_holds_each_clips_end_frame() {
+        let sec = crate::time::FLICKS_PER_SECOND;
+        let (p, a, b) = untrimmed(TrackKind::Video);
+        let before = p.sequence.tracks()[0].clips().to_vec();
+        let at = |t| frame_at(&p, Time(t));
+        // At the cut: A's last frame under B's first, half each.
+        let l = at(4 * sec);
+        assert_eq!(ids(&l), [b, a]);
+        assert_eq!(l[0].source_time, Time(0));
+        assert_eq!(l[1].source_time, Time(4 * sec - 1));
+        assert_eq!(l[0].transform.opacity, 0.5);
+        // Before the cut B holds its first frame while A plays; after it A holds its last.
+        let l = at(4 * sec - sec / 4);
+        assert_eq!(
+            (l[0].source_time, l[1].source_time),
+            (Time(0), Time(4 * sec - sec / 4))
+        );
+        let l = at(4 * sec + sec / 4);
+        assert_eq!(
+            (l[0].source_time, l[1].source_time),
+            (Time(sec / 4), Time(4 * sec - 1))
+        );
+        assert_eq!(ids(&at(4 * sec + sec / 2)), [b]);
+        assert_eq!(
+            p.sequence.tracks()[0].clips(),
+            &before[..],
+            "timeline untouched"
+        );
+    }
+
+    #[test]
+    fn untrimmed_crossfade_keeps_audio_in_sync() {
+        let sec = crate::time::FLICKS_PER_SECOND;
+        let (p, a, b) = untrimmed(TrackKind::Audio);
+        let got: Vec<_> = audio_in(&p.sequence, Time(3 * sec), Time(5 * sec))
+            .iter()
+            .map(|g| (g.clip, g.start, g.end, g.source_start))
+            .collect();
+        // A runs on past its media into silence; B starts at the cut, on its first sample.
+        let a_end = Time(4 * sec + sec / 2);
+        assert_eq!(
+            got,
+            [
+                (a, Time(3 * sec), a_end, Time(3 * sec)),
+                (b, Time(4 * sec), Time(5 * sec), Time(0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn frames_with_media_past_the_cut_are_unchanged() {
+        let sec = crate::time::FLICKS_PER_SECOND;
+        let (mut p, a, b) = untrimmed(TrackKind::Video);
+        // Trim a second off each side of the cut so both have media past it.
+        p.sequence
+            .set_clip_range(a, Time(0), Time(0), Time(3 * sec))
+            .unwrap();
+        p.sequence
+            .set_clip_range(b, Time(3 * sec), Time(sec), Time(4 * sec))
+            .unwrap();
+        for t in (5..=7).map(|q| Time(q * sec / 2)) {
+            let got: Vec<_> = frame_at(&p, t).iter().map(|l| l.source_time).collect();
+            let was: Vec<_> = video_at(&p.sequence, t)
+                .iter()
+                .map(|l| l.source_time)
+                .collect();
+            assert_eq!(got, was, "{t:?}");
+        }
+        assert_eq!(frame_at(&p, Time(3 * sec))[1].source_time, Time(3 * sec));
     }
 }
