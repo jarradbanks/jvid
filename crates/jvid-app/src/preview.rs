@@ -25,7 +25,10 @@ use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, Checkbox, Dropdown};
 
-use crate::i18n::{Label, tr, trn, verbatim};
+#[cfg(test)]
+use crate::i18n::verbatim;
+use crate::i18n::{Label, tr, trn};
+use crate::keymap::{ACTIONS, Keymap};
 use crate::playback::{self, Pixels, Playback, Shown};
 use crate::scopes;
 use crate::transport::{AudioSource, Transport};
@@ -456,6 +459,7 @@ impl Preview {
         ui: &mut Ui,
         project: &Project,
         missing: &HashSet<PathBuf>,
+        keymap: &Keymap,
     ) -> Option<Command> {
         if let Some(p) = &self.player
             && project.asset(p.asset).is_none()
@@ -466,7 +470,7 @@ impl Preview {
             self.program_action("shuttle_stop");
         }
         let Some(p) = &mut self.player else {
-            self.show(ui, None, false, None, None);
+            self.show(ui, None, false, None, None, keymap);
             ui.painter().text(
                 ui.max_rect().center(),
                 Align2::CENTER_CENTER,
@@ -515,13 +519,13 @@ impl Preview {
                     self.generation += 1;
                 }
                 let program = Some((project.settings(), true));
-                self.show(ui, None, false, Some(&row), program)
+                self.show(ui, None, false, Some(&row), program, keymap)
             }
             None => {
                 let (path, video) = (p.path.clone(), p.video);
                 let offline = missing.contains(&path);
                 let source = Some((path.as_path(), row.position, video));
-                self.show(ui, source, offline, Some(&row), None)
+                self.show(ui, source, offline, Some(&row), None, keymap)
             }
         };
         if let Some(time) = input.seek {
@@ -593,6 +597,7 @@ impl Preview {
         playhead: Time,
         trim: Option<(&Path, Time, bool)>,
         offline: bool,
+        keymap: &Keymap,
     ) -> Option<Time> {
         if let Some(p) = &mut self.player
             && p.transport.speed() != 0
@@ -612,7 +617,7 @@ impl Preview {
                 scopes::clear(ui.ctx());
                 self.analysis = None;
             }
-            self.show(ui, trim, offline, None, None);
+            self.show(ui, trim, offline, None, None, keymap);
             return None;
         }
         self.proxy_sources(project);
@@ -646,6 +651,7 @@ impl Preview {
             false,
             Some(&row),
             Some((project.settings(), false)),
+            keymap,
         );
         if let Some(time) = input.seek {
             return Some(time);
@@ -843,6 +849,7 @@ impl Preview {
         offline: bool,
         row: Option<&SourceRow>,
         program: Option<(&ProjectSettings, bool)>,
+        keymap: &Keymap,
     ) -> TransportInput {
         // Only the timeline's own row records.
         let records = matches!(program, Some((_, false)));
@@ -1089,7 +1096,7 @@ impl Preview {
                 + 3.0 * space::S8;
             if inner.width() < full_width {
                 return TransportInput {
-                    action: self.compact_transport(ui, inner, r, records),
+                    action: self.compact_transport(ui, inner, r, records, keymap),
                     seek,
                 };
             }
@@ -1145,8 +1152,8 @@ impl Preview {
                     .layout(Layout::left_to_right(Align::Center)),
                 |ui| {
                     ui.spacing_mut().item_spacing.x = space::S4;
-                    for (glyph, name, key, id) in transport_actions(r.playing) {
-                        let name = tr!("preview.with_key", action = name, key = key);
+                    for (glyph, name, id) in transport_actions(r.playing) {
+                        let name = transport_hint(ui.ctx(), keymap, id, name);
                         if ui
                             .add(Button::icon(glyph, &name))
                             .on_hover_text(&name)
@@ -1157,7 +1164,7 @@ impl Preview {
                     }
                     if let Some(take) = records {
                         ui.add_space(space::S4);
-                        self.record_clicked |= record_button(ui, take, true);
+                        self.record_clicked |= record_button(ui, take, true, keymap);
                     }
                 },
             );
@@ -1215,6 +1222,7 @@ impl Preview {
         inner: Rect,
         row: &SourceRow,
         records: bool,
+        keymap: &Keymap,
     ) -> Option<&'static str> {
         let timecode = format_timecode(row.frame as u64, row.rate);
         let time_width = ui
@@ -1259,9 +1267,9 @@ impl Preview {
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
                 ui.spacing_mut().item_spacing.x = space::S4;
-                for (glyph, name, key, id) in transport_actions(row.playing) {
+                for (glyph, name, id) in transport_actions(row.playing) {
                     if navigation || id == "play_stop" {
-                        let hint = tr!("preview.with_key", action = name, key = key);
+                        let hint = transport_hint(ui.ctx(), keymap, id, name);
                         if ui
                             .add(Button::icon(glyph, &hint))
                             .on_hover_text(&hint)
@@ -1273,7 +1281,7 @@ impl Preview {
                 }
                 if records {
                     ui.add_space(space::S4);
-                    self.record_clicked |= record_button(ui, self.recording, false);
+                    self.record_clicked |= record_button(ui, self.recording, false, keymap);
                 }
                 ui.add_space(space::S4);
                 let more = ui
@@ -1281,9 +1289,9 @@ impl Preview {
                     .on_hover_text(tr!("preview.more"));
                 egui::Popup::menu(&more).show(|ui| {
                     if !navigation {
-                        for (_, name, key, id) in transport_actions(row.playing) {
+                        for (_, name, id) in transport_actions(row.playing) {
                             if id != "play_stop" {
-                                let hint = tr!("preview.with_key", action = name, key = key);
+                                let hint = transport_hint(ui.ctx(), keymap, id, name);
                                 if ui.add(Button::ghost(&hint)).clicked() {
                                     action = Some(id);
                                     ui.close();
@@ -1348,22 +1356,10 @@ impl Preview {
 }
 
 /// Shared transport actions, in visual and keyboard-navigation order.
-fn transport_actions(
-    playing: bool,
-) -> [(&'static str, &'static str, &'static str, &'static str); 5] {
+fn transport_actions(playing: bool) -> [(&'static str, &'static str, &'static str); 5] {
     [
-        (
-            icon::SKIP_BACK,
-            tr!("action.go_to_start"),
-            verbatim("Home"),
-            "go_to_start",
-        ),
-        (
-            icon::REWIND,
-            tr!("action.shuttle_left"),
-            verbatim("J"),
-            "shuttle_left",
-        ),
+        (icon::SKIP_BACK, tr!("action.go_to_start"), "go_to_start"),
+        (icon::REWIND, tr!("action.shuttle_left"), "shuttle_left"),
         (
             if playing { icon::PAUSE } else { icon::PLAY },
             if playing {
@@ -1371,22 +1367,31 @@ fn transport_actions(
             } else {
                 tr!("preview.play")
             },
-            verbatim("Space"),
             "play_stop",
         ),
         (
             icon::FAST_FORWARD,
             tr!("action.shuttle_right"),
-            verbatim("L"),
             "shuttle_right",
         ),
-        (
-            icon::SKIP_FORWARD,
-            tr!("action.go_to_end"),
-            verbatim("End"),
-            "go_to_end",
-        ),
+        (icon::SKIP_FORWARD, tr!("action.go_to_end"), "go_to_end"),
     ]
+}
+
+/// The same live, localized hint labels both the tooltip and accessible control.
+fn transport_hint(ctx: &egui::Context, keymap: &Keymap, id: &str, name: &str) -> String {
+    let index = ACTIONS
+        .iter()
+        .position(|action| action.id == id)
+        .expect("transport action");
+    match keymap.bindings[index].as_ref() {
+        Some(binding) => tr!(
+            "preview.with_key",
+            action = name,
+            key = ctx.format_shortcut(binding)
+        ),
+        None => name.to_owned(),
+    }
 }
 
 fn take_width(ui: &Ui, elapsed: std::time::Duration) -> f32 {
@@ -1429,13 +1434,17 @@ const TAKE_WIDTH: f32 = 84.0;
 
 /// The Program row's Record button: a dot, or while `take` records a Red stop square with its
 /// elapsed time and input meter. Returns whether it was clicked.
-fn record_button(ui: &mut Ui, take: Option<(std::time::Duration, f32)>, readout: bool) -> bool {
+fn record_button(
+    ui: &mut Ui,
+    take: Option<(std::time::Duration, f32)>,
+    readout: bool,
+    keymap: &Keymap,
+) -> bool {
     let name = match take {
         Some(_) => tr!("timeline.stop_recording"),
         None => tr!("action.record"),
     };
-    // Keycaps stay English, like the other transport buttons.
-    let name = tr!("preview.with_key", action = name, key = verbatim("Shift+R"));
+    let name = transport_hint(ui.ctx(), keymap, "record", name);
     let b = ui.add(Button::icon("", &name)).on_hover_text(&name);
     crate::app::tutorial::anchor(ui.ctx(), "record", b.rect);
     let c = b.rect.center();
@@ -1903,7 +1912,8 @@ mod program_tests {
                 return;
             }
             let project = self.history.project();
-            self.preview.show_program(ui, project, Time(0), None, false);
+            self.preview
+                .show_program(ui, project, Time(0), None, false, &Keymap::default());
         }
     }
 
@@ -2100,7 +2110,7 @@ mod program_tests {
                     if suite_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
-                    p.show_source(ui, &project, &HashSet::new());
+                    p.show_source(ui, &project, &HashSet::new(), &Keymap::default());
                 },
                 p,
             );
@@ -2142,7 +2152,7 @@ mod program_tests {
                     if suite_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
-                    p.show_source(ui, &project, &HashSet::new());
+                    p.show_source(ui, &project, &HashSet::new(), &Keymap::default());
                 },
                 preview,
             );
@@ -2210,7 +2220,7 @@ mod program_tests {
                         if suite_ui::test_support::install_theme(ui, &mut fresh) {
                             return;
                         }
-                        p.show_source(ui, &project, &HashSet::new());
+                        p.show_source(ui, &project, &HashSet::new(), &Keymap::default());
                     },
                     p,
                 );
@@ -2371,6 +2381,7 @@ mod audit_transport_tests {
         bounds: Rect,
         program: bool,
         playing: bool,
+        keymap: crate::keymap::Keymap,
     }
 
     fn row_harness(
@@ -2409,6 +2420,7 @@ mod audit_transport_tests {
                         false,
                         Some(&row),
                         Some((&ProjectSettings::default(), !s.program)),
+                        &s.keymap,
                     );
                 },
                 RowState {
@@ -2416,6 +2428,7 @@ mod audit_transport_tests {
                     bounds: Rect::NOTHING,
                     program,
                     playing,
+                    keymap: crate::keymap::Keymap::default(),
                 },
             );
         h.run_steps(4);
@@ -2604,7 +2617,7 @@ mod audit_transport_tests {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let mut frame_output = ctx.run_ui(Default::default(), |ui| {
-            preview.show_source(ui, history.project(), &HashSet::new());
+            preview.show_source(ui, history.project(), &HashSet::new(), &Keymap::default());
         });
         frame_output.textures_delta.clear();
         assert!(!preview.pending);
@@ -2614,7 +2627,7 @@ mod audit_transport_tests {
         );
         assert_eq!(preview.source_frame(), Some(27000));
         let mut frame_output = ctx.run_ui(Default::default(), |ui| {
-            preview.show_source(ui, history.project(), &HashSet::new());
+            preview.show_source(ui, history.project(), &HashSet::new(), &Keymap::default());
         });
         frame_output.textures_delta.clear();
         assert_eq!(
@@ -2622,6 +2635,110 @@ mod audit_transport_tests {
             Some(Time(900 * S)),
             "decode the latest position next"
         );
+    }
+
+    #[test]
+    fn audit_471_live_hints_follow_custom_and_unbound_keys_in_both_monitors() {
+        for program in [false, true] {
+            let mut h = row_harness(800.0, 1.0, program, false, None);
+            h.state_mut().keymap =
+                crate::keymap::Keymap::from_toml("play_stop = \"P\"\nrecord = \"\"").unwrap();
+            h.run_steps(2);
+            let hint = tr!("preview.with_key", action = tr!("preview.play"), key = "P");
+            let button = h.get_by_role_and_label(egui::accesskit::Role::Button, &hint);
+            button.hover();
+            h.ctx
+                .global_style_mut(|s| s.interaction.tooltip_delay = 0.0);
+            h.run_steps(3);
+            assert!(
+                h.query_all_by_label(&hint).count() >= 2,
+                "tooltip and accessible button agree"
+            );
+            assert!(
+                h.query_by_label(&tr!(
+                    "preview.with_key",
+                    action = tr!("preview.play"),
+                    key = verbatim("Space")
+                ))
+                .is_none()
+            );
+            if program {
+                h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("action.record"));
+                assert!(
+                    h.query_by_label(&tr!(
+                        "preview.with_key",
+                        action = tr!("action.record"),
+                        key = verbatim("Shift+R")
+                    ))
+                    .is_none()
+                );
+            }
+            h.state_mut().keymap =
+                Keymap::from_toml("play_stop = \"\"\nrecord = \"Ctrl+Alt+R\"").unwrap();
+            h.run_steps(2);
+            h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.play"));
+            if program {
+                let key = h
+                    .ctx
+                    .format_shortcut(&crate::keymap::parse("Ctrl+Alt+R").unwrap());
+                h.get_by_role_and_label(
+                    egui::accesskit::Role::Button,
+                    &tr!("preview.with_key", action = tr!("action.record"), key = key),
+                );
+            }
+            h.state_mut().keymap = crate::keymap::Keymap::default();
+            h.run_steps(2);
+            h.get_by_role_and_label(
+                egui::accesskit::Role::Button,
+                &tr!(
+                    "preview.with_key",
+                    action = tr!("preview.play"),
+                    key = verbatim("Space")
+                ),
+            );
+        }
+    }
+
+    #[test]
+    fn audit_471_hint_formats_command_keys_for_the_current_platform() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(Default::default(), |_| {});
+        output.textures_delta.clear();
+        let keymap = Keymap::from_toml("play_stop = \"Ctrl+P\"").unwrap();
+        ctx.set_os(egui::os::OperatingSystem::Nix);
+        assert!(transport_hint(&ctx, &keymap, "play_stop", tr!("preview.play")).contains("Ctrl"));
+        ctx.set_os(egui::os::OperatingSystem::Mac);
+        let mac = transport_hint(&ctx, &keymap, "play_stop", tr!("preview.play"));
+        assert!(mac.contains("Cmd") || mac.contains('⌘'), "{mac}");
+        assert!(!mac.contains("Ctrl"));
+    }
+
+    #[test]
+    #[ignore = "changes global locale; run this test in isolation"]
+    fn audit_471_hints_follow_language_switch_without_restart() {
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                suite_ui::i18n::set_language("en");
+            }
+        }
+        let _restore = Restore;
+        let mut h = row_harness(800.0, 1.0, true, false, None);
+        h.state_mut().keymap = Keymap::from_toml("play_stop = \"P\"\nrecord = \"\"").unwrap();
+        for language in ["en", "de", "fr"] {
+            suite_ui::i18n::set_language(language);
+            for program in [false, true] {
+                h.state_mut().program = program;
+                h.run_steps(2);
+                h.get_by_role_and_label(
+                    egui::accesskit::Role::Button,
+                    &tr!("preview.with_key", action = tr!("preview.play"), key = "P"),
+                );
+                if program {
+                    h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("action.record"));
+                }
+            }
+        }
     }
 
     // Locale changes are process-global; explicitly run in isolation alongside #472's test.

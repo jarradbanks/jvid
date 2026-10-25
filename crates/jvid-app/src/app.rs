@@ -1812,7 +1812,10 @@ impl TabViewer for Viewer<'_> {
         };
         if *tab == Tab::Preview && source_tab {
             panel.show(ui, |ui| {
-                if let Some(c) = self.preview.show_source(ui, self.project, self.missing) {
+                if let Some(c) =
+                    self.preview
+                        .show_source(ui, self.project, self.missing, self.keymap)
+                {
                     self.command = Some(c);
                 }
             });
@@ -1830,9 +1833,9 @@ impl TabViewer for Viewer<'_> {
             let r = panel.show(ui, |ui| {
                 let frame = self.preview.project_rect(ui, self.project.settings());
                 let head = self.timeline.playhead();
-                let shown = self
-                    .preview
-                    .show_program(ui, self.project, head, trim, offline);
+                let shown =
+                    self.preview
+                        .show_program(ui, self.project, head, trim, offline, self.keymap);
                 if let Some(t) = shown {
                     self.timeline.seek(t);
                 }
