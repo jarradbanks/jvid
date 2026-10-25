@@ -44,6 +44,8 @@ pub mod menus;
 mod rubber;
 mod silence;
 mod transitions;
+#[cfg(test)]
+mod waveform_tests;
 
 /// The undo gesture a track-height drag coalesces under.
 pub const RESIZE_GESTURE: GestureKey = 0x7472_6163_6b68; // "trackh"
