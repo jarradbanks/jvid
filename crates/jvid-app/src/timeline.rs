@@ -49,8 +49,8 @@ mod transitions;
 pub const RESIZE_GESTURE: GestureKey = 0x7472_6163_6b68; // "trackh"
 /// The undo gesture a track Volume drag coalesces under, xored with the track's ID.
 const VOLUME_GESTURE: GestureKey = 0x7472_6b76_6f6c; // "trkvol"
-/// Width of the Volume slider on an audio track header.
-const VOLUME_WIDTH: f32 = 56.0;
+/// Height of the Volume slider band under an audio track header's toggles.
+const VOLUME_BAND: f32 = 14.0;
 /// Track heights snap to this step.
 const HEIGHT_STEP: f32 = 4.0;
 /// Zoom limits in points per second: about four hours across 1000pt, to a frame 40pt wide.
@@ -1965,6 +1965,31 @@ impl Timeline {
                 tr!("timeline.mute"),
             ),
         };
+        let armed = self.armed == Some(track.id);
+        let level = self.level.filter(|_| armed);
+        // Volume, in the band under the toggles; the input meter takes that band while armed.
+        // Added before the toggles so they keep the pointer where the slider's rect overlaps them.
+        let band = mid + size::SMALL_CONTROL / 2.0;
+        if track.kind == TrackKind::Audio
+            && level.is_none()
+            && rect.bottom() - band >= VOLUME_BAND - 2.0
+        {
+            let r = Rect::from_x_y_ranges(
+                rect.left() + space::INSET..=rect.right() - space::S8,
+                band + VOLUME_BAND / 2.0 - size::CONTROL / 2.0
+                    ..=band + VOLUME_BAND / 2.0 + size::CONTROL / 2.0,
+            );
+            let mut v = f64::from(track.volume);
+            let name = tr!("inspector.volume");
+            let s = ui.put(r, Slider::new(&mut v, 0.0..=2.0, name));
+            if s.changed() {
+                let mut t = track.settings();
+                t.volume = v as f32;
+                edit = Some((Command::SetTrack(t), Some(VOLUME_GESTURE ^ track.id.0)));
+            }
+            s.on_hover_text(format!("{name} {:.0}%", v * 100.0));
+        }
+
         let toggles = [
             (
                 icon::LOCK,
@@ -1987,22 +2012,7 @@ impl Timeline {
         // Audio tracks put record arm before the rest, so the columns line up across kinds.
         let audio = track.kind == TrackKind::Audio;
         let arm_x = x - step;
-        let name_right = if audio { arm_x - VOLUME_WIDTH } else { x } - space::S4;
-        if audio {
-            let r = Rect::from_x_y_ranges(
-                arm_x - VOLUME_WIDTH..=arm_x - space::S4,
-                mid - size::SMALL_CONTROL / 2.0..=mid + size::SMALL_CONTROL / 2.0,
-            );
-            let mut v = f64::from(track.volume);
-            let name = tr!("inspector.volume");
-            let s = ui.put(r.intersect(column), Slider::new(&mut v, 0.0..=2.0, name));
-            if s.changed() {
-                let mut t = track.settings();
-                t.volume = v as f32;
-                edit = Some((Command::SetTrack(t), Some(VOLUME_GESTURE ^ track.id.0)));
-            }
-            s.on_hover_text(format!("{name} {:.0}%", v * 100.0));
-        }
+        let name_right = if audio { arm_x } else { x } - space::S4;
         for (n, (glyph, on, font, tip, solo)) in toggles.into_iter().enumerate() {
             let r = Rect::from_min_size(
                 pos2(x, mid - size::SMALL_CONTROL / 2.0),
@@ -2029,8 +2039,6 @@ impl Timeline {
                 };
             }
         }
-        let armed = self.armed == Some(track.id);
-        let level = self.level.filter(|_| armed);
         if audio {
             let r = Rect::from_min_size(
                 pos2(arm_x, mid - size::SMALL_CONTROL / 2.0),
