@@ -1890,3 +1890,10 @@ I("reframe-dim", "Reframe: dim the wide shot outside the frame", None, ["ui"], "
   summary="From #352 (PR #396), owner's call: while aiming a reframed clip, show the wide shot outside the new frame dimmed, so you can see what's being cropped away.",
   scope=["When the reframe box shows, the Program monitor draws the clip's picture outside the frame, dimmed, in the overlay only; export and playback output are unchanged"],
   ac=["A kittest snapshot shows dimmed picture outside the reframe box; a render test shows export output is unchanged"])
+
+I("cjk-common-sets", "Fonts: bundle the common CJK characters", None, ["suite-ui"], "S", [], labels=["later"],
+  summary="Owner's call (2026-10-25): every PR that adds UI strings regenerates the CJK font subsets, binary files that conflict between parallel PRs (6 so far). Bundling the common characters up front makes the subsets rarely change, at about 3-4 MB more in the app.",
+  scope=["subset-cjk.py adds each language's common set to its catalog characters: JIS X 0208 level 1 kanji plus kana for ja, GB 2312 level 1 for zh-Hans, the 2,350 KS X 1001 Hangul syllables for ko, derived from Python's own codecs with no data files",
+         "The output is byte-identical when the character set hasn't changed, and the script leaves the file untouched then",
+         "Raise the per-face budget in docs/translating.md (Fonts and binary size) to fit, staying near 3-4 MB in total"],
+  ac=["Running subset-cjk.py twice in a row changes no file (test or CI check)", "A catalog edit using only common characters leaves the .otf files unchanged"])
