@@ -2,7 +2,7 @@
 // @param radius float 0.0..100.0 = 20.0
 // @passes 2
 
-// Blurs by up to `radius` logical Full-input pixels, keeping alpha so a masked clip blurs only inside its mask.
+// Blurs by up to `radius` pixels, keeping alpha so a masked clip blurs only inside its mask.
 // Pass 0 blurs along x, pass 1 along y. Taps per pass scale with the radius (4 to 128), at most
 // 1.6 px apart, so no pixel falls between taps and small radii stay cheap. Effects can't loop,
 // so the taps are unrolled and groups past the count are skipped on a uniform branch.
