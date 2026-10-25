@@ -80,6 +80,7 @@ const CLIP: &[&str] = &[
     "",
     "copy_grade",
     "paste_grade",
+    "hide_region",
     "clean_up_voice",
     "nest",
     "",
@@ -118,6 +119,9 @@ impl Timeline {
             "delete" | "ripple_delete" => any || self.gap.is_some(),
             "copy" | "cut" | "duplicate" | "link" | "enable" | "reverse" | "nest" => any,
             "freeze_frame" | "clean_up_voice" => self.clip_action(id, seq).is_some(),
+            "hide_region" => {
+                !self.video_chosen(seq).is_empty() && crate::hide_region::blur().is_some()
+            }
             "detect_silence" => super::silence::Silence::open(seq, &self.selected).is_some(),
             "find_highlights" => super::highlights::Highlights::open(seq, &self.selected).is_some(),
             // cut_action's only side effect is Q's seek, put back after.

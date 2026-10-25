@@ -6,6 +6,7 @@ mod easing;
 mod effects;
 pub mod export;
 mod handles;
+mod hide_region;
 pub mod i18n;
 mod import;
 mod inspector;
