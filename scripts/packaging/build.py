@@ -267,10 +267,19 @@ def native_licenses(stage, sources, target, ffmpeg):
 
 
 def marker(bin_dir, value, portable):
-    (bin_dir / "jvid-distribution").write_bytes((value + "\n").encode("utf-8"))
-    (bin_dir / "jvid.portable").unlink(missing_ok=True)
+    mac = bin_dir.name == "MacOS" and bin_dir.parent.name == "Contents"
+    storage = bin_dir.parent / "Resources" if mac else bin_dir
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "jvid-distribution").write_bytes((value + "\n").encode("utf-8"))
+    (storage / "jvid.portable").unlink(missing_ok=True)
     if portable:
-        (bin_dir / "jvid.portable").write_text("Portable data: see INSTALL.md\n", encoding="utf-8")
+        (storage / "jvid.portable").write_text("Portable data: see INSTALL.md\n", encoding="utf-8")
+    if mac:
+        for name in ("jvid-distribution", "jvid.portable"):
+            link = bin_dir / name
+            link.unlink(missing_ok=True)
+            if (storage / name).is_file():
+                link.symlink_to(Path("../Resources") / name)
 
 
 def zip_tree(tree, archive):
@@ -331,9 +340,14 @@ def build(args):
         plistlib.loads(plist.encode())
         (stage / "jvid.app/Contents/Info.plist").write_text(plist)
         sources = mac_libraries(binary, frameworks)
-    license_root = binary.parent  # Notices beside the actual executable on every OS.
+    # Apple requires data outside code directories. Preserve the notice lookup
+    # path with an internal symlink; marker() does the same for distribution flags.
+    license_root = (binary.parent.parent / "Resources") if target.startswith("macos") else binary.parent
+    license_root.mkdir(parents=True, exist_ok=True)
     providers = native_licenses(license_root, sources, target, args.ffmpeg_dir)
     notices(license_root, providers)
+    if target.startswith("macos"):
+        (binary.parent / "THIRD-PARTY-NOTICES.txt").symlink_to("../Resources/THIRD-PARTY-NOTICES.txt")
     if target.startswith("windows"):
         marker(binary.parent, "windows-installer", False)
         inventory(stage, target)

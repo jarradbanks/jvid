@@ -125,8 +125,13 @@ not an authenticity or trust signal.
 | `jvid-{version}-macos-aarch64-portable.zip` | `macos-aarch64` | `macos-portable` | `jvid-{version}-macos-aarch64/jvid.app` and inventory; both markers in `Contents/MacOS` |
 | `jvid-{version}-linux-x86_64-portable.tar.gz` | `linux-x86_64` | `linux-portable` | `jvid-{version}-linux-x86_64/{AppRun,bin/jvid-app,lib/}`; both markers in `bin` |
 
-macOS libraries live in `jvid.app/Contents/Frameworks`, with executable and notices
-in `Contents/MacOS`. Linux notices are in `bin`, beside the executable. Every
+macOS libraries live in `jvid.app/Contents/Frameworks`, the executable in
+`Contents/MacOS`, and non-code data in `Contents/Resources`. Internal symlinks keep
+`Contents/MacOS/THIRD-PARTY-NOTICES.txt`, `jvid-distribution`, and (portable only)
+`jvid.portable` readable at the agreed beside-executable paths. Distribution-marker
+readers follow those links normally; portable data still lives outside the app.
+The ZIP uses `ditto` to preserve links and bundle metadata. Linux notices are in
+`bin`, beside the executable. Every
 package includes `THIRD-PARTY-NOTICES.txt`, jvid's licenses, runtime license texts,
 `SOURCE-INFO.txt`, installation instructions and a `package-files.json` inventory.
 Portable data is never part of an archive's payload or inventory.

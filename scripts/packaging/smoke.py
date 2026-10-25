@@ -5,6 +5,8 @@ On disposable Windows CI users only, --windows-install checks setup, upgrade and
 import argparse
 import json
 import os
+import posixpath
+import stat
 from pathlib import Path
 import shutil
 import subprocess
@@ -19,11 +21,35 @@ from build import sha256
 def extract(archive, dest):
     if archive.name.endswith(".zip"):
         with zipfile.ZipFile(archive) as source:
+            links = []
             for member in source.infolist():
                 path = dest / member.filename
                 if not path.resolve().is_relative_to(dest.resolve()):
                     raise RuntimeError("archive path escapes destination")
-            source.extractall(dest)
+                if stat.S_ISLNK(member.external_attr >> 16):
+                    target = source.read(member).decode("utf-8")
+                    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(member.filename), target))
+                    if target.startswith("/") or not (dest / resolved).resolve().is_relative_to(dest.resolve()):
+                        raise RuntimeError("unsafe ZIP symlink")
+                    try:
+                        target_member = source.getinfo(resolved)
+                    except KeyError as error:
+                        raise RuntimeError("missing ZIP symlink target") from error
+                    # Only direct links to regular files inside this archive: no directory
+                    # links or chains that could redirect another extraction outside dest.
+                    target_kind = stat.S_IFMT(target_member.external_attr >> 16)
+                    if target_member.is_dir() or target_kind not in (0, stat.S_IFREG):
+                        raise RuntimeError("unsafe ZIP symlink target")
+                    links.append((member, target))
+            if sys.platform == "darwin":
+                # zipfile does not preserve symbolic links or macOS bundle metadata.
+                subprocess.run(["ditto", "-x", "-k", str(archive), str(dest)], check=True)
+            else:
+                source.extractall(dest)
+                for member, target in links:
+                    path = dest / member.filename
+                    path.unlink()
+                    path.symlink_to(target)
     else:
         with tarfile.open(archive) as source:
             for member in source.getmembers():

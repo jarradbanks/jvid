@@ -2,6 +2,8 @@
 """Contract, archive containment, and corruption-detection regressions."""
 import io
 import json
+import sys
+import stat
 from pathlib import Path
 import tarfile
 import tempfile
@@ -80,6 +82,41 @@ class PackagingTests(unittest.TestCase):
                 archive.write_bytes(b'corrupted source download')
                 with self.assertRaisesRegex(RuntimeError, 'checksum mismatch'):
                     build.recover_homebrew_licenses(keg, dest)
+
+    @unittest.skipIf(sys.platform == "win32", "Mac bundle symlinks are tested on macOS/Linux")
+    def test_macos_resources_preserve_beside_executable_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bin_dir = root / "jvid.app/Contents/MacOS"
+            bin_dir.mkdir(parents=True)
+            build.marker(bin_dir, "macos-dmg", False)
+            self.assertEqual((bin_dir / "jvid-distribution").read_text(), "macos-dmg\n")
+            self.assertFalse((bin_dir / "jvid.portable").exists())
+            build.marker(bin_dir, "macos-portable", True)
+            self.assertEqual((bin_dir / "jvid-distribution").read_text(), "macos-portable\n")
+            self.assertTrue((bin_dir / "jvid.portable").is_file())
+            self.assertTrue((bin_dir / "jvid.portable").is_symlink())
+            self.assertEqual((bin_dir / "jvid.portable").resolve().parent.name, "Resources")
+
+    @unittest.skipIf(sys.platform == "win32", "Mac ZIP symlinks are tested on macOS/Linux")
+    def test_zip_preserves_internal_resource_links_and_rejects_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "app.zip"
+            link = zipfile.ZipInfo("app/Contents/MacOS/jvid-distribution")
+            link.create_system = 3
+            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+            with zipfile.ZipFile(archive, "w") as out:
+                out.writestr("app/Contents/Resources/jvid-distribution", "macos-portable\n")
+                out.writestr(link, "../Resources/jvid-distribution")
+            smoke.extract(archive, root / "output")
+            extracted = root / "output/app/Contents/MacOS/jvid-distribution"
+            self.assertTrue(extracted.is_symlink())
+            self.assertEqual(extracted.read_text(), "macos-portable\n")
+            with zipfile.ZipFile(archive, "w") as out:
+                out.writestr(link, "../../../../outside")
+            with self.assertRaisesRegex(RuntimeError, "unsafe ZIP symlink"):
+                smoke.extract(archive, root / "unsafe")
 
     def test_archives_cannot_escape_extraction_root(self):
         with tempfile.TemporaryDirectory() as tmp:
