@@ -80,6 +80,8 @@ pub struct Timeline {
     fx_popover: Option<TrackId>,
     /// Where the dragged clip would land; the press origin is gone by the release frame.
     drag_to: Option<(TrackId, Time)>,
+    /// Selection and linked closure captured once when a clip drag starts.
+    drag_selection: Vec<ClipId>,
     selected: HashSet<ClipId>,
     /// Clicking a clip selects its linked partners too.
     linked_selection: bool,
@@ -109,6 +111,8 @@ pub struct Timeline {
     /// `scroll` and `vscroll` when the pointer went down, so drags track time while the
     /// view auto-scrolls.
     press_scroll: (f64, f32),
+    /// Band origin in sequence time and content height, independent of the viewport.
+    marquee_origin: Option<(Time, f32)>,
     /// The clicked gap: its track and a time inside it.
     gap: Option<(TrackId, Time)>,
     /// Lanes width last frame, for actions that fit to it.
@@ -197,10 +201,12 @@ impl Default for Timeline {
             holding: None,
             slot: 0.0,
             press_scroll: (0.0, 0.0),
+            marquee_origin: None,
             media: Media::default(),
             renaming: None,
             fx_popover: None,
             drag_to: None,
+            drag_selection: Vec::new(),
             selected: HashSet::new(),
             linked_selection: true,
             clipboard: Vec::new(),
@@ -475,7 +481,7 @@ impl Timeline {
             "select_all" => {
                 let clips = project.sequence().tracks().iter().flat_map(|t| t.clips());
                 self.selected = clips.map(|c| c.id).collect();
-                self.keys.selected.clear();
+                self.keys.clear_focus();
             }
             "add_edit" | "ripple_trim_prev" | "ripple_trim_next" => {
                 self.pending = self.cut_action(id, project.sequence());
@@ -592,7 +598,7 @@ impl Timeline {
             .collect();
         let ids: Vec<_> = chosen.iter().map(|(_, c)| c.id).collect();
         if matches!(id, "copy" | "cut") && !chosen.is_empty() {
-            self.keys.clipboard.clear();
+            self.keys.clear_clipboard();
             self.clipboard = chosen.clone();
             self.copied = true;
         }
@@ -867,7 +873,7 @@ impl Timeline {
         lanes: &[(TrackId, TrackKind, Rect)],
         p: Pos2,
     ) {
-        self.keys.selected.clear();
+        self.keys.clear_focus();
         let lane = lanes.iter().find(|l| l.2.contains(p));
         let at = view.time(p.x);
         self.gap = lane
@@ -887,9 +893,32 @@ impl Timeline {
         (Command::Split { ids, at }, None)
     }
 
+    /// Hit-test the band against model coordinates, retaining viewport culling for paint.
+    /// Shift and Ctrl add the hits; linked selection includes each hit's partners.
+    fn marquee_hits(&self, seq: &Sequence, a: (Time, f32), b: (Time, f32)) -> HashSet<ClipId> {
+        let (start, end) = (a.0.min(b.0), a.0.max(b.0));
+        let (top, bottom) = (a.1.min(b.1), a.1.max(b.1));
+        let mut y = 0.0;
+        let mut hits = HashSet::new();
+        for track in seq.tracks() {
+            if y + track.height - 2.0 >= top && y + 2.0 <= bottom {
+                for c in visible(track.clips(), start, end) {
+                    if self.linked_selection {
+                        hits.extend(seq.linked(c.id).into_iter().map(|(_, c)| c.id));
+                    } else {
+                        hits.insert(c.id);
+                    }
+                }
+            }
+            y += track.height + self.keys.extra(track);
+        }
+        hits
+    }
+
     /// Click selection: the clip (and its partners under linked selection) replaces the
     /// selection, Shift adds it, Ctrl toggles it.
     fn select(&mut self, seq: &Sequence, id: ClipId, mods: egui::Modifiers) {
+        self.keys.clear_focus();
         let group: Vec<_> = if self.linked_selection {
             seq.linked(id).into_iter().map(|(_, c)| c.id).collect()
         } else {
@@ -912,7 +941,7 @@ impl Timeline {
         if self.shown_sequence != project.sequence().id() {
             self.shown_sequence = project.sequence().id();
             self.selected.clear();
-            self.keys.selected.clear();
+            self.keys.clear_focus();
         }
         self.transport.rate = project.settings().frame_rate;
         // Room past the last clip, so the end of the sequence can be reached and seen.
@@ -1078,11 +1107,21 @@ impl Timeline {
             ui.input(|i| (i.pointer.any_pressed(), i.pointer.any_down(), i.stable_dt));
         if pressed {
             self.press_scroll = (self.scroll, self.vscroll);
+            self.marquee_origin = ui
+                .input(|i| i.pointer.press_origin())
+                .filter(|p| lanes.contains(*p))
+                .map(|p| {
+                    (
+                        self.view(lanes_left).time(p.x),
+                        p.y - lanes.top() + self.vscroll - self.slot,
+                    )
+                });
         }
         // Drags that began in the lanes, and bin drags over the timeline, scroll at the
         // edges; ruler and playhead scrubs scroll themselves, and a refused drag stays put.
         let scrubbing = scrub.is_pointer_button_down_on() || drag.dragged();
-        let refused = self.holding.is_some_and(|c| locked(seq, c));
+        let refused = self.holding.is_some_and(|c| locked(seq, c))
+            || self.drag_selection.iter().any(|id| locked(seq, *id));
         let ours = !refused
             && ui.ctx().dragged_id().is_some()
             && ui
@@ -1184,7 +1223,6 @@ impl Timeline {
         let mut lane_rects = Vec::new();
         // The clip being dragged, its track, and its response.
         let mut held = None;
-        let mut shown_clips = Vec::new();
         for (i, track) in tracks.iter().enumerate() {
             let extra = self.keys.extra(track);
             let lane = Rect::from_x_y_ranges(lanes.x_range(), y..=y + track.height + extra);
@@ -1234,7 +1272,6 @@ impl Timeline {
                     let stroke = Stroke::new(2.0, color::light_blue());
                     painter.rect_stroke(r, corner, stroke, egui::StrokeKind::Inside);
                 }
-                shown_clips.push((clip.id, r));
                 let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::click_and_drag());
                 if self.razor && cr.hovered() {
                     ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
@@ -1252,7 +1289,7 @@ impl Timeline {
                 {
                     edit = Some(self.razor_cut(seq, view, clip.id, p.x));
                 } else if cr.clicked() {
-                    self.keys.selected.clear();
+                    self.keys.clear_focus();
                     self.select(seq, clip.id, ui.input(|i| i.modifiers));
                 }
                 if cr.secondary_clicked() && !self.selected.contains(&clip.id) {
@@ -1285,8 +1322,26 @@ impl Timeline {
                 if cr.is_pointer_button_down_on() {
                     self.holding = Some(clip.id);
                 }
+                if cr.drag_started() {
+                    if !self.selected.contains(&clip.id) {
+                        self.select(seq, clip.id, egui::Modifiers::NONE);
+                        self.keys.clear_focus();
+                    }
+                    let mut group: Vec<_> = self
+                        .selected
+                        .iter()
+                        .filter(|id| seq.clip(**id).is_some())
+                        .flat_map(|id| seq.linked(*id).into_iter().map(|(_, c)| c.id))
+                        .collect();
+                    group.sort_unstable();
+                    group.dedup();
+                    self.drag_selection = group;
+                }
                 // A clip tied to a locked track can't move: no ghost, a refusal instead.
-                if cr.dragged() && locked(seq, clip.id) {
+                if cr.dragged()
+                    && (locked(seq, clip.id)
+                        || self.drag_selection.iter().any(|id| locked(seq, *id)))
+                {
                     ui.ctx().set_cursor_icon(CursorIcon::NotAllowed);
                     egui::Tooltip::for_widget(&cr)
                         .at_pointer()
@@ -1335,22 +1390,21 @@ impl Timeline {
                 .shrink2(vec2(1.0, 2.0));
             clip_painter.rect_filled(r, 0.0, color::blue().gamma_multiply(0.2));
         }
-        if let (Some(a), Some(b)) = (
-            ui.input(|i| i.pointer.press_origin()),
-            marquee.interact_pointer_pos(),
-        ) && (marquee.dragged() || marquee.drag_stopped())
+        if let (Some(origin), Some(b)) = (self.marquee_origin, marquee.interact_pointer_pos())
+            && (marquee.dragged() || marquee.drag_stopped())
         {
-            // The press point moves with the content as the view auto-scrolls.
-            let (ps, pv) = self.press_scroll;
-            let a = a + vec2(((ps - self.scroll) * self.zoom) as f32, pv - self.vscroll);
+            let a = pos2(
+                view.x(origin.0),
+                lanes.top() + self.slot + origin.1 - self.vscroll,
+            );
             let band = Rect::from_two_pos(a, b);
             if marquee.drag_stopped() {
-                self.keys.selected.clear();
+                self.keys.clear_focus();
                 if !mods.shift && !mods.command {
                     self.selected.clear();
                 }
-                let hit = shown_clips.iter().filter(|(_, r)| r.intersects(band));
-                self.selected.extend(hit.map(|(c, _)| *c));
+                let end = (view.time(b.x), b.y - lanes.top() + self.vscroll - self.slot);
+                self.selected.extend(self.marquee_hits(seq, origin, end));
             } else {
                 clip_painter.rect_filled(band, 0.0, color::blue().gamma_multiply(0.15));
                 let stroke = Stroke::new(1.0, color::light_blue());
@@ -1369,10 +1423,10 @@ impl Timeline {
             );
             egui::Popup::menu(&r).show(|ui| add_menu(ui, &mut edit));
         }
-        let moving = held.as_ref().map(|h| h.0.id).or(self.trim.map(|t| t.clip));
-        let moving: Vec<_> = moving.map_or(Vec::new(), |id| {
-            seq.linked(id).iter().map(|(_, c)| c.id).collect()
-        });
+        let moving: Vec<_> = match self.trim {
+            Some(t) => seq.linked(t.clip).iter().map(|(_, c)| c.id).collect(),
+            None => self.drag_selection.clone(),
+        };
         let mut top = false;
         let mut ghosts = self.drops(
             ui,
@@ -1385,6 +1439,11 @@ impl Timeline {
             &mut top,
             open,
         );
+        if !down {
+            self.drag_selection.clear();
+            self.drag_to = None;
+            self.marquee_origin = None;
+        }
         ghosts.extend(self.trim_ghosts(seq));
         // Dropped into the slot: the new track takes its place, so it closes at once.
         if open && edit.is_some() {
@@ -1809,31 +1868,41 @@ impl Timeline {
                 && (start != clip.start || to != from.id)
             {
                 let (id, track) = (clip.id, to);
-                *edit = Some((Command::DragClip { id, track, start }, None));
+                *edit = Some((
+                    Command::MoveSelection {
+                        ids: self.drag_selection.clone(),
+                        anchor: id,
+                        track,
+                        start,
+                    },
+                    None,
+                ));
             }
             return Vec::new();
         }
         let start = snap(clip.start + (view.time(p.x) - self.press_time(ui, view, p)));
         let seq = project.sequence();
-        let group = seq.linked(clip.id);
-        let ids: Vec<_> = group.iter().map(|(_, c)| c.id).collect();
+        let ids = self.drag_selection.clone();
+        let group: Vec<_> = ids.iter().filter_map(|id| seq.clip(*id)).collect();
         let edges: Vec<_> = group.iter().flat_map(|(_, c)| [c.start, c.end()]).collect();
         let edges: Vec<_> = edges.iter().map(|e| *e + start - clip.start).collect();
-        let start = (start + self.snap(seq, &ids, &edges)).max(Time(0));
+        let start = start + self.snap(seq, &ids, &edges);
         let to = lane_at(Some(from.kind)).unwrap_or(from.id);
-        self.drag_to = Some((to, start));
-        // Linked clips follow on their own tracks; the core clamps the move at zero.
-        let by = start - clip.start;
-        group
-            .into_iter()
-            .map(|(t, c)| {
-                (
-                    Some(if c.id == clip.id { to } else { t }),
-                    c.start + by,
-                    c.end() + by,
-                )
-            })
-            .collect()
+        match seq.plan_move_selection(&ids, clip.id, to, start) {
+            Ok(moved) => {
+                self.drag_to = Some((to, start));
+                moved
+                    .into_iter()
+                    .map(|(t, c)| (Some(t), c.start, c.end()))
+                    .collect()
+            }
+            Err(_) => {
+                self.drag_to = None;
+                self.snapped = None;
+                ui.ctx().set_cursor_icon(CursorIcon::NotAllowed);
+                Vec::new()
+            }
+        }
     }
 
     /// One track's header: ID, name or rename field, toggles, menu and height grip.
@@ -2226,7 +2295,7 @@ impl Timeline {
             if h != track.height {
                 let mut s = track.settings();
                 s.height = h;
-                edit = Some((Command::SetTrack(s), Some(RESIZE_GESTURE)));
+                edit = Some((Command::SetTrack(s), Some(RESIZE_GESTURE ^ track.id.0)));
             }
         }
         edit
@@ -4562,6 +4631,52 @@ mod tests {
         println!("timeline layout+paint, 500 clips ({lines} waveform lines): {ms:.3} ms/frame");
         assert!(ms < 16.6, "{ms:.3} ms/frame");
     }
+    #[test]
+    fn audit_435_ripple_delete_action_preserves_later_sync_and_undo() {
+        use jvid_core::history::Created;
+        let mut setup = History::new(project(0));
+        let tracks = setup.project().sequence().tracks();
+        let (v, a) = (tracks[0].id, tracks[1].id);
+        let mut add = |track, start, len| {
+            let Created::Clip(id) = setup
+                .apply(Command::AddClip {
+                    track,
+                    clip: NewClip {
+                        asset: AssetId(1),
+                        start: Time(start * S),
+                        source_in: Time(0),
+                        source_out: Time(len * S),
+                        link: None,
+                    },
+                })
+                .unwrap()
+            else {
+                panic!("clip")
+            };
+            id
+        };
+        let intro = add(v, 0, 5);
+        let cv = add(v, 5, 10);
+        let ca = add(a, 5, 10);
+        setup
+            .apply(Command::LinkClips {
+                ids: vec![cv, ca],
+                linked: true,
+            })
+            .unwrap();
+        let before = setup.project().clone();
+        let mut h = History::new(before.clone());
+        let mut t = Timeline::default();
+        t.select_clip(h.project().sequence(), intro);
+        t.action("ripple_delete", h.project());
+        h.apply(t.pending.take().unwrap()).unwrap();
+        for id in [cv, ca] {
+            assert_eq!(h.project().sequence().clip(id).unwrap().1.start, Time(0));
+        }
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert!(!h.can_undo());
+    }
 }
 
 #[cfg(test)]
@@ -4639,5 +4754,273 @@ mod multitrack_tests {
             .collect();
         assert_eq!(audio.len(), 1);
         assert_eq!(audio[0].clips()[0].stream, None);
+    }
+}
+
+#[cfg(test)]
+mod audit_b04_tests {
+    use super::*;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+    const S: i64 = FLICKS_PER_SECOND;
+
+    fn harness(project: Project, ppp: f32) -> Harness<'static, (Timeline, History)> {
+        let mut fresh = true;
+        let mut h = Harness::builder()
+            .with_size([600.0, 240.0])
+            .with_pixels_per_point(ppp)
+            .with_step_dt(0.1)
+            .build_ui_state(
+                move |ui, (t, h): &mut (Timeline, History)| {
+                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        if let Some((c, key)) =
+                            t.show(ui, h.project(), &HashSet::new(), &Keymap::default())
+                        {
+                            let result = match key {
+                                Some(key) => h.apply_coalesced(key, c),
+                                None => h.apply(c),
+                            };
+                            t.applied(result.is_ok());
+                            result.unwrap();
+                        }
+                        if !ui.input(|i| i.pointer.any_down()) {
+                            h.end_gesture();
+                        }
+                    }
+                },
+                (Timeline::default(), History::new(project)),
+            );
+        h.run();
+        h
+    }
+
+    fn drag(h: &mut Harness<'_, (Timeline, History)>, from: Pos2, to: Pos2) {
+        h.hover_at(from);
+        h.run();
+        h.drag_at(from);
+        h.run();
+        h.hover_at(to);
+        h.run();
+        h.drop_at(to);
+        h.run();
+    }
+
+    #[test]
+    fn dragging_three_selected_adjacent_clips_moves_every_member() {
+        let p = tests::project(6);
+        let clips = p.sequence().tracks()[0].clips().to_vec();
+        let mut h = harness(p.clone(), 1.0);
+        h.state_mut().0.selected = clips.iter().map(|c| c.id).collect();
+        h.state_mut().0.snapping = false;
+        let y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let from = pos2(8.0 + size::TRACK_HEADER + 20.0, y);
+        drag(&mut h, from, from + vec2(40.0, 0.0));
+        for c in clips {
+            assert_eq!(
+                h.state().1.project().sequence().clip(c.id).unwrap().1.start,
+                c.start + Time(2 * S)
+            );
+        }
+        assert!(h.state_mut().1.undo());
+        assert_eq!(h.state().1.project(), &p);
+        assert!(!h.state().1.can_undo());
+    }
+
+    #[test]
+    fn selection_drag_refuses_a_locked_member_and_unselected_drag_replaces_selection() {
+        let mut setup = History::new(tests::project(6));
+        let seq = setup.project().sequence();
+        let (video, audio) = (seq.tracks()[0].clips()[0].id, seq.tracks()[1].clips()[0].id);
+        let mut settings = seq.tracks()[1].settings();
+        settings.locked = true;
+        setup.apply(Command::SetTrack(settings)).unwrap();
+        let before = setup.project().clone();
+        let mut h = harness(before.clone(), 1.0);
+        h.state_mut().0.selected = [video, audio].into();
+        let y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+        let from = pos2(8.0 + size::TRACK_HEADER + 20.0, y);
+        drag(&mut h, from, from + vec2(40.0, 0.0));
+        assert_eq!(h.state().1.project(), &before);
+        assert!(!h.state().1.can_undo());
+        h.state_mut().0.selected = [audio].into();
+        h.state_mut().0.snapping = false;
+        drag(&mut h, from, from + vec2(40.0, 0.0));
+        assert_eq!(h.state().0.selected, [video].into());
+        assert_eq!(
+            h.state()
+                .1
+                .project()
+                .sequence()
+                .clip(video)
+                .unwrap()
+                .1
+                .start,
+            Time(2 * S)
+        );
+        assert_eq!(
+            h.state()
+                .1
+                .project()
+                .sequence()
+                .clip(audio)
+                .unwrap()
+                .1
+                .start,
+            Time(0)
+        );
+    }
+
+    #[test]
+    fn marquee_selects_across_four_horizontal_viewports_at_both_scales() {
+        for ppp in [1.0, 1.5] {
+            let p = tests::project(160);
+            let mut h = harness(p.clone(), ppp);
+            h.set_size(vec2(420.0, 200.0));
+            h.run();
+            let top = h.get_all_by_label("Lock").next().unwrap().rect().center().y - 16.0;
+            let from = pos2(8.0 + size::TRACK_HEADER + 12.0, top + 1.0);
+            let to = pos2(404.0, top + 20.0);
+            h.hover_at(from);
+            h.run();
+            h.drag_at(from);
+            h.step();
+            h.hover_at(to);
+            for _ in 0..45 {
+                h.step();
+            }
+            assert!(
+                h.state().0.scroll >= h.state().0.span() * 3.0,
+                "scroll {}, span {}, held {:?}, from {from:?} to {to:?}, dragged {:?}",
+                h.state().0.scroll,
+                h.state().0.span(),
+                h.state().0.holding,
+                h.ctx.dragged_id()
+            );
+            h.drop_at(to);
+            h.run();
+            let t = &h.state().0;
+            let end = t.view(8.0 + size::TRACK_HEADER).time(to.x);
+            let expected: HashSet<_> = p.sequence().tracks()[0]
+                .clips()
+                .iter()
+                .filter(|c| c.start < end)
+                .map(|c| c.id)
+                .collect();
+            assert!(expected.len() >= 20);
+            assert_eq!(
+                t.selected, expected,
+                "scale {ppp}; final scroll {}",
+                t.scroll
+            );
+        }
+    }
+
+    #[test]
+    fn marquee_selects_tracks_swept_before_vertical_autoscroll() {
+        use jvid_core::history::Created;
+        let mut setup = History::new(tests::project(0));
+        let mut expected = HashSet::new();
+        for i in 0..10 {
+            let Created::Track(track) = setup
+                .apply(Command::AddTrack {
+                    kind: TrackKind::Video,
+                    name: format!("V{i}"),
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            let Created::Clip(clip) = setup
+                .apply(Command::AddClip {
+                    track,
+                    clip: jvid_core::model::NewClip {
+                        asset: AssetId(1),
+                        start: Time(0),
+                        source_in: Time(0),
+                        source_out: Time(2 * S),
+                        link: None,
+                    },
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            expected.insert(clip);
+        }
+        let mut h = harness(setup.project().clone(), 1.5);
+        h.set_size(vec2(420.0, 200.0));
+        h.run();
+        let top = h.get_all_by_label("Lock").next().unwrap().rect().center().y - 16.0;
+        let from = pos2(8.0 + size::TRACK_HEADER + 12.0, top + 1.0);
+        let to = pos2(8.0 + size::TRACK_HEADER + 20.0, 184.0);
+        h.hover_at(from);
+        h.run();
+        h.drag_at(from);
+        h.step();
+        h.hover_at(to);
+        for _ in 0..35 {
+            h.step();
+        }
+        assert!(
+            h.state().0.vscroll > 200.0,
+            "vscroll {}, held {:?}, from {from:?} to {to:?}, dragged {:?}",
+            h.state().0.vscroll,
+            h.state().0.holding,
+            h.ctx.dragged_id()
+        );
+        h.drop_at(to);
+        h.run();
+        assert_eq!(h.state().0.selected, expected);
+    }
+
+    #[test]
+    fn marquee_modifiers_add_hits_and_linked_selection_is_explicit() {
+        let mut setup = History::new(tests::project(4));
+        let tracks = setup.project().sequence().tracks();
+        let (v, later, a) = (
+            tracks[0].clips()[0].id,
+            tracks[0].clips()[1].id,
+            tracks[1].clips()[0].id,
+        );
+        setup
+            .apply(Command::LinkClips {
+                ids: vec![v, a],
+                linked: true,
+            })
+            .unwrap();
+        for mods in [egui::Modifiers::SHIFT, egui::Modifiers::COMMAND] {
+            let mut h = harness(setup.project().clone(), 1.0);
+            h.state_mut().0.selected.insert(later);
+            let top = h.get_all_by_label("Lock").next().unwrap().rect().center().y - 16.0;
+            let from = pos2(180.0, top + 1.0);
+            let to = pos2(190.0, top + 20.0);
+            h.event(egui::Event::ModifiersChanged(mods));
+            h.hover_at(from);
+            h.run();
+            h.event(egui::Event::PointerButton {
+                pos: from,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: mods,
+            });
+            h.run();
+            h.hover_at(to);
+            h.run();
+            h.event(egui::Event::PointerButton {
+                pos: to,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: mods,
+            });
+            h.run();
+            assert_eq!(h.state().0.selected, [v, a, later].into());
+            h.state_mut().0.linked_selection = false;
+            let hits = h.state().0.marquee_hits(
+                setup.project().sequence(),
+                (Time(0), 1.0),
+                (Time(S), 20.0),
+            );
+            assert_eq!(hits, [v].into());
+        }
     }
 }

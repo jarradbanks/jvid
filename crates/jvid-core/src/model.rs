@@ -2210,6 +2210,75 @@ impl Sequence {
             .collect()
     }
 
+    /// Plans one selection move for both preview and application. Track offsets are
+    /// relative to the anchor; a destination outside the stack or of another kind refuses
+    /// the whole move. Linked partners join the selection even when not explicitly picked.
+    pub fn plan_move_selection(
+        &self,
+        ids: &[ClipId],
+        anchor: ClipId,
+        track: TrackId,
+        start: Time,
+    ) -> Result<Vec<(TrackId, Clip)>, ModelError> {
+        let (from, c) = self.clip(anchor).ok_or(ModelError::UnknownClip(anchor))?;
+        let offset = self.index(track)? as isize - self.index(from)? as isize;
+        let mut moving = BTreeMap::new();
+        for id in ids.iter().copied().chain(std::iter::once(anchor)) {
+            self.clip(id).ok_or(ModelError::UnknownClip(id))?;
+            for (t, c) in self.linked(id) {
+                moving.insert(c.id, (t, c.clone()));
+            }
+        }
+        let earliest = moving.values().map(|(_, c)| c.start).min().expect("anchor");
+        let by = (start - c.start).max(Time(0) - earliest);
+        moving
+            .into_values()
+            .map(|(from, mut c)| {
+                let ti = self.index(from)?;
+                let to = (ti as isize + offset)
+                    .try_into()
+                    .ok()
+                    .and_then(|i: usize| self.tracks.get(i))
+                    .ok_or(ModelError::WrongKind(track))?;
+                self.kind_check(to.id, self.tracks[ti].kind)?;
+                for t in [&self.tracks[ti], to] {
+                    if t.locked {
+                        return Err(ModelError::Locked(t.id));
+                    }
+                }
+                c.start = c.start + by;
+                Ok((to.id, c))
+            })
+            .collect()
+    }
+
+    pub(crate) fn move_selection(
+        &mut self,
+        ids: &[ClipId],
+        anchor: ClipId,
+        track: TrackId,
+        start: Time,
+    ) -> Result<(), ModelError> {
+        let moved = self.plan_move_selection(ids, anchor, track, start)?;
+        let mut s = self.clone();
+        for (_, c) in &moved {
+            s.remove_clip(c.id)?;
+        }
+        let mut links = BTreeMap::new();
+        // Clear every destination before inserting, so moving members cannot overwrite one
+        // another even where their new spans overlap another member's original position.
+        for (t, c) in &moved {
+            let ti = s.index(*t)?;
+            s.clear(ti, c.start, c.end(), &mut links);
+        }
+        for (t, c) in moved {
+            let ti = s.index(t)?;
+            insert_sorted(&mut s.tracks[ti].clips, c);
+        }
+        *self = s;
+        Ok(())
+    }
+
     /// Drags clip `id` to `start` on `track`, its linked clips by the same time on their own
     /// tracks, overwriting whatever they land on. Nothing moves before zero.
     pub(crate) fn drag_clip(
@@ -2247,23 +2316,53 @@ impl Sequence {
 }
 
 impl Sequence {
-    /// Removes the clips. Ripple closes each gap by pulling later clips on its track left.
+    /// Removes the clips atomically. Ripple plans each surviving linked group's common
+    /// shift from the union of deleted intervals relative to its members' starts. This
+    /// counts corresponding A/V intervals once even when the partners have an offset.
     pub(crate) fn remove_clips(&mut self, ids: &[ClipId], ripple: bool) -> Result<(), ModelError> {
         let mut s = self.clone();
         let mut gone = Vec::new();
         for &id in ids {
-            gone.push(s.remove_clip(id)?);
+            if !gone.iter().any(|(_, c): &(TrackId, Clip)| c.id == id) {
+                gone.push(s.remove_clip(id)?);
+            }
         }
         if ripple {
-            gone.sort_by_key(|(_, c)| std::cmp::Reverse(c.start));
-            for (t, c) in gone {
-                let ti = s.index(t)?;
-                for later in &mut s.tracks[ti].clips {
-                    if later.start >= c.start {
-                        later.start = later.start - c.duration();
+            let mut shifts = BTreeMap::new();
+            for track in &s.tracks {
+                for clip in &track.clips {
+                    if shifts.contains_key(&clip.id) {
+                        continue;
+                    }
+                    let group = s.linked(clip.id);
+                    let mut intervals: Vec<_> = group
+                        .iter()
+                        .flat_map(|(t, c)| {
+                            gone.iter()
+                                .filter(move |(from, removed)| {
+                                    from == t && removed.end() <= c.start
+                                })
+                                .map(|(_, removed)| {
+                                    (removed.start - c.start, removed.end() - c.start)
+                                })
+                        })
+                        .collect();
+                    intervals.sort_unstable();
+                    let mut union: Vec<(Time, Time)> = Vec::new();
+                    for (start, end) in intervals {
+                        if let Some(last) = union.last_mut().filter(|last| start <= last.1) {
+                            last.1 = last.1.max(end);
+                        } else {
+                            union.push((start, end));
+                        }
+                    }
+                    let by = union.into_iter().fold(Time(0), |by, (a, b)| by - (b - a));
+                    for (_, c) in group {
+                        shifts.insert(c.id, by);
                     }
                 }
             }
+            s.apply_shifts(&shifts)?;
         }
         *self = s;
         Ok(())
@@ -3020,6 +3119,18 @@ impl Sequence {
         Ok(())
     }
 
+    /// Validate the full mutation closure before a ripple changes any starts.
+    fn check_shift_locks(&self, ids: &[ClipId]) -> Result<(), ModelError> {
+        for id in ids {
+            for (track, _) in self.linked(*id) {
+                if self.track(track).is_some_and(|t| t.locked) {
+                    return Err(ModelError::Locked(track));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Moves `ids` and their linked partners on other tracks by `by`, so ripples keep sync.
     /// Fails, leaving `self` half-moved, if a moved clip would land on another or before zero.
     fn shift_synced(&mut self, mut ids: Vec<ClipId>, by: Time) -> Result<(), ModelError> {
@@ -3030,16 +3141,28 @@ impl Sequence {
                 }
             }
         }
+        let shifts = ids.into_iter().map(|id| (id, by)).collect();
+        self.apply_shifts(&shifts)
+    }
+
+    /// Applies a complete ripple plan on a private candidate, validating the final layout.
+    fn apply_shifts(&mut self, shifts: &BTreeMap<ClipId, Time>) -> Result<(), ModelError> {
+        let moving: Vec<_> = shifts
+            .iter()
+            .filter(|(_, by)| **by != Time(0))
+            .map(|(id, _)| *id)
+            .collect();
+        self.check_shift_locks(&moving)?;
         for t in &mut self.tracks {
-            for c in t.clips.iter_mut().filter(|c| ids.contains(&c.id)) {
-                c.start = c.start + by;
+            for c in &mut t.clips {
+                c.start = c.start + shifts.get(&c.id).copied().unwrap_or_default();
                 if c.start < Time(0) {
                     return Err(ModelError::Overlap(c.id));
                 }
             }
             t.clips.sort_by_key(|c| c.start);
             if let Some(w) = t.clips.windows(2).find(|w| w[0].end() > w[1].start) {
-                let hit = if ids.contains(&w[0].id) {
+                let hit = if moving.contains(&w[0].id) {
                     w[1].id
                 } else {
                     w[0].id
