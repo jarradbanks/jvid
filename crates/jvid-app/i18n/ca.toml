@@ -50,6 +50,9 @@ link = "Enllaça/Desenllaça"
 enable = "Habilita/Inhabilita"
 reverse = "Inverteix"
 freeze_frame = "Congela el fotograma al capçal de reproducció"
+fit_to_frame = "Ajusta al fotograma"
+fill_frame = "Omple el fotograma"
+stretch_to_fit = "Estira per ajustar"
 copy_grade = "Copia la gradació"
 paste_grade = "Enganxa la gradació"
 hide_region = "Amaga la regió"
@@ -974,3 +977,6 @@ none = "No hi ha crosses ni pauses"
 [analysis]
 audio_source = "Font d’Àudio"
 source_stream = "{name} · Pista {number}"
+
+[framing]
+target = "{track} · {clip}"

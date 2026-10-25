@@ -50,6 +50,9 @@ link = "Verknüpfen/Verknüpfung aufheben"
 enable = "Aktivieren/Deaktivieren"
 reverse = "Rückwärts"
 freeze_frame = "Standbild am Abspielkopf"
+fit_to_frame = "In Bild einpassen"
+fill_frame = "Bild ausfüllen"
+stretch_to_fit = "Auf Bildgröße strecken"
 copy_grade = "Grading kopieren"
 paste_grade = "Grading einfügen"
 hide_region = "Bereich verbergen"
@@ -962,3 +965,6 @@ none = "Keine Füllwörter oder Pausen"
 [analysis]
 audio_source = "Audioquelle"
 source_stream = "{name} · Stream {number}"
+
+[framing]
+target = "{track} · {clip}"

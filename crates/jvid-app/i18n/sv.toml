@@ -50,6 +50,9 @@ link = "Länka/ta bort länk"
 enable = "Aktivera/inaktivera"
 reverse = "Baklänges"
 freeze_frame = "Frys bildruta vid uppspelningsmarkören"
+fit_to_frame = "Anpassa till bildruta"
+fill_frame = "Fyll bildruta"
+stretch_to_fit = "Sträck till bildruta"
 copy_grade = "Kopiera gradering"
 paste_grade = "Klistra in gradering"
 hide_region = "Dölj område"
@@ -962,3 +965,6 @@ none = "Inga utfyllnadsord eller pauser"
 [analysis]
 audio_source = "Ljudkälla"
 source_stream = "{name} · Ström {number}"
+
+[framing]
+target = "{track} · {clip}"

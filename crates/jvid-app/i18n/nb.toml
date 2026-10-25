@@ -50,6 +50,9 @@ link = "Koble til/fra"
 enable = "Aktiver/deaktiver"
 reverse = "Baklengs"
 freeze_frame = "Frys bildet ved spillehodet"
+fit_to_frame = "Tilpass til bilderamme"
+fill_frame = "Fyll bilderamme"
+stretch_to_fit = "Strekk til bilderamme"
 copy_grade = "Kopier grading"
 paste_grade = "Lim inn grading"
 hide_region = "Skjul område"
@@ -962,3 +965,6 @@ none = "Ingen fyllord eller pauser"
 [analysis]
 audio_source = "Lydkilde"
 source_stream = "{name} · Strøm {number}"
+
+[framing]
+target = "{track} · {clip}"

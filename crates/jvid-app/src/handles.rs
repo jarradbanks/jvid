@@ -28,7 +28,7 @@ const WIDE_DIM: f32 = 0.6;
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Grab {
     Move,
-    /// Scale from a handle; corners and edges both scale uniformly, as the Inspector links scale.
+    /// Scale from a handle; corners and edges both preserve the current X/Y ratio.
     Scale,
     Rotate,
     /// Drag the reframe box, the project frame, over a wide shot: the clip moves the other way.
@@ -91,7 +91,12 @@ fn dragged(
 
 /// The four corners (top-left, top-right, bottom-left, bottom-right) of `c` under `x` on
 /// screen, with `frame` the project's on-screen rect; `None` when cropped away.
-fn corners(project: &Project, c: &Clip, x: &Transform, frame: Rect) -> Option<[Pos2; 4]> {
+pub(crate) fn corners(
+    project: &Project,
+    c: &Clip,
+    x: &Transform,
+    frame: Rect,
+) -> Option<[Pos2; 4]> {
     let st = project.settings();
     let size = [st.width as f32, st.height as f32];
     let image = crate::masks::upright(project, c).unwrap_or(size);
@@ -124,6 +129,33 @@ fn bounds(
     // The quad is a parallelogram, so image coordinates map linearly onto it.
     let at = |px: u32, py: u32| tl + (tr - tl) * (px as f32 / w) + (bl - tl) * (py as f32 / h);
     Some([at(x0, y0), at(x1, y0), at(x0, y1), at(x1, y1)])
+}
+
+/// The top visible clip whose transformed image contains `pos`. Generated titles use
+/// their drawn text bounds, so empty title canvas does not hide the footage below.
+pub fn clip_at(project: &Project, t: Time, frame: Rect, pos: Pos2) -> Option<ClipId> {
+    jvid_core::eval::video_at(project.sequence(), t)
+        .into_iter()
+        .find_map(|l| {
+            if l.transform.opacity <= 0.0 {
+                return None;
+            }
+            let (_, c) = project.sequence().clip(l.clip)?;
+            let text = project
+                .asset(c.asset)?
+                .text
+                .as_ref()
+                .map(|text| text.with(&l.text));
+            let [tl, tr, bl, _] = bounds(project, c, &l.transform, text.as_ref(), frame)?;
+            let (u, v, d) = (tr - tl, bl - tl, pos - tl);
+            let det = u.x * v.y - u.y * v.x;
+            if det.abs() < 1e-6 {
+                return None;
+            }
+            let a = (d.x * v.y - d.y * v.x) / det;
+            let b = (u.x * d.y - u.y * d.x) / det;
+            ((0.0..=1.0).contains(&a) && (0.0..=1.0).contains(&b)).then_some(c.id)
+        })
 }
 
 /// The top text clip with glyphs (or its box) near a double-click, and where it was, at playhead `t`, inside
@@ -363,12 +395,14 @@ pub fn show(
     let s = frame.width() / st.width as f32;
     // A shot of another shape covering the frame, as Reframe leaves one: the frame is a box
     // to aim over it.
+    let drawn = Rect::from_points(&[tl, tr, bl, br]);
     let reframe = text.is_none()
         && crate::masks::upright(project, c)
             .is_some_and(|[w, h]| (w / h - st.width as f32 / st.height as f32).abs() > 0.01)
-        && Rect::from_points(&[tl, tr, bl, br])
-            .expand(0.5)
-            .contains_rect(frame);
+        && drawn.expand(0.5).contains_rect(frame)
+        // Stretch can match the frame exactly. Only overflow is a wide shot to reframe;
+        // an exact match retains the normal drag direction for the clip.
+        && (drawn.width() > frame.width() + 0.5 || drawn.height() > frame.height() + 0.5);
     let anchor = frame.center() + vec2(x.position[0] as f32, x.position[1] as f32) * s;
     let up = (tl - bl).normalized();
     let top = tl.lerp(tr, 0.5);

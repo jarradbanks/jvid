@@ -50,6 +50,9 @@ link = "Vincular/desvincular"
 enable = "Ativar/desativar"
 reverse = "Inverter"
 freeze_frame = "Congelar quadro no indicador de reprodução"
+fit_to_frame = "Ajustar ao quadro"
+fill_frame = "Preencher quadro"
+stretch_to_fit = "Esticar para ajustar"
 copy_grade = "Copiar correção"
 paste_grade = "Colar correção"
 hide_region = "Ocultar região"
@@ -978,3 +981,6 @@ none = "Nenhum vício ou pausa"
 [analysis]
 audio_source = "Fonte de Áudio"
 source_stream = "{name} · Faixa {number}"
+
+[framing]
+target = "{track} · {clip}"

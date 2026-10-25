@@ -6,6 +6,7 @@
 pub mod curve;
 pub mod eval;
 pub mod file;
+pub mod framing;
 pub mod hdr;
 pub mod history;
 pub mod keyframe;

@@ -50,6 +50,9 @@ link = "Propojit/Rozpojit"
 enable = "Povolit/Zakázat"
 reverse = "Obrátit"
 freeze_frame = "Zmrazit snímek na pozici přehrávací hlavy"
+fit_to_frame = "Přizpůsobit snímku"
+fill_frame = "Vyplnit snímek"
+stretch_to_fit = "Roztáhnout na snímek"
 copy_grade = "Kopírovat grading"
 paste_grade = "Vložit grading"
 hide_region = "Skrýt oblast"
@@ -979,3 +982,6 @@ none = "Žádné vycpávky ani pauzy"
 [analysis]
 audio_source = "Zdroj Zvuku"
 source_stream = "{name} · Stopa {number}"
+
+[framing]
+target = "{track} · {clip}"

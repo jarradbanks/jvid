@@ -119,8 +119,7 @@ const SECTIONS: [(&str, &[Prop<'static>]); 4] = [
             Prop {
                 display: 100.0,
                 suffix: "%",
-                slider: Some((0.0, 4.0)),
-                ..prop("scale", ONE)
+                ..prop("scale", XY)
             },
             Prop {
                 suffix: "°",
@@ -270,7 +269,7 @@ pub(crate) fn mask_param(name: &str) -> Option<(usize, &str)> {
     Some((i.parse().ok()?, p))
 }
 
-/// `name`'s value in `x`; scale reads as linked, X for both.
+/// `name`'s value in `x`, including both scale axes.
 fn get(x: &Transform, name: &str) -> Value {
     if let Some((i, p)) = fx_param(name) {
         let v = x.effects.get(i).and_then(|e| e.params.get(p));
@@ -306,7 +305,7 @@ fn get(x: &Transform, name: &str) -> Value {
     match name {
         "position" => Value::Vec2(x.position),
         "anchor" => Value::Vec2(x.anchor),
-        "scale" => Value::Scalar(x.scale[0]),
+        "scale" => Value::Vec2(x.scale),
         "rotation" => Value::Scalar(x.rotation),
         "opacity" => Value::Scalar(x.opacity),
         "exposure" => Value::Scalar(x.exposure),
@@ -378,6 +377,7 @@ fn set(x: &mut Transform, name: &str, v: Value) {
             x.scale = [v, x.scale[1] * v / x.scale[0]]
         }
         ("scale", Value::Scalar(v)) => x.scale = [v; 2],
+        ("scale", Value::Vec2(v)) => x.scale = v,
         ("rotation", Value::Scalar(v)) => x.rotation = v,
         ("opacity", Value::Scalar(v)) => x.opacity = v.clamp(0.0, 1.0),
         ("exposure", Value::Scalar(v)) => x.exposure = v.clamp(-4.0, 4.0),
@@ -460,6 +460,15 @@ fn rewrite(
 
 /// Adds or replaces the keyframe of `name` at timeline time `t`.
 fn key(c: &Clip, keys: &mut BTreeMap<String, Vec<Keyframe>>, name: &str, t: Time, v: Value) {
+    // Scale historically allowed scalar keys. Keep interpolation continuous when an
+    // independent-axis edit introduces Vec2 values into that animation.
+    if name == "scale" && matches!(v, Value::Vec2(_)) {
+        for k in keys.get_mut(name).into_iter().flatten() {
+            if let Value::Scalar(s) = k.value {
+                k.value = Value::Vec2([s; 2]);
+            }
+        }
+    }
     let list = keys.entry(name.into()).or_default();
     let time = source(c, t);
     match list.binary_search_by(|k| k.time.cmp(&time)) {
@@ -2908,9 +2917,14 @@ fn row(
     // Values' width, as `prop_row` leaves it.
     let w = ui.available_width() - size::INSPECTOR_LABEL - TOOLS - 2.0 * space::S4;
     // Too narrow for every field to show its prefix and three digits, two to a line.
-    let lines = match n > 2 && (w - space::S4 * (n - 1) as f32) / (n as f32) < MIN_FIELD {
-        true => n.div_ceil(2),
-        false => 1,
+    let field_width = (w - space::S4 * (n - 1) as f32) / n as f32;
+    let lines = if p.name == "scale" && field_width < 76.0 {
+        // Percentages need room for X/Y, a decimal and the suffix at the panel minimum.
+        2
+    } else if n > 2 && field_width < MIN_FIELD {
+        n.div_ceil(2)
+    } else {
+        1
     };
     let per = n.div_ceil(lines);
     let (_, c) = prop_rows(ui, p.label(), tools, lines, |ui| {
@@ -4788,7 +4802,12 @@ mod tests {
                 .transform
                 .rotation
         };
-        let field = h.get_all_by_label("").nth(1).unwrap().rect().center();
+        let field = h
+            .get_all_by_role(egui::accesskit::Role::SpinButton)
+            .nth(4)
+            .unwrap()
+            .rect()
+            .center();
         for _ in 0..2 {
             h.hover_at(field);
             h.run();
@@ -4804,6 +4823,71 @@ mod tests {
         assert_eq!(rotation(&h), 10.0);
         assert!(h.state_mut().undo());
         assert_eq!(rotation(&h), 0.0);
+    }
+
+    #[test]
+    fn independent_scale_axes_display_and_edit_without_changing_the_other_axis() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::{NodeT, Queryable};
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness();
+        let c = h.state().project().sequence().tracks()[0].clips()[0].clone();
+        let x = Transform {
+            scale: [4.0 / 3.0, 1.0],
+            ..c.transform.clone()
+        };
+        h.state_mut()
+            .apply(set_props(&[&c], &["scale"], &x, Time(0)))
+            .unwrap();
+        h.run();
+        let axes: Vec<_> = h
+            .get_all_by_role(Role::SpinButton)
+            .skip(2)
+            .take(2)
+            .collect();
+        axes[0].focus();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert_eq!(
+            h.get_by_role(Role::TextInput)
+                .accesskit_node()
+                .value()
+                .as_deref(),
+            Some("133.3")
+        );
+        h.key_press(egui::Key::Escape);
+        h.run();
+        h.get_all_by_role(Role::SpinButton).nth(3).unwrap().focus();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert_eq!(
+            h.get_by_role(Role::TextInput)
+                .accesskit_node()
+                .value()
+                .as_deref(),
+            Some("100.0")
+        );
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run();
+        h.event(egui::Event::Text("150".into()));
+        h.run();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert_eq!(
+            h.state().project().sequence().tracks()[0].clips()[0]
+                .transform
+                .scale,
+            [4.0 / 3.0, 1.5]
+        );
+        assert!(h.state_mut().undo());
+        assert_eq!(
+            h.state().project().sequence().tracks()[0].clips()[0]
+                .transform
+                .scale,
+            [4.0 / 3.0, 1.0]
+        );
     }
 
     /// The scale row, as in [`SECTIONS`].
@@ -5045,26 +5129,26 @@ mod tests {
             return;
         }
         let mut h = harness();
-        let scale = |h: &egui_kittest::Harness<'_, History>| {
+        let opacity = |h: &egui_kittest::Harness<'_, History>| {
             h.state().project().sequence().tracks()[0].clips()[0]
                 .transform
-                .scale[0]
+                .opacity
         };
-        let rect = h.get_by_role_and_label(Role::Slider, "Scale").rect();
-        let from = egui::pos2(rect.left() + rect.width() / 4.0, rect.center().y);
+        let rect = h.get_by_role_and_label(Role::Slider, "Opacity").rect();
+        let from = egui::pos2(rect.left() + rect.width() * 0.9, rect.center().y);
         h.hover_at(from);
         h.run();
         h.drag_at(from);
         h.run();
-        for dx in [10.0, 20.0, 30.0] {
+        for dx in [-10.0, -20.0, -30.0] {
             h.hover_at(from + vec2(dx, 0.0));
             h.run();
         }
-        h.drop_at(from + vec2(30.0, 0.0));
+        h.drop_at(from + vec2(-30.0, 0.0));
         h.run();
-        assert!(scale(&h) > 1.0, "{}", scale(&h));
+        assert!(opacity(&h) < 1.0, "{}", opacity(&h));
         assert!(h.state_mut().undo());
-        assert_eq!(scale(&h), 1.0);
+        assert_eq!(opacity(&h), 1.0);
     }
 
     /// #263: a band drag, a preset and a double-click reset are one undo step each; Custom shows

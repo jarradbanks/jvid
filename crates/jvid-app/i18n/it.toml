@@ -50,6 +50,9 @@ link = "Collega/Scollega"
 enable = "Attiva/Disattiva"
 reverse = "Inverti"
 freeze_frame = "Fermo immagine alla testina"
+fit_to_frame = "Adatta al fotogramma"
+fill_frame = "Riempi fotogramma"
+stretch_to_fit = "Allunga per adattare"
 copy_grade = "Copia grading"
 paste_grade = "Incolla grading"
 hide_region = "Nascondi area"
@@ -974,3 +977,6 @@ none = "Nessun riempitivo o pausa"
 [analysis]
 audio_source = "Sorgente Audio"
 source_stream = "{name} · Traccia {number}"
+
+[framing]
+target = "{track} · {clip}"

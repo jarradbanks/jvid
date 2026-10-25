@@ -50,6 +50,9 @@ link = "Link/Unlink"
 enable = "Enable/Disable"
 reverse = "Reverse"
 freeze_frame = "Freeze Frame at Playhead"
+fit_to_frame = "Fit to Frame"
+fill_frame = "Fill Frame"
+stretch_to_fit = "Stretch to Fit"
 copy_grade = "Copy Grade"
 paste_grade = "Paste Grade"
 hide_region = "Hide Region"
@@ -1068,3 +1071,6 @@ none = "No fillers or pauses"
 [analysis]
 audio_source = "Audio Source"
 source_stream = "{name} · Stream {number}"
+
+[framing]
+target = "{track} · {clip}"

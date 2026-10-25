@@ -50,6 +50,9 @@ link = "Połącz/Rozłącz"
 enable = "Włącz/Wyłącz"
 reverse = "Odtwarzaj wstecz"
 freeze_frame = "Wstaw stopklatkę przy wskaźniku"
+fit_to_frame = "Dopasuj do klatki"
+fill_frame = "Wypełnij klatkę"
+stretch_to_fit = "Rozciągnij do klatki"
 copy_grade = "Kopiuj gradację"
 paste_grade = "Wklej gradację"
 hide_region = "Ukryj obszar"
@@ -986,3 +989,6 @@ none = "Brak wypełniaczy i pauz"
 [analysis]
 audio_source = "Źródło Dźwięku"
 source_stream = "{name} · Strumień {number}"
+
+[framing]
+target = "{track} · {clip}"

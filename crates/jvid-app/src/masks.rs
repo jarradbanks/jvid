@@ -20,16 +20,15 @@ const HANDLE: f32 = 7.0;
 /// How near the first point a click closes the path being drawn.
 const CLOSE: f32 = 8.0;
 
-/// `c`'s image size upright, as frames decode; `None` for a solid or title, which have no
-/// probe and fill the frame.
+/// `c`'s square-pixel display size upright, as the compositor places it. Solids and titles
+/// have no probe and fill the frame, so they return `None`.
 pub fn upright(project: &Project, c: &Clip) -> Option<[f32; 2]> {
-    let p = project.asset(c.asset)?.probe.as_ref()?;
-    let turned = p
-        .streams
-        .iter()
-        .any(|s| matches!(s, jvid_core::model::StreamInfo::Video(v) if v.rotation % 180 == 90));
-    let [w, h] = [p.width? as f32, p.height? as f32];
-    Some(if turned { [h, w] } else { [w, h] })
+    project
+        .asset(c.asset)?
+        .probe
+        .as_ref()?
+        .display_size()
+        .map(|s| s.map(|v| v as f32))
 }
 
 /// `c`'s image size fitted to the frame: the pixels its masks' points are in.

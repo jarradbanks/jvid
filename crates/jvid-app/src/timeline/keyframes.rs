@@ -234,6 +234,18 @@ fn paste(c: &Clip, copied: &[(String, Keyframe)], at: Time) -> Command {
             let time = k.time + base;
             put(keys.entry(p.clone()).or_default(), Keyframe { time, ..*k });
         }
+        // The clipboard can outlive an Inspector scale edit, or come from a clip that
+        // already uses independent axes. Promote both retained and incoming scalar keys
+        // together so Value::lerp never encounters mixed scale variants.
+        if let Some(scale) = keys.get_mut("scale")
+            && scale.iter().any(|k| matches!(k.value, Value::Vec2(_)))
+        {
+            for k in scale {
+                if let Value::Scalar(s) = k.value {
+                    k.value = Value::Vec2([s; 2]);
+                }
+            }
+        }
     })
 }
 
@@ -674,6 +686,7 @@ pub(super) fn diamond(painter: &Painter, c: egui::Pos2, fill: egui::Color32, sol
 mod tests {
     use jvid_core::history::History;
     use jvid_core::keyframe::Value;
+    use jvid_core::model::Transform;
     use jvid_core::time::FLICKS_PER_SECOND as S;
 
     use super::super::tests::project;
@@ -1084,6 +1097,120 @@ mod tests {
         .into();
         assert!(t.key_action("copy", h.project().sequence()));
         (History::new(h.project().clone()), t, a, b)
+    }
+
+    fn scale_clipboard_migration(vector_clipboard: bool) {
+        let mut h = History::new(project(3));
+        let clips = h.project().sequence().tracks()[0].clips();
+        let (a, b) = (clips[0].id, clips[1].id);
+        let clip = |h: &History, id| h.project().sequence().clip(id).unwrap().1.clone();
+        for id in [a, b] {
+            for (time, value, easing) in [
+                (Time(0), Value::Scalar(1.0), Easing::Linear),
+                (Time(S), Value::Scalar(3.0), Easing::EaseOut),
+            ] {
+                h.apply(Command::AddKeyframe {
+                    id,
+                    param: "scale".into(),
+                    key: Keyframe {
+                        time,
+                        value,
+                        easing,
+                    },
+                })
+                .unwrap();
+            }
+        }
+        let promote = |h: &mut History, time| {
+            let c = clip(h, a);
+            let x = Transform {
+                scale: [3.0, 5.0],
+                ..c.transform.clone()
+            };
+            h.apply(crate::inspector::set_props(&[&c], &["scale"], &x, time))
+                .unwrap();
+        };
+        if vector_clipboard {
+            promote(&mut h, Time(S));
+        }
+        let mut t = Timeline::default();
+        t.sync(h.project());
+        t.select_clip(h.project().sequence(), a);
+        t.keys.pick_clip(a);
+        t.keys.selected = [(a, "scale".into(), Time(S))].into();
+        assert!(t.action("copy", h.project()));
+        let clipboard = t.keys.clipboard.clone();
+        let (destination, first, incoming) = if vector_clipboard {
+            // A vector copied from another clip onto an untouched legacy animation.
+            (b, [1.0; 2], [3.0, 5.0])
+        } else {
+            // The timeline retains a scalar copy across an Inspector X/Y edit.
+            promote(&mut h, Time(0));
+            (a, [3.0, 5.0], [3.0; 2])
+        };
+        assert_eq!(
+            t.keys.clipboard, clipboard,
+            "promotion retains the clipboard"
+        );
+        let before = h.project().clone();
+        t.select_clip(h.project().sequence(), destination);
+        let c = clip(&h, destination);
+        t.seek(c.timeline_at(Time(S / 2)));
+        assert!(t.action("paste", h.project()));
+        h.apply(t.pending.take().unwrap()).unwrap();
+        let c = clip(&h, destination);
+        assert_eq!(
+            c.keyframes["scale"],
+            [
+                Keyframe {
+                    time: Time(0),
+                    value: Value::Vec2(first),
+                    easing: Easing::Linear
+                },
+                Keyframe {
+                    time: Time(S / 2),
+                    value: Value::Vec2(incoming),
+                    easing: Easing::EaseOut
+                },
+                Keyframe {
+                    time: Time(S),
+                    value: Value::Vec2([3.0; 2]),
+                    easing: Easing::EaseOut
+                },
+            ],
+            "values, source times and easing survive promotion and paste"
+        );
+        let expected =
+            |fraction: f64| std::array::from_fn(|i| first[i] + (incoming[i] - first[i]) * fraction);
+        assert_eq!(
+            c.transform_at(c.timeline_at(Time(S / 4))).scale,
+            expected(0.5)
+        );
+        let fraction = Easing::EaseOut.apply(0.5);
+        let expected = std::array::from_fn(|i| incoming[i] + (3.0 - incoming[i]) * fraction);
+        assert_eq!(
+            c.transform_at(c.timeline_at(Time(3 * S / 4))).scale,
+            expected
+        );
+        let after = h.project().clone();
+        assert!(h.undo());
+        assert_eq!(
+            h.project(),
+            &before,
+            "one paste undo restores legacy variants too"
+        );
+        assert!(h.redo());
+        assert_eq!(h.project(), &after);
+    }
+
+    #[test]
+    fn retained_scalar_scale_clipboard_pastes_into_promoted_animation() {
+        scale_clipboard_migration(false);
+    }
+
+    #[test]
+    fn vector_scale_clipboard_pastes_into_legacy_scalar_animation() {
+        scale_clipboard_migration(true);
     }
 
     #[test]

@@ -50,6 +50,9 @@ link = "Lier/Délier"
 enable = "Activer/Désactiver"
 reverse = "Inverser"
 freeze_frame = "Arrêt sur image à la tête de lecture"
+fit_to_frame = "Adapter à l’image"
+fill_frame = "Remplir l’image"
+stretch_to_fit = "Étirer pour ajuster"
 copy_grade = "Copier l'étalonnage"
 paste_grade = "Coller l'étalonnage"
 hide_region = "Masquer la zone"
@@ -985,3 +988,6 @@ none = "Aucune hésitation ni pause"
 [analysis]
 audio_source = "Source Audio"
 source_stream = "{name} · Piste {number}"
+
+[framing]
+target = "{track} · {clip}"
