@@ -111,6 +111,8 @@ pub struct Timeline {
     /// `scroll` and `vscroll` when the pointer went down, so drags track time while the
     /// view auto-scrolls.
     press_scroll: (f64, f32),
+    /// Band origin in sequence time and content height, independent of the viewport.
+    marquee_origin: Option<(Time, f32)>,
     /// The clicked gap: its track and a time inside it.
     gap: Option<(TrackId, Time)>,
     /// Lanes width last frame, for actions that fit to it.
@@ -199,6 +201,7 @@ impl Default for Timeline {
             holding: None,
             slot: 0.0,
             press_scroll: (0.0, 0.0),
+            marquee_origin: None,
             media: Media::default(),
             renaming: None,
             fx_popover: None,
@@ -890,6 +893,28 @@ impl Timeline {
         (Command::Split { ids, at }, None)
     }
 
+    /// Hit-test the band against model coordinates, retaining viewport culling for paint.
+    /// Shift and Ctrl add the hits; linked selection includes each hit's partners.
+    fn marquee_hits(&self, seq: &Sequence, a: (Time, f32), b: (Time, f32)) -> HashSet<ClipId> {
+        let (start, end) = (a.0.min(b.0), a.0.max(b.0));
+        let (top, bottom) = (a.1.min(b.1), a.1.max(b.1));
+        let mut y = 0.0;
+        let mut hits = HashSet::new();
+        for track in seq.tracks() {
+            if y + track.height - 2.0 >= top && y + 2.0 <= bottom {
+                for c in visible(track.clips(), start, end) {
+                    if self.linked_selection {
+                        hits.extend(seq.linked(c.id).into_iter().map(|(_, c)| c.id));
+                    } else {
+                        hits.insert(c.id);
+                    }
+                }
+            }
+            y += track.height + self.keys.extra(track);
+        }
+        hits
+    }
+
     /// Click selection: the clip (and its partners under linked selection) replaces the
     /// selection, Shift adds it, Ctrl toggles it.
     fn select(&mut self, seq: &Sequence, id: ClipId, mods: egui::Modifiers) {
@@ -1081,6 +1106,15 @@ impl Timeline {
             ui.input(|i| (i.pointer.any_pressed(), i.pointer.any_down(), i.stable_dt));
         if pressed {
             self.press_scroll = (self.scroll, self.vscroll);
+            self.marquee_origin = ui
+                .input(|i| i.pointer.press_origin())
+                .filter(|p| lanes.contains(*p))
+                .map(|p| {
+                    (
+                        self.view(lanes_left).time(p.x),
+                        p.y - lanes.top() + self.vscroll - self.slot,
+                    )
+                });
         }
         // Drags that began in the lanes, and bin drags over the timeline, scroll at the
         // edges; ruler and playhead scrubs scroll themselves, and a refused drag stays put.
@@ -1188,7 +1222,6 @@ impl Timeline {
         let mut lane_rects = Vec::new();
         // The clip being dragged, its track, and its response.
         let mut held = None;
-        let mut shown_clips = Vec::new();
         for (i, track) in tracks.iter().enumerate() {
             let extra = self.keys.extra(track);
             let lane = Rect::from_x_y_ranges(lanes.x_range(), y..=y + track.height + extra);
@@ -1238,7 +1271,6 @@ impl Timeline {
                     let stroke = Stroke::new(2.0, color::light_blue());
                     painter.rect_stroke(r, corner, stroke, egui::StrokeKind::Inside);
                 }
-                shown_clips.push((clip.id, r));
                 let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::click_and_drag());
                 if self.razor && cr.hovered() {
                     ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
@@ -1357,22 +1389,21 @@ impl Timeline {
                 .shrink2(vec2(1.0, 2.0));
             clip_painter.rect_filled(r, 0.0, color::blue().gamma_multiply(0.2));
         }
-        if let (Some(a), Some(b)) = (
-            ui.input(|i| i.pointer.press_origin()),
-            marquee.interact_pointer_pos(),
-        ) && (marquee.dragged() || marquee.drag_stopped())
+        if let (Some(origin), Some(b)) = (self.marquee_origin, marquee.interact_pointer_pos())
+            && (marquee.dragged() || marquee.drag_stopped())
         {
-            // The press point moves with the content as the view auto-scrolls.
-            let (ps, pv) = self.press_scroll;
-            let a = a + vec2(((ps - self.scroll) * self.zoom) as f32, pv - self.vscroll);
+            let a = pos2(
+                view.x(origin.0),
+                lanes.top() + self.slot + origin.1 - self.vscroll,
+            );
             let band = Rect::from_two_pos(a, b);
             if marquee.drag_stopped() {
                 self.keys.selected.clear();
                 if !mods.shift && !mods.command {
                     self.selected.clear();
                 }
-                let hit = shown_clips.iter().filter(|(_, r)| r.intersects(band));
-                self.selected.extend(hit.map(|(c, _)| *c));
+                let end = (view.time(b.x), b.y - lanes.top() + self.vscroll - self.slot);
+                self.selected.extend(self.marquee_hits(seq, origin, end));
             } else {
                 clip_painter.rect_filled(band, 0.0, color::blue().gamma_multiply(0.15));
                 let stroke = Stroke::new(1.0, color::light_blue());
@@ -1410,6 +1441,7 @@ impl Timeline {
         if !down {
             self.drag_selection.clear();
             self.drag_to = None;
+            self.marquee_origin = None;
         }
         ghosts.extend(self.trim_ghosts(seq));
         // Dropped into the slot: the new track takes its place, so it closes at once.
@@ -4835,5 +4867,159 @@ mod audit_b04_tests {
                 .start,
             Time(0)
         );
+    }
+
+    #[test]
+    fn marquee_selects_across_four_horizontal_viewports_at_both_scales() {
+        for ppp in [1.0, 1.5] {
+            let p = tests::project(160);
+            let mut h = harness(p.clone(), ppp);
+            h.set_size(vec2(420.0, 200.0));
+            h.run();
+            let top = h.get_all_by_label("Lock").next().unwrap().rect().center().y - 16.0;
+            let from = pos2(8.0 + size::TRACK_HEADER + 12.0, top + 1.0);
+            let to = pos2(404.0, top + 20.0);
+            h.hover_at(from);
+            h.run();
+            h.drag_at(from);
+            h.step();
+            h.hover_at(to);
+            for _ in 0..45 {
+                h.step();
+            }
+            assert!(
+                h.state().0.scroll >= h.state().0.span() * 3.0,
+                "scroll {}, span {}, held {:?}, from {from:?} to {to:?}, dragged {:?}",
+                h.state().0.scroll,
+                h.state().0.span(),
+                h.state().0.holding,
+                h.ctx.dragged_id()
+            );
+            h.drop_at(to);
+            h.run();
+            let t = &h.state().0;
+            let end = t.view(8.0 + size::TRACK_HEADER).time(to.x);
+            let expected: HashSet<_> = p.sequence().tracks()[0]
+                .clips()
+                .iter()
+                .filter(|c| c.start < end)
+                .map(|c| c.id)
+                .collect();
+            assert!(expected.len() >= 20);
+            assert_eq!(
+                t.selected, expected,
+                "scale {ppp}; final scroll {}",
+                t.scroll
+            );
+        }
+    }
+
+    #[test]
+    fn marquee_selects_tracks_swept_before_vertical_autoscroll() {
+        use jvid_core::history::Created;
+        let mut setup = History::new(tests::project(0));
+        let mut expected = HashSet::new();
+        for i in 0..10 {
+            let Created::Track(track) = setup
+                .apply(Command::AddTrack {
+                    kind: TrackKind::Video,
+                    name: format!("V{i}"),
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            let Created::Clip(clip) = setup
+                .apply(Command::AddClip {
+                    track,
+                    clip: jvid_core::model::NewClip {
+                        asset: AssetId(1),
+                        start: Time(0),
+                        source_in: Time(0),
+                        source_out: Time(2 * S),
+                        link: None,
+                    },
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            expected.insert(clip);
+        }
+        let mut h = harness(setup.project().clone(), 1.5);
+        h.set_size(vec2(420.0, 200.0));
+        h.run();
+        let top = h.get_all_by_label("Lock").next().unwrap().rect().center().y - 16.0;
+        let from = pos2(8.0 + size::TRACK_HEADER + 12.0, top + 1.0);
+        let to = pos2(8.0 + size::TRACK_HEADER + 20.0, 184.0);
+        h.hover_at(from);
+        h.run();
+        h.drag_at(from);
+        h.step();
+        h.hover_at(to);
+        for _ in 0..35 {
+            h.step();
+        }
+        assert!(
+            h.state().0.vscroll > 200.0,
+            "vscroll {}, held {:?}, from {from:?} to {to:?}, dragged {:?}",
+            h.state().0.vscroll,
+            h.state().0.holding,
+            h.ctx.dragged_id()
+        );
+        h.drop_at(to);
+        h.run();
+        assert_eq!(h.state().0.selected, expected);
+    }
+
+    #[test]
+    fn marquee_modifiers_add_hits_and_linked_selection_is_explicit() {
+        let mut setup = History::new(tests::project(4));
+        let tracks = setup.project().sequence().tracks();
+        let (v, later, a) = (
+            tracks[0].clips()[0].id,
+            tracks[0].clips()[1].id,
+            tracks[1].clips()[0].id,
+        );
+        setup
+            .apply(Command::LinkClips {
+                ids: vec![v, a],
+                linked: true,
+            })
+            .unwrap();
+        for mods in [egui::Modifiers::SHIFT, egui::Modifiers::COMMAND] {
+            let mut h = harness(setup.project().clone(), 1.0);
+            h.state_mut().0.selected.insert(later);
+            let top = h.get_all_by_label("Lock").next().unwrap().rect().center().y - 16.0;
+            let from = pos2(180.0, top + 1.0);
+            let to = pos2(190.0, top + 20.0);
+            h.event(egui::Event::ModifiersChanged(mods));
+            h.hover_at(from);
+            h.run();
+            h.event(egui::Event::PointerButton {
+                pos: from,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: mods,
+            });
+            h.run();
+            h.hover_at(to);
+            h.run();
+            h.event(egui::Event::PointerButton {
+                pos: to,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: mods,
+            });
+            h.run();
+            assert_eq!(h.state().0.selected, [v, a, later].into());
+            h.state_mut().0.linked_selection = false;
+            let hits = h.state().0.marquee_hits(
+                setup.project().sequence(),
+                (Time(0), 1.0),
+                (Time(S), 20.0),
+            );
+            assert_eq!(hits, [v].into());
+        }
     }
 }
