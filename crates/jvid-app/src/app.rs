@@ -1396,6 +1396,16 @@ impl eframe::App for App {
             } else {
                 self.run_action(id, false);
             }
+            // A shortcut can open a modal after this batch was collected. Stop
+            // dispatch and release background focus before widgets see Space/Enter.
+            if self.modal_owns_input(&ctx) {
+                ctx.memory_mut(|m| {
+                    if let Some(id) = m.focused() {
+                        m.surrender_focus(id);
+                    }
+                });
+                break;
+            }
         }
         if !self.keymap.held(&ctx, "add_marker") {
             self.timeline.release_marker();

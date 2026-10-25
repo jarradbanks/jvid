@@ -4,9 +4,13 @@ use egui::{Key, Modifiers};
 use jvid_core::time::FLICKS_PER_SECOND as S;
 
 fn editor() -> Harness<'static, App> {
-    let mut h = builder([1280.0, 720.0], 1.0)
-        .with_step_dt(1.0 / 60.0)
-        .build_eframe(|cc| App::new(cc, &Default::default()));
+    editor_with_gpu(false)
+}
+
+fn editor_with_gpu(with_gpu: bool) -> Harness<'static, App> {
+    let builder = builder([1280.0, 720.0], 1.0).with_step_dt(1.0 / 60.0);
+    let builder = if with_gpu { builder.wgpu() } else { builder };
+    let mut h = builder.build_eframe(|cc| App::new(cc, &Default::default()));
     h.run();
     let app = h.state_mut();
     app.on_welcome = false;
@@ -20,6 +24,173 @@ fn editor() -> Harness<'static, App> {
     app.run_action("focus_timeline", false);
     h.run_steps(3);
     h
+}
+
+/// RawInput keeps every press in the same egui frame. Harness::step otherwise
+/// runs a separate frame for each Harness::event/key_press event.
+fn shortcut_batch(h: &mut Harness<'_, App>, keys: &[(Modifiers, Key)]) {
+    for &(modifiers, key) in keys {
+        h.input_mut()
+            .events
+            .push(egui::Event::ModifiersChanged(modifiers));
+        for pressed in [true, false] {
+            h.input_mut().events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers,
+            });
+        }
+    }
+    h.input_mut()
+        .events
+        .push(egui::Event::ModifiersChanged(Modifiers::NONE));
+    h.step();
+}
+
+fn export_batch_blocks(modifiers: Modifiers, key: Key, focused: Option<&str>) {
+    if !gpu() {
+        return;
+    }
+    let mut h = editor_with_gpu(true);
+    assert!(
+        h.state().can_export(),
+        "exercise the actual Export shortcut"
+    );
+    let dir = std::env::temp_dir().join(format!(
+        "jvid-b11-batch-{key:?}-{}-{}",
+        focused.unwrap_or("global"),
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mic = crate::record::tests::FakeMic::default();
+    h.state_mut().path = Some(dir.join("p.jvid"));
+    h.state_mut().input = Some(Box::new(mic.clone()));
+    if let Some(label) = focused {
+        h.get_by_label(label).focus();
+        h.run_steps(2);
+        assert!(h.get_by_label(label).is_focused());
+    } else {
+        h.ctx.memory_mut(|m| {
+            if let Some(id) = m.focused() {
+                m.surrender_focus(id);
+            }
+        });
+    }
+    let before = h.state().history.project().clone();
+    let selected = h.state().timeline.selected().clone();
+    let head = h.state().timeline.playhead();
+    shortcut_batch(&mut h, &[(Modifiers::COMMAND, Key::M), (modifiers, key)]);
+    let opened = h.state().export_dialog.is_open();
+    let project_changed = h.state().history.project() != &before;
+    let selection_changed = h.state().timeline.selected() != &selected;
+    let head_changed = h.state().timeline.playhead() != head;
+    let playing = h.state().preview.program_playing();
+    let recording = h.state().take.is_some();
+    let mic_opened = mic.0.lock().unwrap().is_some();
+    drop(h);
+    std::fs::remove_dir_all(dir).unwrap();
+    assert!(opened, "Export must open before {key:?}");
+    assert!(
+        !project_changed
+            && !selection_changed
+            && !head_changed
+            && !playing
+            && !recording
+            && !mic_opened,
+        "Export then {key:?}, focused={focused:?}, in one frame: project_changed={project_changed}, \
+         selection_changed={selection_changed}, head_changed={head_changed}, \
+         playing={playing}, recording={recording}, mic_opened={mic_opened}"
+    );
+}
+
+#[test]
+fn audit_452_export_batch_blocks_delete() {
+    export_batch_blocks(Modifiers::NONE, Key::Delete, None);
+}
+
+#[test]
+fn audit_452_export_batch_blocks_undo() {
+    export_batch_blocks(Modifiers::COMMAND, Key::Z, None);
+}
+
+#[test]
+fn audit_452_export_batch_blocks_space() {
+    export_batch_blocks(Modifiers::NONE, Key::Space, None);
+}
+
+#[test]
+fn audit_452_export_batch_blocks_record() {
+    export_batch_blocks(Modifiers::SHIFT, Key::R, None);
+}
+
+#[test]
+fn audit_452_export_batch_blocks_focused_play_space() {
+    export_batch_blocks(Modifiers::NONE, Key::Space, Some("Play (Space)"));
+}
+
+#[test]
+fn audit_452_export_batch_blocks_focused_play_enter() {
+    export_batch_blocks(Modifiers::NONE, Key::Enter, Some("Play (Space)"));
+}
+
+#[test]
+fn audit_452_export_batch_blocks_focused_record_space() {
+    export_batch_blocks(
+        Modifiers::NONE,
+        Key::Space,
+        Some("Record Voiceover (Shift+R)"),
+    );
+}
+
+#[test]
+fn audit_452_export_batch_blocks_focused_record_enter() {
+    export_batch_blocks(
+        Modifiers::NONE,
+        Key::Enter,
+        Some("Record Voiceover (Shift+R)"),
+    );
+}
+
+#[test]
+fn audit_452_nonmodal_batch_runs_every_shortcut() {
+    let mut h = editor();
+    assert!(!h.state().can_export(), "Export cannot open without a GPU");
+    let before = h.state().history.project().clone();
+    let head = h.state().timeline.playhead();
+    shortcut_batch(
+        &mut h,
+        &[
+            (Modifiers::COMMAND, Key::M),
+            (Modifiers::COMMAND, Key::Z),
+            (Modifiers::COMMAND, Key::Y),
+            (Modifiers::NONE, Key::ArrowRight),
+        ],
+    );
+    assert_eq!(h.state().history.project(), &before, "Undo then Redo");
+    assert!(h.state().timeline.playhead() > head, "then step forward");
+}
+
+#[test]
+fn audit_452_prompt_dismissal_keeps_batch_owned() {
+    for dismiss in [Key::Escape, Key::Enter] {
+        let mut h = editor();
+        h.state_mut().prompts.push(Prompt::About);
+        h.run_steps(3);
+        let before = h.state().history.project().clone();
+        shortcut_batch(
+            &mut h,
+            &[(Modifiers::NONE, dismiss), (Modifiers::COMMAND, Key::Z)],
+        );
+        assert!(h.state().prompts.is_empty(), "{dismiss:?}");
+        assert_eq!(h.state().history.project(), &before, "{dismiss:?}");
+        h.run_steps(3);
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run_steps(2);
+        assert_ne!(h.state().history.project(), &before, "Undo resumes");
+    }
 }
 
 #[test]
