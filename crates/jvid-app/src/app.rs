@@ -414,6 +414,7 @@ impl App {
         let button = menu_button(ui, tr!("menu.file"), left);
         let mut picked = None;
         let mut recent = None;
+        let mut reframe = None;
         egui::Popup::menu(&button).show(|ui| {
             for &id in menus::FILE {
                 match id {
@@ -433,6 +434,15 @@ impl App {
                             });
                         });
                     }
+                    "reframe" => {
+                        ui.menu_button(tr!("menu.reframe"), |ui| {
+                            for (label, aspect) in REFRAME {
+                                if ui.button(label).clicked() {
+                                    reframe = Some(aspect);
+                                }
+                            }
+                        });
+                    }
                     _ => {
                         let can = id != "export" || self.can_export();
                         if menus::item(ui, &self.keymap, id, None, can) {
@@ -444,6 +454,9 @@ impl App {
         });
         if let Some(path) = recent {
             self.discard_then(Then::Recent(path));
+        }
+        if let Some(aspect) = reframe {
+            self.reframe(aspect);
         }
         match picked {
             Some("quit") => ui.ctx().send_viewport_cmd(ViewportCommand::Close),
@@ -539,6 +552,29 @@ impl App {
             }
         };
         self.save_to(path)
+    }
+
+    /// Saves a copy reframed to `aspect` (width:height) under a new name and opens it, leaving
+    /// this project as it is.
+    fn reframe(&mut self, aspect: [u32; 2]) {
+        let [aw, ah] = aspect;
+        let Some(mut path) = project_dialog()
+            .set_file_name(format!("{}-{aw}x{ah}.jvid", self.name()))
+            .save_file()
+        else {
+            return;
+        };
+        if path.extension().is_none_or(|e| e != "jvid") {
+            path.as_mut_os_string().push(".jvid");
+        }
+        let project = self.history.project();
+        let st = project.settings();
+        let (w, h) = jvid_core::reframe::frame_size(st.width, st.height, aspect);
+        let copy = project.reframed(w, h, jvid_render::text::drawn_bounds);
+        match project_file::save(&copy, &path) {
+            Ok(()) => self.discard_then(Then::Recent(path)),
+            Err(e) => self.error(tr!("app.save_failed", path = path.display(), error = e)),
+        }
     }
 
     /// Saves the project to `path`, which becomes its path. Returns false if the save failed.
@@ -1416,6 +1452,9 @@ fn menu_button(ui: &mut Ui, name: &str, left: f32) -> egui::Response {
     );
     ui.put(at, Button::ghost(name))
 }
+
+/// File > Reframe's frame shapes, width:height.
+const REFRAME: [(&str, [u32; 2]); 3] = [("9:16", [9, 16]), ("1:1", [1, 1]), ("4:5", [4, 5])];
 
 fn project_dialog() -> FileDialog {
     FileDialog::new().add_filter(tr!("app.project_filter"), &["jvid"])

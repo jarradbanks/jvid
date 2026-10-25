@@ -12,7 +12,8 @@ use super::{Edit, Timeline, add_menu};
 use crate::i18n::tr;
 use crate::keymap::Keymap;
 
-/// The app bar's File menu; "" is a separator and "recent" the Open Recent submenu.
+/// The app bar's File menu; "" is a separator, "recent" the Open Recent submenu and
+/// "reframe" the Reframe submenu.
 pub const FILE: &[&str] = &[
     "new_project",
     "open_project",
@@ -20,6 +21,7 @@ pub const FILE: &[&str] = &[
     "",
     "save",
     "save_as",
+    "reframe",
     "",
     "import",
     "import_subtitles",

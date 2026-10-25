@@ -1054,3 +1054,56 @@ fn blur_at_small_radius_still_spreads_a_one_pixel_line() {
     assert!(red(mid - 1) > 140, "no spread left: {}", red(mid - 1));
     assert!(red(mid + 10) <= 129, "spread too far: {}", red(mid + 10));
 }
+
+#[test]
+fn a_reframed_wide_clip_fills_a_tall_frame_with_no_bars() {
+    use jvid_core::history::{Command, History};
+    use jvid_core::model::{NewClip, ProbeInfo, Project, TrackKind};
+    use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping reframe render test: no software adapter on this platform");
+        return;
+    };
+    let mut h = History::new(Project::default());
+    let probe = ProbeInfo {
+        duration: Time(10 * S),
+        width: Some(64),
+        height: Some(36),
+        ..Default::default()
+    };
+    h.apply(Command::Import(vec![("/n/a.mp4".into(), probe)]))
+        .unwrap();
+    h.apply(Command::AddTrack {
+        kind: TrackKind::Video,
+        name: "V1".into(),
+    })
+    .unwrap();
+    let track = h.project().sequence().tracks()[0].id;
+    let clip = NewClip {
+        asset: h.project().assets()[0].id,
+        source_in: Time(0),
+        source_out: Time(S),
+        start: Time(0),
+        link: None,
+    };
+    h.apply(Command::AddClip { track, clip }).unwrap();
+    let (w, ht) = jvid_core::reframe::frame_size(64, 36, [9, 16]);
+    let tall = h.project().reframed(w, ht, |_, _| None);
+    let x = tall.sequence().tracks()[0].clips()[0].transform_at(Time(0));
+
+    let green = image(&device, &queue, (64, 36), |_, _| [0, 255, 0, 255]);
+    let mut comp = Compositor::new(&device);
+    let tex = comp.render(
+        &device,
+        &queue,
+        (w, ht),
+        1,
+        [255, 0, 0, 255],
+        &[(&green, x)],
+    );
+    let rgba = read_back(&device, &queue, tex);
+    assert!(
+        rgba.chunks(4).all(|p| p == [0, 255, 0, 255]),
+        "background shows in the {w}x{ht} frame"
+    );
+}
