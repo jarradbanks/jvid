@@ -2621,3 +2621,118 @@ fn audit_437_new_clears_canvas_text_and_pending_region_request() {
     assert!(!crate::handles::editing(&h.ctx));
     assert_eq!(crate::hide_region::requested(&h.ctx), None);
 }
+
+#[test]
+fn audit_461_named_recovery_discard_survives_reopen_and_preserves_other_projects() {
+    let dir = std::env::temp_dir().join(format!("jvid-recovery-discard-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("named.jvid");
+    let other = dir.join("other.jvid");
+    project_file::save(&Project::default(), &path).unwrap();
+    let main_bytes = std::fs::read(&path).unwrap();
+    let mut edited = History::new(Project::default());
+    edited
+        .apply(Command::AddTrack {
+            kind: TrackKind::Audio,
+            name: "recovered".into(),
+        })
+        .unwrap();
+    // Explicit timestamps avoid relying on filesystem timestamp resolution.
+    let main = std::fs::File::open(&path).unwrap();
+    main.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1))
+        .unwrap();
+    autosave::write(edited.project(), &path).unwrap();
+    autosave::write(edited.project(), &other).unwrap();
+    let other_bytes = std::fs::read(autosave::slot(&other, 1)).unwrap();
+    let mut app = App::restore(None);
+    app.open(path.clone());
+    let prompt = app.prompts.remove(0);
+    assert!(matches!(prompt, Prompt::Restore { .. }));
+    app.answer(prompt, 1);
+    assert!(!app.history.is_dirty());
+    app.discard_then(Then::Close);
+    assert!(app.closing);
+    drop(app);
+    let mut restarted = App::restore(None);
+    restarted.open(path.clone());
+    assert!(restarted.prompts.is_empty());
+    assert_eq!(std::fs::read(&path).unwrap(), main_bytes);
+    assert_eq!(
+        std::fs::read(autosave::slot(&other, 1)).unwrap(),
+        other_bytes
+    );
+    drop(restarted);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn audit_461_restore_success_is_dirty_and_failure_preserves_recovery() {
+    let dir = std::env::temp_dir().join(format!("jvid-recovery-restore-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("named.jvid");
+    project_file::save(&Project::default(), &path).unwrap();
+    let mut edited = History::new(Project::default());
+    edited
+        .apply(Command::AddTrack {
+            kind: TrackKind::Audio,
+            name: "restored".into(),
+        })
+        .unwrap();
+    autosave::write(edited.project(), &path).unwrap();
+    let auto = autosave::slot(&path, 1);
+    let mut app = App::restore(None);
+    app.open(path.clone());
+    app.prompts.clear();
+    app.answer(
+        Prompt::Restore {
+            path: Some(path.clone()),
+            auto: auto.clone(),
+        },
+        0,
+    );
+    assert_eq!(app.history.project(), edited.project());
+    assert!(app.history.is_dirty());
+    assert!(auto.exists());
+    std::fs::write(&auto, "broken recovery").unwrap();
+    let before = app.history.project().clone();
+    app.answer(
+        Prompt::Restore {
+            path: Some(path),
+            auto: auto.clone(),
+        },
+        0,
+    );
+    assert_eq!(app.history.project(), &before);
+    assert_eq!(std::fs::read_to_string(&auto).unwrap(), "broken recovery");
+    assert!(matches!(app.prompts.last(), Some(Prompt::Error(_))));
+    let untitled = dir.join("Untitled.jvid");
+    autosave::write(edited.project(), &untitled).unwrap();
+    app.untitled = Some(untitled.clone());
+    app.answer(
+        Prompt::Restore {
+            path: None,
+            auto: autosave::slot(&untitled, 1),
+        },
+        1,
+    );
+    assert!(!autosave::slot(&untitled, 1).exists());
+    autosave::write(edited.project(), &untitled).unwrap();
+    let mut fresh = App::restore(None);
+    fresh.untitled = Some(untitled.clone());
+    fresh.answer(
+        Prompt::Restore {
+            path: None,
+            auto: autosave::newer(&untitled).unwrap(),
+        },
+        0,
+    );
+    assert_eq!(fresh.path, None);
+    assert_eq!(fresh.history.project(), edited.project());
+    assert!(fresh.history.is_dirty() && !fresh.on_welcome);
+    assert!(autosave::slot(&untitled, 1).exists());
+    drop(fresh);
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
+}

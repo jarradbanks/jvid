@@ -1315,8 +1315,10 @@ impl App {
                 Err(e) => self.error(tr!("app.restore_failed", path = auto.display(), error = e)),
             },
             (Prompt::About, 1) => self.prompts.push(Prompt::Notices),
-            (Prompt::Restore { path: None, .. }, _) => {
-                if let Some(p) = &self.untitled {
+            (Prompt::Restore { path, .. }, 1) => {
+                // Only an explicit recovery Discard rejects these versions. A failed load
+                // keeps every recovery file and never touches the main project.
+                if let Some(p) = path.as_ref().or(self.untitled.as_ref()) {
                     autosave::clear(p);
                 }
             }
