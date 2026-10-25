@@ -33,12 +33,11 @@ fn main() -> ExitCode {
         Ok(r) => r,
         Err(e) => return fail(2, &e),
     };
-    let gpu = match export::headless_gpu() {
-        Ok(g) => g,
-        Err(e) => return fail(4, &e),
-    };
     let pool = jvid_jobs::Pool::new(1);
-    let (handle, rx) = export::submit(&pool, project, req, gpu);
+    let (handle, rx) = match start_export(&pool, project, req, export::headless_gpu) {
+        Ok(job) => job,
+        Err((code, error)) => return fail(code, &error),
+    };
     let result = loop {
         match rx.recv_timeout(Duration::from_millis(250)) {
             Ok(r) => break r,
@@ -59,6 +58,25 @@ fn main() -> ExitCode {
         Err(Error::Cancelled) => fail(1, "export cancelled"),
         Err(Error::Failed(e)) => fail(1, &e),
     }
+}
+
+type ExportJob = (
+    jvid_jobs::Handle,
+    std::sync::mpsc::Receiver<Result<jvid_core::model::ProbeInfo, Error>>,
+);
+
+fn start_export(
+    pool: &jvid_jobs::Pool,
+    project: Project,
+    req: Request,
+    acquire: impl FnOnce() -> Result<export::GpuContext, String>,
+) -> Result<ExportJob, (u8, String)> {
+    let gpu = if req.needs_gpu() {
+        Some(acquire().map_err(|e| (4, format!("{e}. Composited video needs a rendering device; install a working graphics driver or a software Vulkan adapter such as Mesa lavapipe.")))?)
+    } else {
+        None
+    };
+    Ok(export::submit(pool, project, req, gpu))
 }
 
 fn progress(p: f32, json: bool) {
