@@ -323,10 +323,7 @@ impl App {
                     self.import(paths);
                 }
             }
-            welcome::Action::Tour => {
-                self.new_project(None);
-                self.start_lesson(&tutorial::LESSONS[0]);
-            }
+            welcome::Action::Tour => self.start_lesson(&tutorial::LESSONS[0]),
             welcome::Action::DeclineTour => self.tour_offered(),
         }
     }

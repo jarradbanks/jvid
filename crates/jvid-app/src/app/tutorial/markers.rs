@@ -118,7 +118,7 @@ pub const MARKERS: Lesson = Lesson {
                         to - from
                     })
                     .collect();
-                a.queue.rows().iter().any(|r| lengths.contains(&r.duration))
+                super::queued(a).any(|d| lengths.contains(&d))
             },
             show_me: |a| {
                 let Some(gpu) = a.preview.gpu() else {
