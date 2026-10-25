@@ -44,7 +44,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
-      # FFmpeg dev libraries (docs/adr/0001-ffmpeg-binding.md). bindgen's libclang ships on all runners.
+      # FFmpeg libraries and CLI: runtime fixtures need the executable even on media-cache hits.
+      # See docs/adr/0001-ffmpeg-binding.md. bindgen's libclang ships on all runners.
       # suite-ui GPU tests render on Mesa lavapipe; required on Linux so they can't pass by skipping.
       # Arabic and CJK fonts for the text shaping tests, also required on Linux.
       - name: Install Linux system packages
@@ -66,7 +67,7 @@ jobs:
             | sudo tee /etc/apt/apt-mirrors.txt
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends mesa-vulkan-drivers \
-            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev libasound2-dev \
+            ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev libasound2-dev \
             fonts-dejavu-core fonts-noto-cjk
       - if: runner.os == 'macOS'
         run: brew install ffmpeg
@@ -100,7 +101,6 @@ jobs:
           key: test-media-${{ hashFiles('scripts/gen-test-media') }}
       - if: runner.os == 'Linux' && steps.media-cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg
           time bash scripts/gen-test-media
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # macOS has no software adapter, so its GPU tests skip; Linux (lavapipe) and Windows (WARP) must run them.
