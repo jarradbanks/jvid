@@ -15,6 +15,10 @@ use crate::i18n::tr;
 pub const MOVING_INTERVAL: f64 = 0.25;
 /// Histogram height in texels.
 const HISTOGRAM_H: usize = 128;
+/// Scopes share the fixed dark Viewer surface, independently of the panel theme. Keeping
+/// their palette fixed also makes cached textures correct when the theme changes paused.
+const TRACE: Color32 = suite_ui::themes::DARK.ink;
+const LABEL: Color32 = suite_ui::themes::DARK.ink_3;
 /// 100% primaries and secondaries, the vectorscope's targets.
 const TARGETS: [[u8; 3]; 6] = [
     [255, 0, 0],
@@ -92,7 +96,7 @@ pub fn clear(ctx: &egui::Context) {
 
 /// `count` of `full` as a trace brightness: square root, so sparse values still show.
 fn trace(count: u32, full: f32) -> Color32 {
-    color::ink().gamma_multiply((count as f32 / full.max(1.0)).sqrt().min(1.0))
+    TRACE.gamma_multiply((count as f32 / full.max(1.0)).sqrt().min(1.0))
 }
 
 /// The waveform (luma up, 255 at the top), vectorscope and histogram as images.
@@ -170,7 +174,7 @@ pub fn show(ui: &mut Ui) {
         vec2(side, side),
     );
     let hist_r = Rect::from_min_size(pos2(rect.left(), vector_r.bottom() + gap), wave_r.size());
-    let line = theme::hairline(ui.ctx(), color::ink().gamma_multiply(0.15));
+    let line = theme::hairline(ui.ctx(), TRACE.gamma_multiply(0.15));
     let uv = Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0));
     let scopes = [
         (wave_r, &wave, tr!("bin.scope_waveform")),
@@ -183,7 +187,7 @@ pub fn show(ui: &mut Ui) {
         p.image(tex.id(), r, uv, Color32::WHITE);
         // Left-aligned with the others, so the vectorscope's sits beside its square.
         let at = pos2(rect.left(), r.top()) + vec2(space::S4, space::S4);
-        p.text(at, Align2::LEFT_TOP, label, theme::small(), color::ink_3());
+        p.text(at, Align2::LEFT_TOP, label, theme::small(), LABEL);
     }
     // Waveform graticule: 0, 25, 50, 75 and 100% luma.
     for i in 0..=4 {
@@ -196,13 +200,13 @@ pub fn show(ui: &mut Ui) {
     p.hline(vector_r.x_range(), c.y, line);
     p.vline(c.x, vector_r.y_range(), line);
     let skin = vec2(SKIN.cos(), -SKIN.sin()) * side / 2.0;
-    p.line_segment([c, c + skin], theme::hairline(ui.ctx(), color::ink_3()));
+    p.line_segment([c, c + skin], theme::hairline(ui.ctx(), LABEL));
     let cell = side / VECTOR as f32;
     for rgb in TARGETS {
         let (x, y) = vector_at(rgb);
         let at = vector_r.min + vec2(x as f32 + 0.5, y as f32 + 0.5) * cell;
         let target = Rect::from_center_size(at, vec2(6.0, 6.0));
-        let stroke = theme::hairline(ui.ctx(), color::ink_3());
+        let stroke = theme::hairline(ui.ctx(), LABEL);
         p.rect_stroke(target, 0.0, stroke, egui::StrokeKind::Middle);
     }
 }
@@ -265,16 +269,112 @@ mod tests {
         }
     }
 
+    /// #456: trace density remains readable on Viewer black in all panel themes.
+    #[test]
+    fn scope_images_keep_the_dark_viewer_palette_in_every_theme() {
+        use suite_ui::themes::{DARK, HIGH_CONTRAST, LIGHT, apply};
+        let ctx = egui::Context::default();
+        let gray = [220, 220, 220, 255].repeat(64 * 32);
+        let ramp: Vec<_> = (0..32)
+            .flat_map(|_| (0..64u8).flat_map(|x| [x * 4, x * 4, x * 4, 255]))
+            .collect();
+        for pixels in [gray, ramp] {
+            let analysis = jvid_render::scope::analyze(&pixels, 64);
+            apply(&ctx, &DARK);
+            let expected = images(&analysis);
+            for palette in [LIGHT, DARK, HIGH_CONTRAST] {
+                apply(&ctx, &palette);
+                let actual = images(&analysis);
+                assert_eq!(
+                    actual, expected,
+                    "fixed dark scopes must not inherit panel ink"
+                );
+                for image in &actual[..2] {
+                    let lit: Vec<_> = image.pixels.iter().filter(|p| p.a() > 0).collect();
+                    assert!(!lit.is_empty());
+                    assert!(
+                        lit.iter()
+                            .all(|p| p.r() > 100 && p.g() > 100 && p.b() > 100),
+                        "visible gray/ramp traces"
+                    );
+                }
+                assert_eq!(
+                    actual[2], expected[2],
+                    "histogram channel colors stay unchanged"
+                );
+            }
+        }
+        apply(&ctx, &DARK);
+    }
+
+    /// #456: a cached frame and all guides remain correct after a paused theme switch.
+    #[test]
+    fn paused_theme_switch_keeps_cached_scope_textures_and_viewer_guides() {
+        use suite_ui::themes::{DARK, HIGH_CONTRAST, LIGHT, apply};
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let pixels = [220, 220, 220, 255].repeat(16 * 9);
+        let analysis = jvid_render::scope::analyze(&pixels, 16);
+        let mut state = State {
+            open: true,
+            ..State::default()
+        };
+        assert!(state.due(1, 0.0, false, false));
+        apply(&ctx, &LIGHT);
+        set(&ctx, &analysis);
+        let handles = ctx.data(|d| d.get_temp::<[TextureHandle; 3]>(id()).unwrap());
+        let ids = handles.map(|t| t.id());
+        let mut previous = None;
+        for (n, palette) in [LIGHT, DARK, HIGH_CONTRAST, LIGHT].iter().enumerate() {
+            apply(&ctx, palette);
+            assert!(
+                !state.due(1, n as f64 + 1.0, false, false),
+                "no new frame needed"
+            );
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(240.0, 640.0))),
+                    ..Default::default()
+                },
+                show,
+            );
+            let uploaded_scope = output
+                .textures_delta
+                .set
+                .iter()
+                .any(|(id, _)| ids.contains(id));
+            output.textures_delta.clear();
+            let current = ctx.data(|d| d.get_temp::<[TextureHandle; 3]>(id()).unwrap());
+            assert_eq!(current.map(|t| t.id()), ids);
+            if n > 0 {
+                assert!(
+                    !uploaded_scope,
+                    "theme switch reuses fixed-palette textures"
+                );
+            }
+            // Compare the complete painted scopes, including labels, graticule and targets.
+            // The first pass initializes fonts; subsequent passes have identical geometry.
+            if n >= 2 {
+                assert!(
+                    previous.as_ref().unwrap() == &output.shapes,
+                    "guides and labels keep their viewer palette"
+                );
+            }
+            previous = Some(output.shapes);
+        }
+        apply(&ctx, &DARK);
+    }
+
     #[test]
     fn solid_red_images() {
         let red = [255, 0, 0, 255].repeat(16 * 9);
         let [wave, vector, hist] = images(&jvid_render::scope::analyze(&red, 16));
         // Red's luma, 54, is row 255 - 54 from the top; the trace is full brightness there.
         assert_eq!(wave.size, [16, 256]);
-        assert_eq!(wave.pixels[(255 - 54) * 16 + 3], color::ink());
+        assert_eq!(wave.pixels[(255 - 54) * 16 + 3], TRACE);
         assert_eq!(wave.pixels[(255 - 200) * 16 + 3], Color32::TRANSPARENT);
         let (x, y) = vector_at([255, 0, 0]);
-        assert_eq!(vector.pixels[y * VECTOR + x], color::ink());
+        assert_eq!(vector.pixels[y * VECTOR + x], TRACE);
         // Red's column full height in red, black's G and B column in green and blue.
         let top = |x: usize| hist.pixels[x];
         assert_eq!(top(255), Color32::from_rgb(200, 0, 0));
