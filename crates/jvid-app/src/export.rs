@@ -99,17 +99,26 @@ fn user_presets(dir: &Path) -> Vec<Preset> {
         .collect()
 }
 
+/// Rendering device and queue, needed only for composited video.
+pub type GpuContext = (wgpu::Device, wgpu::Queue);
+
 /// Queues an export of `project` on `pool`; the result arrives on the receiver when it's done.
 pub fn submit(
     pool: &Pool,
     project: Project,
     req: Request,
-    gpu: (wgpu::Device, wgpu::Queue),
+    gpu: impl Into<Option<GpuContext>>,
 ) -> (Handle, Receiver<Result<ProbeInfo, Error>>) {
+    let gpu = gpu.into();
     let (tx, rx) = channel();
     let key = format!("export:{}", req.path.display());
     let handle = pool.submit(key, Priority::Interactive, move |ctx| {
-        let _ = tx.send(run(&project, &req, &gpu.0, &gpu.1, ctx));
+        let _ = tx.send(run_with_gpu(
+            &project,
+            &req,
+            gpu.as_ref().map(|(d, q)| (d, q)),
+            ctx,
+        ));
     });
     (handle, rx)
 }
@@ -339,11 +348,31 @@ pub fn run(
     queue: &wgpu::Queue,
     ctx: &Ctx,
 ) -> Result<ProbeInfo, Error> {
+    run_with_gpu(project, req, Some((device, queue)), ctx)
+}
+
+impl Request {
+    /// Packet copying and audio mixing use CPU/media dependencies only.
+    pub fn needs_gpu(&self) -> bool {
+        self.lossless.is_none() && self.preset.video.is_some()
+    }
+}
+
+/// Shared export entry point for CPU-only requests, with no device creation or probing.
+pub fn run_with_gpu(
+    project: &Project,
+    req: &Request,
+    gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
+    ctx: &Ctx,
+) -> Result<ProbeInfo, Error> {
+    if req.needs_gpu() && gpu.is_none() {
+        return Err("no GPU adapter: composited video requires a rendering device; install a working graphics driver or use a software Vulkan adapter (Mesa lavapipe on Linux)".to_string().into());
+    }
     if !req.sidecar {
-        return encode(project, req, device, queue, ctx);
+        return encode(project, req, gpu, ctx);
     }
     check_destination(project, &req.path.with_extension("srt"))?;
-    let info = encode(&project.without_subtitles(), req, device, queue, ctx)?;
+    let info = encode(&project.without_subtitles(), req, gpu, ctx)?;
     let srt = jvid_core::srt::write(&project.subtitle_cues(), req.range);
     let path = req.path.with_extension("srt");
     std::fs::write(&path, srt)
@@ -354,8 +383,7 @@ pub fn run(
 fn encode(
     project: &Project,
     req: &Request,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
     ctx: &Ctx,
 ) -> Result<ProbeInfo, Error> {
     if let Some(mode) = req.lossless {
@@ -367,15 +395,14 @@ fn encode(
         req.preset = req.preset.hdr();
     }
     replay(project, &req, ctx, |req| {
-        encode_attempt(project, req, device, queue, ctx)
+        encode_attempt(project, req, gpu, ctx)
     })
 }
 
 fn encode_attempt(
     project: &Project,
     req: &Request,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
     ctx: &Ctx,
 ) -> Result<ProbeInfo, AttemptError> {
     let s = project.settings();
@@ -397,7 +424,7 @@ fn encode_attempt(
     };
     let limiter = || gain.map(|g| Limiter::new(g as f32, CEILING));
     match sized(project, req)? {
-        None => render(project, req, enc, limiter(), device, queue, ctx)?,
+        None => render(project, req, enc, limiter(), gpu, ctx)?,
         Some((target, audio, mut bits)) => {
             drop(enc);
             // Encoders only roughly hit an average bit rate, so each pass rescales the video rate
@@ -420,7 +447,7 @@ fn encode_attempt(
                 let enc =
                     Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
                         .map_err(|e| create_error(&req.path, e))?;
-                render(project, &req, enc, limiter(), device, queue, ctx)?;
+                render(project, &req, enc, limiter(), gpu, ctx)?;
                 let size = std::fs::metadata(&req.path)
                     .map_err(|e| e.to_string())?
                     .len() as f64;
@@ -671,14 +698,15 @@ fn render(
     req: &Request,
     mut enc: Encoder,
     mut limiter: Option<Limiter>,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
     ctx: &Ctx,
 ) -> Result<(), AttemptError> {
     let (first, end) = frames(project, req);
     let mut audio = Audio::new(Box::new(blocking));
     // Audio-only presets never touch the GPU.
-    let mut renderer = enc.has_video().then(|| FrameRenderer::new(device));
+    let mut renderer = gpu
+        .filter(|_| enc.has_video())
+        .map(|(device, _)| FrameRenderer::new(device));
     let mut readback = Readback::default();
     let (mut mix, mut limited) = (Vec::new(), Vec::new());
     for (k, time, a, b) in spans(project, req) {
@@ -686,6 +714,8 @@ fn render(
             return Err(Error::Cancelled.into());
         }
         if enc.has_video() {
+            let (device, queue) =
+                gpu.ok_or_else(|| "no GPU adapter for composited video".to_string())?;
             let tex = renderer
                 .as_mut()
                 .expect("video renderer")
@@ -709,7 +739,9 @@ fn render(
         }
         ctx.set_progress((k + 1 - first) as f32 / (end - first) as f32);
     }
-    if let Some(rgba) = readback.take(device) {
+    if let Some((device, _)) = gpu
+        && let Some(rgba) = readback.take(device)
+    {
         enc.video(&rgba)?;
     }
     if let Some(l) = &mut limiter {

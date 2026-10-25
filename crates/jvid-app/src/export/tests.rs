@@ -2338,3 +2338,31 @@ fn program_png_writes_straight_alpha_for_a_transparent_project() {
     assert!(png.pixels().all(|p| p.0 == [255, 0, 0, 128]));
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn cpu_exports_accept_absent_gpu_and_composited_video_preserves_output() {
+    let (files, project, req) = lossless_fixture("cpu-context.mov");
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let mut req = req.clone();
+        req.lossless = Some(mode);
+        let project = project.clone();
+        let info = with_context(move |ctx| run_with_gpu(&project, &req, None, ctx)).unwrap();
+        assert_eq!(info.width, Some(64));
+    }
+    let mut audio = req.clone();
+    audio.path.set_extension("wav");
+    audio.lossless = None;
+    audio.preset = preset("Audio Only (WAV)");
+    let p = project.clone();
+    let info = with_context(move |ctx| run_with_gpu(&p, &audio, None, ctx)).unwrap();
+    assert_eq!(info.width, None);
+    assert_eq!(info.audio_streams, 1);
+    let mut video = req;
+    video.lossless = None;
+    std::fs::write(&video.path, b"prior completed video").unwrap();
+    let path = video.path.clone();
+    let error = with_context(move |ctx| run_with_gpu(&project, &video, None, ctx)).unwrap_err();
+    assert!(matches!(error, Error::Failed(ref e) if e.contains("no GPU adapter")));
+    assert_eq!(std::fs::read(path).unwrap(), b"prior completed video");
+    assert_no_attempts(&files.dir);
+}
