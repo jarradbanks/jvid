@@ -139,6 +139,12 @@ about = "Quant a jvid…"
 tutorials = "Tutorials"
 
 [export]
+phase_preparing = "Preparant"
+phase_analysis = "Analitzant Àudio"
+phase_encoding = "Codificant · Passada {pass}"
+phase_retry = "Reintentant per Programari"
+phase_finalizing = "Finalitzant"
+phase_copying = "Copiant"
 sidecar_file_target = "La destinació no és un fitxer normal."
 sidecar_separate = "Els mitjans i els subtítols han de tenir fitxers de sortida diferents."
 sidecar_recovery = "{error}; còpies de recuperació conservades a {path} ({details})"

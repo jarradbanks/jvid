@@ -141,6 +141,12 @@ about = "jvid 정보…"
 tutorials = "튜토리얼"
 
 [export]
+phase_preparing = "준비 중"
+phase_analysis = "오디오 분석 중"
+phase_encoding = "인코딩 · {pass}차 패스"
+phase_retry = "소프트웨어로 재시도 중"
+phase_finalizing = "마무리 중"
+phase_copying = "복사 중"
 sidecar_file_target = "출력 대상이 일반 파일이 아닙니다."
 sidecar_separate = "미디어와 자막은 별도의 파일로 출력해야 합니다."
 sidecar_recovery = "{error}; 복구 사본을 {path}에 보관했습니다 ({details})"

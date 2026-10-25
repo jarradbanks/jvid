@@ -139,6 +139,12 @@ about = "Про програму jvid…"
 tutorials = "Уроки"
 
 [export]
+phase_preparing = "Підготовка"
+phase_analysis = "Аналіз Аудіо"
+phase_encoding = "Кодування · Прохід {pass}"
+phase_retry = "Повторення Програмно"
+phase_finalizing = "Завершення"
+phase_copying = "Копіювання"
 sidecar_file_target = "Ціль виводу не є звичайним файлом."
 sidecar_separate = "Медіа та субтитри мають виводитися в окремі файли."
 sidecar_recovery = "{error}; копії для відновлення збережено в {path} ({details})"

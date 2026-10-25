@@ -139,6 +139,12 @@ about = "À propos de jvid…"
 tutorials = "Tutoriels"
 
 [export]
+phase_preparing = "Préparation"
+phase_analysis = "Analyse Audio"
+phase_encoding = "Encodage · Passe {pass}"
+phase_retry = "Nouvel Essai Logiciel"
+phase_finalizing = "Finalisation"
+phase_copying = "Copie"
 sidecar_file_target = "La destination n’est pas un fichier normal."
 sidecar_separate = "La vidéo et les sous-titres doivent avoir des fichiers distincts."
 sidecar_recovery = "{error} ; copies de récupération conservées dans {path} ({details})"

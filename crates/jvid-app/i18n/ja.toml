@@ -141,6 +141,12 @@ about = "jvid について…"
 tutorials = "チュートリアル"
 
 [export]
+phase_preparing = "準備中"
+phase_analysis = "音声解析中"
+phase_encoding = "エンコード · パス {pass}"
+phase_retry = "ソフトウェアで再試行中"
+phase_finalizing = "最終処理中"
+phase_copying = "コピー中"
 sidecar_file_target = "出力先は通常のファイルではありません。"
 sidecar_separate = "メディアと字幕の出力先は別々のファイルにしてください。"
 sidecar_recovery = "{error}。復元用コピーを {path} に保持しました（{details}）"

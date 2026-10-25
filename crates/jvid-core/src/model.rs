@@ -2904,7 +2904,8 @@ impl Project {
         cues
     }
 
-    /// A copy with subtitle tracks hidden, for exporting them as a sidecar instead of burnt in.
+    /// A copy with subtitle text suppressed, for sidecar export. Subtitle-only tracks are
+    /// hidden; mixed tracks keep their containers/media and suppress direct text clips.
     pub fn without_subtitles(&self) -> Project {
         let mut p = self.clone();
         let text_assets: std::collections::BTreeSet<_> = p

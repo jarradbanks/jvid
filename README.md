@@ -38,6 +38,8 @@ H.264 export needs working hardware encoding or an FFmpeg build with OpenH264 (`
 
 Headless audio presets (including WAV) and `--lossless`/`--smart` use CPU/media dependencies and do not initialize or probe wgpu. Composited video needs a rendering device; adapter/device failure exits with code 4 and leaves existing output intact. Install a working graphics driver or a software Vulkan adapter such as Mesa lavapipe for video rendering on a headless Linux host.
 
+Export progress names audio analysis, each encoding pass, software retries and finalization. CLI `--json` emits `phase`, `pass`, `retry`, phase `progress` (or `null` when unknown), and `phase_eta_seconds`; this ETA covers the current phase. Completion is reported after output validation and publication.
+
 `scripts/preview/build` regenerates the preview at the top of this page. It drives the real app frame by frame, then lays the capture out with [HyperFrames](https://github.com/heygen-com/hyperframes) from `scripts/preview/motion.html`. It needs the FFmpeg command line tools, Node 22 or later and a Vulkan driver (Mesa's lavapipe works), and downloads its footage once into `target/preview/`.
 
 ## Workspace

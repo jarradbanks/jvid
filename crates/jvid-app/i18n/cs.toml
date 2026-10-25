@@ -139,6 +139,12 @@ about = "O aplikaci jvid…"
 tutorials = "Výukové lekce"
 
 [export]
+phase_preparing = "Příprava"
+phase_analysis = "Analýza Zvuku"
+phase_encoding = "Kódování · Průchod {pass}"
+phase_retry = "Nový Softwarový Pokus"
+phase_finalizing = "Dokončování"
+phase_copying = "Kopírování"
 sidecar_file_target = "Cíl výstupu není běžný soubor."
 sidecar_separate = "Média a titulky musí mít samostatné výstupní soubory."
 sidecar_recovery = "{error}; záložní kopie jsou zachovány v {path} ({details})"

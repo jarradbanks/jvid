@@ -141,6 +141,12 @@ about = "jvid Hakkında…"
 tutorials = "Eğitimler"
 
 [export]
+phase_preparing = "Hazırlanıyor"
+phase_analysis = "Ses Analiz Ediliyor"
+phase_encoding = "Kodlama · Geçiş {pass}"
+phase_retry = "Yazılımla Yeniden Deneniyor"
+phase_finalizing = "Sonlandırılıyor"
+phase_copying = "Kopyalanıyor"
 sidecar_file_target = "Çıktı hedefi normal bir dosya değil."
 sidecar_separate = "Medya ve altyazılar ayrı çıktı dosyaları olmalıdır."
 sidecar_recovery = "{error}; kurtarma kopyaları {path} konumunda saklandı ({details})"

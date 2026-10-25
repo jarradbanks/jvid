@@ -302,7 +302,9 @@ fn nested_sidecar_exports_timed_captions_without_burning_them_or_hiding_titles()
     );
     assert!(
         expected
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .take(320 * 100)
             .filter(|p| p[0] > 200)
             .count()
@@ -361,5 +363,196 @@ fn sidecar_pair_publication_supports_lossless_copy_and_smart() {
         let path = req.path.clone();
         assert!(context(move |ctx| run_with_gpu(&project, &req, None, ctx)).is_err());
         assert_eq!(std::fs::read(path).unwrap(), media);
+    }
+}
+
+#[test]
+fn normalization_analysis_reports_progress_even_before_encoding() {
+    let pool = Pool::new(1);
+    let (tx, rx) = channel();
+    let req = audio_request(std::env::temp_dir().join("analysis-unused.wav"));
+    let handle = pool.submit("analysis progress", Priority::Interactive, move |ctx| {
+        tx.send(measure(&Project::default(), &req, ctx)).unwrap();
+    });
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(10)).unwrap().unwrap(),
+        None
+    );
+    assert!(
+        handle.progress() > 0.0,
+        "analysis left progress at zero until encoding"
+    );
+}
+
+#[test]
+fn normalization_emits_analysis_encoding_finalizing_then_published_completion() {
+    let root = AttemptFiles::new(&std::env::temp_dir().join("phased-audio.wav")).unwrap();
+    let mut req = audio_request(root.output.clone());
+    req.loudness = Some(-14.0);
+    let pool = Pool::new(1);
+    let (handle, rx) = submit(&pool, Project::default(), req.clone(), None);
+    rx.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+    let events = handle.status.events();
+    let phases: Vec<_> = events.iter().map(|e| e.phase).collect();
+    let analysis = phases
+        .iter()
+        .position(|p| *p == Phase::AnalyzingAudio)
+        .unwrap();
+    let encoding = phases
+        .iter()
+        .position(|p| *p == Phase::Encoding { pass: 1 })
+        .unwrap();
+    let finalizing = phases.iter().position(|p| *p == Phase::Finalizing).unwrap();
+    let completed = phases.iter().position(|p| *p == Phase::Completed).unwrap();
+    assert!(analysis < encoding && encoding < finalizing && finalizing < completed);
+    assert!(events.iter().any(
+        |s| s.phase == Phase::AnalyzingAudio && s.progress.is_some_and(|p| p > 0.0 && p < 1.0)
+    ));
+    assert!(
+        events
+            .iter()
+            .filter(|s| s.phase == Phase::Finalizing)
+            .all(|s| s.progress.is_none() && s.phase_left().is_none())
+    );
+    assert_eq!(handle.snapshot().phase, Phase::Completed);
+    assert_eq!(handle.snapshot().progress, Some(1.0));
+    assert!(jvid_media::probe::probe(&req.path).is_ok());
+    assert!(req.path.with_extension("srt").is_file());
+}
+
+#[test]
+fn target_size_passes_are_numbered_and_software_retry_is_explicit() {
+    let root = AttemptFiles::new(&std::env::temp_dir().join("phased-size.wav")).unwrap();
+    let req = audio_request(root.output.clone());
+    context(move |job| {
+        let status = Progress::default();
+        let ctx = Tracked {
+            job,
+            status: &status,
+        };
+        let mut pass = 0;
+        size_passes(&req, 1000, 0.0, 1000, &ctx, |request| {
+            pass += 1;
+            let snapshot = status.snapshot();
+            assert_eq!(snapshot.phase, Phase::Encoding { pass });
+            assert_eq!(snapshot.progress, Some(0.0));
+            assert_eq!(
+                snapshot.phase_left(),
+                None,
+                "new pass must not retain the last ETA"
+            );
+            ctx.set_progress(0.5);
+            std::fs::write(&request.path, vec![0; if pass == 1 { 1500 } else { 980 }]).unwrap();
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(pass, 2);
+        let phases: Vec<_> = status.events().iter().map(|s| s.phase).collect();
+        assert!(phases.contains(&Phase::Encoding { pass: 2 }));
+        assert!(!phases.contains(&Phase::Completed));
+        let mut attempts = 0;
+        replay(&Project::default(), &req, &ctx, |request| {
+            attempts += 1;
+            ctx.set_phase(Phase::Encoding { pass: 1 });
+            if attempts == 1 {
+                return Err(EncodeError::Vaapi((-5).into()).into());
+            }
+            assert_eq!(
+                request.preset.options.get("encoder").map(String::as_str),
+                Some("software")
+            );
+            assert_eq!(status.snapshot().retry, 1);
+            std::fs::write(&request.path, b"validated software output").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(attempts, 2);
+        assert!(status.events().iter().any(|s| s.phase == Phase::Retrying
+            && s.progress.is_none()
+            && s.phase_left().is_none()));
+        assert!(!status.events().iter().any(|s| s.phase == Phase::Completed));
+    });
+}
+
+#[test]
+fn cancellation_is_observed_during_analysis_second_pass_retry_and_finalization() {
+    struct Gate<'a> {
+        tracked: Tracked<'a>,
+        phase: Phase,
+        ready: std::sync::mpsc::Sender<()>,
+        release: Receiver<()>,
+    }
+    impl Context for Gate<'_> {
+        fn is_cancelled(&self) -> bool {
+            self.tracked.is_cancelled()
+        }
+        fn set_progress(&self, p: f32) {
+            self.tracked.set_progress(p);
+        }
+        fn set_phase(&self, phase: Phase) {
+            self.tracked.set_phase(phase);
+            if phase == self.phase {
+                self.ready.send(()).unwrap();
+                self.release.recv_timeout(Duration::from_secs(10)).unwrap();
+            }
+        }
+    }
+    for phase in [
+        Phase::AnalyzingAudio,
+        Phase::Encoding { pass: 2 },
+        Phase::Retrying,
+        Phase::Finalizing,
+    ] {
+        let root = AttemptFiles::new(&std::env::temp_dir().join("cancel-phase.wav")).unwrap();
+        let mut req = audio_request(root.output.clone());
+        req.sidecar = false;
+        req.loudness = (phase == Phase::AnalyzingAudio).then_some(-14.0);
+        std::fs::write(&req.path, b"prior completed export").unwrap();
+        let pool = Pool::new(1);
+        let (ready, wait) = channel();
+        let (release, go) = channel();
+        let (tx, rx) = channel();
+        let request = req.clone();
+        let handle = pool.submit("cancel phase", Priority::Interactive, move |job| {
+            let status = Progress::default();
+            let ctx = Gate {
+                tracked: Tracked {
+                    job,
+                    status: &status,
+                },
+                phase,
+                ready,
+                release: go,
+            };
+            let mut attempts = 0;
+            let result = match phase {
+                Phase::Encoding { .. } => replay(&Project::default(), &request, &ctx, |r| {
+                    size_passes(r, 1000, 0.0, 1000, &ctx, |r| {
+                        attempts += 1;
+                        std::fs::write(&r.path, vec![0; 1500]).unwrap();
+                        Ok(())
+                    })
+                }),
+                Phase::Retrying => replay(&Project::default(), &request, &ctx, |_| {
+                    attempts += 1;
+                    Err::<(), _>(EncodeError::Vaapi((-5).into()).into())
+                }),
+                _ => run_export(&Project::default(), &request, None, &ctx).map(|_| ()),
+            };
+            tx.send((result, attempts, status.events())).unwrap();
+        });
+        wait.recv_timeout(Duration::from_secs(10)).unwrap();
+        handle.cancel();
+        release.send(()).unwrap();
+        let (result, attempts, events) = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(result, Err(Error::Cancelled), "{phase:?}");
+        if matches!(phase, Phase::Encoding { .. } | Phase::Retrying) {
+            assert_eq!(attempts, 1);
+        }
+        assert!(events.iter().any(|s| s.phase == phase));
+        assert!(!events.iter().any(|s| s.phase == Phase::Completed));
+        assert_eq!(std::fs::read(req.path).unwrap(), b"prior completed export");
+        drop(pool);
+        assert_eq!(std::fs::read_dir(&root.dir).unwrap().count(), 1);
     }
 }
