@@ -206,7 +206,10 @@ impl Queue {
 
     /// The lengths of the jobs still listed that were pushed after `mark`.
     pub fn since(&self, mark: usize) -> impl Iterator<Item = Time> + '_ {
-        self.jobs.iter().filter(move |j| j.seq >= mark).map(|j| j.duration)
+        self.jobs
+            .iter()
+            .filter(move |j| j.seq >= mark)
+            .map(|j| j.duration)
     }
 
     /// Every job, oldest first; only the first live one renders.

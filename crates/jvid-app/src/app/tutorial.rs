@@ -1630,7 +1630,9 @@ mod tests {
     /// Lists an export in the Render Queue that never renders.
     fn fake_export(app: &mut App) {
         let (_tx, rx) = std::sync::mpsc::channel();
-        let handle = app.exports.submit("fake", jvid_jobs::Priority::Interactive, |_| {});
+        let handle = app
+            .exports
+            .submit("fake", jvid_jobs::Priority::Interactive, |_| {});
         let path = PathBuf::from(format!("/m/{}.mp4", app.queue.pushed()));
         app.queue.push(path, String::new(), Time(1), (handle, rx));
     }
