@@ -99,10 +99,11 @@ pub fn icon_font() -> FontId {
     FontId::new(size::ICON, FontFamily::Name("icons".into()))
 }
 
-/// Each CJK language's Noto Sans CJK Regular, subset to its catalogs by
-/// `assets/subset-cjk.py` and used for every weight. Loaded only while its language is active,
+/// Each CJK language's Noto Sans CJK Regular, subset to its common characters and catalogs by
+/// `assets/subset-cjk.py` and used for every weight. A `static`, not a `const`, so the binary
+/// links one copy however many crates use it (jvid-app hands it to jvid-render's titles). Loaded only while its language is active,
 /// because each language draws Han characters its own way.
-pub const CJK_FACES: [(&str, &[u8]); 3] = [
+pub static CJK_FACES: [(&str, &[u8]); 3] = [
     ("ja", include_bytes!("../assets/NotoSansCJK-ja.otf")),
     (
         "zh-Hans",

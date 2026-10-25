@@ -236,6 +236,8 @@ impl App {
             })
             .unwrap_or_else(default_dock);
         let exports = jvid_jobs::Pool::new(1);
+        // Titles share the UI's CJK faces, so the binary links one copy of them.
+        jvid_render::text::set_faces(suite_ui::theme::CJK_FACES.map(|(_, b)| b).to_vec());
         // The system font scan can take seconds; done here, the first text frame doesn't stall.
         exports.submit("fonts", jvid_jobs::Priority::Preview, |_| {
             jvid_render::text::warm()

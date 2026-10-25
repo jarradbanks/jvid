@@ -29,26 +29,27 @@ struct Fonts {
     masks: Vec<(Key, Arc<Masks>)>,
 }
 
-/// The suite's Noto Sans CJK faces. They hold only the catalogs' characters, so they draw
-/// translated title presets on systems without a CJK font, not arbitrary user text.
-const CJK_FACES: [&[u8]; 3] = [
-    include_bytes!("../../suite-ui/assets/NotoSansCJK-ja.otf"),
-    include_bytes!("../../suite-ui/assets/NotoSansCJK-zh-Hans.otf"),
-    include_bytes!("../../suite-ui/assets/NotoSansCJK-ko.otf"),
-];
+/// Faces loaded after the system fonts, set by [`set_faces`].
+static FACES: OnceLock<Vec<&'static [u8]>> = OnceLock::new();
 
-fn cjk_sources() -> impl Iterator<Item = cosmic_text::fontdb::Source> {
-    CJK_FACES
-        .into_iter()
-        .map(|b| cosmic_text::fontdb::Source::Binary(Arc::new(b)))
+/// Adds `faces` after the system fonts, so an installed face wins. The app passes the suite's
+/// Noto Sans CJK faces, which draw translated title presets on systems without a CJK font. Call
+/// it before the fonts load ([`warm`]); later calls are ignored.
+pub fn set_faces(faces: Vec<&'static [u8]>) {
+    let _ = FACES.set(faces);
+}
+
+fn sources(faces: &[&'static [u8]]) -> impl Iterator<Item = cosmic_text::fontdb::Source> {
+    faces
+        .iter()
+        .map(|&b| cosmic_text::fontdb::Source::Binary(Arc::new(b)))
 }
 
 fn fonts() -> &'static Mutex<Fonts> {
     static FONTS: OnceLock<Mutex<Fonts>> = OnceLock::new();
     FONTS.get_or_init(|| {
         Mutex::new(Fonts {
-            // Loaded after the system fonts, so an installed full CJK face wins.
-            system: FontSystem::new_with_fonts(cjk_sources()),
+            system: FontSystem::new_with_fonts(sources(FACES.get().map_or(&[], |f| f))),
             swash: SwashCache::new(),
             recent: Vec::new(),
             masks: Vec::new(),
@@ -474,8 +475,14 @@ mod tests {
 
     #[test]
     fn bundled_cjk_faces_draw_title_presets_without_system_fonts() {
+        // The faces jvid-app passes to `set_faces`, linked only into this test.
+        let faces = [
+            include_bytes!("../../suite-ui/assets/NotoSansCJK-ja.otf").as_slice(),
+            include_bytes!("../../suite-ui/assets/NotoSansCJK-zh-Hans.otf"),
+            include_bytes!("../../suite-ui/assets/NotoSansCJK-ko.otf"),
+        ];
         let mut db = cosmic_text::fontdb::Database::new();
-        for source in cjk_sources() {
+        for source in sources(&faces) {
             db.load_font_source(source);
         }
         // The ja, zh-Hans and ko title, lower-third and caption preset texts.
