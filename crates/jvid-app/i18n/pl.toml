@@ -782,6 +782,7 @@ reset_all = "Resetuj wszystkie"
 file_type = "Mapa klawiszy"
 
 [preview]
+position = "Pozycja Odtwarzania"
 more = "Więcej"
 fit = "Dopasuj"
 full = "Pełna"

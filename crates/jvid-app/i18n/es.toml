@@ -773,6 +773,7 @@ reset_all = "Restablecer todo"
 file_type = "Mapa de teclas"
 
 [preview]
+position = "Posición de Reproducción"
 more = "Más"
 fit = "Ajustar"
 full = "Total"

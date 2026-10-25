@@ -771,6 +771,7 @@ reset_all = "Reimposta tutto"
 file_type = "Mappa tasti"
 
 [preview]
+position = "Posizione di Riproduzione"
 more = "Altro"
 fit = "Adatta"
 full = "Intera"

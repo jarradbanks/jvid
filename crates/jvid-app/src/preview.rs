@@ -498,7 +498,7 @@ impl Preview {
             duration: t.duration,
             position: t.rate.time_floor(frame),
         };
-        let action = match asset.filter(|a| a.generated()) {
+        let input = match asset.filter(|a| a.generated()) {
             Some(a) => {
                 if self.source_shown.as_ref().is_none_or(|(was, _)| was != a) {
                     let s = project.settings();
@@ -515,16 +515,48 @@ impl Preview {
                     self.generation += 1;
                 }
                 let program = Some((project.settings(), true));
-                self.show(ui, None, false, Some(&row), program)?
+                self.show(ui, None, false, Some(&row), program)
             }
             None => {
                 let (path, video) = (p.path.clone(), p.video);
                 let offline = missing.contains(&path);
                 let source = Some((path.as_path(), row.position, video));
-                self.show(ui, source, offline, Some(&row), None)?
+                self.show(ui, source, offline, Some(&row), None)
             }
         };
-        self.source_action(action, project)
+        if let Some(time) = input.seek {
+            self.seek_source(time);
+            ui.ctx().request_repaint();
+        }
+        input
+            .action
+            .and_then(|action| self.source_action(action, project))
+    }
+
+    fn seek_source(&mut self, time: Time) {
+        let clock = self.clock();
+        let Some(player) = &mut self.player else {
+            return;
+        };
+        let t = &mut player.transport;
+        let last = t
+            .rate
+            .index_floor(Time(t.duration.0.saturating_sub(1)))
+            .max(0);
+        let frame = t.rate.index_floor(time).clamp(0, last);
+        if frame == t.frame(clock) {
+            return;
+        }
+        if let Some(output) = &mut self.output {
+            output.flush();
+        }
+        t.seek(t.rate.time_floor(frame), clock);
+        // Keep one decode in flight; discard its old result and request the latest
+        // position when it completes instead of queueing every drag event.
+        self.requested = None;
+        self.frame = None;
+        self.error = None;
+        self.generation += 1;
     }
 
     /// Runs a `PROGRAM_ACTIONS` action on timeline playback.
@@ -608,13 +640,17 @@ impl Preview {
         let end = t
             .rate
             .time_floor(t.rate.index_floor(Time(t.duration.0 - 1)).max(0));
-        match self.show(
+        let input = self.show(
             ui,
             None,
             false,
             Some(&row),
             Some((project.settings(), false)),
-        ) {
+        );
+        if let Some(time) = input.seek {
+            return Some(time);
+        }
+        match input.action {
             Some("go_to_start") => Some(Time(0)),
             Some("go_to_end") => Some(end),
             Some(id) => {
@@ -807,7 +843,7 @@ impl Preview {
         offline: bool,
         row: Option<&SourceRow>,
         program: Option<(&ProjectSettings, bool)>,
-    ) -> Option<&'static str> {
+    ) -> TransportInput {
         // Only the timeline's own row records.
         let records = matches!(program, Some((_, false)));
         let path = source.map(|(p, ..)| p);
@@ -870,6 +906,7 @@ impl Preview {
             // A newer time is wanted; go again next frame.
             if self.requested != Some(t) {
                 ui.ctx().request_repaint();
+                continue;
             }
             match r {
                 Ok(f) => {
@@ -896,8 +933,8 @@ impl Preview {
                 }
             }
         }
-        if program.is_none() {
-            self.source.as_ref()?;
+        if program.is_none() && self.source.is_none() {
+            return TransportInput::default();
         }
 
         let rect = ui.max_rect();
@@ -1013,10 +1050,13 @@ impl Preview {
             }
         }
 
-        let bar = Rect::from_x_y_ranges(rect.x_range(), viewer.bottom()..=rect.bottom());
+        let bar =
+            Rect::from_x_y_ranges(rect.x_range(), rect.bottom() - size::HEADER..=rect.bottom());
+        let strip = Rect::from_x_y_ranges(rect.x_range(), viewer.bottom()..=bar.top());
         let mut action = None;
+        let mut seek = None;
         if let Some(r) = row {
-            r.marks(ui, viewer);
+            seek = r.marks(ui, strip);
             let inner = bar.shrink2(vec2(space::INSET, 0.0));
             let time_width = ui
                 .painter()
@@ -1048,7 +1088,10 @@ impl Preview {
                 + secondary_width
                 + 3.0 * space::S8;
             if inner.width() < full_width {
-                return self.compact_transport(ui, inner, r, records);
+                return TransportInput {
+                    action: self.compact_transport(ui, inner, r, records),
+                    seek,
+                };
             }
             let timecode = ui.painter().text(
                 inner.left_center(),
@@ -1126,7 +1169,7 @@ impl Preview {
                 });
             });
         }
-        action
+        TransportInput { action, seek }
     }
 
     /// The Program row's Bypass Grade and before/after split toggles.
@@ -1424,8 +1467,17 @@ fn record_button(ui: &mut Ui, take: Option<(std::time::Duration, f32)>, readout:
 /// The video area of a viewer `ui`: its rect above the transport row.
 pub fn viewer_rect(ui: &Ui) -> Rect {
     let rect = ui.max_rect();
-    Rect::from_min_max(rect.min, rect.max - vec2(0.0, size::HEADER))
+    Rect::from_min_max(rect.min, rect.max - vec2(0.0, size::HEADER + SEEK_HEIGHT))
 }
+
+/// One UI pass coalesces pointer movement to its latest selected position.
+#[derive(Default)]
+struct TransportInput {
+    action: Option<&'static str>,
+    seek: Option<Time>,
+}
+
+const SEEK_HEIGHT: f32 = 16.0;
 
 /// What the Source and Program tabs' transport row shows.
 struct SourceRow {
@@ -1441,20 +1493,37 @@ struct SourceRow {
 }
 
 impl SourceRow {
-    /// The in/out range and playhead along the viewer's bottom edge.
-    fn marks(&self, ui: &Ui, viewer: Rect) {
-        if self.duration.0 <= 0 {
-            return;
+    /// The picture and transform handles end above this dedicated scrub hit area.
+    fn marks(&self, ui: &Ui, hit: Rect) -> Option<Time> {
+        if self.duration.0 <= 0 || hit.width() <= 0.0 {
+            return None;
         }
-        let x = |t: Time| viewer.left() + viewer.width() * t.0 as f32 / self.duration.0 as f32;
+        let response = ui.interact(
+            hit,
+            ui.id().with("preview_seek"),
+            egui::Sense::click_and_drag(),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::slider(
+                true,
+                self.position.0 as f64 / jvid_core::time::FLICKS_PER_SECOND as f64,
+                tr!("preview.position"),
+            )
+        });
+        let response = response.on_hover_text(tr!("preview.position"));
+        let x = |t: Time| hit.left() + hit.width() * (t.0 as f64 / self.duration.0 as f64) as f32;
         let strip =
-            Rect::from_x_y_ranges(viewer.x_range(), viewer.bottom() - 3.0..=viewer.bottom());
+            Rect::from_x_y_ranges(hit.x_range(), hit.center().y - 1.5..=hit.center().y + 1.5);
         let painter = ui.painter();
+        painter.rect_filled(strip, 0.0, color::border_strong());
         if self.in_point.is_some() || self.out_point.is_some() {
             let from = x(self.in_point.unwrap_or(Time(0)));
             let to = x(self.out_point.unwrap_or(self.duration));
-            let band = Rect::from_x_y_ranges(from..=to, strip.y_range());
-            painter.rect_filled(band, 0.0, color::light_blue().gamma_multiply(0.5));
+            painter.rect_filled(
+                Rect::from_x_y_ranges(from..=to, strip.y_range()),
+                0.0,
+                color::light_blue().gamma_multiply(0.5),
+            );
         }
         let head = x(self.position);
         painter.rect_filled(
@@ -1462,6 +1531,19 @@ impl SourceRow {
             0.0,
             color::light_blue(),
         );
+        let pointer = response
+            .interact_pointer_pos()
+            .filter(|_| response.clicked() || response.dragged());
+        pointer.map(|p| {
+            let fraction = ((p.x - hit.left()) as f64 / hit.width() as f64).clamp(0.0, 1.0);
+            let time = Time((fraction * self.duration.0 as f64) as i64);
+            let last = self
+                .rate
+                .index_floor(Time(self.duration.0.saturating_sub(1)))
+                .max(0);
+            self.rate
+                .time_floor(self.rate.index_floor(time).clamp(0, last))
+        })
     }
 }
 
@@ -1589,6 +1671,12 @@ impl CallbackTrait for Paint {
 
 #[cfg(test)]
 impl Preview {
+    pub fn source_frame(&self) -> Option<i64> {
+        self.player
+            .as_ref()
+            .map(|p| p.transport.frame(self.clock()))
+    }
+
     pub fn source_speed(&self) -> Option<i32> {
         self.player.as_ref().map(|p| p.transport.speed())
     }
@@ -2353,6 +2441,7 @@ mod audit_transport_tests {
                             egui::accesskit::Role::Button,
                             egui::accesskit::Role::ComboBox,
                             egui::accesskit::Role::CheckBox,
+                            egui::accesskit::Role::Slider,
                         ] {
                             controls.extend(h.query_all_by_role(role).map(|n| n.rect()));
                         }
@@ -2448,6 +2537,91 @@ mod audit_transport_tests {
                 h.get_by_label(tr!("preview.guides"));
             }
         }
+    }
+
+    #[test]
+    fn audit_463_source_seek_flushes_audio_and_coalesces_pending_decode() {
+        use jvid_core::{history::History, model::ProbeInfo, time::FLICKS_PER_SECOND as S};
+        use std::sync::Mutex;
+        #[derive(Clone, Default)]
+        struct Backend(Arc<Mutex<Option<Arc<jvid_audio::Feed>>>>);
+        impl jvid_audio::Backend for Backend {
+            fn devices(&self) -> Vec<String> {
+                vec!["test".into()]
+            }
+            fn open(
+                &mut self,
+                _: Option<&str>,
+                feed: Arc<jvid_audio::Feed>,
+            ) -> Result<(String, Box<dyn std::any::Any>), String> {
+                *self.0.lock().unwrap() = Some(feed);
+                Ok(("test".into(), Box::new(())))
+            }
+        }
+        let backend = Backend::default();
+        let mut history = History::new(Project::default());
+        let path = PathBuf::from("/nonexistent/seek-coalescing.mp4");
+        history
+            .apply(Command::Import(vec![(
+                path.clone(),
+                ProbeInfo {
+                    duration: Time(1800 * S),
+                    width: Some(1920),
+                    height: Some(1080),
+                    frame_rate: Some(jvid_core::time::Rate::new(30, 1)),
+                    ..Default::default()
+                },
+            )]))
+            .unwrap();
+        let mut preview = Preview::new(None);
+        preview.open(history.project(), history.project().assets()[0].id);
+        preview.set_output(Output::new(Box::new(backend.clone()), None));
+        assert_eq!(preview.output.as_mut().unwrap().push(&[0.5; 64]), 64);
+        preview.source = Some(path.clone());
+        preview.pending = true;
+        preview.requested = Some(Time(0));
+        for seconds in [200, 400, 800, 900] {
+            preview.seek_source(Time(seconds * S));
+            assert!(preview.pending);
+            assert!(
+                preview.source_job.is_none(),
+                "no extra decode queued while one is in flight"
+            );
+        }
+        let mut output = [1.0; 64];
+        backend
+            .0
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .fill(&mut output, 2);
+        assert_eq!(output, [0.0; 64], "old audio was flushed");
+        preview
+            .tx
+            .send((path, Time(0), Err("stale decode".into())))
+            .unwrap();
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut frame_output = ctx.run_ui(Default::default(), |ui| {
+            preview.show_source(ui, history.project(), &HashSet::new());
+        });
+        frame_output.textures_delta.clear();
+        assert!(!preview.pending);
+        assert!(
+            preview.error.is_none(),
+            "discard stale replies after seeking"
+        );
+        assert_eq!(preview.source_frame(), Some(27000));
+        let mut frame_output = ctx.run_ui(Default::default(), |ui| {
+            preview.show_source(ui, history.project(), &HashSet::new());
+        });
+        frame_output.textures_delta.clear();
+        assert_eq!(
+            preview.requested,
+            Some(Time(900 * S)),
+            "decode the latest position next"
+        );
     }
 
     // Locale changes are process-global; explicitly run in isolation alongside #472's test.

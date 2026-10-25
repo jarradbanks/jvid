@@ -773,6 +773,7 @@ reset_all = "Alles resetten"
 file_type = "Sneltoetsenset"
 
 [preview]
+position = "Afspeelpositie"
 more = "Meer"
 fit = "Passend"
 full = "Volledig"

@@ -481,3 +481,74 @@ fn audit_470_default_and_remapped_focus_effects_select_and_focus_bin() {
         }
     }
 }
+
+fn pointer_click(h: &mut Harness<'_, App>, at: egui::Pos2) {
+    h.hover_at(at);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    h.run_steps(2);
+}
+
+#[test]
+fn audit_463_source_strip_seeks_long_recording_and_keeps_marks_and_timeline_independent() {
+    let (mut h, id) = source_editor();
+    double_click(&mut h, "long-recording.wav");
+    let strip = h.get_by_label(tr!("preview.position")).rect();
+    assert!(strip.height() >= 12.0, "a practical scrub hit area");
+    let before = h.state().history.project().clone();
+    let head = h.state().timeline.playhead();
+    pointer_click(&mut h, strip.center());
+    assert!((h.state().preview.source_frame().unwrap() - 27000).abs() <= 1);
+    assert_eq!(h.state().timeline.playhead(), head);
+    assert_eq!(
+        h.state().history.project(),
+        &before,
+        "seeking is not a history edit"
+    );
+    h.key_press(Key::I);
+    h.run_steps(2);
+    h.key_press(Key::ArrowRight);
+    h.run_steps(2);
+    h.key_press(Key::O);
+    h.run_steps(2);
+    let rate = h.state().history.project().settings().frame_rate;
+    let marked = h.state().history.project().asset(id).unwrap();
+    assert_eq!(marked.in_point, Some(rate.time_floor(27000)));
+    assert_eq!(marked.out_point, Some(rate.time_floor(27002)));
+    let before = h.state().history.project().clone();
+    h.drag_at(strip.center());
+    h.step();
+    h.hover_at(egui::pos2(strip.left() - 100.0, strip.center().y));
+    h.run_steps(2);
+    assert_eq!(h.state().preview.source_frame(), Some(0));
+    h.hover_at(egui::pos2(strip.right() + 100.0, strip.center().y));
+    h.run_steps(2);
+    assert_eq!(h.state().preview.source_frame(), Some(53999));
+    h.event(egui::Event::PointerButton {
+        pos: egui::pos2(strip.right() + 100.0, strip.center().y),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run_steps(2);
+    assert_eq!(h.state().history.project(), &before);
+    assert_eq!(h.state().timeline.playhead(), head);
+}
+
+#[test]
+fn audit_463_program_strip_uses_timeline_seek_without_a_history_edit() {
+    let mut h = editor();
+    h.state_mut().timeline.seek(Time(0));
+    h.run_steps(2);
+    let before = h.state().history.project().clone();
+    let strip = h.get_by_label(tr!("preview.position")).rect();
+    pointer_click(&mut h, strip.center());
+    assert_eq!(h.state().timeline.playhead(), Time(S / 2));
+    assert_eq!(h.state().history.project(), &before);
+}

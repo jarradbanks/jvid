@@ -762,6 +762,7 @@ reset_all = "모두 재설정"
 file_type = "키맵"
 
 [preview]
+position = "재생 위치"
 more = "더 보기"
 fit = "맞춤"
 full = "전체"

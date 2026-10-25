@@ -760,6 +760,7 @@ reset_all = "Alle zurücksetzen"
 file_type = "Tastaturbelegung"
 
 [preview]
+position = "Wiedergabeposition"
 more = "Mehr"
 fit = "Passend"
 full = "Voll"

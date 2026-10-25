@@ -781,6 +781,7 @@ reset_all = "Tout réinitialiser"
 file_type = "Configuration clavier"
 
 [preview]
+position = "Position de Lecture"
 more = "Plus"
 fit = "Ajuster"
 full = "Totale"

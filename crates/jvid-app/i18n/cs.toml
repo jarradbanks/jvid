@@ -775,6 +775,7 @@ reset_all = "Obnovit vše"
 file_type = "Klávesová mapa"
 
 [preview]
+position = "Pozice Přehrávání"
 more = "Další"
 fit = "Vcelku"
 full = "Plné"

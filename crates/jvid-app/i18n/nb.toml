@@ -760,6 +760,7 @@ reset_all = "Tilbakestill alle"
 file_type = "Tastaturoppsett"
 
 [preview]
+position = "Avspillingsposisjon"
 more = "Mer"
 fit = "Tilpass"
 full = "Full"
