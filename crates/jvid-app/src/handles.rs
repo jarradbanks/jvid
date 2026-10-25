@@ -28,6 +28,8 @@ enum Grab {
     /// Scale from a handle; corners and edges both scale uniformly, as the Inspector links scale.
     Scale,
     Rotate,
+    /// Drag the reframe box, the project frame, over a wide shot: the clip moves the other way.
+    Reframe,
 }
 
 /// A drag's start: the pointer and transform when it began, and the drag count.
@@ -52,8 +54,11 @@ fn dragged(
 ) -> Transform {
     let mut x = start.clone();
     match grab {
-        Grab::Move => {
+        Grab::Move | Grab::Reframe => {
             let mut d = (to - from) / s;
+            if grab == Grab::Reframe {
+                d = -d;
+            }
             if shift {
                 if d.x.abs() > d.y.abs() {
                     d.y = 0.0;
@@ -353,7 +358,16 @@ pub fn show(
             layer.map_or_else(|| text.clone(), |l| text.with(&l.text))
         });
     let [tl, tr, bl, br] = bounds(project, c, &x, text.as_ref(), frame)?;
-    let s = frame.width() / project.settings().width as f32;
+    let st = project.settings();
+    let s = frame.width() / st.width as f32;
+    // A shot of another shape covering the frame, as Reframe leaves one: the frame is a box
+    // to aim over it.
+    let reframe = text.is_none()
+        && crate::masks::upright(project, c)
+            .is_some_and(|[w, h]| (w / h - st.width as f32 / st.height as f32).abs() > 0.01)
+        && Rect::from_points(&[tl, tr, bl, br])
+            .expand(0.5)
+            .contains_rect(frame);
     let anchor = frame.center() + vec2(x.position[0] as f32, x.position[1] as f32) * s;
     let up = (tl - bl).normalized();
     let top = tl.lerp(tr, 0.5);
@@ -365,6 +379,9 @@ pub fn show(
     // Later grabs sit on top: the body first, so handles win where they overlap it.
     let bounds = Rect::from_points(&[tl, tr, bl, br]);
     grabs.push((Grab::Move, bounds));
+    if reframe {
+        grabs.push((Grab::Reframe, frame));
+    }
     for p in [
         tl,
         tr,
@@ -385,14 +402,18 @@ pub fn show(
         Rect::from_center_size(rot, Vec2::splat(HANDLE * 1.5)),
     ));
     // Off the viewer, nothing draws or takes clicks; Fit zoom brings off-frame handles back.
-    let clip = frame
-        .expand(STEM + HANDLE)
-        .intersect(crate::preview::viewer_rect(ui));
+    // A reframed shot's outline runs on across the viewer.
+    let viewer = crate::preview::viewer_rect(ui);
+    let clip = if reframe {
+        viewer
+    } else {
+        frame.expand(STEM + HANDLE).intersect(viewer)
+    };
     let mut edit = None;
     for (i, (grab, r)) in grabs.into_iter().enumerate() {
         let resp = ui.interact(r.intersect(clip), id.with(i), Sense::drag());
         let icon = match grab {
-            Grab::Move => egui::CursorIcon::Move,
+            Grab::Move | Grab::Reframe => egui::CursorIcon::Move,
             Grab::Scale => egui::CursorIcon::ResizeNwSe,
             Grab::Rotate => egui::CursorIcon::Alias,
         };
@@ -428,7 +449,7 @@ pub fn show(
             let new = dragged(grab, &st.x, st.from, to, anchor, s, shift);
             if new != x {
                 let names: &[&str] = match grab {
-                    Grab::Move => &["position"],
+                    Grab::Move | Grab::Reframe => &["position"],
                     Grab::Scale => &["scale"],
                     Grab::Rotate => &["rotation"],
                 };
@@ -441,6 +462,14 @@ pub fn show(
     let p = ui.painter().with_clip_rect(clip);
     let stroke = Stroke::new(1.0, color::amber());
     p.add(egui::Shape::closed_line(vec![tl, tr, br, bl], stroke));
+    if reframe {
+        p.rect_stroke(
+            frame,
+            0.0,
+            Stroke::new(1.0, color::light_blue()),
+            egui::StrokeKind::Inside,
+        );
+    }
     p.line_segment([top, rot], stroke);
     p.circle(rot, HANDLE / 2.0, color::VIEWER, stroke);
     for h in [
@@ -493,6 +522,9 @@ pub(crate) mod tests {
         assert_eq!(m.position, [10.0, 0.0]);
         let m = dragged(Grab::Move, &x, a, pos2(104.0, 140.0), a, 2.0, true);
         assert_eq!(m.position, [0.0, 20.0]);
+        // The reframe box moves right over the shot, so the shot moves left.
+        let m = dragged(Grab::Reframe, &x, a, pos2(120.0, 106.0), a, 2.0, false);
+        assert_eq!(m.position, [-10.0, -3.0]);
         // A corner twice as far from the anchor doubles scale; past the anchor it floors.
         let s = dragged(
             Grab::Scale,
@@ -616,6 +648,59 @@ pub(crate) mod tests {
         );
         assert!(harness.state_mut().undo());
         assert_eq!(keys(&harness), before);
+    }
+
+    #[test]
+    fn dragging_the_reframe_box_at_two_times_keys_twice_and_undoes_each() {
+        use jvid_core::history::History;
+        use jvid_core::time::FLICKS_PER_SECOND as S;
+        let (h, id) = history();
+        let tall = h.project().reframed(1080, 1920, |_, _| None);
+        // The 9:16 frame fitted in a 960x540 viewer.
+        let frame = Rect::from_center_size(pos2(480.0, 270.0), vec2(303.75, 540.0));
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([960.0, 540.0])
+            .build_ui_state(
+                move |ui, (h, t): &mut (History, Time)| {
+                    let edit = show(ui, h.project(), &HashSet::from([id]), *t, frame);
+                    if let Some((c, Some(k))) = edit {
+                        h.apply_coalesced(k, c).unwrap();
+                    }
+                },
+                (History::new(tall), Time(0)),
+            );
+        let keys = |h: &egui_kittest::Harness<'_, (History, Time)>| {
+            h.state().0.project().sequence().tracks()[0].clips()[0].keyframes["position"].clone()
+        };
+        assert_eq!(keys(&harness).len(), 1, "Reframe keys the start");
+        for secs in [1, 2] {
+            harness.state_mut().1 = Time(secs * S);
+            harness.run();
+            let mut p = pos2(450.0, 270.0);
+            harness.hover_at(p);
+            harness.run();
+            harness.drag_at(p);
+            harness.run();
+            for _ in 0..3 {
+                p += vec2(10.0, 0.0);
+                harness.hover_at(p);
+                harness.run();
+            }
+            harness.drop_at(p);
+            harness.run();
+        }
+        let after = keys(&harness);
+        assert_eq!(after.len(), 3);
+        assert_eq!([after[1].time, after[2].time], [Time(S), Time(2 * S)]);
+        // The box went right, so the shot went left: 30 points at 0.28 points a pixel.
+        let jvid_core::keyframe::Value::Vec2([x, _]) = after[1].value else {
+            panic!()
+        };
+        assert!((x + 30.0 * 1920.0 / 540.0).abs() < 0.5, "{x}");
+        assert!(harness.state_mut().0.undo());
+        assert_eq!(keys(&harness).len(), 2);
+        assert!(harness.state_mut().0.undo());
+        assert_eq!(keys(&harness).len(), 1);
     }
 
     /// A title clip filling 0..1s of a default project, with a box so its hit and bounds
