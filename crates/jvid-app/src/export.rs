@@ -195,6 +195,8 @@ impl From<EncodeError> for AttemptError {
 struct AttemptFiles {
     dir: PathBuf,
     output: PathBuf,
+    /// Preserve recovery copies if restoring a prior output itself fails.
+    retain: bool,
 }
 
 impl AttemptFiles {
@@ -214,6 +216,7 @@ impl AttemptFiles {
                     return Ok(Self {
                         output: dir.join(name),
                         dir,
+                        retain: false,
                     });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -225,7 +228,9 @@ impl AttemptFiles {
 
 impl Drop for AttemptFiles {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        if !self.retain {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
     }
 }
 
@@ -366,18 +371,136 @@ pub fn run_with_gpu(
     ctx: &Ctx,
 ) -> Result<ProbeInfo, Error> {
     if req.needs_gpu() && gpu.is_none() {
-        return Err("no GPU adapter: composited video requires a rendering device; install a working graphics driver or use a software Vulkan adapter (Mesa lavapipe on Linux)".to_string().into());
+        return Err(tr!("export.no_gpu").to_string().into());
     }
     if !req.sidecar {
         return encode(project, req, gpu, ctx);
     }
-    check_destination(project, &req.path.with_extension("srt"))?;
-    let info = encode(&project.without_subtitles(), req, gpu, ctx)?;
+    check_sidecar_destinations(project, req)?;
+    let mut files = AttemptFiles::new(&req.path)?;
+    let staged = Request {
+        path: files.output.clone(),
+        ..req.clone()
+    };
+    let info = encode(&project.without_subtitles(), &staged, gpu, ctx)?;
     let srt = jvid_core::srt::write(&project.subtitle_cues(), req.range);
-    let path = req.path.with_extension("srt");
+    let path = staged.path.with_extension("srt");
     std::fs::write(&path, srt)
         .map_err(|e| tr!("export.write_error", path = path.display(), error = e))?;
+    publish_sidecar(project, req, &mut files, ctx, |from, to| {
+        std::fs::rename(from, to)
+    })?;
     Ok(info)
+}
+
+/// Both destinations must be independent regular files and must not alias any source.
+fn check_sidecar_destinations(project: &Project, req: &Request) -> Result<(), Error> {
+    let sidecar = req.path.with_extension("srt");
+    for path in [&req.path, &sidecar] {
+        check_destination(project, path)?;
+        match std::fs::metadata(path) {
+            Ok(meta) if !meta.is_file() => {
+                return Err(tr!(
+                    "export.publish_error",
+                    path = path.display(),
+                    error = tr!("export.sidecar_file_target")
+                )
+                .into());
+            }
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(tr!("export.publish_error", path = path.display(), error = e).into());
+            }
+            _ => {}
+        }
+    }
+    if req.path == sidecar || same_file::is_same_file(&req.path, &sidecar).unwrap_or(false) {
+        return Err(tr!(
+            "export.publish_error",
+            path = sidecar.display(),
+            error = tr!("export.sidecar_separate")
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// A short, uncancellable commit after the final cancellation/identity check. Move prior
+/// outputs aside (also supports Windows overwrite), publish both staged files, or restore
+/// both originals. Never discard recovery copies if restoration encounters an I/O error.
+fn publish_sidecar(
+    project: &Project,
+    req: &Request,
+    files: &mut AttemptFiles,
+    ctx: &Ctx,
+    mut publish: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), Error> {
+    check_sidecar_destinations(project, req)?;
+    if ctx.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    let targets = [req.path.clone(), req.path.with_extension("srt")];
+    let staged = [files.output.clone(), files.output.with_extension("srt")];
+    let backups = [
+        files.dir.join(".previous-media"),
+        files.dir.join(".previous-sidecar"),
+    ];
+    let (mut saved, mut published) = ([false; 2], [false; 2]);
+    let commit = (|| {
+        for i in 0..2 {
+            match std::fs::symlink_metadata(&targets[i]) {
+                Ok(_) => {
+                    std::fs::rename(&targets[i], &backups[i])?;
+                    saved[i] = true;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+        for i in 0..2 {
+            publish(&staged[i], &targets[i])?;
+            published[i] = true;
+        }
+        Ok::<_, std::io::Error>(())
+    })();
+    if let Err(error) = commit {
+        let mut recovery = Vec::new();
+        for i in (0..2).rev() {
+            let restored = if saved[i] {
+                // Windows rename cannot replace a newly published file.
+                if published[i] {
+                    std::fs::remove_file(&targets[i])
+                        .and_then(|_| std::fs::rename(&backups[i], &targets[i]))
+                } else {
+                    std::fs::rename(&backups[i], &targets[i])
+                }
+            } else if published[i] {
+                std::fs::remove_file(&targets[i])
+            } else {
+                Ok(())
+            };
+            if let Err(e) = restored {
+                recovery.push(format!("{}: {e}", backups[i].display()));
+            }
+        }
+        let error = if recovery.is_empty() {
+            error.to_string()
+        } else {
+            files.retain = true;
+            tr!(
+                "export.sidecar_recovery",
+                error = error,
+                path = files.dir.display(),
+                details = recovery.join("; ")
+            )
+        };
+        return Err(tr!(
+            "export.publish_error",
+            path = req.path.display(),
+            error = error
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn encode(
@@ -714,8 +837,7 @@ fn render(
             return Err(Error::Cancelled.into());
         }
         if enc.has_video() {
-            let (device, queue) =
-                gpu.ok_or_else(|| "no GPU adapter for composited video".to_string())?;
+            let (device, queue) = gpu.ok_or_else(|| tr!("export.no_gpu").to_string())?;
             let tex = renderer
                 .as_mut()
                 .expect("video renderer")
@@ -853,3 +975,6 @@ mod tests;
 
 #[cfg(test)]
 mod audit_b10a;
+
+#[cfg(test)]
+mod audit_b10;

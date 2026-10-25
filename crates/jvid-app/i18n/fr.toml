@@ -139,6 +139,10 @@ about = "À propos de jvid…"
 tutorials = "Tutoriels"
 
 [export]
+sidecar_file_target = "La destination n’est pas un fichier normal."
+sidecar_separate = "La vidéo et les sous-titres doivent avoir des fichiers distincts."
+sidecar_recovery = "{error} ; copies de récupération conservées dans {path} ({details})"
+no_gpu = "Aucun adaptateur GPU : la vidéo composée nécessite un périphérique de rendu. Installez un pilote graphique ou un adaptateur Vulkan logiciel (Mesa lavapipe sous Linux)."
 codec_no_encoder = "Aucun encodeur {codec} utilisable avec ces paramètres d’exportation. Utilisez du matériel compatible, installez une version avec {encoders} ou choisissez un préréglage avec un autre codec."
 codec_wrong = "Le codec demandé est {expected}, mais la vidéo encodée est en {actual}. Le fichier de sortie n’a pas été publié."
 encoder = "Encodeurs à Essayer"

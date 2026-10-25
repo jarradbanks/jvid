@@ -146,6 +146,10 @@ about = "关于 jvid…"
 tutorials = "教程"
 
 [export]
+sidecar_file_target = "输出目标不是普通文件。"
+sidecar_separate = "媒体和字幕必须输出到不同的文件。"
+sidecar_recovery = "{error}；恢复副本保留在 {path}（{details}）"
+no_gpu = "没有GPU适配器：合成视频需要渲染设备。请安装显卡驱动或软件Vulkan适配器（Linux上可用Mesa lavapipe）。"
 codec_no_encoder = "没有可用于这些导出设置的 {codec} 编码器。请使用支持的硬件、安装包含 {encoders} 的构建版本，或选择使用其他编解码器的预设。"
 codec_wrong = "请求的格式为 {expected}，但编码后的视频格式为 {actual}。输出文件未发布。"
 encoder = "待尝试的编码器"

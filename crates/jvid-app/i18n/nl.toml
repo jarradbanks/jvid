@@ -142,6 +142,10 @@ about = "Over jvid…"
 tutorials = "Tutorials"
 
 [export]
+sidecar_file_target = "Het uitvoerdoel is geen gewoon bestand."
+sidecar_separate = "Media en ondertitels moeten aparte uitvoerbestanden hebben."
+sidecar_recovery = "{error}; herstelkopieën bewaard in {path} ({details})"
+no_gpu = "Geen GPU-adapter: samengestelde video vereist een renderapparaat. Installeer een grafisch stuurprogramma of software-Vulkan (Mesa lavapipe op Linux)."
 codec_no_encoder = "Geen bruikbare {codec}-encoder voor deze exportinstellingen. Gebruik ondersteunde hardware, installeer een versie met {encoders} of kies een voorinstelling met een andere codec."
 codec_wrong = "Er is {expected} aangevraagd, maar de gecodeerde video is {actual}. Het uitvoerbestand is niet gepubliceerd."
 encoder = "Te Proberen Encoders"

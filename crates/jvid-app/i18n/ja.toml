@@ -141,6 +141,10 @@ about = "jvid について…"
 tutorials = "チュートリアル"
 
 [export]
+sidecar_file_target = "出力先は通常のファイルではありません。"
+sidecar_separate = "メディアと字幕の出力先は別々のファイルにしてください。"
+sidecar_recovery = "{error}。復元用コピーを {path} に保持しました（{details}）"
+no_gpu = "GPUアダプターがありません。合成動画には描画デバイスが必要です。グラフィックスドライバーまたはソフトウェアVulkan（LinuxではMesa lavapipe）をインストールしてください。"
 codec_no_encoder = "この書き出し設定で使用できる {codec} エンコーダーがありません。対応ハードウェアを使用するか、{encoders} を含むビルドをインストールするか、別のコーデックのプリセットを選択してください。"
 codec_wrong = "{expected} が指定されましたが、エンコードされた動画は {actual} です。出力ファイルは公開されませんでした。"
 encoder = "試行するエンコーダー"

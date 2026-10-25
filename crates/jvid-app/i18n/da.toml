@@ -139,6 +139,10 @@ about = "Om jvid…"
 tutorials = "Selvstudier"
 
 [export]
+sidecar_file_target = "Outputmålet er ikke en almindelig fil."
+sidecar_separate = "Medier og undertekster skal have separate outputfiler."
+sidecar_recovery = "{error}; gendannelseskopier bevaret i {path} ({details})"
+no_gpu = "Ingen GPU-adapter: sammensat video kræver en renderingsenhed. Installer en grafikdriver eller en Vulkan-softwareadapter (Mesa lavapipe på Linux)."
 codec_no_encoder = "Ingen brugbar {codec}-koder til disse eksportindstillinger. Brug understøttet hardware, installer en version med {encoders}, eller vælg en forudindstilling med en anden codec."
 codec_wrong = "Der blev anmodet om {expected}, men den kodede video er {actual}. Outputfilen blev ikke publiceret."
 encoder = "Kodere at Prøve"

@@ -139,6 +139,10 @@ about = "O programie jvid…"
 tutorials = "Samouczki"
 
 [export]
+sidecar_file_target = "Cel wyjściowy nie jest zwykłym plikiem."
+sidecar_separate = "Media i napisy muszą mieć osobne pliki wyjściowe."
+sidecar_recovery = "{error}; kopie odzyskiwania zachowano w {path} ({details})"
+no_gpu = "Brak adaptera GPU: złożone wideo wymaga urządzenia renderującego. Zainstaluj sterownik graficzny lub programowy adapter Vulkan (Mesa lavapipe w Linuksie)."
 codec_no_encoder = "Brak dostępnego kodera {codec} dla tych ustawień eksportu. Użyj obsługiwanego sprzętu, zainstaluj kompilację z {encoders} lub wybierz ustawienie z innym kodekiem."
 codec_wrong = "Zażądano {expected}, ale zakodowane wideo ma format {actual}. Plik wyjściowy nie został opublikowany."
 encoder = "Kodery do Wypróbowania"

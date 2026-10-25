@@ -141,6 +141,10 @@ about = "jvid Hakkında…"
 tutorials = "Eğitimler"
 
 [export]
+sidecar_file_target = "Çıktı hedefi normal bir dosya değil."
+sidecar_separate = "Medya ve altyazılar ayrı çıktı dosyaları olmalıdır."
+sidecar_recovery = "{error}; kurtarma kopyaları {path} konumunda saklandı ({details})"
+no_gpu = "GPU bağdaştırıcısı yok: birleştirilmiş video bir işleme aygıtı gerektirir. Grafik sürücüsü veya yazılımsal Vulkan bağdaştırıcısı (Linux için Mesa lavapipe) yükleyin."
 codec_no_encoder = "Bu dışa aktarma ayarları için kullanılabilir bir {codec} kodlayıcısı yok. Desteklenen donanım kullanın, {encoders} içeren bir derleme yükleyin veya başka kodek kullanan bir hazır ayar seçin."
 codec_wrong = "{expected} istendi, ancak kodlanan video {actual} biçiminde. Çıktı dosyası yayımlanmadı."
 encoder = "Denenecek Kodlayıcılar"

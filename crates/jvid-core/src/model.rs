@@ -2841,30 +2841,94 @@ impl Project {
         })
     }
 
-    /// The enabled text clips on subtitle tracks as cues, sorted by start.
+    /// Visible subtitle cues in the open sequence, including every placed nested instance.
     pub fn subtitle_cues(&self) -> Vec<crate::srt::Cue> {
-        let tracks = self.sequence.tracks.iter().filter(|t| t.subtitles);
-        let mut cues: Vec<_> = tracks
-            .flat_map(|t| &t.clips)
-            .filter(|c| c.enabled)
-            .filter_map(|c| {
-                let text = self.asset(c.asset)?.text.as_ref()?;
-                Some(crate::srt::Cue {
-                    start: c.start,
-                    end: c.end(),
-                    text: text.content.clone(),
-                })
-            })
-            .collect();
+        let mut cues = self.subtitle_cues_in(&self.sequence, 1);
         cues.sort_by_key(|c| c.start);
+        cues
+    }
+
+    fn subtitle_cues_in(&self, sequence: &Sequence, depth: usize) -> Vec<crate::srt::Cue> {
+        if depth > MAX_NEST_DEPTH {
+            return Vec::new();
+        }
+        let video = || {
+            sequence
+                .tracks
+                .iter()
+                .filter(|t| t.kind == TrackKind::Video)
+        };
+        let solo = video().any(|t| t.solo);
+        let mut cues = Vec::new();
+        for track in video().filter(|t| !t.hidden && (!solo || t.solo)) {
+            for clip in track.clips.iter().filter(|c| c.enabled) {
+                if track.subtitles
+                    && let Some(text) = self.asset(clip.asset).and_then(|a| a.text.as_ref())
+                {
+                    cues.push(crate::srt::Cue {
+                        start: clip.start,
+                        end: clip.end(),
+                        text: text.content.clone(),
+                    });
+                }
+                let Some(child) = self.nested(clip.asset) else {
+                    continue;
+                };
+                for mut cue in self.subtitle_cues_in(child, depth + 1) {
+                    let span = if let Some(frozen) = clip.freeze {
+                        (cue.start <= frozen && frozen < cue.end)
+                            .then_some((clip.start, clip.end()))
+                    } else {
+                        let (a, b) = (cue.start.max(clip.source_in), cue.end.min(clip.source_out));
+                        (a < b).then(|| {
+                            // Cue endpoints are half-open boundaries. Reverse playback's
+                            // sampled last flick is source_out - 1, but its boundary is out.
+                            let at = |s| {
+                                if clip.reverse {
+                                    clip.start + clip.timeline_len(s, clip.source_out)
+                                } else {
+                                    clip.timeline_at(s)
+                                }
+                            };
+                            let (x, y) = (at(a), at(b));
+                            (x.min(y).max(clip.start), x.max(y).min(clip.end()))
+                        })
+                    };
+                    if let Some((start, end)) = span.filter(|(a, b)| a < b) {
+                        (cue.start, cue.end) = (start, end);
+                        cues.push(cue);
+                    }
+                }
+            }
+        }
         cues
     }
 
     /// A copy with subtitle tracks hidden, for exporting them as a sidecar instead of burnt in.
     pub fn without_subtitles(&self) -> Project {
         let mut p = self.clone();
-        for t in p.sequence.tracks.iter_mut().filter(|t| t.subtitles) {
-            t.hidden = true;
+        let text_assets: std::collections::BTreeSet<_> = p
+            .assets
+            .iter()
+            .filter(|a| a.text.is_some())
+            .map(|a| a.id)
+            .collect();
+        for sequence in std::iter::once(&mut p.sequence).chain(&mut p.sequences) {
+            for track in sequence.tracks.iter_mut().filter(|t| t.subtitles) {
+                // Nesting can put a whole section on a subtitle-marked outer track. Keep
+                // its container/media clips on that exact track with their original settings.
+                if track.clips.iter().any(|c| !text_assets.contains(&c.asset)) {
+                    for clip in track
+                        .clips
+                        .iter_mut()
+                        .filter(|c| text_assets.contains(&c.asset))
+                    {
+                        clip.enabled = false;
+                    }
+                } else {
+                    track.hidden = true;
+                }
+            }
         }
         p
     }

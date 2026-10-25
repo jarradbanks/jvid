@@ -139,6 +139,10 @@ about = "Über jvid…"
 tutorials = "Tutorials"
 
 [export]
+sidecar_file_target = "Das Ausgabeziel ist keine reguläre Datei."
+sidecar_separate = "Medien und Untertitel benötigen getrennte Ausgabedateien."
+sidecar_recovery = "{error}; Wiederherstellungskopien bleiben unter {path} erhalten ({details})"
+no_gpu = "Kein GPU-Adapter: zusammengesetztes Video benötigt ein Rendergerät. Installiere einen Grafiktreiber oder Software-Vulkan (Mesa lavapipe unter Linux)."
 codec_no_encoder = "Für diese Exporteinstellungen ist kein nutzbarer {codec}-Encoder verfügbar. Verwende unterstützte Hardware, installiere eine Version mit {encoders} oder wähle eine Vorgabe mit einem anderen Codec."
 codec_wrong = "Angefordert wurde {expected}, das kodierte Video ist jedoch {actual}. Die Ausgabedatei wurde nicht veröffentlicht."
 encoder = "Mögliche Encoder"

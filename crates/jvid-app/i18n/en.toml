@@ -148,6 +148,10 @@ tutorials = "Tutorials"
 
 # Exporting: the Export button, its dialog and the render queue.
 [export]
+sidecar_file_target = "Output target is not a regular file."
+sidecar_separate = "Media and subtitle outputs must be separate files."
+sidecar_recovery = "{error}; output recovery copies retained at {path} ({details})"
+no_gpu = "no GPU adapter: composited video needs a rendering device. Install a graphics driver or a software Vulkan adapter (Mesa lavapipe on Linux)."
 codec_no_encoder = "No usable {codec} encoder for these export settings. Use supported hardware, install a build with {encoders}, or choose another codec preset."
 codec_wrong = "Requested {expected}, but the encoded video is {actual}. The output was not published."
 encoder = "Encoders to Try"
