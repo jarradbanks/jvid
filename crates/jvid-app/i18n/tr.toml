@@ -256,6 +256,7 @@ ok = "Tamam"
 [about]
 version = "Sürüm {version}"
 samples = "Örnek Medya"
+notices = "Üçüncü Taraf Bildirimleri"
 
 [settings]
 title = "Tercihler"

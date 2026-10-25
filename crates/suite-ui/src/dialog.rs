@@ -15,6 +15,8 @@ pub struct Dialog<'a> {
     pub body: &'a str,
     pub buttons: &'a [(&'a str, ButtonKind)],
     pub cancel: usize,
+    /// A long body, such as licence text: the dialog is wider and the body scrolls.
+    pub long: bool,
 }
 
 impl Dialog<'_> {
@@ -28,10 +30,16 @@ impl Dialog<'_> {
                     .inner_margin(space::S16),
             )
             .show(ctx, |ui| {
-                ui.set_width(360.0);
+                ui.set_width(if self.long { 640.0 } else { 360.0 });
                 ui.label(RichText::new(self.title).font(theme::headline()));
                 ui.add_space(space::S8);
-                ui.label(self.body);
+                if self.long {
+                    egui::ScrollArea::vertical()
+                        .max_height(ctx.content_rect().height() * 0.6)
+                        .show(ui, |ui| ui.label(self.body));
+                } else {
+                    ui.label(self.body);
+                }
                 ui.add_space(space::S16);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = space::S8;

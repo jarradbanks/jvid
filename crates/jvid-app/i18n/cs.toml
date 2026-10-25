@@ -256,6 +256,7 @@ ok = "OK"
 [about]
 version = "Verze {version}"
 samples = "Ukázková média"
+notices = "Oznámení třetích stran"
 
 [settings]
 title = "Předvolby"

@@ -258,6 +258,7 @@ ok = "OK"
 [about]
 version = "Версія {version}"
 samples = "Зразки медіафайлів"
+notices = "Повідомлення третіх сторін"
 
 [settings]
 title = "Налаштування"

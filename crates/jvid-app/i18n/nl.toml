@@ -258,6 +258,7 @@ ok = "OK"
 [about]
 version = "Versie {version}"
 samples = "Voorbeeldmedia"
+notices = "Kennisgevingen van derden"
 
 [settings]
 title = "Voorkeuren"

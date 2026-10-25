@@ -13,6 +13,7 @@ mod keymap;
 mod keymap_editor;
 mod masks;
 mod media_bin;
+mod notices;
 mod playback;
 pub mod preferences;
 mod preview;

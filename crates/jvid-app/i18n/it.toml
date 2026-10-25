@@ -256,6 +256,7 @@ ok = "OK"
 [about]
 version = "Versione {version}"
 samples = "Media di esempio"
+notices = "Avvisi di terze parti"
 
 [settings]
 title = "Preferenze"

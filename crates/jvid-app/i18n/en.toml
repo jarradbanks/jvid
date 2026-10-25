@@ -265,10 +265,12 @@ discard = "Discard"
 error = "Error"
 ok = "OK"
 
-# Help > About: the app version, then the credits of the tutorial sample clips.
+# Help > About: the app version, then the credits of the tutorial sample clips; its Third-Party
+# Notices button opens the licence notices, under the same name.
 [about]
 version = "Version {version}"
 samples = "Sample Media"
+notices = "Third-Party Notices"
 
 # The app settings dialog (the project menu in the title bar > Settings…).
 [settings]

@@ -256,6 +256,7 @@ ok = "OK"
 [about]
 version = "Version {version}"
 samples = "Médias d'exemple"
+notices = "Mentions tierces"
 
 [settings]
 title = "Préférences"

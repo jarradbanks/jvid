@@ -1194,6 +1194,27 @@ fn help_menu_about_credits_the_sample_media() {
 }
 
 #[test]
+fn about_opens_the_third_party_notices() {
+    let mut h = plain_harness();
+    h.state_mut().on_welcome = false;
+    h.state_mut().prompts.push(Prompt::About);
+    h.run();
+    h.get_by_label("Third-Party Notices").click();
+    h.run();
+    assert_eq!(h.state().prompts, [Prompt::Notices]);
+    assert!(
+        h.query_by_label_contains("jvid Third-Party Notices")
+            .is_some()
+    );
+    // A move-and-click in one frame misses here, so hover first as a real pointer does.
+    h.get_by_label("OK").hover();
+    h.run();
+    h.get_by_label("OK").click();
+    h.run();
+    assert!(h.state().prompts.is_empty());
+}
+
+#[test]
 fn project_settings_turn_on_hdr_output() {
     if !gpu() {
         return;

@@ -1,5 +1,6 @@
 //! The editor window: the app bar, a dock of empty panel shells, and the file actions.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -169,6 +170,8 @@ enum Prompt {
     Error(String),
     /// Help > About: the version and the sample media credits.
     About,
+    /// About > Third-Party Notices.
+    Notices,
 }
 
 /// What runs once unsaved changes are saved or discarded.
@@ -1092,10 +1095,10 @@ impl App {
             return;
         };
         let name = self.name();
-        let (title, body, buttons, cancel): (_, _, &[_], _) = match prompt {
+        let (title, body, buttons, cancel): (_, Cow<str>, &[_], _) = match prompt {
             Prompt::Discard(_) => (
                 tr!("prompt.unsaved"),
-                tr!("prompt.unsaved_body", name = name),
+                tr!("prompt.unsaved_body", name = name).into(),
                 &[
                     (tr!("prompt.save"), ButtonKind::Primary),
                     (tr!("prompt.cancel"), ButtonKind::Secondary),
@@ -1111,7 +1114,8 @@ impl App {
                         .as_deref()
                         .and_then(Path::file_stem)
                         .map_or(tr!("app.untitled").into(), |s| s.to_string_lossy())
-                ),
+                )
+                .into(),
                 &[
                     (tr!("prompt.restore_button"), ButtonKind::Primary),
                     (tr!("prompt.discard"), ButtonKind::Destructive),
@@ -1120,7 +1124,7 @@ impl App {
             ),
             Prompt::Error(message) => (
                 tr!("prompt.error"),
-                message.clone(),
+                message.clone().into(),
                 &[(tr!("prompt.ok"), ButtonKind::Primary)],
                 0,
             ),
@@ -1131,7 +1135,17 @@ impl App {
                     tr!("about.version", version = env!("CARGO_PKG_VERSION")),
                     tr!("about.samples"),
                     crate::samples::credits().join("\n")
-                ),
+                )
+                .into(),
+                &[
+                    (tr!("prompt.ok"), ButtonKind::Primary),
+                    (tr!("about.notices"), ButtonKind::Secondary),
+                ],
+                0,
+            ),
+            Prompt::Notices => (
+                tr!("about.notices"),
+                crate::notices::TEXT.into(),
                 &[(tr!("prompt.ok"), ButtonKind::Primary)],
                 0,
             ),
@@ -1141,6 +1155,7 @@ impl App {
             body: &body,
             buttons,
             cancel,
+            long: *prompt == Prompt::Notices,
         };
         if let Some(answer) = dialog.show(ctx) {
             let prompt = self.prompts.remove(0);
@@ -1173,6 +1188,7 @@ impl App {
                 }
                 Err(e) => self.error(tr!("app.restore_failed", path = auto.display(), error = e)),
             },
+            (Prompt::About, 1) => self.prompts.push(Prompt::Notices),
             (Prompt::Restore { path: None, .. }, _) => {
                 if let Some(p) = &self.untitled {
                     autosave::clear(p);
