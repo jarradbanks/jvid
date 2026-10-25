@@ -428,9 +428,10 @@ mod tests {
             })
             .collect();
         let mut t = Timeline::default();
-        t.media
-            .peaks
-            .insert((p.assets()[0].path.clone(), 0), Some(Pyramid::new(peaks)));
+        t.media.peaks.insert(
+            (p.assets()[0].path.clone(), 0),
+            Some(Arc::new(Pyramid::new(peaks))),
+        );
         t.sync(&p);
         assert!(!t.can("find_highlights", p.sequence()));
         t.selected.insert(id(1));

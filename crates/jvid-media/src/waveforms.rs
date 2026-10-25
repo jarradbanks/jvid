@@ -227,8 +227,14 @@ impl Cache {
         mut done: impl FnMut(Result<Pyramid, String>) + Send + 'static,
     ) -> Handle {
         let cache = self.clone();
-        let key = format!("peaks:{}:{nth}", path.display());
-        jobs.submit(key, Priority::Preview, move |ctx| {
+        // Match the disk cache's source generation. A rewritten file needs its own callback
+        // even while the previous generation is still scanning. Metadata failure still goes
+        // through the worker so callers receive the usual asynchronous error and can retry.
+        let job_key = match key(&path) {
+            Ok(generation) => format!("peaks:{generation}:{nth}"),
+            Err(_) => format!("peaks:{}:{nth}", path.display()),
+        };
+        jobs.submit(job_key, Priority::Preview, move |ctx| {
             let result = cache.load_cancellable(
                 &path,
                 nth,
@@ -476,6 +482,65 @@ mod tests {
         assert!(!cache.dir.exists());
         let finished = cache.load(&corpus.join("tone-1khz.wav"), 0).unwrap();
         assert!(finished.finest().iter().any(|p| p[1] > 0.09));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn submitted_jobs_share_unchanged_generations_but_keep_streams_separate() {
+        let dir = tmp("submit-sharing");
+        let source = dir.join("source.wav");
+        fs::write(&source, b"unchanged source").unwrap();
+        let (started, start) = mpsc::channel();
+        let (release, gate) = mpsc::channel();
+        let gate = Mutex::new(gate);
+        let cache = Arc::new(Cache::with_scan(
+            dir.join("cache"),
+            u64::MAX,
+            Box::new(move |_, nth, _, _| {
+                started.send(nth).unwrap();
+                if nth == 0 {
+                    gate.lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(5))
+                        .unwrap();
+                }
+                Ok(vec![[nth as f32; 2]; 10])
+            }),
+        ));
+        let pool = jvid_jobs::Pool::new(1);
+        let (done, received) = mpsc::channel();
+        let first_done = done.clone();
+        let first = cache.submit(&pool, source.clone(), 0, move |p| {
+            first_done.send((0, p.unwrap())).unwrap();
+        });
+        assert_eq!(start.recv_timeout(Duration::from_secs(5)).unwrap(), 0);
+        let (duplicate_done, duplicate_result) = mpsc::channel();
+        let duplicate = cache.submit(&pool, source.clone(), 0, move |p| {
+            duplicate_done.send(p).unwrap();
+        });
+        let other = cache.submit(&pool, source.clone(), 1, move |p| {
+            done.send((1, p.unwrap())).unwrap();
+        });
+        release.send(()).unwrap();
+        for nth in [0, 1] {
+            let (stream, pyramid) = received.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(stream, nth);
+            assert_eq!(pyramid.finest(), vec![[nth as f32; 2]; 10]);
+        }
+        assert_eq!(start.recv_timeout(Duration::from_secs(5)).unwrap(), 1);
+        // Join before inspecting the callbacks; no timing sleeps establish ordering.
+        drop(pool);
+        assert!(first.is_finished() && duplicate.is_finished() && other.is_finished());
+        assert!(
+            duplicate_result.try_recv().is_err(),
+            "the duplicate callback was not queued"
+        );
+        assert!(
+            start.try_recv().is_err(),
+            "one scan per stream and generation"
+        );
+        assert_eq!(cache.load(&source, 0).unwrap().finest(), vec![[0.0; 2]; 10]);
+        assert_eq!(cache.load(&source, 1).unwrap().finest(), vec![[1.0; 2]; 10]);
         fs::remove_dir_all(dir).unwrap();
     }
 
