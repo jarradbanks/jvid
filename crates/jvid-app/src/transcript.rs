@@ -11,6 +11,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use egui::text::{CCursor, LayoutJob, TextFormat};
 use egui::{Color32, Key, Margin, Sense, Ui, vec2};
@@ -27,7 +28,9 @@ use crate::i18n::tr;
 use crate::subtitles::targets;
 
 /// Bumped when the file format or the word timing changes, so older transcripts are redone.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
+/// The cache file's last line, before the word count.
+const END: &str = "end";
 /// A pause this long between words starts a new paragraph.
 const PARAGRAPH: Time = Time(S);
 /// Line height of the words, roomier than Body's for reading.
@@ -39,13 +42,19 @@ pub struct Cache {
     dir: Option<PathBuf>,
     /// By path and stream; `None` when not transcribed.
     loaded: HashMap<(PathBuf, usize), Option<Vec<Word>>>,
+    /// The last [`words`], with the project and selection it was placed for.
+    placed: Option<(Project, HashSet<ClipId>, Rc<Placed>)>,
 }
+
+/// The words to show, in timeline time with the clip each is in, sorted; and the whole
+/// streams not transcribed yet.
+type Placed = (Vec<(ClipId, Word)>, Vec<Source>);
 
 impl Cache {
     pub fn new(dir: PathBuf) -> Self {
         Self {
             dir: Some(dir),
-            loaded: HashMap::new(),
+            ..Self::default()
         }
     }
 
@@ -70,7 +79,8 @@ impl Cache {
             let text = self
                 .file(path, nth)
                 .and_then(|f| fs::read_to_string(f).ok());
-            self.loaded.insert(key.clone(), text.map(|t| parse(&t)));
+            self.loaded
+                .insert(key.clone(), text.and_then(|t| parse(&t)));
         }
         self.loaded[&key].as_deref()
     }
@@ -78,26 +88,47 @@ impl Cache {
     /// Keeps `t`, the transcript of the whole of `source`, and saves it.
     pub fn insert(&mut self, source: &Source, t: Transcript) {
         if let Some(file) = self.file(&source.path, source.nth) {
+            // Written aside then renamed, so a crash never leaves half a transcript.
+            let tmp = file.with_extension("tmp");
             let saved = file.parent().map_or(Ok(()), fs::create_dir_all);
-            if let Err(e) = saved.and_then(|_| fs::write(&file, format(&t.words))) {
+            let saved = saved
+                .and_then(|_| fs::write(&tmp, format(&t.words)))
+                .and_then(|_| fs::rename(&tmp, &file));
+            if let Err(e) = saved {
                 tracing::warn!("transcript: can't save {}: {e}", file.display());
             }
         }
         let key = (source.path.clone(), source.nth);
         self.loaded.insert(key, Some(t.words));
+        self.placed = None;
+    }
+
+    /// [`words`], placed again only when the project or the selection changes.
+    fn placed(&mut self, project: &Project, selected: &HashSet<ClipId>) -> Rc<Placed> {
+        match &self.placed {
+            Some((p, s, w)) if p == project && s == selected => w.clone(),
+            _ => {
+                let w = Rc::new(words(project, selected, self));
+                self.placed = Some((project.clone(), selected.clone(), w.clone()));
+                w
+            }
+        }
     }
 }
 
-/// One word per line: start and end in flicks, then the text, tab separated.
+/// One word per line: start and end in flicks, then the text, tab separated; then `end` and
+/// the word count, so a cut-short file shows.
 fn format(words: &[Word]) -> String {
     let line = |w: &Word| {
         let text = w.text.replace(['\t', '\n', '\r'], " ");
         format!("{}\t{}\t{text}\n", w.start.0, w.end.0)
     };
-    words.iter().map(line).collect()
+    let lines: String = words.iter().map(line).collect();
+    format!("{lines}{END}\t{}\n", words.len())
 }
 
-fn parse(text: &str) -> Vec<Word> {
+/// `None` unless the whole file reads.
+fn parse(text: &str) -> Option<Vec<Word>> {
     let word = |line: &str| {
         let mut f = line.splitn(3, '\t');
         Some(Word {
@@ -107,16 +138,14 @@ fn parse(text: &str) -> Vec<Word> {
             confidence: 1.0,
         })
     };
-    text.lines().filter_map(word).collect()
+    let mut lines: Vec<&str> = text.lines().collect();
+    let end = lines.pop()?;
+    (end == format!("{END}\t{}", lines.len())).then_some(())?;
+    lines.into_iter().map(word).collect()
 }
 
-/// The words to show, in timeline time with the clip each is in, sorted; and the whole
-/// streams not transcribed yet.
-fn words(
-    project: &Project,
-    selected: &HashSet<ClipId>,
-    cache: &mut Cache,
-) -> (Vec<(ClipId, Word)>, Vec<Source>) {
+/// The words to show and the streams not transcribed yet; see [`Placed`].
+fn words(project: &Project, selected: &HashSet<ClipId>, cache: &mut Cache) -> Placed {
     let (mut words, mut missing) = (Vec::new(), Vec::<Source>::new());
     for t in targets(project, selected, true) {
         let whole = Source {
@@ -159,7 +188,7 @@ pub struct Output {
 #[derive(Default)]
 pub struct TranscriptPanel {
     pub cache: Cache,
-    query: String,
+    pub(crate) query: String,
     /// The first and last words picked, by start time, so it outlives edits elsewhere.
     selection: Option<(Time, Time)>,
     /// The start of the word last lit, to scroll to the next one.
@@ -185,7 +214,10 @@ impl TranscriptPanel {
         focused: bool,
     ) -> Output {
         let mut out = Output::default();
-        let (words, missing) = words(project, selected, &mut self.cache);
+        // Before Find draws, which may let go of the focus this frame.
+        let typing = ui.ctx().text_edit_focused();
+        let placed = self.cache.placed(project, selected);
+        let (words, missing) = &*placed;
         let close = [(icon::X, tr!("transcript.close"))];
         let r = Panel::titled(tr!("panel.transcript"))
             .actions(&close)
@@ -206,7 +238,9 @@ impl TranscriptPanel {
                         let find = TextInput::search(&mut self.query).hint(tr!("transcript.find"));
                         let find = ui.add(find.width(ui.available_width()));
                         if find.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                            self.find_next(&words, playhead, &mut out);
+                            self.find_next(words, playhead, &mut out);
+                            // Keeps typing in Find, so Enter goes on to the next match.
+                            find.request_focus();
                         }
                     });
                 });
@@ -215,14 +249,14 @@ impl TranscriptPanel {
                     .show(ui, |ui| {
                         let frame = egui::Frame::NONE
                             .inner_margin(Margin::symmetric(space::INSET as i8, space::S4 as i8));
-                        frame.show(ui, |ui| self.text(ui, &words, playhead, &mut out));
+                        frame.show(ui, |ui| self.text(ui, words, playhead, &mut out));
                     });
             });
         out.close = r.action == Some(0);
-        if focused && !ui.ctx().text_edit_focused() {
+        if focused && !typing && !ui.ctx().text_edit_focused() {
             let delete = ui.input(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace));
-            if let Some(picked) = self.picked(&words).filter(|_| delete) {
-                out.command = cut(&words, picked);
+            if let Some(picked) = self.picked(words).filter(|_| delete) {
+                out.command = cut(words, picked);
                 self.selection = None;
             }
             if ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -298,8 +332,8 @@ impl TranscriptPanel {
         let galley = ui.painter().layout_job(job);
         let size = vec2(ui.available_width(), galley.size().y);
         let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
-        let all = galley.text().to_owned();
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &all));
+        let label = || egui::WidgetInfo::labeled(egui::WidgetType::Label, true, galley.text());
+        response.widget_info(label);
         let at = |pos: egui::Pos2| {
             let c = galley.cursor_from_pos(pos - rect.min).index.0;
             let i = starts.partition_point(|&s| s <= c).checked_sub(1)?;
@@ -486,7 +520,89 @@ mod tests {
         assert!(none.is_empty());
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].range, 0..i64::MAX);
-        assert_eq!(parse(&format(&[word("a\tb", 1.0, 2.0)]))[0].text, "a b");
+        assert_eq!(
+            parse(&format(&[word("a\tb", 1.0, 2.0)])).unwrap()[0].text,
+            "a b"
+        );
+    }
+
+    /// A file cut short, mid line or between lines, is no transcript, so Transcribe shows.
+    #[test]
+    fn a_cut_short_cache_file_is_no_transcript() {
+        let dir = tmp("short");
+        let (h, panel) = project(&dir);
+        let path = &h.project().assets()[0].path;
+        let file = panel.cache.file(path, 0).unwrap();
+        let full = fs::read_to_string(&file).unwrap();
+        assert_eq!(parse(&full).unwrap().len(), 10);
+        assert_eq!(parse("end\t0\n"), Some(Vec::new()));
+        let lines: Vec<&str> = full.lines().collect();
+        for short in [&full[..full.len() / 2], &lines[..5].join("\n"), ""] {
+            assert!(parse(short).is_none(), "{short:?}");
+        }
+        fs::write(&file, &full[..full.len() / 2]).unwrap();
+        let mut cache = Cache::new(dir.join("cache"));
+        assert!(cache.get(path, 0).is_none());
+        let (_, missing) = super::words(h.project(), &HashSet::new(), &mut cache);
+        assert_eq!(missing.len(), 1);
+        // Saving leaves no temporary file behind.
+        let names = fs::read_dir(dir.join("cache")).unwrap().count();
+        assert_eq!(names, 1);
+    }
+
+    /// Placing runs again only when the project, the selection or a transcript changes.
+    #[test]
+    fn placed_words_are_kept_until_something_changes() {
+        let dir = tmp("placed");
+        let (mut h, mut panel) = project(&dir);
+        let none = HashSet::new();
+        let first = panel.cache.placed(h.project(), &none);
+        assert_eq!(first.0.len(), 10);
+        assert!(Rc::ptr_eq(&first, &panel.cache.placed(h.project(), &none)));
+        let (words, _) = &*first;
+        h.apply(cut(words, 2..5).unwrap()).unwrap();
+        let cut = panel.cache.placed(h.project(), &none);
+        assert_eq!(cut.0.len(), 7);
+        let one = HashSet::from([words[0].0]);
+        assert!(!Rc::ptr_eq(&cut, &panel.cache.placed(h.project(), &one)));
+        let again = panel.cache.placed(h.project(), &one);
+        let source = Source {
+            path: h.project().assets()[0].path.clone(),
+            nth: 0,
+            range: 0..i64::MAX,
+        };
+        let heard = Transcript {
+            language: None,
+            words: vec![word("only", 10.0, 10.5)],
+        };
+        panel.cache.insert(&source, heard);
+        let after = panel.cache.placed(h.project(), &one);
+        assert!(!Rc::ptr_eq(&again, &after));
+        assert_eq!(texts(&after.0), ["only"]);
+    }
+
+    /// Game and mic streams, linked: the whole sequence shows the group's words once.
+    #[test]
+    fn a_link_group_with_two_audio_clips_shows_its_words_once() {
+        let dir = tmp("streams");
+        let (mut h, mut panel) = project(&dir);
+        let kind = TrackKind::Audio;
+        let Ok(jvid_core::history::Created::Track(track)) = h.apply(Command::AddTrack {
+            kind,
+            name: String::new(),
+        }) else {
+            panic!()
+        };
+        let clip = NewClip {
+            asset: h.project().assets()[0].id,
+            source_in: t(10.0),
+            source_out: t(20.0),
+            start: t(2.0),
+            link: Some(jvid_core::model::LinkId(1)),
+        };
+        h.apply(Command::AddClip { track, clip }).unwrap();
+        let (words, _) = super::words(h.project(), &HashSet::new(), &mut panel.cache);
+        assert_eq!(words.len(), 10);
     }
 
     #[test]

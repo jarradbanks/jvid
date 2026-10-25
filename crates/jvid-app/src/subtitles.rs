@@ -167,13 +167,13 @@ pub(crate) fn targets(project: &Project, selected: &HashSet<ClipId>, whole: bool
             .collect();
         clips.sort_by_key(|c| (c.start, c.id.0));
         clips.dedup_by_key(|c| c.id);
-        // shortcut: a group with several audio clips (game and mic streams) captions only its
-        // first, as Detect Silence reads it.
-        let mut links = HashSet::new();
-        clips.retain(|c| c.link.is_none_or(|l| links.insert(l)));
         clips.into_iter().map(|c| (c, (c.start, c.end()))).collect()
     };
     spans.sort_by_key(|(c, s)| (s.0, c.id.0));
+    // shortcut: a group with several audio clips (game and mic streams) captions only its
+    // first, as Detect Silence reads it.
+    let mut links = HashSet::new();
+    spans.retain(|(c, _)| c.link.is_none_or(|l| links.insert(l)));
     let rate = Rate::new(SAMPLE_RATE, 1);
     spans
         .into_iter()

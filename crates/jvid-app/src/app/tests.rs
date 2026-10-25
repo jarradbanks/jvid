@@ -2145,4 +2145,24 @@ fn transcript_panel_cuts_the_picked_words() {
     h.run();
     assert_eq!(clips(&h), [(Time(0), Time(0), duration)]);
     assert!(h.query_by_label("one two three").is_some());
+
+    // Find: Enter goes from match to match, and Backspace still edits the query, not the clip.
+    h.state_mut().timeline.seek(Time(0));
+    // The text field nearest the words: Transcript's Find, not the bin's search.
+    let words = h.get_by_label("one two three").rect().center();
+    let fields = h.get_all_by_role(egui::accesskit::Role::TextInput);
+    let near = |n: &egui_kittest::Node<'_>| n.rect().center().distance(words) as i32;
+    fields.min_by_key(near).unwrap().focus();
+    h.run();
+    h.event(egui::Event::Text("t".into()));
+    h.run();
+    for want in [at(0.6), at(1.0)] {
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert_eq!(h.state().timeline.playhead(), want);
+    }
+    h.key_press(egui::Key::Backspace);
+    h.run();
+    assert_eq!(clips(&h), [(Time(0), Time(0), duration)]);
+    assert_eq!(h.state().transcript.query, "");
 }
