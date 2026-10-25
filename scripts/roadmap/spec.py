@@ -1906,3 +1906,14 @@ I("marker-lane", "Markers: own lane above the ruler, drag to move", None, ["ui",
   ac=["Test: dragging a flag moves the marker by the dragged time, and one undo restores it",
       "Test: dragging a range's end changes only its duration; a range can't go below zero length",
       "A kittest snapshot shows the lane above the ruler with a point and a range marker"])
+
+I("tutorial-next", "Tutorials: Next button, tighter spotlight, Space fix", None, ["ui"], "M", [], labels=["later"],
+  summary="Owner's tutorial feedback (2026-10-25): steps jump ahead on their own, a focused card button eats Space, the spotlight hides what a step needs, and Inspector steps light up the whole panel.",
+  scope=["No auto-advance: when a step's check passes, the card marks it done and shows a primary Next button (Enter also works); Show Me does the step and waits for Next too",
+         "Card buttons give up keyboard focus after a click, so Space (play) or Delete in a step reaches the app instead of pressing Show Me again",
+         "Drag steps leave both ends lit: a drag from Media onto the Timeline undims Media as well (Step.also), and the drag source never looks disabled",
+         "Steps about one Inspector control light only that row: Inspector rows the lessons name (Feather, Scale, Opacity, and so on) register their own anchors, and those steps point at the row, not the panel"],
+  ac=["Test: a step whose check passes stays on that step until Next is clicked",
+      "Test: after clicking Show Me, pressing Space toggles playback and doesn't click Show Me again",
+      "Test: every lesson step that names an Inspector control anchors to a rect smaller than the Inspector panel",
+      "The existing every-lesson Show Me test passes using Next"])
