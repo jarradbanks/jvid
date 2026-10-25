@@ -4,7 +4,10 @@ use egui::{Key, Modifiers};
 use jvid_core::time::FLICKS_PER_SECOND as S;
 
 fn editor() -> Harness<'static, App> {
-    let mut h = plain_harness();
+    let mut h = builder([1280.0, 720.0], 1.0)
+        .with_step_dt(1.0 / 60.0)
+        .build_eframe(|cc| App::new(cc, &Default::default()));
+    h.run();
     let app = h.state_mut();
     app.on_welcome = false;
     crate::playback::tests::add_solid(&mut app.history, [0.2, 0.3, 0.4, 1.0], Time(0));
@@ -240,4 +243,199 @@ fn audit_453_tab_space_record_and_stop_do_not_restart_take() {
     assert_eq!(h.state().preview.program_speed(), 0);
     drop(h);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn source_editor() -> (Harness<'static, App>, AssetId) {
+    let mut h = editor();
+    let app = h.state_mut();
+    let path = PathBuf::from("/nonexistent/long-recording.wav");
+    app.history
+        .apply(Command::Import(vec![(
+            path.clone(),
+            jvid_core::model::ProbeInfo {
+                duration: Time(1800 * S),
+                frame_rate: Some(jvid_core::time::Rate::new(30, 1)),
+                width: Some(1920),
+                height: Some(1080),
+                ..Default::default()
+            },
+        )]))
+        .unwrap();
+    app.missing.insert(path);
+    let id = app.history.project().assets().last().unwrap().id;
+    app.run_action("focus_media", false);
+    app.bin.list = true;
+    app.bin.query = "long-recording.wav".into();
+    h.run_steps(3);
+    (h, id)
+}
+
+fn bin_asset_pos(h: &Harness<'_, App>) -> egui::Pos2 {
+    let rect = h
+        .state()
+        .dock
+        .iter_leaves()
+        .find(|(_, l)| l.tabs.contains(&Tab::Media))
+        .unwrap()
+        .1
+        .rect;
+    let search = h
+        .get_all_by_role(egui::accesskit::Role::TextInput)
+        .into_iter()
+        .find(|n| rect.contains_rect(n.rect()))
+        .unwrap()
+        .rect();
+    fn text_rect(shape: &egui::Shape, search: Rect, name: &str) -> Option<Rect> {
+        match shape {
+            egui::Shape::Text(t)
+                if t.pos.y > search.bottom()
+                    && t.galley.job.text == name
+                    && t.pos.x >= search.left()
+                    && t.pos.x < search.right() =>
+            {
+                Some(Rect::from_min_size(t.pos, t.galley.size()))
+            }
+            egui::Shape::Vec(v) => v.iter().find_map(|s| text_rect(s, search, name)),
+            _ => None,
+        }
+    }
+    let found = h
+        .output()
+        .shapes
+        .iter()
+        .filter(|s| s.clip_rect.intersects(rect))
+        .find_map(|s| text_rect(&s.shape, search, &h.state().bin.query))
+        .unwrap();
+    found.center()
+}
+
+fn double_click(h: &mut Harness<'_, App>, label: &str) {
+    h.state_mut().bin.query = label.into();
+    h.input_mut().time = Some(h.ctx.input(|i| i.time) + 1.0);
+    h.run_steps(2);
+    let at = bin_asset_pos(h);
+    h.hover_at(at);
+    h.step();
+    for pressed in [true, false, true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        h.step();
+    }
+    h.run_steps(2);
+}
+
+#[test]
+fn audit_457_bin_double_click_focuses_source_and_routes_following_keys() {
+    let (mut h, id) = source_editor();
+    double_click(&mut h, "long-recording.wav");
+    assert_eq!(h.state().preview.source_asset(), Some(id));
+    assert_eq!(
+        h.state_mut().dock.find_active_focused().map(|(_, t)| *t),
+        Some(Tab::Preview)
+    );
+    let head = h.state().timeline.playhead();
+    h.key_press(Key::Space);
+    h.run_steps(2);
+    assert_eq!(h.state().preview.source_speed(), Some(1));
+    assert_eq!(h.state().preview.program_speed(), 0);
+    h.key_press(Key::Space);
+    h.key_press(Key::I);
+    h.run_steps(2);
+    h.key_press(Key::ArrowRight);
+    h.run_steps(2);
+    h.key_press(Key::O);
+    h.run_steps(2);
+    let p = h.state().history.project();
+    let a = p.asset(id).unwrap();
+    let rate = p.settings().frame_rate;
+    assert_eq!(a.in_point, Some(Time(0)));
+    assert_eq!(a.out_point, Some(rate.time_floor(2)));
+    assert!(p.sequence().in_point().is_none() && p.sequence().out_point().is_none());
+    assert_eq!(h.state().timeline.playhead(), head);
+    // Source marks are history edits and survive the project-file round trip.
+    let saved = jvid_core::file::to_json(p, Path::new("/")).unwrap();
+    let restored = jvid_core::file::from_json(&saved, Path::new("/"), |_| true).unwrap();
+    assert_eq!(restored.asset(id).unwrap().in_point, a.in_point);
+    assert_eq!(restored.asset(id).unwrap().out_point, a.out_point);
+    h.state_mut().history.undo();
+    assert!(
+        h.state()
+            .history
+            .project()
+            .asset(id)
+            .unwrap()
+            .out_point
+            .is_none()
+    );
+    h.state_mut().history.redo();
+    let mut track = h.state().history.project().sequence().tracks()[0].settings();
+    track.target = true;
+    let target = track.id;
+    h.state_mut()
+        .history
+        .apply(Command::SetTrack(track))
+        .unwrap();
+    for key in [Key::Comma, Key::Period] {
+        h.key_press(key);
+        h.run_steps(2);
+        assert!(
+            h.state()
+                .history
+                .project()
+                .sequence()
+                .track(target)
+                .unwrap()
+                .clips()
+                .iter()
+                .any(|c| c.asset == id && c.source_out == rate.time_floor(2))
+        );
+    }
+}
+
+#[test]
+fn audit_457_single_click_and_nested_sequence_keep_existing_destinations() {
+    let (mut h, _) = source_editor();
+    let at = bin_asset_pos(&h);
+    h.hover_at(at);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    h.run_steps(2);
+    assert_eq!(
+        h.state_mut().dock.find_active_focused().map(|(_, t)| *t),
+        Some(Tab::Media)
+    );
+    assert!(h.state().preview.source_asset().is_none());
+    let clip = h.state().history.project().sequence().tracks()[0].clips()[0].id;
+    h.state_mut()
+        .history
+        .apply(Command::Nest {
+            ids: vec![clip],
+            name: "Nested".into(),
+            outer: "Main".into(),
+        })
+        .unwrap();
+    let seq = h
+        .state()
+        .history
+        .project()
+        .assets()
+        .iter()
+        .find(|a| a.display_name() == "Nested")
+        .unwrap()
+        .sequence
+        .unwrap();
+    h.run_steps(2);
+    double_click(&mut h, "Nested");
+    assert_eq!(h.state().history.project().sequence().id(), seq);
+    assert!(h.state().preview.source_asset().is_none());
 }

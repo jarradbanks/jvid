@@ -1523,7 +1523,9 @@ impl eframe::App for App {
             }
             if let Some(id) = open.filter(|_| nested.is_none()) {
                 self.preview.open(self.history.project(), id);
-                self.preview_active = 0;
+                if self.preview.source_asset() == Some(id) {
+                    self.run_action("focus_source", false);
+                }
             }
             let applied = match (command, gesture) {
                 (Some(c), Some(k)) => Some(self.history.apply_coalesced(k, c)),
