@@ -212,6 +212,9 @@ impl App {
         app.language = settings.language.clone();
         app.input_device = settings.input_device.clone();
         app.reduce_motion = settings.reduce_motion;
+        app.autosave.set_interval(std::time::Duration::from_secs(
+            settings.autosave_secs.into(),
+        ));
         app.tutorials_done = settings.tutorials_done.clone();
         app.welcome.tour = !settings.tour_offered;
         // Tests never write the real settings file; those that save set their own.

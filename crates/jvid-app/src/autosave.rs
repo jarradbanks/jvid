@@ -11,7 +11,7 @@ use jvid_jobs::{Pool, Priority};
 
 use crate::project_file;
 
-/// A kill loses at most this much work.
+/// The default periodic cadence; the configured interval may override or disable it.
 pub const INTERVAL: Duration = Duration::from_secs(60);
 /// Autosave versions kept per project; slot 1 is the newest.
 pub const KEEP: usize = 3;
@@ -59,6 +59,7 @@ pub fn clear(path: &Path) {
 type Latest = Arc<Mutex<Option<(Project, PathBuf)>>>;
 
 pub struct Autosave {
+    interval: Duration,
     pool: Pool,
     latest: Latest,
     /// Serialises writes between the job and the panic hook.
@@ -84,6 +85,7 @@ impl Default for Autosave {
             }
         });
         Self {
+            interval: INTERVAL,
             pool: Pool::new(1),
             latest,
             writing,
@@ -94,6 +96,19 @@ impl Default for Autosave {
 }
 
 impl Autosave {
+    /// Zero disables periodic writes. Panic recovery snapshots and explicit `flush` remain
+    /// available independently of this timer. Changing cadence preserves the oldest edit's
+    /// deadline, so continuous edits cannot postpone a shorter interval.
+    pub fn set_interval(&mut self, interval: Duration) {
+        if self.interval.is_zero() && !interval.is_zero() {
+            self.rev = None;
+        }
+        self.interval = interval;
+        if interval.is_zero() {
+            self.pending_since = None;
+        }
+    }
+
     /// A revision number alone is not an identity across independent project histories.
     pub fn reset_session(&mut self) {
         self.rev = None;
@@ -125,12 +140,17 @@ impl Autosave {
         };
         if self.rev != Some(history.rev()) {
             self.rev = Some(history.rev());
-            self.pending_since.get_or_insert(now);
+            if !self.interval.is_zero() {
+                self.pending_since.get_or_insert(now);
+            }
             *self.latest.lock().unwrap_or_else(|e| e.into_inner()) =
                 Some((history.project().clone(), target.to_owned()));
         }
+        if self.interval.is_zero() {
+            return None;
+        }
         let since = self.pending_since?;
-        let left = INTERVAL.as_secs_f64() - (now - since);
+        let left = self.interval.as_secs_f64() - (now - since);
         if left > 0.0 {
             return Some(Duration::from_secs_f64(left));
         }
@@ -206,5 +226,66 @@ mod tests {
         }
         assert_eq!(&project_file::load(&slot(&path, 1)).unwrap(), h.project());
         std::fs::remove_dir_all(&d).unwrap();
+    }
+    fn idle(a: &Autosave) {
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        while !a.pool.is_idle() {
+            assert!(std::time::Instant::now() < until, "autosave did not finish");
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn configured_cadence_uses_fake_clock_at_15_300_and_zero() {
+        for secs in [15, 300, 0] {
+            let d = dir(&format!("cadence-{secs}"));
+            let path = d.join("p.jvid");
+            let mut a = Autosave::default();
+            a.set_interval(Duration::from_secs(secs));
+            let mut h = History::new(Project::default());
+            h.apply(Command::AddAsset(d.join("a.mkv"))).unwrap();
+            let due = a.tick(&h, Some(&path), 0.0);
+            assert_eq!(due, (secs > 0).then_some(Duration::from_secs(secs)));
+            for now in [14.0, 15.0, 60.0, 299.0, 300.0, 600.0] {
+                a.tick(&h, Some(&path), now);
+                idle(&a);
+                let expected = secs > 0 && now >= secs as f64;
+                assert_eq!(
+                    slot(&path, 1).exists(),
+                    expected,
+                    "interval {secs} at {now}"
+                );
+            }
+            // Even with periodic writes disabled, the panic hook has the latest snapshot.
+            assert_eq!(a.latest.lock().unwrap().as_ref().unwrap().0, *h.project());
+            drop(a);
+            std::fs::remove_dir_all(d).unwrap();
+        }
+    }
+
+    #[test]
+    fn continuous_edits_and_shortening_cadence_keep_the_oldest_edit_deadline() {
+        let d = dir("continuous");
+        let path = d.join("p.jvid");
+        let mut a = Autosave::default();
+        a.set_interval(Duration::from_secs(300));
+        let mut h = History::new(Project::default());
+        for now in [0.0, 5.0, 10.0, 14.0] {
+            h.apply(Command::AddAsset(d.join(format!("{now}.mkv"))))
+                .unwrap();
+            a.tick(&h, Some(&path), now);
+        }
+        a.set_interval(Duration::from_secs(15));
+        assert_eq!(a.tick(&h, Some(&path), 14.0), Some(Duration::from_secs(1)));
+        assert_eq!(a.tick(&h, Some(&path), 15.0), None);
+        idle(&a);
+        assert_eq!(project_file::load(&slot(&path, 1)).unwrap(), *h.project());
+        assert_eq!(a.tick(&h, Some(&path), 60.0), None);
+        assert!(
+            !slot(&path, 2).exists(),
+            "no redundant write without a new edit"
+        );
+        drop(a);
+        std::fs::remove_dir_all(d).unwrap();
     }
 }

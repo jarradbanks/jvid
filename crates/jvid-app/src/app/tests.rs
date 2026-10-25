@@ -2736,3 +2736,31 @@ fn audit_461_restore_success_is_dirty_and_failure_preserves_recovery() {
     drop(app);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn audit_469_app_settings_control_periodic_autosave() {
+    use std::time::Duration;
+    for seconds in [15, 300, 0] {
+        let settings = jvid_core::settings::Settings {
+            autosave_secs: seconds,
+            ..Default::default()
+        };
+        let mut h = builder([1280.0, 720.0], 1.0).build_eframe(move |cc| App::new(cc, &settings));
+        let app = h.state_mut();
+        app.history
+            .apply(Command::AddTrack {
+                kind: TrackKind::Audio,
+                name: String::new(),
+            })
+            .unwrap();
+        let target = std::env::temp_dir().join(format!(
+            "jvid-cadence-{seconds}-{}.jvid",
+            std::process::id()
+        ));
+        let due = app.autosave.tick(&app.history, Some(&target), 0.0);
+        assert_eq!(
+            due,
+            (seconds > 0).then_some(Duration::from_secs(seconds.into()))
+        );
+    }
+}
