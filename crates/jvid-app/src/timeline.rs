@@ -43,6 +43,8 @@ mod keyframes;
 mod markers;
 pub mod menus;
 mod rubber;
+#[cfg(test)]
+mod seek_tests;
 mod silence;
 mod transitions;
 #[cfg(test)]
@@ -1029,7 +1031,11 @@ impl Timeline {
             Rect::from_x_y_ranges(lanes_left..=area.right(), ruler.bottom()..=area.bottom());
         let headers = Rect::from_x_y_ranges(area.left()..=lanes_left, lanes.y_range());
         self.width = lanes.width();
-        self.follow();
+        // Playback must not move the time under a held seek pointer. Scrubs still scroll
+        // themselves past the edges; ordinary playback paging resumes on release.
+        if !self.scrub_seek.is_active() || !ui.input(|i| i.pointer.primary_down()) {
+            self.follow();
+        }
 
         // Input first, so this frame draws the result.
         let view = self.view(lanes_left);
@@ -1087,10 +1093,9 @@ impl Timeline {
         if let Some(p) = scrub.interact_pointer_pos().or(drag.interact_pointer_pos())
             && (scrub.is_pointer_button_down_on() || drag.dragged())
         {
-            if scrub.drag_started()
-                || drag.drag_started()
-                || ui.input(|i| i.pointer.primary_pressed())
-            {
+            // click_and_drag can become a drag after a timeout or a small movement. The
+            // ruler already submitted this press, so only a new press resets its target.
+            if ui.input(|i| i.pointer.primary_pressed()) {
                 self.scrub_seek.update(None);
             }
             self.scrub(ui, p.x, lanes);
@@ -4461,40 +4466,6 @@ mod tests {
         t.scroll = 0.0;
         t.follow();
         assert_eq!(t.scroll, 0.0);
-    }
-
-    #[test]
-    fn held_ruler_does_not_seek_back_over_playback_follow() {
-        let ctx = egui::Context::default();
-        theme::install(&ctx);
-        let project = project(40);
-        let mut timeline = Timeline::default();
-        timeline.sync(&project);
-        let lanes = Rect::from_min_size(pos2(100.0, 0.0), vec2(800.0, 200.0));
-        for x in [300.0, 500.0, 200.0] {
-            let mut output = ctx.run_ui(Default::default(), |ui| timeline.scrub(ui, x, lanes));
-            output.textures_delta.clear();
-            let target = timeline.playhead();
-            for frame in 1..10 {
-                // The Program monitor writes its advancing audio-clock position back here.
-                let followed = target + timeline.transport.rate.time_floor(frame);
-                timeline.seek(followed);
-                let mut output = ctx.run_ui(Default::default(), |ui| timeline.scrub(ui, x, lanes));
-                output.textures_delta.clear();
-                assert_eq!(
-                    timeline.playhead(),
-                    followed,
-                    "held ruler replayed the seek"
-                );
-            }
-        }
-        // A released gesture must allow a fresh click at the same position.
-        let mut output = ctx.run_ui(Default::default(), |ui| {
-            timeline.show(ui, &project, &HashSet::new(), &Keymap::default());
-            timeline.scrub(ui, 200.0, lanes);
-        });
-        output.textures_delta.clear();
-        assert_eq!(timeline.playhead(), Time(5 * S));
     }
 
     #[test]

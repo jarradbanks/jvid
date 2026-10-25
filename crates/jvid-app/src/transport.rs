@@ -26,6 +26,10 @@ pub(crate) struct SeekGesture {
 }
 
 impl SeekGesture {
+    pub(crate) fn is_active(&self) -> bool {
+        self.target.is_some()
+    }
+
     /// A changed target seeks once. `None` ends the gesture so the next press can seek again.
     pub(crate) fn update(&mut self, target: Option<Time>) -> Option<Time> {
         let previous = std::mem::replace(&mut self.target, target);
@@ -435,6 +439,50 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn obsolete_seek_generations_cannot_fill_or_advance_current_buffer() {
+        let (seek, seeks) = channel();
+        let (tx, chunks) = sync_channel(AHEAD);
+        let mut source = AudioSource {
+            feeder: Some(Feeder {
+                seek,
+                chunks,
+                generation: 0,
+                thread: None,
+            }),
+            buf: AudioBuffer::default(),
+        };
+        let start = 24_019;
+        source.fill(start, &mut []);
+        let (obsolete, _) = seeks.recv().unwrap();
+        source.fill(144_031, &mut []);
+        source.fill(start, &mut []);
+        let _ = seeks.recv().unwrap();
+        let (current, at) = seeks.recv().unwrap();
+        assert_eq!(at, start);
+        assert_ne!(current, obsolete);
+        // Tag generations with distinct sample-index ramps, even when their timestamps
+        // overlap. A periodic tone could hide incorrectly accepted obsolete PCM here.
+        let tagged = |tag: i64| Chunk {
+            start,
+            samples: (0..800).map(|i| (tag + i / 2) as f32).collect(),
+        };
+        tx.send((obsolete, tagged(100_001))).unwrap();
+        let mut got = [1.0; 800];
+        source.fill(start, &mut got);
+        assert_eq!(got, [0.0; 800], "obsolete PCM must not reach output");
+        assert_eq!(
+            source.buf.end(),
+            start,
+            "obsolete timestamps must not signal readiness"
+        );
+        tx.send((current, tagged(start + 1))).unwrap();
+        source.fill(start, &mut got);
+        for (i, pair) in got.as_chunks::<2>().0.iter().enumerate() {
+            assert_eq!(*pair, [(start + i as i64 + 1) as f32; 2]);
+        }
+    }
+
     /// Real decoder/resampler and asynchronous feeder coverage, with output and DSP checked
     /// against an offline reader. Rapid obsolete requests must settle at the latest position.
     #[test]
@@ -468,9 +516,11 @@ pub(crate) mod tests {
                 let mut out = Output::new(Box::new(fake.clone()), None);
                 let mut transport = Transport::new(secs(5), FPS30);
                 transport.toggle(out.clock());
-                for target in [96_000, 24_000, 144_000, 48_000] {
+                // Distinct phases as well as times: integral 1kHz periods can conceal
+                // wrong-position PCM when comparing these stationary tone fixtures.
+                for target in [96_007, 24_019, 144_031, 48_041] {
                     // Queue several jumps without waiting for the decoder, as during a drag.
-                    for obsolete in [192_000, 12_000, 168_000] {
+                    for obsolete in [192_011, 12_023, 168_037] {
                         source.fill(obsolete, &mut [0.0; 1600]);
                     }
                     out.flush();
