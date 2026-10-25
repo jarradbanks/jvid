@@ -2210,6 +2210,75 @@ impl Sequence {
             .collect()
     }
 
+    /// Plans one selection move for both preview and application. Track offsets are
+    /// relative to the anchor; a destination outside the stack or of another kind refuses
+    /// the whole move. Linked partners join the selection even when not explicitly picked.
+    pub fn plan_move_selection(
+        &self,
+        ids: &[ClipId],
+        anchor: ClipId,
+        track: TrackId,
+        start: Time,
+    ) -> Result<Vec<(TrackId, Clip)>, ModelError> {
+        let (from, c) = self.clip(anchor).ok_or(ModelError::UnknownClip(anchor))?;
+        let offset = self.index(track)? as isize - self.index(from)? as isize;
+        let mut moving = BTreeMap::new();
+        for id in ids.iter().copied().chain(std::iter::once(anchor)) {
+            self.clip(id).ok_or(ModelError::UnknownClip(id))?;
+            for (t, c) in self.linked(id) {
+                moving.insert(c.id, (t, c.clone()));
+            }
+        }
+        let earliest = moving.values().map(|(_, c)| c.start).min().expect("anchor");
+        let by = (start - c.start).max(Time(0) - earliest);
+        moving
+            .into_values()
+            .map(|(from, mut c)| {
+                let ti = self.index(from)?;
+                let to = (ti as isize + offset)
+                    .try_into()
+                    .ok()
+                    .and_then(|i: usize| self.tracks.get(i))
+                    .ok_or(ModelError::WrongKind(track))?;
+                self.kind_check(to.id, self.tracks[ti].kind)?;
+                for t in [&self.tracks[ti], to] {
+                    if t.locked {
+                        return Err(ModelError::Locked(t.id));
+                    }
+                }
+                c.start = c.start + by;
+                Ok((to.id, c))
+            })
+            .collect()
+    }
+
+    pub(crate) fn move_selection(
+        &mut self,
+        ids: &[ClipId],
+        anchor: ClipId,
+        track: TrackId,
+        start: Time,
+    ) -> Result<(), ModelError> {
+        let moved = self.plan_move_selection(ids, anchor, track, start)?;
+        let mut s = self.clone();
+        for (_, c) in &moved {
+            s.remove_clip(c.id)?;
+        }
+        let mut links = BTreeMap::new();
+        // Clear every destination before inserting, so moving members cannot overwrite one
+        // another even where their new spans overlap another member's original position.
+        for (t, c) in &moved {
+            let ti = s.index(*t)?;
+            s.clear(ti, c.start, c.end(), &mut links);
+        }
+        for (t, c) in moved {
+            let ti = s.index(t)?;
+            insert_sorted(&mut s.tracks[ti].clips, c);
+        }
+        *self = s;
+        Ok(())
+    }
+
     /// Drags clip `id` to `start` on `track`, its linked clips by the same time on their own
     /// tracks, overwriting whatever they land on. Nothing moves before zero.
     pub(crate) fn drag_clip(
