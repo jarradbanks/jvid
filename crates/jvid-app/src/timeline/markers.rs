@@ -1,10 +1,12 @@
 //! Markers: M drops one at the playhead without touching playback, or marks a range while
 //! held during playback; Alt+M turns in/out into a
-//! ranged one, Shift+M / Ctrl+Shift+M jump between them. Flags sit on the ruler; click one to
-//! seek, right-click to edit its name, color and note.
+//! ranged one, Shift+M / Ctrl+Shift+M jump between them. Flags sit in their own lane above the
+//! ruler; click one to seek, drag it to move (or a range's end to resize), right-click to edit
+//! its name, color and note.
 
 use egui::{
-    Align, Color32, Id, Label, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, pos2, vec2,
+    Align, Color32, CursorIcon, Id, Label, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, pos2,
+    vec2,
 };
 use jvid_core::history::Command;
 use jvid_core::model::{Marker, Sequence};
@@ -39,6 +41,51 @@ const COLOR_NAMES: [&str; 6] = [
 
 fn swatch(i: u8) -> Color32 {
     PALETTE.get(i as usize).copied().unwrap_or(DARK.amber)
+}
+
+/// The Markers lane's height, above the ruler.
+pub(super) const LANE: f32 = space::S16;
+
+/// Pointer reach of a flag or a range end either side of its x.
+const GRIP: f32 = 5.0;
+
+/// What a marker drag moves: the whole marker, or one end of a range.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Grip {
+    Move,
+    Start,
+    End,
+}
+
+/// The grip under `px` for a marker drawn from `x` to `end`: a range's nearer end within
+/// reach, otherwise the whole marker.
+fn grip(m: &Marker, x: f32, end: f32, px: f32) -> Grip {
+    let (start, end) = ((px - x).abs(), (px - end).abs());
+    if m.duration == Time(0) || start.min(end) > GRIP {
+        Grip::Move
+    } else if end < start {
+        Grip::End
+    } else {
+        Grip::Start
+    }
+}
+
+/// `m` dragged `by` at `grip`: never before zero, and a range never shorter than zero.
+pub(super) fn dragged(m: &Marker, grip: Grip, by: Time) -> Marker {
+    let end = m.time + m.duration;
+    let (time, end) = match grip {
+        Grip::Move => {
+            let t = (m.time + by).max(Time(0));
+            (t, t + m.duration)
+        }
+        Grip::Start => ((m.time + by).clamp(Time(0), end), end),
+        Grip::End => (m.time, (end + by).max(m.time)),
+    };
+    Marker {
+        time,
+        duration: end - time,
+        ..m.clone()
+    }
 }
 
 /// The popup's width: Inspector-style rows, a label column then the field.
@@ -155,37 +202,90 @@ impl Timeline {
         });
     }
 
-    /// Draws the flags (and ranges) on the ruler and handles clicks on them.
+    /// Draws the flags (and ranges) in the Markers lane and handles clicks and drags on them.
+    /// A drag previews live and commits one SetMarker on release.
     pub(super) fn markers(
         &mut self,
         ui: &Ui,
         seq: &Sequence,
         view: View,
-        ruler: Rect,
+        lane: Rect,
         id: Id,
     ) -> Option<Edit> {
-        let painter = ui.painter().with_clip_rect(ruler);
+        let painter = ui.painter().with_clip_rect(lane);
+        let rate = self.transport.rate;
         let mut edit = None;
         let mut anchored = false;
         for m in seq.markers() {
-            let (x, c) = (view.x(m.time), swatch(m.color));
-            if m.duration > Time(0) {
-                let band = Rect::from_x_y_ranges(x..=view.x(m.time + m.duration), ruler.y_range());
+            let shown = match &self.marker_drag {
+                Some((_, d)) if d.id == m.id => d.clone(),
+                _ => m.clone(),
+            };
+            let (x, c) = (view.x(shown.time), swatch(m.color));
+            let end = view.x(shown.time + shown.duration);
+            let top = lane.top() + 1.0;
+            if shown.duration > Time(0) {
+                let band = Rect::from_x_y_ranges(x..=end, top..=lane.bottom());
                 painter.rect_filled(band, 0.0, c.gamma_multiply(0.3));
+                painter.line_segment(
+                    [pos2(end, top), pos2(end, lane.bottom())],
+                    Stroke::new(1.0, c),
+                );
             }
-            let top = ruler.top() + 1.0;
             painter.add(Shape::convex_polygon(
                 vec![pos2(x - 5.0, top), pos2(x + 5.0, top), pos2(x, top + 8.0)],
                 c,
                 Stroke::NONE,
             ));
-            painter.line_segment([pos2(x, top), pos2(x, ruler.bottom())], Stroke::new(1.0, c));
-            // The upper part only, so scrubbing still works under a flag.
-            let hit = Rect::from_x_y_ranges(x - 5.0..=x + 5.0, top..=top + 10.0);
-            let r = ui.interact(hit, id.with(("marker", m.id.0)), Sense::click());
-            if !anchored && ruler.intersects(hit) {
+            painter.line_segment([pos2(x, top), pos2(x, lane.bottom())], Stroke::new(1.0, c));
+            let flag = Rect::from_x_y_ranges(x - GRIP..=x + GRIP, lane.y_range());
+            let hit = Rect::from_x_y_ranges(x - GRIP..=end + GRIP, lane.y_range());
+            let r = ui.interact(hit, id.with(("marker", m.id.0)), Sense::click_and_drag());
+            if !anchored && lane.intersects(flag) {
                 anchored = true;
-                crate::app::tutorial::anchor(ui.ctx(), "marker", hit);
+                crate::app::tutorial::anchor(ui.ctx(), "marker", flag);
+            }
+            if let Some(p) = r.hover_pos().filter(|_| r.hovered() || r.dragged()) {
+                let g = match &self.marker_drag {
+                    Some((g, d)) if d.id == m.id => *g,
+                    _ => grip(&shown, x, end, p.x),
+                };
+                let icon = match (g, r.dragged()) {
+                    (Grip::Move, false) => CursorIcon::Grab,
+                    (Grip::Move, true) => CursorIcon::Grabbing,
+                    _ => CursorIcon::ResizeHorizontal,
+                };
+                ui.ctx().set_cursor_icon(icon);
+            }
+            if r.drag_started() {
+                let origin = ui.input(|i| i.pointer.press_origin()).map_or(x, |o| o.x);
+                self.marker_drag = Some((grip(m, x, end, origin), m.clone()));
+            }
+            if r.dragged()
+                && let Some(p) = r.interact_pointer_pos()
+                && let Some((g, _)) = self.marker_drag.as_ref().filter(|(_, d)| d.id == m.id)
+            {
+                let g = *g;
+                let by = view.time(p.x) - self.press_time(ui, view, p);
+                let by = rate.time_floor(rate.index_nearest(by));
+                let d = dragged(m, g, by);
+                let edges = match g {
+                    Grip::Move => vec![d.time, d.time + d.duration],
+                    Grip::Start => vec![d.time],
+                    Grip::End => vec![d.time + d.duration],
+                };
+                // Set first so the snap skips this marker's own edges.
+                self.marker_drag = Some((g, d));
+                let by = by + self.snap(seq, &[], &edges);
+                self.marker_drag = Some((g, dragged(m, g, by)));
+            }
+            if r.drag_stopped() {
+                self.snapped = None;
+                if let Some((_, d)) = self.marker_drag.take()
+                    && d != *m
+                {
+                    edit = Some((Command::SetMarker(d), None));
+                }
             }
             if r.clicked() {
                 self.seek(m.time);
@@ -346,6 +446,137 @@ mod tests {
         }
     }
 
+    #[test]
+    fn dragged_keeps_markers_in_bounds() {
+        let m = Marker {
+            id: jvid_core::model::MarkerId(1),
+            time: Time(3 * S),
+            duration: Time(2 * S),
+            name: String::new(),
+            color: 0,
+            note: String::new(),
+        };
+        let at = |grip, by: i64| {
+            let d = dragged(&m, grip, Time(by * S));
+            (d.time.0 / S, d.duration.0 / S)
+        };
+        assert_eq!(at(Grip::Move, 1), (4, 2));
+        assert_eq!(at(Grip::Move, -9), (0, 2));
+        assert_eq!(at(Grip::Start, 1), (4, 1));
+        assert_eq!(at(Grip::Start, 9), (5, 0));
+        assert_eq!(at(Grip::Start, -9), (0, 5));
+        assert_eq!(at(Grip::End, 1), (3, 3));
+        assert_eq!(at(Grip::End, -9), (3, 0));
+    }
+
+    type Timed = egui_kittest::Harness<'static, (Timeline, History)>;
+
+    /// A one-clip timeline (0-2s) with a marker at `time` lasting `duration` seconds.
+    fn with_marker(time: i64, duration: i64) -> Timed {
+        let mut h = super::super::tests::harness(project(1));
+        let c = Command::AddMarker {
+            time: Time(time * S),
+            duration: Time(duration * S),
+            name: String::new(),
+        };
+        h.state_mut().1.apply(c).unwrap();
+        h.run();
+        h
+    }
+
+    fn marker(h: &Timed) -> (Time, Time) {
+        let m = &h.state().1.project().sequence().markers()[0];
+        (m.time, m.duration)
+    }
+
+    /// Presses in the Markers lane at `from`, drags `dx` points and lets go.
+    fn drag_lane(h: &mut Timed, from: Time, dx: f32) {
+        let left = 8.0 + size::TRACK_HEADER;
+        let (x, y) = (h.state().0.view(left).x(from), 8.0 + LANE / 2.0);
+        h.hover_at(pos2(x, y));
+        h.run();
+        h.drag_at(pos2(x, y));
+        h.run();
+        for f in [0.1, 0.5, 1.0] {
+            h.hover_at(pos2(x + dx * f, y));
+            h.run();
+        }
+        h.drop_at(pos2(x + dx, y));
+        h.run();
+    }
+
+    /// #415: a flag drags by the dragged time as one undo step, snaps like a clip, and a
+    /// click still seeks.
+    #[test]
+    fn dragging_a_flag_moves_it_as_one_undo_step() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = with_marker(3, 0);
+        // 100pt is 5s.
+        drag_lane(&mut h, Time(3 * S), 100.0);
+        assert_eq!(marker(&h), (Time(8 * S), Time(0)));
+        assert_eq!(h.state().0.playhead(), Time(0), "a drag isn't a click");
+        assert!(h.state_mut().1.undo());
+        assert_eq!(marker(&h), (Time(3 * S), Time(0)));
+        assert!(h.state_mut().1.undo(), "the marker's add is next");
+        assert!(h.state_mut().1.redo());
+        // The playhead sits 1/3s (under 8pt) past the drop: it snaps there.
+        let at = Time(8 * S + S / 3);
+        h.state_mut().0.seek(at);
+        h.run();
+        drag_lane(&mut h, Time(3 * S), 100.0);
+        assert_eq!(marker(&h), (at, Time(0)));
+        // A click still seeks.
+        h.state_mut().0.seek(Time(0));
+        h.run();
+        let left = 8.0 + size::TRACK_HEADER;
+        let p = pos2(h.state().0.view(left).x(at), 8.0 + LANE / 2.0);
+        h.hover_at(p);
+        h.run();
+        h.drag_at(p);
+        h.run();
+        h.drop_at(p);
+        h.run();
+        assert_eq!(h.state().0.playhead(), at);
+    }
+
+    /// #415: a range's end resizes it, never below zero; its body moves it whole.
+    #[test]
+    fn dragging_a_range_end_changes_only_its_duration() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = with_marker(3, 2);
+        drag_lane(&mut h, Time(5 * S), 20.0);
+        assert_eq!(marker(&h), (Time(3 * S), Time(3 * S)));
+        drag_lane(&mut h, Time(6 * S), -200.0);
+        assert_eq!(marker(&h), (Time(3 * S), Time(0)));
+        assert!(h.state_mut().1.undo());
+        assert_eq!(marker(&h), (Time(3 * S), Time(3 * S)));
+        drag_lane(&mut h, Time(3 * S), 20.0);
+        assert_eq!(marker(&h), (Time(4 * S), Time(2 * S)), "start resizes");
+        drag_lane(&mut h, Time(5 * S), 40.0);
+        assert_eq!(marker(&h), (Time(6 * S), Time(2 * S)), "body moves");
+    }
+
+    /// #415: the Markers lane above the ruler, with a point and a range marker.
+    #[test]
+    fn marker_lane_snapshot() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = with_marker(1, 0);
+        let c = Command::AddMarker {
+            time: Time(3 * S),
+            duration: Time(2 * S),
+            name: String::new(),
+        };
+        h.state_mut().1.apply(c).unwrap();
+        h.run();
+        h.snapshot("timeline_marker_lane");
+    }
+
     /// A timeline with one marker at 1s, its popup open.
     fn popup_open() -> egui_kittest::Harness<'static, (Timeline, History)> {
         let mut h = super::super::tests::harness(project(4));
@@ -356,9 +587,9 @@ mod tests {
         };
         h.state_mut().1.apply(c).unwrap();
         h.run();
-        // The flag's grip, past the 8pt margin and the headers.
+        // The flag in the Markers lane, past the 8pt margin and the headers.
         let left = 8.0 + suite_ui::tokens::size::TRACK_HEADER;
-        let at = pos2(h.state().0.view(left).x(Time(S)), 8.0 + 5.0);
+        let at = pos2(h.state().0.view(left).x(Time(S)), 8.0 + LANE / 2.0);
         h.hover_at(at);
         h.run();
         for pressed in [true, false] {
