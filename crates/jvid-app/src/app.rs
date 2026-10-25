@@ -108,6 +108,9 @@ pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
 
 pub struct App {
     history: History,
+    /// Ownership of project-local editor state and asynchronous results.
+    project_session: u64,
+    editor_context: Option<egui::Context>,
     path: Option<PathBuf>,
     dock: DockState<Tab>,
     /// The preview's views: one shows as a title, several as tabs.
@@ -197,6 +200,7 @@ impl App {
         theme::install(&cc.egui_ctx);
         jvid_media::hwdec::set_enabled(settings.hardware_decode);
         let mut app = Self::restore(cc.storage);
+        app.editor_context = Some(cc.egui_ctx.clone());
         let caches = crate::media_bin::Caches::new(settings);
         app.bin = MediaBin::new(caches.clone());
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
@@ -244,6 +248,8 @@ impl App {
         });
         Self {
             history: History::new(Project::default()),
+            project_session: 0,
+            editor_context: None,
             path: None,
             dock: {
                 let mut dock = dock;
@@ -292,39 +298,83 @@ impl App {
         }
     }
 
+    /// Starts a fresh editor session while keeping user layout and disk cache services.
+    /// Result channels are detached rather than joining old workers on the UI thread.
+    fn reset_project_session(&mut self) {
+        self.project_session += 1;
+        self.importer.reset_session(self.project_session);
+        self.timeline.reset_session();
+        self.preview.reset_session();
+        self.bin.reset_session();
+        self.transcript.reset_session();
+        self.subtitles.close();
+        self.settings_dialog = Default::default();
+        self.export_dialog = Default::default();
+        self.autosave.reset_session();
+        self.preview_active = 1;
+        self.prompts.clear();
+        self.toasts.clear();
+        self.closing = false;
+        // Widget edits/gestures also hold clip IDs (canvas text, masks, inspector fields).
+        // The dock layout and application preferences live outside this widget memory.
+        if let Some(ctx) = &self.editor_context {
+            ctx.data_mut(|d| d.clear());
+            ctx.memory_mut(|m| {
+                if let Some(id) = m.focused() {
+                    m.surrender_focus(id);
+                }
+            });
+            ctx.stop_dragging();
+            egui::Popup::close_all(ctx);
+        }
+    }
+
+    /// The common successful New/Open/recovery replacement boundary. Loading happens first,
+    /// so an unreadable project leaves the current history, jobs and editing context intact.
+    fn replace_project(
+        &mut self,
+        project: Project,
+        path: Option<PathBuf>,
+        match_source: bool,
+    ) -> bool {
+        if !self.leave_project() {
+            return false;
+        }
+        self.reset_project_session();
+        self.missing = relink::missing(&project);
+        self.history = History::new(project);
+        self.path = path;
+        self.match_source = match_source;
+        self.on_welcome = false;
+        true
+    }
+
     /// Replaces the project with an empty one; `None` settings is Match source.
     fn new_project(&mut self, settings: Option<ProjectSettings>) {
-        if !self.leave_project() {
-            return;
+        let match_source = settings.is_none();
+        let mut history = History::new(Project::default());
+        if let Some(s) = settings {
+            let _ = history.apply(Command::SetSettings(s));
         }
-        self.history = History::new(Project::default());
-        if let Some(s) = &settings {
-            // Setting up isn't an edit: no undo step, nothing to save yet.
-            let _ = self.history.apply(Command::SetSettings(s.clone()));
-            self.history = History::new(self.history.project().clone());
-        }
-        self.match_source = settings.is_none();
-        self.missing.clear();
-        self.path = None;
-        self.on_welcome = false;
+        self.replace_project(history.project().clone(), None, match_source);
     }
 
     fn open(&mut self, path: PathBuf) {
         match project_file::load(&path) {
             Ok(project) => {
-                if !self.leave_project() {
+                if !self.replace_project(project, Some(path.clone()), false) {
                     return;
                 }
-                welcome::remember(&mut self.welcome.recent, Recent::of(&path, &project));
-                self.missing = relink::missing(&project);
-                self.history = History::new(project);
+                welcome::remember(
+                    &mut self.welcome.recent,
+                    Recent::of(&path, self.history.project()),
+                );
                 if let Some(auto) = autosave::newer(&path) {
-                    let path = Some(path.clone());
-                    self.prompts.push(Prompt::Restore { path, auto });
+                    self.prompts.push(Prompt::Restore {
+                        path: Some(path),
+                        auto,
+                    });
                 }
-                self.path = Some(path);
-                self.match_source = false;
-                self.on_welcome = false;
             }
             Err(e) => self.error(tr!("app.open_failed", path = path.display(), error = e)),
         }
@@ -1258,14 +1308,9 @@ impl App {
             }
             (Prompt::Restore { path, auto }, 0) => match project_file::load(&auto) {
                 Ok(project) => {
-                    if path.is_none() {
-                        self.new_project(Some(project.settings().clone()));
+                    if self.replace_project(project, path, false) {
+                        self.history.mark_unsaved();
                     }
-                    if !self.leave_project() {
-                        return;
-                    }
-                    self.history = History::new(project);
-                    self.history.mark_unsaved();
                 }
                 Err(e) => self.error(tr!("app.restore_failed", path = auto.display(), error = e)),
             },
@@ -1283,6 +1328,7 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.editor_context = Some(ctx.clone());
         if let Some(e) = self.theme.poll(&ctx) {
             let until = ctx.input(|i| i.time) + TOAST_SECS;
             self.toasts.push((e, until));

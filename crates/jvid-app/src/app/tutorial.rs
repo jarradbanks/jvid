@@ -12,7 +12,7 @@ use egui::{
 };
 use jvid_core::history::{Command, History};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
-use jvid_core::model::{AssetId, Project, TrackKind};
+use jvid_core::model::{Project, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use suite_ui::theme;
 use suite_ui::tokens::{color, radius, space};
@@ -20,7 +20,6 @@ use suite_ui::widgets::{Button, State};
 
 use super::{App, Tab};
 use crate::i18n::{tr, verbatim};
-use crate::import::Importer;
 use crate::timeline::Timeline;
 
 mod audio;
@@ -947,11 +946,9 @@ struct Stash {
     path: Option<PathBuf>,
     missing: HashSet<PathBuf>,
     match_source: bool,
-    importer: Importer,
     /// The playhead, selection and clipboard: clip ids repeat across projects.
     timeline: Timeline,
     bin_tab: usize,
-    bin_selected: Option<AssetId>,
     /// Started from the Welcome screen, so exit goes back there.
     on_welcome: bool,
 }
@@ -979,23 +976,24 @@ impl App {
             }
         };
         self.end_lesson();
-        self.leave_project();
+        if !self.leave_project() {
+            return;
+        }
         // Autosave is off in a lesson, so the edits it hasn't written yet are written now.
         if let Some(target) = self.autosave_target() {
             self.autosave.flush(&self.history, &target);
         }
-        let (importer, timeline) = (self.importer.sibling(), self.timeline.sibling());
+        let timeline = self.timeline.sibling();
         let stash = Stash {
             history: std::mem::replace(&mut self.history, History::new(Project::default())),
             path: self.path.take(),
             missing: std::mem::take(&mut self.missing),
             match_source: std::mem::replace(&mut self.match_source, true),
-            importer: std::mem::replace(&mut self.importer, importer),
             timeline: std::mem::replace(&mut self.timeline, timeline),
             bin_tab: self.bin.tab,
-            bin_selected: self.bin.selected.take(),
             on_welcome: std::mem::take(&mut self.on_welcome),
         };
+        self.reset_project_session();
         self.import(media);
         self.lesson = Some(Run {
             lesson,
@@ -1017,7 +1015,10 @@ impl App {
         let Some(run) = self.lesson.take() else {
             return;
         };
-        self.leave_project();
+        if !self.leave_project() {
+            self.lesson = Some(run);
+            return;
+        }
         // The lesson's playback would run on into the user's timeline.
         if self.preview.playing() {
             self.preview.program_action("shuttle_stop");
@@ -1027,11 +1028,10 @@ impl App {
         self.path = s.path;
         self.missing = s.missing;
         self.match_source = s.match_source;
-        self.importer = s.importer;
         self.timeline = s.timeline;
         self.bin.tab = s.bin_tab;
-        self.bin.selected = s.bin_selected;
         self.on_welcome = s.on_welcome;
+        self.reset_project_session();
     }
 
     /// Esc exits the lesson and Enter presses Next, unless a dialog, menu or text field would
@@ -2251,7 +2251,7 @@ mod tests {
     }
 
     #[test]
-    fn esc_exits_unless_a_dialog_is_open() {
+    fn previous_session_dialogs_do_not_block_esc_or_exit() {
         let mut h = harness();
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
@@ -2259,8 +2259,8 @@ mod tests {
         h.run();
         assert!(h.state().lesson.is_none(), "Esc exits");
 
-        // A card shown after Project Settings opened sits above it, but neither its Exit nor
-        // Esc leave the sandbox under the dialog, whose Apply would land on the user's project.
+        // A draft from the previous session must be cleared on sandbox entry. It cannot
+        // apply to the sandbox or block its Exit/Escape controls.
         let under_settings = |h: &mut Harness<'_, App>| {
             h.state_mut().end_lesson();
             let state = h.state_mut();
@@ -2273,14 +2273,14 @@ mod tests {
         h.key_press(Key::Escape);
         h.run();
         assert!(
-            h.state().lesson.is_some(),
-            "Esc closes the dialog, not the lesson"
+            h.state().lesson.is_none(),
+            "the previous session's dialog was cleared, so Esc exits the lesson"
         );
         under_settings(&mut h);
         click(&mut h, tr!("tutorial.exit"));
         assert!(
-            h.state().lesson.is_some(),
-            "the card is inert under a dialog"
+            h.state().lesson.is_none(),
+            "the previous session's dialog cannot block Exit"
         );
     }
 

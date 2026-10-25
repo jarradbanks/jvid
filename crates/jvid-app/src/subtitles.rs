@@ -348,7 +348,7 @@ impl Subtitles {
     }
 
     /// Cancels anything running and frees the model.
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.open = false;
         self.run = None;
         self.engine = None;

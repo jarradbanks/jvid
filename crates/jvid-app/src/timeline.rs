@@ -933,6 +933,11 @@ impl Timeline {
         t
     }
 
+    /// Drop selections, clip/key clipboards, dialogs and deferred edits across projects.
+    pub fn reset_session(&mut self) {
+        *self = self.sibling();
+    }
+
     /// No filmstrip, waveform or thumbnail job is queued or running on the shared pool.
     #[cfg(test)]
     pub fn jobs_idle(&self) -> bool {

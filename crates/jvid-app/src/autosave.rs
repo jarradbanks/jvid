@@ -94,6 +94,13 @@ impl Default for Autosave {
 }
 
 impl Autosave {
+    /// A revision number alone is not an identity across independent project histories.
+    pub fn reset_session(&mut self) {
+        self.rev = None;
+        self.pending_since = None;
+        *self.latest.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
     /// Writes `history` to `target` now if it has unsaved edits, before autosave stops
     /// watching it.
     pub fn flush(&mut self, history: &History, target: &Path) {

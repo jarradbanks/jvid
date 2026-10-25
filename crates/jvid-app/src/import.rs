@@ -4,18 +4,22 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use jvid_core::model::ProbeInfo;
-use jvid_jobs::{Pool, Priority};
+use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::probe::ProbeError;
 
 use crate::i18n::tr;
 
 pub type Probe = fn(&Path) -> Result<ProbeInfo, String>;
 
+type ResultMessage = (u64, PathBuf, Result<ProbeInfo, String>);
+
 pub struct Importer {
+    session: u64,
+    handles: Vec<Handle>,
     pool: Pool,
     probe: Probe,
-    tx: Sender<(PathBuf, Result<ProbeInfo, String>)>,
-    rx: Receiver<(PathBuf, Result<ProbeInfo, String>)>,
+    tx: Sender<ResultMessage>,
+    rx: Receiver<ResultMessage>,
     pending: Vec<PathBuf>,
     done: Vec<(PathBuf, ProbeInfo)>,
 }
@@ -32,6 +36,8 @@ impl Importer {
     pub fn new(pool: Pool, probe: Probe) -> Self {
         let (tx, rx) = channel();
         Self {
+            session: 0,
+            handles: Vec::new(),
             pool,
             probe,
             tx,
@@ -47,9 +53,20 @@ impl Importer {
         })
     }
 
-    /// An importer with its own queue and the same probe, for another project.
-    pub fn sibling(&self) -> Self {
-        Self::new(Pool::with_default_threads(), self.probe)
+    /// Abandons queued probes without waiting for an uninterruptible running probe. A late
+    /// result cannot clear a new session's pending path, even when the path is reused.
+    pub fn reset_session(&mut self, session: u64) {
+        self.session = session;
+        for handle in self.handles.drain(..) {
+            handle.cancel();
+        }
+        self.pending.clear();
+        self.done.clear();
+    }
+
+    #[cfg(test)]
+    pub fn jobs_idle(&self) -> bool {
+        self.pool.is_idle()
     }
 
     pub fn is_busy(&self) -> bool {
@@ -65,17 +82,22 @@ impl Importer {
             }
             self.pending.push(path.clone());
             let (tx, probe) = (self.tx.clone(), self.probe);
-            let key = format!("import:{}", path.display());
-            self.pool.submit(key, Priority::Interactive, move |_| {
+            let session = self.session;
+            let key = format!("import:{session}:{}", path.display());
+            let handle = self.pool.submit(key, Priority::Interactive, move |_| {
                 let r = probe(&path);
-                let _ = tx.send((path, r));
+                let _ = tx.send((session, path, r));
             });
+            self.handles.push(handle);
         }
     }
 
     pub fn poll(&mut self) -> Polled {
         let mut out = Polled::default();
-        for (path, r) in self.rx.try_iter() {
+        for (session, path, r) in self.rx.try_iter() {
+            if session != self.session {
+                continue;
+            }
             self.pending.retain(|p| *p != path);
             match r {
                 Ok(info) => self.done.push((path, info)),
@@ -84,6 +106,7 @@ impl Importer {
                     .push(tr!("app.import_failed", name = name(&path), error = e)),
             }
         }
+        self.handles.retain(|h| !h.is_finished());
         if self.pending.is_empty() && !self.done.is_empty() {
             out.batch = Some(std::mem::take(&mut self.done));
         }

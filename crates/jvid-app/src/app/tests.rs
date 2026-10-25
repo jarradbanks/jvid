@@ -2412,3 +2412,212 @@ fn audit_433_failed_finish_preserves_intervening_edits() {
         unrelated_edit_during_take(armed, true);
     }
 }
+
+#[test]
+fn audit_437_open_with_reused_ids_clears_selection_clipboard_and_source() {
+    let dir = std::env::temp_dir().join(format!("jvid-session-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut app = App::restore(None);
+    crate::playback::tests::add_solid(&mut app.history, [1.0, 0.0, 0.0, 1.0], Time(0));
+    let project_a = app.history.project().clone();
+    let asset = project_a.assets()[0].id;
+    let clip = project_a
+        .sequence()
+        .tracks()
+        .iter()
+        .flat_map(|t| t.clips())
+        .next()
+        .unwrap()
+        .id;
+    let path_b = dir.join("b.jvid");
+    let mut project_b = History::new(Project::default());
+    crate::playback::tests::add_solid(&mut project_b, [0.0, 0.0, 1.0, 1.0], Time(0));
+    assert_eq!(project_b.project().assets()[0].id, asset);
+    assert!(project_b.project().sequence().clip(clip).is_some());
+    project_file::save(project_b.project(), &path_b).unwrap();
+    app.timeline.action("select_all", &project_a);
+    app.timeline.action("copy", &project_a);
+    app.preview.open(&project_a, asset);
+    app.bin.selected = Some(asset);
+    app.bin.renaming = Some((asset, "stale".into()));
+    app.bin.confirm_remove = Some(asset);
+    app.settings_dialog.draft = Some(project_a.settings().clone());
+    app.transcript.query = "project A".into();
+    app.timeline.action("mark_in", &project_a);
+    app.open(path_b);
+    assert!(app.timeline.selected().is_empty());
+    assert_eq!(app.preview.source_asset(), None);
+    assert!(
+        app.preview
+            .source_action("mark_in", app.history.project())
+            .is_none()
+    );
+    assert!(
+        app.bin.selected.is_none()
+            && app.bin.renaming.is_none()
+            && app.bin.confirm_remove.is_none()
+    );
+    assert!(app.transcript.query.is_empty());
+    assert!(app.settings_dialog.draft.is_none());
+    let before = app.history.project().clone();
+    app.on_welcome = false;
+    let mut h = builder([1280.0, 720.0], 1.0).build_eframe(move |cc| {
+        theme::install(&cc.egui_ctx);
+        app
+    });
+    h.run_steps(2);
+    assert_eq!(h.state().history.project(), &before, "stale deferred edit");
+    h.state_mut().run_action("delete", true);
+    h.state_mut().run_action("paste", true);
+    h.run_steps(2);
+    assert_eq!(
+        h.state().history.project(),
+        &before,
+        "stale selection or clipboard"
+    );
+    let app = h.state_mut();
+    // A failed Open retains the current editing session and selection.
+    app.timeline.select_clip(before.sequence(), clip);
+    app.open(dir.join("missing.jvid"));
+    assert!(app.timeline.selected().contains(&clip));
+    assert_eq!(app.history.project(), &before);
+    drop(h);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn audit_437_late_probe_cannot_mutate_replacement_sessions() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+    static PHASE: AtomicUsize = AtomicUsize::new(0);
+    fn delayed(_: &Path) -> Result<jvid_core::model::ProbeInfo, String> {
+        PHASE.store(1, Ordering::SeqCst);
+        let until = Instant::now() + Duration::from_secs(5);
+        while PHASE.load(Ordering::SeqCst) == 1 {
+            assert!(Instant::now() < until, "test never released the probe");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        PHASE.store(3, Ordering::SeqCst);
+        Ok(jvid_core::model::ProbeInfo {
+            width: Some(640),
+            height: Some(480),
+            ..Default::default()
+        })
+    }
+    let dir = std::env::temp_dir().join(format!("jvid-delayed-session-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("b.jvid");
+    project_file::save(&Project::default(), &path).unwrap();
+    for replacement in ["new", "open", "recovery", "tutorial"] {
+        PHASE.store(0, Ordering::SeqCst);
+        let mut app = App::restore(None);
+        app.importer = Importer::new(jvid_jobs::Pool::new(1), delayed);
+        app.import([dir.join("delayed.mkv")]);
+        let until = Instant::now() + Duration::from_secs(5);
+        while PHASE.load(Ordering::SeqCst) != 1 {
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let began = Instant::now();
+        match replacement {
+            "new" => app.new_project(None),
+            "open" => app.open(path.clone()),
+            "recovery" => app.answer(
+                Prompt::Restore {
+                    path: Some(path.clone()),
+                    auto: path.clone(),
+                },
+                0,
+            ),
+            "tutorial" => {
+                app.start_lesson(&tutorial::LESSONS[0]);
+                app.end_lesson();
+            }
+            _ => unreachable!(),
+        }
+        // Release before assertions so failure cannot leave a worker waiting on the test.
+        PHASE.store(2, Ordering::SeqCst);
+        assert!(
+            began.elapsed() < Duration::from_secs(1),
+            "switch waited for an abandoned probe"
+        );
+        while PHASE.load(Ordering::SeqCst) != 3 {
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // The producer has signalled and the job has returned before checking the receiver.
+        let until = Instant::now() + Duration::from_secs(5);
+        while !app.importer.jobs_idle() {
+            assert!(Instant::now() < until, "probe worker did not finish");
+            std::thread::yield_now();
+        }
+        app.poll_import(0.0);
+        assert!(
+            app.history.project().assets().is_empty(),
+            "stale import after {replacement}"
+        );
+        assert_eq!(
+            app.history.project().settings().width,
+            ProjectSettings::default().width
+        );
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn audit_437_new_clears_canvas_text_and_pending_region_request() {
+    use jvid_core::history::Created;
+    use jvid_core::model::{NewClip, Text};
+    let mut h = plain_harness();
+    let app = h.state_mut();
+    let Created::Asset(asset) = app
+        .history
+        .apply(Command::AddText {
+            name: "A".into(),
+            text: Text::default(),
+        })
+        .unwrap()
+    else {
+        panic!("asset")
+    };
+    let Created::Track(track) = app
+        .history
+        .apply(Command::AddTrack {
+            kind: TrackKind::Video,
+            name: "V1".into(),
+        })
+        .unwrap()
+    else {
+        panic!("track")
+    };
+    let Created::Clip(clip) = app
+        .history
+        .apply(Command::AddClip {
+            track,
+            clip: NewClip {
+                asset,
+                source_in: Time(0),
+                source_out: Time(jvid_core::time::FLICKS_PER_SECOND),
+                start: Time(0),
+                link: None,
+            },
+        })
+        .unwrap()
+    else {
+        panic!("clip")
+    };
+    crate::handles::start_editing(&h.ctx, h.state().history.project(), clip, egui::Pos2::ZERO);
+    crate::hide_region::request(&h.ctx, clip);
+    assert!(crate::handles::editing(&h.ctx));
+    h.state_mut()
+        .open(PathBuf::from("/nonexistent/jvid-session-failure.jvid"));
+    assert!(
+        crate::handles::editing(&h.ctx),
+        "failed Open preserves the editor session"
+    );
+    h.state_mut().new_project(None);
+    assert!(!crate::handles::editing(&h.ctx));
+    assert_eq!(crate::hide_region::requested(&h.ctx), None);
+}
