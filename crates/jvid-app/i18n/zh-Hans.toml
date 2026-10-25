@@ -794,6 +794,8 @@ reset_all = "全部重置"
 file_type = "键盘映射"
 
 [preview]
+position = "播放位置"
+more = "更多"
 fit = "适应"
 full = "全尺寸"
 no_frame = "没有可导出的帧"

@@ -872,6 +872,20 @@ impl App {
         }
     }
 
+    /// App dialogs own keyboard input from opening through dismissal, including their
+    /// first frame before egui has registered a modal layer. Nested widget modals use
+    /// egui's shared ownership state instead of another app-specific list.
+    fn modal_owns_input(&self, ctx: &egui::Context) -> bool {
+        self.settings_dialog.draft.is_some()
+            || self.export_dialog.is_open()
+            || self.preferences.is_open()
+            || self.keymap_editor.is_open()
+            || self.subtitles.is_open()
+            || !self.prompts.is_empty()
+            || self.bin.confirm_remove.is_some()
+            || ctx.memory(|m| m.top_modal_layer().is_some())
+    }
+
     /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
     /// focus. shortcut: unimplemented actions are stubs until their features land.
     fn run_action(&mut self, id: &str, menu: bool) {
@@ -946,6 +960,10 @@ impl App {
         }
         let tab = match id {
             "focus_media" => Tab::Media,
+            "focus_effects" => {
+                self.bin.tab = 1;
+                Tab::Media
+            }
             "focus_timeline" => Tab::Timeline,
             "focus_inspector" => Tab::Inspector,
             "focus_source" => {
@@ -1353,7 +1371,10 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
             }
         }
-        self.lesson_keys(&ctx);
+        let modal_owned_input = self.modal_owns_input(&ctx);
+        if !modal_owned_input {
+            self.lesson_keys(&ctx);
+        }
         let was_closing = self.closing;
         self.show_prompt(&ctx);
         if self.closing && !was_closing {
@@ -1364,11 +1385,7 @@ impl eframe::App for App {
             .dock
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
-        let pressed = if self.closing
-            || self.keymap_editor.is_open()
-            || self.subtitles.is_open()
-            || !self.prompts.is_empty()
-        {
+        let pressed = if self.closing || modal_owned_input {
             Vec::new()
         } else {
             self.keymap.pressed(&ctx, timeline)
@@ -1510,7 +1527,9 @@ impl eframe::App for App {
             }
             if let Some(id) = open.filter(|_| nested.is_none()) {
                 self.preview.open(self.history.project(), id);
-                self.preview_active = 0;
+                if self.preview.source_asset() == Some(id) {
+                    self.run_action("focus_source", false);
+                }
             }
             let applied = match (command, gesture) {
                 (Some(c), Some(k)) => Some(self.history.apply_coalesced(k, c)),
@@ -1793,7 +1812,10 @@ impl TabViewer for Viewer<'_> {
         };
         if *tab == Tab::Preview && source_tab {
             panel.show(ui, |ui| {
-                if let Some(c) = self.preview.show_source(ui, self.project, self.missing) {
+                if let Some(c) =
+                    self.preview
+                        .show_source(ui, self.project, self.missing, self.keymap)
+                {
                     self.command = Some(c);
                 }
             });
@@ -1811,9 +1833,9 @@ impl TabViewer for Viewer<'_> {
             let r = panel.show(ui, |ui| {
                 let frame = self.preview.project_rect(ui, self.project.settings());
                 let head = self.timeline.playhead();
-                let shown = self
-                    .preview
-                    .show_program(ui, self.project, head, trim, offline);
+                let shown =
+                    self.preview
+                        .show_program(ui, self.project, head, trim, offline, self.keymap);
                 if let Some(t) = shown {
                     self.timeline.seek(t);
                 }

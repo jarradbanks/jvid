@@ -763,6 +763,8 @@ reset_all = "Alle zurücksetzen"
 file_type = "Tastaturbelegung"
 
 [preview]
+position = "Wiedergabeposition"
+more = "Mehr"
 fit = "Passend"
 full = "Voll"
 no_frame = "es gibt keinen Frame zum Exportieren"

@@ -763,6 +763,8 @@ reset_all = "Återställ alla"
 file_type = "Tangentmappning"
 
 [preview]
+position = "Uppspelningsposition"
+more = "Mer"
 fit = "Anpassa"
 full = "Full"
 no_frame = "det finns ingen bildruta att exportera"

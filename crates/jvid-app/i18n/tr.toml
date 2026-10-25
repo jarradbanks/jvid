@@ -766,6 +766,8 @@ reset_all = "Tümünü Sıfırla"
 file_type = "Tuş Haritası"
 
 [preview]
+position = "Oynatma Konumu"
+more = "Diğer"
 fit = "Sığdır"
 full = "Tam"
 no_frame = "dışa aktarılacak kare yok"

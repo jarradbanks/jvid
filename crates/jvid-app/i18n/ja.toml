@@ -765,6 +765,8 @@ reset_all = "すべてリセット"
 file_type = "キーマップ"
 
 [preview]
+position = "再生位置"
+more = "その他"
 fit = "フィット"
 full = "フル"
 no_frame = "書き出すフレームがありません"

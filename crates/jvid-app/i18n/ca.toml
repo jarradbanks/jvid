@@ -774,6 +774,8 @@ reset_all = "Restableix-ho tot"
 file_type = "Mapa de tecles"
 
 [preview]
+position = "Posició de Reproducció"
+more = "Més"
 fit = "Ajusta"
 full = "Completa"
 no_frame = "no hi ha cap fotograma per exportar"
