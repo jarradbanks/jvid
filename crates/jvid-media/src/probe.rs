@@ -135,7 +135,12 @@ fn stream_info(stream: Stream) -> Result<StreamInfo, ProbeError> {
         .video()
         .map_err(|_| ProbeError::UnsupportedCodec(codec.clone()))?;
     let (width, height) = (v.width(), v.height());
-    let sample_aspect = rate(v.aspect_ratio());
+    // Container-level SAR can differ from the decoder default (for example MOV's pasp).
+    // ffmpeg-next exposes the decoder ratio but has no AVStream SAR accessor.
+    // SAFETY: stream is live and owned by the input context; this only reads its ratio.
+    #[allow(unsafe_code)]
+    let stream_aspect = unsafe { (*stream.as_ptr()).sample_aspect_ratio };
+    let sample_aspect = rate(Rational::from(stream_aspect)).or_else(|| rate(v.aspect_ratio()));
     let avg_frame_rate = rate(stream.avg_frame_rate());
     let real_frame_rate = rate(stream.rate());
     Ok(StreamInfo::Video(VideoInfo {

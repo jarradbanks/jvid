@@ -32,7 +32,7 @@ use suite_ui::widgets::{Button, Slider, TextInput};
 use crate::i18n::{tr, trn, verbatim};
 use crate::keymap::Keymap;
 use crate::media_bin::{Caches, filmstrips::FilmstripRequests};
-use crate::transport::Transport;
+use crate::transport::{SeekGesture, Transport};
 
 mod fades;
 #[cfg(test)]
@@ -43,6 +43,8 @@ mod keyframes;
 mod markers;
 pub mod menus;
 mod rubber;
+#[cfg(test)]
+mod seek_tests;
 mod silence;
 mod transitions;
 #[cfg(test)]
@@ -70,6 +72,7 @@ const NAME_STRIP: f32 = 16.0;
 pub struct Timeline {
     /// The sequence playhead; #32 gives it a clock, until then it only seeks.
     transport: Transport,
+    scrub_seek: SeekGesture,
     /// Points per second.
     zoom: f64,
     /// Seconds at the lanes' left edge.
@@ -198,6 +201,7 @@ impl Default for Timeline {
     fn default() -> Self {
         Self {
             transport: Transport::new(Time(0), Rate::new(30, 1)),
+            scrub_seek: SeekGesture::default(),
             zoom: 20.0,
             scroll: 0.0,
             vscroll: 0.0,
@@ -375,6 +379,13 @@ impl Timeline {
         self.select(seq, id, egui::Modifiers::NONE);
     }
 
+    /// Selects exactly the visual layer clicked in Program, even if it has linked clips.
+    pub fn select_program_clip(&mut self, id: ClipId) {
+        self.keys.clear_focus();
+        self.selected = HashSet::from([id]);
+        self.gap = None;
+    }
+
     pub fn seek(&mut self, t: Time) {
         let r = self.transport.rate;
         self.transport.seek(r.time_floor(r.index_nearest(t)), 0);
@@ -528,6 +539,15 @@ impl Timeline {
                 }
             }
             "nest" => {}
+            "fit_to_frame" | "fill_frame" | "stretch_to_fit" => {
+                let ids: Vec<_> = self.selected.iter().copied().collect();
+                self.pending = crate::framing::command(
+                    project,
+                    &ids,
+                    crate::framing::mode(id).expect("framing action"),
+                    self.playhead(),
+                );
+            }
             "copy_grade" => {
                 let seq = project.sequence();
                 if let Some(c) = self.video_chosen(seq).first() {
@@ -1027,7 +1047,11 @@ impl Timeline {
             Rect::from_x_y_ranges(lanes_left..=area.right(), ruler.bottom()..=area.bottom());
         let headers = Rect::from_x_y_ranges(area.left()..=lanes_left, lanes.y_range());
         self.width = lanes.width();
-        self.follow();
+        // Playback must not move the time under a held seek pointer. Scrubs still scroll
+        // themselves past the edges; ordinary playback paging resumes on release.
+        if !self.scrub_seek.is_active() || !ui.input(|i| i.pointer.primary_down()) {
+            self.follow();
+        }
 
         // Input first, so this frame draws the result.
         let view = self.view(lanes_left);
@@ -1085,7 +1109,14 @@ impl Timeline {
         if let Some(p) = scrub.interact_pointer_pos().or(drag.interact_pointer_pos())
             && (scrub.is_pointer_button_down_on() || drag.dragged())
         {
+            // click_and_drag can become a drag after a timeout or a small movement. The
+            // ruler already submitted this press, so only a new press resets its target.
+            if ui.input(|i| i.pointer.primary_pressed()) {
+                self.scrub_seek.update(None);
+            }
             self.scrub(ui, p.x, lanes);
+        } else {
+            self.scrub_seek.update(None);
         }
         if drag.hovered() || drag.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
@@ -1301,7 +1332,11 @@ impl Timeline {
                 if cr.secondary_clicked() && !self.selected.contains(&clip.id) {
                     self.select(seq, clip.id, egui::Modifiers::NONE);
                 }
-                cr.context_menu(|ui| self.clip_menu(ui, seq, keymap, clip.asset));
+                cr.context_menu(|ui| {
+                    if let Some(cmd) = self.clip_menu(ui, seq, keymap, project, clip.id) {
+                        edit = Some((cmd, None));
+                    }
+                });
                 if let Some(e) = self.trim_handles(ui, project, view, clip, r) {
                     edit = Some(e);
                 }
@@ -1760,7 +1795,13 @@ impl Timeline {
             self.clamp_scroll();
             ui.ctx().request_repaint();
         }
-        self.seek(self.view(lanes.left()).time(inside));
+        let rate = self.transport.rate;
+        let target = rate
+            .time_floor(rate.index_nearest(self.view(lanes.left()).time(inside)))
+            .clamp(Time(0), self.transport.duration);
+        if let Some(target) = self.scrub_seek.update(Some(target)) {
+            self.seek(target);
+        }
         // Scrubbing scrolls itself; don't page as well.
         self.followed = self.playhead();
     }

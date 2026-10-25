@@ -95,6 +95,9 @@ pub const ACTIONS: &[Action] = &[
     t("enable", "Shift+E"),
     t("reverse", "Ctrl+R"),
     t("freeze_frame", "Shift+F"),
+    t("fit_to_frame", ""),
+    t("fill_frame", ""),
+    t("stretch_to_fit", ""),
     t("copy_grade", "Ctrl+Alt+C"),
     t("paste_grade", "Ctrl+Alt+V"),
     t("clean_up_voice", "Ctrl+Alt+U"),
@@ -384,7 +387,7 @@ mod tests {
 
     #[test]
     fn defaults_all_parse_without_conflicts() {
-        for a in ACTIONS {
+        for a in ACTIONS.iter().filter(|a| !a.default.is_empty()) {
             assert!(parse(a.default).is_some(), "{}", a.default);
         }
         assert_eq!(Keymap::default().conflicts(), vec![]);
@@ -393,6 +396,17 @@ mod tests {
             Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::K))
         );
         assert_eq!(parse("Hyper+K"), None);
+    }
+
+    #[test]
+    fn framing_actions_are_unbound_by_default_and_remappable() {
+        let defaults = Keymap::default();
+        for id in crate::framing::ACTIONS {
+            assert_eq!(binding(&defaults, id), None);
+            let map = Keymap::from_toml(&format!("{id} = \"Ctrl+Shift+F\"\n")).unwrap();
+            assert_eq!(binding(&map, id), parse("Ctrl+Shift+F"));
+            assert_eq!(Keymap::from_toml(&map.to_toml()).unwrap(), map);
+        }
     }
 
     #[test]
@@ -420,7 +434,7 @@ mod tests {
 
     #[test]
     fn format_and_toml_round_trip() {
-        for a in ACTIONS {
+        for a in ACTIONS.iter().filter(|a| !a.default.is_empty()) {
             let sc = parse(a.default).unwrap();
             assert_eq!(parse(&format(&sc)), Some(sc), "{}", a.default);
         }
@@ -488,8 +502,12 @@ mod tests {
             md += &format!("\n## {heading}\n\n{note}\n\n| Action | Shortcut |\n| --- | --- |\n");
             for a in ACTIONS.iter().filter(|a| a.context == context) {
                 // Code spans don't take backslash escapes, but a table cell still needs `|` escaped.
-                let key = a.default.replace('|', "\\|");
-                md += &format!("| {} | `{key}` |\n", a.name());
+                let key = if a.default.is_empty() {
+                    "—".to_owned()
+                } else {
+                    format!("`{}`", a.default.replace('|', "\\|"))
+                };
+                md += &format!("| {} | {key} |\n", a.name());
             }
         }
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/shortcuts.md");

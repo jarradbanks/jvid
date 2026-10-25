@@ -87,6 +87,30 @@ pub struct ProbeInfo {
 }
 
 impl ProbeInfo {
+    /// Square-pixel display dimensions, with sample aspect applied before turning upright.
+    /// Older probes and still images without stream metadata use their stored dimensions.
+    pub fn display_size(&self) -> Option<[f64; 2]> {
+        let (mut w, mut h) = (self.width? as f64, self.height? as f64);
+        if w <= 0.0 || h <= 0.0 {
+            return None;
+        }
+        if let Some(v) = self.streams.iter().find_map(|s| match s {
+            StreamInfo::Video(v) => Some(v),
+            _ => None,
+        }) {
+            let valid = |r: Rate| (r.num > 0 && r.den > 0).then(|| r.num as f64 / r.den as f64);
+            if let Some(sar) = v.sample_aspect.and_then(valid) {
+                w *= sar;
+            } else if let Some(dar) = v.display_aspect.and_then(valid) {
+                w = h * dar;
+            }
+            if v.rotation % 180 == 90 {
+                std::mem::swap(&mut w, &mut h);
+            }
+        }
+        Some([w, h])
+    }
+
     /// The nth audio stream's title, e.g. "Mic", else "Audio n" counting from 1.
     pub fn audio_name(&self, n: u32) -> String {
         let mut titles = self.streams.iter().filter_map(|s| match s {

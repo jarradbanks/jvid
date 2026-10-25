@@ -1101,6 +1101,134 @@ fn chroma_key_shows_the_lower_track_and_suppresses_spill() {
     assert!(same(full[1], [220, 170, 140]), "no cast, no change");
 }
 
+/// Mask coordinates follow the upright, square-pixel display image, including when the
+/// decoder/proxy supplies fewer samples or a different aspect ratio.
+fn display_geometry_masks(mode: &str) {
+    use jvid_core::model::{MaskShape, Secondary};
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let invert = crate::effect::parse(
+        "// @jvid effect \"Invert\"
+fn effect(uv: vec2<f32>) -> vec4<f32> {
+    let c = textureSample(src, smp, uv);
+    return vec4<f32>(1.0 - c.rgb, c.a);
+}",
+    )
+    .unwrap();
+    // A 144x108 file with SAR 4:3 displays as 192x108. Rotation is applied by the
+    // decoder, after SAR, so its upright sampled and display sizes both swap axes.
+    for (sampled, logical, project) in [
+        ((144, 108), [144.0, 108.0], (192, 108)), // square-pixel control
+        ((144, 108), [192.0, 108.0], (192, 108)), // anamorphic review repro
+        ((108, 144), [108.0, 192.0], (192, 108)), // rotated, pillarboxed
+        ((108, 144), [108.0, 192.0], (108, 192)), // rotated, fills project
+    ] {
+        let mut comp = Compositor::new(&device);
+        comp.logical_sizes = vec![logical];
+        comp.set_effect(&device, "invert", Some(&invert)).unwrap();
+        for quality in [1, 2, 4] {
+            for proxy in [1, 2] {
+                let divisor = quality * proxy;
+                let src = image(
+                    &device,
+                    &queue,
+                    (sampled.0 / divisor, sampled.1 / divisor),
+                    |_, _| [255, 0, 0, 255],
+                );
+                let mask = Mask {
+                    id: if mode == "effect" { 7 } else { 0 },
+                    ..Mask::new(MaskShape::Rectangle, vec![[0.0; 2], [48.0, 54.0]])
+                };
+                let t = Transform {
+                    masks: vec![mask],
+                    secondary: Secondary {
+                        masked: mode == "secondary",
+                        saturation: if mode == "secondary" { -1.0 } else { 0.0 },
+                        ..Default::default()
+                    },
+                    effects: if mode == "effect" {
+                        vec![Effect {
+                            shader: "invert".into(),
+                            params: Default::default(),
+                            enabled: true,
+                            mask: Some(7),
+                        }]
+                    } else {
+                        vec![]
+                    },
+                    ..Default::default()
+                };
+                let rgba = read_back(
+                    &device,
+                    &queue,
+                    comp.render(
+                        &device,
+                        &queue,
+                        project,
+                        quality,
+                        [0, 0, 0, 255],
+                        &[(&src, t)],
+                    ),
+                );
+                let (w, h) = (project.0 / quality, project.1 / quality);
+                let changed = |x, y| {
+                    let i = ((y * w + x) * 4) as usize;
+                    match mode {
+                        "alpha" => rgba[i] > 127,
+                        "secondary" => rgba[i] < 155 && rgba[i + 1] > 20,
+                        "effect" => rgba[i + 1] > 127,
+                        _ => unreachable!(),
+                    }
+                };
+                // The 50% contour must match the stored box/overlay in project pixels.
+                // Test both axes: rotation/SAR can distort either one independently.
+                let horizontal: Vec<_> = (0..w).filter(|&x| changed(x, h / 2)).collect();
+                let vertical: Vec<_> = (0..h).filter(|&y| changed(w / 2, y)).collect();
+                let expected = |extent: u32, mask: f32| {
+                    (0..extent)
+                        .filter(|&p| {
+                            ((p as f32 + 0.5) - extent as f32 / 2.0).abs()
+                                < mask / quality as f32 / 2.0
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let context = format!(
+                    "{mode} {logical:?}, project {project:?}, quality {quality}, proxy {proxy}"
+                );
+                for (axis, got, want) in [
+                    ("horizontal", horizontal, expected(w, 48.0)),
+                    ("vertical", vertical, expected(h, 54.0)),
+                ] {
+                    // Filtering and half-pixel ties can move the contour by one output
+                    // pixel. The review's 48 -> 64 px distortion is far outside this.
+                    assert!(
+                        got.first().unwrap().abs_diff(want[0]) <= 1
+                            && got.last().unwrap().abs_diff(*want.last().unwrap()) <= 1,
+                        "{axis} {context}: got {got:?}, want {want:?}"
+                    );
+                    assert!(got.windows(2).all(|p| p[1] == p[0] + 1));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn alpha_masks_follow_display_geometry_at_reduced_sizes() {
+    display_geometry_masks("alpha");
+}
+
+#[test]
+fn secondary_masks_follow_display_geometry_at_reduced_sizes() {
+    display_geometry_masks("secondary");
+}
+
+#[test]
+fn effect_masks_follow_display_geometry_at_reduced_sizes() {
+    display_geometry_masks("effect");
+}
+
 #[test]
 fn a_feathered_ellipse_mask_fades_the_clip_out_across_its_outline() {
     use jvid_core::model::{Mask, MaskShape};
@@ -1655,7 +1783,7 @@ fn legacy_full_mask_enlargement_keeps_its_effect_reference() {
                 ..Default::default()
             };
             // The old Full mask path sampled an already enlarged fitted-size texture before
-            // setting fx.size. Reconstruct it with the unchanged Masker, independently of
+            // setting fx.size. Reconstruct it with the original square-pixel geometry, independently of
             // the new logical-size mapping; the unmasked baseline sampled the native original.
             let mut legacy = Compositor::new(&device);
             legacy.set_effect(&device, "blur", Some(&shader)).unwrap();
@@ -1664,6 +1792,7 @@ fn legacy_full_mask_enlargement_keeps_its_effect_reference() {
             let mut old_masks = crate::mask::Masker::new(&device);
             let mut encoder = device.create_command_encoder(&Default::default());
             let frame = [project.0 as f32, project.1 as f32];
+            let [_, _, fw, fh] = place([w as f32, h as f32], [0.0, 0.0, frame[0], frame[1]], None);
             let full_input = old_masks.apply(
                 &device,
                 &queue,
@@ -1671,7 +1800,7 @@ fn legacy_full_mask_enlargement_keeps_its_effect_reference() {
                 0,
                 &source,
                 &transform.masks,
-                (frame, frame),
+                ([fw, fh], frame, frame),
                 false,
             );
             queue.submit([encoder.finish()]);

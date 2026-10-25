@@ -1547,7 +1547,7 @@ impl SourceRow {
         let pointer = response
             .interact_pointer_pos()
             .filter(|_| response.clicked() || response.dragged());
-        pointer.map(|p| {
+        let target = pointer.map(|p| {
             let fraction = ((p.x - hit.left()) as f64 / hit.width() as f64).clamp(0.0, 1.0);
             let time = Time((fraction * self.duration.0 as f64) as i64);
             let last = self
@@ -1556,6 +1556,16 @@ impl SourceRow {
                 .max(0);
             self.rate
                 .time_floor(self.rate.index_floor(time).clamp(0, last))
+        });
+        let new_gesture = response.drag_started() || response.clicked();
+        ui.data_mut(|data| {
+            let gesture = data.get_temp_mut_or_default::<crate::transport::SeekGesture>(
+                response.id.with("seek_target"),
+            );
+            if new_gesture {
+                gesture.update(None);
+            }
+            gesture.update(target)
         })
     }
 }
@@ -1776,6 +1786,9 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod seek_tests;
 
 #[cfg(test)]
 mod program_tests {
