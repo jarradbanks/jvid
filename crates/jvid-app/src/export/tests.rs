@@ -1966,3 +1966,347 @@ fn built_in_preset_names_are_their_english_catalog_names() {
     };
     assert_eq!(preset_name(all.len(), &mine), "Mine");
 }
+
+#[test]
+fn imported_still_alpha_survives_program_and_export() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("jvid-b07-alpha-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("logo.png");
+    let logo = image::RgbaImage::from_fn(12, 8, |x, y| {
+        image::Rgba(if y < 4 {
+            match x / 4 {
+                0 => [0, 255, 0, 0],
+                1 => [255, 0, 0, 128],
+                _ => [255, 255, 255, 255],
+            }
+        } else {
+            [255, 255, 0, 255]
+        })
+    });
+    logo.save(&path).unwrap();
+    let mut h = History::new(Project::default());
+    h.apply(Command::SetSettings(jvid_core::model::ProjectSettings {
+        width: 12,
+        height: 8,
+        background: [0, 0, 255, 255],
+        ..Default::default()
+    }))
+    .unwrap();
+    add(&mut h, TrackKind::Video, path, Time(0), secs(2));
+    let mut pb = crate::playback::Playback::from_files(1 << 20);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let shown = loop {
+        if let Some(s) = pb.park(h.project())
+            && s.exact
+        {
+            break s;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "still decode timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    let Pixels::Still(first) = &shown.layers[0].0 else {
+        panic!("expected RGBA still")
+    };
+    pb.transport.seek(secs(1), 0);
+    let later = pb
+        .park(h.project())
+        .expect("a second frame reuses the still");
+    let Pixels::Still(second) = &later.layers[0].0 else {
+        panic!("expected RGBA still")
+    };
+    assert!(Arc::ptr_eq(first, second), "no per-timeline-frame decode");
+    let mut gpu = Gpu::new(&device);
+    let got = jvid_render::composite::read_back(
+        &device,
+        &queue,
+        gpu.draw(&device, &queue, h.project().settings(), 1, &shown),
+    );
+    for (x, want) in [
+        (1, [0, 0, 255, 255]),
+        (5, [128, 0, 127, 255]),
+        (9, [255; 4]),
+    ] {
+        let at = (12 + x) * 4;
+        assert!(
+            got[at..at + 4]
+                .iter()
+                .zip(want)
+                .all(|(a, b)| a.abs_diff(b) <= 2),
+            "x={x}: {:?} want {want:?}",
+            &got[at..at + 4]
+        );
+    }
+    let request = Request {
+        path: dir.join("alpha.mov"),
+        range: (Time(0), h.project().settings().frame_rate.time_floor(3)),
+        preset: Preset {
+            size: Some([12, 8]),
+            frame_rate: Some(h.project().settings().frame_rate),
+            ..preset("ProRes Master")
+        },
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    run_now(h.project(), &request, false).unwrap();
+    let mut decoder = VideoDecoder::open(&request.path).unwrap();
+    let exported = decoder.frame_at(Time(0)).unwrap().view_rgba((12, 8));
+    for x in [1, 5, 9] {
+        let at = (12 + x) * 4;
+        assert!(
+            exported
+                .get_pixel(x as u32, 1)
+                .0
+                .iter()
+                .zip(&got[at..at + 4])
+                .all(|(a, b)| a.abs_diff(*b) <= 12),
+            "export differs at {x}"
+        );
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn program_png_matches_full_video_composition_with_title_effect_and_mask() {
+    use jvid_core::model::{Effect, Mask, MaskShape, Text, Transform};
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    jvid_media::ffmpeg::init().unwrap();
+    let dir = out("b07-program-png");
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("original.mov");
+    let pixels = image::RgbaImage::from_fn(64, 32, |x, y| {
+        let v = if (x / 4 + y / 4) % 2 == 0 { 220 } else { 60 };
+        image::Rgba([v, v, v, 255])
+    });
+    let rate = Rate::new(30, 1);
+    let mut enc = Encoder::create(&source, (64, 32), rate, &preset("ProRes Master")).unwrap();
+    for _ in 0..3 {
+        enc.video(pixels.as_raw()).unwrap();
+    }
+    enc.finish().unwrap();
+    let mut h = History::new(Project::default());
+    h.apply(Command::SetSettings(jvid_core::model::ProjectSettings {
+        width: 128,
+        height: 96,
+        background: [17, 23, 41, 255],
+        ..Default::default()
+    }))
+    .unwrap();
+    add(
+        &mut h,
+        TrackKind::Video,
+        source.clone(),
+        Time(0),
+        rate.time_floor(3),
+    );
+    let clip = h.project().sequence().tracks()[0].clips()[0].clone();
+    let mut mask = Mask::new(MaskShape::Rectangle, vec![[0.0, 0.0], [72.0, 40.0]]);
+    mask.id = 9;
+    let transform = Transform {
+        position: [13.0, -9.0],
+        scale: [0.7, 0.7],
+        rotation: 11.0,
+        crop: [4.0, 0.0, 0.0, 0.0],
+        exposure: 0.3,
+        masks: vec![mask],
+        effects: vec![Effect {
+            shader: "pixelate".into(),
+            params: [("block".into(), 8.0)].into(),
+            enabled: true,
+            mask: Some(9),
+        }],
+        ..Default::default()
+    };
+    h.apply(Command::SetClipProps(vec![(
+        clip.id,
+        transform,
+        clip.keyframes,
+    )]))
+    .unwrap();
+    let Ok(Created::Asset(asset)) = h.apply(Command::AddText {
+        name: "Title".into(),
+        text: Text {
+            content: "Frame".into(),
+            size: 24.0,
+            anchor: [0.45, 0.75],
+            ..Default::default()
+        },
+    }) else {
+        panic!("title")
+    };
+    let Ok(Created::Track(track)) = h.apply(Command::AddTrack {
+        kind: TrackKind::Video,
+        name: "Titles".into(),
+    }) else {
+        panic!("track")
+    };
+    h.apply(Command::AddClip {
+        track,
+        clip: NewClip {
+            asset,
+            start: Time(0),
+            source_in: Time(0),
+            source_out: rate.time_floor(3),
+            link: None,
+        },
+    })
+    .unwrap();
+    crate::effects::scan_for_test(&dir.join("effects"));
+    let mut renderer = FrameRenderer::new(&device);
+    let full = jvid_render::composite::read_back(
+        &device,
+        &queue,
+        renderer
+            .render(h.project(), Time(0), &device, &queue)
+            .unwrap(),
+    );
+    let path = dir.join("program.png");
+    frame_png(h.project(), Time(0), &device, &queue, &path).unwrap();
+    let png = image::open(&path).unwrap().into_rgba8();
+    assert_eq!(png.dimensions(), (128, 96));
+    assert_eq!(
+        png.as_raw(),
+        &full,
+        "PNG must use the exact full video-export renderer"
+    );
+    assert_eq!(png.get_pixel(0, 0).0, [17, 23, 41, 255]);
+    assert!(
+        png.enumerate_pixels()
+            .filter(|(_, y, p)| *y > 58 && p[0] > 240)
+            .count()
+            > 20,
+        "title draws over video"
+    );
+    // The enabled masked effect must visibly differ from its bypassed version.
+    let current = h
+        .project()
+        .sequence()
+        .tracks()
+        .iter()
+        .flat_map(|t| t.clips())
+        .find(|c| c.id == clip.id)
+        .unwrap()
+        .clone();
+    let mut bypass = current.transform.clone();
+    bypass.effects[0].enabled = false;
+    h.apply(Command::SetClipProps(vec![(
+        clip.id,
+        bypass,
+        current.keyframes.clone(),
+    )]))
+    .unwrap();
+    let plain = jvid_render::composite::read_back(
+        &device,
+        &queue,
+        renderer
+            .render(h.project(), Time(0), &device, &queue)
+            .unwrap(),
+    );
+    assert!(
+        full.iter()
+            .zip(&plain)
+            .filter(|(a, b)| a.abs_diff(**b) > 20)
+            .count()
+            > 100,
+        "the masked pixelation is enabled"
+    );
+    h.apply(Command::SetClipProps(vec![(
+        clip.id,
+        current.transform,
+        current.keyframes,
+    )]))
+    .unwrap();
+    let request = Request {
+        path: dir.join("program.mov"),
+        range: (Time(0), rate.time_floor(3)),
+        preset: preset("ProRes Master"),
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    run_now(h.project(), &request, false).unwrap();
+    let mut decoder = VideoDecoder::open(&request.path).unwrap();
+    let video = decoder.frame_at(Time(0)).unwrap().view_rgba((128, 96));
+    let mean = video
+        .as_raw()
+        .iter()
+        .zip(&full)
+        .map(|(a, b)| a.abs_diff(*b) as f64)
+        .sum::<f64>()
+        / full.len() as f64;
+    assert!(
+        mean < 5.0,
+        "ProRes composition comparison mean error {mean}"
+    );
+    let before = std::fs::read(&source).unwrap();
+    assert!(frame_png(h.project(), Time(0), &device, &queue, &source).is_err());
+    assert_eq!(
+        std::fs::read(&source).unwrap(),
+        before,
+        "frame export preserves source aliases"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn program_png_rejects_empty_or_failed_timelines_without_partial_output() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let dir = out("b07-empty-png");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("frame.png");
+    assert_eq!(
+        frame_png(&Project::default(), Time(0), &device, &queue, &path),
+        Err(tr!("preview.no_frame").into())
+    );
+    assert!(!path.exists());
+    let mut h = History::new(Project::default());
+    add(
+        &mut h,
+        TrackKind::Video,
+        dir.join("missing.mov"),
+        Time(0),
+        secs(1),
+    );
+    assert!(frame_png(h.project(), Time(0), &device, &queue, &path).is_err());
+    assert!(!path.exists());
+    std::fs::write(&path, b"existing image").unwrap();
+    assert!(frame_png(h.project(), Time(0), &device, &queue, &path).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"existing image");
+    assert_eq!(
+        std::fs::read_dir(&dir).unwrap().count(),
+        1,
+        "no partial PNG or staging directory"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn program_png_writes_straight_alpha_for_a_transparent_project() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut h = History::new(Project::default());
+    h.apply(Command::SetSettings(jvid_core::model::ProjectSettings {
+        width: 16,
+        height: 8,
+        background: [0; 4],
+        ..Default::default()
+    }))
+    .unwrap();
+    crate::playback::tests::add_solid(&mut h, [1.0, 0.0, 0.0, 0.5], Time(0));
+    let path = out("b07-transparent.png");
+    frame_png(h.project(), Time(0), &device, &queue, &path).unwrap();
+    let png = jvid_media::stills::decode_still(&path).unwrap();
+    assert!(png.pixels().all(|p| p.0 == [255, 0, 0, 128]));
+    std::fs::remove_file(path).unwrap();
+}

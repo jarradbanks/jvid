@@ -72,6 +72,9 @@ pub struct Compositor {
     /// By layer index: the layer is premultiplied, as a nested sequence's frame from another
     /// `Compositor` is. Unlisted layers are straight alpha.
     pub premultiplied: Vec<bool>,
+    /// Original image dimensions by layer, independent of proxy and preview texture sizes.
+    /// Missing entries keep the texture dimensions for direct renderer callers.
+    pub logical_sizes: Vec<[f32; 2]>,
 }
 
 impl Compositor {
@@ -190,6 +193,7 @@ impl Compositor {
             frame: 0,
             before: 0.0,
             premultiplied: Vec::new(),
+            logical_sizes: Vec::new(),
         }
     }
 
@@ -273,6 +277,7 @@ impl Compositor {
         effects: &[Effect],
         masks: &[Mask],
         sizes: ([f32; 2], [f32; 2]),
+        logical_size: [f32; 2],
     ) -> Option<wgpu::Texture> {
         if self.fx_pool.len() <= slot {
             self.fx_pool.resize_with(slot + 1, Default::default);
@@ -320,11 +325,15 @@ impl Compositor {
             for pass in 0..*passes {
                 let input = out.as_ref().unwrap_or(tex);
                 let mut p = vec![
-                    input.width() as f32,
-                    input.height() as f32,
+                    logical_size[0],
+                    logical_size[1],
                     // Exact up to 2^24 frames (over 6 days at 30 fps).
                     self.frame as f32,
                     pass as f32,
+                    input.width() as f32,
+                    input.height() as f32,
+                    0.0,
+                    0.0,
                 ];
                 p.extend(params.iter().map(|q| {
                     let v = e.params.get(&q.name).copied().unwrap_or(q.default);
@@ -434,6 +443,11 @@ impl Compositor {
             .enumerate()
             .map(|(i, (tex, t))| {
                 let sizes = ([size.0 as f32, size.1 as f32], [w as f32, h as f32]);
+                let logical = self
+                    .logical_sizes
+                    .get(i)
+                    .copied()
+                    .unwrap_or([tex.width() as f32, tex.height() as f32]);
                 // Masks an effect is limited to only limit it.
                 let own: Vec<Mask> = (t.masks.iter())
                     .filter(|m| m.id == 0 || !t.effects.iter().any(|e| e.mask == Some(m.id)))
@@ -444,16 +458,45 @@ impl Compositor {
                 let masked =
                     self.masks
                         .apply(device, queue, &mut encoder, i, tex, &own, sizes, cover);
+                // Preserve the pre-existing Full-quality mask input size. A normal alpha
+                // mask historically enlarged a smaller source to its fitted project extent;
+                // keep that reference fixed even when its sampled texture is now reduced.
+                let effect_logical = if !cover && masked.is_some() {
+                    let [_, _, fw, _] = place(logical, [0.0, 0.0, sizes.0[0], sizes.0[1]], None);
+                    let k = (fw / logical[0]).max(1.0);
+                    logical.map(|v| (v * k).round())
+                } else {
+                    logical
+                };
                 let slot = (i, layers.len());
                 let (fx, t) = (&t.effects, &t.masks);
                 if cover {
-                    let fx =
-                        self.apply_effects(device, queue, &mut encoder, slot, tex, fx, t, sizes);
-                    return (fx, masked);
+                    let fx = self.apply_effects(
+                        device,
+                        queue,
+                        &mut encoder,
+                        slot,
+                        tex,
+                        fx,
+                        t,
+                        sizes,
+                        effect_logical,
+                    );
+                    return (fx, masked, effect_logical);
                 }
                 let tex = masked.as_ref().unwrap_or(tex);
-                let fx = self.apply_effects(device, queue, &mut encoder, slot, tex, fx, t, sizes);
-                (fx.or(masked), None)
+                let fx = self.apply_effects(
+                    device,
+                    queue,
+                    &mut encoder,
+                    slot,
+                    tex,
+                    fx,
+                    t,
+                    sizes,
+                    effect_logical,
+                );
+                (fx.or(masked), None, effect_logical)
             })
             .collect();
         if self
@@ -502,19 +545,20 @@ impl Compositor {
             .iter()
             .zip(&effected)
             .enumerate()
-            .map(|(i, ((tex, t), (fx, cover)))| {
+            .map(|(i, ((tex, t), (fx, cover, logical)))| {
                 let cover = cover.as_ref().unwrap_or(&self.no_cover);
                 (
                     fx.as_ref().unwrap_or(tex),
                     t,
                     self.premultiplied.get(i),
                     cover,
+                    *logical,
                 )
             })
             .rev()
             .filter(|(_, t, ..)| t.opacity > 0.0)
-            .filter_map(|(tex, t, pre, cover)| {
-                let corners = quad([tex.width() as f32, tex.height() as f32], frame, t)?;
+            .filter_map(|(tex, t, pre, cover, logical)| {
+                let corners = quad(logical, frame, t)?;
                 let mut p = corners.concat();
                 let mode = Blend::ALL.iter().position(|b| *b == t.blend).unwrap_or(0);
                 let pre = f32::from(u8::from(pre == Some(&true)));

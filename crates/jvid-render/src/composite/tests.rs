@@ -1378,3 +1378,370 @@ fn a_reframed_wide_clip_fills_a_tall_frame_with_no_bars() {
         "background shows in the {w}x{ht} frame"
     );
 }
+
+#[test]
+fn transformed_still_edges_ignore_invisible_rgb_with_an_effect() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let dirty = image(&device, &queue, (16, 12), |x, _| match x {
+        0..=5 => [0, 255, 0, 0],
+        6..=9 => [255, 0, 0, 128],
+        _ => [255, 0, 0, 255],
+    });
+    let clean = image(&device, &queue, (16, 12), |x, _| match x {
+        0..=5 => [255, 0, 0, 0],
+        6..=9 => [255, 0, 0, 128],
+        _ => [255, 0, 0, 255],
+    });
+    let mut comp = Compositor::new(&device);
+    let shader = crate::effect::parse(include_str!("../effects/gaussian_blur.wgsl")).unwrap();
+    comp.set_effect(&device, "blur", Some(&shader)).unwrap();
+    for enabled in [false, true] {
+        let transform = Transform {
+            position: [0.5, -0.25],
+            scale: [1.4, 0.8],
+            rotation: 13.0,
+            effects: vec![Effect {
+                shader: "blur".into(),
+                params: [("radius".into(), 3.0)].into(),
+                enabled,
+                mask: None,
+            }],
+            ..Default::default()
+        };
+        let a = read_back(
+            &device,
+            &queue,
+            comp.render(
+                &device,
+                &queue,
+                (48, 36),
+                1,
+                [0, 0, 255, 255],
+                &[(&dirty, transform.clone())],
+            ),
+        );
+        let b = read_back(
+            &device,
+            &queue,
+            comp.render(
+                &device,
+                &queue,
+                (48, 36),
+                1,
+                [0, 0, 255, 255],
+                &[(&clean, transform)],
+            ),
+        );
+        assert_eq!(a, b, "invisible RGB leaked with effect enabled={enabled}");
+        assert!(
+            a.as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p[1] == 0 && p[3] == 255)
+        );
+        assert!(a.as_chunks::<4>().0.iter().any(|p| p[0] > 40 && p[2] > 40));
+    }
+}
+
+#[test]
+fn pixel_effect_units_keep_block_counts_across_quality_and_proxy_sizes() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let shader = crate::effect::parse(include_str!("../effects/pixelate.wgsl")).unwrap();
+    for (w, h) in [(192, 128), (128, 192)] {
+        let mut comp = Compositor::new(&device);
+        comp.set_effect(&device, "pixelate", Some(&shader)).unwrap();
+        comp.logical_sizes = vec![[w as f32, h as f32]];
+        let transform = Transform {
+            effects: vec![Effect {
+                shader: "pixelate".into(),
+                params: [("block".into(), (w / 8) as f64)].into(),
+                enabled: true,
+                mask: None,
+            }],
+            ..Default::default()
+        };
+        for quality in [1, 2, 4] {
+            for proxy in [1, 2] {
+                let divisor = quality * proxy;
+                let src = image(&device, &queue, (w / divisor, h / divisor), |x, _| {
+                    [
+                        ((x as f32 + 0.5) * divisor as f32 / w as f32 * 240.0) as u8,
+                        0,
+                        0,
+                        255,
+                    ]
+                });
+                let rgba = read_back(
+                    &device,
+                    &queue,
+                    comp.render(
+                        &device,
+                        &queue,
+                        (w, h),
+                        quality,
+                        [0, 0, 0, 255],
+                        &[(&src, transform.clone())],
+                    ),
+                );
+                let row = &rgba[((h / quality / 2 * w / quality) * 4) as usize..]
+                    [..(w / quality * 4) as usize];
+                let red: Vec<_> = row.as_chunks::<4>().0.iter().map(|p| p[0]).collect();
+                let mut changing = false;
+                let mut blocks = 1;
+                for pair in red.windows(2) {
+                    let next = pair[0].abs_diff(pair[1]) > 3;
+                    blocks += usize::from(next && !changing);
+                    changing = next;
+                }
+                assert_eq!(blocks, 8, "{w}x{h}, quality {quality}, proxy {proxy}");
+            }
+        }
+    }
+}
+
+#[test]
+fn sampling_effect_extents_and_masks_agree_at_reduced_sizes() {
+    use jvid_core::model::MaskShape;
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    for (file, param, amount) in [
+        ("gaussian_blur.wgsl", "radius", 16.0),
+        ("chromatic_aberration.wgsl", "amount", 16.0),
+    ] {
+        let source = crate::effect::BUNDLED
+            .iter()
+            .find(|(f, _)| *f == file)
+            .unwrap()
+            .1;
+        let shader = crate::effect::parse(source).unwrap();
+        for (w, h) in [(192, 128), (128, 192)] {
+            for mask_mode in 0..3 {
+                let masked = mask_mode != 0;
+                let mut comp = Compositor::new(&device);
+                comp.set_effect(&device, file, Some(&shader)).unwrap();
+                comp.logical_sizes = vec![[w as f32, h as f32]];
+                let mut mask = Mask::new(MaskShape::Rectangle, vec![[30.0, 0.0], [100.0, 220.0]]);
+                mask.id = if mask_mode == 1 { 7 } else { 0 };
+                let transform = Transform {
+                    position: [12.0, -8.0],
+                    scale: [0.8, 0.75],
+                    rotation: 7.0,
+                    masks: if masked { vec![mask] } else { vec![] },
+                    effects: vec![Effect {
+                        shader: file.into(),
+                        params: [(param.into(), amount)].into(),
+                        enabled: true,
+                        mask: (mask_mode == 1).then_some(7),
+                    }],
+                    ..Default::default()
+                };
+                let chart = image::RgbaImage::from_fn(w, h, |x, y| {
+                    let white = x >= w * 5 / 8 && x < w * 7 / 8 && y >= h / 4 && y < h * 3 / 4;
+                    image::Rgba([
+                        if white { 255 } else { 0 },
+                        if white { 255 } else { 0 },
+                        if white { 255 } else { 0 },
+                        255,
+                    ])
+                });
+                let mut full = None;
+                for (quality, proxy) in [(1, 1), (2, 1), (4, 1), (1, 2), (2, 2), (4, 2)] {
+                    let divisor = quality * proxy;
+                    let sampled = image::imageops::resize(
+                        &chart,
+                        w / divisor,
+                        h / divisor,
+                        image::imageops::FilterType::Triangle,
+                    );
+                    let src = image(&device, &queue, sampled.dimensions(), |x, y| {
+                        sampled.get_pixel(x, y).0
+                    });
+                    let out = read_back(
+                        &device,
+                        &queue,
+                        comp.render(
+                            &device,
+                            &queue,
+                            (256, 256),
+                            quality,
+                            [0, 0, 0, 255],
+                            &[(&src, transform.clone())],
+                        ),
+                    );
+                    let out =
+                        image::RgbaImage::from_raw(256 / quality, 256 / quality, out).unwrap();
+                    if quality == 1 && proxy == 1 {
+                        full = Some(out);
+                        continue;
+                    }
+                    let expected = image::imageops::resize(
+                        full.as_ref().unwrap(),
+                        out.width(),
+                        out.height(),
+                        image::imageops::FilterType::Triangle,
+                    );
+                    let mean = out
+                        .as_raw()
+                        .iter()
+                        .zip(expected.as_raw())
+                        .map(|(a, b)| a.abs_diff(*b) as f64)
+                        .sum::<f64>()
+                        / out.len() as f64;
+                    assert!(
+                        mean < 4.0,
+                        "{file} {w}x{h} masked={masked} quality={quality} proxy={proxy}: mean {mean}"
+                    );
+                    // Measure the visible RGB extent in project pixels, allowing sampled texels
+                    // and output antialiasing at each edge rather than merely comparing means.
+                    let bounds = |img: &image::RgbaImage, channel: usize| {
+                        let mut b = [img.width(), img.height(), 0, 0];
+                        for (x, y, _) in img.enumerate_pixels().filter(|(_, _, p)| p[channel] > 16)
+                        {
+                            b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
+                        }
+                        b
+                    };
+                    for c in 0..3 {
+                        let a = bounds(&out, c);
+                        let b = bounds(&expected, c);
+                        assert!(
+                            a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 2 * proxy),
+                            "{file} extent channel {c}: {a:?} vs {b:?}, {w}x{h} masked={masked} quality={quality} proxy={proxy}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_full_mask_enlargement_keeps_its_effect_reference() {
+    use jvid_core::model::MaskShape;
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let shader = crate::effect::parse(include_str!("../effects/gaussian_blur.wgsl")).unwrap();
+    for ((w, h), project) in [
+        ((64, 32), (256, 128)),
+        ((32, 64), (128, 256)),
+        ((96, 64), (256, 256)),
+    ] {
+        let chart = image::RgbaImage::from_fn(w, h, |x, _| {
+            image::Rgba([if x >= w / 2 { 255 } else { 0 }, 0, 0, 255])
+        });
+        let source = image(&device, &queue, (w, h), |x, y| chart.get_pixel(x, y).0);
+        for masked in [false, true] {
+            let mut mask = Mask::new(
+                MaskShape::Rectangle,
+                vec![[0.0, 0.0], [(project.0 * 2) as f64, (project.1 * 2) as f64]],
+            );
+            mask.id = 0;
+            let transform = Transform {
+                position: [6.0, -4.0],
+                scale: [0.8, 0.8],
+                masks: if masked { vec![mask] } else { vec![] },
+                effects: vec![Effect {
+                    shader: "blur".into(),
+                    params: [("radius".into(), 16.0)].into(),
+                    enabled: true,
+                    mask: None,
+                }],
+                ..Default::default()
+            };
+            // The old Full mask path sampled an already enlarged fitted-size texture before
+            // setting fx.size. Reconstruct it with the unchanged Masker, independently of
+            // the new logical-size mapping; the unmasked baseline sampled the native original.
+            let mut legacy = Compositor::new(&device);
+            legacy.set_effect(&device, "blur", Some(&shader)).unwrap();
+            let mut legacy_transform = transform.clone();
+            legacy_transform.masks.clear();
+            let mut old_masks = crate::mask::Masker::new(&device);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            let frame = [project.0 as f32, project.1 as f32];
+            let full_input = old_masks.apply(
+                &device,
+                &queue,
+                &mut encoder,
+                0,
+                &source,
+                &transform.masks,
+                (frame, frame),
+                false,
+            );
+            queue.submit([encoder.finish()]);
+            let input = full_input.as_ref().unwrap_or(&source);
+            let baseline = read_back(
+                &device,
+                &queue,
+                legacy.render(
+                    &device,
+                    &queue,
+                    project,
+                    1,
+                    [0, 0, 0, 255],
+                    &[(input, legacy_transform)],
+                ),
+            );
+            let baseline = image::RgbaImage::from_raw(project.0, project.1, baseline).unwrap();
+            let mut comp = Compositor::new(&device);
+            comp.set_effect(&device, "blur", Some(&shader)).unwrap();
+            comp.logical_sizes = vec![[w as f32, h as f32]];
+            for (quality, proxy) in [(1, 1), (2, 1), (4, 1), (1, 2), (2, 2), (4, 2)] {
+                let sampled = image::imageops::resize(
+                    &chart,
+                    w / (quality * proxy),
+                    h / (quality * proxy),
+                    image::imageops::FilterType::Triangle,
+                );
+                let src = image(&device, &queue, sampled.dimensions(), |x, y| {
+                    sampled.get_pixel(x, y).0
+                });
+                let out = read_back(
+                    &device,
+                    &queue,
+                    comp.render(
+                        &device,
+                        &queue,
+                        project,
+                        quality,
+                        [0, 0, 0, 255],
+                        &[(&src, transform.clone())],
+                    ),
+                );
+                let expected = image::imageops::resize(
+                    &baseline,
+                    project.0 / quality,
+                    project.1 / quality,
+                    image::imageops::FilterType::Triangle,
+                );
+                let mean = out
+                    .iter()
+                    .zip(expected.as_raw())
+                    .map(|(a, b)| a.abs_diff(*b) as f64)
+                    .sum::<f64>()
+                    / out.len() as f64;
+                assert!(
+                    mean < if quality * proxy > 4 { 4.0 } else { 2.5 },
+                    "{w}x{h} masked={masked} quality={quality} proxy={proxy}: legacy mean error {mean}"
+                );
+                if quality == 1 && proxy == 1 {
+                    let difference = out
+                        .iter()
+                        .zip(baseline.as_raw())
+                        .enumerate()
+                        .find(|(_, (a, b))| a != b);
+                    assert!(
+                        difference.is_none(),
+                        "existing Full output must be exact: {w}x{h}, masked={masked}, first difference {difference:?}"
+                    );
+                }
+            }
+        }
+    }
+}

@@ -555,6 +555,119 @@ fn measure(project: &Project, req: &Request, ctx: &Ctx) -> Result<Option<f64>, E
     Ok(meter.integrated())
 }
 
+/// Full-resolution Program renderer shared by video export and Export Frame. Its immutable
+/// project input is the caller's snapshot; every file is read exactly from the original path.
+pub(crate) struct FrameRenderer {
+    decoders: DecoderPool,
+    stills: std::collections::HashMap<PathBuf, Arc<image::RgbaImage>>,
+    gpu: Gpu,
+}
+
+impl FrameRenderer {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
+        let mut gpu = Gpu::new(device);
+        gpu.pin_effects = true;
+        Self {
+            decoders: DecoderPool::hdr(),
+            stills: Default::default(),
+            gpu,
+        }
+    }
+
+    pub(crate) fn render(
+        &mut self,
+        project: &Project,
+        time: Time,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<&wgpu::Texture, String> {
+        let layers =
+            resolve::<String, _>(project, frame_at(project, time), &mut |asset, layer| {
+                if jvid_media::stills::is_still(&asset.path) {
+                    let image = match self.stills.get(&asset.path) {
+                        Some(image) => image.clone(),
+                        None => {
+                            let image = jvid_media::stills::cached(&asset.path)?;
+                            self.stills.insert(asset.path.clone(), image.clone());
+                            image
+                        }
+                    };
+                    return Ok(Some(Pixels::Still(image)));
+                }
+                let f = self
+                    .decoders
+                    .frame_at(&asset.path, layer.source_time)
+                    .map_err(|e| {
+                        tr!(
+                            "export.decode_error",
+                            path = asset.path.display(),
+                            error = e
+                        )
+                    })?;
+                Ok(Some(Pixels::Frame(Arc::new(f))))
+            })?;
+        Ok(self.gpu.draw(
+            device,
+            queue,
+            project.settings(),
+            1,
+            &Shown {
+                index: project.settings().frame_rate.index_floor(time),
+                layers,
+                exact: true,
+            },
+        ))
+    }
+}
+
+/// Saves one full-resolution Program frame, independent of Source, proxies and preview quality.
+/// Rendering and PNG encoding finish in a private sibling directory before publication.
+pub fn frame_png(
+    project: &Project,
+    time: Time,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    path: &Path,
+) -> Result<(), String> {
+    if project.sequence().duration().0 <= 0 {
+        return Err(tr!("preview.no_frame").into());
+    }
+    let destination = || match check_destination(project, path) {
+        Ok(()) => Ok(()),
+        Err(Error::Failed(e)) => Err(e),
+        Err(Error::Cancelled) => unreachable!("destination validation cannot cancel"),
+    };
+    destination()?;
+    jvid_media::ffmpeg::init().map_err(|e| e.to_string())?;
+    let mut renderer = FrameRenderer::new(device);
+    let tex = renderer.render(project, time, device, queue)?;
+    let mut rgba = jvid_render::composite::read_back(device, queue, tex);
+    // PNG stores straight alpha; Program textures are premultiplied, including a transparent
+    // project background. Opaque output remains byte-identical to video export's input.
+    for p in rgba.as_chunks_mut::<4>().0 {
+        let a = p[3] as u32;
+        for c in &mut p[..3] {
+            *c = (*c as u32 * 255 + a / 2)
+                .checked_div(a)
+                .unwrap_or(0)
+                .min(255) as u8;
+        }
+    }
+    let files = AttemptFiles::new(path)?;
+    image::save_buffer_with_format(
+        &files.output,
+        &rgba,
+        tex.width(),
+        tex.height(),
+        image::ExtendedColorType::Rgba8,
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| e.to_string())?;
+    destination()?;
+    std::fs::rename(&files.output, path)
+        .map_err(|e| tr!("export.publish_error", path = path.display(), error = e))
+}
+
 fn render(
     project: &Project,
     req: &Request,
@@ -565,14 +678,9 @@ fn render(
     ctx: &Ctx,
 ) -> Result<(), AttemptError> {
     let (first, end) = frames(project, req);
-    let decoders = DecoderPool::hdr();
     let mut audio = Audio::new(Box::new(blocking));
     // Audio-only presets never touch the GPU.
-    let mut gpu = enc.has_video().then(|| {
-        let mut g = Gpu::new(device);
-        g.pin_effects = true;
-        g
-    });
+    let mut renderer = enc.has_video().then(|| FrameRenderer::new(device));
     let mut readback = Readback::default();
     let (mut mix, mut limited) = (Vec::new(), Vec::new());
     for (k, time, a, b) in spans(project, req) {
@@ -580,31 +688,10 @@ fn render(
             return Err(Error::Cancelled.into());
         }
         if enc.has_video() {
-            let layers =
-                resolve::<String, _>(project, frame_at(project, time), &mut |asset, layer| {
-                    let f = decoders
-                        .frame_at(&asset.path, layer.source_time)
-                        .map_err(|e| {
-                            tr!(
-                                "export.decode_error",
-                                path = asset.path.display(),
-                                error = e
-                            )
-                        })?;
-                    Ok(Some(Pixels::Frame(Arc::new(f))))
-                })?;
-            let tex = gpu.get_or_insert_with(|| Gpu::new(device)).draw(
-                device,
-                queue,
-                project.settings(),
-                1,
-                &Shown {
-                    index: k,
-                    layers,
-                    // Decoded synchronously with frame_at, never a keyframe stand-in.
-                    exact: true,
-                },
-            );
+            let tex = renderer
+                .as_mut()
+                .expect("video renderer")
+                .render(project, time, device, queue)?;
             if let Some(rgba) = readback.push(device, queue, tex) {
                 enc.video(&rgba)?;
             }
