@@ -2247,30 +2247,53 @@ impl Sequence {
 }
 
 impl Sequence {
-    /// Removes the clips. Ripple closes each gap by pulling later clips on its track left.
+    /// Removes the clips atomically. Ripple plans each surviving linked group's common
+    /// shift from the union of deleted intervals relative to its members' starts. This
+    /// counts corresponding A/V intervals once even when the partners have an offset.
     pub(crate) fn remove_clips(&mut self, ids: &[ClipId], ripple: bool) -> Result<(), ModelError> {
         let mut s = self.clone();
         let mut gone = Vec::new();
         for &id in ids {
-            gone.push(s.remove_clip(id)?);
+            if !gone.iter().any(|(_, c): &(TrackId, Clip)| c.id == id) {
+                gone.push(s.remove_clip(id)?);
+            }
         }
         if ripple {
-            gone.sort_by_key(|(_, c)| std::cmp::Reverse(c.start));
-            for (t, c) in gone {
-                let ti = s.index(t)?;
-                let later: Vec<_> = s.tracks[ti]
-                    .clips
-                    .iter()
-                    .filter(|later| later.start >= c.start)
-                    .map(|c| c.id)
-                    .collect();
-                s.check_shift_locks(&later)?;
-                for later in &mut s.tracks[ti].clips {
-                    if later.start >= c.start {
-                        later.start = later.start - c.duration();
+            let mut shifts = BTreeMap::new();
+            for track in &s.tracks {
+                for clip in &track.clips {
+                    if shifts.contains_key(&clip.id) {
+                        continue;
+                    }
+                    let group = s.linked(clip.id);
+                    let mut intervals: Vec<_> = group
+                        .iter()
+                        .flat_map(|(t, c)| {
+                            gone.iter()
+                                .filter(move |(from, removed)| {
+                                    from == t && removed.end() <= c.start
+                                })
+                                .map(|(_, removed)| {
+                                    (removed.start - c.start, removed.end() - c.start)
+                                })
+                        })
+                        .collect();
+                    intervals.sort_unstable();
+                    let mut union: Vec<(Time, Time)> = Vec::new();
+                    for (start, end) in intervals {
+                        if let Some(last) = union.last_mut().filter(|last| start <= last.1) {
+                            last.1 = last.1.max(end);
+                        } else {
+                            union.push((start, end));
+                        }
+                    }
+                    let by = union.into_iter().fold(Time(0), |by, (a, b)| by - (b - a));
+                    for (_, c) in group {
+                        shifts.insert(c.id, by);
                     }
                 }
             }
+            s.apply_shifts(&shifts)?;
         }
         *self = s;
         Ok(())
@@ -3049,19 +3072,28 @@ impl Sequence {
                 }
             }
         }
-        if by != Time(0) {
-            self.check_shift_locks(&ids)?;
-        }
+        let shifts = ids.into_iter().map(|id| (id, by)).collect();
+        self.apply_shifts(&shifts)
+    }
+
+    /// Applies a complete ripple plan on a private candidate, validating the final layout.
+    fn apply_shifts(&mut self, shifts: &BTreeMap<ClipId, Time>) -> Result<(), ModelError> {
+        let moving: Vec<_> = shifts
+            .iter()
+            .filter(|(_, by)| **by != Time(0))
+            .map(|(id, _)| *id)
+            .collect();
+        self.check_shift_locks(&moving)?;
         for t in &mut self.tracks {
-            for c in t.clips.iter_mut().filter(|c| ids.contains(&c.id)) {
-                c.start = c.start + by;
+            for c in &mut t.clips {
+                c.start = c.start + shifts.get(&c.id).copied().unwrap_or_default();
                 if c.start < Time(0) {
                     return Err(ModelError::Overlap(c.id));
                 }
             }
             t.clips.sort_by_key(|c| c.start);
             if let Some(w) = t.clips.windows(2).find(|w| w[0].end() > w[1].start) {
-                let hit = if ids.contains(&w[0].id) {
+                let hit = if moving.contains(&w[0].id) {
                     w[1].id
                 } else {
                     w[0].id

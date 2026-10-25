@@ -4562,6 +4562,52 @@ mod tests {
         println!("timeline layout+paint, 500 clips ({lines} waveform lines): {ms:.3} ms/frame");
         assert!(ms < 16.6, "{ms:.3} ms/frame");
     }
+    #[test]
+    fn audit_435_ripple_delete_action_preserves_later_sync_and_undo() {
+        use jvid_core::history::Created;
+        let mut setup = History::new(project(0));
+        let tracks = setup.project().sequence().tracks();
+        let (v, a) = (tracks[0].id, tracks[1].id);
+        let mut add = |track, start, len| {
+            let Created::Clip(id) = setup
+                .apply(Command::AddClip {
+                    track,
+                    clip: NewClip {
+                        asset: AssetId(1),
+                        start: Time(start * S),
+                        source_in: Time(0),
+                        source_out: Time(len * S),
+                        link: None,
+                    },
+                })
+                .unwrap()
+            else {
+                panic!("clip")
+            };
+            id
+        };
+        let intro = add(v, 0, 5);
+        let cv = add(v, 5, 10);
+        let ca = add(a, 5, 10);
+        setup
+            .apply(Command::LinkClips {
+                ids: vec![cv, ca],
+                linked: true,
+            })
+            .unwrap();
+        let before = setup.project().clone();
+        let mut h = History::new(before.clone());
+        let mut t = Timeline::default();
+        t.select_clip(h.project().sequence(), intro);
+        t.action("ripple_delete", h.project());
+        h.apply(t.pending.take().unwrap()).unwrap();
+        for id in [cv, ca] {
+            assert_eq!(h.project().sequence().clip(id).unwrap().1.start, Time(0));
+        }
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert!(!h.can_undo());
+    }
 }
 
 #[cfg(test)]

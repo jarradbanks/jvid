@@ -2596,4 +2596,111 @@ mod audit_b04 {
         assert!(h.undo());
         assert_eq!(h.project(), &before);
     }
+
+    #[test]
+    fn ripple_delete_unlinked_intro_moves_later_linked_group_once() {
+        let (mut h, _, _, intro, cv, ca) = fixture();
+        let before = h.project().clone();
+        h.apply(Command::RemoveClips {
+            ids: vec![intro],
+            ripple: true,
+        })
+        .unwrap();
+        for id in [cv, ca] {
+            assert_eq!(h.project().sequence().clip(id).unwrap().1.start, Time(0));
+        }
+        let after = h.project().clone();
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert!(!h.can_undo());
+        assert!(h.redo());
+        assert_eq!(h.project(), &after);
+    }
+
+    #[test]
+    fn ripple_delete_offset_linked_pair_closes_one_interval() {
+        let (h, _, a, intro, cv, ca) = fixture();
+        let mut p = h.project().clone();
+        p.sequence.move_clip(ca, a, Time(6 * S)).unwrap();
+        let audio_intro = p
+            .sequence
+            .add_clip(
+                a,
+                NewClip {
+                    asset: AssetId(1),
+                    start: Time(S),
+                    source_in: Time(0),
+                    source_out: Time(5 * S),
+                    link: None,
+                },
+            )
+            .unwrap();
+        p.sequence.link_clips(&[intro, audio_intro], true).unwrap();
+        let before = p.clone();
+        let mut h = History::new(p);
+        h.apply(Command::RemoveClips {
+            ids: vec![intro, audio_intro],
+            ripple: true,
+        })
+        .unwrap();
+        assert_eq!(h.project().sequence().clip(cv).unwrap().1.start, Time(0));
+        assert_eq!(h.project().sequence().clip(ca).unwrap().1.start, Time(S));
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert!(!h.can_undo());
+    }
+
+    #[test]
+    fn ripple_delete_multiple_intervals_and_pair_are_not_counted_twice() {
+        let (h, v, a, intro, cv, ca) = fixture();
+        let mut p = h.project().clone();
+        // Delete the intro and the first half of the later pair; leave linked tails.
+        p.sequence.split_at(&[cv, ca], Time(10 * S)).unwrap();
+        let tails: Vec<_> = p
+            .sequence
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips())
+            .filter(|c| c.start == Time(10 * S))
+            .map(|c| c.id)
+            .collect();
+        let before = p.clone();
+        let mut h = History::new(p);
+        h.apply(Command::RemoveClips {
+            ids: vec![intro, cv, ca],
+            ripple: true,
+        })
+        .unwrap();
+        for id in tails {
+            assert_eq!(h.project().sequence().clip(id).unwrap().1.start, Time(0));
+        }
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert!(!h.can_undo());
+        // A colliding stationary clip on the partner's track refuses the whole delete.
+        let mut p = before;
+        p.sequence
+            .add_clip(
+                a,
+                NewClip {
+                    asset: AssetId(1),
+                    start: Time(0),
+                    source_in: Time(0),
+                    source_out: Time(S),
+                    link: None,
+                },
+            )
+            .unwrap();
+        let mut h = History::new(p.clone());
+        assert!(matches!(
+            h.apply(Command::RemoveClips {
+                ids: vec![intro],
+                ripple: true
+            }),
+            Err(ModelError::Overlap(_))
+        ));
+        assert_eq!(h.project(), &p);
+        assert!(!h.can_undo());
+        assert_eq!(h.project().sequence().track(v).unwrap().clips().len(), 3);
+    }
 }
