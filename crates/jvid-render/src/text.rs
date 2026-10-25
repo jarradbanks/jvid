@@ -29,11 +29,26 @@ struct Fonts {
     masks: Vec<(Key, Arc<Masks>)>,
 }
 
+/// The suite's Noto Sans CJK faces. They hold only the catalogs' characters, so they draw
+/// translated title presets on systems without a CJK font, not arbitrary user text.
+const CJK_FACES: [&[u8]; 3] = [
+    include_bytes!("../../suite-ui/assets/NotoSansCJK-ja.otf"),
+    include_bytes!("../../suite-ui/assets/NotoSansCJK-zh-Hans.otf"),
+    include_bytes!("../../suite-ui/assets/NotoSansCJK-ko.otf"),
+];
+
+fn cjk_sources() -> impl Iterator<Item = cosmic_text::fontdb::Source> {
+    CJK_FACES
+        .into_iter()
+        .map(|b| cosmic_text::fontdb::Source::Binary(Arc::new(b)))
+}
+
 fn fonts() -> &'static Mutex<Fonts> {
     static FONTS: OnceLock<Mutex<Fonts>> = OnceLock::new();
     FONTS.get_or_init(|| {
         Mutex::new(Fonts {
-            system: FontSystem::new(),
+            // Loaded after the system fonts, so an installed full CJK face wins.
+            system: FontSystem::new_with_fonts(cjk_sources()),
             swash: SwashCache::new(),
             recent: Vec::new(),
             masks: Vec::new(),
@@ -387,17 +402,20 @@ mod tests {
 
     /// Shapes `s` with the system fonts; `None` when no installed font covers it.
     fn shape(s: &str) -> Option<(bool, Vec<u16>)> {
-        let mut f = fonts().lock().unwrap();
-        let mut buf = Buffer::new(&mut f.system, Metrics::new(32.0, 40.0));
-        buf.set_text(&mut f.system, s, &Attrs::new(), Shaping::Advanced, None);
-        buf.shape_until_scroll(&mut f.system, false);
+        shape_with(&mut fonts().lock().unwrap().system, s)
+    }
+
+    fn shape_with(system: &mut FontSystem, s: &str) -> Option<(bool, Vec<u16>)> {
+        let mut buf = Buffer::new(system, Metrics::new(32.0, 40.0));
+        buf.set_text(system, s, &Attrs::new(), Shaping::Advanced, None);
+        buf.shape_until_scroll(system, false);
         let run = buf.layout_runs().next()?;
         let ids: Vec<u16> = run.glyphs.iter().map(|g| g.glyph_id).collect();
         // Which fallback font shaped it differs per OS, so say, for failures.
         let faces: Vec<_> = run
             .glyphs
             .iter()
-            .filter_map(|g| f.system.db().face(g.font_id))
+            .filter_map(|g| system.db().face(g.font_id))
             .map(|face| face.post_script_name.clone())
             .collect();
         eprintln!("{s}: {ids:?} from {faces:?}");
@@ -452,6 +470,26 @@ mod tests {
         };
         assert!(!rtl);
         assert_eq!(ids.len(), 4);
+    }
+
+    #[test]
+    fn bundled_cjk_faces_draw_title_presets_without_system_fonts() {
+        let mut db = cosmic_text::fontdb::Database::new();
+        for source in cjk_sources() {
+            db.load_font_source(source);
+        }
+        // The ja, zh-Hans and ko title, lower-third and caption preset texts.
+        for (locale, text) in [
+            ("ja", "タイトル"),
+            ("ja", "名前"),
+            ("ja", "キャプション"),
+            ("zh-Hans", "说明文字"),
+            ("ko", "타이틀"),
+        ] {
+            let mut system = FontSystem::new_with_locale_and_db(locale.into(), db.clone());
+            let (_, ids) = shape_with(&mut system, text).unwrap_or_else(|| panic!("{text} tofu"));
+            assert_eq!(ids.len(), text.chars().count(), "{text}");
+        }
     }
 
     #[test]

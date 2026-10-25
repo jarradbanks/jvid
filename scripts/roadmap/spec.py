@@ -1880,3 +1880,40 @@ I("overlay-design-lines", "Transform overlay: DESIGN.md lines instead of amber",
   summary="From #352 (PR #396): the Program monitor's transform overlay draws an amber outline, but DESIGN.md's Neutral Viewer Rule asks for 1px Ink or Light Blue lines.",
   scope=["Draw the transform overlay's outline and handles in the DESIGN.md viewer colours, keeping the reframe box distinct"],
   ac=["A kittest snapshot of a selected clip shows no amber in the overlay"])
+
+I("viewer-amber-leftovers", "Viewer: remaining amber strokes", None, ["ui"], "S", ["overlay-design-lines"], labels=["later"],
+  summary="From #400 (PR #407): the on-picture text-edit caret and selection highlight, and the stroke in zoom.rs, are still amber, against DESIGN.md's Neutral Viewer Rule.",
+  scope=["Draw the viewer's text caret, text selection and zoom stroke in DESIGN.md viewer colours (DARK tokens, as PR #407 does)"],
+  ac=["grep finds no color::amber() in viewer drawing code; a snapshot of a title being edited shows no amber"])
+
+I("reframe-dim", "Reframe: dim the wide shot outside the frame", None, ["ui"], "S", ["reframe"], labels=["later"],
+  summary="From #352 (PR #396), owner's call: while aiming a reframed clip, show the wide shot outside the new frame dimmed, so you can see what's being cropped away.",
+  scope=["When the reframe box shows, the Program monitor draws the clip's picture outside the frame, dimmed, in the overlay only; export and playback output are unchanged"],
+  ac=["A kittest snapshot shows dimmed picture outside the reframe box; a render test shows export output is unchanged"])
+
+I("cjk-common-sets", "Fonts: bundle the common CJK characters", None, ["suite-ui"], "S", [], labels=["later"],
+  summary="Owner's call (2026-10-25): every PR that adds UI strings regenerates the CJK font subsets, binary files that conflict between parallel PRs (6 so far). Bundling the common characters up front makes the subsets rarely change, at about 3-4 MB more in the app.",
+  scope=["subset-cjk.py adds each language's common set to its catalog characters: JIS X 0208 level 1 kanji plus kana for ja, GB 2312 level 1 for zh-Hans, the 2,350 KS X 1001 Hangul syllables for ko, derived from Python's own codecs with no data files",
+         "The output is byte-identical when the character set hasn't changed, and the script leaves the file untouched then",
+         "Raise the per-face budget in docs/translating.md (Fonts and binary size) to fit, staying near 3-4 MB in total"],
+  ac=["Running subset-cjk.py twice in a row changes no file (test or CI check)", "A catalog edit using only common characters leaves the .otf files unchanged"])
+
+I("marker-lane", "Markers: own lane above the ruler, drag to move", None, ["ui", "timeline"], "M", ["marker-popup-style"], labels=["later"],
+  summary="Owner's request (2026-10-25): markers get their own slim bar above the timeline ruler instead of sitting in it, and you can drag them to adjust.",
+  scope=["A slim Markers lane directly above the timeline ruler holds the flags and range bands; the ruler is left for scrubbing",
+         "Drag a flag to move its marker, and drag either end of a range to resize it, snapping like clip drags; each drag is one undo step (SetMarker)",
+         "Click still seeks, right-click still opens the marker popup, and the tutorial 'marker' anchor and the Markers lesson keep working"],
+  ac=["Test: dragging a flag moves the marker by the dragged time, and one undo restores it",
+      "Test: dragging a range's end changes only its duration; a range can't go below zero length",
+      "A kittest snapshot shows the lane above the ruler with a point and a range marker"])
+
+I("tutorial-next", "Tutorials: Next button, tighter spotlight, Space fix", None, ["ui"], "M", [], labels=["later"],
+  summary="Owner's tutorial feedback (2026-10-25): steps jump ahead on their own, a focused card button eats Space, the spotlight hides what a step needs, and Inspector steps light up the whole panel.",
+  scope=["No auto-advance: when a step's check passes, the card marks it done and shows a primary Next button (Enter also works); Show Me does the step and waits for Next too",
+         "Card buttons give up keyboard focus after a click, so Space (play) or Delete in a step reaches the app instead of pressing Show Me again",
+         "Drag steps leave both ends lit: a drag from Media onto the Timeline undims Media as well (Step.also), and the drag source never looks disabled",
+         "Steps about one Inspector control light only that row: Inspector rows the lessons name (Feather, Scale, Opacity, and so on) register their own anchors, and those steps point at the row, not the panel"],
+  ac=["Test: a step whose check passes stays on that step until Next is clicked",
+      "Test: after clicking Show Me, pressing Space toggles playback and doesn't click Show Me again",
+      "Test: every lesson step that names an Inspector control anchors to a rect smaller than the Inspector panel",
+      "The existing every-lesson Show Me test passes using Next"])

@@ -526,6 +526,11 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#395](https://github.com/jarradbanks/jvid/issues/395) **Find Highlights: fast scene scan on long recordings** — From #347 (PR #392): the scene scan decodes every frame at full size, so a two-hour recording takes many minutes.
 - [#399](https://github.com/jarradbanks/jvid/issues/399) **Reframe: honour crop, rotation and title keys** — From #352 (PR #396): Reframe ignores a clip's crop and rotation and a title's own position and text_size keys, so those clips can end up with bars or a title outside title-safe.
 - [#400](https://github.com/jarradbanks/jvid/issues/400) **Transform overlay: DESIGN.md lines instead of amber** — From #352 (PR #396): the Program monitor's transform overlay draws an amber outline, but DESIGN.md's Neutral Viewer Rule asks for 1px Ink or Light Blue lines.
+- [#408](https://github.com/jarradbanks/jvid/issues/408) **Viewer: remaining amber strokes** — From #400 (PR #407): the on-picture text-edit caret and selection highlight, and the stroke in zoom.rs, are still amber, against DESIGN.md's Neutral Viewer Rule.
+- [#411](https://github.com/jarradbanks/jvid/issues/411) **Reframe: dim the wide shot outside the frame** — From #352 (PR #396), owner's call: while aiming a reframed clip, show the wide shot outside the new frame dimmed, so you can see what's being cropped away.
+- [#413](https://github.com/jarradbanks/jvid/issues/413) **Fonts: bundle the common CJK characters** — Owner's call (2026-10-25): every PR that adds UI strings regenerates the CJK font subsets, binary files that conflict between parallel PRs (6 so far). Bundling the common characters up front makes the subsets rarely change, at about 3-4 MB more in the app.
+- [#415](https://github.com/jarradbanks/jvid/issues/415) **Markers: own lane above the ruler, drag to move** — Owner's request (2026-10-25): markers get their own slim bar above the timeline ruler instead of sitting in it, and you can drag them to adjust.
+- [#417](https://github.com/jarradbanks/jvid/issues/417) **Tutorials: Next button, tighter spotlight, Space fix** — Owner's tutorial feedback (2026-10-25): steps jump ahead on their own, a focused card button eats Space, the spotlight hides what a step needs, and Inspector steps light up the whole panel.
 
 ---
 

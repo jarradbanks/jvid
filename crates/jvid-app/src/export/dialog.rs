@@ -371,8 +371,8 @@ impl ExportDialog {
                                 lossless_picker(ui, &mut self.lossless, &copyable)
                             });
                             if let Err(why) = &copyable {
-                                let text = tr!("export.unavailable", reason = why[0]);
-                                note(ui, Note::Help, &text).on_hover_text(why.join("\n"));
+                                // No "<label>: " prefix: it would force the reason's capital.
+                                note(ui, Note::Help, &why[0]).on_hover_text(why.join("\n"));
                             }
                             if let (Some(_), Ok(cuts)) = (self.lossless, &copyable)
                                 && let Some(ext) = cuts[0].path.extension()
@@ -647,7 +647,9 @@ fn target_picker(ui: &mut Ui, target: &mut Option<u64>, bounds: Rect) {
     let field = |ui: &mut Ui, v: &mut u64, w| {
         let mut mb = *v as f64;
         let f = DragField::new(&mut mb).range(1.0..=100_000.0).decimals(0);
-        let r = ui.add(f.suffix(verbatim(" MB")).width(w));
+        // The dropdown's "{value} MB" without the value, so both show the same unit.
+        let unit = tr!("export.mb", value = "");
+        let r = ui.add(f.suffix(&unit).width(w));
         *v = mb as u64;
         r
     };

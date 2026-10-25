@@ -28,7 +28,7 @@ use jvid_media::thumbnails;
 use jvid_media::waveforms::{self, BUCKET, Peak, Pyramid};
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, TextInput};
+use suite_ui::widgets::{Button, Slider, TextInput};
 
 use crate::i18n::{tr, trn, verbatim};
 use crate::keymap::Keymap;
@@ -47,6 +47,10 @@ mod transitions;
 
 /// The undo gesture a track-height drag coalesces under.
 pub const RESIZE_GESTURE: GestureKey = 0x7472_6163_6b68; // "trackh"
+/// The undo gesture a track Volume drag coalesces under, xored with the track's ID.
+const VOLUME_GESTURE: GestureKey = 0x7472_6b76_6f6c; // "trkvol"
+/// Height of the Volume slider band under an audio track header's toggles.
+const VOLUME_BAND: f32 = 14.0;
 /// Track heights snap to this step.
 const HEIGHT_STEP: f32 = 4.0;
 /// Zoom limits in points per second: about four hours across 1000pt, to a frame 40pt wide.
@@ -1923,7 +1927,11 @@ impl Timeline {
         );
         target.widget_info(|| {
             let name = match fx {
-                true => format!("{}, {}", tr!("timeline.target"), tr!("timeline.fx_on")),
+                true => tr!(
+                    "timeline.target_fx",
+                    target = tr!("timeline.target"),
+                    fx = tr!("timeline.fx_on")
+                ),
                 false => tr!("timeline.target").to_owned(),
             };
             egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, track.target, name)
@@ -1961,6 +1969,31 @@ impl Timeline {
                 tr!("timeline.mute"),
             ),
         };
+        let armed = self.armed == Some(track.id);
+        let level = self.level.filter(|_| armed);
+        // Volume, in the band under the toggles; the input meter takes that band while armed.
+        // Added before the toggles so they keep the pointer where the slider's rect overlaps them.
+        let band = mid + size::SMALL_CONTROL / 2.0;
+        if track.kind == TrackKind::Audio
+            && level.is_none()
+            && rect.bottom() - band >= VOLUME_BAND - 2.0
+        {
+            let r = Rect::from_x_y_ranges(
+                rect.left() + space::INSET..=rect.right() - space::S8,
+                band + VOLUME_BAND / 2.0 - size::CONTROL / 2.0
+                    ..=band + VOLUME_BAND / 2.0 + size::CONTROL / 2.0,
+            );
+            let mut v = f64::from(track.volume);
+            let name = tr!("inspector.volume");
+            let s = ui.put(r, Slider::new(&mut v, 0.0..=2.0, name));
+            if s.changed() {
+                let mut t = track.settings();
+                t.volume = v as f32;
+                edit = Some((Command::SetTrack(t), Some(VOLUME_GESTURE ^ track.id.0)));
+            }
+            s.on_hover_text(format!("{name} {:.0}%", v * 100.0));
+        }
+
         let toggles = [
             (
                 icon::LOCK,
@@ -2010,8 +2043,6 @@ impl Timeline {
                 };
             }
         }
-        let armed = self.armed == Some(track.id);
-        let level = self.level.filter(|_| armed);
         if audio {
             let r = Rect::from_min_size(
                 pos2(arm_x, mid - size::SMALL_CONTROL / 2.0),
@@ -3559,6 +3590,31 @@ mod tests {
         for _ in 0..5 {
             assert!(h.state_mut().1.undo());
         }
+        assert_eq!(h.state().1.project(), &project(2));
+    }
+
+    #[test]
+    fn track_volume_drag_is_one_undo_step() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(2));
+        let volume = |h: &egui_kittest::Harness<'_, (Timeline, History)>| {
+            h.state().1.project().sequence().tracks()[1].volume
+        };
+        let r = h.get_by_label("Volume").rect();
+        let y = r.center().y;
+        h.drag_at(pos2(r.center().x, y));
+        h.run();
+        for x in [r.left() + 10.0, r.left() + 4.0, r.left()] {
+            h.hover_at(pos2(x, y));
+            h.run();
+        }
+        h.drop_at(pos2(r.left(), y));
+        h.run();
+        assert_eq!(volume(&h), 0.0);
+        assert!(h.state_mut().1.undo());
         assert_eq!(h.state().1.project(), &project(2));
     }
 
