@@ -255,7 +255,8 @@ impl Keymap {
 
     /// Ids of actions whose shortcut was pressed this frame, first match per key press.
     /// None while a text field has focus; no Up or Down while any widget has it, such as a
-    /// hovered EQ band.
+    /// hovered EQ band. Unmodified Space/Enter belong to the focused widget. Other
+    /// handled shortcuts are consumed before widgets see them, including remapped keys.
     pub fn pressed(&self, ctx: &egui::Context, timeline_focused: bool) -> Vec<&'static str> {
         if ctx.text_edit_focused() || ctx.memory(|m| m.top_modal_layer().is_some()) {
             return Vec::new();
@@ -272,6 +273,7 @@ impl Keymap {
                 repeat: false,
                 modifiers,
             };
+            let clipboard = matches!(e, Event::Copy | Event::Cut | Event::Paste(_));
             let shift = ctx.input(|i| i.modifiers.shift);
             let e = match e {
                 Event::Copy => clip(Modifiers::COMMAND, Key::C),
@@ -290,7 +292,10 @@ impl Keymap {
             else {
                 continue;
             };
-            if focused && matches!(key, Key::ArrowUp | Key::ArrowDown) {
+            if focused
+                && (matches!(key, Key::ArrowUp | Key::ArrowDown)
+                    || (modifiers.is_none() && matches!(key, Key::Space | Key::Enter)))
+            {
                 continue;
             }
             let hit = ACTIONS.iter().zip(&self.bindings).find(|(a, b)| {
@@ -301,6 +306,13 @@ impl Keymap {
                 }) && (a.context == Context::Global || timeline_focused)
             });
             if let Some((a, _)) = hit {
+                ctx.input_mut(|i| {
+                    i.consume_key(modifiers, key);
+                    if clipboard {
+                        i.events
+                            .retain(|e| !matches!(e, Event::Copy | Event::Cut | Event::Paste(_)));
+                    }
+                });
                 out.push(a.id);
             }
         }

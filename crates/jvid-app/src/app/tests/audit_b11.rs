@@ -109,8 +109,17 @@ fn audit_452_modal_text_edit_keeps_typing_and_local_undo() {
     field.focus();
     field.type_text("hello");
     h.run_steps(3);
+    let value = |h: &Harness<'_, App>| {
+        h.get_all_by_role(egui::accesskit::Role::TextInput)
+            .into_iter()
+            .find(|n| area.contains_rect(n.rect()))
+            .unwrap()
+            .value()
+    };
+    assert_eq!(value(&h).as_deref(), Some("hello"));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     h.run_steps(2);
+    assert_eq!(value(&h).as_deref(), Some(""));
     assert_eq!(h.state().history.project(), &before);
     assert!(h.state().keymap_editor.is_open());
     h.key_press(Key::Escape);
@@ -142,6 +151,93 @@ fn audit_452_modal_does_not_stop_an_active_take() {
         assert_eq!(h.state().history.project(), &before);
     }
     h.state_mut().end_take();
+    drop(h);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn tab_to(h: &mut Harness<'_, App>, label: &str) {
+    for _ in 0..160 {
+        if h.get_by_label(label).is_focused() {
+            return;
+        }
+        h.key_press(Key::Tab);
+        h.run_steps(2);
+    }
+    panic!("Tab never reached {label}");
+}
+
+#[test]
+fn audit_453_tab_space_and_pointer_each_run_one_transport_action() {
+    for (label, expected) in [("Play (Space)", 1), ("Shuttle Right (L)", 1)] {
+        let mut h = editor();
+        h.state_mut().timeline.seek(Time(0));
+        h.state_mut().run_action("focus_program", false);
+        h.run_steps(2);
+        tab_to(&mut h, label);
+        h.key_press(Key::Space);
+        h.run_steps(2);
+        assert_eq!(h.state().preview.program_speed(), expected, "{label}");
+    }
+    let mut h = editor();
+    h.state_mut().timeline.seek(Time(0));
+    h.run_steps(2);
+    tab_to(&mut h, "Play (Space)");
+    h.key_press(Key::Enter);
+    h.run_steps(2);
+    assert_eq!(h.state().preview.program_speed(), 1);
+    h.get_by_label("Stop (Space)").click();
+    h.run_steps(2);
+    h.get_by_label("Play (Space)").click();
+    h.run_steps(2);
+    assert_eq!(h.state().preview.program_speed(), 1);
+    h.get_by_label("Stop (Space)").click();
+    h.run_steps(2);
+    assert_eq!(h.state().preview.program_speed(), 0);
+    // With no widget focused, the global default toggles once; remapping it does too.
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+    h.state_mut().run_action("focus_timeline", false);
+    h.key_press(Key::Space);
+    h.run_steps(2);
+    assert_eq!(h.state().preview.program_speed(), 1);
+    h.state_mut().keymap = Keymap::from_toml("play_stop = \"P\"").unwrap();
+    h.key_press(Key::P);
+    h.run_steps(2);
+    assert_eq!(h.state().preview.program_speed(), 0);
+    h.key_press(Key::Space);
+    h.run_steps(2);
+    assert_eq!(h.state().preview.program_speed(), 0);
+    h.key_press(Key::P);
+    h.run_steps(2);
+    assert_eq!(h.state().preview.program_speed(), 1);
+}
+
+#[test]
+fn audit_453_tab_space_record_and_stop_do_not_restart_take() {
+    let mut h = editor();
+    let dir = std::env::temp_dir().join(format!("jvid-b11-record-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mic = crate::record::tests::FakeMic::default();
+    h.state_mut().path = Some(dir.join("p.jvid"));
+    h.state_mut().input = Some(Box::new(mic.clone()));
+    h.state_mut().timeline.seek(Time(0));
+    h.run_steps(2);
+    tab_to(&mut h, "Record Voiceover (Shift+R)");
+    h.key_press(Key::Space);
+    h.run_steps(2);
+    assert!(h.state().take.is_some());
+    mic.0.lock().unwrap().as_ref().unwrap().push(&[0.25; 4800]);
+    assert!(h.get_by_label("Stop Recording (Shift+R)").is_focused());
+    h.key_press(Key::Space);
+    h.run_steps(2);
+    assert!(
+        h.state().take.is_none(),
+        "Stop must not immediately start a new take"
+    );
+    assert_eq!(h.state().preview.program_speed(), 0);
     drop(h);
     std::fs::remove_dir_all(dir).unwrap();
 }

@@ -1411,6 +1411,10 @@ impl CallbackTrait for Paint {
 
 #[cfg(test)]
 impl Preview {
+    pub fn program_speed(&self) -> i32 {
+        self.program.transport.speed()
+    }
+
     pub fn program_playing(&self) -> bool {
         self.program.transport.speed() != 0
     }
