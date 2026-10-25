@@ -1766,3 +1766,56 @@ fn still_versions_are_checked_on_explicit_media_refresh_without_repaint_io() {
     assert_eq!(next.get_pixel(0, 0).0, [0, 255, 0, 128]);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// Block A inside the decoder while seeks B..Z queue behind it. Only Z remains useful.
+#[test]
+fn obsolete_stand_ins_are_cancelled_before_decode() {
+    for playing in [false, true] {
+        let mut h = History::new(Project::default());
+        add(&mut h, TrackKind::Video, "scrub.mp4", secs(30));
+        let (started_tx, started_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let release_rx = Mutex::new(release_rx);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let recorded = calls.clone();
+        let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), silent(), DEFAULT_BUDGET);
+        pb.quick = Some(Arc::new(move |_, t| {
+            recorded.lock().unwrap().push(t);
+            if t == Time(0) {
+                started_tx.send(()).unwrap();
+                release_rx.lock().unwrap().recv_timeout(HUNG).unwrap();
+            }
+            Ok(tiny(t))
+        }));
+        pb.sync(h.project());
+        pb.stand_in(h.project(), 0);
+        started_rx.recv_timeout(HUNG).unwrap();
+        for i in 1..=25 {
+            pb.transport.seek(secs(i), 0);
+            pb.stand_in(h.project(), 0);
+        }
+        if playing {
+            pb.transport.toggle(0);
+            pb.stand_in(h.project(), 0);
+        }
+        release_tx.send(()).unwrap();
+        let barrier = pb.quick_jobs.submit("drain", Priority::Interactive, |_| {});
+        let deadline = Instant::now() + HUNG;
+        while !barrier.is_finished() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let want = if playing {
+            vec![Time(0)]
+        } else {
+            vec![Time(0), secs(25)]
+        };
+        assert_eq!(*calls.lock().unwrap(), want, "playing={playing}");
+        // The in-flight A was allowed to finish, but must never publish its obsolete pixels.
+        let completed: Vec<_> = pb.quick_done.try_iter().collect();
+        assert_eq!(completed.len(), usize::from(!playing));
+        if !playing {
+            assert_eq!(completed[0].0.1, secs(25));
+        }
+    }
+}
