@@ -1438,7 +1438,7 @@ impl Timeline {
         if let Some(t) = self.snapped {
             let x = view.x(t);
             let r = Rect::from_x_y_ranges(x - 0.5..=x + 0.5, lanes.y_range());
-            clip_painter.rect_filled(r, 0.0, color::amber());
+            clip_painter.rect_filled(r, 0.0, color::light_blue());
         }
         if tracks.is_empty() {
             painter.text(
@@ -3365,6 +3365,55 @@ mod tests {
         let mut h = harness(header_states());
         h.run();
         results.add(h.try_snapshot("timeline_headers"));
+    }
+
+    /// Volume lines, fades, transitions and keys paint no Amber: DESIGN.md keeps it for
+    /// warnings, engaged Solo and hot meters.
+    #[test]
+    fn clip_decorations_paint_no_amber() {
+        use jvid_core::keyframe::{Easing, Keyframe, Value};
+        use jvid_core::model::{Transition, TransitionKind};
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut p = History::new(project(4));
+        let key = |time, v| Keyframe {
+            time,
+            value: Value::Scalar(v),
+            easing: Easing::Linear,
+        };
+        let v = p.project().sequence().tracks()[0].clips()[0].clone();
+        let mut x = v.transform.clone();
+        x.fade_in = Time(S / 2);
+        x.transition = Some(Transition {
+            kind: TransitionKind::Crossfade,
+            duration: Time(S),
+        });
+        let mut keys = v.keyframes.clone();
+        keys.insert("opacity".into(), vec![key(Time(0), 1.0), key(Time(S), 0.5)]);
+        let a = p.project().sequence().tracks()[1].clips()[0].clone();
+        let mut ak = a.keyframes.clone();
+        ak.insert("volume".into(), vec![key(Time(0), 1.0), key(Time(S), 0.5)]);
+        p.apply(Command::SetClipProps(vec![
+            (v.id, x, keys),
+            (a.id, a.transform.clone(), ak),
+        ]))
+        .unwrap();
+        let mut h = harness(p.project().clone());
+        h.state_mut().0.keys.expanded.insert(v.id);
+        h.state_mut().0.snapped = Some(Time(S));
+        for _ in 0..3 {
+            h.state_mut().0.action("zoom_in", &Project::default());
+        }
+        h.run();
+        let img = h.render().expect("render");
+        let amber = color::amber();
+        let near = |c: u8, t: u8| c.abs_diff(t) <= 12;
+        let hits = img
+            .pixels()
+            .filter(|p| near(p[0], amber.r()) && near(p[1], amber.g()) && near(p[2], amber.b()))
+            .count();
+        assert_eq!(hits, 0, "amber pixels on the timeline");
     }
 
     /// #263: a track's Audio Effects open in a popover beside its header, which stays open

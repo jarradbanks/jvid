@@ -344,7 +344,11 @@ impl Timeline {
         diamond(
             painter,
             c,
-            if open { color::amber() } else { color::ink_2() },
+            if open {
+                color::light_blue()
+            } else {
+                color::ink_2()
+            },
             open,
         );
         if resp.clicked() && !self.keys.expanded.remove(&clip.id) {
@@ -431,7 +435,11 @@ impl Timeline {
                 diamond(
                     &painter,
                     c,
-                    if on { color::amber() } else { color::ink_2() },
+                    if on {
+                        color::light_blue()
+                    } else {
+                        color::ink_2()
+                    },
                     true,
                 );
                 if r.clicked() || r.drag_started() || r.secondary_clicked() {

@@ -64,10 +64,7 @@ impl Timeline {
                 .clamp(r.left() + S / 2.0, r.right() - S / 2.0);
             if len > Time(0) {
                 let corner = pos2(edge.clamp(r.left(), r.right()), r.bottom());
-                painter.line_segment(
-                    [corner, pos2(at, r.top())],
-                    Stroke::new(1.5, color::amber()),
-                );
+                painter.line_segment([corner, pos2(at, r.top())], Stroke::new(1.5, color::ink()));
             }
             if locked {
                 continue;
@@ -78,7 +75,15 @@ impl Timeline {
             if hot {
                 ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
             }
-            painter.rect_filled(h, 1.0, if hot { color::amber() } else { color::border() });
+            painter.rect_filled(
+                h,
+                1.0,
+                if hot {
+                    color::light_blue()
+                } else {
+                    color::border()
+                },
+            );
             if resp.double_clicked() {
                 edit = Some((toggle(clip), None));
             }
