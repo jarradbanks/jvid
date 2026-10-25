@@ -16,6 +16,7 @@ jvid-media = { path = "crates/jvid-media" }
 jvid-log = { path = "crates/jvid-log" }
 jvid-jobs = { path = "crates/jvid-jobs" }
 jvid-render = { path = "crates/jvid-render" }
+jvid-transcribe = { path = "crates/jvid-transcribe" }
 suite-ui = { path = "crates/suite-ui" }
 proptest = "1.5"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }

@@ -143,6 +143,7 @@ pub struct App {
     export_dialog: crate::export::dialog::ExportDialog,
     autosave: crate::autosave::Autosave,
     queue: crate::export::queue::Queue,
+    subtitles: crate::subtitles::Subtitles,
     /// Dialogs waiting to be answered, the first one showing.
     prompts: Vec<Prompt>,
     /// The user chose to quit; the next close request goes through.
@@ -269,6 +270,7 @@ impl App {
             export_dialog: Default::default(),
             autosave: Default::default(),
             queue: Default::default(),
+            subtitles: Default::default(),
             prompts: Vec::new(),
             closing: false,
             lesson: None,
@@ -351,7 +353,8 @@ impl App {
         );
         let file = self.file_menu(ui, logo.right() + space::S12);
         let edit = self.edit_menu(ui, file + space::S4);
-        self.help_menu(ui, edit + space::S4);
+        let timeline = self.timeline_menu(ui, edit + space::S4);
+        self.help_menu(ui, timeline + space::S4);
 
         let name = self.name();
         let text_w = ui
@@ -499,6 +502,25 @@ impl App {
             self.run_action(id, true);
         }
         button.rect.right()
+    }
+
+    /// The Timeline menu, its left edge at `left`. Returns its right edge.
+    fn timeline_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
+        let button = menu_button(ui, tr!("menu.timeline"), left);
+        let mut picked = false;
+        egui::Popup::menu(&button).show(|ui| {
+            let can = self.can_generate_subtitles();
+            picked = menus::item(ui, &self.keymap, "generate_subtitles", None, can);
+        });
+        if picked {
+            self.run_action("generate_subtitles", true);
+        }
+        button.rect.right()
+    }
+
+    fn can_generate_subtitles(&self) -> bool {
+        let selected = self.timeline.selected();
+        crate::subtitles::Subtitles::can_open(self.history.project(), selected)
     }
 
     /// The Help menu, its left edge at `left`.
@@ -787,6 +809,12 @@ impl App {
             "save_as" => return self.file_action(FileAction::SaveAs),
             "import" => return self.import_dialog(),
             "import_subtitles" => return self.import_subtitles(),
+            "generate_subtitles" => {
+                if self.can_generate_subtitles() {
+                    self.subtitles.open();
+                }
+                return;
+            }
             "export" => {
                 if self.can_export() {
                     let seq = self.history.project().sequence();
@@ -1224,11 +1252,13 @@ impl eframe::App for App {
             .dock
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
-        let pressed = if self.keymap_editor.is_open() || !self.prompts.is_empty() {
-            Vec::new()
-        } else {
-            self.keymap.pressed(&ctx, timeline)
-        };
+        let pressed =
+            if self.keymap_editor.is_open() || self.subtitles.is_open() || !self.prompts.is_empty()
+            {
+                Vec::new()
+            } else {
+                self.keymap.pressed(&ctx, timeline)
+            };
         for id in pressed {
             if id == "quit" {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -1420,6 +1450,12 @@ impl eframe::App for App {
                 && let Err(e) = self.history.apply(c)
             {
                 tracing::warn!("edit failed: {e}");
+            }
+            let selected = self.timeline.selected();
+            if let Some(c) = self.subtitles.show(ui, self.history.project(), selected)
+                && let Err(e) = self.history.apply(c)
+            {
+                tracing::warn!("subtitles failed: {e}");
             }
             let (language, input) = (&mut self.language, &mut self.input_device);
             let (theme, motion) = (&mut self.theme_setting, &mut self.reduce_motion);

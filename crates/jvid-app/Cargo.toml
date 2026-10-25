@@ -13,6 +13,7 @@ jvid-core.workspace = true
 jvid-jobs.workspace = true
 jvid-log.workspace = true
 jvid-media.workspace = true
+jvid-transcribe.workspace = true
 directories.workspace = true
 tracing.workspace = true
 image.workspace = true

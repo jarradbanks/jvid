@@ -75,6 +75,7 @@ fn full(
 ) -> Result<Transcript, Error> {
     let mut p = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     p.set_language(opts.language.as_deref());
+    p.set_translate(opts.translate);
     if let Some(prompt) = &opts.initial_prompt {
         p.set_initial_prompt(prompt);
     }

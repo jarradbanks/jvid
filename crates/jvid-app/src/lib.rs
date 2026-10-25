@@ -25,6 +25,7 @@ mod relink;
 pub mod samples;
 mod scopes;
 pub mod settings_file;
+mod subtitles;
 mod timeline;
 mod transport;
 mod welcome;

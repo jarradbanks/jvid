@@ -825,7 +825,7 @@ fn look(s: &Status) -> (&'static str, Color32, &'static str) {
 }
 
 /// A neutral progress bar: Ink on Border Strong, never Blue.
-fn bar(ui: &Ui, rect: Rect, progress: f32) {
+pub(crate) fn bar(ui: &Ui, rect: Rect, progress: f32) {
     let corner = CornerRadius::same((rect.height() / 2.0) as u8);
     ui.painter()
         .rect_filled(rect, corner, color::border_strong());

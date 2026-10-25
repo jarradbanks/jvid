@@ -2250,6 +2250,7 @@ dependencies = [
  "jvid-log",
  "jvid-media",
  "jvid-render",
+ "jvid-transcribe",
  "proc-macro2",
  "rfd",
  "serde",

@@ -46,6 +46,8 @@ pub struct Options {
     /// Text whisper continues from, so its style carries over: a prompt like "Um, uh, so, like"
     /// keeps the filler words whisper otherwise drops.
     pub initial_prompt: Option<String>,
+    /// Gives the words in English, whatever language is spoken.
+    pub translate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
