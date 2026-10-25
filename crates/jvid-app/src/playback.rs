@@ -81,6 +81,8 @@ pub struct Shown {
 #[derive(Clone)]
 pub enum Pixels {
     Frame(Arc<Frame>),
+    /// A proxy or stand-in with the original asset's logical dimensions.
+    Sampled(Arc<Frame>, (u32, u32)),
     /// An imported still, upright straight RGBA, shared for its file version.
     Still(Arc<image::RgbaImage>),
     /// A solid color layer, straight RGBA.
@@ -950,7 +952,18 @@ impl Playback {
                     stand_ins.get(&key).cloned().flatten().ok_or(())?
                 }
             };
-            Ok(Some(Pixels::Frame(f)))
+            let logical = asset
+                .probe
+                .as_ref()
+                .and_then(|p| Some((p.width?, p.height?)))
+                .filter(|(w, h)| *w > 0 && *h > 0)
+                .unwrap_or((f.width, f.height));
+            let px = if logical == (f.width, f.height) {
+                Pixels::Frame(f)
+            } else {
+                Pixels::Sampled(f, logical)
+            };
+            Ok(Some(px))
         })
         .ok()?;
         if self.shown == Some((index, exact)) {
@@ -1039,7 +1052,7 @@ impl Gpu {
         let mut still_textures = Vec::new();
         for (i, ((px, _), preview)) in layers.iter().zip(&mut self.layers).enumerate() {
             let f = match px {
-                Pixels::Frame(f) => f,
+                Pixels::Frame(f) | Pixels::Sampled(f, _) => f,
                 Pixels::Still(image) => {
                     let old = self
                         .still_textures
@@ -1136,6 +1149,15 @@ impl Gpu {
                 }
             }
         }
+        self.compositor.logical_sizes = layers
+            .iter()
+            .map(|(px, _)| match px {
+                Pixels::Frame(f) => [f.width as f32, f.height as f32],
+                Pixels::Sampled(_, (w, h)) => [*w as f32, *h as f32],
+                Pixels::Still(i) => [i.width() as f32, i.height() as f32],
+                _ => [s.width as f32, s.height as f32],
+            })
+            .collect();
         self.compositor.frame = index;
         self.compositor.before = self.before;
         self.compositor.premultiplied = layers
@@ -1147,7 +1169,7 @@ impl Gpu {
             .zip(&self.layers)
             .scan(solids.iter(), |solids, ((px, t), p)| {
                 let tex = match px {
-                    Pixels::Frame(_) => p.image().expect("uploaded above"),
+                    Pixels::Frame(_) | Pixels::Sampled(_, _) => p.image().expect("uploaded above"),
                     Pixels::Still(_) | Pixels::Solid(_) | Pixels::Text(_) | Pixels::Nested(_) => {
                         solids.next().expect("made above")
                     }

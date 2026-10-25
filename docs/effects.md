@@ -30,7 +30,7 @@ fn effect(uv: vec2<f32>) -> vec4<f32> {
 
 - `// @jvid effect "Name"` names the effect in the Inspector. Required.
 - `// @param name float min..max = default`, one per parameter. Each becomes a keyframeable
-  slider in the Inspector. Only `float` is supported; `size`, `frame` and `pass_index` are
+  slider in the Inspector. Only `float` is supported; `size`, `texel_size`, `jvid_padding`, `frame` and `pass_index` are
   reserved names.
 - `// @passes N` (1 to 8, default 1) runs the effect N times, each over the last one's output.
   `fx.pass_index` says which run this is, from 0. Gaussian blur uses two: x, then y.
@@ -45,7 +45,8 @@ can read:
 | --- | --- |
 | `src` | The clip's image (`texture_2d<f32>`), straight RGBA, after earlier effects. |
 | `smp` | A linear, clamping sampler. |
-| `fx.size` | The image size in pixels (`vec2<f32>`). |
+| `fx.size` | Baseline Full-quality effect-input dimensions in logical pixels (`vec2<f32>`), stable across preview quality and proxies. |
+| `fx.texel_size` | Actual sampled texture dimensions (`vec2<f32>`), for texel-level operations. |
 | `fx.frame` | The timeline frame number (`f32`), for animated noise. |
 | `fx.pass_index` | Which `@passes` run this is (`f32`), from 0. |
 | `fx.<param>` | Each `@param`'s current value (`f32`), keyframes applied. |
@@ -75,3 +76,23 @@ For spatial sampling in a user effect, `jvid_sample(uv)` provides alpha-aware, b
 clamped sampling of `src` and returns straight RGBA. Raw `textureSample` remains available
 with its existing WGSL behaviour. Weight RGB by alpha when averaging samples and divide by
 the accumulated alpha; invisible RGB must not tint an edge. Effects still return straight RGBA.
+
+Pixel parameters (blur radius, pixelation block size and chromatic split distance) use the
+logical pixels of the **baseline Full-quality effect input**, before the clip's transform.
+For unmasked sources this is the original image size; generated layers and nested sequences
+use project dimensions. Preview quality and proxies retain that fixed reference while the
+actual texture may be smaller. Both effect dispatch branches use that same reference.
+
+Compatibility: ordinary alpha masks historically enlarged a smaller source to its full fitted
+project extent before effects. That enlarged Full-quality input remains the fixed logical
+reference when such a mask is present. For example, a 64×32 source in a 256×128 project with
+blur radius 16 keeps a 16-project-pixel radius with an ordinary mask and a 64-project-pixel
+radius without one, matching existing Full output. Effect-specific masks and secondary
+coverage masks retain their original image reference and project-space geometry. Attaching
+or removing an ordinary alpha mask can therefore retain this historical unit difference;
+quality and proxy switches never introduce an additional difference.
+
+Existing user shaders dividing pixel offsets by `fx.size` retain their Full appearance and
+now keep that spatial extent at Half/Quarter or with proxies. Use `fx.texel_size` or
+`textureDimensions(src)` when an operation intentionally addresses actual texels. Saved
+parameters are unchanged, with no project migration or per-effect unit mode.

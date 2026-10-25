@@ -12,7 +12,8 @@
 //!
 //! The file defines `fn effect(uv: vec2<f32>) -> vec4<f32>` returning straight RGBA, and may use
 //! `src` (the clip's image, straight RGBA), `smp` (a linear sampler) and the uniform `fx`, whose
-//! fields are `size` (pixels), `frame` (the timeline frame number), `pass_index` and one `f32`
+//! fields are `size` (baseline Full-quality effect-input pixels, stable across proxies and preview quality),
+//! `texel_size` (the sampled texture dimensions), `frame` (the timeline frame number), `pass_index` and one `f32`
 //! per parameter. `// @passes N` runs the effect N times, each over the last one's output, with
 //! `fx.pass_index` counting from 0: a separable blur does x then y.
 
@@ -81,7 +82,7 @@ pub fn parse(src: &str) -> Result<Shader, String> {
             if min.partial_cmp(&max) != Some(std::cmp::Ordering::Less) {
                 return Err(err("min must be less than max"));
             }
-            if ["size", "frame", "pass_index"].contains(&pname)
+            if ["size", "frame", "pass_index", "texel_size", "jvid_padding"].contains(&pname)
                 || params.iter().any(|q| q.name == pname)
             {
                 return Err(err(&format!("parameter name {pname:?} is taken")));
@@ -137,7 +138,7 @@ fn find_loop(block: &naga::Block) -> Option<naga::Span> {
 
 const PRELUDE: &str = "
 struct JvidOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
-struct JvidFx { size: vec2<f32>, frame: f32, pass_index: f32 /*params*/ }
+struct JvidFx { size: vec2<f32>, frame: f32, pass_index: f32, texel_size: vec2<f32>, jvid_padding: vec2<f32> /*params*/ }
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
 @group(0) @binding(2) var<uniform> fx: JvidFx;

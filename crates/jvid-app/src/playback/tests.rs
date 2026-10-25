@@ -57,7 +57,7 @@ fn tiny(t: Time) -> Frame {
 
 fn frame_of(px: &Pixels) -> &Frame {
     match px {
-        Pixels::Frame(f) => f,
+        Pixels::Frame(f) | Pixels::Sampled(f, _) => f,
         _ => panic!("generated"),
     }
 }
@@ -883,7 +883,7 @@ fn parked_seek_shows_a_keyframe_stand_in_then_the_exact_frame() {
     let mut next = |pb: &mut Playback| {
         let s = pb.tick(p, &mut out).expect("shown");
         assert_eq!(s.index, 150);
-        let Pixels::Frame(f) = &s.layers[0].0 else {
+        let (Pixels::Frame(f) | Pixels::Sampled(f, _)) = &s.layers[0].0 else {
             panic!("frame")
         };
         (s.exact, f.pts)
@@ -1580,6 +1580,141 @@ fn track_volume_scales_its_clips_and_undoes() {
     }
     assert!(h.undo());
     assert!(mix(h.project()) == before);
+}
+
+#[test]
+fn real_proxy_playback_keeps_original_pixel_effect_units() {
+    use jvid_core::model::Effect;
+    use jvid_media::encode::Encoder;
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    jvid_media::ffmpeg::init().unwrap();
+    let dir = std::env::temp_dir().join(format!("jvid-b07-proxy-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let original = dir.join("original.mov");
+    let small = dir.join("small.mov");
+    let preset = jvid_core::preset::builtin()
+        .into_iter()
+        .find(|p| p.name == "ProRes Master")
+        .unwrap();
+    for (path, (w, h)) in [(&original, (192, 128)), (&small, (96, 64))] {
+        let rgba = image::RgbaImage::from_fn(w, h, |x, _| {
+            image::Rgba([((x as f32 + 0.5) / w as f32 * 240.0) as u8; 4])
+        });
+        let mut rgba = rgba;
+        for p in rgba.pixels_mut() {
+            p[3] = 255;
+        }
+        let mut enc = Encoder::create(path, (w, h), FPS30, &preset).unwrap();
+        for _ in 0..3 {
+            enc.video(rgba.as_raw()).unwrap();
+        }
+        enc.finish().unwrap();
+    }
+    let proxies = Arc::new(Proxies::new(dir.clone()));
+    // Exercise the real proxy resolver and decoder with a deterministic intra-frame fixture.
+    std::fs::copy(&small, proxies.path(&original).unwrap()).unwrap();
+    let mut h = History::new(Project::default());
+    h.apply(Command::SetSettings(ProjectSettings {
+        width: 192,
+        height: 128,
+        ..Default::default()
+    }))
+    .unwrap();
+    let clip = add(
+        &mut h,
+        TrackKind::Video,
+        original.to_str().unwrap(),
+        FPS30.time_floor(3),
+    );
+    let id = h.project().assets()[0].id;
+    h.apply(Command::SetAssetProbe {
+        id,
+        probe: Some(jvid_media::probe::probe(&original).unwrap()),
+    })
+    .unwrap();
+    let transform = Transform {
+        effects: vec![Effect {
+            shader: "pixelate".into(),
+            params: [("block".into(), 24.0)].into(),
+            enabled: true,
+            mask: None,
+        }],
+        ..Default::default()
+    };
+    h.apply(Command::SetClipProps(vec![(
+        clip,
+        transform,
+        Default::default(),
+    )]))
+    .unwrap();
+    let shader = jvid_render::effect::parse(include_str!(
+        "../../../jvid-render/src/effects/pixelate.wgsl"
+    ))
+    .unwrap();
+    let mut gpu = Gpu::new(&device);
+    gpu.compositor
+        .set_effect(&device, "pixelate", Some(&shader))
+        .unwrap();
+    gpu.effects = (Some(0), ["pixelate".into()].into());
+    gpu.pin_effects = true;
+    let mut pb = Playback::from_proxies(DEFAULT_BUDGET, proxies.clone());
+    let mut reference = None;
+    for proxy in [false, true] {
+        proxies.set_enabled(proxy);
+        pb.reset_session();
+        let deadline = Instant::now() + HUNG;
+        let shown = loop {
+            if let Some(s) = pb.park(h.project())
+                && s.exact
+            {
+                break s;
+            }
+            assert!(Instant::now() < deadline, "proxy decode timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        if proxy {
+            assert!(matches!(shown.layers[0].0, Pixels::Sampled(_, (192, 128))));
+        }
+        for quality in [1, 2, 4] {
+            let rgba = composite::read_back(
+                &device,
+                &queue,
+                gpu.draw(&device, &queue, h.project().settings(), quality, &shown),
+            );
+            let output = image::RgbaImage::from_raw(192 / quality, 128 / quality, rgba).unwrap();
+            let row: Vec<_> = (0..output.width())
+                .map(|x| output.get_pixel(x, output.height() / 2)[0])
+                .collect();
+            let (mut blocks, mut changing) = (1, false);
+            for p in row.windows(2) {
+                let next = p[0].abs_diff(p[1]) > 3;
+                blocks += usize::from(next && !changing);
+                changing = next;
+            }
+            assert_eq!(blocks, 8, "proxy={proxy} quality={quality}");
+            if !proxy && quality == 1 {
+                reference = Some(output.clone());
+            }
+            for block in 0..8 {
+                let x = block * 24 + 12;
+                assert!(
+                    output.get_pixel(x / quality, output.height() / 2)[0]
+                        .abs_diff(reference.as_ref().unwrap().get_pixel(x, 64)[0])
+                        <= 5
+                );
+            }
+        }
+    }
+    assert_eq!(
+        h.project().sequence().tracks()[0].clips()[0]
+            .transform
+            .effects[0]
+            .params["block"],
+        24.0
+    );
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
