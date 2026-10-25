@@ -10,7 +10,7 @@ use jvid_core::history::Command;
 use jvid_core::keyframe::{Easing, Keyframe, Value};
 use jvid_core::model::{Clip, ClipId, Project, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
-use suite_ui::tokens::color;
+use suite_ui::themes::DARK;
 
 use crate::i18n::tr;
 
@@ -182,7 +182,7 @@ pub fn show(
     p.rect_stroke(
         screen,
         0.0,
-        Stroke::new(1.0, color::amber()),
+        Stroke::new(1.0, DARK.ink),
         egui::StrokeKind::Inside,
     );
     None

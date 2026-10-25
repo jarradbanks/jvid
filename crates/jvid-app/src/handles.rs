@@ -308,15 +308,12 @@ pub fn edit_text(ui: &mut Ui, project: &Project, t: Time, frame: Rect) -> Option
                 at([x1, bottom]),
                 at([x0, bottom]),
             ];
-            let fill = color::amber().gamma_multiply(0.35);
+            let fill = DARK.light_blue.gamma_multiply(0.35);
             p.add(egui::Shape::convex_polygon(q, fill, Stroke::NONE));
         }
     }
     let [x, top, bottom] = carets[a.min(carets.len() - 1)];
-    p.line_segment(
-        [at([x, top]), at([x, bottom])],
-        Stroke::new(2.0, color::amber()),
-    );
+    p.line_segment([at([x, top]), at([x, bottom])], Stroke::new(2.0, DARK.ink));
 
     (typing.content != base.content).then(|| {
         let text = Text {
@@ -652,6 +649,16 @@ pub(crate) mod tests {
         assert_eq!(keys(&harness), before);
     }
 
+    fn has_amber(img: &image::RgbaImage) -> bool {
+        let amber = color::amber();
+        img.pixels().any(|p| {
+            [amber.r(), amber.g(), amber.b()]
+                .iter()
+                .zip(p.0)
+                .all(|(a, b)| a.abs_diff(b) < 40)
+        })
+    }
+
     #[test]
     fn the_overlay_draws_no_amber() {
         if !suite_ui::test_support::gpu() {
@@ -666,14 +673,7 @@ pub(crate) mod tests {
             });
         harness.run();
         let img = harness.render().unwrap();
-        let amber = color::amber();
-        let near = |p: &image::Rgba<u8>| {
-            [amber.r(), amber.g(), amber.b()]
-                .iter()
-                .zip(p.0)
-                .all(|(a, b)| a.abs_diff(b) < 40)
-        };
-        assert!(!img.pixels().any(near), "amber in the overlay");
+        assert!(!has_amber(&img), "amber in the overlay");
         // The Ink outline is drawn.
         assert!(img.pixels().any(|p| p.0[..3].iter().all(|c| *c > 200)));
     }
@@ -912,6 +912,12 @@ pub(crate) mod tests {
             harness.run();
         }
         assert_eq!(content(harness.state()), "Title 2", "the text updates live");
+        if suite_ui::test_support::gpu() {
+            harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Home);
+            harness.run();
+            let img = harness.render().unwrap();
+            assert!(!has_amber(&img), "amber in the caret or selection");
+        }
         harness.key_press(egui::Key::Escape);
         harness.run();
         assert!(!editing(&harness.ctx), "Esc commits");
