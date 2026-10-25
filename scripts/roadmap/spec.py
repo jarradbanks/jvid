@@ -1917,3 +1917,9 @@ I("tutorial-next", "Tutorials: Next button, tighter spotlight, Space fix", None,
       "Test: after clicking Show Me, pressing Space toggles playback and doesn't click Show Me again",
       "Test: every lesson step that names an Inspector control anchors to a rect smaller than the Inspector panel",
       "The existing every-lesson Show Me test passes using Next"])
+
+I("dialog-height", "Confirm dialogs stretch to full window height", None, ["suite-ui"], "S", [], labels=["later", "bug"],
+  summary="Owner report (2026-10-25): Unsaved Changes opens as a tall empty panel with the buttons halfway down. In suite-ui dialog.rs the button row is ui.with_layout(Layout::right_to_left(Align::Center)) inside the auto-sized Modal, so it claims all the available height.",
+  scope=["The button row takes only its own height (for example, allocate_ui_with_layout with a zero-height size, or Align::Min); every Dialog, long or short, hugs its content"],
+  ac=["Test: in a tall harness (1920x1080), a short Dialog's rect is under 200 px high and its buttons sit directly below the body",
+      "Existing dialog snapshots are updated, and every Dialog caller still renders"])

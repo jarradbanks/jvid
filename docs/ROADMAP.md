@@ -531,6 +531,7 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#413](https://github.com/jarradbanks/jvid/issues/413) **Fonts: bundle the common CJK characters** — Owner's call (2026-10-25): every PR that adds UI strings regenerates the CJK font subsets, binary files that conflict between parallel PRs (6 so far). Bundling the common characters up front makes the subsets rarely change, at about 3-4 MB more in the app.
 - [#415](https://github.com/jarradbanks/jvid/issues/415) **Markers: own lane above the ruler, drag to move** — Owner's request (2026-10-25): markers get their own slim bar above the timeline ruler instead of sitting in it, and you can drag them to adjust.
 - [#417](https://github.com/jarradbanks/jvid/issues/417) **Tutorials: Next button, tighter spotlight, Space fix** — Owner's tutorial feedback (2026-10-25): steps jump ahead on their own, a focused card button eats Space, the spotlight hides what a step needs, and Inspector steps light up the whole panel.
+- [#418](https://github.com/jarradbanks/jvid/issues/418) **Confirm dialogs stretch to full window height** — Owner report (2026-10-25): Unsaved Changes opens as a tall empty panel with the buttons halfway down. In suite-ui dialog.rs the button row is ui.with_layout(Layout::right_to_left(Align::Center)) inside the auto-sized Modal, so it claims all the available height.
 
 ---
 
