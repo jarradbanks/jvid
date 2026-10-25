@@ -1,0 +1,7 @@
+{
+  "leptonica/1.87.0": {
+    "file": "leptonica-1.87.0.txt",
+    "source": "https://raw.githubusercontent.com/DanBloomberg/leptonica/13275a278eb55b5746e33f95fbf5a2c8f604b3ab/leptonica-license.txt",
+    "sha256": "87829abb5bbb00b55a107365da89e9a33f86c4250169e5a1e5588505be7d5806"
+  }
+}

@@ -87,8 +87,8 @@ pub struct Shown {
 #[derive(Clone)]
 pub enum Pixels {
     Frame(Arc<Frame>),
-    /// A proxy or stand-in with the original asset's logical dimensions.
-    Sampled(Arc<Frame>, (u32, u32)),
+    /// A decoded image with different display dimensions (non-square pixels or a proxy).
+    Sampled(Arc<Frame>, (f32, f32)),
     /// An imported still, upright straight RGBA, shared for its file version.
     Still(Arc<image::RgbaImage>),
     /// A solid color layer, straight RGBA.
@@ -134,6 +134,22 @@ where
         } else {
             frame(asset, &layer)?
         };
+        let px = px.map(|px| match px {
+            Pixels::Frame(f) | Pixels::Sampled(f, _) => {
+                let size = asset
+                    .probe
+                    .as_ref()
+                    .and_then(|p| p.display_size())
+                    .map(|s| (s[0] as f32, s[1] as f32))
+                    .unwrap_or((f.width as f32, f.height as f32));
+                if size == (f.width as f32, f.height as f32) {
+                    Pixels::Frame(f)
+                } else {
+                    Pixels::Sampled(f, size)
+                }
+            }
+            px => px,
+        });
         out.extend(px.map(|px| (px, layer.transform)));
     }
     Ok(out)
@@ -1018,18 +1034,7 @@ impl Playback {
                     stand_ins.get(&key).cloned().flatten().ok_or(())?
                 }
             };
-            let logical = asset
-                .probe
-                .as_ref()
-                .and_then(|p| Some((p.width?, p.height?)))
-                .filter(|(w, h)| *w > 0 && *h > 0)
-                .unwrap_or((f.width, f.height));
-            let px = if logical == (f.width, f.height) {
-                Pixels::Frame(f)
-            } else {
-                Pixels::Sampled(f, logical)
-            };
-            Ok(Some(px))
+            Ok(Some(Pixels::Frame(f)))
         })
         .ok()?;
         if self.shown == Some((index, exact)) {
@@ -1220,7 +1225,7 @@ impl Gpu {
             .iter()
             .map(|(px, _)| match px {
                 Pixels::Frame(f) => [f.width as f32, f.height as f32],
-                Pixels::Sampled(_, (w, h)) => [*w as f32, *h as f32],
+                Pixels::Sampled(_, (w, h)) => [*w, *h],
                 Pixels::Still(i) => [i.width() as f32, i.height() as f32],
                 _ => [s.width as f32, s.height as f32],
             })

@@ -5,7 +5,6 @@ use jvid_core::model::{Mask, MaskMode, MaskShape};
 use wgpu::util::DeviceExt;
 
 use crate::composite::FORMAT;
-use crate::preview::place;
 
 // shortcut: fixed uniform arrays, so masks past these are dropped; move the vertices to a
 // storage buffer if real paths need more.
@@ -157,8 +156,10 @@ impl Masker {
     }
 
     /// `tex` with `masks` applied into `encoder`, or `None` when none draws. The image fits a
-    /// `frame`-sized project drawn `target` pixels big; a smaller image, such as a solid's, is
-    /// masked at its drawn size so edges stay sharp. `slot` (the layer index) picks the pooled
+    /// `frame`-sized project drawn `target` pixels big, with `fitted` display pixels as its
+    /// mask coordinate system. Texture dimensions only determine sampling/allocation; SAR,
+    /// source rotation and reduced decoding must not change the stored geometry. A smaller
+    /// image is masked at its drawn size so edges stay sharp. `slot` picks the pooled
     /// texture and uniform. With `cover`, the output is the coverage alone, in alpha over white.
     #[allow(clippy::too_many_arguments)]
     pub fn apply(
@@ -169,20 +170,24 @@ impl Masker {
         slot: usize,
         tex: &wgpu::Texture,
         masks: &[Mask],
-        (frame, target): ([f32; 2], [f32; 2]),
+        (fitted, frame, target): ([f32; 2], [f32; 2], [f32; 2]),
         cover: bool,
     ) -> Option<wgpu::Texture> {
         if !masks.iter().any(|m| m.enabled) {
             return None;
         }
         let image = [tex.width() as f32, tex.height() as f32];
-        let [_, _, fw, fh] = place(image, [0.0, 0.0, frame[0], frame[1]], None);
-        let k = (fw * target[0] / frame[0] / image[0]).max(1.0);
+        let k = (fitted[0] * target[0] / frame[0] / image[0])
+            .max(fitted[1] * target[1] / frame[1] / image[1])
+            .max(1.0);
         let (w, h) = ((image[0] * k).round() as u32, (image[1] * k).round() as u32);
         // Fitted pixels per output pixel: the mask texture's, or the drawn frame's when that's
         // coarser (a half-size preview, or a 4K clip in a 1080 project).
-        let aa = (fw / w as f32).max(frame[0] / target[0]);
-        let data = uniform(masks, [fw, fh], aa)?;
+        let aa = (fitted[0] / w as f32)
+            .max(fitted[1] / h as f32)
+            .max(frame[0] / target[0])
+            .max(frame[1] / target[1]);
+        let data = uniform(masks, fitted, aa)?;
         if self.pool.len() <= slot {
             self.pool.resize_with(slot + 1, || None);
         }

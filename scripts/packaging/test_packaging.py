@@ -2,10 +2,13 @@
 """Contract, archive containment, and corruption-detection regressions."""
 import io
 import json
+import sys
+import stat
 from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 import build
@@ -40,10 +43,80 @@ class PackagingTests(unittest.TestCase):
             stage = root / "package"
             stage.mkdir()
             providers = build.native_licenses(stage, [source], "macos-aarch64", None)
-            self.assertEqual(providers, [str(keg)])
+            self.assertEqual(providers, [str(keg.resolve())])
             copied = stage / "runtime-licenses/leptonica"
             self.assertTrue((copied / "INSTALL_RECEIPT.json").is_file())
             self.assertIn('Copyright and distribution terms', '\n'.join(p.read_text() for p in copied.iterdir()))
+            # Actual Homebrew bottle omits this file: use the reviewed version-pinned
+            # upstream text and retain its source/checksum, never silently omit it.
+            import shutil
+            shutil.rmtree(stage / "runtime-licenses")
+            (keg / "leptonica-license.txt").unlink()
+            build.native_licenses(stage, [source], "macos-aarch64", None)
+            self.assertTrue((copied / "license-source.json").is_file())
+            self.assertTrue(list(copied.glob('*-leptonica-1.87.0.txt')))
+
+    def test_macos_recovers_reuse_text_from_verified_source_and_rejects_corruption(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            keg = root / "glib/2.88.3"
+            (keg / ".brew").mkdir(parents=True)
+            archive = root / "glib.tar.gz"
+            with tarfile.open(archive, "w:gz") as out:
+                data = b"GNU LGPL source license text"
+                member = tarfile.TarInfo("glib/LICENSES/LGPL-2.1-or-later.txt")
+                member.size = len(data)
+                out.addfile(member, io.BytesIO(data))
+                link = tarfile.TarInfo("glib/COPYING")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "LICENSES/LGPL-2.1-or-later.txt"
+                out.addfile(link)
+            (keg / ".brew/glib.rb").write_text('url "https://example.invalid/glib.tar.gz"\nsha256 "' + build.sha256(archive) + '"\n')
+            dest = root / "notices"
+            dest.mkdir()
+            import shutil
+            with patch('build.urllib.request.urlretrieve', side_effect=lambda url, path: shutil.copy2(archive, path)):
+                build.recover_homebrew_licenses(keg, dest)
+                self.assertIn('GNU LGPL source license text', (dest / 'source-1-COPYING').read_text())
+                self.assertTrue((dest / 'license-source.json').is_file())
+                archive.write_bytes(b'corrupted source download')
+                with self.assertRaisesRegex(RuntimeError, 'checksum mismatch'):
+                    build.recover_homebrew_licenses(keg, dest)
+
+    @unittest.skipIf(sys.platform == "win32", "Mac bundle symlinks are tested on macOS/Linux")
+    def test_macos_resources_preserve_beside_executable_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bin_dir = root / "jvid.app/Contents/MacOS"
+            bin_dir.mkdir(parents=True)
+            build.marker(bin_dir, "macos-dmg", False)
+            self.assertEqual((bin_dir / "jvid-distribution").read_text(), "macos-dmg\n")
+            self.assertFalse((bin_dir / "jvid.portable").exists())
+            build.marker(bin_dir, "macos-portable", True)
+            self.assertEqual((bin_dir / "jvid-distribution").read_text(), "macos-portable\n")
+            self.assertTrue((bin_dir / "jvid.portable").is_file())
+            self.assertTrue((bin_dir / "jvid.portable").is_symlink())
+            self.assertEqual((bin_dir / "jvid.portable").resolve().parent.name, "Resources")
+
+    @unittest.skipIf(sys.platform == "win32", "Mac ZIP symlinks are tested on macOS/Linux")
+    def test_zip_preserves_internal_resource_links_and_rejects_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "app.zip"
+            link = zipfile.ZipInfo("app/Contents/MacOS/jvid-distribution")
+            link.create_system = 3
+            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+            with zipfile.ZipFile(archive, "w") as out:
+                out.writestr("app/Contents/Resources/jvid-distribution", "macos-portable\n")
+                out.writestr(link, "../Resources/jvid-distribution")
+            smoke.extract(archive, root / "output")
+            extracted = root / "output/app/Contents/MacOS/jvid-distribution"
+            self.assertTrue(extracted.is_symlink())
+            self.assertEqual(extracted.read_text(), "macos-portable\n")
+            with zipfile.ZipFile(archive, "w") as out:
+                out.writestr(link, "../../../../outside")
+            with self.assertRaisesRegex(RuntimeError, "unsafe ZIP symlink"):
+                smoke.extract(archive, root / "unsafe")
 
     def test_archives_cannot_escape_extraction_root(self):
         with tempfile.TemporaryDirectory() as tmp:

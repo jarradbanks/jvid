@@ -18,6 +18,25 @@ pub const MAX_SPEED: i32 = 8;
 /// How far ahead of the clock audio is queued, in sample frames (50ms).
 const LEAD: u64 = SAMPLE_RATE as u64 / 20;
 
+/// Remembers the pointer's selected frame independently of the advancing playback position.
+/// Resubmitting a held target would flush the output and replay the start of that frame.
+#[derive(Clone, Default)]
+pub(crate) struct SeekGesture {
+    target: Option<Time>,
+}
+
+impl SeekGesture {
+    pub(crate) fn is_active(&self) -> bool {
+        self.target.is_some()
+    }
+
+    /// A changed target seeks once. `None` ends the gesture so the next press can seek again.
+    pub(crate) fn update(&mut self, target: Option<Time>) -> Option<Time> {
+        let previous = std::mem::replace(&mut self.target, target);
+        target.filter(|t| Some(*t) != previous)
+    }
+}
+
 pub struct Transport {
     /// Shuttle speed: 0 stopped, 1 play, negative reverse.
     speed: i32,
@@ -416,6 +435,151 @@ pub(crate) mod tests {
                     );
                 }
                 assert!(src.buf.chunks.len() <= AHEAD);
+            }
+        }
+    }
+
+    #[test]
+    fn obsolete_seek_generations_cannot_fill_or_advance_current_buffer() {
+        let (seek, seeks) = channel();
+        let (tx, chunks) = sync_channel(AHEAD);
+        let mut source = AudioSource {
+            feeder: Some(Feeder {
+                seek,
+                chunks,
+                generation: 0,
+                thread: None,
+            }),
+            buf: AudioBuffer::default(),
+        };
+        let start = 24_019;
+        source.fill(start, &mut []);
+        let (obsolete, _) = seeks.recv().unwrap();
+        source.fill(144_031, &mut []);
+        source.fill(start, &mut []);
+        let _ = seeks.recv().unwrap();
+        let (current, at) = seeks.recv().unwrap();
+        assert_eq!(at, start);
+        assert_ne!(current, obsolete);
+        // Tag generations with distinct sample-index ramps, even when their timestamps
+        // overlap. A periodic tone could hide incorrectly accepted obsolete PCM here.
+        let tagged = |tag: i64| Chunk {
+            start,
+            samples: (0..800).map(|i| (tag + i / 2) as f32).collect(),
+        };
+        tx.send((obsolete, tagged(100_001))).unwrap();
+        let mut got = [1.0; 800];
+        source.fill(start, &mut got);
+        assert_eq!(got, [0.0; 800], "obsolete PCM must not reach output");
+        assert_eq!(
+            source.buf.end(),
+            start,
+            "obsolete timestamps must not signal readiness"
+        );
+        tx.send((current, tagged(start + 1))).unwrap();
+        source.fill(start, &mut got);
+        for (i, pair) in got.as_chunks::<2>().0.iter().enumerate() {
+            assert_eq!(*pair, [(start + i as i64 + 1) as f32; 2]);
+        }
+    }
+
+    /// Real decoder/resampler and asynchronous feeder coverage, with output and DSP checked
+    /// against an offline reader. Rapid obsolete requests must settle at the latest position.
+    #[test]
+    fn repeated_seeks_settle_to_reference_audio_with_and_without_effects() {
+        let Some(dir) = jvid_media::test_media::corpus() else {
+            return;
+        };
+        jvid_media::ffmpeg::init().unwrap();
+        for file in ["tone-1khz-44k.wav", "tone-1khz.wav", "tone-1khz.m4a"] {
+            let path = dir.join(file);
+            let mut decoder = AudioDecoder::open(&path, 0).unwrap();
+            let mut reference = Vec::new();
+            while let Some(chunk) = decoder.next_chunk().unwrap() {
+                reference.resize(chunk.start as usize * 2, 0.0);
+                reference.extend(chunk.samples);
+            }
+            for effects in [false, true] {
+                let mut params = jvid_core::model::AudioFx::default();
+                params.high_pass.freq = 100.0;
+                params.eq.bands[5] = 3.0;
+                params.compressor.ratio = 4.0;
+                params.noise_reduction.amount = 25.0;
+                params.high_pass.enabled = effects;
+                params.eq.enabled = effects;
+                params.compressor.enabled = effects;
+                params.noise_reduction.enabled = effects;
+                let mut source = AudioSource::open(&path, true);
+                let mut fx = jvid_audio::Fx::default();
+                let mut expected_fx = jvid_audio::Fx::default();
+                let fake = Fake::default();
+                let mut out = Output::new(Box::new(fake.clone()), None);
+                let mut transport = Transport::new(secs(5), FPS30);
+                transport.toggle(out.clock());
+                // Distinct phases as well as times: integral 1kHz periods can conceal
+                // wrong-position PCM when comparing these stationary tone fixtures.
+                for target in [96_007, 24_019, 144_031, 48_041] {
+                    // Queue several jumps without waiting for the decoder, as during a drag.
+                    for obsolete in [192_011, 12_023, 168_037] {
+                        source.fill(obsolete, &mut [0.0; 1600]);
+                    }
+                    out.flush();
+                    transport.seek(
+                        Time(target * FLICKS_PER_SECOND / SAMPLE_RATE as i64),
+                        out.clock(),
+                    );
+                    let history = if params.is_default() {
+                        0
+                    } else {
+                        jvid_audio::Fx::PREROLL as i64
+                    };
+                    let latency = jvid_audio::Fx::latency(&params) as i64;
+                    let mut expected = VecDeque::new();
+                    for step in 0..12 {
+                        let start = transport.next_sample;
+                        let from = start - if step == 0 { history } else { 0 };
+                        // Hold the device clock while decoding catches up; no timing-dependent
+                        // sleeps determine correctness or allow an obsolete generation to pass.
+                        let deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(3);
+                        loop {
+                            source.fill(from, &mut []);
+                            if source.buf.end() >= start + LEAD as i64 + latency {
+                                break;
+                            }
+                            assert!(
+                                std::time::Instant::now() < deadline,
+                                "{file}: feeder timed out"
+                            );
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                        transport.tick(&mut out, &mut |start, buf| {
+                            fx.render(&params, start, buf, |at, b| source.fill(at, b));
+                            let mut want = vec![0.0; buf.len()];
+                            expected_fx.render(&params, start, &mut want, |at, b| {
+                                b.copy_from_slice(
+                                    &reference[at as usize * 2..at as usize * 2 + b.len()],
+                                );
+                            });
+                            expected.extend(want);
+                        });
+                        for got in fake.pull(800) {
+                            let want = expected.pop_front().unwrap();
+                            assert!(
+                                (got - want).abs() < 0.003,
+                                "{file}, effects={effects}, target={target}, step={step}: {got} vs {want}"
+                            );
+                        }
+                        assert_eq!(transport.speed(), 1);
+                        assert_eq!(
+                            transport.position(out.clock()),
+                            Time(
+                                (target + (step + 1) * 800) * FLICKS_PER_SECOND
+                                    / SAMPLE_RATE as i64
+                            )
+                        );
+                    }
+                }
             }
         }
     }

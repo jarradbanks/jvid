@@ -125,8 +125,13 @@ not an authenticity or trust signal.
 | `jvid-{version}-macos-aarch64-portable.zip` | `macos-aarch64` | `macos-portable` | `jvid-{version}-macos-aarch64/jvid.app` and inventory; both markers in `Contents/MacOS` |
 | `jvid-{version}-linux-x86_64-portable.tar.gz` | `linux-x86_64` | `linux-portable` | `jvid-{version}-linux-x86_64/{AppRun,bin/jvid-app,lib/}`; both markers in `bin` |
 
-macOS libraries live in `jvid.app/Contents/Frameworks`, with executable and notices
-in `Contents/MacOS`. Linux notices are in `bin`, beside the executable. Every
+macOS libraries live in `jvid.app/Contents/Frameworks`, the executable in
+`Contents/MacOS`, and non-code data in `Contents/Resources`. Internal symlinks keep
+`Contents/MacOS/THIRD-PARTY-NOTICES.txt`, `jvid-distribution`, and (portable only)
+`jvid.portable` readable at the agreed beside-executable paths. Distribution-marker
+readers follow those links normally; portable data still lives outside the app.
+The ZIP uses `ditto` to preserve links and bundle metadata. Linux notices are in
+`bin`, beside the executable. Every
 package includes `THIRD-PARTY-NOTICES.txt`, jvid's licenses, runtime license texts,
 `SOURCE-INFO.txt`, installation instructions and a `package-files.json` inventory.
 Portable data is never part of an archive's payload or inventory.
@@ -185,7 +190,14 @@ use dynamically linked **GPL FFmpeg with x264/x265**, and the explicit
 `gpl-ffmpeg` feature. The separate LGPL developer build option is unchanged.
 There is no silent codec fallback and no nonfree FFmpeg variant. Runtime-specific
 license/provenance files are collected in addition to the generated Rust/font/
-Whisper/sample notices. Their full corresponding source and build scripts must
+Whisper/sample notices. Where a Homebrew bottle omits a nonstandard upstream
+license (currently Leptonica 1.87.0), the version-pinned, checksum-checked text in
+`packaging/licenses` is included with its exact upstream source URL; an unknown
+missing notice is recovered from the exact source archive URL and SHA-256 in the
+bottle's retained `.brew` formula. Archive paths are read only to recover notice
+texts (including REUSE license directories and COPYING symlink targets); source
+is never executed. A missing formula, checksum mismatch or absent source notices
+fails assembly. Their full corresponding source and build scripts must
 be reviewed before public distribution. Native package-manager provenance and
 upstream links alone are not treated as the completed corresponding-source offer.
 
