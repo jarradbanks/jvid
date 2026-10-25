@@ -9,7 +9,7 @@ use ffmpeg_next::color::{Range, Space};
 use ffmpeg_next::format::{self, Pixel};
 use ffmpeg_next::software::scaling;
 use ffmpeg_next::{Error, Rational, decoder, frame, media};
-use jvid_core::hdr::Hdr;
+use jvid_core::hdr::{BT2020_TO_BT709, Hdr, nits_to_pq, pq_to_nits};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use jvid_jobs::{Handle, Priority};
 
@@ -27,6 +27,105 @@ pub struct Frame {
     /// PQ or HLG from an HDR decoder: samples are 10-bit little-endian `u16`s and the matrix is
     /// BT.2020, whatever `bt709` says.
     pub hdr: Option<Hdr>,
+}
+
+impl Frame {
+    /// The SDR viewer image used by proxies and posters. Mirrors preview.rs/convert.wgsl:
+    /// metadata selects BT.601/709 and range, or BT.2020 with the existing PQ/HLG BT.2390
+    /// view transform. HDR stays 10-bit until this deliberate tone map. SDR planes are sampled
+    /// bilinearly; HDR samples nearest, as in the viewer's two-byte texture sampler.
+    pub fn view_rgba(&self, (w, h): (u32, u32)) -> image::RgbaImage {
+        let (fw, fh) = (self.width as usize, self.height as usize);
+        let (cw, ch) = (fw.div_ceil(2), fh.div_ceil(2));
+        let sample = |plane: usize, pw: usize, ph: usize, x: u32, y: u32| {
+            let p = &self.planes[plane];
+            if self.hdr.is_some() {
+                let sx = (((x as f32 + 0.5) * pw as f32 / w as f32) as usize).min(pw - 1);
+                let sy = (((y as f32 + 0.5) * ph as f32 / h as f32) as usize).min(ph - 1);
+                let i = (sy * pw + sx) * 2;
+                // Exactly the shader's `deep`: a 10-bit code over four in 8-bit code units.
+                return u16::from_le_bytes([p[i], p[i + 1]]) as f32 / 4.0;
+            }
+            let sx = ((x as f32 + 0.5) * pw as f32 / w as f32 - 0.5).max(0.0);
+            let sy = ((y as f32 + 0.5) * ph as f32 / h as f32 - 0.5).max(0.0);
+            let (x0, y0) = (sx as usize, sy as usize);
+            let (x1, y1) = ((x0 + 1).min(pw - 1), (y0 + 1).min(ph - 1));
+            let (tx, ty) = (sx.fract(), sy.fract());
+            let lerp = |a: u8, b: u8, t| a as f32 * (1.0 - t) + b as f32 * t;
+            let a = lerp(p[y0 * pw + x0], p[y0 * pw + x1], tx);
+            let b = lerp(p[y1 * pw + x0], p[y1 * pw + x1], tx);
+            a * (1.0 - ty) + b * ty
+        };
+        let (kr, kb) = if self.hdr.is_some() {
+            (0.2627, 0.0593)
+        } else if self.bt709 {
+            (0.2126, 0.0722)
+        } else {
+            (0.299, 0.114)
+        };
+        let kg = 1.0 - kr - kb;
+        image::RgbaImage::from_fn(w, h, |x, y| {
+            let (y, u, v) = (
+                sample(0, fw, fh, x, y),
+                sample(1, cw, ch, x, y),
+                sample(2, cw, ch, x, y),
+            );
+            let (y, u, v) = if self.full_range {
+                (y / 255.0, (u - 128.0) / 255.0, (v - 128.0) / 255.0)
+            } else {
+                ((y - 16.0) / 219.0, (u - 128.0) / 224.0, (v - 128.0) / 224.0)
+            };
+            let mut rgb = [
+                y + 2.0 * (1.0 - kr) * v,
+                y - 2.0 * kb * (1.0 - kb) / kg * u - 2.0 * kr * (1.0 - kr) / kg * v,
+                y + 2.0 * (1.0 - kb) * u,
+            ]
+            .map(|c| c.clamp(0.0, 1.0));
+            if let Some(hdr) = self.hdr {
+                rgb = view_hdr(rgb, hdr);
+            }
+            let [r, g, b] = rgb.map(|c| (c * 255.0).round() as u8);
+            image::Rgba([r, g, b, 255])
+        })
+    }
+}
+
+/// CPU mirror of convert.wgsl's HDR view transform. GPU read-back regressions compare the
+/// original, proxy and poster paths so a future shader change cannot silently diverge here.
+fn view_hdr(mut signal: [f32; 3], hdr: Hdr) -> [f32; 3] {
+    if hdr == Hdr::Hlg {
+        let scene = signal.map(|e| {
+            if e <= 0.5 {
+                e * e / 3.0
+            } else {
+                (((e - 0.559_910_7) / 0.178_832_77).exp() + 0.284_668_92) / 12.0
+            }
+        });
+        let ys = 0.2627 * scene[0] + 0.6780 * scene[1] + 0.0593 * scene[2];
+        signal = scene.map(|c| nits_to_pq(1000.0 * ys.max(1e-6).powf(0.2) * c));
+    }
+    // Same constants as the existing shader: BT.2390, 1000 cd/m² source, 203 cd/m² SDR peak.
+    let linear = signal.map(|pq| {
+        let e = (pq / 0.751_827_1).min(1.0);
+        let knee = 0.658_555_4;
+        let t = (e - knee) / (1.0 - knee);
+        let e = if e < knee {
+            e
+        } else {
+            (2.0 * t.powi(3) - 3.0 * t.powi(2) + 1.0) * knee
+                + (t.powi(3) - 2.0 * t.powi(2) + t) * (1.0 - knee)
+                + (-2.0 * t.powi(3) + 3.0 * t.powi(2)) * 0.772_370_2
+        };
+        pq_to_nits(e * 0.751_827_1) / 203.0
+    });
+    BT2020_TO_BT709.map(|row| {
+        row.iter()
+            .zip(linear)
+            .map(|(m, c)| m * c)
+            .sum::<f32>()
+            .clamp(0.0, 1.0)
+            .powf(1.0 / 2.4)
+    })
 }
 
 /// One open file. Not shared: take one from a [`DecoderPool`] per request.
@@ -308,12 +407,13 @@ fn to_i420(f: &frame::Video, hdr: bool) -> Result<Frame, Error> {
         Space::Unspecified => h > 576,
         _ => true,
     };
-    // swscale turns the JPEG (yuvj) formats into limited range; other formats keep their values.
+    // YUVJ formats are full range even when the range field is unspecified. Explicitly keep
+    // that range during subsampling/bit-depth conversion instead of swscale's default squeeze.
     let jpeg = matches!(
         f.format(),
-        Pixel::YUVJ422P | Pixel::YUVJ444P | Pixel::YUVJ440P | Pixel::YUVJ411P
+        Pixel::YUVJ420P | Pixel::YUVJ422P | Pixel::YUVJ444P | Pixel::YUVJ440P | Pixel::YUVJ411P
     );
-    let full_range = f.color_range() == Range::JPEG && !jpeg;
+    let full_range = f.color_range() == Range::JPEG || jpeg;
     // yuvj420p is I420 already, just tagged full range.
     let f = if f.format() == want || hdr.is_none() && f.format() == Pixel::YUVJ420P {
         f
@@ -321,6 +421,7 @@ fn to_i420(f: &frame::Video, hdr: bool) -> Result<Frame, Error> {
         // shortcut: a scaler per frame (it isn't Send, so can't live in the pooled decoder);
         // cache one per decode call if non-4:2:0 sources (ProRes) show up hot in profiles.
         let mut sws = scaling::Context::get(f.format(), w, h, want, w, h, scaling::Flags::POINT)?;
+        preserve_color(&mut sws, bt709, full_range, hdr.is_some())?;
         let mut out = frame::Video::empty();
         sws.run(f, &mut out)?;
         converted = out;
@@ -348,6 +449,52 @@ fn to_i420(f: &frame::Video, hdr: bool) -> Result<Frame, Error> {
         full_range,
         hdr,
     })
+}
+
+/// Subsampling and format changes must preserve the matrix/range described by Frame. RGB
+/// inputs are converted with that same matrix; YUV inputs keep their source coefficients.
+#[allow(unsafe_code)]
+fn preserve_color(
+    s: &mut scaling::Context,
+    bt709: bool,
+    full: bool,
+    hdr: bool,
+) -> Result<(), Error> {
+    let space = if hdr {
+        ffmpeg_next::ffi::SWS_CS_BT2020
+    } else if bt709 {
+        ffmpeg_next::ffi::SWS_CS_ITU709
+    } else {
+        ffmpeg_next::ffi::SWS_CS_ITU601
+    };
+    // SAFETY: the exclusively borrowed context is live. FFmpeg owns the static coefficient
+    // table and copies its four entries; no borrowed Rust storage escapes this call.
+    let result = unsafe {
+        let coefficients = ffmpeg_next::ffi::sws_getCoefficients(space);
+        ffmpeg_next::ffi::sws_setColorspaceDetails(
+            s.as_mut_ptr(),
+            coefficients,
+            i32::from(full),
+            coefficients,
+            i32::from(full),
+            0,
+            1 << 16,
+            1 << 16,
+        )
+    };
+    // FFmpeg 4.4 applies range/tables but returns -1 for same-matrix YUV→YUV. Matrix changes
+    // aren't requested here. RGB→YUV must still succeed normally (a real matrix conversion).
+    // SAFETY: supported pixel formats have a static, live descriptor owned by FFmpeg.
+    let yuv = unsafe {
+        let descriptor = ffmpeg_next::ffi::av_pix_fmt_desc_get(s.input().format.into());
+        !descriptor.is_null()
+            && (*descriptor).flags & ffmpeg_next::ffi::AV_PIX_FMT_FLAG_RGB as u64 == 0
+    };
+    if result < 0 && !(result == -1 && yuv) {
+        Err(Error::from(result))
+    } else {
+        Ok(())
+    }
 }
 
 /// Turns `f` clockwise by `rotation` degrees (0, 90, 180 or 270).
@@ -536,6 +683,39 @@ mod tests {
     }
 
     #[test]
+    fn format_conversion_preserves_full_range_and_matrix() {
+        for (pixel, range) in [
+            (Pixel::YUVJ444P, Range::Unspecified),
+            (Pixel::YUV444P, Range::JPEG),
+        ] {
+            let mut f = frame::Video::new(pixel, 32, 16);
+            f.set_color_range(range);
+            f.set_color_space(Space::BT709);
+            for p in 0..3 {
+                f.data_mut(p).fill(if p == 0 {
+                    177
+                } else if p == 1 {
+                    33
+                } else {
+                    137
+                });
+            }
+            let got = to_i420(&f, true).unwrap();
+            assert_eq!((got.bt709, got.full_range, got.hdr), (true, true, None));
+            for (p, want) in got.planes.iter().zip([177, 33, 137]) {
+                assert!(p.iter().all(|&v| v.abs_diff(want) <= 1));
+            }
+            let rgb = got.view_rgba((16, 8));
+            assert!(
+                rgb.get_pixel(8, 4).0[..3]
+                    .iter()
+                    .zip([191, 191, 0])
+                    .all(|(g, w)| g.abs_diff(w) <= 3)
+            );
+        }
+    }
+
+    #[test]
     fn upright_turns_planes_clockwise() {
         // 2x2 luma [a b; c d], 1x1 chroma.
         let f = Frame {
@@ -588,7 +768,7 @@ mod tests {
         assert_eq!((y(0), y(16)), (code(26.0), code(1000.0)));
         assert_eq!(deep.planes[1][..2], 512u16.to_le_bytes());
         assert_eq!(deep.planes[0].len(), 32 * 16 * 2);
-        // Other decoders (thumbnails, proxies) stay 8-bit.
+        // Callers explicitly choosing the legacy 8-bit decoder still get 8-bit samples.
         assert_eq!((sdr.hdr, sdr.planes[0].len()), (None, 32 * 16));
     }
 

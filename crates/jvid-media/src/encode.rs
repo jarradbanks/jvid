@@ -171,6 +171,42 @@ const MAX_CLL: u32 = REFERENCE_WHITE as u32;
 const X265_HDR10: &str = "master-display=G(13250,34500)B(7500,3000)R(34000,16000)\
                           WP(15635,16450)L(10000000,1):max-cll=203,203";
 
+/// SDR output contract at every resolution (including SD): the Program's full-range BT.709
+/// R'G'B' becomes limited-range BT.709 Y'CbCr. Both the pixels and encoder/frame tags follow
+/// this policy; resolution-based player guesses must never choose the conversion matrix.
+fn sdr_metadata(f: &mut frame::Video) {
+    f.set_color_space(Space::BT709);
+    f.set_color_range(Range::MPEG);
+    f.set_color_primaries(Primaries::BT709);
+    f.set_color_transfer_characteristic(TransferCharacteristic::BT709);
+}
+
+/// ffmpeg-next does not expose swscale's color configuration. Configure the live context
+/// explicitly rather than tagging pixels produced with swscale's default BT.601 matrix.
+#[allow(unsafe_code)]
+fn sdr_scaler(mut s: scaling::Context) -> Result<scaling::Context, Error> {
+    // SAFETY: `s` owns a live, exclusively borrowed SwsContext. The coefficient table is a
+    // static FFmpeg table; sws_setColorspaceDetails copies it and retains no Rust pointers.
+    let result = unsafe {
+        let coefficients = ffmpeg_next::ffi::sws_getCoefficients(ffmpeg_next::ffi::SWS_CS_ITU709);
+        ffmpeg_next::ffi::sws_setColorspaceDetails(
+            s.as_mut_ptr(),
+            coefficients,
+            1,
+            coefficients,
+            0,
+            0,
+            1 << 16,
+            1 << 16,
+        )
+    };
+    if result < 0 {
+        Err(Error::from(result))
+    } else {
+        Ok(s)
+    }
+}
+
 /// The preset's quality (`crf`, x264's 0–51 scale, default 20) as `name`'s own rate control.
 /// Encoders without a constant-quality mode get a bit rate that halves every 6 steps, like crf.
 fn rate_control(
@@ -239,6 +275,11 @@ pub(crate) fn open_video(
         if name == "libx265" {
             opts.set("x265-params", X265_HDR10);
         }
+    } else if pixel != Pixel::PAL8 {
+        e.set_color_primaries(Primaries::BT709);
+        e.set_color_transfer_characteristic(TransferCharacteristic::BT709);
+        e.set_colorspace(Space::BT709);
+        e.set_color_range(Range::MPEG);
     }
     let software = HW_H264.iter().chain(HW_HEVC).all(|n| *n != name);
     if software {
@@ -526,7 +567,7 @@ impl Encoder {
                     let resize = (src != (width, height)).then(|| scale(Pixel::RGBA));
                     Convert::Pq(resize.transpose()?, Box::new(Hdr10::new()))
                 } else {
-                    Convert::Scale(scale(pixel)?)
+                    Convert::Scale(sdr_scaler(scale(pixel)?)?)
                 };
                 Some(Video {
                     stream,
@@ -606,6 +647,7 @@ impl Encoder {
             Convert::Scale(scaler) => {
                 let mut yuv = frame::Video::empty();
                 scaler.run(&src, &mut yuv)?;
+                sdr_metadata(&mut yuv);
                 yuv.set_pts(src.pts());
                 let vaapi = hwenc::is_vaapi(name);
                 push_video(&mut self.out, stream, yuv, vaapi, hwenc::upload)
@@ -788,6 +830,130 @@ fn drain<E>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Program image is full-range BT.709 R'G'B'. Sample well inside flat patches, where
+    /// chroma downsampling has no edge contribution. Four codes allow codec quantization plus
+    /// 8/10-bit YUV rounding; a BT.601/709 matrix mismatch exceeds this by tens of codes.
+    #[test]
+    fn sdr_color_patches_round_trip_with_matching_tags() {
+        crate::ffmpeg::init().unwrap();
+        let patches = [
+            [255, 0, 0],
+            [0, 255, 0],
+            [0, 0, 255],
+            [128; 3],
+            [0; 3],
+            [255; 3],
+        ];
+        let mut codecs = vec![("mpeg4", Pixel::YUV420P, "mp4")];
+        for (name, pixel, ext) in [
+            ("libopenh264", Pixel::YUV420P, "mp4"),
+            ("libx264", Pixel::YUV420P, "mp4"),
+            ("libx265", Pixel::YUV420P, "mp4"),
+            ("prores_ks", Pixel::YUV422P10LE, "mov"),
+        ] {
+            if encoder::find_by_name(name).is_some() {
+                codecs.push((name, pixel, ext));
+            }
+        }
+        codecs.extend(hardware().iter().map(|name| (*name, Pixel::NV12, "mp4")));
+        eprintln!("SDR color encoders exercised: {codecs:?}");
+        for (w, h) in [(720, 480), (1280, 720), (1920, 1080)] {
+            let rgba: Vec<_> = (0..h)
+                .flat_map(|_| {
+                    (0..w).flat_map(|x| {
+                        let [r, g, b] = patches[(x * patches.len() as u32 / w) as usize];
+                        [r, g, b, 255]
+                    })
+                })
+                .collect();
+            for &(name, pixel, ext) in &codecs {
+                let path = std::env::temp_dir().join(format!(
+                    "jvid-sdr-{name}-{h}-{}.{}",
+                    std::process::id(),
+                    ext
+                ));
+                let mut preset = small_preset();
+                preset.video = Some(if name.starts_with("prores") {
+                    VideoCodec::ProRes
+                } else if name == "libx265" || name.starts_with("hevc_") {
+                    VideoCodec::Hevc
+                } else {
+                    VideoCodec::H264
+                });
+                preset.options = opts(&[("crf", "12"), ("x265-params", "pools=1:frame-threads=1")]);
+                let mut enc = Encoder::create_with(
+                    &path,
+                    (w, h),
+                    Rate::new(30, 1),
+                    &preset,
+                    &[name],
+                    |_, candidate_pixel, size, rate, global, hdr, options| {
+                        assert_eq!(
+                            candidate_pixel, pixel,
+                            "conversion must match encoder input"
+                        );
+                        open_video(name, pixel, size, rate, global, hdr, options)
+                    },
+                )
+                .unwrap();
+                for _ in 0..3 {
+                    enc.video(&rgba).unwrap();
+                }
+                enc.finish().unwrap();
+                let f = crate::decode::VideoDecoder::open(&path)
+                    .unwrap()
+                    .frame_at(jvid_core::time::Time(0))
+                    .unwrap();
+                for (i, want) in patches.iter().enumerate() {
+                    let x = (2 * i + 1) * w as usize / (2 * patches.len());
+                    let y = h as usize / 2;
+                    let l = (f.planes[0][y * w as usize + x] as f32 - 16.0) / 219.0;
+                    let c = (y / 2) * w.div_ceil(2) as usize + x / 2;
+                    let u = (f.planes[1][c] as f32 - 128.0) / 224.0;
+                    let v = (f.planes[2][c] as f32 - 128.0) / 224.0;
+                    let got = [
+                        l + 1.5748 * v,
+                        l - 0.187324 * u - 0.468124 * v,
+                        l + 1.8556 * u,
+                    ]
+                    .map(|v| (255.0 * v.clamp(0.0, 1.0)).round() as u8);
+                    assert!(
+                        got.iter().zip(want).all(|(a, b)| a.abs_diff(*b) <= 4),
+                        "{name} {w}x{h}: {got:?}, want {want:?}"
+                    );
+                }
+                // Inspect the actual muxed bitstream, not only the encoder context.
+                let input = format::input(&path).unwrap();
+                let stream = input
+                    .streams()
+                    .best(ffmpeg_next::media::Type::Video)
+                    .unwrap();
+                let decoder = codec::Context::from_parameters(stream.parameters())
+                    .unwrap()
+                    .decoder()
+                    .video()
+                    .unwrap();
+                assert_eq!(
+                    (
+                        decoder.color_space(),
+                        decoder.color_range(),
+                        decoder.color_primaries(),
+                        decoder.color_transfer_characteristic()
+                    ),
+                    (
+                        Space::BT709,
+                        Range::MPEG,
+                        Primaries::BT709,
+                        TransferCharacteristic::BT709
+                    ),
+                    "{name} {w}x{h}"
+                );
+                drop((decoder, input));
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+    }
 
     fn opts(kv: &[(&str, &str)]) -> BTreeMap<String, String> {
         kv.iter()
