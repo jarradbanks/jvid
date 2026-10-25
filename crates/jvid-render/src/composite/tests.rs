@@ -986,11 +986,11 @@ fn masked_blur_and_pixelate_change_only_inside_the_mask() {
     }
 }
 
-#[test]
-fn blur_at_max_radius_hides_a_one_pixel_line() {
+/// Gaussian-blurs a white 1 px vertical line on grey, 256x8, returning the RGBA8 output.
+fn blur_one_pixel_line(radius: f64) -> Option<(u32, Vec<u8>)> {
     let Some((device, queue)) = device() else {
         eprintln!("skipping effect test: no software adapter on this platform");
-        return;
+        return None;
     };
     // A white 1 px vertical line on grey: the detail a face or text blur must not leak.
     let (w, h) = (256u32, 8u32);
@@ -1011,7 +1011,7 @@ fn blur_at_max_radius_hides_a_one_pixel_line() {
     let blurred = Transform {
         effects: vec![Effect {
             shader: "blur".into(),
-            params: [("radius".into(), 100.0)].into(),
+            params: [("radius".into(), radius)].into(),
             enabled: true,
         }],
         ..Default::default()
@@ -1024,7 +1024,14 @@ fn blur_at_max_radius_hides_a_one_pixel_line() {
         [0, 0, 0, 255],
         &[(&src, blurred)],
     );
-    let out = read_back(&device, &queue, tex);
+    Some((w, read_back(&device, &queue, tex)))
+}
+
+#[test]
+fn blur_at_max_radius_hides_a_one_pixel_line() {
+    let Some((_, out)) = blur_one_pixel_line(100.0) else {
+        return;
+    };
     // The line's 127 codes spread over ~120 px leave about 1 code; one 7x7 pass left over 30.
     let worst = out
         .chunks(4)
@@ -1032,4 +1039,18 @@ fn blur_at_max_radius_hides_a_one_pixel_line() {
         .max()
         .unwrap();
     assert!(worst <= 3, "line still shows: {worst} codes off grey");
+}
+
+#[test]
+fn blur_at_small_radius_still_spreads_a_one_pixel_line() {
+    let Some((w, out)) = blur_one_pixel_line(2.0) else {
+        return;
+    };
+    // Few taps must still blur: the line dims and its neighbours brighten.
+    let red = |x: u32| out[x as usize * 4] as i32;
+    let mid = w / 2;
+    assert!(red(mid) < 230, "line not dimmed: {}", red(mid));
+    assert!(red(mid + 1) > 140, "no spread right: {}", red(mid + 1));
+    assert!(red(mid - 1) > 140, "no spread left: {}", red(mid - 1));
+    assert!(red(mid + 10) <= 129, "spread too far: {}", red(mid + 10));
 }
