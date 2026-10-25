@@ -111,3 +111,120 @@ fn save_between_volume_drags_undoes_to_clean_saved_value() {
     assert!(!h.state().history.is_dirty());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn copied_key_pastes_via_app_action_into_selected_unanimated_clip() {
+    use jvid_core::history::Created;
+    use jvid_core::keyframe::{Easing, Keyframe, Value};
+    use jvid_core::model::NewClip;
+    use jvid_core::time::FLICKS_PER_SECOND as S;
+    let mut h = editing_harness();
+    let app = h.state_mut();
+    let Created::Asset(asset) = app
+        .history
+        .apply(Command::AddSolid {
+            name: "Solid".into(),
+            color: [0.1, 0.2, 0.3, 1.0],
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    let track = app.history.project().sequence().tracks()[0].id;
+    let mut clips = Vec::new();
+    for start in [Time(0), Time(2 * S)] {
+        let Created::Clip(id) = app
+            .history
+            .apply(Command::AddClip {
+                track,
+                clip: NewClip {
+                    asset,
+                    start,
+                    source_in: Time(0),
+                    source_out: Time(2 * S),
+                    link: None,
+                },
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        clips.push(id);
+    }
+    let (a, b) = (clips[0], clips[1]);
+    app.history
+        .apply(Command::AddKeyframe {
+            id: a,
+            param: "opacity".into(),
+            key: Keyframe {
+                time: Time(S / 2),
+                value: Value::Scalar(0.5),
+                easing: Easing::Linear,
+            },
+        })
+        .unwrap();
+    app.timeline
+        .select_clip(app.history.project().sequence(), a);
+    app.history = History::new(app.history.project().clone());
+    h.run();
+    let target = h.get_all_by_label("Target").next().unwrap().rect();
+    let at = pos2(
+        target.left() - 8.0 + 160.0 + 10.0,
+        target.center().y - 16.0 + 40.0 + 9.0,
+    );
+    h.hover_at(at);
+    h.run();
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run();
+    }
+    {
+        let app = h.state_mut();
+        assert!(app.timeline.can("copy", app.history.project().sequence()));
+        app.run_action("copy", true);
+    }
+    h.run();
+    assert!(
+        h.output()
+            .platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::CopyText(_)))
+    );
+    let before = h.state().history.project().clone();
+    {
+        let app = h.state_mut();
+        app.timeline
+            .select_clip(app.history.project().sequence(), b);
+        app.timeline.seek(Time(5 * S / 2));
+        assert!(
+            app.timeline.can("paste", app.history.project().sequence()),
+            "Edit > Paste enabled"
+        );
+        app.run_action("paste", true);
+    }
+    h.run();
+    assert_eq!(
+        h.state().history.project().sequence().clip(a),
+        before.sequence().clip(a)
+    );
+    let keys = &h
+        .state()
+        .history
+        .project()
+        .sequence()
+        .clip(b)
+        .unwrap()
+        .1
+        .keyframes["opacity"];
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].time, Time(S / 2));
+    assert!(h.state_mut().history.undo());
+    assert_eq!(h.state().history.project(), &before);
+    assert!(!h.state().history.can_undo());
+}

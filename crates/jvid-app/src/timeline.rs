@@ -481,7 +481,7 @@ impl Timeline {
             "select_all" => {
                 let clips = project.sequence().tracks().iter().flat_map(|t| t.clips());
                 self.selected = clips.map(|c| c.id).collect();
-                self.keys.selected.clear();
+                self.keys.clear_focus();
             }
             "add_edit" | "ripple_trim_prev" | "ripple_trim_next" => {
                 self.pending = self.cut_action(id, project.sequence());
@@ -598,7 +598,7 @@ impl Timeline {
             .collect();
         let ids: Vec<_> = chosen.iter().map(|(_, c)| c.id).collect();
         if matches!(id, "copy" | "cut") && !chosen.is_empty() {
-            self.keys.clipboard.clear();
+            self.keys.clear_clipboard();
             self.clipboard = chosen.clone();
             self.copied = true;
         }
@@ -873,7 +873,7 @@ impl Timeline {
         lanes: &[(TrackId, TrackKind, Rect)],
         p: Pos2,
     ) {
-        self.keys.selected.clear();
+        self.keys.clear_focus();
         let lane = lanes.iter().find(|l| l.2.contains(p));
         let at = view.time(p.x);
         self.gap = lane
@@ -918,6 +918,7 @@ impl Timeline {
     /// Click selection: the clip (and its partners under linked selection) replaces the
     /// selection, Shift adds it, Ctrl toggles it.
     fn select(&mut self, seq: &Sequence, id: ClipId, mods: egui::Modifiers) {
+        self.keys.clear_focus();
         let group: Vec<_> = if self.linked_selection {
             seq.linked(id).into_iter().map(|(_, c)| c.id).collect()
         } else {
@@ -940,7 +941,7 @@ impl Timeline {
         if self.shown_sequence != project.sequence().id() {
             self.shown_sequence = project.sequence().id();
             self.selected.clear();
-            self.keys.selected.clear();
+            self.keys.clear_focus();
         }
         self.transport.rate = project.settings().frame_rate;
         // Room past the last clip, so the end of the sequence can be reached and seen.
@@ -1288,7 +1289,7 @@ impl Timeline {
                 {
                     edit = Some(self.razor_cut(seq, view, clip.id, p.x));
                 } else if cr.clicked() {
-                    self.keys.selected.clear();
+                    self.keys.clear_focus();
                     self.select(seq, clip.id, ui.input(|i| i.modifiers));
                 }
                 if cr.secondary_clicked() && !self.selected.contains(&clip.id) {
@@ -1324,7 +1325,7 @@ impl Timeline {
                 if cr.drag_started() {
                     if !self.selected.contains(&clip.id) {
                         self.select(seq, clip.id, egui::Modifiers::NONE);
-                        self.keys.selected.clear();
+                        self.keys.clear_focus();
                     }
                     let mut group: Vec<_> = self
                         .selected
@@ -1398,7 +1399,7 @@ impl Timeline {
             );
             let band = Rect::from_two_pos(a, b);
             if marquee.drag_stopped() {
-                self.keys.selected.clear();
+                self.keys.clear_focus();
                 if !mods.shift && !mods.command {
                     self.selected.clear();
                 }

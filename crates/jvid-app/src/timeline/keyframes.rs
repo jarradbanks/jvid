@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use egui::{Id, Painter, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use jvid_core::history::{Command, GestureKey};
-use jvid_core::keyframe::{Easing, Keyframe, SPEED};
+use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value};
 use jvid_core::model::{Clip, ClipId, Sequence, Track};
 use jvid_core::time::Time;
 use suite_ui::theme;
@@ -35,7 +35,9 @@ pub struct Keys {
     pub selected: BTreeSet<(ClipId, String, Time)>,
     /// Copied keys with times relative to the earliest.
     pub clipboard: Vec<(String, Keyframe)>,
-    /// The clip pasted keys go to: the last one a key was picked on.
+    /// Clipboard target metadata, retained even when the source clip is removed.
+    clipboard_source: Option<Clip>,
+    /// The focused key editor, cleared when clip or empty-lane selection takes focus.
     clip: Option<ClipId>,
     /// Timeline shift of the selected keys while they're dragged.
     pub(super) drag: Option<Time>,
@@ -235,7 +237,67 @@ fn paste(c: &Clip, copied: &[(String, Keyframe)], at: Time) -> Command {
     })
 }
 
+/// Validate property kinds and structural targets before offering a key paste. Effect
+/// slots must refer to the same shader, and mask points must exist on the destination.
+fn supports_key(c: &Clip, source: Option<&Clip>, name: &str, value: Value) -> bool {
+    use jvid_core::model::{Curves, Secondary, Text, Wheels};
+    if let Some((i, p)) = crate::inspector::fx_param(name) {
+        return matches!(value, Value::Scalar(_))
+            && source
+                .and_then(|s| s.transform.effects.get(i))
+                .zip(c.transform.effects.get(i))
+                .is_some_and(|(a, b)| a.shader == b.shader && b.params.contains_key(p));
+    }
+    if let Some((i, p)) = crate::inspector::mask_param(name) {
+        let Some(mask) = c.transform.masks.get(i) else {
+            return false;
+        };
+        return match p {
+            "feather" | "opacity" => matches!(value, Value::Scalar(_)),
+            p => p
+                .strip_prefix('p')
+                .and_then(|n| n.parse::<usize>().ok())
+                .is_some_and(|n| n < mask.points.len() && matches!(value, Value::Vec2(_))),
+        };
+    }
+    if Curves::NAMES.contains(&name) {
+        return matches!(value, Value::Curve(_));
+    }
+    if Wheels::NAMES.contains(&name) {
+        return matches!(value, Value::Vec2(_));
+    }
+    if Secondary::KEYS.contains(&name) || Wheels::KEYS.contains(&name) {
+        return matches!(value, Value::Scalar(_));
+    }
+    if let Some(expected) = Text::default().get(name) {
+        // Sequence-only action checks cannot resolve an asset's text style. Retain text
+        // keys on the same asset rather than silently animating an unrelated media type.
+        return source.is_some_and(|s| s.asset == c.asset)
+            && std::mem::discriminant(&value) == std::mem::discriminant(&expected);
+    }
+    match name {
+        "position" | "anchor" => matches!(value, Value::Vec2(_)),
+        "scale" => matches!(value, Value::Scalar(_) | Value::Vec2(_)),
+        "color" => matches!(value, Value::Color(_)) && source.is_some_and(|s| s.asset == c.asset),
+        SPEED => matches!(value, Value::Scalar(v) if jvid_core::keyframe::SPEEDS.contains(&v)),
+        "rotation" | "opacity" | "crop_left" | "crop_top" | "crop_right" | "crop_bottom"
+        | "volume" | "pan" | "exposure" | "contrast" | "saturation" | "temperature" | "tint"
+        | "lut_intensity" => matches!(value, Value::Scalar(_)),
+        _ => false,
+    }
+}
+
 impl Keys {
+    pub(super) fn clear_focus(&mut self) {
+        self.clip = None;
+        self.selected.clear();
+    }
+
+    pub(super) fn clear_clipboard(&mut self) {
+        self.clipboard.clear();
+        self.clipboard_source = None;
+    }
+
     /// Picks keys on `clip`, dropping any picked on other clips: edits go to one clip.
     pub(super) fn pick_clip(&mut self, clip: ClipId) {
         self.clip = Some(clip);
@@ -276,28 +338,79 @@ impl Timeline {
         self.keys.graph = Some(super::graph::Graph::new(clip));
     }
 
+    fn key_paste_clip<'a>(&self, seq: &'a Sequence) -> Option<&'a Clip> {
+        let id = if self.selected.len() == 1 {
+            *self.selected.iter().next()?
+        } else if self.selected.is_empty() {
+            self.keys
+                .graph
+                .as_ref()
+                .map(|g| g.clip)
+                .or(self.keys.clip)?
+        } else {
+            return None;
+        };
+        let (track, c) = seq.clip(id)?;
+        if seq.track(track)?.locked
+            || !self
+                .keys
+                .clipboard
+                .iter()
+                .all(|(p, k)| supports_key(c, self.keys.clipboard_source.as_ref(), p, k.value))
+        {
+            return None;
+        }
+        Some(c)
+    }
+
+    /// Some means the key editor owns this action, even when an invalid destination
+    /// disables it; None lets the clip editor handle it. Menus and shortcuts share this.
+    pub(super) fn key_capability(&self, id: &str, seq: &Sequence) -> Option<bool> {
+        match id {
+            "paste" if !self.keys.clipboard.is_empty() => Some(self.key_paste_clip(seq).is_some()),
+            "copy" | "cut" | "delete"
+                if self.selected.is_empty()
+                    || (self.selected.len() == 1
+                        && self.keys.clip.is_some_and(|id| self.selected.contains(&id))) =>
+            {
+                let (track, c) = seq.clip(self.keys.clip?)?;
+                picked(&self.keys.selected, c)
+                    .any(|(p, t)| {
+                        c.keyframes
+                            .get(p)
+                            .is_some_and(|keys| keys.iter().any(|k| k.time == t))
+                    })
+                    .then(|| id == "copy" || seq.track(track).is_some_and(|t| !t.locked))
+            }
+            _ => None,
+        }
+    }
+
     /// Delete, copy, cut and paste for keys; false leaves the action to clips.
     pub(super) fn key_action(&mut self, id: &str, seq: &Sequence) -> bool {
-        let here = self.playhead();
-        let k = &mut self.keys;
-        let clip = k.clip.and_then(|c| seq.clip(c));
-        let Some((_, c)) = clip else { return false };
-        let has = picked(&k.selected, c).next().is_some();
-        match id {
-            "copy" | "cut" | "delete" if has => {
-                if id != "delete" {
-                    k.clipboard = copy(c, &k.selected);
-                    self.clipboard.clear();
-                }
-                if id != "copy" {
-                    self.pending = Some(delete(c, &k.selected));
-                    k.selected.clear();
-                }
+        match self.key_capability(id, seq) {
+            None => return false,
+            Some(false) => return true,
+            Some(true) => {}
+        }
+        if id == "paste" {
+            let c = self.key_paste_clip(seq).expect("capability checked");
+            self.pending = Some(paste(c, &self.keys.clipboard, self.playhead()));
+        } else {
+            let c = seq
+                .clip(self.keys.clip.expect("capability checked"))
+                .expect("checked")
+                .1;
+            if id != "delete" {
+                self.keys.clipboard = copy(c, &self.keys.selected);
+                self.keys.clipboard_source = Some(c.clone());
+                self.clipboard.clear();
+                self.copied = true;
             }
-            "paste" if !k.clipboard.is_empty() => {
-                self.pending = Some(paste(c, &k.clipboard, here));
+            if id != "copy" {
+                self.pending = Some(delete(c, &self.keys.selected));
+                self.keys.selected.clear();
             }
-            _ => return false,
         }
         true
     }
@@ -943,5 +1056,119 @@ mod tests {
         h.run();
         let t = &h.state().1.project().sequence().tracks()[0];
         assert_eq!(t.height, height + 20.0, "grows with the pointer, no jump");
+    }
+
+    fn clipboard_fixture() -> (History, Timeline, ClipId, ClipId) {
+        let mut h = History::new(project(4));
+        let clips = h.project().sequence().tracks()[0].clips();
+        let (a, b) = (clips[0].id, clips[1].id);
+        for time in [Time(0), Time(S / 2)] {
+            h.apply(Command::AddKeyframe {
+                id: a,
+                param: "opacity".into(),
+                key: Keyframe {
+                    time,
+                    value: Value::Scalar(0.5),
+                    easing: Easing::Linear,
+                },
+            })
+            .unwrap();
+        }
+        let mut t = Timeline::default();
+        t.sync(h.project());
+        t.keys.pick_clip(a);
+        t.keys.selected = [
+            (a, "opacity".into(), Time(0)),
+            (a, "opacity".into(), Time(S / 2)),
+        ]
+        .into();
+        assert!(t.key_action("copy", h.project().sequence()));
+        (History::new(h.project().clone()), t, a, b)
+    }
+
+    #[test]
+    fn key_clipboard_pastes_into_selected_unanimated_clip_and_undoes_only_it() {
+        let (mut h, mut t, a, b) = clipboard_fixture();
+        let before = h.project().clone();
+        t.select_clip(h.project().sequence(), b);
+        t.seek(Time(5 * S / 2));
+        assert!(t.key_action("paste", h.project().sequence()));
+        h.apply(t.pending.take().unwrap()).unwrap();
+        assert_eq!(h.project().sequence().clip(a), before.sequence().clip(a));
+        let c = h.project().sequence().clip(b).unwrap().1;
+        let times: Vec<_> = c.keyframes["opacity"].iter().map(|k| k.time).collect();
+        assert_eq!(times, [Time(S / 2), Time(S)]);
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert!(!h.can_undo());
+    }
+
+    #[test]
+    fn key_clipboard_and_menus_share_capabilities_and_copy_marker() {
+        let (h, mut t, _, b) = clipboard_fixture();
+        assert!(t.copied, "key copies trigger the system clipboard marker");
+        t.select_clip(h.project().sequence(), b);
+        assert!(t.can("paste", h.project().sequence()));
+        assert!(
+            t.clip_action("paste", h.project().sequence()).is_none(),
+            "keys never enable clip paste"
+        );
+    }
+
+    #[test]
+    fn key_paste_refuses_ambiguous_stale_locked_or_unsupported_destinations() {
+        let (mut h, mut t, a, b) = clipboard_fixture();
+        t.selected = [a, b].into();
+        assert!(!t.can("paste", h.project().sequence()));
+        assert!(t.key_action("paste", h.project().sequence()));
+        assert!(t.pending.is_none());
+        t.select_clip(h.project().sequence(), b);
+        t.selected.clear();
+        assert!(
+            !t.can("paste", h.project().sequence()),
+            "no stale owner after explicit selection"
+        );
+        t.select_clip(h.project().sequence(), b);
+        t.keys.clipboard[0].1.value = Value::Vec2([0.5, 0.5]);
+        assert!(
+            !t.can("paste", h.project().sequence()),
+            "opacity needs scalar values"
+        );
+        t.keys.clipboard[0].1.value = Value::Scalar(0.5);
+        let mut settings = h.project().sequence().tracks()[0].settings();
+        settings.locked = true;
+        h.apply(Command::SetTrack(settings)).unwrap();
+        assert!(!t.can("paste", h.project().sequence()));
+    }
+
+    #[test]
+    fn effect_key_paste_requires_matching_shader_and_parameter_target() {
+        use jvid_core::model::Effect;
+        let (mut h, mut t, _, b) = clipboard_fixture();
+        t.select_clip(h.project().sequence(), b);
+        t.keys.clipboard = vec![(
+            "fx0.amount".into(),
+            Keyframe {
+                time: Time(0),
+                value: Value::Scalar(0.5),
+                easing: Easing::Linear,
+            },
+        )];
+        let effect = |shader: &str| Effect {
+            shader: shader.into(),
+            params: [("amount".into(), 1.0)].into(),
+            enabled: true,
+            mask: None,
+        };
+        t.keys.clipboard_source.as_mut().unwrap().transform.effects = vec![effect("grain")];
+        assert!(!t.can("paste", h.project().sequence()), "missing target");
+        for (shader, expected) in [("blur", false), ("grain", true)] {
+            let c = h.project().sequence().clip(b).unwrap().1;
+            let mut x = c.transform.clone();
+            x.effects = vec![effect(shader)];
+            h.apply(Command::SetClipProps(vec![(b, x, c.keyframes.clone())]))
+                .unwrap();
+            assert_eq!(t.can("paste", h.project().sequence()), expected);
+        }
     }
 }
