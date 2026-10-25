@@ -349,6 +349,14 @@ impl Timeline {
         self.media.peaks.insert((path, 0), Some(peaks));
     }
 
+    #[cfg(test)]
+    pub fn recorded_waveform(&self, path: &std::path::Path) -> Option<&Pyramid> {
+        self.media
+            .peaks
+            .get(&(path.to_owned(), 0))
+            .and_then(Option::as_ref)
+    }
+
     pub fn selected(&self) -> &HashSet<ClipId> {
         &self.selected
     }
@@ -923,6 +931,11 @@ impl Timeline {
         let mut t = Self::default();
         t.media.caches = self.media.caches.clone();
         t
+    }
+
+    /// Drop selections, clip/key clipboards, dialogs and deferred edits across projects.
+    pub fn reset_session(&mut self) {
+        *self = self.sibling();
     }
 
     /// No filmstrip, waveform or thumbnail job is queued or running on the shared pool.

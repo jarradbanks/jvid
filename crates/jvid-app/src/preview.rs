@@ -184,6 +184,7 @@ pub struct Preview {
     /// slow decode drops frames instead of queueing them).
     requested: Option<Time>,
     pending: bool,
+    source_job: Option<jvid_jobs::Handle>,
     frame: Option<Arc<Frame>>,
     error: Option<String>,
     /// Bumped when `frame` or the preview scale changes; the GPU side re-uploads when it sees a new one.
@@ -251,6 +252,7 @@ impl Preview {
             source: None,
             requested: None,
             pending: false,
+            source_job: None,
             frame: None,
             error: None,
             generation: 0,
@@ -277,6 +279,38 @@ impl Preview {
             recording: None,
             record_clicked: false,
         }
+    }
+
+    /// Clears both viewers and detaches old decode replies without joining worker pools.
+    pub fn reset_session(&mut self) {
+        if let Some(out) = &mut self.output {
+            out.flush();
+        }
+        self.program.reset_session();
+        self.player = None;
+        self.source = None;
+        self.requested = None;
+        self.pending = false;
+        if let Some(handle) = self.source_job.take() {
+            handle.cancel();
+        }
+        self.frame = None;
+        self.error = None;
+        (self.tx, self.rx) = channel();
+        self.generation += 1;
+        self.program_shown = None;
+        self.source_shown = None;
+        self.program_gen += 1;
+        self.program_head = Time(0);
+        self.program_seq = None;
+        self.compare = Compare::default();
+        self.thumb.from = None;
+        self.thumb.wanted = true;
+        self.thumb.copy = false;
+        self.scopes = scopes::State::default();
+        self.analysis = None;
+        self.recording = None;
+        self.record_clicked = false;
     }
 
     /// Stores proxies in `proxies`' directory and switches timeline playback to decode through it.
@@ -789,7 +823,7 @@ impl Preview {
         {
             (self.requested, self.pending) = (Some(t), true);
             let (tx, ctx, p) = (self.tx.clone(), ui.ctx().clone(), path.to_path_buf());
-            self.pool.submit(
+            self.source_job = Some(self.pool.submit(
                 &self.jobs,
                 self.proxies.resolve(path),
                 t,
@@ -798,9 +832,10 @@ impl Preview {
                     let _ = tx.send((p, t, r.map_err(|e| e.to_string())));
                     ctx.request_repaint();
                 },
-            );
+            ));
         }
         while let Ok((path, t, r)) = self.rx.try_recv() {
+            self.source_job = None;
             self.pending = false;
             if self.source.as_deref() != Some(&path) {
                 continue;

@@ -199,6 +199,21 @@ fn is_audio(asset: &MediaAsset) -> bool {
 }
 
 impl MediaBin {
+    /// Keeps layout choices and reusable caches while forgetting project asset identities.
+    pub fn reset_session(&mut self) {
+        *self = Self {
+            tab: self.tab,
+            list: self.list,
+            sort: self.sort,
+            fx_grid: self.fx_grid,
+            thumbs: Thumbs {
+                cache: self.thumbs.cache.clone(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+    }
+
     pub fn new(caches: Arc<Caches>) -> Self {
         let mut bin = Self::default();
         bin.thumbs.cache = Some(caches);

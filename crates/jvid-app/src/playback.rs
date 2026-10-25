@@ -441,6 +441,8 @@ fn open_streams(open: &mut OpenAudio, asset: &MediaAsset, stream: Option<u32>) -
 
 /// The timeline playback engine. See the module docs.
 pub struct Playback {
+    session: u64,
+    quick_handles: Vec<Handle>,
     pub transport: Transport,
     pub cache: FrameCache,
     jobs: Pool,
@@ -478,6 +480,8 @@ impl Playback {
         let (done_tx, done) = channel();
         let (quick_tx, quick_done) = channel();
         Self {
+            session: 0,
+            quick_handles: Vec::new(),
             transport: Transport::new(Time(0), Rate::new(30, 1)),
             cache: FrameCache::new(budget),
             jobs: Pool::new(DECODE_THREADS),
@@ -530,6 +534,28 @@ impl Playback {
                 .map_err(|e| e.to_string())
         }));
         pb
+    }
+
+    /// Retains decoder services while abandoning every project-local identity and reply.
+    pub fn reset_session(&mut self) {
+        self.session += 1;
+        for (_, handle) in self.pending.drain() {
+            handle.cancel();
+        }
+        for handle in self.quick_handles.drain(..) {
+            handle.cancel();
+        }
+        (self.done_tx, self.done) = channel();
+        (self.quick_tx, self.quick_done) = channel();
+        self.cache = FrameCache::new(self.cache.budget);
+        self.stand_ins.clear();
+        self.failed.clear();
+        self.paths.clear();
+        self.audio = Audio::sharing(self.audio.open.clone());
+        self.sequence = SequenceId::default();
+        self.transport = Transport::new(Time(0), Rate::new(30, 1));
+        self.latency = Duration::ZERO;
+        self.shown = None;
     }
 
     /// Makes the next `tick` return the frame even if the playhead hasn't moved.
@@ -680,7 +706,13 @@ impl Playback {
                     asset.path.clone(),
                 );
                 // The path too, so a relink isn't handed the old path's job still running.
-                let job = format!("playback:{}:{}:{}", key.0.0, key.1.0, path.display());
+                let job = format!(
+                    "playback:{}:{}:{}:{}",
+                    self.session,
+                    key.0.0,
+                    key.1.0,
+                    path.display()
+                );
                 let handle = self.jobs.submit(job, Priority::Interactive, move |ctx| {
                     if !ctx.is_cancelled() {
                         let start = Instant::now();
@@ -733,12 +765,21 @@ impl Playback {
             }
             self.stand_ins.insert(key, None);
             let (quick, tx, path) = (quick.clone(), self.quick_tx.clone(), asset.path.clone());
-            let job = format!("keyframe:{}:{}:{}", key.0.0, key.1.0, path.display());
-            self.quick_jobs
+            let job = format!(
+                "keyframe:{}:{}:{}:{}",
+                self.session,
+                key.0.0,
+                key.1.0,
+                path.display()
+            );
+            self.quick_handles.retain(|h| !h.is_finished());
+            let handle = self
+                .quick_jobs
                 .submit(job, Priority::Interactive, move |_| {
                     let r = quick(&path, key.1);
                     let _ = tx.send((key, path, r));
                 });
+            self.quick_handles.push(handle);
         }
         self.stand_ins.retain(|k, _| want.contains(k));
     }

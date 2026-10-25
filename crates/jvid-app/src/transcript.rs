@@ -201,6 +201,14 @@ pub struct TranscriptPanel {
 }
 
 impl TranscriptPanel {
+    /// Whole-file transcript caches are reusable; word selections and searches are not.
+    pub fn reset_session(&mut self) {
+        self.query.clear();
+        self.selection = None;
+        self.lit = None;
+        self.unticked = None;
+    }
+
     /// The picked words, as a range of `words`.
     fn picked(&self, words: &[(ClipId, Word)]) -> Option<Range<usize>> {
         let (a, b) = self.selection?;

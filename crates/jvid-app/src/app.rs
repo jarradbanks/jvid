@@ -108,6 +108,9 @@ pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
 
 pub struct App {
     history: History,
+    /// Ownership of project-local editor state and asynchronous results.
+    project_session: u64,
+    editor_context: Option<egui::Context>,
     path: Option<PathBuf>,
     dock: DockState<Tab>,
     /// The preview's views: one shows as a title, several as tabs.
@@ -197,6 +200,7 @@ impl App {
         theme::install(&cc.egui_ctx);
         jvid_media::hwdec::set_enabled(settings.hardware_decode);
         let mut app = Self::restore(cc.storage);
+        app.editor_context = Some(cc.egui_ctx.clone());
         let caches = crate::media_bin::Caches::new(settings);
         app.bin = MediaBin::new(caches.clone());
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
@@ -208,6 +212,9 @@ impl App {
         app.language = settings.language.clone();
         app.input_device = settings.input_device.clone();
         app.reduce_motion = settings.reduce_motion;
+        app.autosave.set_interval(std::time::Duration::from_secs(
+            settings.autosave_secs.into(),
+        ));
         app.tutorials_done = settings.tutorials_done.clone();
         app.welcome.tour = !settings.tour_offered;
         // Tests never write the real settings file; those that save set their own.
@@ -244,6 +251,8 @@ impl App {
         });
         Self {
             history: History::new(Project::default()),
+            project_session: 0,
+            editor_context: None,
             path: None,
             dock: {
                 let mut dock = dock;
@@ -292,35 +301,83 @@ impl App {
         }
     }
 
+    /// Starts a fresh editor session while keeping user layout and disk cache services.
+    /// Result channels are detached rather than joining old workers on the UI thread.
+    fn reset_project_session(&mut self) {
+        self.project_session += 1;
+        self.importer.reset_session(self.project_session);
+        self.timeline.reset_session();
+        self.preview.reset_session();
+        self.bin.reset_session();
+        self.transcript.reset_session();
+        self.subtitles.close();
+        self.settings_dialog = Default::default();
+        self.export_dialog = Default::default();
+        self.autosave.reset_session();
+        self.preview_active = 1;
+        self.prompts.clear();
+        self.toasts.clear();
+        self.closing = false;
+        // Widget edits/gestures also hold clip IDs (canvas text, masks, inspector fields).
+        // The dock layout and application preferences live outside this widget memory.
+        if let Some(ctx) = &self.editor_context {
+            ctx.data_mut(|d| d.clear());
+            ctx.memory_mut(|m| {
+                if let Some(id) = m.focused() {
+                    m.surrender_focus(id);
+                }
+            });
+            ctx.stop_dragging();
+            egui::Popup::close_all(ctx);
+        }
+    }
+
+    /// The common successful New/Open/recovery replacement boundary. Loading happens first,
+    /// so an unreadable project leaves the current history, jobs and editing context intact.
+    fn replace_project(
+        &mut self,
+        project: Project,
+        path: Option<PathBuf>,
+        match_source: bool,
+    ) -> bool {
+        if !self.leave_project() {
+            return false;
+        }
+        self.reset_project_session();
+        self.missing = relink::missing(&project);
+        self.history = History::new(project);
+        self.path = path;
+        self.match_source = match_source;
+        self.on_welcome = false;
+        true
+    }
+
     /// Replaces the project with an empty one; `None` settings is Match source.
     fn new_project(&mut self, settings: Option<ProjectSettings>) {
-        self.leave_project();
-        self.history = History::new(Project::default());
-        if let Some(s) = &settings {
-            // Setting up isn't an edit: no undo step, nothing to save yet.
-            let _ = self.history.apply(Command::SetSettings(s.clone()));
-            self.history = History::new(self.history.project().clone());
+        let match_source = settings.is_none();
+        let mut history = History::new(Project::default());
+        if let Some(s) = settings {
+            let _ = history.apply(Command::SetSettings(s));
         }
-        self.match_source = settings.is_none();
-        self.missing.clear();
-        self.path = None;
-        self.on_welcome = false;
+        self.replace_project(history.project().clone(), None, match_source);
     }
 
     fn open(&mut self, path: PathBuf) {
         match project_file::load(&path) {
             Ok(project) => {
-                welcome::remember(&mut self.welcome.recent, Recent::of(&path, &project));
-                self.missing = relink::missing(&project);
-                self.leave_project();
-                self.history = History::new(project);
-                if let Some(auto) = autosave::newer(&path) {
-                    let path = Some(path.clone());
-                    self.prompts.push(Prompt::Restore { path, auto });
+                if !self.replace_project(project, Some(path.clone()), false) {
+                    return;
                 }
-                self.path = Some(path);
-                self.match_source = false;
-                self.on_welcome = false;
+                welcome::remember(
+                    &mut self.welcome.recent,
+                    Recent::of(&path, self.history.project()),
+                );
+                if let Some(auto) = autosave::newer(&path) {
+                    self.prompts.push(Prompt::Restore {
+                        path: Some(path),
+                        auto,
+                    });
+                }
             }
             Err(e) => self.error(tr!("app.open_failed", path = path.display(), error = e)),
         }
@@ -574,6 +631,9 @@ impl App {
     /// Saves to the current path, asking for one first if there is none or `as_new`.
     /// Returns false if cancelled or the save failed.
     fn save(&mut self, as_new: bool) -> bool {
+        if !self.finalize_take() {
+            return false;
+        }
         let path = match (&self.path, as_new) {
             (Some(p), false) => p.clone(),
             _ => {
@@ -617,6 +677,9 @@ impl App {
 
     /// Saves the project to `path`, which becomes its path. Returns false if the save failed.
     fn save_to(&mut self, path: PathBuf) -> bool {
+        if !self.finalize_take() {
+            return false;
+        }
         match project_file::save(self.history.project(), &path) {
             Ok(()) => {
                 self.history.mark_saved();
@@ -814,7 +877,8 @@ impl App {
     fn run_action(&mut self, id: &str, menu: bool) {
         // Space and K stop the take along with playback, wherever focus is.
         if self.take.is_some() && matches!(id, "play_stop" | "shuttle_stop" | "record") {
-            return self.end_take();
+            self.end_take();
+            return;
         }
         match id {
             "record" => return self.start_take(),
@@ -914,7 +978,7 @@ impl App {
         let seq = self.history.project().sequence();
         let armed = self.timeline.armed.and_then(|id| seq.track(id));
         let armed = armed.filter(|t| t.kind == TrackKind::Audio).map(|t| t.id);
-        // One undo step with the track, rolled back if the device won't open.
+        // Track creation is a short transaction, rolled back if the device will not open.
         let txn = self.history.begin();
         let track = match armed {
             Some(id) => Ok(id),
@@ -959,20 +1023,33 @@ impl App {
         }
     }
 
-    /// Ends the take, stops playback and places the recording.
+    /// Stops recording from a transport or tutorial action.
     fn end_take(&mut self) {
+        self.finalize_take();
+    }
+
+    /// Finalizes before dirty checking or saving. Cancel keeps this completed, undoable edit;
+    /// failure prevents navigation and leaves the WAV on disk for recovery.
+    fn finalize_take(&mut self) -> bool {
         let Some(take) = self.take.take() else {
-            return;
+            return true;
         };
         self.timeline.level = None;
         self.timeline.live = None;
+        self.preview.recording = None;
+        self.preview.record_clicked = false;
         self.preview.program_action("shuttle_stop");
         let path = take.path.clone();
-        match take.finish(&mut self.history) {
+        let finished = take.finish(&mut self.history);
+        match finished {
             Ok(Some(peaks)) => self.timeline.recorded(path, peaks),
             Ok(None) => {}
-            Err(e) => self.timeline.notice = Some(tr!("timeline.record_save_failed", error = e)),
+            Err(e) => {
+                self.error(tr!("timeline.record_save_failed", error = e));
+                return false;
+            }
         }
+        true
     }
 
     /// Runs the take a frame: feeds the header meter and the live clip, and ends it when the
@@ -982,7 +1059,8 @@ impl App {
             return;
         };
         if self.timeline.armed != Some(take.track) {
-            return self.end_take();
+            self.end_take();
+            return;
         }
         match take.poll() {
             Ok(level) => {
@@ -998,9 +1076,12 @@ impl App {
     }
 
     /// Before the project is replaced: a take in progress lands in the old one.
-    fn leave_project(&mut self) {
-        self.end_take();
+    fn leave_project(&mut self) -> bool {
+        if !self.finalize_take() {
+            return false;
+        }
         self.timeline.armed = None;
+        true
     }
 
     /// Asks for media files and queues them for import.
@@ -1109,6 +1190,9 @@ impl App {
     /// Runs `then` now if the project is clean, else once the user saves or discards it.
     fn discard_then(&mut self, then: Then) {
         // The question is about the user's project, not the lesson's.
+        if !self.finalize_take() {
+            return;
+        }
         self.end_lesson();
         if self.history.is_dirty() {
             self.prompts.push(Prompt::Discard(then));
@@ -1227,18 +1311,17 @@ impl App {
             }
             (Prompt::Restore { path, auto }, 0) => match project_file::load(&auto) {
                 Ok(project) => {
-                    if path.is_none() {
-                        self.new_project(Some(project.settings().clone()));
+                    if self.replace_project(project, path, false) {
+                        self.history.mark_unsaved();
                     }
-                    self.leave_project();
-                    self.history = History::new(project);
-                    self.history.mark_unsaved();
                 }
                 Err(e) => self.error(tr!("app.restore_failed", path = auto.display(), error = e)),
             },
             (Prompt::About, 1) => self.prompts.push(Prompt::Notices),
-            (Prompt::Restore { path: None, .. }, _) => {
-                if let Some(p) = &self.untitled {
+            (Prompt::Restore { path, .. }, 1) => {
+                // Only an explicit recovery Discard rejects these versions. A failed load
+                // keeps every recovery file and never touches the main project.
+                if let Some(p) = path.as_ref().or(self.untitled.as_ref()) {
                     autosave::clear(p);
                 }
             }
@@ -1250,21 +1333,23 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.editor_context = Some(ctx.clone());
         if let Some(e) = self.theme.poll(&ctx) {
             let until = ctx.input(|i| i.time) + TOAST_SECS;
             self.toasts.push((e, until));
         }
-        if ctx.input(|i| i.viewport().close_requested()) {
-            self.end_lesson();
-        }
-        self.lesson_keys(&ctx);
-        if ctx.input(|i| i.viewport().close_requested()) && !self.closing && self.history.is_dirty()
-        {
+        if ctx.input(|i| i.viewport().close_requested()) && !self.closing {
+            // Cancel this OS request even if finalization fails. Only an approved request is
+            // reissued; no recording is left with an unfinalized WAV header on normal close.
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             if !self.prompts.contains(&Prompt::Discard(Then::Close)) {
-                self.prompts.push(Prompt::Discard(Then::Close));
+                self.discard_then(Then::Close);
+            }
+            if self.closing {
+                ctx.send_viewport_cmd(ViewportCommand::Close);
             }
         }
+        self.lesson_keys(&ctx);
         let was_closing = self.closing;
         self.show_prompt(&ctx);
         if self.closing && !was_closing {
@@ -1275,13 +1360,15 @@ impl eframe::App for App {
             .dock
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
-        let pressed =
-            if self.keymap_editor.is_open() || self.subtitles.is_open() || !self.prompts.is_empty()
-            {
-                Vec::new()
-            } else {
-                self.keymap.pressed(&ctx, timeline)
-            };
+        let pressed = if self.closing
+            || self.keymap_editor.is_open()
+            || self.subtitles.is_open()
+            || !self.prompts.is_empty()
+        {
+            Vec::new()
+        } else {
+            self.keymap.pressed(&ctx, timeline)
+        };
         for id in pressed {
             if id == "quit" {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -1399,7 +1486,7 @@ impl eframe::App for App {
             if let Some(sources) = transcript.transcribe {
                 self.subtitles.open_transcribe(sources);
             }
-            if std::mem::take(&mut self.preview.record_clicked) {
+            if std::mem::take(&mut self.preview.record_clicked) && !self.closing {
                 self.run_action("record", true);
             }
             self.queue_action(ui.ctx(), queue);
