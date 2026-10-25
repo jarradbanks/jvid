@@ -1875,9 +1875,9 @@ fn up_over_an_eq_band_nudges_it_and_not_the_playhead() {
 
 /// Speech-to-text stand-in: "Hello there. This is a test." from 0.1 s, or, when `slow`, no
 /// words until cancelled. Keeps the options it was asked with.
-struct FakeTranscriber {
-    slow: bool,
-    asked: std::sync::Mutex<Vec<jvid_transcribe::Options>>,
+pub(super) struct FakeTranscriber {
+    pub(super) slow: bool,
+    pub(super) asked: std::sync::Mutex<Vec<jvid_transcribe::Options>>,
 }
 
 impl jvid_transcribe::Transcriber for FakeTranscriber {

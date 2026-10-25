@@ -363,6 +363,15 @@ impl Subtitles {
         }
     }
 
+    /// Clicks Generate, or Transcribe, as a lesson's Show Me does: only once the model is on
+    /// disk or loaded, so a download waits for the user to choose it in the dialog.
+    pub(crate) fn start_if_ready(&mut self, project: &Project, selected: &HashSet<ClipId>) {
+        let m = self.model();
+        if self.engine.as_ref().is_some_and(|(e, _)| *e == m) || self.downloaded.contains(&m) {
+            self.start(project, selected);
+        }
+    }
+
     fn start(&mut self, project: &Project, selected: &HashSet<ClipId>) {
         let targets = match self.transcribe {
             Some(_) => Vec::new(),

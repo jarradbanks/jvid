@@ -324,6 +324,32 @@ impl TranscriptPanel {
         }
     }
 
+    /// The streams Transcribe would transcribe, for a lesson's Show Me.
+    pub(crate) fn missing(&mut self, project: &Project, selected: &HashSet<ClipId>) -> Vec<Source> {
+        self.cache.placed(project, selected).1.clone()
+    }
+
+    /// Whether audio stream `nth` of `path` has a transcript loaded.
+    pub(crate) fn heard(&self, path: &Path, nth: usize) -> bool {
+        matches!(
+            self.cache.loaded.get(&(path.to_owned(), nth)),
+            Some(Some(_))
+        )
+    }
+
+    /// What Delete does with words `picked` (clamped to the words there are), for a lesson's
+    /// Show Me.
+    pub(crate) fn cut(
+        &mut self,
+        project: &Project,
+        selected: &HashSet<ClipId>,
+        picked: Range<usize>,
+    ) -> Option<Command> {
+        let placed = self.cache.placed(project, selected);
+        let n = placed.0.len();
+        cut(&placed.0, picked.start.min(n)..picked.end.min(n))
+    }
+
     /// Enter in Find: picks and seeks to the next match after the playhead, from the top
     /// after the last.
     fn find_next(&mut self, words: &[(ClipId, Word)], playhead: Time, out: &mut Output) {
