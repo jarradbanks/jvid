@@ -460,7 +460,7 @@ pub fn show(
     }
 
     let p = ui.painter().with_clip_rect(clip);
-    let stroke = Stroke::new(1.0, color::amber());
+    let stroke = Stroke::new(1.0, color::ink());
     p.add(egui::Shape::closed_line(vec![tl, tr, br, bl], stroke));
     if reframe {
         p.rect_stroke(
@@ -485,7 +485,7 @@ pub fn show(
         p.rect_filled(
             Rect::from_center_size(h, Vec2::splat(HANDLE)),
             0.0,
-            color::amber(),
+            color::ink(),
         );
     }
     p.circle_stroke(anchor, HANDLE, stroke);
@@ -648,6 +648,32 @@ pub(crate) mod tests {
         );
         assert!(harness.state_mut().undo());
         assert_eq!(keys(&harness), before);
+    }
+
+    #[test]
+    fn the_overlay_draws_no_amber() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let (h, id) = history();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([960.0, 540.0])
+            .build_ui(move |ui| {
+                let frame = Rect::from_min_size(Pos2::ZERO, vec2(960.0, 540.0));
+                show(ui, h.project(), &HashSet::from([id]), Time(0), frame);
+            });
+        harness.run();
+        let img = harness.render().unwrap();
+        let amber = color::amber();
+        let near = |p: &image::Rgba<u8>| {
+            [amber.r(), amber.g(), amber.b()]
+                .iter()
+                .zip(p.0)
+                .all(|(a, b)| a.abs_diff(b) < 40)
+        };
+        assert!(!img.pixels().any(near), "amber in the overlay");
+        // The Ink outline is drawn.
+        assert!(img.pixels().any(|p| p.0[..3].iter().all(|c| *c > 200)));
     }
 
     #[test]
