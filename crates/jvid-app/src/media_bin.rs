@@ -24,6 +24,11 @@ use suite_ui::widgets::{Button, Dropdown, TextInput, fit_text};
 use crate::i18n::{tr, trn, verbatim};
 use crate::preview::Preview;
 
+#[cfg(test)]
+pub(crate) mod filmstrip_tests;
+pub(crate) mod filmstrips;
+use filmstrips::{FilmstripRequests, Filmstrips};
+
 /// The bin's tabs, in order.
 fn tabs() -> [&'static str; 4] {
     [
@@ -55,6 +60,7 @@ pub struct Caches {
     pub proxies: Arc<Proxies>,
     /// Where the Transcript panel keeps whole files' transcripts.
     pub transcripts: PathBuf,
+    pub(crate) filmstrips: Filmstrips,
 }
 
 impl Caches {
@@ -77,6 +83,7 @@ impl Caches {
             jobs: Pool::new(2),
             proxies,
             transcripts,
+            filmstrips: Filmstrips::default(),
         })
     }
 }
@@ -248,6 +255,9 @@ impl MediaBin {
         importing: bool,
         missing: &HashSet<PathBuf>,
     ) -> BinResponse {
+        self.thumbs
+            .strip_requests
+            .on_focus(ui.ctx(), self.thumbs.cache.as_deref());
         let mut out = BinResponse::default();
         if let Some((n, dragged)) = self.new_text
             && let Some(a) = project.assets().get(n)
@@ -749,8 +759,10 @@ struct Thumbs {
     /// `None` while a poster is in flight or failed; the placeholder shows.
     textures: HashMap<PathBuf, Option<TextureHandle>>,
     /// Filmstrips, loaded on first hover and skimmed from memory after.
-    strip_done: Done<Vec<egui::ColorImage>>,
+    strip_requests: FilmstripRequests,
     strips: HashMap<PathBuf, Option<Vec<TextureHandle>>>,
+    /// Re-entering a tile checks its source off-thread, including a completed strip.
+    hovered: Option<PathBuf>,
 }
 
 /// The filmstrip frame under the cursor, `frac` of the way across a tile, of `n` frames.
@@ -767,6 +779,9 @@ impl Thumbs {
     /// The tile's picture: the cached poster, or a neutral placeholder until it's ready.
     /// `skim` is the hover position across the tile, 0 to 1, which swaps in a filmstrip frame.
     fn paint(&mut self, ui: &Ui, rect: Rect, asset: &MediaAsset, offline: bool, skim: Option<f32>) {
+        // A source can go offline, or hover can move to an audio/title tile before the job
+        // finishes. Its terminal result still needs draining and its CPU frames releasing.
+        self.strip_requests.poll(ui.ctx(), &mut self.strips);
         let p = ui.painter();
         p.rect_filled(rect, CornerRadius::same(radius::CONTROL), color::raised());
         if offline {
@@ -827,53 +842,36 @@ impl Thumbs {
             return;
         }
         let Some(probe) = &asset.probe else { return };
+        if skim.is_some() && self.hovered.as_deref() != Some(&asset.path) {
+            self.hovered = Some(asset.path.clone());
+            if let Some(caches) = &self.cache {
+                caches
+                    .filmstrips
+                    .refresh_source(caches, &asset.path, ui.ctx());
+            }
+        } else if skim.is_none() && self.hovered.as_deref() == Some(&asset.path) {
+            self.hovered = None;
+        }
         for (path, img) in self.done.lock().unwrap().drain(..) {
             let tex = ui
                 .ctx()
                 .load_texture(path.display().to_string(), img, Default::default());
             self.textures.insert(path, Some(tex));
         }
-        for (path, imgs) in self.strip_done.lock().unwrap().drain(..) {
-            let texs = imgs
-                .into_iter()
-                .enumerate()
-                .map(|(i, img)| {
-                    let name = format!("{}#{i}", path.display());
-                    ui.ctx().load_texture(name, img, Default::default())
-                })
-                .collect();
-            self.strips.insert(path, Some(texs));
-        }
-        if let Some(frac) = skim {
-            match self.strips.get(&asset.path) {
-                Some(Some(texs)) if !texs.is_empty() => {
-                    letterbox(ui, rect, &texs[skim_index(frac, texs.len())]);
-                    return;
-                }
-                Some(_) => {}
-                None => {
-                    self.strips.insert(asset.path.clone(), None);
-                    let (done, ctx) = (self.strip_done.clone(), ui.ctx().clone());
-                    let Some(c) = &self.cache else { return };
-                    let (cache, jobs) = (c.thumbs.clone(), &c.jobs);
-                    let (path, duration) = (asset.path.clone(), probe.duration);
-                    let key = format!("strip:{}", path.display());
-                    jobs.submit(key, jvid_jobs::Priority::Preview, move |c| {
-                        if c.is_cancelled() {
-                            return;
-                        }
-                        match cache.filmstrip(&path, duration) {
-                            Ok(v) => {
-                                done.lock()
-                                    .unwrap()
-                                    .push((path, v.iter().map(color_image).collect()));
-                                ctx.request_repaint();
-                            }
-                            Err(e) => tracing::warn!("filmstrip for {}: {e}", path.display()),
-                        }
-                    });
-                }
-            }
+        self.strip_requests.refresh(
+            ui.ctx(),
+            self.cache.as_deref(),
+            &asset.path,
+            probe.duration,
+            &mut self.strips,
+            skim.is_some(),
+        );
+        if let Some(frac) = skim
+            && let Some(Some(texs)) = self.strips.get(&asset.path)
+            && !texs.is_empty()
+        {
+            letterbox(ui, rect, &texs[skim_index(frac, texs.len())]);
+            return;
         }
         match self.textures.get(&asset.path) {
             Some(Some(tex)) => letterbox(ui, rect, tex),
@@ -1558,6 +1556,7 @@ mod tests {
                 jobs: Pool::new(1),
                 proxies: Arc::new(Proxies::new(d.join("proxies"))),
                 transcripts: d.join("transcripts"),
+                filmstrips: Filmstrips::default(),
             })),
             ..Default::default()
         };
