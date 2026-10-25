@@ -67,3 +67,5 @@ The preview uses footage from [Tears of Steel](https://mango.blender.org), (CC) 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Release builds bundle FFmpeg, which has its own license; see [PLAN.md · Licensing](docs/PLAN.md#licensing).
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in jvid by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+Packaging candidates and portable data locations are described in the [installation guide](docs/packaging.md). Native package CI does not publish a release.

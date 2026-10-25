@@ -11,7 +11,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-directories.workspace = true
+jvid-paths.workspace = true
 jvid-core.workspace = true
 jvid-jobs.workspace = true
 jvid-media.workspace = true

@@ -964,3 +964,11 @@ none = "フィラーや間はありません"
 [analysis]
 audio_source = "音声ソース"
 source_stream = "{name} · ストリーム {number}"
+
+[components]
+title = "オプションのコンポーネント"
+purpose = "Whisperモデルで音声の文字起こしと字幕生成をローカルで行えます。モデルなしでも編集と書き出しは可能です。後からヘルプで追加できます。スキップするには完了を選んでください。"
+download = "ダウンロード"
+installed = "インストール済み"
+location = "モデル: {path}"
+portable_error = "ポータブル版のデータを書き込めません。フォルダー全体を書き込み可能な場所に移動して再試行してください。\n\n{error}"

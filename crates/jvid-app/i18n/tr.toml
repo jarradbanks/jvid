@@ -965,3 +965,11 @@ none = "Dolgu sözcüğü veya duraklama yok"
 [analysis]
 audio_source = "Ses Kaynağı"
 source_stream = "{name} · Akış {number}"
+
+[components]
+title = "İsteğe bağlı bileşenler"
+purpose = "Whisper modelleri yerel konuşma dökümü ve altyazı sağlar. İsteğe bağlıdır; modeller olmadan düzenleme ve dışa aktarma yapabilir, bunları daha sonra Yardım menüsünden ekleyebilirsiniz. Atlamak için Bitti seçin."
+download = "İndir"
+installed = "Yüklendi"
+location = "Modeller: {path}"
+portable_error = "Bu taşınabilir kopya verilerini yazamıyor. Klasörün tamamını yazılabilir bir konuma taşıyıp tekrar deneyin.\n\n{error}"

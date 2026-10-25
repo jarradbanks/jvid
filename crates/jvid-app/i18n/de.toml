@@ -962,3 +962,11 @@ none = "Keine Füllwörter oder Pausen"
 [analysis]
 audio_source = "Audioquelle"
 source_stream = "{name} · Stream {number}"
+
+[components]
+title = "Optionale Komponenten"
+purpose = "Whisper-Modelle ermöglichen lokale Spracherkennung und Untertitel. Sie sind optional. Bearbeiten und Exportieren ist auch ohne sie möglich. Modelle lassen sich später über Hilfe hinzufügen. Mit Fertig überspringen."
+download = "Herunterladen"
+installed = "Installiert"
+location = "Modelle: {path}"
+portable_error = "Diese portable Kopie kann ihre Daten nicht schreiben. Verschiebe den gesamten Ordner an einen beschreibbaren Ort und versuche es erneut.\n\n{error}"

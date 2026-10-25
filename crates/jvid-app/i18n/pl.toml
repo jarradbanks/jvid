@@ -986,3 +986,11 @@ none = "Brak wypełniaczy i pauz"
 [analysis]
 audio_source = "Źródło Dźwięku"
 source_stream = "{name} · Strumień {number}"
+
+[components]
+title = "Składniki opcjonalne"
+purpose = "Modele Whisper umożliwiają lokalną transkrypcję i napisy. Są opcjonalne: można edytować i eksportować bez nich oraz dodać je później w menu Pomoc. Wybierz Gotowe, aby pominąć."
+download = "Pobierz"
+installed = "Zainstalowano"
+location = "Modele: {path}"
+portable_error = "Ta kopia przenośna nie może zapisać danych. Przenieś cały folder do lokalizacji z prawem zapisu i spróbuj ponownie.\n\n{error}"

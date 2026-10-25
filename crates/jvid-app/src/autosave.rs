@@ -18,8 +18,7 @@ pub const KEEP: usize = 3;
 
 /// Where an untitled project autosaves, or `None` without a home dir.
 pub fn untitled() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "jvid")
-        .map(|d| d.data_dir().join("autosave").join("Untitled.jvid"))
+    jvid_paths::data_dir().map(|d| d.join("autosave").join("Untitled.jvid"))
 }
 
 /// `<project>.autosave<n>`, `n` in `1..=KEEP`.

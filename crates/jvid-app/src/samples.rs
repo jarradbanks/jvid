@@ -71,10 +71,10 @@ pub fn credits() -> Vec<String> {
 /// `name`'s path in the app data folder, writing it out first if it is missing or differs in
 /// size. `None` for an unknown name or a system without a data folder.
 pub fn path(name: &str) -> std::io::Result<Option<PathBuf>> {
-    let Some(dirs) = directories::ProjectDirs::from("", "", "jvid") else {
+    let Some(dir) = jvid_paths::data_dir() else {
         return Ok(None);
     };
-    path_in(&dirs.data_dir().join("samples").join(VERSION), name)
+    path_in(&dir.join("samples").join(VERSION), name)
 }
 
 /// The folder holding every clip, each written out first if needed; see [`path`].

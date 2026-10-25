@@ -601,10 +601,7 @@ impl Posters {
                     let s = crate::settings_file::load();
                     let dir = s
                         .cache_dir
-                        .or_else(|| {
-                            directories::ProjectDirs::from("", "", "jvid")
-                                .map(|d| d.cache_dir().to_owned())
-                        })
+                        .or_else(|| jvid_paths::cache_dir())
                         .unwrap_or_else(std::env::temp_dir)
                         .join("thumbnails");
                     (

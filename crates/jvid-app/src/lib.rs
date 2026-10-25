@@ -2,6 +2,7 @@
 
 pub mod app;
 mod autosave;
+mod components;
 mod easing;
 mod effects;
 pub mod export;
@@ -15,6 +16,7 @@ mod keymap_editor;
 mod masks;
 mod media_bin;
 mod notices;
+pub mod package_smoke;
 mod playback;
 pub mod preferences;
 mod preview;

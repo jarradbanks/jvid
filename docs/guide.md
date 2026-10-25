@@ -4,7 +4,7 @@ How to use jvid as it is today. Every shortcut is listed in the [shortcut cheat 
 
 ## Building from source
 
-jvid isn't packaged yet, so you build it. You need:
+Native installation and portable candidates are described in the [packaging guide](packaging.md). To build from source, you need:
 
 - A Rust toolchain from [rustup](https://rustup.rs). `rust-toolchain.toml` pins the channel, so rustup installs the right one on first use.
 - FFmpeg 4.4 to 8.x development libraries, `pkg-config` and libclang. The per-OS commands are in [CONTRIBUTING.md](../CONTRIBUTING.md#developer-setup).

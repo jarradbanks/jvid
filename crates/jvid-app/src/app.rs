@@ -97,6 +97,8 @@ pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
             .with_inner_size([1280.0, 720.0])
             .with_min_inner_size([960.0, 600.0]),
         renderer: eframe::Renderer::Wgpu,
+        persistence_path: jvid_paths::portable_root()
+            .and_then(|_| jvid_paths::config_dir().map(|d| d.join("window.ron"))),
         ..Default::default()
     };
     eframe::run_native(
@@ -132,6 +134,7 @@ pub struct App {
     /// Match source: the next imported video sets the project's size and frame rate.
     match_source: bool,
     settings_dialog: crate::project_settings::SettingsDialog,
+    components: crate::components::Components,
     preferences: crate::preferences::Preferences,
     /// The `language` setting: `system` or a language code.
     language: String,
@@ -217,6 +220,9 @@ impl App {
         ));
         app.tutorials_done = settings.tutorials_done.clone();
         app.welcome.tour = !settings.tour_offered;
+        if !cfg!(test) {
+            app.components.offer();
+        }
         // Tests never write the real settings file; those that save set their own.
         app.settings_path = crate::settings_file::path().filter(|_| !cfg!(test));
         // Nor the real untitled autosave: one there opens every harness on a Restore prompt.
@@ -277,6 +283,7 @@ impl App {
             on_welcome: true,
             match_source: false,
             settings_dialog: Default::default(),
+            components: Default::default(),
             preferences: Default::default(),
             language: jvid_core::settings::Settings::default().language,
             input_device: String::new(),
@@ -601,6 +608,9 @@ impl App {
         let button = menu_button(ui, tr!("menu.help"), left);
         egui::Popup::menu(&button).show(|ui| {
             self.tutorials_menu(ui);
+            if ui.button(tr!("components.title")).clicked() {
+                self.components.open = true;
+            }
             if ui.button(tr!("menu.about")).clicked() {
                 self.prompts.push(Prompt::About);
             }
@@ -879,6 +889,7 @@ impl App {
         self.settings_dialog.draft.is_some()
             || self.export_dialog.is_open()
             || self.preferences.is_open()
+            || self.components.open
             || self.keymap_editor.is_open()
             || self.subtitles.is_open()
             || !self.prompts.is_empty()
@@ -1371,6 +1382,7 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
             }
         }
+        self.components.show(&ctx);
         let modal_owned_input = self.modal_owns_input(&ctx);
         if !modal_owned_input {
             self.lesson_keys(&ctx);

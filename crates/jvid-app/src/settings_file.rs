@@ -9,12 +9,12 @@ use crate::i18n::tr;
 
 /// `<platform config dir>/settings.toml`, or `None` if the platform has no home dir.
 pub fn path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "jvid").map(|d| d.config_dir().join("settings.toml"))
+    jvid_paths::config_dir().map(|d| d.join("settings.toml"))
 }
 
 /// `<platform config dir>/themes`, where theme `.toml` files go.
 pub fn themes_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "jvid").map(|d| d.config_dir().join("themes"))
+    jvid_paths::config_dir().map(|d| d.join("themes"))
 }
 
 /// Never fails: a missing, unreadable or malformed file gives defaults.

@@ -1,0 +1,200 @@
+name: Package
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/package.yml'
+      - 'packaging/**'
+      - 'scripts/packaging/**'
+      - 'crates/jvid-paths/**'
+      - 'crates/jvid-app/src/components.rs'
+      - 'crates/jvid-app/src/package_smoke.rs'
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  GGML_NATIVE: 'OFF'
+  GGML_METAL: 'OFF'
+  JVID_UPDATE_PUBLIC_KEY: ${{ vars.JVID_UPDATE_PUBLIC_KEY }}
+
+jobs:
+  build:
+    name: package (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x86_64
+          - os: macos-14
+            target: macos-aarch64
+          - os: ubuntu-22.04
+            target: linux-x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s scripts/packaging -p 'test_*.py'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: package-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
+      - name: Validate release version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, sys
+          sys.path.insert(0, 'scripts/packaging')
+          from build import version
+          ref = os.environ['GITHUB_REF']
+          if ref.startswith('refs/tags/') and ref != 'refs/tags/v' + version():
+              raise SystemExit('Release tag must match workspace.package.version')
+          PY
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang libclang-dev pkg-config patchelf \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev \
+            libasound2-dev libx11-6 libxcursor1 libxi6 libxrandr2 libxkbcommon0 libxkbcommon-x11-0 \
+            libwayland-client0 libwayland-cursor0 libwayland-egl1 libfontconfig1 libfreetype6 libdbus-1-3
+      - name: macOS build dependencies
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install ffmpeg@8 pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg@8)/lib/pkgconfig" >> "$GITHUB_ENV"
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+      - name: Windows build environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Windows shared runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python scripts/packaging/fetch_ffmpeg.py "$env:RUNNER_TEMP/ffmpeg"
+          "FFMPEG_DIR=$env:RUNNER_TEMP/ffmpeg" >> $env:GITHUB_ENV
+          'LIBCLANG_PATH=C:\Program Files\LLVM\bin' >> $env:GITHUB_ENV
+          # whisper.cpp and Rust use the static MSVC CRT; UCRT is supplied by Windows.
+          'RUSTFLAGS=-C target-feature=+crt-static' >> $env:GITHUB_ENV
+          'CARGO_BUILD_TARGET=x86_64-pc-windows-msvc' >> $env:GITHUB_ENV
+          "$env:RUNNER_TEMP/ffmpeg/bin" >> $env:GITHUB_PATH
+          if (!(Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
+            choco install innosetup --yes --no-progress
+          }
+      - name: Build editor with required codecs
+        run: cargo build --locked --release -p jvid-app --features gpl-ffmpeg
+      # #477 owns this executable and the metadata generator. Conditional until its PR
+      # lands; a release with updater support must ship the helper with the same key.
+      - name: Build updater helper when available
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path crates/jvid-updater/Cargo.toml) {
+            cargo build --locked --release -p jvid-updater --bin jvid-update-helper
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Assemble Windows installer and portable ZIP
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $helperArgs = @()
+          if (Test-Path target/x86_64-pc-windows-msvc/release/jvid-update-helper.exe) { $helperArgs = @('--helper', 'target/x86_64-pc-windows-msvc/release/jvid-update-helper.exe') }
+          python scripts/packaging/build.py --target windows-x86_64 --binary target/x86_64-pc-windows-msvc/release/jvid-app.exe --ffmpeg-dir "$env:FFMPEG_DIR" @helperArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $zip = (Get-ChildItem dist/*-portable.zip).FullName
+          $setup = (Get-ChildItem dist/*-setup.exe).FullName
+          python scripts/packaging/smoke.py $zip --evidence dist/smoke --windows-install $setup
+      - name: Assemble Linux tarball
+        if: runner.os == 'Linux'
+        run: |
+          python scripts/packaging/build.py --target linux-x86_64 --binary target/release/jvid-app
+          python scripts/packaging/smoke.py dist/*-portable.tar.gz --evidence dist/smoke
+      - name: Exercise Linux artifact in a fresh runtime container
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD/dist:/artifacts" ubuntu:22.04 bash -euxc '
+            mkdir /opt/jvid
+            tar -xzf /artifacts/*-portable.tar.gz -C /opt/jvid
+            env -i HOME=/tmp/jvid-home PATH=/usr/bin:/bin /opt/jvid/*/AppRun --smoke-test /artifacts/clean-runtime
+          '
+      - name: Assemble and verify macOS app, DMG and portable ZIP
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          python scripts/packaging/build.py --target macos-aarch64 --binary target/release/jvid-app
+          hdiutil verify dist/*.dmg
+          hdiutil attach dist/*.dmg -mountpoint "$RUNNER_TEMP/jvid-dmg" -nobrowse
+          "$RUNNER_TEMP/jvid-dmg/jvid.app/Contents/MacOS/jvid-app" --smoke-test dist/smoke/dmg
+          hdiutil detach "$RUNNER_TEMP/jvid-dmg"
+          python scripts/packaging/smoke.py dist/*-portable.zip --evidence dist/smoke
+      - name: Checksums
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          files = sorted(p for p in Path('dist').iterdir() if p.is_file())
+          Path('dist/SHA256SUMS.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name + '\n' for p in files))
+          PY
+      - name: Retain artifacts and evidence without releasing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.target }}
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.dmg
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt
+            dist/smoke/
+            dist/clean-runtime/
+          if-no-files-found: error
+
+  # Disabled unless explicitly configured by the maintainer; manual/PR runs never publish.
+  # A draft gives the maintainer a final signing/source/clean-machine review boundary.
+  release-draft:
+    if: startsWith(github.ref, 'refs/tags/') && vars.JVID_RELEASE_ENABLED == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          path: packages
+      - name: Collect reviewed corresponding source
+        env:
+          SOURCE_URL: ${{ vars.JVID_CORRESPONDING_SOURCE_URL }}
+          SOURCE_SHA256: ${{ vars.JVID_CORRESPONDING_SOURCE_SHA256 }}
+        run: |
+          test -n "$SOURCE_URL" && test -n "$SOURCE_SHA256"
+          curl --fail --location --proto '=https' "$SOURCE_URL" -o "jvid-${GITHUB_REF_NAME#v}-corresponding-source.tar.gz"
+          printf '%s  %s\n' "$SOURCE_SHA256" "jvid-${GITHUB_REF_NAME#v}-corresponding-source.tar.gz" | sha256sum --check
+      - name: Prepare downloads
+        run: python scripts/packaging/collect.py packages release-assets
+      # #477 supplies its metadata generator; its CLI hook is documented in packaging.md.
+      - name: Create reviewable draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp jvid-*-corresponding-source.tar.gz release-assets/
+          python scripts/packaging/checksums.py release-assets
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "jvid $GITHUB_REF_NAME" --notes-file packaging/release-notes.md release-assets/*

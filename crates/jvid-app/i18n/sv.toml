@@ -962,3 +962,11 @@ none = "Inga utfyllnadsord eller pauser"
 [analysis]
 audio_source = "Ljudkälla"
 source_stream = "{name} · Ström {number}"
+
+[components]
+title = "Valfria komponenter"
+purpose = "Whisper-modeller ger lokal taligenkänning och undertexter. De är valfria: du kan redigera och exportera utan dem och lägga till dem senare via Hjälp. Välj Klar för att hoppa över."
+download = "Hämta"
+installed = "Installerad"
+location = "Modeller: {path}"
+portable_error = "Den här portabla kopian kan inte skriva sina data. Flytta hela mappen till en skrivbar plats och försök igen.\n\n{error}"

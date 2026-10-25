@@ -976,3 +976,11 @@ none = "No hay muletillas ni pausas"
 [analysis]
 audio_source = "Fuente de Audio"
 source_stream = "{name} · Pista {number}"
+
+[components]
+title = "Componentes opcionales"
+purpose = "Los modelos Whisper permiten transcribir voz y crear subtítulos localmente. Son opcionales: puedes editar y exportar sin ellos y añadirlos después desde Ayuda. Pulsa Listo para omitir."
+download = "Descargar"
+installed = "Instalado"
+location = "Modelos: {path}"
+portable_error = "Esta copia portable no puede guardar sus datos. Mueve toda la carpeta a una ubicación con permiso de escritura e inténtalo de nuevo.\n\n{error}"

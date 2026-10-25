@@ -962,3 +962,11 @@ none = "Ingen fyldord eller pauser"
 [analysis]
 audio_source = "Lydkilde"
 source_stream = "{name} · Strøm {number}"
+
+[components]
+title = "Valgfrie komponenter"
+purpose = "Whisper-modeller giver lokal talegenkendelse og undertekster. De er valgfrie: du kan redigere og eksportere uden dem og tilføje dem senere via Hjælp. Vælg Færdig for at springe over."
+download = "Hent"
+installed = "Installeret"
+location = "Modeller: {path}"
+portable_error = "Denne portable kopi kan ikke skrive sine data. Flyt hele mappen til et sted med skriveadgang, og prøv igen.\n\n{error}"

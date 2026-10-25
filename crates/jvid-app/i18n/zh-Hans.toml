@@ -995,3 +995,11 @@ none = "没有填充词或停顿"
 [analysis]
 audio_source = "音频源"
 source_stream = "{name} · 音轨 {number}"
+
+[components]
+title = "可选组件"
+purpose = "Whisper 模型可在本地进行语音转录并生成字幕。模型是可选的，不影响编辑和导出，也可以稍后在帮助菜单中添加。选择完成即可跳过。"
+download = "下载"
+installed = "已安装"
+location = "模型：{path}"
+portable_error = "此便携副本无法写入数据。请将整个文件夹移到可写位置，然后重试。\n\n{error}"
