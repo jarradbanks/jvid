@@ -1721,6 +1721,10 @@ fn queue_reports_cancelled_waiting_job() {
     assert_eq!(q.pending(), 1);
     h[0].cancel();
     assert_eq!((q.running(), q.pending()), (None, 0));
+    assert!(
+        q.unsettled(),
+        "cancelled jobs must still prevent an update while unwinding"
+    );
     go.send(()).unwrap();
     while !h.iter().all(|h| h.is_finished()) {
         std::thread::yield_now();
@@ -1731,6 +1735,7 @@ fn queue_reports_cancelled_waiting_job() {
         ("b.mp4".into(), cancelled),
     ];
     assert_eq!(q.poll(), ended);
+    assert!(!q.unsettled());
 }
 
 /// Target-size exports land under the target and within 3% of it, across corpus sources of

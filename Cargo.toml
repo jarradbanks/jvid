@@ -18,6 +18,7 @@ jvid-paths = { path = "crates/jvid-paths" }
 jvid-jobs = { path = "crates/jvid-jobs" }
 jvid-render = { path = "crates/jvid-render" }
 jvid-transcribe = { path = "crates/jvid-transcribe" }
+jvid-updater = { path = "crates/jvid-updater" }
 suite-ui = { path = "crates/suite-ui" }
 proptest = "1.5"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
@@ -26,6 +27,11 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "1"
 directories = "6"
 same-file = "1"
+semver = "1"
+sha2 = "0.10"
+ed25519-dalek = "2.2"
+tempfile = "3"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 tracing = "0.1"
 wgpu = "30"
 naga = { version = "30", features = ["wgsl-in"] }

@@ -171,6 +171,11 @@ impl Queue {
         self.jobs.iter().filter(|j| j.live()).count()
     }
 
+    /// A cancelled export still owns output files until its result arrives.
+    pub fn unsettled(&self) -> bool {
+        self.jobs.iter().any(|j| j.result.is_none())
+    }
+
     /// Cancels job `i` if it isn't over yet.
     pub fn cancel(&self, i: usize) {
         if let Some(j) = self.jobs.get(i).filter(|j| j.result.is_none()) {

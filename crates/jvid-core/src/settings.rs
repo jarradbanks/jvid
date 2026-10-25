@@ -42,6 +42,8 @@ pub struct Settings {
     pub input_device: String,
     /// Turns the UI's animations off, such as hover fades and the timeline's New Track slot.
     pub reduce_motion: bool,
+    /// Check for stable GitHub releases at startup; installation always requires a click.
+    pub automatic_update_checks: bool,
     /// Ids of the lessons finished in Help > Tutorials.
     pub tutorials_done: Vec<String>,
     /// The Welcome screen offered the tour, so it doesn't again.
@@ -62,6 +64,7 @@ impl Default for Settings {
             language: "system".into(),
             input_device: String::new(),
             reduce_motion: false,
+            automatic_update_checks: true,
             tutorials_done: Vec::new(),
             tour_offered: false,
         }
@@ -103,6 +106,9 @@ impl Settings {
                 "language" => set(&mut out.language, &key, value, |v: &String| !v.is_empty()),
                 "input_device" => set(&mut out.input_device, &key, value, |_| true),
                 "reduce_motion" => set(&mut out.reduce_motion, &key, value, |_| true),
+                "automatic_update_checks" => {
+                    set(&mut out.automatic_update_checks, &key, value, |_| true)
+                }
                 "tutorials_done" => set(&mut out.tutorials_done, &key, value, |_| true),
                 "tour_offered" => set(&mut out.tour_offered, &key, value, |_| true),
                 _ => tracing::warn!("settings: ignoring unknown key `{key}`"),
@@ -137,6 +143,20 @@ mod tests {
     #[test]
     fn empty_is_default() {
         assert_eq!(Settings::from_toml("").unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn automatic_update_checks_default_on_and_can_be_disabled_without_touching_other_settings() {
+        let settings =
+            Settings::from_toml("automatic_update_checks = false\ntheme = 'light'\n").unwrap();
+        assert!(!settings.automatic_update_checks);
+        assert_eq!(settings.theme, "light");
+        assert_eq!(Settings::from_toml(&settings.to_toml()).unwrap(), settings);
+        assert!(
+            Settings::from_toml("automatic_update_checks = 'no'")
+                .unwrap()
+                .automatic_update_checks
+        );
     }
 
     #[test]
@@ -203,6 +223,7 @@ mod tests {
             language: "es".into(),
             input_device: "USB Mic".into(),
             reduce_motion: true,
+            automatic_update_checks: false,
             tutorials_done: vec!["basics".into()],
             tour_offered: true,
         };

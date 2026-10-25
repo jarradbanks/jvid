@@ -31,6 +31,7 @@ mod subtitles;
 mod timeline;
 mod transcript;
 mod transport;
+mod updates;
 mod welcome;
 mod zoom;
 

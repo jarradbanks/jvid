@@ -123,7 +123,7 @@ impl Welcome {
                     .max_rect()
                     .shrink2(vec2(space::GUTTER + space::INSET, 0.0));
                 let p = ui.painter();
-                let version = verbatim(concat!("v", env!("CARGO_PKG_VERSION")));
+                let version = format!("{}{}", verbatim("v"), jvid_updater::VERSION);
                 p.text(
                     r.left_center(),
                     Align2::LEFT_CENTER,
