@@ -1151,7 +1151,10 @@
         "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
         "hardware_validation": "physical_hardware_comparison_unverified; CPU/lavapipe_and_native_available_encoders_checked",
         "native_windows_validation": "new_color_tests_passed; two_baseline_failures_confirmed",
-        "report_path": "/tmp/jvid-remediation-2026-10-25/B03-report.md"
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B03-report.md",
+        "followup_commits": [
+          "3e8c1a3efa7210c6a0611be45cdb065e4f19b783"
+        ]
       },
       "448": {
         "state": "implemented",
@@ -1545,6 +1548,24 @@
         "release-long-confirm.json",
         "final-issue-ref-check.json"
       ]
+    },
+    "publication": {
+      "pull_request": 475,
+      "url": "https://github.com/jarradbanks/jvid/pull/475",
+      "requested_merge_method": "merge",
+      "head_at_open": "5c25f30aa780412c0d5922e3793266e473eb93ac",
+      "initial_ci_run": 40192553366,
+      "followup_commits": {
+        "workflow": "e1ad18aeb11d4434b7e35c518964b3ccf1686fd7",
+        "media_test": "3e8c1a3efa7210c6a0611be45cdb065e4f19b783"
+      },
+      "followup_local_validation": {
+        "format": "passed",
+        "strict_workspace_clippy": "passed",
+        "linux_ffmpeg_4_4_selected_tests": 2,
+        "windows_ffmpeg_8_1_selected_tests": 2
+      },
+      "live_status": "See GitHub PR for current CI and merge status."
     }
   }
 }

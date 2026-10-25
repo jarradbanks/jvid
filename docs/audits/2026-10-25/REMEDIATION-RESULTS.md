@@ -2,7 +2,7 @@
 
 All 43 primary implementations and integration follow-ups are merged locally on `audit/432-474-integration`. Final functional verification passed against product commit `f28cf2b2f4cf9a5287e98c4277053d39f5298c2e`. Performance limits are recorded below.
 
-The work reused three Orca worktrees across dependent batches. Every issue has a separate primary commit and local `audit/issue-N` ref. No push, PR, issue update or external publication was performed. The original audit files were preserved.
+The work reused three Orca worktrees across dependent batches. Every issue has a separate primary commit and local `audit/issue-N` ref. The implementation phase ended with all changes local; subsequent PR publication was authorized separately and is recorded below. The original audit files were preserved.
 
 ## Issue coverage
 
@@ -103,6 +103,16 @@ Optimized app measurements used frozen `6f20bf6`; the later product change only 
 - Media/SRT publication restores prior outputs on tested publication failure and retains recovery files if restoration fails. This is rollback-protected publication, not a crash-atomic two-file transaction.
 - Completed externally modified filmstrips refresh at explicit request, hover re-entry or focus-return boundaries. Source identity follows size/mtime. A single in-progress native decoder call cannot be preempted; cancellation is checked at its next bounded boundary.
 - Masked pixel effects preserve the legacy Full-quality enlargement reference, including its existing difference from unmasked source-relative sizing. Preview/proxy scaling stays consistent with that saved-project behavior.
+
+## PR publication and CI follow-ups
+
+[PR #475](https://github.com/jarradbanks/jvid/pull/475) integrates this branch into `main`, with a merge commit requested to retain individual issue history. GitHub is authoritative for its live CI and merge state.
+
+The initial hosted [CI run](https://github.com/jarradbanks/jvid/actions/runs/40192553366) exposed two validation portability gaps. Runtime audio fixtures invoke the `ffmpeg` executable, but the workflow installed it only when generating an uncached corpus. The workflow now installs it alongside the development libraries on every Linux run (`e1ad18a`).
+
+The ProRes check also assumed that a decoder context always contains its limited-range flag. MOV's `nclc` color atom has no range field, and FFmpeg 6.1 sets ProRes range on decoded frames; the [MOV muxer](https://github.com/FFmpeg/FFmpeg/blob/n6.1/libavformat/movenc.c#L1990) and [ProRes decoder](https://github.com/FFmpeg/FFmpeg/blob/n6.1/libavcodec/proresdec2.c#L267) show those contracts. The test now strictly checks matrix/range/primaries/transfer on actual decoded frames for every exercised encoder, retains stream color tags and the MP4 range check, and keeps the same pixel tolerances (`3e8c1a3`). No runtime encoding behavior changed.
+
+The follow-up passed formatting, strict all-target workspace Clippy, and both the color and independent-offset audio regressions on Linux FFmpeg 4.4 and native Windows FFmpeg 8.1. Hosted CI then verifies the corrected tests and cache-hit fixture path on FFmpeg 6.1. Raw evidence is in `ci-followup-{fmt,clippy,media}.log`, `ci-followup-results.json` and `native-ci-followup.log` in the session evidence directory.
 
 ## Review artifacts
 
