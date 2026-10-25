@@ -12,7 +12,9 @@
 //!
 //! The file defines `fn effect(uv: vec2<f32>) -> vec4<f32>` returning straight RGBA, and may use
 //! `src` (the clip's image, straight RGBA), `smp` (a linear sampler) and the uniform `fx`, whose
-//! fields are `size` (pixels), `frame` (the timeline frame number) and one `f32` per parameter.
+//! fields are `size` (pixels), `frame` (the timeline frame number), `pass_index` and one `f32`
+//! per parameter. `// @passes N` runs the effect N times, each over the last one's output, with
+//! `fx.pass_index` counting from 0: a separable blur does x then y.
 
 /// One `@param` line: `@param name float min..max = default`.
 #[derive(Debug, Clone, PartialEq)]
@@ -29,6 +31,8 @@ pub struct Shader {
     /// From `@jvid effect "Name"`.
     pub name: String,
     pub params: Vec<Param>,
+    /// From `@passes N`, 1 without it.
+    pub passes: u32,
     /// The user's source followed by the generated bindings and entry points.
     pub(crate) module: String,
 }
@@ -38,6 +42,7 @@ pub struct Shader {
 pub fn parse(src: &str) -> Result<Shader, String> {
     let mut name = None;
     let mut params: Vec<Param> = Vec::new();
+    let mut passes = 1;
     for (i, line) in src.lines().enumerate() {
         let err = |m: &str| format!("line {}: {m}", i + 1);
         let Some(rest) = line.trim().strip_prefix("//") else {
@@ -51,6 +56,13 @@ pub fn parse(src: &str) -> Result<Shader, String> {
                 n.ok_or_else(|| err("expected @jvid effect \"Name\""))?
                     .to_owned(),
             );
+        } else if let Some(n) = rest.strip_prefix("@passes") {
+            passes = n
+                .trim()
+                .parse()
+                .ok()
+                .filter(|n| (1..=8).contains(n))
+                .ok_or_else(|| err("expected @passes 1 to 8"))?;
         } else if let Some(p) = rest.strip_prefix("@param") {
             let bad = || err("expected @param name float min..max = default");
             let (decl, default) = p.split_once('=').ok_or_else(bad)?;
@@ -69,7 +81,9 @@ pub fn parse(src: &str) -> Result<Shader, String> {
             if min.partial_cmp(&max) != Some(std::cmp::Ordering::Less) {
                 return Err(err("min must be less than max"));
             }
-            if ["size", "frame"].contains(&pname) || params.iter().any(|q| q.name == pname) {
+            if ["size", "frame", "pass_index"].contains(&pname)
+                || params.iter().any(|q| q.name == pname)
+            {
                 return Err(err(&format!("parameter name {pname:?} is taken")));
             }
             params.push(Param {
@@ -104,6 +118,7 @@ pub fn parse(src: &str) -> Result<Shader, String> {
     Ok(Shader {
         name,
         params,
+        passes,
         module,
     })
 }
@@ -122,7 +137,7 @@ fn find_loop(block: &naga::Block) -> Option<naga::Span> {
 
 const PRELUDE: &str = "
 struct JvidOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
-struct JvidFx { size: vec2<f32>, frame: f32 /*params*/ }
+struct JvidFx { size: vec2<f32>, frame: f32, pass_index: f32 /*params*/ }
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
 @group(0) @binding(2) var<uniform> fx: JvidFx;

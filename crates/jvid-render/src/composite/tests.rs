@@ -985,3 +985,51 @@ fn masked_blur_and_pixelate_change_only_inside_the_mask() {
         }
     }
 }
+
+#[test]
+fn blur_at_max_radius_hides_a_one_pixel_line() {
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping effect test: no software adapter on this platform");
+        return;
+    };
+    // A white 1 px vertical line on grey: the detail a face or text blur must not leak.
+    let (w, h) = (256u32, 8u32);
+    let src = image(&device, &queue, (w, h), |x, _| {
+        if x == w / 2 {
+            [255; 4]
+        } else {
+            [128, 128, 128, 255]
+        }
+    });
+    let (_, text) = crate::effect::BUNDLED
+        .iter()
+        .find(|(f, _)| *f == "gaussian_blur.wgsl")
+        .unwrap();
+    let shader = crate::effect::parse(text).unwrap();
+    let mut comp = Compositor::new(&device);
+    comp.set_effect(&device, "blur", Some(&shader)).unwrap();
+    let blurred = Transform {
+        effects: vec![Effect {
+            shader: "blur".into(),
+            params: [("radius".into(), 100.0)].into(),
+            enabled: true,
+        }],
+        ..Default::default()
+    };
+    let tex = comp.render(
+        &device,
+        &queue,
+        (w, h),
+        1,
+        [0, 0, 0, 255],
+        &[(&src, blurred)],
+    );
+    let out = read_back(&device, &queue, tex);
+    // The line's 127 codes spread over ~120 px leave about 1 code; one 7x7 pass left over 30.
+    let worst = out
+        .chunks(4)
+        .map(|p| (p[0] as i32 - 128).abs())
+        .max()
+        .unwrap();
+    assert!(worst <= 3, "line still shows: {worst} codes off grey");
+}

@@ -30,7 +30,10 @@ fn effect(uv: vec2<f32>) -> vec4<f32> {
 
 - `// @jvid effect "Name"` names the effect in the Inspector. Required.
 - `// @param name float min..max = default`, one per parameter. Each becomes a keyframeable
-  slider in the Inspector. Only `float` is supported; `size` and `frame` are reserved names.
+  slider in the Inspector. Only `float` is supported; `size`, `frame` and `pass_index` are
+  reserved names.
+- `// @passes N` (1 to 8, default 1) runs the effect N times, each over the last one's output.
+  `fx.pass_index` says which run this is, from 0. Gaussian blur uses two: x, then y.
 - `fn effect(uv: vec2<f32>) -> vec4<f32>` returns the colour at `uv` (0,0 top left to 1,1
   bottom right) as straight (not premultiplied) RGBA in 0..1.
 
@@ -44,6 +47,7 @@ can read:
 | `smp` | A linear, clamping sampler. |
 | `fx.size` | The image size in pixels (`vec2<f32>`). |
 | `fx.frame` | The timeline frame number (`f32`), for animated noise. |
+| `fx.pass_index` | Which `@passes` run this is (`f32`), from 0. |
 | `fx.<param>` | Each `@param`'s current value (`f32`), keyframes applied. |
 
 ## Where it runs

@@ -50,12 +50,14 @@ pub struct Compositor {
     /// Uploaded LUTs by [`Transform::lut`] path, and the stand-in bound for layers without one.
     luts: std::collections::HashMap<String, wgpu::Texture>,
     no_lut: wgpu::Texture,
-    /// Effect pipelines by [`Effect::shader`], with their parameters in uniform order; layers
-    /// naming an effect not set skip it.
-    effects: std::collections::HashMap<String, (wgpu::RenderPipeline, Vec<crate::effect::Param>)>,
+    /// Effect pipelines by [`Effect::shader`], with their parameters in uniform order and pass
+    /// count; layers naming an effect not set skip it.
+    effects:
+        std::collections::HashMap<String, (wgpu::RenderPipeline, Vec<crate::effect::Param>, u32)>,
     /// `src`, `smp`, `fx` at group 0: fixed, so a shader binding anything else fails in `set_effect`.
     effect_layout: wgpu::BindGroupLayout,
-    /// Per layer index: a ping-pong texture pair and one uniform per effect, reused across frames.
+    /// Per layer index: a ping-pong texture pair and one uniform per effect pass, reused across
+    /// frames.
     fx_pool: Vec<(Option<[wgpu::Texture; 2]>, Vec<wgpu::Buffer>)>,
     masks: crate::mask::Masker,
     /// The timeline frame number effects see as `fx.frame`.
@@ -219,8 +221,10 @@ impl Compositor {
         let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
         match pop.as_mut().poll(&mut cx) {
             std::task::Poll::Ready(None) => {
-                self.effects
-                    .insert(key.to_owned(), (pipeline, shader.params.clone()));
+                self.effects.insert(
+                    key.to_owned(),
+                    (pipeline, shader.params.clone(), shader.passes),
+                );
                 Ok(())
             }
             std::task::Poll::Ready(Some(e)) => Err(e.to_string()),
@@ -261,85 +265,88 @@ impl Compositor {
         }
         let pair = pair.as_ref().unwrap();
         let mut out: Option<&wgpu::Texture> = None;
-        // `i` counts applied effects, so it never skips past `uniforms.len()`.
+        // `i` counts applied passes, so it never skips past `uniforms.len()`.
         let mut i = 0;
         for e in effects.iter().filter(|e| e.enabled) {
-            let Some((pipeline, params)) = self.effects.get(&e.shader) else {
+            let Some((pipeline, params, passes)) = self.effects.get(&e.shader) else {
                 continue;
             };
-            let input = out.unwrap_or(tex);
-            let mut p = vec![
-                input.width() as f32,
-                input.height() as f32,
-                // Exact up to 2^24 frames (over 6 days at 30 fps).
-                self.frame as f32,
-            ];
-            p.extend(params.iter().map(|q| {
-                let v = e.params.get(&q.name).copied().unwrap_or(q.default);
-                v.clamp(q.min, q.max) as f32
-            }));
-            p.resize(p.len().next_multiple_of(4), 0.0);
-            let bytes: Vec<u8> = p.iter().flat_map(|f| f.to_ne_bytes()).collect();
-            if uniforms
-                .get(i)
-                .is_none_or(|u| u.size() != bytes.len() as u64)
-            {
-                let u = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("effect"),
-                    size: bytes.len() as u64,
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                match uniforms.get_mut(i) {
-                    Some(old) => *old = u,
-                    None => uniforms.push(u),
+            for pass in 0..*passes {
+                let input = out.unwrap_or(tex);
+                let mut p = vec![
+                    input.width() as f32,
+                    input.height() as f32,
+                    // Exact up to 2^24 frames (over 6 days at 30 fps).
+                    self.frame as f32,
+                    pass as f32,
+                ];
+                p.extend(params.iter().map(|q| {
+                    let v = e.params.get(&q.name).copied().unwrap_or(q.default);
+                    v.clamp(q.min, q.max) as f32
+                }));
+                p.resize(p.len().next_multiple_of(4), 0.0);
+                let bytes: Vec<u8> = p.iter().flat_map(|f| f.to_ne_bytes()).collect();
+                if uniforms
+                    .get(i)
+                    .is_none_or(|u| u.size() != bytes.len() as u64)
+                {
+                    let u = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("effect"),
+                        size: bytes.len() as u64,
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    match uniforms.get_mut(i) {
+                        Some(old) => *old = u,
+                        None => uniforms.push(u),
+                    }
                 }
+                queue.write_buffer(&uniforms[i], 0, &bytes);
+                let view = input.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(input.format().remove_srgb_suffix()),
+                    ..Default::default()
+                });
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &self.effect_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: uniforms[i].as_entire_binding(),
+                        },
+                    ],
+                });
+                // Ping-pong: write whichever of the pair isn't the input.
+                let next = &pair[usize::from(out.is_some_and(|o| *o == pair[0]))];
+                let target = next.create_view(&Default::default());
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("effect"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, &bind, &[]);
+                pass.draw(0..4, 0..1);
+                drop(pass);
+                out = Some(next);
+                i += 1;
             }
-            queue.write_buffer(&uniforms[i], 0, &bytes);
-            let view = input.create_view(&wgpu::TextureViewDescriptor {
-                format: Some(input.format().remove_srgb_suffix()),
-                ..Default::default()
-            });
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &self.effect_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: uniforms[i].as_entire_binding(),
-                    },
-                ],
-            });
-            // Ping-pong: write whichever of the pair isn't the input.
-            let next = &pair[usize::from(out.is_some_and(|o| *o == pair[0]))];
-            let target = next.create_view(&Default::default());
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("effect"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &bind, &[]);
-            pass.draw(0..4, 0..1);
-            drop(pass);
-            out = Some(next);
-            i += 1;
         }
         out.cloned()
     }
