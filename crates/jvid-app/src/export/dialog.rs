@@ -56,6 +56,9 @@ pub struct ExportDialog {
     after: f64,
     /// Highlight file name: `{project}`, `{marker}` and `{index}` are filled in.
     template: String,
+    /// Deterministic codec preflight for dialog tests, independent of host encoders.
+    #[cfg(test)]
+    test_encoders: Option<Vec<&'static str>>,
 }
 
 impl Default for ExportDialog {
@@ -74,11 +77,18 @@ impl Default for ExportDialog {
             before: 15.0,
             after: 5.0,
             template: TEMPLATE.into(),
+            #[cfg(test)]
+            test_encoders: None,
         }
     }
 }
 
 impl ExportDialog {
+    /// Whether the export modal currently owns input, including before its first draw.
+    pub fn is_open(&self) -> bool {
+        self.range.is_some()
+    }
+
     /// Sets the output file, whose folder the next `open` keeps; for tests that need a fixed path.
     #[doc(hidden)]
     pub fn set_path(&mut self, path: PathBuf) {
@@ -221,6 +231,24 @@ impl ExportDialog {
                             };
                             let video = video_summary(shown, s.width, s.height, s.frame_rate);
                             row(ui, tr!("export.video"), |ui| readout(ui, &video));
+                            if let Some(codec) = shown.video {
+                                #[cfg(test)]
+                                let encoders = self.test_encoders.clone().unwrap_or_else(|| {
+                                    jvid_media::encode::video_encoders(codec, &shown.options)
+                                });
+                                #[cfg(not(test))]
+                                let encoders =
+                                    jvid_media::encode::video_encoders(codec, &shown.options);
+                                let names = if encoders.is_empty() {
+                                    tr!("export.none").to_owned()
+                                } else {
+                                    encoders.join(" → ")
+                                };
+                                row(ui, tr!("export.encoder"), |ui| readout(ui, &names));
+                                if encoders.is_empty() && self.lossless.is_none() {
+                                    note(ui, Note::Warn, &codec_unavailable(codec));
+                                }
+                            }
                             let name = preset_name(self.preset, preset);
                             if let Some(w) = aspect_warning(name, preset, (s.width, s.height)) {
                                 note(ui, Note::Warn, &w);
@@ -536,7 +564,7 @@ fn row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
             |ui| {
                 ui.set_width(LABEL);
                 let l = egui::Label::new(RichText::new(label).color(color::ink_2())).truncate();
-                ui.add(l);
+                ui.add(l).on_hover_text(label);
             },
         );
         add(ui)
@@ -550,7 +578,10 @@ fn readout(ui: &mut Ui, text: &str) {
     ui.allocate_ui_with_layout(
         vec2(w, size::CONTROL),
         Layout::left_to_right(Align::Center),
-        |ui| ui.add(egui::Label::new(RichText::new(text).color(color::ink_2())).truncate()),
+        |ui| {
+            ui.add(egui::Label::new(RichText::new(text).color(color::ink_2())).truncate())
+                .on_hover_text(text)
+        },
     );
 }
 
@@ -835,6 +866,23 @@ fn aspect_warning(name: &str, p: &Preset, (w, h): (u32, u32)) -> Option<String> 
     ))
 }
 
+pub(super) fn codec_name(codec: VideoCodec) -> &'static str {
+    match codec {
+        VideoCodec::H264 => verbatim("H.264"),
+        VideoCodec::Hevc => verbatim("HEVC"),
+        VideoCodec::ProRes => verbatim("ProRes"),
+        VideoCodec::Gif => verbatim("GIF"),
+    }
+}
+
+pub(super) fn codec_unavailable(codec: VideoCodec) -> String {
+    tr!(
+        "export.codec_no_encoder",
+        codec = codec_name(codec),
+        encoders = jvid_media::encode::software_encoder_hint(codec)
+    )
+}
+
 fn video_summary(p: &Preset, w: u32, h: u32, rate: Rate) -> String {
     let Some(v) = p.video else {
         return tr!("export.none").into();
@@ -843,11 +891,8 @@ fn video_summary(p: &Preset, w: u32, h: u32, rate: Rate) -> String {
     let rate = p.frame_rate.unwrap_or(rate);
     let fps = rate.num as f64 / rate.den as f64;
     let codec = match v {
-        VideoCodec::H264 => verbatim("H.264"),
         VideoCodec::Hevc if p.options.contains_key("hdr") => verbatim("HEVC HDR10"),
-        VideoCodec::Hevc => verbatim("HEVC"),
-        VideoCodec::ProRes => verbatim("ProRes"),
-        VideoCodec::Gif => verbatim("GIF"),
+        codec => codec_name(codec),
     };
     let rate = format!("{fps:.3}");
     let rate = rate.strip_suffix(".000").unwrap_or(&rate);
@@ -1119,8 +1164,13 @@ mod tests {
 
     fn harness(
         project: Project,
-        dialog: ExportDialog,
+        mut dialog: ExportDialog,
     ) -> egui_kittest::Harness<'static, ExportDialog> {
+        // The displayed order is injected; unit snapshots must not change with GPL features,
+        // encoder registration or the machine's adapters.
+        if dialog.test_encoders.is_none() {
+            dialog.test_encoders = Some(vec!["libopenh264"]);
+        }
         let mut fresh = true;
         let mut harness = egui_kittest::Harness::builder()
             .with_size([960.0, 600.0])
@@ -1175,6 +1225,19 @@ mod tests {
         }
         let (project, dialog) = scenario();
         snapshot("export_dialog", project, dialog);
+    }
+
+    #[test]
+    fn unavailable_codec_preflight_explains_choices_in_dialog() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let (project, mut dialog) = scenario();
+        dialog.test_encoders = Some(Vec::new());
+        let h = harness(project, dialog);
+        h.get_by_label("Encoders to Try");
+        h.get_by_label(&codec_unavailable(VideoCodec::H264));
     }
 
     /// Every dropdown's menu opens inside the dialog's body, clear of its head and buttons.

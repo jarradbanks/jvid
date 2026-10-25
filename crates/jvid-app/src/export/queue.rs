@@ -4,7 +4,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
-use std::time::Instant;
 
 use egui::{
     Align, Align2, Color32, CornerRadius, Layout, Rect, RichText, Sense, Ui, UiBuilder, WidgetInfo,
@@ -12,13 +11,12 @@ use egui::{
 };
 use jvid_core::model::ProbeInfo;
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
-use jvid_jobs::Handle;
 use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
 use suite_ui::widgets::{Button, State, fit_text, paint_fit};
 
-use super::Error;
+use super::{Error, ExportHandle, Phase};
 use crate::i18n::{tr, trn};
 
 struct Job {
@@ -27,10 +25,8 @@ struct Job {
     preset: String,
     /// The exported range's length.
     duration: Time,
-    handle: Handle,
+    handle: ExportHandle,
     rx: Receiver<Result<ProbeInfo, Error>>,
-    /// When the job became the one running, for time left.
-    started: Option<Instant>,
     /// Its place in the order jobs were pushed, counting ones since cleared.
     seq: usize,
     /// `Some` once the job is over.
@@ -61,7 +57,9 @@ pub enum Status {
     Waiting,
     /// `left` is seconds to go, once there's enough progress to tell.
     Rendering {
-        progress: f32,
+        phase: Phase,
+        retry: u8,
+        progress: Option<f32>,
         left: Option<f64>,
     },
     Done,
@@ -115,7 +113,7 @@ impl Queue {
         path: PathBuf,
         preset: String,
         duration: Time,
-        (handle, rx): (Handle, Receiver<Result<ProbeInfo, Error>>),
+        (handle, rx): (impl Into<ExportHandle>, Receiver<Result<ProbeInfo, Error>>),
     ) -> bool {
         if self.writing(&path) {
             return false;
@@ -124,9 +122,8 @@ impl Queue {
             path,
             preset,
             duration,
-            handle,
+            handle: handle.into(),
             rx,
-            started: None,
             seq: self.pushed,
             result: None,
             size: None,
@@ -159,9 +156,6 @@ impl Queue {
             self.failed_unseen |= matches!(r, Err(Error::Failed(_)));
             ended.push((j.path.clone(), r.clone()));
             j.result = Some(r);
-        }
-        if let Some(j) = self.jobs.iter_mut().find(|j| j.live()) {
-            j.started.get_or_insert_with(Instant::now);
         }
         ended
     }
@@ -218,11 +212,12 @@ impl Queue {
         let rows = self.jobs.iter().enumerate().map(|(i, j)| {
             let status = match &j.result {
                 None if Some(i) == running => {
-                    let progress = j.handle.progress();
-                    let elapsed = j.started.map_or(0.0, |s| s.elapsed().as_secs_f64());
+                    let snapshot = j.handle.snapshot();
                     Status::Rendering {
-                        progress,
-                        left: time_left(elapsed, progress),
+                        phase: snapshot.phase,
+                        retry: snapshot.retry,
+                        progress: snapshot.progress,
+                        left: snapshot.phase_left(),
                     }
                 }
                 None if j.handle.is_cancelled() => Status::Cancelled,
@@ -357,51 +352,56 @@ pub fn menu(ui: &mut Ui, rows: &[Row], confirm: bool, shortcut: &str) -> Option<
     action
 }
 
-/// "Rendering 1 of 2", the running job's bar, and its name and preset; "All Finished" after.
+/// Current phase and its progress, with full labels on hover at narrow widths.
 fn summary(ui: &mut Ui, rows: &[Row]) {
-    let live = rows.iter().filter(|r| r.status.live()).count();
-    let running = rows.iter().find_map(|r| match r.status {
-        Status::Rendering { progress, left } => Some((r, progress, left)),
-        _ => None,
-    });
-    let pad = space::S8;
-    let h = if running.is_some() { 58.0 } else { 32.0 };
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
-    let inner = rect.shrink(pad);
-    let top = match running {
-        Some(_) => tr!("export.rendering_of", total = live),
-        None => tr!("export.all_finished").into(),
-    };
-    text(
-        ui,
-        inner.left_top(),
-        Align2::LEFT_TOP,
-        &top,
-        theme::body_strong(),
-        color::ink(),
-    );
-    let Some((r, progress, left)) = running else {
+    let running = rows
+        .iter()
+        .find(|r| matches!(r.status, Status::Rendering { .. }));
+    let h = if running.is_some() { 76.0 } else { 32.0 };
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
+    let inner = rect.shrink(space::S8);
+    let Some(r) = running else {
+        cell(ui, inner, tr!("export.all_finished"), color::ink());
         return;
     };
-    let pct = percent(progress, left);
-    text(
-        ui,
-        inner.right_top(),
-        Align2::RIGHT_TOP,
-        &pct,
-        theme::body(),
-        color::ink_2(),
-    );
-    let bar_rect =
-        Rect::from_min_size(inner.left_top() + vec2(0.0, 22.0), vec2(inner.width(), 6.0));
-    bar(ui, bar_rect, progress);
+    let Status::Rendering {
+        phase,
+        retry,
+        progress,
+        left,
+    } = r.status
+    else {
+        unreachable!()
+    };
+    let label = phase_text(phase, retry);
+    let detail = phase_percent(progress, left);
+    let title = Rect::from_min_size(inner.min, vec2(inner.width(), 16.0));
+    cell(ui, title, &label, color::ink());
+    let detail_rect = title.translate(vec2(0.0, 18.0));
+    cell(ui, detail_rect, &detail, color::ink_2());
+    let bar_rect = Rect::from_min_size(inner.min + vec2(0.0, 36.0), vec2(inner.width(), 4.0));
+    bar(ui, bar_rect, progress.unwrap_or(0.0));
     let bottom = format!("{} · {}", file_name(&r.path), r.preset);
-    let galley = fit_text(ui, &bottom, theme::body(), color::ink_3(), inner.width());
-    ui.painter().galley(
-        pos2(inner.left(), inner.bottom() - galley.size().y),
-        galley,
+    cell(
+        ui,
+        title.translate(vec2(0.0, 44.0)),
+        &bottom,
         color::ink_3(),
     );
+    tip(response, r);
+}
+
+fn phase_text(phase: Phase, retry: u8) -> String {
+    let label = phase.label();
+    if retry > 0 && matches!(phase, Phase::Encoding { .. } | Phase::AnalyzingAudio) {
+        format!("{label} · {}", Phase::Retrying.label())
+    } else {
+        label
+    }
+}
+
+fn phase_percent(progress: Option<f32>, left: Option<f64>) -> String {
+    progress.map_or_else(|| tr!("export.estimating").into(), |p| percent(p, left))
 }
 
 /// A finished job: its status icon, name and, when done, Reveal. Returns true on Reveal.
@@ -719,20 +719,18 @@ fn row(ui: &mut Ui, i: usize, r: &Row, wide: bool) -> Option<Action> {
     cell(ui, cols[2], &clock(seconds(r.duration)), color::ink_3());
     cell(ui, cols[3], &size, color::ink_3());
     match &r.status {
-        Status::Rendering { progress, left } => {
-            let pct = percent(*progress, *left);
-            let font = theme::body();
-            let w = ui
-                .painter()
-                .layout_no_wrap(pct.clone(), font.clone(), color::ink_2())
-                .size()
-                .x;
+        Status::Rendering {
+            phase,
+            retry,
+            progress,
+            left,
+        } => {
             let c = cols[4];
-            let at = pos2(c.right(), c.center().y);
-            text(ui, at, Align2::RIGHT_CENTER, &pct, font, color::ink_2());
-            let bar_w = (c.width() - w - space::S8).max(0.0);
-            let b = Rect::from_min_size(pos2(c.left(), c.center().y - 2.0), vec2(bar_w, 4.0));
-            bar(ui, b, *progress);
+            let label = phase_text(*phase, *retry);
+            let upper = Rect::from_min_max(c.min, pos2(c.right(), c.center().y));
+            cell(ui, upper, &label, color::ink_2());
+            let lower = Rect::from_min_max(pos2(c.left(), c.center().y), c.max);
+            cell(ui, lower, &phase_percent(*progress, *left), color::ink_3());
         }
         Status::Failed(e) => cell(ui, cols[4], e, color::red()),
         _ => {}
@@ -764,6 +762,16 @@ fn tip(response: egui::Response, r: &Row) {
         Status::Failed(e) => {
             response.on_hover_text(format!("{}\n{path}", tr!("export.failed", error = e)))
         }
+        Status::Rendering {
+            phase,
+            retry,
+            progress,
+            left,
+        } => response.on_hover_text(format!(
+            "{}\n{}\n{path}",
+            phase_text(*phase, *retry),
+            phase_percent(*progress, *left)
+        )),
         _ => response.on_hover_text(path.to_string()),
     };
 }
@@ -789,7 +797,10 @@ fn chip(ui: &mut Ui, cell: Rect, s: &Status) {
         .x;
     let rect = Rect::from_min_size(
         pos2(cell.left(), cell.center().y - 10.0),
-        vec2(space::S4 + 12.0 + space::S4 + w + 6.0, 20.0),
+        vec2(
+            (space::S4 + 12.0 + space::S4 + w + 6.0).min(cell.width()),
+            20.0,
+        ),
     );
     let tint = match s {
         Status::Done | Status::Failed(_) => 0.14,
@@ -804,12 +815,14 @@ fn chip(ui: &mut Ui, cell: Rect, s: &Status) {
     let at = pos2(rect.left() + space::S4 + 6.0, rect.center().y);
     text(ui, at, Align2::CENTER_CENTER, glyph, icon_font, ink);
     let at = pos2(rect.left() + space::S4 + 12.0 + space::S4, rect.center().y);
-    text(ui, at, Align2::LEFT_CENTER, label, font, ink);
+    let galley = fit_text(ui, label, font, ink, (rect.right() - at.x - 6.0).max(0.0));
+    paint_fit(ui, pos2(at.x, at.y - galley.size().y / 2.0), galley, ink);
     ui.interact(
         rect,
         ui.id().with(("chip", cell.min.y as i32)),
         Sense::hover(),
     )
+    .on_hover_text(label)
     .widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, label));
 }
 
@@ -842,7 +855,10 @@ fn cell(ui: &mut Ui, rect: Rect, s: &str, ink: Color32) {
         UiBuilder::new()
             .max_rect(rect)
             .layout(Layout::left_to_right(Align::Center)),
-        |ui| ui.add(egui::Label::new(RichText::new(s).color(ink)).truncate()),
+        |ui| {
+            ui.add(egui::Label::new(RichText::new(s).color(ink)).truncate())
+                .on_hover_text(s)
+        },
     );
 }
 
@@ -982,7 +998,9 @@ mod tests {
             row(
                 "Main Edit.mp4",
                 Status::Rendering {
-                    progress: 0.42,
+                    phase: Phase::Encoding { pass: 2 },
+                    retry: 0,
+                    progress: Some(0.42),
                     left: Some(95.0),
                 },
                 None,
@@ -990,7 +1008,9 @@ mod tests {
             row(
                 "Second Edit.mp4",
                 Status::Rendering {
-                    progress: 0.02,
+                    phase: Phase::AnalyzingAudio,
+                    retry: 0,
+                    progress: Some(0.02),
                     left: None,
                 },
                 None,
@@ -1011,6 +1031,63 @@ mod tests {
         });
         h.run_steps(2);
         h.snapshot(name);
+    }
+
+    #[test]
+    fn phase_labels_have_full_tooltips_and_actions_fit_narrow_panels() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        for width in [240.0, 300.0, 480.0] {
+            for scale in [1.0, 1.5] {
+                for phase in [
+                    Phase::AnalyzingAudio,
+                    Phase::Encoding { pass: 2 },
+                    Phase::Finalizing,
+                ] {
+                    let label = phase_text(phase, 1);
+                    let rows = vec![
+                        row("Completed.mov", Status::Done, Some(1000)),
+                        row(
+                            "Active.mov",
+                            Status::Rendering {
+                                phase,
+                                retry: 1,
+                                progress: Some(0.42),
+                                left: None,
+                            },
+                            None,
+                        ),
+                    ];
+                    let mut fresh = true;
+                    let mut h = Harness::builder()
+                        .with_size([width, 280.0])
+                        .with_pixels_per_point(scale)
+                        .build_ui(move |ui| {
+                            if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                                panel(ui, &rows, false, true);
+                            }
+                        });
+                    h.run_steps(3);
+                    for action in [tr!("prompt.cancel"), tr!("export.reveal")] {
+                        let rect = h.get_by_label(action).rect();
+                        assert!(
+                            h.ctx.content_rect().contains_rect(rect),
+                            "{width}/{scale}: {action} at {rect:?}"
+                        );
+                    }
+                    h.get_by_label(&label).hover();
+                    for _ in 0..40 {
+                        h.step();
+                    }
+                    assert!(
+                        h.query_all_by_label(&label).count() >= 2,
+                        "full phase tooltip missing at {width}/{scale}: {label}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -24,9 +24,78 @@ pub struct Fx {
     level: f32,
     /// Smoothed gain reduction in dB.
     reduction: f32,
+    /// Next compensated output position and parameters; a discontinuity resets all DSP state.
+    render_at: Option<(i64, AudioFx)>,
+    scratch: Vec<f32>,
 }
 
 impl Fx {
+    /// Bounded history used to settle effects after a seek, in project sample frames.
+    pub const PREROLL: usize = SAMPLE_RATE as usize / 10;
+
+    /// Algorithmic input-to-output latency in project sample frames. Filters have their usual
+    /// frequency-dependent phase response; RNNoise has a fixed two-frame pipeline delay.
+    pub fn latency(p: &AudioFx) -> usize {
+        if p.noise_reduction.enabled && p.noise_reduction.amount > 0.0 {
+            Denoise::DELAY
+        } else {
+            0
+        }
+    }
+
+    /// Renders timeline-aligned output, pulling bounded lookahead from `read`. The reader must
+    /// supply silence outside its clip/track. Sequential calls carry state; seeks and parameter
+    /// changes reset and prime it with 100 ms of history. Padding after the source end flushes
+    /// the pipeline, and only the requested output range is returned.
+    pub fn render(
+        &mut self,
+        p: &AudioFx,
+        start: i64,
+        out: &mut [f32],
+        mut read: impl FnMut(i64, &mut [f32]),
+    ) {
+        if out.is_empty() {
+            return;
+        }
+        let contiguous = self
+            .render_at
+            .as_ref()
+            .is_some_and(|(at, old)| *at == start && old == p);
+        if !contiguous {
+            *self = Self::default();
+        }
+        let frames = out.len() / 2;
+        let latency = Self::latency(p);
+        if p.is_default() {
+            read(start, out);
+        } else {
+            let preroll = if contiguous { 0 } else { Self::PREROLL };
+            let discard = if contiguous { 0 } else { preroll + latency };
+            let from = if contiguous {
+                start + latency as i64
+            } else {
+                start - preroll as i64
+            };
+            let mut scratch = std::mem::take(&mut self.scratch);
+            let mut done = 0;
+            while done < discard + frames {
+                let n = (discard + frames - done).min(2048);
+                scratch.clear();
+                scratch.resize(n * 2, 0.0);
+                read(from + done as i64, &mut scratch);
+                self.process(p, &mut scratch);
+                let skip = discard.saturating_sub(done).min(n);
+                if skip < n {
+                    let at = (done + skip - discard) * 2;
+                    out[at..at + (n - skip) * 2].copy_from_slice(&scratch[skip * 2..]);
+                }
+                done += n;
+            }
+            self.scratch = scratch;
+        }
+        self.render_at = Some((start + frames as i64, *p));
+    }
+
     /// Runs `buf` through `p`'s high-pass, noise reduction, EQ then compressor, skipping each
     /// while it's off or neutral.
     pub fn process(&mut self, p: &AudioFx, buf: &mut [f32]) {
@@ -111,7 +180,6 @@ const PCM: f32 = 32_768.0;
 
 /// Per channel denoiser state. Samples are buffered into whole frames, so the output lags the
 /// input by [`Denoise::DELAY`] frames, the dry sound with it so the mix lines up.
-// shortcut: clips with noise reduction play 20 ms late, compensate in the reader if it shows.
 struct Denoise {
     states: [Box<DenoiseState<'static>>; 2],
     /// The frame filling up, in 16-bit units.
@@ -126,7 +194,6 @@ struct Denoise {
 
 impl Denoise {
     /// Input to output, in samples: one frame buffering here, one inside RNNoise.
-    #[cfg(test)]
     const DELAY: usize = 2 * FRAME;
 
     fn new() -> Box<Self> {
@@ -162,6 +229,91 @@ impl Denoise {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn latency_reports_active_pipeline_delay() {
+        let mut p = AudioFx::default();
+        assert_eq!(Fx::latency(&p), 0);
+        p.noise_reduction.amount = 25.0;
+        assert_eq!(Fx::latency(&p), 960);
+        p.noise_reduction.enabled = false;
+        assert_eq!(Fx::latency(&p), 0);
+    }
+
+    #[test]
+    fn aligned_render_flushes_short_input_and_resets_on_seeks() {
+        let mut p = AudioFx::default();
+        p.noise_reduction.amount = 25.0;
+        let input = |start: i64, buf: &mut [f32]| {
+            assert!(buf.len() <= 4096, "reader work stays bounded");
+            for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                let at = start + i as i64;
+                f.fill(if at == 13 {
+                    0.5
+                } else if at == 256 {
+                    0.25
+                } else {
+                    0.0
+                });
+            }
+        };
+        let mut fx = Fx::default();
+        let mut out = vec![0.0; 257 * 2];
+        fx.render(&p, 0, &mut out, input);
+        let peak = |b: &[f32]| {
+            b.as_chunks::<2>()
+                .0
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a[0].abs().total_cmp(&b[0].abs()))
+                .unwrap()
+                .0
+        };
+        assert_eq!(peak(&out), 13);
+        assert!(
+            out[512] > 0.15,
+            "the last frame of a clip shorter than the latency survives"
+        );
+        for start in [200, 0, 200] {
+            let mut got = vec![0.0; (257 - start) as usize * 2];
+            fx.render(&p, start, &mut got, input);
+            assert_eq!(peak(&got), if start == 0 { 13 } else { 56 });
+        }
+        // Changing the cleanup controls resets its pipeline coherently.
+        p.noise_reduction.enabled = false;
+        fx.render(&p, 0, &mut out, input);
+        assert_eq!(out[26], 0.5);
+        assert_eq!(out[512], 0.25);
+    }
+
+    #[test]
+    fn aligned_noise_reduction_preserves_floor_reduction_and_wet_mix() {
+        let input = noisy_voice();
+        let read = |start: i64, buf: &mut [f32]| {
+            for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                let at = start + i as i64;
+                *f = if at >= 0 && (at as usize) < input.len() / 2 {
+                    [input[at as usize * 2], input[at as usize * 2 + 1]]
+                } else {
+                    [0.0; 2]
+                };
+            }
+        };
+        let mut p = AudioFx::default();
+        p.noise_reduction.amount = 100.0;
+        let mut wet = vec![0.0; input.len()];
+        Fx::default().render(&p, 0, &mut wet, read);
+        assert!(floor_db(&input) - floor_db(&wet) >= 10.0);
+        p.noise_reduction.amount = 25.0;
+        let mut mixed = vec![0.0; input.len()];
+        Fx::default().render(&p, 0, &mut mixed, read);
+        assert!(
+            mixed
+                .iter()
+                .zip(input.iter().zip(&wet))
+                .all(|(got, (dry, wet))| (got - (dry * 0.75 + wet * 0.25)).abs() < 1e-6)
+        );
+    }
 
     /// One second of a `freq` Hz sine at `amp` on both channels.
     fn sine(freq: f32, amp: f32) -> Vec<f32> {

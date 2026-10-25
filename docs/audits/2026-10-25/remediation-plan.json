@@ -1,0 +1,1571 @@
+{
+  "schema_version": 1,
+  "status": "implemented_with_documented_validation_limits",
+  "date": "2026-10-25",
+  "repository": "jarradbanks/jvid",
+  "reviewed_commit": "7efe671152a6c6a67bd31f9cbcb670748f73f57b",
+  "execution_base": "origin/main",
+  "issue_range": [
+    432,
+    474
+  ],
+  "expected_issue_count": 43,
+  "expected_bug_count": 38,
+  "enhancements": [
+    463,
+    465,
+    472,
+    473,
+    474
+  ],
+  "implementation_worktree_count": 3,
+  "coordinator": "current checkout",
+  "worktree_policy": "Three reusable implementation lanes; separate issue commits and local refs. Publication was not performed.",
+  "explicit_issue_dependencies": [
+    {
+      "before": 434,
+      "after": 435
+    },
+    {
+      "before": 447,
+      "after": 448
+    }
+  ],
+  "shared_wiring_owned_by_coordinator": [
+    "crates/jvid-app/src/app/tests.rs",
+    "other shared regression-module declarations",
+    "localization catalog additions"
+  ],
+  "batches": [
+    {
+      "id": "B01",
+      "name": "Export data safety",
+      "worktree": "audit-lane-a",
+      "issues_in_order": [
+        432
+      ],
+      "prerequisite_batches": [],
+      "stages": [
+        {
+          "wave": 1,
+          "issues": [
+            432
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 432,
+          "url": "https://github.com/jarradbanks/jvid/issues/432",
+          "title": "Cancelled or failed lossless exports destroy an existing destination",
+          "priority": "P1",
+          "target_files": [
+            "crates/jvid-app/src/export.rs",
+            "crates/jvid-app/src/export/lossless.rs",
+            "crates/jvid-app/src/export/tests.rs",
+            "crates/jvid-media/src/remux.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-app/src/export.rs",
+        "crates/jvid-app/src/export/lossless.rs",
+        "crates/jvid-app/src/export/tests.rs",
+        "crates/jvid-media/src/remux.rs"
+      ]
+    },
+    {
+      "id": "B02",
+      "name": "Project lifecycle",
+      "worktree": "audit-lane-b",
+      "issues_in_order": [
+        433,
+        437,
+        461,
+        469
+      ],
+      "prerequisite_batches": [],
+      "stages": [
+        {
+          "wave": 1,
+          "issues": [
+            433,
+            437,
+            461,
+            469
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 433,
+          "url": "https://github.com/jarradbanks/jvid/issues/433",
+          "title": "Closing or replacing a project during voiceover can lose the active take",
+          "priority": "P1",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/record.rs"
+          ]
+        },
+        {
+          "number": 437,
+          "url": "https://github.com/jarradbanks/jvid/issues/437",
+          "title": "New/Open retains editor state and pending jobs from the previous project",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/import.rs",
+            "crates/jvid-app/src/preview.rs",
+            "crates/jvid-app/src/timeline.rs",
+            "crates/jvid-app/src/transcript.rs"
+          ]
+        },
+        {
+          "number": 461,
+          "url": "https://github.com/jarradbanks/jvid/issues/461",
+          "title": "Discarding a named project recovery leaves the same recovery prompt for next open",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/app/tests.rs"
+          ]
+        },
+        {
+          "number": 469,
+          "url": "https://github.com/jarradbanks/jvid/issues/469",
+          "title": "The configured autosave interval and off switch are ignored",
+          "priority": "P3",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/autosave.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-app/src/app.rs",
+        "crates/jvid-app/src/app/tests.rs",
+        "crates/jvid-app/src/autosave.rs",
+        "crates/jvid-app/src/import.rs",
+        "crates/jvid-app/src/preview.rs",
+        "crates/jvid-app/src/record.rs",
+        "crates/jvid-app/src/timeline.rs",
+        "crates/jvid-app/src/transcript.rs"
+      ]
+    },
+    {
+      "id": "B03",
+      "name": "Color conversion",
+      "worktree": "audit-lane-c",
+      "issues_in_order": [
+        447,
+        448
+      ],
+      "prerequisite_batches": [],
+      "stages": [
+        {
+          "wave": 1,
+          "issues": [
+            447,
+            448
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 447,
+          "url": "https://github.com/jarradbanks/jvid/issues/447",
+          "title": "SDR encoding uses an untagged BT.601 conversion for HD output",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-media/src/encode.rs",
+            "crates/jvid-render/src/preview/tests.rs"
+          ]
+        },
+        {
+          "number": 448,
+          "url": "https://github.com/jarradbanks/jvid/issues/448",
+          "title": "Proxy and thumbnail conversion changes source color",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-media/src/decode.rs",
+            "crates/jvid-media/src/proxy.rs",
+            "crates/jvid-media/src/thumbnails.rs",
+            "crates/jvid-render/src/convert.wgsl"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-media/src/decode.rs",
+        "crates/jvid-media/src/encode.rs",
+        "crates/jvid-media/src/proxy.rs",
+        "crates/jvid-media/src/thumbnails.rs",
+        "crates/jvid-render/src/convert.wgsl",
+        "crates/jvid-render/src/preview/tests.rs"
+      ]
+    },
+    {
+      "id": "B04",
+      "name": "Editing and selection",
+      "worktree": "audit-lane-b",
+      "issues_in_order": [
+        434,
+        435,
+        436,
+        458,
+        459,
+        460
+      ],
+      "prerequisite_batches": [
+        "B02"
+      ],
+      "stages": [
+        {
+          "wave": 2,
+          "issues": [
+            434,
+            435,
+            436,
+            458,
+            459,
+            460
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 434,
+          "url": "https://github.com/jarradbanks/jvid/issues/434",
+          "title": "Ripple edits can move later linked clips on locked tracks",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/timeline.rs",
+            "crates/jvid-core/src/history.rs",
+            "crates/jvid-core/src/model.rs"
+          ]
+        },
+        {
+          "number": 435,
+          "url": "https://github.com/jarradbanks/jvid/issues/435",
+          "title": "Ripple-deleting an unlinked insert desynchronizes later linked audio and video",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/timeline.rs",
+            "crates/jvid-core/src/history.rs",
+            "crates/jvid-core/src/model.rs"
+          ]
+        },
+        {
+          "number": 436,
+          "url": "https://github.com/jarradbanks/jvid/issues/436",
+          "title": "Separate drags merge into one Undo step, including across Save",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/timeline.rs",
+            "crates/jvid-core/src/history.rs"
+          ]
+        },
+        {
+          "number": 458,
+          "url": "https://github.com/jarradbanks/jvid/issues/458",
+          "title": "Dragging a multi-selection moves only the grabbed clip and its linked group",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/timeline.rs",
+            "crates/jvid-core/src/history.rs",
+            "crates/jvid-core/src/model.rs"
+          ]
+        },
+        {
+          "number": 459,
+          "url": "https://github.com/jarradbanks/jvid/issues/459",
+          "title": "Marquee selection drops clips that scroll out of view during the drag",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/timeline.rs"
+          ]
+        },
+        {
+          "number": 460,
+          "url": "https://github.com/jarradbanks/jvid/issues/460",
+          "title": "Keyframe clipboard pastes into the previous key owner instead of the selected destination",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/timeline.rs",
+            "crates/jvid-app/src/timeline/keyframes.rs",
+            "crates/jvid-app/src/timeline/menus.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-app/src/app.rs",
+        "crates/jvid-app/src/app/tests.rs",
+        "crates/jvid-app/src/timeline.rs",
+        "crates/jvid-app/src/timeline/keyframes.rs",
+        "crates/jvid-app/src/timeline/menus.rs",
+        "crates/jvid-core/src/history.rs",
+        "crates/jvid-core/src/model.rs"
+      ]
+    },
+    {
+      "id": "B05",
+      "name": "Audio alignment",
+      "worktree": "audit-lane-a",
+      "issues_in_order": [
+        440,
+        441
+      ],
+      "prerequisite_batches": [
+        "B01",
+        "B02"
+      ],
+      "stages": [
+        {
+          "wave": 2,
+          "issues": [
+            440,
+            441
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 440,
+          "url": "https://github.com/jarradbanks/jvid/issues/440",
+          "title": "Playback and export discard delayed audio stream timestamps",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/export.rs",
+            "crates/jvid-app/src/export/tests.rs",
+            "crates/jvid-app/src/transport.rs",
+            "crates/jvid-media/src/audio.rs"
+          ]
+        },
+        {
+          "number": 441,
+          "url": "https://github.com/jarradbanks/jvid/issues/441",
+          "title": "Noise reduction adds uncompensated 20 ms latency and clips the audio tail",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/export.rs",
+            "crates/jvid-app/src/export/tests.rs",
+            "crates/jvid-app/src/playback.rs",
+            "crates/jvid-audio/src/fx.rs",
+            "crates/jvid-audio/src/mixer.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-app/src/export.rs",
+        "crates/jvid-app/src/export/tests.rs",
+        "crates/jvid-app/src/playback.rs",
+        "crates/jvid-app/src/transport.rs",
+        "crates/jvid-audio/src/fx.rs",
+        "crates/jvid-audio/src/mixer.rs",
+        "crates/jvid-media/src/audio.rs"
+      ]
+    },
+    {
+      "id": "B06",
+      "name": "Inspector and scopes",
+      "worktree": "audit-lane-c",
+      "issues_in_order": [
+        438,
+        455,
+        456
+      ],
+      "prerequisite_batches": [],
+      "stages": [
+        {
+          "wave": 2,
+          "issues": [
+            438,
+            455,
+            456
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 438,
+          "url": "https://github.com/jarradbanks/jvid/issues/438",
+          "title": "Mixed timeline selection can expose and edit an unrelated title selected earlier in the bin",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/inspector.rs"
+          ]
+        },
+        {
+          "number": 455,
+          "url": "https://github.com/jarradbanks/jvid/issues/455",
+          "title": "Inspector sliders paint and interact over Reset controls at the minimum width",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/inspector.rs",
+            "crates/jvid-app/tests/snapshots/inspector_audio_fx_240.png"
+          ]
+        },
+        {
+          "number": 456,
+          "url": "https://github.com/jarradbanks/jvid/issues/456",
+          "title": "Light theme makes waveform and vectorscope traces nearly invisible",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/scopes.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-app/src/app/tests.rs",
+        "crates/jvid-app/src/inspector.rs",
+        "crates/jvid-app/src/scopes.rs",
+        "crates/jvid-app/tests/snapshots/inspector_audio_fx_240.png"
+      ]
+    },
+    {
+      "id": "B07",
+      "name": "Composition correctness",
+      "worktree": "audit-lane-a",
+      "issues_in_order": [
+        446,
+        449,
+        445
+      ],
+      "prerequisite_batches": [
+        "B02",
+        "B03",
+        "B05"
+      ],
+      "stages": [
+        {
+          "wave": 3,
+          "issues": [
+            446,
+            449,
+            445
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 446,
+          "url": "https://github.com/jarradbanks/jvid/issues/446",
+          "title": "Transparent imported stills become opaque in Program and export",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/export.rs",
+            "crates/jvid-app/src/export/tests.rs",
+            "crates/jvid-app/src/playback.rs",
+            "crates/jvid-app/src/preview.rs",
+            "crates/jvid-media/src/stills.rs",
+            "crates/jvid-render/src/composite/tests.rs"
+          ]
+        },
+        {
+          "number": 449,
+          "url": "https://github.com/jarradbanks/jvid/issues/449",
+          "title": "Half/Quarter preview and proxies change pixel-sized effect strength",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/export/tests.rs",
+            "crates/jvid-app/src/playback.rs",
+            "crates/jvid-app/src/preview.rs",
+            "crates/jvid-render/src/composite.rs",
+            "crates/jvid-render/src/composite/tests.rs",
+            "crates/jvid-render/src/effect.rs",
+            "crates/jvid-render/src/effects/chromatic_aberration.wgsl",
+            "crates/jvid-render/src/effects/gaussian_blur.wgsl",
+            "crates/jvid-render/src/effects/pixelate.wgsl",
+            "docs/effects.md"
+          ]
+        },
+        {
+          "number": 445,
+          "url": "https://github.com/jarradbanks/jvid/issues/445",
+          "title": "Export frame reads the Source buffer instead of the Program composition",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/export.rs",
+            "crates/jvid-app/src/export/tests.rs",
+            "crates/jvid-app/src/preview.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-app/src/app.rs",
+        "crates/jvid-app/src/export.rs",
+        "crates/jvid-app/src/export/tests.rs",
+        "crates/jvid-app/src/playback.rs",
+        "crates/jvid-app/src/preview.rs",
+        "crates/jvid-media/src/stills.rs",
+        "crates/jvid-render/src/composite.rs",
+        "crates/jvid-render/src/composite/tests.rs",
+        "crates/jvid-render/src/effect.rs",
+        "crates/jvid-render/src/effects/chromatic_aberration.wgsl",
+        "crates/jvid-render/src/effects/gaussian_blur.wgsl",
+        "crates/jvid-render/src/effects/pixelate.wgsl",
+        "docs/effects.md"
+      ]
+    },
+    {
+      "id": "B08",
+      "name": "Import portability and order",
+      "worktree": "audit-lane-b",
+      "issues_in_order": [
+        439,
+        462
+      ],
+      "prerequisite_batches": [
+        "B02"
+      ],
+      "stages": [
+        {
+          "wave": 3,
+          "issues": [
+            439,
+            462
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 439,
+          "url": "https://github.com/jarradbanks/jvid/issues/439",
+          "title": "Windows imports are saved without portable relative media paths",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/import.rs",
+            "crates/jvid-app/src/project_file.rs",
+            "crates/jvid-core/src/file.rs"
+          ]
+        },
+        {
+          "number": 462,
+          "url": "https://github.com/jarradbanks/jvid/issues/462",
+          "title": "Match source depends on probe completion order instead of import order",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/import.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-app/src/app/tests.rs",
+        "crates/jvid-app/src/import.rs",
+        "crates/jvid-app/src/project_file.rs",
+        "crates/jvid-core/src/file.rs"
+      ]
+    },
+    {
+      "id": "B09",
+      "name": "Speech analysis",
+      "worktree": "audit-lane-c",
+      "issues_in_order": [
+        442,
+        443,
+        465
+      ],
+      "prerequisite_batches": [
+        "B02",
+        "B04"
+      ],
+      "stages": [
+        {
+          "wave": 3,
+          "issues": [
+            442,
+            443,
+            465
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 442,
+          "url": "https://github.com/jarradbanks/jvid/issues/442",
+          "title": "Speech and silence tools ignore the selected microphone in a linked multistream recording",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/subtitles.rs",
+            "crates/jvid-app/src/timeline/highlights.rs",
+            "crates/jvid-app/src/timeline/silence.rs",
+            "crates/jvid-app/src/transcript.rs"
+          ]
+        },
+        {
+          "number": 443,
+          "url": "https://github.com/jarradbanks/jvid/issues/443",
+          "title": "Remove Fillers marks ordinary words from other languages for deletion",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/transcript.rs",
+            "crates/jvid-app/src/transcript/fillers.rs"
+          ]
+        },
+        {
+          "number": 465,
+          "url": "https://github.com/jarradbanks/jvid/issues/465",
+          "title": "Detect Silence rescans complete long recordings for every selected cut on every frame",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/timeline.rs",
+            "crates/jvid-app/src/timeline/silence.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-app/src/app/tests.rs",
+        "crates/jvid-app/src/subtitles.rs",
+        "crates/jvid-app/src/timeline.rs",
+        "crates/jvid-app/src/timeline/highlights.rs",
+        "crates/jvid-app/src/timeline/silence.rs",
+        "crates/jvid-app/src/transcript.rs",
+        "crates/jvid-app/src/transcript/fillers.rs"
+      ]
+    },
+    {
+      "id": "B10",
+      "name": "Codec, CLI and sidecars",
+      "worktree": "audit-lane-a",
+      "issues_in_order": [
+        450,
+        451,
+        444,
+        473
+      ],
+      "prerequisite_batches": [
+        "B01",
+        "B03",
+        "B04",
+        "B05",
+        "B07"
+      ],
+      "stages": [
+        {
+          "wave": 4,
+          "issues": [
+            450,
+            451,
+            444,
+            473
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 450,
+          "url": "https://github.com/jarradbanks/jvid/issues/450",
+          "title": "H.264 presets can silently export MPEG-4 Part 2",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/export.rs",
+            "crates/jvid-app/src/export/dialog.rs",
+            "crates/jvid-app/src/export/tests.rs",
+            "crates/jvid-media/src/encode.rs"
+          ]
+        },
+        {
+          "number": 451,
+          "url": "https://github.com/jarradbanks/jvid/issues/451",
+          "title": "CLI requires a GPU even for audio-only and lossless exports",
+          "priority": "P2",
+          "target_files": [
+            "README.md",
+            "crates/jvid-app/src/export.rs",
+            "crates/jvid-app/src/export/tests.rs",
+            "crates/jvid-cli/src/main.rs",
+            "crates/jvid-cli/src/tests.rs"
+          ]
+        },
+        {
+          "number": 444,
+          "url": "https://github.com/jarradbanks/jvid/issues/444",
+          "title": "Nested captions disappear from SRT sidecars and remain burned into sidecar exports",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/export.rs",
+            "crates/jvid-core/src/history.rs",
+            "crates/jvid-core/src/model.rs"
+          ]
+        },
+        {
+          "number": 473,
+          "url": "https://github.com/jarradbanks/jvid/issues/473",
+          "title": "Show export phases instead of a single restarting percentage",
+          "priority": "P3",
+          "target_files": [
+            "crates/jvid-app/src/export.rs",
+            "crates/jvid-app/src/export/dialog.rs",
+            "crates/jvid-app/src/export/queue.rs",
+            "crates/jvid-app/src/export/tests.rs",
+            "crates/jvid-cli/src/main.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "README.md",
+        "crates/jvid-app/src/export.rs",
+        "crates/jvid-app/src/export/dialog.rs",
+        "crates/jvid-app/src/export/queue.rs",
+        "crates/jvid-app/src/export/tests.rs",
+        "crates/jvid-cli/src/main.rs",
+        "crates/jvid-cli/src/tests.rs",
+        "crates/jvid-core/src/history.rs",
+        "crates/jvid-core/src/model.rs",
+        "crates/jvid-media/src/encode.rs"
+      ]
+    },
+    {
+      "id": "B11",
+      "name": "Shortcuts and transport",
+      "worktree": "audit-lane-b",
+      "issues_in_order": [
+        452,
+        453,
+        457,
+        470,
+        454,
+        463,
+        471,
+        472
+      ],
+      "prerequisite_batches": [
+        "B02",
+        "B04",
+        "B07"
+      ],
+      "stages": [
+        {
+          "wave": 4,
+          "issues": [
+            452,
+            453,
+            457,
+            470,
+            454,
+            463,
+            471,
+            472
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 452,
+          "url": "https://github.com/jarradbanks/jvid/issues/452",
+          "title": "Application shortcuts can edit the project behind modal dialogs",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/keymap.rs"
+          ]
+        },
+        {
+          "number": 453,
+          "url": "https://github.com/jarradbanks/jvid/issues/453",
+          "title": "Space activates both the focused transport control and the global playback action",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/keymap.rs",
+            "crates/jvid-app/src/preview.rs"
+          ]
+        },
+        {
+          "number": 457,
+          "url": "https://github.com/jarradbanks/jvid/issues/457",
+          "title": "Opening a bin clip in Source leaves shortcuts focused on the Media panel",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/app/tests.rs"
+          ]
+        },
+        {
+          "number": 470,
+          "url": "https://github.com/jarradbanks/jvid/issues/470",
+          "title": "The advertised Focus Effects shortcut has no implementation",
+          "priority": "P3",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/app/tests.rs"
+          ]
+        },
+        {
+          "number": 454,
+          "url": "https://github.com/jarradbanks/jvid/issues/454",
+          "title": "Preview transport controls overlap at narrow widths and while recording",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/preview.rs"
+          ]
+        },
+        {
+          "number": 463,
+          "url": "https://github.com/jarradbanks/jvid/issues/463",
+          "title": "Add direct seeking to the Source monitor for long recordings",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/app/tests.rs",
+            "crates/jvid-app/src/preview.rs"
+          ]
+        },
+        {
+          "number": 471,
+          "url": "https://github.com/jarradbanks/jvid/issues/471",
+          "title": "Transport hints keep showing default keys after shortcuts are remapped",
+          "priority": "P3",
+          "target_files": [
+            "crates/jvid-app/src/app.rs",
+            "crates/jvid-app/src/preview.rs"
+          ]
+        },
+        {
+          "number": 472,
+          "url": "https://github.com/jarradbanks/jvid/issues/472",
+          "title": "Make the shortcut editor fit reduced logical viewport heights",
+          "priority": "P3",
+          "target_files": [
+            "crates/jvid-app/src/keymap_editor.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-app/src/app.rs",
+        "crates/jvid-app/src/app/tests.rs",
+        "crates/jvid-app/src/keymap.rs",
+        "crates/jvid-app/src/keymap_editor.rs",
+        "crates/jvid-app/src/preview.rs"
+      ]
+    },
+    {
+      "id": "B12",
+      "name": "Media jobs and GPU resource reuse",
+      "worktree": "audit-lane-c",
+      "issues_in_order": [
+        468,
+        464,
+        467,
+        466,
+        474
+      ],
+      "prerequisite_batches": [],
+      "stages": [
+        {
+          "wave": 4,
+          "issues": [
+            468
+          ],
+          "prerequisite_batches": []
+        },
+        {
+          "wave": 5,
+          "issues": [
+            464,
+            467,
+            466,
+            474
+          ],
+          "prerequisite_batches": [
+            "B07",
+            "B09",
+            "B11"
+          ]
+        }
+      ],
+      "issue_scopes": [
+        {
+          "number": 468,
+          "url": "https://github.com/jarradbanks/jvid/issues/468",
+          "title": "Waveform scans ignore cancellation after starting and block pool shutdown",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-media/src/waveforms.rs"
+          ]
+        },
+        {
+          "number": 464,
+          "url": "https://github.com/jarradbanks/jvid/issues/464",
+          "title": "Bin hover and timeline filmstrip requests can leave one panel permanently pending",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/media_bin.rs",
+            "crates/jvid-app/src/timeline.rs"
+          ]
+        },
+        {
+          "number": 467,
+          "url": "https://github.com/jarradbanks/jvid/issues/467",
+          "title": "Obsolete keyframe stand-ins accumulate during rapid scrubbing",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/playback.rs"
+          ]
+        },
+        {
+          "number": 466,
+          "url": "https://github.com/jarradbanks/jvid/issues/466",
+          "title": "Parked Program seeks do not repaint when decoding finishes",
+          "priority": "P2",
+          "target_files": [
+            "crates/jvid-app/src/playback.rs",
+            "crates/jvid-app/src/preview.rs"
+          ]
+        },
+        {
+          "number": 474,
+          "url": "https://github.com/jarradbanks/jvid/issues/474",
+          "title": "Reuse video upload textures across frames of the same format",
+          "priority": "P3",
+          "target_files": [
+            "crates/jvid-app/src/preview.rs",
+            "crates/jvid-render/src/preview.rs",
+            "crates/jvid-render/src/preview/tests.rs"
+          ]
+        }
+      ],
+      "target_files": [
+        "crates/jvid-app/src/media_bin.rs",
+        "crates/jvid-app/src/playback.rs",
+        "crates/jvid-app/src/preview.rs",
+        "crates/jvid-app/src/timeline.rs",
+        "crates/jvid-media/src/waveforms.rs",
+        "crates/jvid-render/src/preview.rs",
+        "crates/jvid-render/src/preview/tests.rs"
+      ]
+    }
+  ],
+  "validation": {
+    "issue_count": 43,
+    "batch_count": 12,
+    "implementation_worktrees": 3,
+    "missing_issues": [],
+    "duplicate_issues": [],
+    "declared_dependency_order": "passed",
+    "batch_prerequisite_order": "passed",
+    "concurrent_production_file_conflicts": [],
+    "shared_test_root_exceptions": [
+      {
+        "wave": 2,
+        "batches": [
+          "B04",
+          "B06"
+        ],
+        "files": [
+          "crates/jvid-app/src/app/tests.rs"
+        ],
+        "resolution": "Batch-specific test modules; coordinator alone applies shared root declarations."
+      },
+      {
+        "wave": 3,
+        "batches": [
+          "B08",
+          "B09"
+        ],
+        "files": [
+          "crates/jvid-app/src/app/tests.rs"
+        ],
+        "resolution": "Batch-specific test modules; coordinator alone applies shared root declarations."
+      }
+    ],
+    "scope_source": "issue-drafts.json",
+    "validation_kind": "Plan structure validated; all 43 issues implemented and integrated. Functional acceptance passed; environment and performance limits recorded in REMEDIATION-RESULTS.md."
+  },
+  "execution": {
+    "run_id": "run_8fb5c0f27f26",
+    "integration_branch": "audit/432-474-integration",
+    "base_commit": "7efe671152a6c6a67bd31f9cbcb670748f73f57b",
+    "active_batches": [],
+    "accepted_batches": [
+      "B01",
+      "B02",
+      "B03",
+      "B04",
+      "B05",
+      "B06",
+      "B07",
+      "B08",
+      "B09",
+      "B10",
+      "B11",
+      "B12"
+    ],
+    "issue_outcomes": {
+      "432": {
+        "state": "implemented",
+        "commit": "8b82ce84d641e60357527d0417d2ba02ad8cb0d7",
+        "branch": "audit/issue-432",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "followup_commits": [
+          "439ab0719844adc9e23f7866b6d5a5399c072185",
+          "439ab07"
+        ],
+        "native_windows_validation": "passed_direct_and_hardlink_aliases; symlinks_unavailable_privilege_1314"
+      },
+      "433": {
+        "state": "implemented",
+        "commit": "2b68b29b4edcb5a89f68d5107ae800650aba84a1",
+        "branch": "audit/issue-433",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "native_windows_validation": "passed_7_recording_lifecycle_regressions"
+      },
+      "434": {
+        "state": "implemented",
+        "commit": "af51294145900e0fae08df19631c3e7578a52d28",
+        "branch": "audit/issue-434",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B04-report.md",
+        "native_windows_validation": "passed_targeted_audio_editing_layout_and_full_core_wave2"
+      },
+      "435": {
+        "state": "implemented",
+        "commit": "3260a02d6a50129168987f9bace09d90b288d620",
+        "branch": "audit/issue-435",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B04-report.md",
+        "native_windows_validation": "passed_targeted_audio_editing_layout_and_full_core_wave2"
+      },
+      "436": {
+        "state": "implemented",
+        "commit": "4175a8d61026676fba5888726849ba205e505802",
+        "branch": "audit/issue-436",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B04-report.md",
+        "native_windows_validation": "passed_targeted_audio_editing_layout_and_full_core_wave2"
+      },
+      "437": {
+        "state": "implemented",
+        "commit": "3803dc47f1a6fbfdfc485c00e113674561a27001",
+        "branch": "audit/issue-437",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b"
+      },
+      "438": {
+        "state": "implemented",
+        "commit": "6c5acbae99c5e0c01c76cea1332b37b57bcc90cf",
+        "branch": "audit/issue-438",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b"
+      },
+      "439": {
+        "state": "implemented",
+        "commit": "c125d419744f27dd203f2c57ceace589ba84bba6",
+        "branch": "audit/issue-439",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "native_app_validation": "passed_real_importer_save_move_reload"
+      },
+      "440": {
+        "state": "implemented",
+        "commit": "723cbe73a332a02b8dccb05af6637f40c781d83c",
+        "branch": "audit/issue-440",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B05-report.md",
+        "native_windows_validation": "passed_targeted_audio_editing_layout_and_full_core_wave2"
+      },
+      "441": {
+        "state": "implemented",
+        "commit": "f0f4d1fccebd0fe5bf3c3a8dc08b28e618ccb2d9",
+        "branch": "audit/issue-441",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B05-report.md",
+        "native_windows_validation": "passed_targeted_audio_editing_layout_and_full_core_wave2"
+      },
+      "442": {
+        "state": "implemented",
+        "commit": "a0c5877adf9651f4276cda2c9925acecdf9c47bd",
+        "branch": "audit/issue-442",
+        "targeted_tests": "passed; source_choice_and_callers_reviewed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b"
+      },
+      "443": {
+        "state": "implemented",
+        "commit": "aa350f9f6364ddbab872a0430f8f2df4bb87c0ce",
+        "branch": "audit/issue-443",
+        "targeted_tests": "passed_11_transcript_filler_regressions",
+        "component_clippy": "passed_app_lib_and_tests",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b"
+      },
+      "444": {
+        "state": "implemented",
+        "owner": "coordinator_core; full_B10_app_validation",
+        "stage": "B10b",
+        "core_commit": "30d14c5",
+        "commit": "cee4bbb0f6b8c789c5d6e13665418aa947b17e35",
+        "branch": "audit/issue-444",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "native_windows_validation": "passed_targeted_frozen8b21701_wave4",
+        "followup_commits": [
+          "d080b6e"
+        ]
+      },
+      "445": {
+        "state": "implemented",
+        "commit": "14de36aa35977e2f47dfb5f8a2eb47dc29e6925f",
+        "branch": "audit/issue-445",
+        "targeted_tests": "passed_renderer_playback_preview_stills_and_frame_exports",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B07-report.md"
+      },
+      "446": {
+        "state": "implemented",
+        "commit": "7dac83df6c34a689befda9b27985347814b3bbae",
+        "branch": "audit/issue-446",
+        "targeted_tests": "passed_renderer_playback_preview_stills_and_frame_exports",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B07-report.md"
+      },
+      "447": {
+        "state": "implemented",
+        "commit": "bc3a97b683531138293ab33bd35289a652c1d63f",
+        "branch": "audit/issue-447",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "hardware_validation": "physical_hardware_comparison_unverified; CPU/lavapipe_and_native_available_encoders_checked",
+        "native_windows_validation": "new_color_tests_passed; two_baseline_failures_confirmed",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B03-report.md",
+        "followup_commits": [
+          "3e8c1a3efa7210c6a0611be45cdb065e4f19b783"
+        ]
+      },
+      "448": {
+        "state": "implemented",
+        "commit": "622146bf083094643c67a115da47ab73ede120c6",
+        "branch": "audit/issue-448",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "hardware_validation": "physical_hardware_comparison_unverified; CPU/lavapipe_and_native_available_encoders_checked",
+        "native_windows_validation": "new_color_tests_passed; two_baseline_failures_confirmed",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B03-report.md"
+      },
+      "449": {
+        "state": "implemented",
+        "commit": "fed3c349653dd58ec6ca2bdc8903a43e9eca4c96",
+        "branch": "audit/issue-449",
+        "targeted_tests": "passed_renderer_playback_preview_stills_and_frame_exports",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B07-report.md",
+        "followup_commits": [
+          "432d78244d4ea53848ab27d23ca12d051cfbf58e"
+        ]
+      },
+      "450": {
+        "state": "implemented",
+        "commit": "ee1b40cdd57e2f2604f2661afb9514670c0382ed",
+        "branch": "audit/issue-450",
+        "targeted_tests": "passed_default_absence_and_real_GPL_encoding",
+        "component_clippy": "passed_workspace_all_targets",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B10a-report.md",
+        "followup_commits": [
+          "e9d1e0f"
+        ]
+      },
+      "451": {
+        "state": "implemented",
+        "commit": "777104e2784bc2fd016699e858f8383ee0d10f2d",
+        "branch": "audit/issue-451",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "native_windows_validation": "passed_targeted_frozen8b21701_wave4"
+      },
+      "452": {
+        "state": "implemented",
+        "commit": "d273cc7d948d93b48e1f83ed32791b65ce72b6e9",
+        "branch": "audit/issue-452",
+        "batch": "B11",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B11-report.md",
+        "native_windows_validation": "passed_final_36_input_keymap_transport_tests_f28cf2b",
+        "followup_commits": [
+          "f69a70cab312553ee0ca8f852f3748d2c0aeab34"
+        ]
+      },
+      "453": {
+        "state": "implemented",
+        "commit": "c32494df535cbfdf86fb4f658eeb2314ba2fe804",
+        "branch": "audit/issue-453",
+        "batch": "B11",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B11-report.md",
+        "native_windows_validation": "passed_targeted_frozen8b21701_wave4"
+      },
+      "454": {
+        "state": "implemented",
+        "commit": "5888e96a065c36ad935f5bac7cd92b5d392a9ba2",
+        "branch": "audit/issue-454",
+        "batch": "B11",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B11-report.md",
+        "native_windows_validation": "passed_targeted_frozen8b21701_wave4"
+      },
+      "455": {
+        "state": "implemented",
+        "commit": "fc9877dcfa80dc5cb0a11a62314e846f92f1bf29",
+        "branch": "audit/issue-455",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b"
+      },
+      "456": {
+        "state": "implemented",
+        "commit": "d8635762c373f4e50cd1b3168ac5c15e9b7c867e",
+        "branch": "audit/issue-456",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b"
+      },
+      "457": {
+        "state": "implemented",
+        "commit": "e19efeb2e9b5316896d80731f123e45c7ff3ca15",
+        "branch": "audit/issue-457",
+        "batch": "B11",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B11-report.md",
+        "native_windows_validation": "passed_targeted_frozen8b21701_wave4"
+      },
+      "458": {
+        "state": "implemented",
+        "commit": "e5c1dc96e9f97c8076b216a403e786a94c1ac1b6",
+        "branch": "audit/issue-458",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B04-report.md",
+        "native_windows_validation": "passed_targeted_audio_editing_layout_and_full_core_wave2"
+      },
+      "459": {
+        "state": "implemented",
+        "commit": "ba60ada0a9bb574e97435f2dcc40b2f2a6f38760",
+        "branch": "audit/issue-459",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B04-report.md",
+        "native_windows_validation": "passed_targeted_audio_editing_layout_and_full_core_wave2"
+      },
+      "460": {
+        "state": "implemented",
+        "commit": "5231a663706dc1507ff7c483fd2661847948c57c",
+        "branch": "audit/issue-460",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B04-report.md",
+        "native_windows_validation": "passed_targeted_audio_editing_layout_and_full_core_wave2"
+      },
+      "461": {
+        "state": "implemented",
+        "commit": "927c968f12eb40c9ae5506994356e9eaab59ef6b",
+        "branch": "audit/issue-461",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b"
+      },
+      "462": {
+        "state": "implemented",
+        "commit": "0baddd5f73ff3b717e4b9070885b299bb84ac2f3",
+        "branch": "audit/issue-462",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B08-report.md"
+      },
+      "463": {
+        "state": "implemented",
+        "commit": "4c98008123b79e3b317fcf8da4fd592d399a3205",
+        "branch": "audit/issue-463",
+        "batch": "B11",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B11-report.md",
+        "native_windows_validation": "passed_targeted_frozen8b21701_wave4",
+        "followup_commits": [
+          "8c7a3df",
+          "a65b274"
+        ]
+      },
+      "464": {
+        "state": "implemented",
+        "stage": "B12c",
+        "commit": "2cfa621628e6fc728c1c805715393b79491ae66a",
+        "branch": "audit/issue-464",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B12c-report.md",
+        "followup_commits": [
+          "f3e2e1feda909c4bfe31ca1954e3dea9d3566d3c"
+        ]
+      },
+      "465": {
+        "state": "implemented",
+        "commit": "b62134d130dc30c3bb51b6301ba761bbeddf5385",
+        "followup_commits": [
+          "252612b87763ac2246de6811d07becb208513f92"
+        ],
+        "branch": "audit/issue-465",
+        "targeted_tests": "passed_source_scan_cache_and_real_generation_handoff_regressions",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_paths": [
+          "/tmp/jvid-remediation-2026-10-25/B09-report.md",
+          "/tmp/jvid-remediation-2026-10-25/B09r-report.md"
+        ]
+      },
+      "466": {
+        "state": "implemented",
+        "batch": "B12b",
+        "commit": "ba4a94e0333e1ffdca5ab21a7e29d8f93094be08",
+        "branch": "audit/issue-466",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b"
+      },
+      "467": {
+        "state": "implemented",
+        "batch": "B12b",
+        "commit": "b9e762075c91cf28ca0aeb590abf23cf3c4627c7",
+        "branch": "audit/issue-467",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b"
+      },
+      "468": {
+        "state": "implemented",
+        "commit": "15426c15b338edde5f71e2aba6c54957d332f5fa",
+        "branch": "audit/issue-468",
+        "targeted_tests": "passed",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B12a-report.md"
+      },
+      "469": {
+        "state": "implemented",
+        "commit": "d969c15e35340609e206b050929c9aa6a9821637",
+        "branch": "audit/issue-469",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b"
+      },
+      "470": {
+        "state": "implemented",
+        "commit": "27d970214533ad7cd73ba7f073c971a655b2801c",
+        "branch": "audit/issue-470",
+        "batch": "B11",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B11-report.md",
+        "native_windows_validation": "passed_targeted_frozen8b21701_wave4"
+      },
+      "471": {
+        "state": "implemented",
+        "commit": "044056e3bc0330b58b0a25313266ec75e0c072b9",
+        "branch": "audit/issue-471",
+        "batch": "B11",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B11-report.md",
+        "native_windows_validation": "passed_targeted_frozen8b21701_wave4"
+      },
+      "472": {
+        "state": "implemented",
+        "commit": "8e7b75951467996e92b398163e50fc685175e7b3",
+        "branch": "audit/issue-472",
+        "targeted_tests": "passed_including_explicit_isolated_locale_case",
+        "component_clippy": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B11a-report.md",
+        "native_windows_validation": "passed_targeted_audio_editing_layout_and_full_core_wave2"
+      },
+      "473": {
+        "state": "implemented",
+        "batch": "B10",
+        "commit": "02625c4ea9ad58320b84bc0e7354f928fc2697f9",
+        "branch": "audit/issue-473",
+        "targeted_tests": "passed",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B10-report.md"
+      },
+      "474": {
+        "state": "implemented",
+        "commit": "40fc54c6c411a0d47f7e58af9861e9802a7973c7",
+        "branch": "audit/issue-474",
+        "targeted_tests": "passed_default_and_GPL_gpu_allocation_pixel_srgb_retention",
+        "workspace_validation": "passed_final_default_and_gpl_f28cf2b",
+        "report_path": "/tmp/jvid-remediation-2026-10-25/B12b-report.md"
+      }
+    },
+    "state_path": "/tmp/jvid-remediation-2026-10-25/run.json",
+    "accepted_stages": [
+      "B12a",
+      "B11a",
+      "B09r",
+      "B10a",
+      "B12c",
+      "B12cr",
+      "B07r",
+      "B12cs",
+      "B12b",
+      "B11r"
+    ],
+    "integration_commit": "f28cf2b2f4cf9a5287e98c4277053d39f5298c2e",
+    "notes": [
+      "#468 pulled forward and implemented by coordinator.",
+      "B01, B02, B03 and B06 reviewed and integrated; the same three managed worktrees now run B05, B04 and B08.",
+      "#433 capture finalization was corrected after review to preserve unrelated edits and undo history.",
+      "Coordinator pulls forward isolated #472 in keymap_editor.rs while the three batch workers remain active.",
+      "B09 runtime Task completed, but #465 is not accepted until B09r fixes real waveform dedup/generation handoff. #442 and #443 already integrated. Gate B12b on this followup as well as its recorded Task deps.",
+      "LaneA now B11; laneB finishing B10a then full B10. This swaps the default wave4 allocation to keep work parallel. #472 remains inherited/done.",
+      "Pull #464 forward into laneC only: media_bin/Timeline subscription files are disjoint from active B11 app/preview/keymap work. Remaining B12b #467/#466/#474 still wait for B11.",
+      "B11 seven fixes mergedf790f5f, all ownership released and worker terminal released after report. B12b remaining467/466/474 moves into same laneA while C completes464 paint-path review followup. Still exactly three reusable worktrees.",
+      "Final disposition: all 12 batches and all 43 issues integrated using the same three worktrees. The final #452 followup stops subsequent shortcuts and clears background focus when an earlier shortcut opens a modal."
+    ],
+    "validation_notes": [
+      "Integrated Linux media suite: 89 passed, one existing ignored timing case.",
+      "Native Windows color/waveform media suite: 87 passed, two existing-test failures, one ignored. A clean rebuild of original 7efe671 (80-test inventory) reproduces both failures: corrupt_packets_are_skipped and mp3_lasts_its_samples.",
+      "Native Windows core portability tests passed (114 unit, 4 fixture, 3 time); real importer app regression is compiling against frozen integrated source.",
+      "B05a staging task was not dispatched; its #440 objective will be recorded from B05 completion.",
+      "B10 must resolve the pre-existing sidecar write-after-media-publication ordering boundary.",
+      "Native app first run: all seven #433 regressions and real #439 importer/move test passed. Alias test stopped on Windows symlink privilege error1314; explicit guard followup is being revalidated, direct/hard-link checks still required.",
+      "Confirmed native Windows frozen app rerun:17 passed; direct/hard-link alias safety,7 recording cases and real importer/move passed. Windows symlinks explicitly unavailable due privilege1314; Linux symlinks verified.",
+      "Frozen integrated 8e7b759 Linux workspace test suite and native Windows audio/editing/layout plus core regressions are running.",
+      "Frozen8e7b759 native Windows wave2 passed:19app+5audio+8core+1media targeted tests, then full native core122unit+4fixture+3time. No selected skips.",
+      "Linux workspace at8e7b759 passed all31test binaries with corpus/GPU/x265 required: libtest reported859passed,7ignored. Locale-global #472 was also explicitly run separately. Debug early-return performance/model download cases are not claimed verified. #442 was integrated afterward and awaits next workspace run.",
+      "Release dependency-only warm build completed on frozen dcb894e; no tests executed. All ten workspace packages were cleaned in release afterward, preserving third-party cache for final current-source performance gates.",
+      "Native Windows wave3 frozen integrated29issue source is validating Program/alpha/effect, speech/silence handoff and codec-family behavior with real OpenH264; baseline MP3 encoder test excluded explicitly.",
+      "Native Windows wave3 confirmed:25app+14media+4renderer selected tests pass after test-only decoder cleanup d080b6e. Original29issue frozen source2a9c9e8 plus these3drop statements, no core444 or CPU451 source was copied into this run.",
+      "Native wave4 running frozen8b21701: B11, nested/sidecar444, CPU451/CLI and core, using copied complete corpus and required GPU, with clean rebuild of all10workspace packages.",
+      "Native wave4 confirmed167reportedpasses at8b21701 (allB11+444+451+actualCLI/appparity+fullcore);2localeignoresexplicitlyrun. Frozen42issue e8bfe98 fullworkspace+clippy nowrunning;474outputlease implementationactive. AllB10andB12cr terminals released afterreview.",
+      "Frozen42 e8bfe98: fmt and strictworkspaceClippy pass; fullworkspace fails8app UI/snapshot tests and1i18nguard. B07r/B12cs/root followups active, no tolerance/guard weakening; final validation pending.",
+      "All43 primary implementations and final integration followups are merged at frozen6f20bf6. Final default/GPL workspace, isolatedlocales, native targeted regressions and release app compilation running. Optimized media/audio3gates pass; final unchanged-component hash check pending.",
+      "Final f28cf2b: fmt and strict default/GPL workspace Clippy pass; default972 and GPL974 tests pass with zero failures and9 ordinary ignores each;3 locale-mutating cases pass separately. Native95 selected tests at6f20bf6 and36 final modal/input tests atf28cf2b pass. Optimized performance remains qualified; see final_validation and REMEDIATION-RESULTS.md. Earlier entries are chronological history, superseded where explicitly noted."
+    ],
+    "status": "implemented_with_documented_validation_limits",
+    "results_path": "docs/audits/2026-10-25/REMEDIATION-RESULTS.md",
+    "final_validation": {
+      "product_commit": "f28cf2b2f4cf9a5287e98c4277053d39f5298c2e",
+      "base_commit": "7efe671152a6c6a67bd31f9cbcb670748f73f57b",
+      "functional_validation": "passed",
+      "performance_validation": "mixed; retained limits documented",
+      "format": "passed",
+      "strict_workspace_clippy": {
+        "default": "passed",
+        "gpl": "passed"
+      },
+      "linux_workspace": {
+        "default": {
+          "passed": 972,
+          "failed": 0,
+          "ignored": 9
+        },
+        "gpl": {
+          "passed": 974,
+          "failed": 0,
+          "ignored": 9
+        },
+        "isolated_locale_tests_passed": 3,
+        "corpus_gpu_x265_required": true
+      },
+      "windows": {
+        "all_issue_pipeline": {
+          "commit": "6f20bf6",
+          "passed": 95,
+          "failed": 0,
+          "ignored": 0
+        },
+        "final_modal_followup": {
+          "commit": "f28cf2b2f4cf9a5287e98c4277053d39f5298c2e",
+          "passed": 36,
+          "failed": 0,
+          "ignored": 0
+        },
+        "scope": "targeted; not a whole-Windows-workspace pass",
+        "debug_timing_early_returns": 4
+      },
+      "optimized_cpu_gates": {
+        "passed": 3,
+        "source": "9c592fe",
+        "components_unchanged_at_product_commit": true
+      },
+      "optimized_app": {
+        "source": "6f20bf6",
+        "quiet_six_case_run": {
+          "passed": 4,
+          "failed": 2
+        },
+        "long_seek_confirmation": {
+          "corrected_worst_first_frame_ms": 73.8,
+          "original_worst_first_frame_ms": 156.0,
+          "corrected": "passed",
+          "original": "failed"
+        },
+        "remaining_limit": "two-layer frame-perfect throughput fails on both original and corrected code on this host; cold-start/RSS observations also exceed informational budgets",
+        "physical_gpu_performance_verified": false
+      },
+      "orchestration": {
+        "worktrees_reused": 3,
+        "completed_tasks": 23,
+        "settled_workers": 19,
+        "released_terminals": 18,
+        "user_retained_terminals": 1
+      },
+      "evidence_files": [
+        "final-combined-results.json",
+        "final-combined-workspace-default.log",
+        "final-combined-workspace-gpl.log",
+        "native-final.log",
+        "native-modal.log",
+        "release-final-cpu.log",
+        "release-quiet-comparison.json",
+        "release-long-confirm.json",
+        "final-issue-ref-check.json"
+      ]
+    },
+    "publication": {
+      "pull_request": 475,
+      "url": "https://github.com/jarradbanks/jvid/pull/475",
+      "requested_merge_method": "merge",
+      "head_at_open": "5c25f30aa780412c0d5922e3793266e473eb93ac",
+      "initial_ci_run": 40192553366,
+      "followup_commits": {
+        "workflow": "e1ad18aeb11d4434b7e35c518964b3ccf1686fd7",
+        "media_test": "3e8c1a3efa7210c6a0611be45cdb065e4f19b783"
+      },
+      "followup_local_validation": {
+        "format": "passed",
+        "strict_workspace_clippy": "passed",
+        "linux_ffmpeg_4_4_selected_tests": 2,
+        "windows_ffmpeg_8_1_selected_tests": 2
+      },
+      "live_status": "See GitHub PR for current CI and merge status."
+    }
+  }
+}

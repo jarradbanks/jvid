@@ -7,12 +7,309 @@ use jvid_core::time::Rate;
 use jvid_media::decode::VideoDecoder;
 use jvid_media::test_media::{corpus, frame_index};
 
+use super::audit_b10a::{check_codec_result, rendering_preset};
 use super::*;
 use crate::export::Lossless;
 use crate::playback::tests::device;
 
 fn secs(s: i64) -> Time {
     Time(s * FLICKS_PER_SECOND)
+}
+
+#[test]
+fn delayed_stream_reads_keep_silence_and_match_waveforms() {
+    jvid_media::ffmpeg::init().unwrap();
+    let fixture = jvid_media::audio::offset_fixture::Fixture::default();
+    for (nth, offset) in [(0, 24_000), (1, 36_000)] {
+        let mut read = blocking(&fixture.0, nth);
+        for (start, frames) in [
+            (0, 48_000),
+            (12_000, 24_000),
+            (36_000, 4096),
+            (40_096, 4096),
+            (0, 1024),
+        ] {
+            let mut got = vec![1.0; frames * 2];
+            read(start, &mut got);
+            for (i, pair) in got.as_chunks::<2>().0.iter().enumerate() {
+                let want =
+                    jvid_media::audio::offset_fixture::Fixture::sample(nth, start + i as i64);
+                assert!(
+                    pair.iter().all(|x| (x - want).abs() <= 1.0 / 32768.0),
+                    "stream {nth}, sample {}: {pair:?} vs {want}",
+                    start + i as i64
+                );
+            }
+        }
+        let cache =
+            jvid_media::waveforms::Cache::new(fixture.0.parent().unwrap().join("peaks"), 1_000_000);
+        let peaks = cache.load(&fixture.0, nth).unwrap();
+        let first = peaks.finest().iter().position(|p| p[1] > 0.0).unwrap();
+        assert_eq!(first as i64, offset / jvid_media::waveforms::BUCKET);
+    }
+}
+
+#[test]
+fn independently_delayed_streams_export_at_their_source_positions() {
+    jvid_media::ffmpeg::init().unwrap();
+    let fixture = jvid_media::audio::offset_fixture::Fixture::default();
+    let mut h = History::new(Project::default());
+    add(
+        &mut h,
+        TrackKind::Audio,
+        fixture.0.clone(),
+        Time(0),
+        secs(2),
+    );
+    let id = h.project().assets()[0].id;
+    h.apply(Command::SetAssetProbe {
+        id,
+        probe: Some(jvid_media::probe::probe(&fixture.0).unwrap()),
+    })
+    .unwrap();
+    let track = &h.project().sequence().tracks()[0];
+    let (track_id, mut clip) = (track.id, track.clips()[0].clone());
+    h.apply(Command::RemoveClip(clip.id)).unwrap();
+    clip.stream = None;
+    h.apply(Command::Paste {
+        clips: vec![(track_id, clip)],
+        at: Time(0),
+    })
+    .unwrap();
+    let path = fixture.0.parent().unwrap().join("export.wav");
+    let req = Request {
+        path: path.clone(),
+        range: (Time(0), secs(2)),
+        preset: preset("Audio Only (WAV)"),
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    run_now(h.project(), &req, false).unwrap();
+    let mut decoded = blocking(&path, 0);
+    let mut got = vec![0.0; 96_000 * 2];
+    decoded(0, &mut got);
+    let gain = std::f32::consts::FRAC_1_SQRT_2;
+    for (i, pair) in got.as_chunks::<2>().0.iter().enumerate() {
+        let want = (jvid_media::audio::offset_fixture::Fixture::sample(0, i as i64)
+            + jvid_media::audio::offset_fixture::Fixture::sample(1, i as i64))
+            * gain;
+        assert!(
+            pair.iter().all(|x| (x - want).abs() < 3.0 / 32768.0),
+            "sample {i}: {pair:?}"
+        );
+    }
+    let mut d = AudioDecoder::open(&path, 0).unwrap();
+    let mut frames = 0;
+    while let Some(c) = d.next_chunk().unwrap() {
+        frames += c.samples.len() / 2;
+    }
+    assert_eq!(frames, 96_000);
+}
+
+fn cleanup_project(path: PathBuf, clip_fx: bool, track_fx: bool) -> Project {
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Audio, path, Time(0), secs(1));
+    let t = &h.project().sequence().tracks()[0];
+    let c = &t.clips()[0];
+    let (id, mut x, keys, mut settings) =
+        (c.id, c.transform.clone(), c.keyframes.clone(), t.settings());
+    // Leave enough dry signal to measure timing even when RNNoise suppresses an isolated impulse.
+    x.audio_fx.noise_reduction.amount = if clip_fx { 25.0 } else { 0.0 };
+    settings.fx.noise_reduction.amount = if track_fx { 25.0 } else { 0.0 };
+    h.apply(Command::SetClipProps(vec![(id, x, keys)])).unwrap();
+    h.apply(Command::SetTrack(settings)).unwrap();
+    h.project().clone()
+}
+
+fn impulses(start: i64, out: &mut [f32]) {
+    for (i, f) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+        let at = start + i as i64;
+        f.fill(if [7200, 47_760].contains(&at) {
+            0.5
+        } else {
+            0.0
+        });
+    }
+}
+
+fn impulse_audio() -> Audio {
+    Audio::new(Box::new(|_, _| Box::new(impulses)))
+}
+
+#[test]
+fn cleanup_prime_opens_sources_before_effect_history() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    for (clip, track) in [(false, false), (true, false), (false, true), (true, true)] {
+        let p = cleanup_project("impulses.wav".into(), clip, track);
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let record = calls.clone();
+        let mut audio = Audio::new(Box::new(move |_, _| {
+            let record = record.clone();
+            Box::new(move |at, out| {
+                record.borrow_mut().push((at, out.is_empty()));
+                impulses(at, out);
+            })
+        }));
+        audio.prime(&p, Time(FLICKS_PER_SECOND / 2));
+        audio.mix(&p, 24_000, &mut [0.0; 1024]);
+        let calls = calls.borrow();
+        let from = 24_000 - (i64::from(clip) + i64::from(track)) * jvid_audio::Fx::PREROLL as i64;
+        assert_eq!(calls[0], (from, true));
+        assert_eq!(calls[1], (from, false));
+        assert!(calls.iter().all(|(at, _)| *at >= from));
+    }
+}
+
+fn peak_frame(buf: &[f32]) -> usize {
+    buf.as_chunks::<2>()
+        .0
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a[0].abs().total_cmp(&b[0].abs()))
+        .unwrap()
+        .0
+}
+
+#[test]
+fn cleanup_impulses_align_at_clip_track_and_cascade() {
+    for (clip, track) in [(true, false), (false, true), (true, true)] {
+        let p = cleanup_project("impulses.wav".into(), clip, track);
+        let mut audio = impulse_audio();
+        let mut whole = vec![0.0; 48_000 * 2];
+        audio.mix(&p, 0, &mut whole);
+        assert_eq!(
+            peak_frame(&whole[..24_000]),
+            7200,
+            "clip {clip} track {track}"
+        );
+        assert_eq!(
+            peak_frame(&whole[47_000 * 2..]) + 47_000,
+            47_760,
+            "tail: clip {clip} track {track}"
+        );
+        assert!(whole[47_760 * 2].abs() > 0.1, "tail survived");
+        let mut audio = impulse_audio();
+        let mut blocks = vec![0.0; whole.len()];
+        let mut at = 0;
+        for frames in [137, 509, 1600].into_iter().cycle() {
+            if at == 48_000 {
+                break;
+            }
+            let end = (at + frames).min(48_000);
+            audio.prime(
+                &p,
+                Time(at as i64 * (FLICKS_PER_SECOND / jvid_audio::SAMPLE_RATE as i64)),
+            );
+            audio.mix(&p, at as i64, &mut blocks[at * 2..end * 2]);
+            at = end;
+        }
+        let max = blocks
+            .iter()
+            .zip(&whole)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
+        assert!(
+            max < 1e-5,
+            "partition difference {max}: clip {clip} track {track}"
+        );
+        // Forward and backward non-contiguous requests reset and prime both effect stages.
+        for start in [47000, 4800, 0, 4800] {
+            let mut got = vec![0.0; 1000 * 2];
+            if start == 4800 {
+                got.resize(4000 * 2, 0.0);
+            }
+            audio.mix(&p, start, &mut got);
+            let want = if start == 47000 {
+                760
+            } else if start == 4800 {
+                2400
+            } else {
+                continue;
+            };
+            assert_eq!(
+                peak_frame(&got),
+                want,
+                "seek {start}: clip {clip} track {track}"
+            );
+        }
+    }
+}
+
+#[test]
+fn cleanup_export_retains_tail_and_duration_from_inside_clip() {
+    jvid_media::ffmpeg::init().unwrap();
+    let fixture = jvid_media::audio::offset_fixture::Fixture::default();
+    let source = fixture.0.parent().unwrap().join("impulses.wav");
+    let mut enc = Encoder::create(
+        &source,
+        (64, 64),
+        Rate::new(30, 1),
+        &preset("Audio Only (WAV)"),
+    )
+    .unwrap();
+    let mut input = vec![0.0; 48_000 * 2];
+    impulses(0, &mut input);
+    enc.audio(&input).unwrap();
+    enc.finish().unwrap();
+    for (clip, track) in [(true, false), (false, true), (true, true)] {
+        let p = cleanup_project(source.clone(), clip, track);
+        for first in [0, 4800] {
+            let path = fixture
+                .0
+                .parent()
+                .unwrap()
+                .join(format!("cleanup-{clip}-{track}-{first}.wav"));
+            let req = Request {
+                path: path.clone(),
+                range: (
+                    Time(first * (FLICKS_PER_SECOND / jvid_audio::SAMPLE_RATE as i64)),
+                    secs(1),
+                ),
+                preset: preset("Audio Only (WAV)"),
+                loudness: None,
+                lossless: None,
+                sidecar: false,
+            };
+            run_now(&p, &req, false).unwrap();
+            let mut got = Vec::new();
+            let mut d = AudioDecoder::open(&path, 0).unwrap();
+            while let Some(c) = d.next_chunk().unwrap() {
+                got.extend(c.samples);
+            }
+            assert_eq!(got.len() / 2, (48_000 - first) as usize);
+            assert_eq!(
+                peak_frame(&got[..(12000 - first) as usize * 2]),
+                (7200 - first) as usize
+            );
+            let tail_start = (47000 - first) as usize;
+            assert_eq!(
+                peak_frame(&got[tail_start * 2..]) + tail_start,
+                (47760 - first) as usize
+            );
+            assert!(got[(47760 - first) as usize * 2].abs() > 0.1);
+            let mut playback = Audio::new(Box::new(blocking));
+            let mut want = vec![0.0; got.len()];
+            for (i, block) in want.chunks_mut(512 * 2).enumerate() {
+                playback.mix(&p, first + (i * 512) as i64, block);
+            }
+            let (index, max) = got
+                .iter()
+                .zip(&want)
+                .enumerate()
+                .map(|(i, (a, b))| (i, (a - b).abs()))
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .unwrap();
+            assert!(
+                max <= 1.0 / 32768.0 + 1e-7,
+                "playback/export mismatch: clip {clip} track {track} first {first}, sample {}, error {max}, got {} want {}",
+                index / 2,
+                got[index],
+                want[index]
+            );
+        }
+    }
 }
 
 /// Adds `path` on a new track as one clip of source `[0, len)` starting at `start`.
@@ -123,10 +420,405 @@ fn with_context<T: Send + 'static>(work: impl FnOnce(&Ctx) -> T + Send + 'static
     rx.recv().unwrap()
 }
 
+/// A disposable, generated source: these safety tests need neither the corpus nor a GPU.
+pub(super) fn lossless_fixture(name: &str) -> (AttemptFiles, Project, Request) {
+    jvid_media::ffmpeg::init().unwrap();
+    let files = AttemptFiles::new(&out(name)).unwrap();
+    let source = files.dir.join("source.mov");
+    let mut p = preset("ProRes Master");
+    p.size = None;
+    p.audio = None;
+    p.options.insert("encoder".into(), "software".into());
+    let mut encoder = Encoder::create(&source, (64, 64), Rate::new(30, 1), &p).unwrap();
+    for i in 0..60 {
+        encoder.video(&vec![i as u8; 64 * 64 * 4]).unwrap();
+    }
+    encoder.finish().unwrap();
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, source.clone(), Time(0), secs(2));
+    let id = h.project().assets()[0].id;
+    let probe = Some(jvid_media::probe::probe(&source).unwrap());
+    h.apply(Command::SetAssetProbe { id, probe }).unwrap();
+    let req = Request {
+        path: files.dir.join("destination.mov"),
+        range: (Time(0), secs(1)),
+        preset: p,
+        loudness: None,
+        lossless: Some(Lossless::Copy),
+        sidecar: false,
+    };
+    (files, h.project().clone(), req)
+}
+
+fn assert_no_attempts(dir: &Path) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        assert!(
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".jvid-export-"),
+            "owned attempt directory was left behind"
+        );
+    }
+}
+
+#[test]
+fn lossless_cancel_preserves_destination() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let (files, project, mut req) = lossless_fixture("safety-cancel.mov");
+        req.lossless = Some(mode);
+        std::fs::write(&req.path, b"previous export: preserve every byte").unwrap();
+        let original = std::fs::read(&project.assets()[0].path).unwrap();
+        let destination = req.path.clone();
+        let pool = Pool::new(1);
+        let (ready_tx, ready_rx) = channel();
+        let (go_tx, go_rx) = channel();
+        let (tx, rx) = channel();
+        let handle = pool.submit("cancel lossless", Priority::Interactive, move |ctx| {
+            ready_tx.send(()).unwrap();
+            go_rx
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap();
+            tx.send(lossless::run(&project, &req, mode, ctx)).unwrap();
+        });
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        handle.cancel();
+        go_tx.send(()).unwrap();
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap(),
+            Err(Error::Cancelled)
+        );
+        assert_eq!(
+            std::fs::read(destination).unwrap(),
+            b"previous export: preserve every byte"
+        );
+        assert_eq!(
+            std::fs::read(files.dir.join("source.mov")).unwrap(),
+            original
+        );
+        assert_no_attempts(&files.dir);
+    }
+}
+
+#[test]
+fn lossless_later_failure_preserves_destination() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let (files, project, mut req) = lossless_fixture("safety-failure.mov");
+        let original = std::fs::read(&project.assets()[0].path).unwrap();
+        let mut h = History::new(project);
+        let track = h.project().sequence().tracks()[0].id;
+        let probe = h.project().assets()[0].probe.clone();
+        let missing = files.dir.join("unreadable.mov");
+        std::fs::write(&missing, b"not a media file").unwrap();
+        let Ok(Created::Asset(asset)) = h.apply(Command::AddAsset(missing.clone())) else {
+            panic!("asset")
+        };
+        h.apply(Command::SetAssetProbe { id: asset, probe })
+            .unwrap();
+        h.apply(Command::AddClip {
+            track,
+            clip: NewClip {
+                asset,
+                source_in: Time(0),
+                source_out: secs(1),
+                start: secs(2),
+                link: None,
+            },
+        })
+        .unwrap();
+        req.range.1 = secs(3);
+        req.lossless = Some(mode);
+        let destination = req.path.clone();
+        std::fs::write(&destination, b"previous export").unwrap();
+        let project = h.project().clone();
+        let (p, r) = (project.clone(), req.clone());
+        let result = with_context(move |ctx| lossless::run(&p, &r, mode, ctx));
+        assert!(matches!(result, Err(Error::Failed(_))), "{result:?}");
+        assert_eq!(std::fs::read(destination).unwrap(), b"previous export");
+        assert_eq!(
+            std::fs::read(files.dir.join("source.mov")).unwrap(),
+            original
+        );
+        assert_eq!(std::fs::read(&missing).unwrap(), b"not a media file");
+        // The destination must also be checked against later inputs, before copying the first.
+        req.path = missing.clone();
+        let result = with_context(move |ctx| lossless::run(&project, &req, mode, ctx));
+        let Err(Error::Failed(error)) = result else {
+            panic!("{result:?}")
+        };
+        assert!(error.contains(&missing.display().to_string()), "{error}");
+        assert_eq!(std::fs::read(missing).unwrap(), b"not a media file");
+        assert_eq!(
+            std::fs::read(files.dir.join("source.mov")).unwrap(),
+            original
+        );
+        assert_no_attempts(&files.dir);
+    }
+}
+
+#[test]
+fn lossless_success_replaces_destination() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let (files, project, mut req) = lossless_fixture("safety-success.mov");
+        req.lossless = Some(mode);
+        let source = project.assets()[0].path.clone();
+        let original = std::fs::read(&source).unwrap();
+        let destination = req.path.clone();
+        std::fs::write(&destination, b"previous export").unwrap();
+        let (p, r) = (project.clone(), req.clone());
+        let info = with_context(move |ctx| lossless::run(&p, &r, mode, ctx)).unwrap();
+        assert_eq!(info.duration, secs(1));
+        assert_eq!(jvid_media::probe::probe(&destination).unwrap(), info);
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+        assert_no_attempts(&files.dir);
+        // A fresh destination goes through the same identity checks and publication path.
+        std::fs::remove_file(&destination).unwrap();
+        with_context(move |ctx| lossless::run(&project, &req, mode, ctx)).unwrap();
+        assert_no_attempts(&files.dir);
+    }
+}
+
+#[test]
+fn lossless_source_aliases_are_rejected_before_writing() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let (files, project, req) = lossless_fixture("safety-alias.mov");
+        let source = project.assets()[0].path.clone();
+        let original = std::fs::read(&source).unwrap();
+        let hardlink = files.dir.join("hardlink.mov");
+        std::fs::hard_link(&source, &hardlink).unwrap();
+        let mut aliases = vec![
+            source.clone(),
+            files.dir.join(".").join("source.mov"),
+            hardlink,
+        ];
+        #[cfg(unix)]
+        {
+            let symlink = files.dir.join("symlink.mov");
+            std::os::unix::fs::symlink(&source, &symlink).unwrap();
+            aliases.push(symlink);
+        }
+        #[cfg(windows)]
+        {
+            let symlink = files.dir.join("symlink.mov");
+            match std::os::windows::fs::symlink_file(&source, &symlink) {
+                Ok(()) => aliases.push(symlink),
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::PermissionDenied
+                        || e.raw_os_error() == Some(1314) =>
+                {
+                    eprintln!("symlink alias unverified: Windows symlink permission unavailable");
+                }
+                Err(e) => panic!("creating source symlink: {e}"),
+            }
+        }
+        for alias in aliases {
+            let (project, mut req) = (project.clone(), req.clone());
+            req.path = alias.clone();
+            req.lossless = Some(mode);
+            let result = with_context(move |ctx| lossless::run(&project, &req, mode, ctx));
+            let Err(Error::Failed(error)) = result else {
+                panic!("{result:?}")
+            };
+            assert!(error.contains(&source.display().to_string()), "{error}");
+            assert!(error.contains(&alias.display().to_string()), "{error}");
+            assert_eq!(std::fs::read(&source).unwrap(), original);
+            assert_eq!(std::fs::read(alias).unwrap(), original);
+            assert_no_attempts(&files.dir);
+        }
+        // Rendered exports share the same guard and must reject an alias before encoding.
+        let mut req = req;
+        req.path = source;
+        req.lossless = None;
+        let result: Result<(), _> = with_context(move |ctx| {
+            replay(&project, &req, ctx, |_| {
+                panic!("source collision reached encoder")
+            })
+        });
+        assert!(matches!(result, Err(Error::Failed(_))));
+    }
+}
+
+#[test]
+fn lossless_late_cancel_preserves_destination() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let (files, project, mut req) = lossless_fixture("safety-late-cancel.mov");
+        req.lossless = Some(mode);
+        let source = project.assets()[0].path.clone();
+        let original = std::fs::read(&source).unwrap();
+        let destination = req.path.clone();
+        std::fs::write(&destination, b"previous export").unwrap();
+        let pool = Pool::new(1);
+        let (ready_tx, ready_rx) = channel();
+        let (go_tx, go_rx) = channel();
+        let (tx, rx) = channel();
+        let handle = pool.submit("cancel after packets", Priority::Interactive, move |ctx| {
+            let result: Result<(), _> = replay(&project, &req, ctx, |attempt| {
+                let cuts = lossless::check(&project, req.range).unwrap();
+                let mut paused = false;
+                jvid_media::remux::export(
+                    &cuts,
+                    &attempt.path,
+                    mode == Lossless::Smart,
+                    &mut |f| {
+                        if f > 0.25 && !paused {
+                            paused = true;
+                            ready_tx.send(()).unwrap();
+                            go_rx
+                                .recv_timeout(std::time::Duration::from_secs(10))
+                                .unwrap();
+                        }
+                        !ctx.is_cancelled()
+                    },
+                )?;
+                Ok(())
+            });
+            tx.send(result).unwrap();
+        });
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"previous export");
+        handle.cancel();
+        go_tx.send(()).unwrap();
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap(),
+            Err(Error::Cancelled)
+        );
+        assert_eq!(std::fs::read(destination).unwrap(), b"previous export");
+        assert_eq!(std::fs::read(source).unwrap(), original);
+        assert_no_attempts(&files.dir);
+    }
+}
+
+#[test]
+fn lossless_mux_and_probe_failures_preserve_destination() {
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        for probe_failure in [false, true] {
+            let (files, project, mut req) = lossless_fixture("safety-validation.mov");
+            req.lossless = Some(mode);
+            if !probe_failure {
+                // WAVE cannot mux the generated ProRes video: fail during header writing.
+                req.path.set_extension("wav");
+            }
+            let source = project.assets()[0].path.clone();
+            let original = std::fs::read(&source).unwrap();
+            let destination = req.path.clone();
+            std::fs::write(&destination, b"previous export").unwrap();
+            let result: Result<(), _> = with_context(move |ctx| {
+                replay(&project, &req, ctx, |attempt| {
+                    let cuts = lossless::check(&project, req.range).unwrap();
+                    jvid_media::remux::export(
+                        &cuts,
+                        &attempt.path,
+                        mode == Lossless::Smart,
+                        &mut |_| true,
+                    )?;
+                    assert!(
+                        probe_failure,
+                        "unsupported muxer unexpectedly accepted ProRes"
+                    );
+                    // Inject damage between mux completion and the real validation probe.
+                    std::fs::write(&attempt.path, b"damaged output").unwrap();
+                    jvid_media::probe::probe(&attempt.path).map_err(|e| e.to_string())?;
+                    Ok(())
+                })
+            });
+            assert!(matches!(result, Err(Error::Failed(_))), "{result:?}");
+            assert_eq!(std::fs::read(destination).unwrap(), b"previous export");
+            assert_eq!(std::fs::read(source).unwrap(), original);
+            assert_no_attempts(&files.dir);
+        }
+    }
+}
+
+#[test]
+fn lossless_panic_preserves_destination_and_cleans_attempt() {
+    let (files, project, req) = lossless_fixture("safety-panic.mov");
+    let destination = req.path.clone();
+    std::fs::write(&destination, b"previous export").unwrap();
+    let panicked = with_context(move |ctx| {
+        std::panic::catch_unwind(|| {
+            let _: Result<(), _> = replay(&project, &req, ctx, |attempt| {
+                std::fs::write(&attempt.path, b"partial output").unwrap();
+                panic!("injected remux panic");
+            });
+        })
+        .is_err()
+    });
+    assert!(panicked);
+    assert_eq!(std::fs::read(destination).unwrap(), b"previous export");
+    assert_no_attempts(&files.dir);
+}
+
+#[test]
+fn lossless_rechecks_source_identity_before_publication() {
+    let (files, project, req) = lossless_fixture("safety-recheck.mov");
+    let source = project.assets()[0].path.clone();
+    let original = std::fs::read(&source).unwrap();
+    let destination = req.path.clone();
+    let result: Result<(), _> = with_context(move |ctx| {
+        replay(&project, &req, ctx, |attempt| {
+            std::fs::write(&attempt.path, b"finished output").unwrap();
+            // The destination was absent at preflight, then became an alias while encoding.
+            std::fs::hard_link(&source, &req.path).unwrap();
+            Ok(())
+        })
+    });
+    assert!(matches!(result, Err(Error::Failed(_))));
+    assert_eq!(std::fs::read(destination).unwrap(), original);
+    assert_eq!(
+        std::fs::read(files.dir.join("source.mov")).unwrap(),
+        original
+    );
+    assert_no_attempts(&files.dir);
+}
+
+#[cfg(feature = "gpl-ffmpeg")]
+#[test]
+fn lossless_smart_partial_gops_replace_validated_destination() {
+    let Some(corpus) = corpus() else { return };
+    let files = AttemptFiles::new(&out("smart-edges.mp4")).unwrap();
+    let source = files.dir.join("source.mp4");
+    std::fs::copy(corpus.join("frame-index-1080p30.mp4"), &source).unwrap();
+    let original = std::fs::read(&source).unwrap();
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, source.clone(), Time(0), secs(10));
+    let id = h.project().assets()[0].id;
+    let probe = Some(jvid_media::probe::probe(&source).unwrap());
+    h.apply(Command::SetAssetProbe { id, probe }).unwrap();
+    let destination = files.dir.join("destination.mp4");
+    std::fs::write(&destination, b"previous export").unwrap();
+    let req = Request {
+        path: destination.clone(),
+        range: (half(3), half(5)),
+        preset: preset("YouTube 1080p"),
+        loudness: None,
+        lossless: Some(Lossless::Smart),
+        sidecar: false,
+    };
+    let info =
+        with_context(move |ctx| lossless::run(h.project(), &req, Lossless::Smart, ctx)).unwrap();
+    assert!((info.duration - secs(1)).0.abs() <= Rate::new(30, 1).time_floor(1).0);
+    assert_eq!(jvid_media::probe::probe(&destination).unwrap(), info);
+    let mut decoder = VideoDecoder::open(&destination).unwrap();
+    for (time, index) in [(Time(0), 45), (half(1), 60)] {
+        let frame = decoder.frame_at(time).unwrap();
+        assert_eq!(frame_index(&frame.planes[0], frame.width as usize), index);
+    }
+    assert_eq!(std::fs::read(source).unwrap(), original);
+    assert_no_attempts(&files.dir);
+}
+
 #[test]
 fn in_progress_hardware_failure_replays_fresh_software_output() {
     jvid_media::ffmpeg::init().unwrap();
     let mut req = retry_request("retry-fresh.mkv");
+    // This fixture tests replay and timing; request ProRes explicitly on every host.
+    req.preset = rendering_preset();
+    req.preset.size = None;
     req.preset.audio = Some(jvid_core::preset::AudioCodec::Aac);
     let destination = req.path.clone();
     let unrelated = req.path.with_extension("mkv.best");
@@ -135,7 +827,7 @@ fn in_progress_hardware_failure_replays_fresh_software_output() {
     let original_options = req.preset.options.clone();
     let (result, paths) = with_context(move |ctx| {
         let mut paths = Vec::new();
-        let result = replay(&req, ctx, |attempt| {
+        let result = replay(&Project::default(), &req, ctx, |attempt| {
             if let Some(previous) = paths.last() {
                 assert!(
                     !Path::new(previous).exists(),
@@ -277,7 +969,7 @@ fn hardware_retry_is_bounded_and_unrelated_errors_do_not_retry() {
             std::fs::write(&req.path, b"keep").unwrap();
             let mut calls = 0;
             let mut attempt_paths = Vec::new();
-            let result: Result<(), _> = replay(&req, ctx, |attempt| {
+            let result: Result<(), _> = replay(&Project::default(), &req, ctx, |attempt| {
                 calls += 1;
                 attempt_paths.push(attempt.path.clone());
                 std::fs::write(&attempt.path, b"partial").unwrap();
@@ -309,7 +1001,7 @@ fn cancellation_during_hardware_failure_prevents_retry() {
     let (done_tx, done_rx) = channel();
     let handle = pool.submit("cancel hardware retry", Priority::Interactive, move |ctx| {
         let mut calls = 0;
-        let result: Result<(), _> = replay(&req, ctx, |attempt| {
+        let result: Result<(), _> = replay(&Project::default(), &req, ctx, |attempt| {
             calls += 1;
             assert_eq!(calls, 1);
             std::fs::write(&attempt.path, b"partial").unwrap();
@@ -341,47 +1033,57 @@ fn export_matches_range_with_audio_in_sync() {
         let req = Request {
             path: path.clone(),
             range: (secs(1), secs(2)),
-            preset: preset("YouTube 1080p"),
+            preset: if ext == "mp4" {
+                preset("YouTube 1080p")
+            } else {
+                rendering_preset()
+            },
             loudness: None,
             lossless: None,
             sidecar: false,
         };
-        let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{ext}: {e:?}"));
-        assert_eq!((info.width, info.height), (Some(1920), Some(1080)), "{ext}");
-        let off = (info.duration - secs(1)).0.abs();
-        assert!(off <= rate.time_floor(1).0, "{ext}: {:?}", info.duration);
+        check_codec_result(
+            &req,
+            || run_now(&p, &req, false),
+            |info| {
+                assert_eq!((info.width, info.height), (Some(1920), Some(1080)), "{ext}");
+                let off = (info.duration - secs(1)).0.abs();
+                assert!(off <= rate.time_floor(1).0, "{ext}: {:?}", info.duration);
 
-        let mut v = VideoDecoder::open(&path).unwrap();
-        // MKV shifts every stream by AAC's priming (21 ms), so allow up to a frame of offset.
-        let frame = rate.time_floor(1);
-        let first = v.frame_at(Time(0)).unwrap();
-        assert!(
-            first.pts.0.abs() <= frame.0,
-            "{ext}: starts at {:?}",
-            first.pts
-        );
-        let last = v.frame_at(secs(10)).unwrap();
-        assert!((last.pts - secs(1) + frame).0.abs() <= frame.0, "{ext}");
-        let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
-        assert_eq!((index(&first), index(&last)), (30, 59), "{ext}");
+                let mut v = VideoDecoder::open(&path).unwrap();
+                // MKV shifts every stream by AAC's priming (21 ms), so allow up to a frame of offset.
+                let frame = rate.time_floor(1);
+                let first = v.frame_at(Time(0)).unwrap();
+                assert!(
+                    first.pts.0.abs() <= frame.0,
+                    "{ext}: starts at {:?}",
+                    first.pts
+                );
+                let last = v.frame_at(secs(10)).unwrap();
+                assert!((last.pts - secs(1) + frame).0.abs() <= frame.0, "{ext}");
+                let index =
+                    |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
+                assert_eq!((index(&first), index(&last)), (30, 59), "{ext}");
 
-        let mut a = AudioDecoder::open(&path, 0).unwrap();
-        let mut samples = Vec::new();
-        while let Some(c) = a.next_chunk().unwrap() {
-            samples.extend(c.samples);
-        }
-        let onset = samples.iter().position(|s| s.abs() > 0.02).unwrap() as i64 / 2;
-        let frame_samples = 48_000 / 30;
-        assert!(
-            (onset - 24_000).abs() <= frame_samples,
-            "{ext}: onset {onset}"
+                let mut a = AudioDecoder::open(&path, 0).unwrap();
+                let mut samples = Vec::new();
+                while let Some(c) = a.next_chunk().unwrap() {
+                    samples.extend(c.samples);
+                }
+                let onset = samples.iter().position(|s| s.abs() > 0.02).unwrap() as i64 / 2;
+                let frame_samples = 48_000 / 30;
+                assert!(
+                    (onset - 24_000).abs() <= frame_samples,
+                    "{ext}: onset {onset}"
+                );
+                let len = samples.len() as i64 / 2;
+                assert!(
+                    (len - 48_000).abs() <= frame_samples,
+                    "{ext}: {len} samples"
+                );
+                std::fs::remove_file(&path).unwrap();
+            },
         );
-        let len = samples.len() as i64 / 2;
-        assert!(
-            (len - 48_000).abs() <= frame_samples,
-            "{ext}: {len} samples"
-        );
-        std::fs::remove_file(&path).unwrap();
     }
 }
 
@@ -416,11 +1118,11 @@ fn a_ramped_clip_exports_its_curve() {
     let expected = 2.0 * 2f64.ln() * FLICKS_PER_SECOND as f64;
     assert!((c.duration().0 as f64 - expected).abs() < frame.0 as f64);
 
-    let path = out("ramp.mp4");
+    let path = out("ramp.mov");
     let req = Request {
         path: path.clone(),
         range: (Time(0), c.duration()),
-        preset: preset("YouTube 1080p"),
+        preset: rendering_preset(),
         loudness: None,
         lossless: None,
         sidecar: false,
@@ -434,8 +1136,7 @@ fn a_ramped_clip_exports_its_curve() {
     );
     let mut v = VideoDecoder::open(&path).unwrap();
     let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
-    // The mp4 drops a final part frame at any speed (its edit list ends at the last frame's
-    // start), so this compares the whole frames.
+    // Compare every complete frame in the ramp's range.
     let whole = rate.index_floor(c.duration());
     let (got, want): (Vec<_>, Vec<_>) = (0..whole)
         .map(|n| {
@@ -494,11 +1195,11 @@ fn untrimmed_crossfade_blends_the_end_frames() {
     h.apply(Command::SetClipProps(vec![(a.id, t, a.keyframes.clone())]))
         .unwrap();
 
-    let path = out("untrimmed-crossfade.mp4");
+    let path = out("untrimmed-crossfade.mov");
     let req = Request {
         path: path.clone(),
         range: (len - half(1), len + half(1)),
-        preset: preset("YouTube 1080p"),
+        preset: rendering_preset(),
         loudness: None,
         lossless: None,
         sidecar: false,
@@ -543,11 +1244,11 @@ fn in_to_out_exports_the_marked_range() {
     )
     .unwrap();
     assert_eq!(range, (secs(1), half(5)));
-    let path = out("in-out.mp4");
+    let path = out("in-out.mov");
     let req = Request {
         path: path.clone(),
         range,
-        preset: preset("YouTube 1080p"),
+        preset: rendering_preset(),
         loudness: None,
         lossless: None,
         sidecar: false,
@@ -590,11 +1291,11 @@ fn ten_highlights_export_as_ten_trimmed_files() {
     let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
     for (i, m) in chosen.iter().enumerate() {
         let name = dialog::file_name(dialog::TEMPLATE, "hl", m, i + 1);
-        let path = out(&format!("{name}.mp4"));
+        let path = out(&format!("{name}.mov"));
         let req = Request {
             path: path.clone(),
             range: (m.time, m.time + m.duration),
-            preset: preset("YouTube 1080p"),
+            preset: rendering_preset(),
             loudness: None,
             lossless: None,
             sidecar: false,
@@ -631,11 +1332,11 @@ fn two_point_markers_export_as_two_padded_files() {
     let frame = Rate::new(30, 1).time_floor(1);
     let index = |f: &jvid_media::decode::Frame| frame_index(&f.planes[0], f.width as usize);
     for (i, m) in chosen.iter().enumerate() {
-        let path = out(&format!("point-{i}.mp4"));
+        let path = out(&format!("point-{i}.mov"));
         let req = Request {
             path: path.clone(),
             range: dialog::highlight(m, (secs(2), secs(1)), seq.duration()),
-            preset: preset("YouTube 1080p"),
+            preset: rendering_preset(),
             loudness: None,
             lossless: None,
             sidecar: false,
@@ -726,15 +1427,20 @@ fn every_builtin_preset_exports() {
             lossless: None,
             sidecar: false,
         };
-        let info = run_now(&p, &req, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
-        if has_video {
-            assert_eq!(
-                (info.width, info.height),
-                (Some(size.0), Some(size.1)),
-                "{name}"
-            );
-        }
-        std::fs::remove_file(&path).unwrap();
+        check_codec_result(
+            &req,
+            || run_now(&p, &req, false),
+            |info| {
+                if has_video {
+                    assert_eq!(
+                        (info.width, info.height),
+                        (Some(size.0), Some(size.1)),
+                        "{name}"
+                    );
+                }
+                std::fs::remove_file(&path).unwrap();
+            },
+        );
     }
 }
 
@@ -764,26 +1470,31 @@ fn screen_recording_keeps_text_sharp() {
         lossless: None,
         sidecar: false,
     };
-    run_now(h.project(), &req, false).unwrap();
-    let got = VideoDecoder::open(&path)
-        .unwrap()
-        .frame_at(Time(0))
-        .unwrap();
-    let want = VideoDecoder::open(&src).unwrap().frame_at(secs(1)).unwrap();
-    assert_eq!((got.width, got.height), (2560, 1440));
-    // The text line: rows 195..215, columns 70..600.
-    let (mut sum, mut n) = (0u64, 0u64);
-    for y in 195..215 {
-        for x in 70..600 {
-            let i = y * 2560 + x;
-            sum += got.planes[0][i].abs_diff(want.planes[0][i]) as u64;
-            n += 1;
-        }
-    }
-    let diff = sum as f64 / n as f64;
-    eprintln!("text luma diff {diff}");
-    assert!(diff < 2.0, "mean luma difference over the text {diff}");
-    std::fs::remove_file(&path).unwrap();
+    check_codec_result(
+        &req,
+        || run_now(h.project(), &req, false),
+        |_| {
+            let got = VideoDecoder::open(&path)
+                .unwrap()
+                .frame_at(Time(0))
+                .unwrap();
+            let want = VideoDecoder::open(&src).unwrap().frame_at(secs(1)).unwrap();
+            assert_eq!((got.width, got.height), (2560, 1440));
+            // The text line: rows 195..215, columns 70..600.
+            let (mut sum, mut n) = (0u64, 0u64);
+            for y in 195..215 {
+                for x in 70..600 {
+                    let i = y * 2560 + x;
+                    sum += got.planes[0][i].abs_diff(want.planes[0][i]) as u64;
+                    n += 1;
+                }
+            }
+            let diff = sum as f64 / n as f64;
+            eprintln!("text luma diff {diff}");
+            assert!(diff < 2.0, "mean luma difference over the text {diff}");
+            std::fs::remove_file(&path).unwrap();
+        },
+    );
 }
 
 /// Normalized exports land within 0.5 LU of the target, under the true-peak ceiling.
@@ -949,18 +1660,18 @@ fn editing_after_queueing_doesnt_change_the_export() {
     pool.submit("busy", Priority::Interactive, move |_| {
         let _ = wait.recv();
     });
-    let path = out("snapshot.mp4");
+    let path = out("snapshot.mov");
     let req = Request {
         path: path.clone(),
         range: (secs(1), secs(2)),
-        preset: preset("YouTube 1080p"),
+        preset: rendering_preset(),
         loudness: None,
         lossless: None,
         sidecar: false,
     };
     let mut q = queue::Queue::default();
     let job = submit(&pool, h.project().clone(), req.clone(), gpu);
-    assert!(q.push(path.clone(), "YouTube 1080p".into(), secs(1), job));
+    assert!(q.push(path.clone(), req.preset.name.clone(), secs(1), job));
     assert!(!q.writing(&out("other.mp4")) && q.writing(&path));
     let video = h.project().sequence().tracks()[0].clips()[0].id;
     h.apply(Command::RemoveClip(video)).unwrap();
@@ -1057,15 +1768,20 @@ fn target_size_lands(src: &str, ext: &str, target: u64, fill: f64) {
         sidecar: false,
     };
     let p = small(h.project().clone());
-    run_now(&p, &req, false).unwrap_or_else(|e| panic!("{src}: {e:?}"));
-    let size = std::fs::metadata(&path).unwrap().len();
-    let off = size as f64 / target as f64;
-    assert!(
-        (fill..=1.0).contains(&off),
-        "{src} {ext}: {size} of {target}"
+    check_codec_result(
+        &req,
+        || run_now(&p, &req, false),
+        |_| {
+            let size = std::fs::metadata(&path).unwrap().len();
+            let off = size as f64 / target as f64;
+            assert!(
+                (fill..=1.0).contains(&off),
+                "{src} {ext}: {size} of {target}"
+            );
+            assert!(!PathBuf::from(format!("{}.best", path.display())).exists());
+            std::fs::remove_file(&path).unwrap();
+        },
     );
-    assert!(!PathBuf::from(format!("{}.best", path.display())).exists());
-    std::fs::remove_file(&path).unwrap();
 }
 
 #[test]
@@ -1277,4 +1993,378 @@ fn built_in_preset_names_are_their_english_catalog_names() {
         ..all[0].clone()
     };
     assert_eq!(preset_name(all.len(), &mine), "Mine");
+}
+
+#[test]
+fn imported_still_alpha_survives_program_and_export() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("jvid-b07-alpha-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("logo.png");
+    let logo = image::RgbaImage::from_fn(12, 8, |x, y| {
+        image::Rgba(if y < 4 {
+            match x / 4 {
+                0 => [0, 255, 0, 0],
+                1 => [255, 0, 0, 128],
+                _ => [255, 255, 255, 255],
+            }
+        } else {
+            [255, 255, 0, 255]
+        })
+    });
+    logo.save(&path).unwrap();
+    let mut h = History::new(Project::default());
+    h.apply(Command::SetSettings(jvid_core::model::ProjectSettings {
+        width: 12,
+        height: 8,
+        background: [0, 0, 255, 255],
+        ..Default::default()
+    }))
+    .unwrap();
+    add(&mut h, TrackKind::Video, path, Time(0), secs(2));
+    let mut pb = crate::playback::Playback::from_files(1 << 20);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let shown = loop {
+        if let Some(s) = pb.park(h.project())
+            && s.exact
+        {
+            break s;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "still decode timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    let Pixels::Still(first) = &shown.layers[0].0 else {
+        panic!("expected RGBA still")
+    };
+    pb.transport.seek(secs(1), 0);
+    let later = pb
+        .park(h.project())
+        .expect("a second frame reuses the still");
+    let Pixels::Still(second) = &later.layers[0].0 else {
+        panic!("expected RGBA still")
+    };
+    assert!(Arc::ptr_eq(first, second), "no per-timeline-frame decode");
+    let mut gpu = Gpu::new(&device);
+    let got = jvid_render::composite::read_back(
+        &device,
+        &queue,
+        gpu.draw(&device, &queue, h.project().settings(), 1, &shown),
+    );
+    for (x, want) in [
+        (1, [0, 0, 255, 255]),
+        (5, [128, 0, 127, 255]),
+        (9, [255; 4]),
+    ] {
+        let at = (12 + x) * 4;
+        assert!(
+            got[at..at + 4]
+                .iter()
+                .zip(want)
+                .all(|(a, b)| a.abs_diff(b) <= 2),
+            "x={x}: {:?} want {want:?}",
+            &got[at..at + 4]
+        );
+    }
+    let request = Request {
+        path: dir.join("alpha.mov"),
+        range: (Time(0), h.project().settings().frame_rate.time_floor(3)),
+        preset: Preset {
+            size: Some([12, 8]),
+            frame_rate: Some(h.project().settings().frame_rate),
+            ..preset("ProRes Master")
+        },
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    run_now(h.project(), &request, false).unwrap();
+    let mut decoder = VideoDecoder::open(&request.path).unwrap();
+    let exported = decoder.frame_at(Time(0)).unwrap().view_rgba((12, 8));
+    for x in [1, 5, 9] {
+        let at = (12 + x) * 4;
+        assert!(
+            exported
+                .get_pixel(x as u32, 1)
+                .0
+                .iter()
+                .zip(&got[at..at + 4])
+                .all(|(a, b)| a.abs_diff(*b) <= 12),
+            "export differs at {x}"
+        );
+    }
+    drop((decoder, pb));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn program_png_matches_full_video_composition_with_title_effect_and_mask() {
+    use jvid_core::model::{Effect, Mask, MaskShape, Text, Transform};
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    jvid_media::ffmpeg::init().unwrap();
+    let dir = out("b07-program-png");
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("original.mov");
+    let pixels = image::RgbaImage::from_fn(64, 32, |x, y| {
+        let v = if (x / 4 + y / 4) % 2 == 0 { 220 } else { 60 };
+        image::Rgba([v, v, v, 255])
+    });
+    let rate = Rate::new(30, 1);
+    let mut enc = Encoder::create(&source, (64, 32), rate, &preset("ProRes Master")).unwrap();
+    for _ in 0..3 {
+        enc.video(pixels.as_raw()).unwrap();
+    }
+    enc.finish().unwrap();
+    let mut h = History::new(Project::default());
+    h.apply(Command::SetSettings(jvid_core::model::ProjectSettings {
+        width: 128,
+        height: 96,
+        background: [17, 23, 41, 255],
+        ..Default::default()
+    }))
+    .unwrap();
+    add(
+        &mut h,
+        TrackKind::Video,
+        source.clone(),
+        Time(0),
+        rate.time_floor(3),
+    );
+    let clip = h.project().sequence().tracks()[0].clips()[0].clone();
+    let mut mask = Mask::new(MaskShape::Rectangle, vec![[0.0, 0.0], [72.0, 40.0]]);
+    mask.id = 9;
+    let transform = Transform {
+        position: [13.0, -9.0],
+        scale: [0.7, 0.7],
+        rotation: 11.0,
+        crop: [4.0, 0.0, 0.0, 0.0],
+        exposure: 0.3,
+        masks: vec![mask],
+        effects: vec![Effect {
+            shader: "pixelate".into(),
+            params: [("block".into(), 8.0)].into(),
+            enabled: true,
+            mask: Some(9),
+        }],
+        ..Default::default()
+    };
+    h.apply(Command::SetClipProps(vec![(
+        clip.id,
+        transform,
+        clip.keyframes,
+    )]))
+    .unwrap();
+    let Ok(Created::Asset(asset)) = h.apply(Command::AddText {
+        name: "Title".into(),
+        text: Text {
+            content: "Frame".into(),
+            size: 24.0,
+            anchor: [0.45, 0.75],
+            ..Default::default()
+        },
+    }) else {
+        panic!("title")
+    };
+    let Ok(Created::Track(track)) = h.apply(Command::AddTrack {
+        kind: TrackKind::Video,
+        name: "Titles".into(),
+    }) else {
+        panic!("track")
+    };
+    h.apply(Command::AddClip {
+        track,
+        clip: NewClip {
+            asset,
+            start: Time(0),
+            source_in: Time(0),
+            source_out: rate.time_floor(3),
+            link: None,
+        },
+    })
+    .unwrap();
+    crate::effects::scan_for_test(&dir.join("effects"));
+    let mut renderer = FrameRenderer::new(&device);
+    let full = jvid_render::composite::read_back(
+        &device,
+        &queue,
+        renderer
+            .render(h.project(), Time(0), &device, &queue)
+            .unwrap(),
+    );
+    let path = dir.join("program.png");
+    frame_png(h.project(), Time(0), &device, &queue, &path).unwrap();
+    let png = image::open(&path).unwrap().into_rgba8();
+    assert_eq!(png.dimensions(), (128, 96));
+    assert_eq!(
+        png.as_raw(),
+        &full,
+        "PNG must use the exact full video-export renderer"
+    );
+    assert_eq!(png.get_pixel(0, 0).0, [17, 23, 41, 255]);
+    assert!(
+        png.enumerate_pixels()
+            .filter(|(_, y, p)| *y > 58 && p[0] > 240)
+            .count()
+            > 20,
+        "title draws over video"
+    );
+    // The enabled masked effect must visibly differ from its bypassed version.
+    let current = h
+        .project()
+        .sequence()
+        .tracks()
+        .iter()
+        .flat_map(|t| t.clips())
+        .find(|c| c.id == clip.id)
+        .unwrap()
+        .clone();
+    let mut bypass = current.transform.clone();
+    bypass.effects[0].enabled = false;
+    h.apply(Command::SetClipProps(vec![(
+        clip.id,
+        bypass,
+        current.keyframes.clone(),
+    )]))
+    .unwrap();
+    let plain = jvid_render::composite::read_back(
+        &device,
+        &queue,
+        renderer
+            .render(h.project(), Time(0), &device, &queue)
+            .unwrap(),
+    );
+    assert!(
+        full.iter()
+            .zip(&plain)
+            .filter(|(a, b)| a.abs_diff(**b) > 20)
+            .count()
+            > 100,
+        "the masked pixelation is enabled"
+    );
+    h.apply(Command::SetClipProps(vec![(
+        clip.id,
+        current.transform,
+        current.keyframes,
+    )]))
+    .unwrap();
+    let request = Request {
+        path: dir.join("program.mov"),
+        range: (Time(0), rate.time_floor(3)),
+        preset: preset("ProRes Master"),
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    run_now(h.project(), &request, false).unwrap();
+    let mut decoder = VideoDecoder::open(&request.path).unwrap();
+    let video = decoder.frame_at(Time(0)).unwrap().view_rgba((128, 96));
+    let mean = video
+        .as_raw()
+        .iter()
+        .zip(&full)
+        .map(|(a, b)| a.abs_diff(*b) as f64)
+        .sum::<f64>()
+        / full.len() as f64;
+    assert!(
+        mean < 5.0,
+        "ProRes composition comparison mean error {mean}"
+    );
+    let before = std::fs::read(&source).unwrap();
+    assert!(frame_png(h.project(), Time(0), &device, &queue, &source).is_err());
+    assert_eq!(
+        std::fs::read(&source).unwrap(),
+        before,
+        "frame export preserves source aliases"
+    );
+    drop((decoder, renderer));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn program_png_rejects_empty_or_failed_timelines_without_partial_output() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let dir = out("b07-empty-png");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("frame.png");
+    assert_eq!(
+        frame_png(&Project::default(), Time(0), &device, &queue, &path),
+        Err(tr!("preview.no_frame").into())
+    );
+    assert!(!path.exists());
+    let mut h = History::new(Project::default());
+    add(
+        &mut h,
+        TrackKind::Video,
+        dir.join("missing.mov"),
+        Time(0),
+        secs(1),
+    );
+    assert!(frame_png(h.project(), Time(0), &device, &queue, &path).is_err());
+    assert!(!path.exists());
+    std::fs::write(&path, b"existing image").unwrap();
+    assert!(frame_png(h.project(), Time(0), &device, &queue, &path).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"existing image");
+    assert_eq!(
+        std::fs::read_dir(&dir).unwrap().count(),
+        1,
+        "no partial PNG or staging directory"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn program_png_writes_straight_alpha_for_a_transparent_project() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut h = History::new(Project::default());
+    h.apply(Command::SetSettings(jvid_core::model::ProjectSettings {
+        width: 16,
+        height: 8,
+        background: [0; 4],
+        ..Default::default()
+    }))
+    .unwrap();
+    crate::playback::tests::add_solid(&mut h, [1.0, 0.0, 0.0, 0.5], Time(0));
+    let path = out("b07-transparent.png");
+    frame_png(h.project(), Time(0), &device, &queue, &path).unwrap();
+    let png = jvid_media::stills::decode_still(&path).unwrap();
+    assert!(png.pixels().all(|p| p.0 == [255, 0, 0, 128]));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn cpu_exports_accept_absent_gpu_and_composited_video_preserves_output() {
+    let (files, project, req) = lossless_fixture("cpu-context.mov");
+    for mode in [Lossless::Copy, Lossless::Smart] {
+        let mut req = req.clone();
+        req.lossless = Some(mode);
+        let project = project.clone();
+        let info = with_context(move |ctx| run_with_gpu(&project, &req, None, ctx)).unwrap();
+        assert_eq!(info.width, Some(64));
+    }
+    let mut audio = req.clone();
+    audio.path.set_extension("wav");
+    audio.lossless = None;
+    audio.preset = preset("Audio Only (WAV)");
+    let p = project.clone();
+    let info = with_context(move |ctx| run_with_gpu(&p, &audio, None, ctx)).unwrap();
+    assert_eq!(info.width, None);
+    assert_eq!(info.audio_streams, 1);
+    let mut video = req;
+    video.lossless = None;
+    std::fs::write(&video.path, b"prior completed video").unwrap();
+    let path = video.path.clone();
+    let error = with_context(move |ctx| run_with_gpu(&project, &video, None, ctx)).unwrap_err();
+    assert!(matches!(error, Error::Failed(ref e) if e.contains("no GPU adapter")));
+    assert_eq!(std::fs::read(path).unwrap(), b"prior completed video");
+    assert_no_attempts(&files.dir);
 }

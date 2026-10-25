@@ -57,7 +57,7 @@ fn tiny(t: Time) -> Frame {
 
 fn frame_of(px: &Pixels) -> &Frame {
     match px {
-        Pixels::Frame(f) => f,
+        Pixels::Frame(f) | Pixels::Sampled(f, _) => f,
         _ => panic!("generated"),
     }
 }
@@ -883,7 +883,7 @@ fn parked_seek_shows_a_keyframe_stand_in_then_the_exact_frame() {
     let mut next = |pb: &mut Playback| {
         let s = pb.tick(p, &mut out).expect("shown");
         assert_eq!(s.index, 150);
-        let Pixels::Frame(f) = &s.layers[0].0 else {
+        let (Pixels::Frame(f) | Pixels::Sampled(f, _)) = &s.layers[0].0 else {
             panic!("frame")
         };
         (s.exact, f.pts)
@@ -1580,4 +1580,434 @@ fn track_volume_scales_its_clips_and_undoes() {
     }
     assert!(h.undo());
     assert!(mix(h.project()) == before);
+}
+
+#[test]
+fn real_proxy_playback_keeps_original_pixel_effect_units() {
+    use jvid_core::model::Effect;
+    use jvid_media::encode::Encoder;
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    jvid_media::ffmpeg::init().unwrap();
+    let dir = std::env::temp_dir().join(format!("jvid-b07-proxy-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let original = dir.join("original.mov");
+    let small = dir.join("small.mov");
+    let preset = jvid_core::preset::builtin()
+        .into_iter()
+        .find(|p| p.name == "ProRes Master")
+        .unwrap();
+    for (path, (w, h)) in [(&original, (192, 128)), (&small, (96, 64))] {
+        let rgba = image::RgbaImage::from_fn(w, h, |x, _| {
+            image::Rgba([((x as f32 + 0.5) / w as f32 * 240.0) as u8; 4])
+        });
+        let mut rgba = rgba;
+        for p in rgba.pixels_mut() {
+            p[3] = 255;
+        }
+        let mut enc = Encoder::create(path, (w, h), FPS30, &preset).unwrap();
+        for _ in 0..3 {
+            enc.video(rgba.as_raw()).unwrap();
+        }
+        enc.finish().unwrap();
+    }
+    let proxies = Arc::new(Proxies::new(dir.clone()));
+    // Exercise the real proxy resolver and decoder with a deterministic intra-frame fixture.
+    std::fs::copy(&small, proxies.path(&original).unwrap()).unwrap();
+    let mut h = History::new(Project::default());
+    h.apply(Command::SetSettings(ProjectSettings {
+        width: 192,
+        height: 128,
+        ..Default::default()
+    }))
+    .unwrap();
+    let clip = add(
+        &mut h,
+        TrackKind::Video,
+        original.to_str().unwrap(),
+        FPS30.time_floor(3),
+    );
+    let id = h.project().assets()[0].id;
+    h.apply(Command::SetAssetProbe {
+        id,
+        probe: Some(jvid_media::probe::probe(&original).unwrap()),
+    })
+    .unwrap();
+    let transform = Transform {
+        effects: vec![Effect {
+            shader: "pixelate".into(),
+            params: [("block".into(), 24.0)].into(),
+            enabled: true,
+            mask: None,
+        }],
+        ..Default::default()
+    };
+    h.apply(Command::SetClipProps(vec![(
+        clip,
+        transform,
+        Default::default(),
+    )]))
+    .unwrap();
+    let shader = jvid_render::effect::parse(include_str!(
+        "../../../jvid-render/src/effects/pixelate.wgsl"
+    ))
+    .unwrap();
+    let mut gpu = Gpu::new(&device);
+    gpu.compositor
+        .set_effect(&device, "pixelate", Some(&shader))
+        .unwrap();
+    gpu.effects = (Some(0), ["pixelate".into()].into());
+    gpu.pin_effects = true;
+    let mut pb = Playback::from_proxies(DEFAULT_BUDGET, proxies.clone());
+    let mut reference = None;
+    for proxy in [false, true] {
+        proxies.set_enabled(proxy);
+        pb.reset_session();
+        let deadline = Instant::now() + HUNG;
+        let shown = loop {
+            if let Some(s) = pb.park(h.project())
+                && s.exact
+            {
+                break s;
+            }
+            assert!(Instant::now() < deadline, "proxy decode timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        if proxy {
+            assert!(matches!(shown.layers[0].0, Pixels::Sampled(_, (192, 128))));
+        }
+        for quality in [1, 2, 4] {
+            let rgba = composite::read_back(
+                &device,
+                &queue,
+                gpu.draw(&device, &queue, h.project().settings(), quality, &shown),
+            );
+            let output = image::RgbaImage::from_raw(192 / quality, 128 / quality, rgba).unwrap();
+            let row: Vec<_> = (0..output.width())
+                .map(|x| output.get_pixel(x, output.height() / 2)[0])
+                .collect();
+            let (mut blocks, mut changing) = (1, false);
+            for p in row.windows(2) {
+                let next = p[0].abs_diff(p[1]) > 3;
+                blocks += usize::from(next && !changing);
+                changing = next;
+            }
+            assert_eq!(blocks, 8, "proxy={proxy} quality={quality}");
+            if !proxy && quality == 1 {
+                reference = Some(output.clone());
+            }
+            for block in 0..8 {
+                let x = block * 24 + 12;
+                assert!(
+                    output.get_pixel(x / quality, output.height() / 2)[0]
+                        .abs_diff(reference.as_ref().unwrap().get_pixel(x, 64)[0])
+                        <= 5
+                );
+            }
+        }
+    }
+    assert_eq!(
+        h.project().sequence().tracks()[0].clips()[0]
+            .transform
+            .effects[0]
+            .params["block"],
+        24.0
+    );
+    drop(pb);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn still_versions_are_checked_on_explicit_media_refresh_without_repaint_io() {
+    let dir = std::env::temp_dir().join(format!("jvid-b07-still-refresh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("still.png");
+    image::RgbaImage::from_pixel(12, 8, image::Rgba([255, 0, 0, 128]))
+        .save(&path)
+        .unwrap();
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, path.to_str().unwrap(), secs(2));
+    let mut pb = Playback::from_files(DEFAULT_BUDGET);
+    let wait = |pb: &mut Playback| {
+        let deadline = Instant::now() + HUNG;
+        loop {
+            if let Some(s) = pb.park(h.project())
+                && s.exact
+            {
+                return s;
+            }
+            assert!(Instant::now() < deadline, "still decode timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    let first = wait(&mut pb);
+    let Pixels::Still(first) = &first.layers[0].0 else {
+        panic!("still")
+    };
+    std::fs::remove_file(&path).unwrap();
+    // Removing the backing file proves parked repaints do not stat it: the old polling path
+    // invalidated the loaded image as soon as metadata failed and queued a failed re-decode.
+    for _ in 0..100 {
+        assert!(pb.park(h.project()).is_none());
+        assert!(pb.pending.is_empty());
+        assert!(Arc::ptr_eq(first, pb.stills.values().next().unwrap()));
+    }
+    image::RgbaImage::from_pixel(16, 10, image::Rgba([0, 255, 0, 128]))
+        .save(&path)
+        .unwrap();
+    pb.refresh_media();
+    let next = wait(&mut pb);
+    let Pixels::Still(next) = &next.layers[0].0 else {
+        panic!("still")
+    };
+    assert!(!Arc::ptr_eq(first, next));
+    assert_eq!(next.dimensions(), (16, 10));
+    assert_eq!(next.get_pixel(0, 0).0, [0, 255, 0, 128]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Block A inside the decoder while seeks B..Z queue behind it. Only Z remains useful.
+#[test]
+fn obsolete_stand_ins_are_cancelled_before_decode() {
+    for playing in [false, true] {
+        let mut h = History::new(Project::default());
+        add(&mut h, TrackKind::Video, "scrub.mp4", secs(30));
+        let (started_tx, started_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let release_rx = Mutex::new(release_rx);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let recorded = calls.clone();
+        let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), silent(), DEFAULT_BUDGET);
+        pb.quick = Some(Arc::new(move |_, t| {
+            recorded.lock().unwrap().push(t);
+            if t == Time(0) {
+                started_tx.send(()).unwrap();
+                release_rx.lock().unwrap().recv_timeout(HUNG).unwrap();
+            }
+            Ok(tiny(t))
+        }));
+        pb.sync(h.project());
+        pb.stand_in(h.project(), 0);
+        started_rx.recv_timeout(HUNG).unwrap();
+        for i in 1..=25 {
+            pb.transport.seek(secs(i), 0);
+            pb.stand_in(h.project(), 0);
+        }
+        if playing {
+            pb.transport.toggle(0);
+            pb.stand_in(h.project(), 0);
+        }
+        release_tx.send(()).unwrap();
+        let barrier = pb.quick_jobs.submit("drain", Priority::Interactive, |_| {});
+        let deadline = Instant::now() + HUNG;
+        while !barrier.is_finished() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let want = if playing {
+            vec![Time(0)]
+        } else {
+            vec![Time(0), secs(25)]
+        };
+        assert_eq!(*calls.lock().unwrap(), want, "playing={playing}");
+        // The in-flight A was allowed to finish, but must never publish its obsolete pixels.
+        let completed: Vec<_> = pb.quick_done.try_iter().collect();
+        assert_eq!(completed.len(), usize::from(!playing));
+        if !playing {
+            assert_eq!(completed[0].0.1, secs(25));
+        }
+    }
+}
+
+fn gated_decode(fail: bool) -> (DecodeFn, Receiver<()>, Sender<()>) {
+    let (started_tx, started_rx) = channel();
+    let (release_tx, release_rx) = channel();
+    let release_rx = Mutex::new(release_rx);
+    let decode: DecodeFn = Arc::new(move |_, t| {
+        started_tx.send(()).unwrap();
+        release_rx.lock().unwrap().recv_timeout(HUNG).unwrap();
+        if fail {
+            Err("fake decode failure".into())
+        } else {
+            Ok(tiny(t))
+        }
+    });
+    (decode, started_rx, release_tx)
+}
+
+fn wake_counter(pb: &mut Playback) -> (Arc<std::sync::atomic::AtomicUsize>, Receiver<()>) {
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = count.clone();
+    let (tx, rx) = channel();
+    pb.set_decode_notify(Arc::new(move || {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        tx.send(()).unwrap();
+    }));
+    (count, rx)
+}
+
+#[test]
+fn parked_exact_completion_wakes_once_for_success_or_failure() {
+    for fail in [false, true] {
+        let mut h = History::new(Project::default());
+        add(&mut h, TrackKind::Video, "parked.mp4", FPS30.time_floor(1));
+        let (decode, started, release) = gated_decode(fail);
+        let mut pb = Playback::new(decode, silent(), DEFAULT_BUDGET);
+        let (count, wakes) = wake_counter(&mut pb);
+        assert!(pb.park(h.project()).is_none());
+        started.recv_timeout(HUNG).unwrap();
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 0);
+        release.send(()).unwrap();
+        // No tick, poll, or UI input between the release and event-loop notification.
+        wakes
+            .recv_timeout(HUNG)
+            .expect("parked decode did not wake the UI");
+        let shown = pb.park(h.project()).expect("completion display pass");
+        assert!(shown.exact);
+        assert_eq!(shown.layers.len(), usize::from(!fail));
+        assert!(pb.pending.is_empty());
+        for _ in 0..10 {
+            assert!(pb.park(h.project()).is_none());
+        }
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(wakes.try_recv().is_err(), "idle repaint loop");
+    }
+}
+
+#[test]
+fn parked_stand_in_and_exact_each_wake_and_converge() {
+    for quick_fails in [false, true] {
+        let mut h = History::new(Project::default());
+        add(&mut h, TrackKind::Video, "parked.mp4", FPS30.time_floor(1));
+        let (decode, exact_started, exact_release) = gated_decode(false);
+        let (quick, quick_started, quick_release) = gated_decode(quick_fails);
+        let mut pb = Playback::new(decode, silent(), DEFAULT_BUDGET);
+        pb.quick = Some(quick);
+        let (count, wakes) = wake_counter(&mut pb);
+        assert!(pb.park(h.project()).is_none());
+        exact_started.recv_timeout(HUNG).unwrap();
+        quick_started.recv_timeout(HUNG).unwrap();
+        quick_release.send(()).unwrap();
+        wakes
+            .recv_timeout(HUNG)
+            .expect("stand-in did not wake the UI");
+        let first = pb.park(h.project());
+        if quick_fails {
+            assert!(first.is_none());
+        } else {
+            assert!(!first.unwrap().exact);
+        }
+        exact_release.send(()).unwrap();
+        wakes
+            .recv_timeout(HUNG)
+            .expect("exact frame did not replace stand-in");
+        assert!(pb.park(h.project()).unwrap().exact);
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(pb.park(h.project()).is_none());
+        assert!(wakes.try_recv().is_err());
+    }
+}
+
+#[test]
+fn cancelled_and_relinked_decodes_do_not_wake_for_obsolete_results() {
+    for reset in [false, true] {
+        let mut h = History::new(Project::default());
+        add(&mut h, TrackKind::Video, "old.mp4", FPS30.time_floor(1));
+        let asset = h.project().assets()[0].id;
+        let (started_tx, started_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let release_rx = Mutex::new(release_rx);
+        let decode: DecodeFn = Arc::new(move |path, t| {
+            if path == Path::new("old.mp4") {
+                started_tx.send(()).unwrap();
+                release_rx.lock().unwrap().recv_timeout(HUNG).unwrap();
+            }
+            Ok(tiny(t))
+        });
+        let mut pb = Playback::new(decode.clone(), silent(), DEFAULT_BUDGET);
+        pb.quick = Some(decode);
+        let (count, wakes) = wake_counter(&mut pb);
+        assert!(pb.park(h.project()).is_none());
+        for _ in 0..2 {
+            started_rx.recv_timeout(HUNG).unwrap();
+        }
+        if reset {
+            pb.reset_session();
+        } else {
+            h.apply(Command::RelinkAssets(vec![(asset, "new.mp4".into())]))
+                .unwrap();
+            pb.park(h.project());
+        }
+        // The old calls finish without interruption, and must not publish or repaint.
+        for _ in 0..2 {
+            release_tx.send(()).unwrap();
+        }
+        let deadline = Instant::now() + HUNG;
+        while !pb.jobs.is_idle() || !pb.quick_jobs.is_idle() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            count.load(std::sync::atomic::Ordering::SeqCst),
+            if reset { 0 } else { 2 }
+        );
+        if !reset {
+            let shown = pb.park(h.project()).unwrap();
+            assert!(shown.exact);
+            assert_eq!(shown.layers.len(), 1);
+        }
+        assert_eq!(wakes.try_iter().count(), if reset { 0 } else { 2 });
+    }
+}
+
+#[test]
+fn program_composition_reuses_upload_resources_and_retains_uploads() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let settings = ProjectSettings {
+        width: 2,
+        height: 2,
+        ..ProjectSettings::default()
+    };
+    let mut gpu = Gpu::new(&device);
+    let mut warm = None;
+    for i in 0..8 {
+        let mut frame = tiny(Time(i));
+        frame.planes = [vec![32 + 20 * i as u8; 4], vec![128], vec![128]];
+        let shown = Shown {
+            index: i,
+            exact: true,
+            layers: vec![(Pixels::Frame(Arc::new(frame)), Transform::default())],
+        };
+        gpu.draw(&device, &queue, &settings, 1, &shown);
+        let allocations = gpu.layers[0].upload_allocations();
+        if let Some(warm) = warm {
+            assert_eq!(allocations, warm);
+        }
+        warm = Some(allocations);
+    }
+    let retained = gpu.layers[0].image().unwrap();
+    let expected = jvid_render::composite::read_back(&device, &queue, &retained);
+    let shown = Shown {
+        index: 8,
+        exact: true,
+        layers: vec![(Pixels::Frame(Arc::new(tiny(Time(8)))), Transform::default())],
+    };
+    gpu.draw(&device, &queue, &settings, 1, &shown);
+    assert_eq!(
+        jvid_render::composite::read_back(&device, &queue, &retained),
+        expected
+    );
+    let shown = Shown {
+        index: 9,
+        exact: true,
+        layers: Vec::new(),
+    };
+    gpu.draw(&device, &queue, &settings, 1, &shown);
+    assert!(
+        gpu.layers.is_empty(),
+        "unused upload pools should be released"
+    );
 }

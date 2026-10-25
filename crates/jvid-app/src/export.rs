@@ -9,13 +9,19 @@ use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Limiter, Meter};
 use jvid_core::eval::frame_at;
 use jvid_core::model::{ProbeInfo, Project};
-use jvid_core::preset::Preset;
+use jvid_core::preset::{Preset, VideoCodec};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
-use jvid_jobs::{Ctx, Handle, Pool, Priority};
+#[cfg(test)]
+use jvid_jobs::Handle;
+use jvid_jobs::{Ctx, Pool, Priority};
 use jvid_media::audio::AudioDecoder;
 use jvid_media::decode::DecoderPool;
-use jvid_media::encode::{EncodeError, Encoder};
+use jvid_media::encode::{CreateError, EncodeError, Encoder};
 use jvid_render::composite::Readback;
+
+mod progress;
+use progress::{Context, Progress, Tracked};
+pub use progress::{ExportHandle, Phase, Snapshot};
 
 use crate::i18n::tr;
 use crate::playback::{Audio, ClipAudio, Gpu, Pixels, Shown, resolve, sample};
@@ -99,19 +105,36 @@ fn user_presets(dir: &Path) -> Vec<Preset> {
         .collect()
 }
 
+/// Rendering device and queue, needed only for composited video.
+pub type GpuContext = (wgpu::Device, wgpu::Queue);
+
 /// Queues an export of `project` on `pool`; the result arrives on the receiver when it's done.
 pub fn submit(
     pool: &Pool,
     project: Project,
     req: Request,
-    gpu: (wgpu::Device, wgpu::Queue),
-) -> (Handle, Receiver<Result<ProbeInfo, Error>>) {
+    gpu: impl Into<Option<GpuContext>>,
+) -> (ExportHandle, Receiver<Result<ProbeInfo, Error>>) {
+    let gpu = gpu.into();
     let (tx, rx) = channel();
     let key = format!("export:{}", req.path.display());
+    let status = Progress::default();
+    let report = status.clone();
     let handle = pool.submit(key, Priority::Interactive, move |ctx| {
-        let _ = tx.send(run(&project, &req, &gpu.0, &gpu.1, ctx));
+        let ctx = Tracked {
+            job: ctx,
+            status: &report,
+        };
+        ctx.set_phase(Phase::Preparing);
+        let result = run_export(&project, &req, gpu.as_ref().map(|(d, q)| (d, q)), &ctx);
+        ctx.set_phase(match &result {
+            Ok(_) => Phase::Completed,
+            Err(Error::Cancelled) => Phase::Cancelled,
+            Err(Error::Failed(_)) => Phase::Failed,
+        });
+        let _ = tx.send(result);
     });
-    (handle, rx)
+    (ExportHandle::new(handle, status), rx)
 }
 
 /// A device for exporting without a window: the default adapter, else a software one.
@@ -186,6 +209,8 @@ impl From<EncodeError> for AttemptError {
 struct AttemptFiles {
     dir: PathBuf,
     output: PathBuf,
+    /// Preserve recovery copies if restoring a prior output itself fails.
+    retain: bool,
 }
 
 impl AttemptFiles {
@@ -205,6 +230,7 @@ impl AttemptFiles {
                     return Ok(Self {
                         output: dir.join(name),
                         dir,
+                        retain: false,
                     });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -216,17 +242,67 @@ impl AttemptFiles {
 
 impl Drop for AttemptFiles {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        if !self.retain {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
     }
+}
+
+/// Refuse both path aliases (including symlinks) and existing-file aliases such as hard links.
+/// Check every project asset, including nested sequences' sources, before creating any output.
+fn check_destination(project: &Project, destination: &Path) -> Result<(), Error> {
+    let identity_error = |error| {
+        Error::Failed(tr!(
+            "export.identity_error",
+            path = destination.display(),
+            error = error
+        ))
+    };
+    let destination_identity = match same_file::Handle::from_path(destination) {
+        Ok(handle) => Some(handle),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(identity_error(e)),
+    };
+    let destination_path = std::fs::canonicalize(destination).ok();
+    for asset in project
+        .assets()
+        .iter()
+        .filter(|a| !a.path.as_os_str().is_empty())
+    {
+        let same_path = destination == asset.path
+            || destination_path.as_ref().is_some_and(|path| {
+                std::fs::canonicalize(&asset.path).is_ok_and(|source| source == *path)
+            });
+        let same_file = match &destination_identity {
+            Some(destination) => match same_file::Handle::from_path(&asset.path) {
+                Ok(source) => source == *destination,
+                // An offline asset cannot alias an existing destination.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                Err(e) => return Err(identity_error(e)),
+            },
+            None => false,
+        };
+        if same_path || same_file {
+            return Err(tr!(
+                "export.source_collision",
+                path = destination.display(),
+                source = asset.path.display()
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// Replays the entire shared job once in software, with fresh encoder/render/audio state.
 /// Preset overrides live in a request clone and never affect project or saved dialog settings.
 fn replay<T>(
+    project: &Project,
     req: &Request,
-    ctx: &Ctx,
+    ctx: &dyn Context,
     mut attempt: impl FnMut(&Request) -> Result<T, AttemptError>,
 ) -> Result<T, Error> {
+    check_destination(project, &req.path)?;
     let mut request = req.clone();
     for retry in 0..=1 {
         if ctx.is_cancelled() {
@@ -241,6 +317,12 @@ fn replay<T>(
         }
         match result {
             Ok(info) => {
+                ctx.set_phase(Phase::Finalizing);
+                // The destination may have become a source alias while the job ran.
+                check_destination(project, &req.path)?;
+                if ctx.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
                 std::fs::rename(&files.output, &req.path).map_err(|e| {
                     tr!("export.publish_error", path = req.path.display(), error = e)
                 })?;
@@ -259,7 +341,7 @@ fn replay<T>(
                     .preset
                     .options
                     .insert("encoder".into(), "software".into());
-                ctx.set_progress(0.0);
+                ctx.set_phase(Phase::Retrying);
             }
             Err(AttemptError::Vaapi(error)) => return Err(Error::Failed(err(error))),
             Err(AttemptError::Export(error)) => return Err(error),
@@ -286,23 +368,175 @@ pub fn run(
     queue: &wgpu::Queue,
     ctx: &Ctx,
 ) -> Result<ProbeInfo, Error> {
-    if !req.sidecar {
-        return encode(project, req, device, queue, ctx);
+    run_with_gpu(project, req, Some((device, queue)), ctx)
+}
+
+impl Request {
+    /// Packet copying and audio mixing use CPU/media dependencies only.
+    pub fn needs_gpu(&self) -> bool {
+        self.lossless.is_none() && self.preset.video.is_some()
     }
-    let info = encode(&project.without_subtitles(), req, device, queue, ctx)?;
+}
+
+/// Shared export entry point for CPU-only requests, with no device creation or probing.
+pub fn run_with_gpu(
+    project: &Project,
+    req: &Request,
+    gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
+    ctx: &Ctx,
+) -> Result<ProbeInfo, Error> {
+    let result = run_export(project, req, gpu, ctx);
+    if result.is_ok() {
+        ctx.set_progress(1.0);
+    }
+    result
+}
+
+fn run_export(
+    project: &Project,
+    req: &Request,
+    gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
+    ctx: &dyn Context,
+) -> Result<ProbeInfo, Error> {
+    if req.needs_gpu() && gpu.is_none() {
+        return Err(tr!("export.no_gpu").to_string().into());
+    }
+    if !req.sidecar {
+        return encode(project, req, gpu, ctx);
+    }
+    check_sidecar_destinations(project, req)?;
+    let mut files = AttemptFiles::new(&req.path)?;
+    let staged = Request {
+        path: files.output.clone(),
+        ..req.clone()
+    };
+    let info = encode(&project.without_subtitles(), &staged, gpu, ctx)?;
     let srt = jvid_core::srt::write(&project.subtitle_cues(), req.range);
-    let path = req.path.with_extension("srt");
+    let path = staged.path.with_extension("srt");
     std::fs::write(&path, srt)
         .map_err(|e| tr!("export.write_error", path = path.display(), error = e))?;
+    publish_sidecar(project, req, &mut files, ctx, |from, to| {
+        std::fs::rename(from, to)
+    })?;
     Ok(info)
+}
+
+/// Both destinations must be independent regular files and must not alias any source.
+fn check_sidecar_destinations(project: &Project, req: &Request) -> Result<(), Error> {
+    let sidecar = req.path.with_extension("srt");
+    for path in [&req.path, &sidecar] {
+        check_destination(project, path)?;
+        match std::fs::metadata(path) {
+            Ok(meta) if !meta.is_file() => {
+                return Err(tr!(
+                    "export.publish_error",
+                    path = path.display(),
+                    error = tr!("export.sidecar_file_target")
+                )
+                .into());
+            }
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(tr!("export.publish_error", path = path.display(), error = e).into());
+            }
+            _ => {}
+        }
+    }
+    if req.path == sidecar || same_file::is_same_file(&req.path, &sidecar).unwrap_or(false) {
+        return Err(tr!(
+            "export.publish_error",
+            path = sidecar.display(),
+            error = tr!("export.sidecar_separate")
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// A short, uncancellable commit after the final cancellation/identity check. Move prior
+/// outputs aside (also supports Windows overwrite), publish both staged files, or restore
+/// both originals. Never discard recovery copies if restoration encounters an I/O error.
+fn publish_sidecar(
+    project: &Project,
+    req: &Request,
+    files: &mut AttemptFiles,
+    ctx: &dyn Context,
+    mut publish: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), Error> {
+    ctx.set_phase(Phase::Finalizing);
+    check_sidecar_destinations(project, req)?;
+    if ctx.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    let targets = [req.path.clone(), req.path.with_extension("srt")];
+    let staged = [files.output.clone(), files.output.with_extension("srt")];
+    let backups = [
+        files.dir.join(".previous-media"),
+        files.dir.join(".previous-sidecar"),
+    ];
+    let (mut saved, mut published) = ([false; 2], [false; 2]);
+    let commit = (|| {
+        for i in 0..2 {
+            match std::fs::symlink_metadata(&targets[i]) {
+                Ok(_) => {
+                    std::fs::rename(&targets[i], &backups[i])?;
+                    saved[i] = true;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+        for i in 0..2 {
+            publish(&staged[i], &targets[i])?;
+            published[i] = true;
+        }
+        Ok::<_, std::io::Error>(())
+    })();
+    if let Err(error) = commit {
+        let mut recovery = Vec::new();
+        for i in (0..2).rev() {
+            let restored = if saved[i] {
+                // Windows rename cannot replace a newly published file.
+                if published[i] {
+                    std::fs::remove_file(&targets[i])
+                        .and_then(|_| std::fs::rename(&backups[i], &targets[i]))
+                } else {
+                    std::fs::rename(&backups[i], &targets[i])
+                }
+            } else if published[i] {
+                std::fs::remove_file(&targets[i])
+            } else {
+                Ok(())
+            };
+            if let Err(e) = restored {
+                recovery.push(format!("{}: {e}", backups[i].display()));
+            }
+        }
+        let error = if recovery.is_empty() {
+            error.to_string()
+        } else {
+            files.retain = true;
+            tr!(
+                "export.sidecar_recovery",
+                error = error,
+                path = files.dir.display(),
+                details = recovery.join("; ")
+            )
+        };
+        return Err(tr!(
+            "export.publish_error",
+            path = req.path.display(),
+            error = error
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn encode(
     project: &Project,
     req: &Request,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    ctx: &Ctx,
+    gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
+    ctx: &dyn Context,
 ) -> Result<ProbeInfo, Error> {
     if let Some(mode) = req.lossless {
         return lossless::run(project, req, mode, ctx);
@@ -312,17 +546,16 @@ fn encode(
     if project.settings().hdr_output {
         req.preset = req.preset.hdr();
     }
-    replay(&req, ctx, |req| {
-        encode_attempt(project, req, device, queue, ctx)
+    replay(project, &req, ctx, |req| {
+        encode_attempt(project, req, gpu, ctx)
     })
 }
 
 fn encode_attempt(
     project: &Project,
     req: &Request,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    ctx: &Ctx,
+    gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
+    ctx: &dyn Context,
 ) -> Result<ProbeInfo, AttemptError> {
     let s = project.settings();
     let (first, end) = frames(project, req);
@@ -335,7 +568,7 @@ fn encode_attempt(
         return Err(tr!("export.hdr_no_encoder").to_string().into());
     }
     let enc = Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
-        .map_err(|e| tr!("export.create_error", path = req.path.display(), error = e))?;
+        .map_err(|e| create_error(&req.path, e))?;
     let partial = Partial(&req.path);
     let gain = match req.loudness.filter(|_| req.preset.audio.is_some()) {
         Some(target) => measure(project, req, ctx)?.map(|lufs| 10f64.powf((target - lufs) / 20.0)),
@@ -343,64 +576,85 @@ fn encode_attempt(
     };
     let limiter = || gain.map(|g| Limiter::new(g as f32, CEILING));
     match sized(project, req)? {
-        None => render(project, req, enc, limiter(), device, queue, ctx)?,
-        Some((target, audio, mut bits)) => {
+        None => {
+            ctx.set_phase(Phase::Encoding { pass: 1 });
+            render(project, req, enc, limiter(), gpu, ctx)?;
+        }
+        Some((target, audio, bits)) => {
             drop(enc);
-            // Encoders only roughly hit an average bit rate, so each pass rescales the video rate
-            // by how far the last file missed, until one lands in the window.
-            // shortcut: progress restarts each pass; weight it by pass if users notice.
-            let want = target as f64 * (1.0 - OVERHEAD) - audio;
-            // The fullest pass under the target so far, moved aside so later passes can't lose it.
-            let best = PathBuf::from(format!("{}.best", req.path.display()));
-            let _best = Partial(&best);
-            let (mut under, mut over) = (None::<(u64, f64)>, None::<(u64, f64)>);
-            for pass in 1..=PASSES {
-                let mut preset = req.preset.clone();
-                preset.options.remove("target_size");
-                preset.options.remove("crf");
-                preset.options.insert("b".into(), bits.to_string());
-                let req = Request {
-                    preset,
-                    ..req.clone()
-                };
+            size_passes(req, target, audio, bits, ctx, |req| {
                 let enc =
                     Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
-                        .map_err(|e| {
-                            tr!("export.create_error", path = req.path.display(), error = e)
-                        })?;
-                render(project, &req, enc, limiter(), device, queue, ctx)?;
-                let size = std::fs::metadata(&req.path)
-                    .map_err(|e| e.to_string())?
-                    .len() as f64;
-                tracing::info!(pass, bits, size, target, "target-size pass");
-                if size > target as f64 {
-                    over = Some((bits, size - audio));
-                } else {
-                    if size >= MIN_FILL * target as f64 {
-                        break;
-                    }
-                    // No bigger for more bits: the encoder is at its best quality, as simple
-                    // content can't use the whole rate.
-                    if under.is_some_and(|(b, v)| b < bits && size - audio < v * 1.01) {
-                        break;
-                    }
-                    under = Some((bits, size - audio));
-                    std::fs::rename(&req.path, &best).map_err(|e| e.to_string())?;
-                }
-                if pass == PASSES {
-                    if under.is_none() {
-                        return Err(tr!("export.over_target", size = size).into());
-                    }
-                    std::fs::rename(&best, &req.path).map_err(|e| e.to_string())?;
-                    break;
-                }
-                bits = next_bits(under, over, want);
-            }
+                        .map_err(|e| create_error(&req.path, e))?;
+                render(project, req, enc, limiter(), gpu, ctx)
+            })?;
         }
     }
     let info = validate(project, req)?;
     std::mem::forget(partial);
     Ok(info)
+}
+
+/// Each size attempt has its own progress/clock; the number of further attempts is unknown.
+fn size_passes(
+    req: &Request,
+    target: u64,
+    audio: f64,
+    mut bits: u64,
+    ctx: &dyn Context,
+    mut encode: impl FnMut(&Request) -> Result<(), AttemptError>,
+) -> Result<(), AttemptError> {
+    let want = target as f64 * (1.0 - OVERHEAD) - audio;
+    let best = PathBuf::from(format!("{}.best", req.path.display()));
+    let _best = Partial(&best);
+    let (mut under, mut over) = (None::<(u64, f64)>, None::<(u64, f64)>);
+    for pass in 1..=PASSES {
+        if ctx.is_cancelled() {
+            return Err(Error::Cancelled.into());
+        }
+        ctx.set_phase(Phase::Encoding { pass });
+        if ctx.is_cancelled() {
+            return Err(Error::Cancelled.into());
+        }
+        let mut preset = req.preset.clone();
+        preset.options.remove("target_size");
+        preset.options.remove("crf");
+        preset.options.insert("b".into(), bits.to_string());
+        let req = Request {
+            preset,
+            ..req.clone()
+        };
+        encode(&req)?;
+        if ctx.is_cancelled() {
+            return Err(Error::Cancelled.into());
+        }
+        ctx.set_phase(Phase::Finalizing);
+        let size = std::fs::metadata(&req.path)
+            .map_err(|e| e.to_string())?
+            .len() as f64;
+        tracing::info!(pass, bits, size, target, "target-size pass");
+        if size > target as f64 {
+            over = Some((bits, size - audio));
+        } else {
+            if size >= MIN_FILL * target as f64 {
+                break;
+            }
+            if under.is_some_and(|(b, v)| b < bits && size - audio < v * 1.01) {
+                break;
+            }
+            under = Some((bits, size - audio));
+            std::fs::rename(&req.path, &best).map_err(|e| e.to_string())?;
+        }
+        if pass == PASSES {
+            if under.is_none() {
+                return Err(Error::from(tr!("export.over_target", size = size)).into());
+            }
+            std::fs::rename(&best, &req.path).map_err(|e| e.to_string())?;
+            break;
+        }
+        bits = next_bits(under, over, want);
+    }
+    Ok(())
 }
 
 /// Share of a target size kept back for container headers and indexes, which run well under 1%
@@ -484,11 +738,13 @@ fn spans(project: &Project, req: &Request) -> impl Iterator<Item = (i64, Time, i
 }
 
 /// First pass for normalization: the range's integrated loudness, or `None` if it's silent.
-fn measure(project: &Project, req: &Request, ctx: &Ctx) -> Result<Option<f64>, Error> {
+fn measure(project: &Project, req: &Request, ctx: &dyn Context) -> Result<Option<f64>, Error> {
+    ctx.set_phase(Phase::AnalyzingAudio);
+    let (first, end) = frames(project, req);
     let mut audio = Audio::new(Box::new(blocking));
     let mut meter = Meter::default();
     let mut mix = Vec::new();
-    for (_, time, a, b) in spans(project, req) {
+    for (k, time, a, b) in spans(project, req) {
         if ctx.is_cancelled() {
             return Err(Error::Cancelled);
         }
@@ -497,8 +753,122 @@ fn measure(project: &Project, req: &Request, ctx: &Ctx) -> Result<Option<f64>, E
         audio.prime(project, time);
         audio.mix(project, a, &mut mix);
         meter.push(&mix);
+        ctx.set_progress((k + 1 - first) as f32 / (end - first) as f32);
     }
     Ok(meter.integrated())
+}
+
+/// Full-resolution Program renderer shared by video export and Export Frame. Its immutable
+/// project input is the caller's snapshot; every file is read exactly from the original path.
+pub(crate) struct FrameRenderer {
+    decoders: DecoderPool,
+    stills: std::collections::HashMap<PathBuf, Arc<image::RgbaImage>>,
+    gpu: Gpu,
+}
+
+impl FrameRenderer {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
+        let mut gpu = Gpu::new(device);
+        gpu.pin_effects = true;
+        Self {
+            decoders: DecoderPool::hdr(),
+            stills: Default::default(),
+            gpu,
+        }
+    }
+
+    pub(crate) fn render(
+        &mut self,
+        project: &Project,
+        time: Time,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<&wgpu::Texture, String> {
+        let layers =
+            resolve::<String, _>(project, frame_at(project, time), &mut |asset, layer| {
+                if jvid_media::stills::is_still(&asset.path) {
+                    let image = match self.stills.get(&asset.path) {
+                        Some(image) => image.clone(),
+                        None => {
+                            let image = jvid_media::stills::cached(&asset.path)?;
+                            self.stills.insert(asset.path.clone(), image.clone());
+                            image
+                        }
+                    };
+                    return Ok(Some(Pixels::Still(image)));
+                }
+                let f = self
+                    .decoders
+                    .frame_at(&asset.path, layer.source_time)
+                    .map_err(|e| {
+                        tr!(
+                            "export.decode_error",
+                            path = asset.path.display(),
+                            error = e
+                        )
+                    })?;
+                Ok(Some(Pixels::Frame(Arc::new(f))))
+            })?;
+        Ok(self.gpu.draw(
+            device,
+            queue,
+            project.settings(),
+            1,
+            &Shown {
+                index: project.settings().frame_rate.index_floor(time),
+                layers,
+                exact: true,
+            },
+        ))
+    }
+}
+
+/// Saves one full-resolution Program frame, independent of Source, proxies and preview quality.
+/// Rendering and PNG encoding finish in a private sibling directory before publication.
+pub fn frame_png(
+    project: &Project,
+    time: Time,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    path: &Path,
+) -> Result<(), String> {
+    if project.sequence().duration().0 <= 0 {
+        return Err(tr!("preview.no_frame").into());
+    }
+    let destination = || match check_destination(project, path) {
+        Ok(()) => Ok(()),
+        Err(Error::Failed(e)) => Err(e),
+        Err(Error::Cancelled) => unreachable!("destination validation cannot cancel"),
+    };
+    destination()?;
+    jvid_media::ffmpeg::init().map_err(|e| e.to_string())?;
+    let mut renderer = FrameRenderer::new(device);
+    let tex = renderer.render(project, time, device, queue)?;
+    let mut rgba = jvid_render::composite::read_back(device, queue, tex);
+    // PNG stores straight alpha; Program textures are premultiplied, including a transparent
+    // project background. Opaque output remains byte-identical to video export's input.
+    for p in rgba.as_chunks_mut::<4>().0 {
+        let a = p[3] as u32;
+        for c in &mut p[..3] {
+            *c = (*c as u32 * 255 + a / 2)
+                .checked_div(a)
+                .unwrap_or(0)
+                .min(255) as u8;
+        }
+    }
+    let files = AttemptFiles::new(path)?;
+    image::save_buffer_with_format(
+        &files.output,
+        &rgba,
+        tex.width(),
+        tex.height(),
+        image::ExtendedColorType::Rgba8,
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| e.to_string())?;
+    destination()?;
+    std::fs::rename(&files.output, path)
+        .map_err(|e| tr!("export.publish_error", path = path.display(), error = e))
 }
 
 fn render(
@@ -506,19 +876,15 @@ fn render(
     req: &Request,
     mut enc: Encoder,
     mut limiter: Option<Limiter>,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    ctx: &Ctx,
+    gpu: Option<(&wgpu::Device, &wgpu::Queue)>,
+    ctx: &dyn Context,
 ) -> Result<(), AttemptError> {
     let (first, end) = frames(project, req);
-    let decoders = DecoderPool::hdr();
     let mut audio = Audio::new(Box::new(blocking));
     // Audio-only presets never touch the GPU.
-    let mut gpu = enc.has_video().then(|| {
-        let mut g = Gpu::new(device);
-        g.pin_effects = true;
-        g
-    });
+    let mut renderer = gpu
+        .filter(|_| enc.has_video())
+        .map(|(device, _)| FrameRenderer::new(device));
     let mut readback = Readback::default();
     let (mut mix, mut limited) = (Vec::new(), Vec::new());
     for (k, time, a, b) in spans(project, req) {
@@ -526,31 +892,11 @@ fn render(
             return Err(Error::Cancelled.into());
         }
         if enc.has_video() {
-            let layers =
-                resolve::<String, _>(project, frame_at(project, time), &mut |asset, layer| {
-                    let f = decoders
-                        .frame_at(&asset.path, layer.source_time)
-                        .map_err(|e| {
-                            tr!(
-                                "export.decode_error",
-                                path = asset.path.display(),
-                                error = e
-                            )
-                        })?;
-                    Ok(Some(Pixels::Frame(Arc::new(f))))
-                })?;
-            let tex = gpu.get_or_insert_with(|| Gpu::new(device)).draw(
-                device,
-                queue,
-                project.settings(),
-                1,
-                &Shown {
-                    index: k,
-                    layers,
-                    // Decoded synchronously with frame_at, never a keyframe stand-in.
-                    exact: true,
-                },
-            );
+            let (device, queue) = gpu.ok_or_else(|| tr!("export.no_gpu").to_string())?;
+            let tex = renderer
+                .as_mut()
+                .expect("video renderer")
+                .render(project, time, device, queue)?;
             if let Some(rgba) = readback.push(device, queue, tex) {
                 enc.video(&rgba)?;
             }
@@ -570,7 +916,10 @@ fn render(
         }
         ctx.set_progress((k + 1 - first) as f32 / (end - first) as f32);
     }
-    if let Some(rgba) = readback.take(device) {
+    ctx.set_phase(Phase::Finalizing);
+    if let Some((device, _)) = gpu
+        && let Some(rgba) = readback.take(device)
+    {
         enc.video(&rgba)?;
     }
     if let Some(l) = &mut limiter {
@@ -584,6 +933,26 @@ fn render(
     enc.finish()?;
     if ctx.is_cancelled() {
         return Err(Error::Cancelled.into());
+    }
+    Ok(())
+}
+
+fn create_error(path: &Path, error: CreateError) -> String {
+    let error = match error {
+        CreateError::NoVideoEncoder(codec) => dialog::codec_unavailable(codec),
+        other => other.to_string(),
+    };
+    tr!("export.create_error", path = path.display(), error = error)
+}
+
+fn validate_video_family(expected: VideoCodec, actual: &str) -> Result<(), Error> {
+    if actual != jvid_media::encode::video_codec_id(expected).name() {
+        return Err(tr!(
+            "export.codec_wrong",
+            expected = dialog::codec_name(expected),
+            actual = actual
+        )
+        .into());
     }
     Ok(())
 }
@@ -605,6 +974,13 @@ fn validate(project: &Project, req: &Request) -> Result<ProbeInfo, Error> {
     if info.width.is_some() != p.video.is_some() || (info.audio_streams > 0) != p.audio.is_some() {
         return Err(tr!("export.streams_wrong").to_string().into());
     }
+    if let Some(expected) = p.video {
+        for stream in &info.streams {
+            if let jvid_core::model::StreamInfo::Video(video) = stream {
+                validate_video_family(expected, &video.codec)?;
+            }
+        }
+    }
     if (info.duration - want).0.abs() > frame.0 {
         let secs = |t: Time| t.0 as f64 / FLICKS_PER_SECOND as f64;
         let (got, want) = (
@@ -622,27 +998,25 @@ fn blocking(path: &Path, nth: usize) -> ClipAudio {
     let mut dec = AudioDecoder::open(path, nth)
         .map_err(|e| tracing::debug!("export audio of {}: {e}", path.display()))
         .ok();
-    let (mut buf, mut at) = (Vec::<f32>::new(), i64::MAX);
+    let mut buf = crate::transport::AudioBuffer::default();
     Box::new(move |start, out| {
+        out.fill(0.0);
         let Some(d) = &mut dec else { return };
-        if start < at || start > at + buf.len() as i64 / 2 {
+        if buf.needs_seek(start, 0) {
             if let Err(e) = d.seek(start) {
                 return tracing::warn!("export audio seek: {e}");
             }
-            buf.clear();
-            at = start;
+            buf.reset(start);
         }
-        buf.drain(..(start - at) as usize * 2);
-        at = start;
-        while buf.len() < out.len() {
+        buf.discard_before(start);
+        while buf.end() < start.saturating_add(out.len() as i64 / 2) {
             match d.next_chunk() {
-                Ok(Some(c)) => buf.extend(c.samples),
+                Ok(Some(c)) => buf.push(c),
                 Ok(None) => break,
                 Err(e) => return tracing::warn!("export audio decode: {e}"),
             }
         }
-        let n = out.len().min(buf.len());
-        out[..n].copy_from_slice(&buf[..n]);
+        buf.copy(start, out);
     })
 }
 
@@ -654,3 +1028,9 @@ pub use lossless::Lossless;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod audit_b10a;
+
+#[cfg(test)]
+mod audit_b10;

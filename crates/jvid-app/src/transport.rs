@@ -4,6 +4,7 @@
 //! one whose audio is playing. Every speed change or seek flushes the output ring and re-anchors
 //! at the clock, so audio already queued can't play on or pull the two apart.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel, sync_channel};
 use std::thread::JoinHandle;
@@ -150,14 +151,77 @@ impl Transport {
 /// so the UI thread only copies samples and asks for seeks; it exits when this is dropped.
 pub struct AudioSource {
     feeder: Option<Feeder>,
-    /// Decoded samples starting at sample frame `at`, contiguous from the last seek.
-    buf: Vec<f32>,
-    at: i64,
+    buf: AudioBuffer,
+}
+
+/// Timestamped decoder output. Gaps stay sparse; only copying a requested window materializes
+/// silence. Keeping chunks (rather than padding a Vec) also bounds storage for delayed streams.
+#[derive(Default)]
+pub(crate) struct AudioBuffer {
+    chunks: VecDeque<Chunk>,
+    at: Option<i64>,
+    end: i64,
+}
+
+impl AudioBuffer {
+    pub(crate) fn needs_seek(&self, start: i64, gap: i64) -> bool {
+        self.at
+            .is_none_or(|at| start < at || start > self.end.saturating_add(gap))
+    }
+
+    pub(crate) fn reset(&mut self, start: i64) {
+        self.chunks.clear();
+        self.at = Some(start);
+        self.end = start;
+    }
+
+    pub(crate) fn end(&self) -> i64 {
+        self.end
+    }
+
+    pub(crate) fn push(&mut self, chunk: Chunk) {
+        self.end = self.end.max(chunk.start + chunk.samples.len() as i64 / 2);
+        self.chunks.push_back(chunk);
+        self.discard_before(self.at.unwrap_or(0));
+    }
+
+    pub(crate) fn discard_before(&mut self, start: i64) {
+        self.at = Some(start);
+        while let Some(c) = self.chunks.front_mut() {
+            let skip = start
+                .saturating_sub(c.start)
+                .clamp(0, c.samples.len() as i64 / 2) as usize;
+            if skip * 2 == c.samples.len() {
+                self.chunks.pop_front();
+            } else {
+                c.samples.drain(..skip * 2);
+                c.start += skip as i64;
+                break;
+            }
+        }
+    }
+
+    pub(crate) fn copy(&self, start: i64, out: &mut [f32]) {
+        out.fill(0.0);
+        let end = start.saturating_add(out.len() as i64 / 2);
+        for c in &self.chunks {
+            let lo = start.max(c.start);
+            let hi = end.min(c.start + c.samples.len() as i64 / 2);
+            if hi > lo {
+                let (dst, src, n) = (
+                    (lo - start) as usize * 2,
+                    (lo - c.start) as usize * 2,
+                    (hi - lo) as usize * 2,
+                );
+                out[dst..dst + n].copy_from_slice(&c.samples[src..src + n]);
+            }
+        }
+    }
 }
 
 struct Feeder {
     seek: Sender<(u64, i64)>,
-    chunks: Receiver<(u64, Vec<f32>)>,
+    chunks: Receiver<(u64, Chunk)>,
     /// The seek generation chunks must carry to be used.
     generation: u64,
     thread: Option<JoinHandle<()>>,
@@ -183,9 +247,7 @@ impl AudioSource {
     pub fn stream(path: &Path, nth: usize) -> Self {
         Self {
             feeder: Some(Feeder::spawn(path.to_owned(), nth)),
-            buf: Vec::new(),
-            // Forces a seek on first use.
-            at: i64::MAX,
+            buf: AudioBuffer::default(),
         }
     }
 
@@ -193,29 +255,30 @@ impl AudioSource {
     /// (silence past that). Samples before `start` are dropped; nothing at or after it is, so a
     /// caller that only queued part of `out` asks again from where it got to.
     pub fn fill(&mut self, start: i64, out: &mut [f32]) {
+        out.fill(0.0);
         let Some(f) = &mut self.feeder else { return };
-        while let Ok((g, samples)) = f.chunks.try_recv() {
-            if g == f.generation {
-                self.buf.extend(samples);
-            }
-        }
-        if start < self.at || start > self.at + self.buf.len() as i64 / 2 + MAX_GAP {
+        if self.buf.needs_seek(start, MAX_GAP) {
             f.generation += 1;
             if f.seek.send((f.generation, start)).is_err() {
                 self.feeder = None;
                 return;
             }
-            self.buf.clear();
-            self.at = start;
+            self.buf.reset(start);
         }
-        // Behind the playhead after an underrun: drop what's arrived, the rest as it comes.
-        let skip = ((start - self.at) as usize * 2).min(self.buf.len());
-        self.buf.drain(..skip);
-        self.at += skip as i64 / 2;
-        if self.at == start {
-            let n = out.len().min(self.buf.len());
-            out[..n].copy_from_slice(&self.buf[..n]);
+        self.buf.discard_before(start);
+        // Bound both the stored output and work per UI tick, including stale seek generations.
+        for _ in 0..AHEAD {
+            if self.buf.chunks.len() >= AHEAD {
+                break;
+            }
+            let Ok((g, chunk)) = f.chunks.try_recv() else {
+                break;
+            };
+            if g == f.generation {
+                self.buf.push(chunk);
+            }
         }
+        self.buf.copy(start, out);
     }
 }
 
@@ -248,8 +311,8 @@ impl Feeder {
                             Err(TryRecvError::Disconnected) => return,
                             Err(TryRecvError::Empty) => {}
                         }
-                        let samples = match dec.next_chunk() {
-                            Ok(Some(Chunk { samples, .. })) => samples,
+                        let chunk = match dec.next_chunk() {
+                            Ok(Some(chunk)) => chunk,
                             Ok(None) => match seeks.recv() {
                                 Ok(w) => {
                                     want = w;
@@ -262,7 +325,7 @@ impl Feeder {
                                 return;
                             }
                         };
-                        if tx.send((generation, samples)).is_err() {
+                        if tx.send((generation, chunk)).is_err() {
                             return;
                         }
                     }
@@ -298,6 +361,64 @@ pub(crate) mod tests {
     use std::sync::{Arc, Mutex};
 
     const FPS30: Rate = Rate::new(30, 1);
+
+    #[test]
+    fn timestamp_buffer_keeps_sparse_gaps_and_trims_overlaps() {
+        let mut buf = AudioBuffer::default();
+        buf.reset(10);
+        buf.push(Chunk {
+            start: 8,
+            samples: vec![0.25; 12],
+        });
+        buf.push(Chunk {
+            start: 1_000_000_000,
+            samples: vec![0.5; 8],
+        });
+        let mut out = [1.0; 16];
+        buf.copy(10, &mut out);
+        assert_eq!(&out[..8], &[0.25; 8]);
+        assert_eq!(&out[8..], &[0.0; 8]);
+        assert_eq!(
+            buf.chunks.iter().map(|c| c.samples.len()).sum::<usize>(),
+            16
+        );
+        buf.discard_before(1_000_000_002);
+        buf.copy(1_000_000_002, &mut out);
+        assert_eq!(&out[..4], &[0.5; 4]);
+        assert_eq!(&out[4..], &[0.0; 12]);
+    }
+
+    #[test]
+    fn playback_keeps_each_stream_offset_across_reads_and_seeks() {
+        jvid_media::ffmpeg::init().unwrap();
+        let fixture = jvid_media::audio::offset_fixture::Fixture::default();
+        for nth in 0..2 {
+            let mut src = AudioSource::stream(&fixture.0, nth);
+            for start in (0..48_000).step_by(2000).chain([12_000, 40_000, 0]) {
+                let mut got = vec![1.0; 4000];
+                // Wait for decoding, even for a wholly silent window.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                loop {
+                    src.fill(start, &mut got);
+                    if src.buf.end() >= start + 2000 {
+                        break;
+                    }
+                    assert!(std::time::Instant::now() < deadline, "feeder timed out");
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                for (i, pair) in got.as_chunks::<2>().0.iter().enumerate() {
+                    let want =
+                        jvid_media::audio::offset_fixture::Fixture::sample(nth, start + i as i64);
+                    assert!(
+                        pair.iter().all(|x| (x - want).abs() <= 1.0 / 32768.0),
+                        "stream {nth}, sample {}: {pair:?} vs {want}",
+                        start + i as i64
+                    );
+                }
+                assert!(src.buf.chunks.len() <= AHEAD);
+            }
+        }
+    }
 
     fn secs(s: i64) -> Time {
         Time(s * FLICKS_PER_SECOND)

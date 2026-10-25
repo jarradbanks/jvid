@@ -139,45 +139,173 @@ impl Target {
     }
 }
 
-/// The audio clips to caption: the selected ones and those linked to them, else every enabled
-/// one on an unmuted track between In and Out, or with `whole` across the whole sequence.
-/// Reversed and frozen clips are left out.
+/// One deliberate audio source per linked group, shared by every speech/peak tool.
+/// Explicit audio selection wins before linked partners are considered. Preferences only
+/// resolve ambiguity among equally explicit candidates, so selecting Mic always wins.
+#[derive(Default)]
+pub(crate) struct AudioSources {
+    preferred: HashSet<ClipId>,
+}
+
+impl AudioSources {
+    fn groups<'a>(
+        &self,
+        seq: &'a Sequence,
+        selected: &HashSet<ClipId>,
+        reverse: bool,
+    ) -> Vec<Vec<&'a Clip>> {
+        let mut clips: Vec<_> = seq
+            .tracks()
+            .iter()
+            .filter(|t| t.kind == TrackKind::Audio && (!selected.is_empty() || !t.muted))
+            .flat_map(|t| t.clips())
+            .filter(|c| c.enabled && c.freeze.is_none() && (reverse || !c.reverse))
+            .filter(|c| {
+                selected.is_empty()
+                    || selected.contains(&c.id)
+                    || selected
+                        .iter()
+                        .any(|&id| seq.linked(id).iter().any(|(_, p)| p.id == c.id))
+            })
+            .collect();
+        clips.sort_by_key(|c| {
+            (
+                !selected.contains(&c.id),
+                !self.preferred.contains(&c.id),
+                c.start,
+                c.id.0,
+            )
+        });
+        let mut groups: Vec<Vec<&Clip>> = Vec::new();
+        for c in clips {
+            if let Some(g) = groups
+                .iter_mut()
+                .find(|g| c.link.is_some() && g[0].link == c.link)
+            {
+                g.push(c);
+            } else {
+                groups.push(vec![c]);
+            }
+        }
+        for g in &mut groups {
+            if g.iter().any(|c| selected.contains(&c.id)) {
+                g.retain(|c| selected.contains(&c.id));
+            }
+        }
+        groups.sort_by_key(|g| (g[0].start, g[0].id.0));
+        groups
+    }
+
+    pub(crate) fn clips<'a>(
+        &self,
+        seq: &'a Sequence,
+        selected: &HashSet<ClipId>,
+        reverse: bool,
+    ) -> Vec<&'a Clip> {
+        self.groups(seq, selected, reverse)
+            .into_iter()
+            .map(|g| g[0])
+            .collect()
+    }
+
+    pub(crate) fn selection(&self, seq: &Sequence, selected: &HashSet<ClipId>) -> HashSet<ClipId> {
+        let ids: HashSet<_> = self
+            .clips(seq, selected, false)
+            .iter()
+            .map(|c| c.id)
+            .collect();
+        if ids.is_empty() {
+            selected.clone()
+        } else {
+            ids
+        }
+    }
+
+    /// Shows the analyzed stream even when there is only one; ambiguous groups get a picker.
+    /// Returns true when an old preview must be discarded.
+    pub(crate) fn show(
+        &mut self,
+        ui: &mut Ui,
+        seq: &Sequence,
+        selected: &HashSet<ClipId>,
+        reverse: bool,
+    ) -> bool {
+        let mut changed = false;
+        for g in self.groups(seq, selected, reverse) {
+            let labels: Vec<_> = g
+                .iter()
+                .map(|c| {
+                    let name = seq
+                        .clip(c.id)
+                        .and_then(|(t, _)| seq.track(t))
+                        .map(|t| t.name.as_str())
+                        .unwrap_or_default();
+                    tr!(
+                        "analysis.source_stream",
+                        name = name,
+                        number = c.stream.unwrap_or(0) + 1
+                    )
+                })
+                .collect();
+            ui.horizontal(|ui| {
+                ui.label(tr!("analysis.audio_source"));
+                if g.len() == 1 {
+                    ui.label(&labels[0]);
+                } else {
+                    let names: Vec<_> = labels.iter().map(String::as_str).collect();
+                    let mut pick = 0;
+                    ui.push_id(g[0].link, |ui| {
+                        ui.add(Dropdown::new(&mut pick, &names).width(200.0));
+                    });
+                    if pick != 0 {
+                        for c in &g {
+                            self.preferred.remove(&c.id);
+                        }
+                        self.preferred.insert(g[pick].id);
+                        changed = true;
+                    }
+                }
+            });
+        }
+        changed
+    }
+}
+
+/// Selected audio (before linked expansion), or enabled audio between In and Out / whole
+/// sequence. Reversed and frozen clips are left out. Source ranges keep their chosen stream.
 pub(crate) fn targets(project: &Project, selected: &HashSet<ClipId>, whole: bool) -> Vec<Target> {
+    targets_with_sources(project, selected, whole, &AudioSources::default())
+}
+
+fn targets_with_sources(
+    project: &Project,
+    selected: &HashSet<ClipId>,
+    whole: bool,
+    sources: &AudioSources,
+) -> Vec<Target> {
     let seq = project.sequence();
-    let plays = |c: &Clip| c.freeze.is_none() && !c.reverse;
-    let mut spans: Vec<(&Clip, (Time, Time))> = if selected.is_empty() {
-        let span = whole.then_some((Time(0), seq.duration()));
-        let Some((from, to)) = span.or_else(|| in_out(seq)) else {
+    let span = if selected.is_empty() {
+        let Some(span) = whole
+            .then_some((Time(0), seq.duration()))
+            .or_else(|| in_out(seq))
+        else {
             return Vec::new();
         };
-        seq.tracks()
-            .iter()
-            .filter(|t| t.kind == TrackKind::Audio && !t.muted)
-            .flat_map(|t| t.clips())
-            .filter(|c| c.enabled && plays(c))
-            .map(|c| (c, (c.start.max(from), c.end().min(to))))
-            .filter(|(_, (a, b))| a < b)
-            .collect()
+        Some(span)
     } else {
-        let mut clips: Vec<&Clip> = selected
-            .iter()
-            .flat_map(|&id| seq.linked(id))
-            .filter(|(t, c)| plays(c) && seq.track(*t).is_some_and(|t| t.kind == TrackKind::Audio))
-            .map(|(_, c)| c)
-            .collect();
-        clips.sort_by_key(|c| (c.start, c.id.0));
-        clips.dedup_by_key(|c| c.id);
-        clips.into_iter().map(|c| (c, (c.start, c.end()))).collect()
+        None
     };
-    spans.sort_by_key(|(c, s)| (s.0, c.id.0));
-    // shortcut: a group with several audio clips (game and mic streams) captions only its
-    // first, as Detect Silence reads it.
-    let mut links = HashSet::new();
-    spans.retain(|(c, _)| c.link.is_none_or(|l| links.insert(l)));
     let rate = Rate::new(SAMPLE_RATE, 1);
-    spans
+    sources
+        .clips(seq, selected, false)
         .into_iter()
-        .filter_map(|(c, span)| {
+        .filter_map(|c| {
+            let span = span.map_or((c.start, c.end()), |(a, b)| {
+                (c.start.max(a), c.end().min(b))
+            });
+            if span.0 >= span.1 {
+                return None;
+            }
             let asset = project.asset(c.asset)?;
             let from = c.source_at(span.0);
             let to = if span.1 >= c.end() {
@@ -190,7 +318,6 @@ pub(crate) fn targets(project: &Project, selected: &HashSet<ClipId>, whole: bool
                 span,
                 source: Source {
                     path: asset.path.clone(),
-                    // shortcut: a clip of all streams mixed reads the first, as its waveform draws.
                     nth: c.stream.unwrap_or(0) as usize,
                     range: rate.index_floor(from)..rate.index_floor(to),
                 },
@@ -301,6 +428,7 @@ pub struct Subtitles {
     open: bool,
     /// 0 is Auto, then [`LANGUAGES`].
     language: usize,
+    sources: AudioSources,
     /// 0 is Fast, 1 Accurate.
     quality: usize,
     translate: bool,
@@ -324,6 +452,7 @@ impl Subtitles {
 
     pub fn open(&mut self) {
         self.transcribe = None;
+        self.sources = AudioSources::default();
         self.show_dialog();
     }
 
@@ -348,7 +477,7 @@ impl Subtitles {
     }
 
     /// Cancels anything running and frees the model.
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.open = false;
         self.run = None;
         self.engine = None;
@@ -375,7 +504,7 @@ impl Subtitles {
     fn start(&mut self, project: &Project, selected: &HashSet<ClipId>) {
         let targets = match self.transcribe {
             Some(_) => Vec::new(),
-            None => targets(project, selected, false),
+            None => targets_with_sources(project, selected, false, &self.sources),
         };
         let mut sources: Vec<Source> = self.transcribe.clone().unwrap_or_default();
         for t in &targets {
@@ -537,6 +666,24 @@ impl Subtitles {
                 } else {
                     State::Disabled
                 };
+                ui.add_enabled_ui(self.run.is_none(), |ui| {
+                    if let Some(sources) = &self.transcribe {
+                        for source in sources {
+                            let name = source
+                                .path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy();
+                            ui.label(tr!(
+                                "analysis.source_stream",
+                                name = name,
+                                number = source.nth + 1
+                            ));
+                        }
+                    } else {
+                        self.sources.show(ui, project.sequence(), selected, false);
+                    }
+                });
                 egui::Grid::new("subtitles_grid")
                     .spacing([space::S8, space::S8])
                     .show(ui, |ui| {
@@ -817,6 +964,44 @@ mod tests {
     }
 
     #[test]
+    fn audit_442_selected_microphone_beats_linked_creation_order() {
+        let (mut h, first) = project();
+        let Created::Track(track) = h
+            .apply(Command::AddTrack {
+                kind: TrackKind::Audio,
+                name: "Mic".into(),
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let asset = h.project().assets()[0].id;
+        let Created::Clip(mic) = h
+            .apply(Command::AddClip {
+                track,
+                clip: NewClip {
+                    asset,
+                    source_in: Time(10 * S),
+                    source_out: Time(20 * S),
+                    start: Time(2 * S),
+                    link: Some(jvid_core::model::LinkId(7)),
+                },
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        h.apply(Command::SetClipLink {
+            id: first,
+            link: Some(jvid_core::model::LinkId(7)),
+        })
+        .unwrap();
+        let result = targets(h.project(), &HashSet::from([mic]), false);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].clip.id, mic);
+    }
+
+    #[test]
     fn selected_audio_or_in_to_out_is_transcribed_and_placed_on_the_timeline() {
         let (mut h, audio) = project();
         let none = HashSet::new();
@@ -860,5 +1045,56 @@ mod tests {
             panic!()
         };
         assert_eq!(t.span, (Time(2 * S), Time(12 * S)));
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use jvid_core::history::{Command, History};
+    use jvid_core::model::{Placement, ProbeInfo};
+
+    pub(crate) fn two_streams(mic_first: bool) -> (Project, ClipId, ClipId) {
+        let mut h = History::new(Project::default());
+        h.apply(Command::Import(vec![(
+            PathBuf::from("/fake/two-streams.mkv"),
+            ProbeInfo {
+                duration: Time(6 * S),
+                width: Some(640),
+                height: Some(360),
+                audio_streams: 2,
+                ..Default::default()
+            },
+        )]))
+        .unwrap();
+        let mut streams = vec![(Some(0), "Game".into()), (Some(1), "Mic".into())];
+        if mic_first {
+            streams.reverse();
+        }
+        h.apply(Command::Place(Placement {
+            asset: h.project().assets()[0].id,
+            source_in: Time(S),
+            source_out: Time(5 * S),
+            start: Time(2 * S),
+            video: None,
+            audio: None,
+            streams,
+            add_video: true,
+            add_audio: true,
+            insert: false,
+        }))
+        .unwrap();
+        let audio = |nth| {
+            h.project()
+                .sequence()
+                .tracks()
+                .iter()
+                .filter(|t| t.kind == TrackKind::Audio)
+                .flat_map(|t| t.clips())
+                .find(|c| c.stream == Some(nth))
+                .unwrap()
+                .id
+        };
+        (h.project().clone(), audio(1), audio(0))
     }
 }

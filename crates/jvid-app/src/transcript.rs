@@ -27,10 +27,11 @@ use suite_ui::tokens::{color, size, space};
 use suite_ui::widgets::{Button, Checkbox, State, TextInput};
 
 use crate::i18n::tr;
-use crate::subtitles::targets;
+use crate::subtitles::{AudioSources, targets};
 
 /// Bumped when the file format or the word timing changes, so older transcripts are redone.
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
+const HEADER: &str = "transcript";
 /// The cache file's last line, before the word count.
 const END: &str = "end";
 /// A pause this long between words starts a new paragraph.
@@ -43,14 +44,15 @@ const LINE: f32 = 20.0;
 pub struct Cache {
     dir: Option<PathBuf>,
     /// By path and stream; `None` when not transcribed.
-    loaded: HashMap<(PathBuf, usize), Option<Vec<Word>>>,
+    loaded: HashMap<(PathBuf, usize), Option<Transcript>>,
     /// The last [`words`], with the project and selection it was placed for.
     placed: Option<(Project, HashSet<ClipId>, Rc<Placed>)>,
 }
 
 /// The words to show, in timeline time with the clip each is in, sorted; and the whole
 /// streams not transcribed yet.
-type Placed = (Vec<(ClipId, Word)>, Vec<Source>);
+type Languages = HashMap<ClipId, Option<String>>;
+type Placed = (Vec<(ClipId, Word)>, Vec<Source>, Languages);
 
 impl Cache {
     pub fn new(dir: PathBuf) -> Self {
@@ -76,7 +78,7 @@ impl Cache {
 
     /// The words of audio stream `nth` of `path`, timed from the file's start; `None` until
     /// it's transcribed.
-    pub fn get(&mut self, path: &Path, nth: usize) -> Option<&[Word]> {
+    pub fn get(&mut self, path: &Path, nth: usize) -> Option<&Transcript> {
         let key = (path.to_owned(), nth);
         if !self.loaded.contains_key(&key) {
             let text = self
@@ -85,7 +87,7 @@ impl Cache {
             self.loaded
                 .insert(key.clone(), text.and_then(|t| parse(&t)));
         }
-        self.loaded[&key].as_deref()
+        self.loaded[&key].as_ref()
     }
 
     /// Keeps `t`, the transcript of the whole of `source`, and saves it.
@@ -95,14 +97,14 @@ impl Cache {
             let tmp = file.with_extension("tmp");
             let saved = file.parent().map_or(Ok(()), fs::create_dir_all);
             let saved = saved
-                .and_then(|_| fs::write(&tmp, format(&t.words)))
+                .and_then(|_| fs::write(&tmp, format(&t)))
                 .and_then(|_| fs::rename(&tmp, &file));
             if let Err(e) = saved {
                 tracing::warn!("transcript: can't save {}: {e}", file.display());
             }
         }
         let key = (source.path.clone(), source.nth);
-        self.loaded.insert(key, Some(t.words));
+        self.loaded.insert(key, Some(t));
         self.placed = None;
     }
 
@@ -121,17 +123,30 @@ impl Cache {
 
 /// One word per line: start and end in flicks, then the text, tab separated; then `end` and
 /// the word count, so a cut-short file shows.
-fn format(words: &[Word]) -> String {
+fn format(t: &Transcript) -> String {
+    let words = &t.words;
     let line = |w: &Word| {
         let text = w.text.replace(['\t', '\n', '\r'], " ");
         format!("{}\t{}\t{text}\n", w.start.0, w.end.0)
     };
     let lines: String = words.iter().map(line).collect();
-    format!("{lines}{END}\t{}\n", words.len())
+    let language = t
+        .language
+        .as_deref()
+        .filter(|s| valid_language(s))
+        .unwrap_or_default();
+    format!(
+        "{HEADER}\t{VERSION}\t{language}\n{lines}{END}\t{}\n",
+        words.len()
+    )
 }
 
 /// `None` unless the whole file reads.
-fn parse(text: &str) -> Option<Vec<Word>> {
+fn valid_language(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
+}
+
+fn parse(text: &str) -> Option<Transcript> {
     let word = |line: &str| {
         let mut f = line.splitn(3, '\t');
         Some(Word {
@@ -141,28 +156,41 @@ fn parse(text: &str) -> Option<Vec<Word>> {
             confidence: 1.0,
         })
     };
-    let mut lines: Vec<&str> = text.lines().collect();
+    let mut input = text.lines();
+    let header = input.next()?;
+    let language = header.strip_prefix(&format!("{HEADER}\t{VERSION}\t"))?;
+    if !language.is_empty() && !valid_language(language) {
+        return None;
+    }
+    let mut lines: Vec<&str> = input.collect();
     let end = lines.pop()?;
     (end == format!("{END}\t{}", lines.len())).then_some(())?;
-    lines.into_iter().map(word).collect()
+    Some(Transcript {
+        language: (!language.is_empty()).then(|| language.to_owned()),
+        words: lines.into_iter().map(word).collect::<Option<_>>()?,
+    })
 }
 
 /// The words to show and the streams not transcribed yet; see [`Placed`].
 fn words(project: &Project, selected: &HashSet<ClipId>, cache: &mut Cache) -> Placed {
     let (mut words, mut missing) = (Vec::new(), Vec::<Source>::new());
+    let mut languages = Languages::new();
     for t in targets(project, selected, true) {
         let whole = Source {
             range: 0..i64::MAX,
             ..t.source.clone()
         };
         match cache.get(&whole.path, whole.nth) {
-            Some(w) => words.extend(t.place(w).map(|w| (t.clip.id, w))),
+            Some(transcript) => {
+                languages.insert(t.clip.id, transcript.language.clone());
+                words.extend(t.place(&transcript.words).map(|w| (t.clip.id, w)));
+            }
             None if !missing.contains(&whole) => missing.push(whole),
             None => {}
         }
     }
     words.sort_by_key(|(c, w)| (w.start, c.0));
-    (words, missing)
+    (words, missing, languages)
 }
 
 /// Ripple deletes `words[picked]`: each run of neighbouring words in one clip is one span,
@@ -190,6 +218,7 @@ pub struct Output {
 
 #[derive(Default)]
 pub struct TranscriptPanel {
+    sources: AudioSources,
     pub cache: Cache,
     pub(crate) query: String,
     /// The first and last words picked, by start time, so it outlives edits elsewhere.
@@ -201,6 +230,15 @@ pub struct TranscriptPanel {
 }
 
 impl TranscriptPanel {
+    /// Whole-file transcript caches are reusable; word selections and searches are not.
+    pub fn reset_session(&mut self) {
+        self.sources = AudioSources::default();
+        self.query.clear();
+        self.selection = None;
+        self.lit = None;
+        self.unticked = None;
+    }
+
     /// The picked words, as a range of `words`.
     fn picked(&self, words: &[(ClipId, Word)]) -> Option<Range<usize>> {
         let (a, b) = self.selection?;
@@ -218,16 +256,27 @@ impl TranscriptPanel {
         playhead: Time,
         focused: bool,
     ) -> Output {
+        let selected_input = selected;
         let mut out = Output::default();
         // Before Find draws, which may let go of the focus this frame.
         let typing = ui.ctx().text_edit_focused();
-        let placed = self.cache.placed(project, selected);
-        let (words, missing) = &*placed;
+        let selected = self.sources.selection(project.sequence(), selected);
+        let placed = self.cache.placed(project, &selected);
+        let (words, missing, languages) = &*placed;
         let close = [(icon::X, tr!("transcript.close"))];
         let r = Panel::titled(tr!("panel.transcript"))
             .actions(&close)
             .focused(focused)
             .show(ui, |ui| {
+                if self
+                    .sources
+                    .show(ui, project.sequence(), selected_input, false)
+                {
+                    self.selection = None;
+                    self.unticked = None;
+                    ui.ctx().request_repaint();
+                    return;
+                }
                 let bar = egui::Frame::NONE
                     .inner_margin(Margin::symmetric(space::INSET as i8, space::S8 as i8));
                 bar.show(ui, |ui| {
@@ -246,7 +295,7 @@ impl TranscriptPanel {
                             out.transcribe = Some(missing.clone());
                         }
                         if let Some(unticked) = &self.unticked {
-                            let hits = fillers::find(words);
+                            let hits = fillers::find(words, languages);
                             let ready = match hits.is_empty() {
                                 true => State::Disabled,
                                 false => State::Live,
@@ -280,7 +329,7 @@ impl TranscriptPanel {
                         let frame = egui::Frame::NONE
                             .inner_margin(Margin::symmetric(space::INSET as i8, space::S4 as i8));
                         frame.show(ui, |ui| match self.unticked.is_some() {
-                            true => self.hits(ui, words, &mut out),
+                            true => self.hits(ui, words, languages, &mut out),
                             false => self.text(ui, words, playhead, &mut out),
                         });
                     });
@@ -301,8 +350,14 @@ impl TranscriptPanel {
 
     /// Fillers' list: a row per hit with its context, ticked unless unticked; ticking one
     /// seeks to it.
-    fn hits(&mut self, ui: &mut Ui, words: &[(ClipId, Word)], out: &mut Output) {
-        let hits = fillers::find(words);
+    fn hits(
+        &mut self,
+        ui: &mut Ui,
+        words: &[(ClipId, Word)],
+        languages: &Languages,
+        out: &mut Output,
+    ) {
+        let hits = fillers::find(words, languages);
         let Some(unticked) = &mut self.unticked else {
             return;
         };
@@ -326,7 +381,8 @@ impl TranscriptPanel {
 
     /// The streams Transcribe would transcribe, for a lesson's Show Me.
     pub(crate) fn missing(&mut self, project: &Project, selected: &HashSet<ClipId>) -> Vec<Source> {
-        self.cache.placed(project, selected).1.clone()
+        let selected = self.sources.selection(project.sequence(), selected);
+        self.cache.placed(project, &selected).1.clone()
     }
 
     /// Whether audio stream `nth` of `path` has a transcript loaded.
@@ -345,7 +401,8 @@ impl TranscriptPanel {
         selected: &HashSet<ClipId>,
         picked: Range<usize>,
     ) -> Option<Command> {
-        let placed = self.cache.placed(project, selected);
+        let selected = self.sources.selection(project.sequence(), selected);
+        let placed = self.cache.placed(project, &selected);
         let n = placed.0.len();
         cut(&placed.0, picked.start.min(n)..picked.end.min(n))
     }
@@ -559,7 +616,7 @@ mod tests {
         let dir = tmp("cut");
         let (mut h, mut panel) = project(&dir);
         let none = HashSet::new();
-        let (words, missing) = words(h.project(), &none, &mut panel.cache);
+        let (words, missing, _) = words(h.project(), &none, &mut panel.cache);
         assert!(missing.is_empty());
         assert_eq!(words.len(), 10);
         // On the timeline: "two" is at 4 s.
@@ -573,14 +630,14 @@ mod tests {
         let want = vec![(t(2.0), t(10.0), t(12.0)), (t(4.0), t(14.6), t(20.0))];
         assert_eq!(ranges(&h), [want.clone(), want]);
         // The words follow the edit.
-        let (after, _) = super::words(h.project(), &none, &mut panel.cache);
+        let (after, _, _) = super::words(h.project(), &none, &mut panel.cache);
         let spoken = "zero one five six seven eight nine";
         assert_eq!(texts(&after), spoken.split(' ').collect::<Vec<_>>());
         assert_eq!(after[2].1.start, t(4.4));
 
         h.undo();
         assert_eq!(ranges(&h), before);
-        let (back, _) = super::words(h.project(), &none, &mut panel.cache);
+        let (back, _, _) = super::words(h.project(), &none, &mut panel.cache);
         assert_eq!(back, words);
     }
 
@@ -591,7 +648,7 @@ mod tests {
         let path = &h.project().assets()[0].path;
         // A fresh cache reads what the first saved.
         let mut cache = Cache::new(dir.join("cache"));
-        let words = cache.get(path, 0).unwrap().to_vec();
+        let words = cache.get(path, 0).unwrap().words.clone();
         assert_eq!(words.len(), 10);
         assert_eq!(words[3], word("three", 13.0, 13.6));
         assert!(cache.get(path, 1).is_none());
@@ -600,12 +657,18 @@ mod tests {
         assert!(Cache::new(dir.join("cache")).get(path, 0).is_none());
         // Nothing transcribed: the panel asks for the whole stream.
         let mut empty = Cache::new(dir.join("other"));
-        let (none, missing) = super::words(h.project(), &HashSet::new(), &mut empty);
+        let (none, missing, _) = super::words(h.project(), &HashSet::new(), &mut empty);
         assert!(none.is_empty());
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].range, 0..i64::MAX);
         assert_eq!(
-            parse(&format(&[word("a\tb", 1.0, 2.0)])).unwrap()[0].text,
+            parse(&format(&Transcript {
+                language: Some("en".into()),
+                words: vec![word("a\tb", 1.0, 2.0)]
+            }))
+            .unwrap()
+            .words[0]
+                .text,
             "a b"
         );
     }
@@ -618,8 +681,15 @@ mod tests {
         let path = &h.project().assets()[0].path;
         let file = panel.cache.file(path, 0).unwrap();
         let full = fs::read_to_string(&file).unwrap();
-        assert_eq!(parse(&full).unwrap().len(), 10);
-        assert_eq!(parse("end\t0\n"), Some(Vec::new()));
+        assert_eq!(parse(&full).unwrap().words.len(), 10);
+        assert_eq!(
+            parse("transcript\t3\t\nend\t0\n"),
+            Some(Transcript::default())
+        );
+        assert!(
+            parse("end\t0\n").is_none(),
+            "old caches lack language metadata"
+        );
         let lines: Vec<&str> = full.lines().collect();
         for short in [&full[..full.len() / 2], &lines[..5].join("\n"), ""] {
             assert!(parse(short).is_none(), "{short:?}");
@@ -627,7 +697,7 @@ mod tests {
         fs::write(&file, &full[..full.len() / 2]).unwrap();
         let mut cache = Cache::new(dir.join("cache"));
         assert!(cache.get(path, 0).is_none());
-        let (_, missing) = super::words(h.project(), &HashSet::new(), &mut cache);
+        let (_, missing, _) = super::words(h.project(), &HashSet::new(), &mut cache);
         assert_eq!(missing.len(), 1);
         // Saving leaves no temporary file behind.
         let names = fs::read_dir(dir.join("cache")).unwrap().count();
@@ -643,7 +713,7 @@ mod tests {
         let first = panel.cache.placed(h.project(), &none);
         assert_eq!(first.0.len(), 10);
         assert!(Rc::ptr_eq(&first, &panel.cache.placed(h.project(), &none)));
-        let (words, _) = &*first;
+        let (words, _, _) = &*first;
         h.apply(cut(words, 2..5).unwrap()).unwrap();
         let cut = panel.cache.placed(h.project(), &none);
         assert_eq!(cut.0.len(), 7);
@@ -685,8 +755,56 @@ mod tests {
             link: Some(jvid_core::model::LinkId(1)),
         };
         h.apply(Command::AddClip { track, clip }).unwrap();
-        let (words, _) = super::words(h.project(), &HashSet::new(), &mut panel.cache);
+        let (words, _, _) = super::words(h.project(), &HashSet::new(), &mut panel.cache);
         assert_eq!(words.len(), 10);
+    }
+
+    #[test]
+    fn audit_443_language_specific_fillers_survive_reopen_and_one_undo() {
+        for (language, sentence, expected) in [
+            ("de", "Er kommt ähm", vec!["ähm"]),
+            ("pt", "um livro hum", vec!["hum"]),
+            ("en", "um umbrella uhhh", vec!["um", "uhhh"]),
+        ] {
+            let dir = tmp(language);
+            let (mut h, mut panel) = project(&dir);
+            let source = Source {
+                path: h.project().assets()[0].path.clone(),
+                nth: 0,
+                range: 0..i64::MAX,
+            };
+            let words = sentence
+                .split(' ')
+                .enumerate()
+                .map(|(i, w)| word(w, 10.0 + i as f64 * 0.5, 10.3 + i as f64 * 0.5))
+                .collect();
+            panel.cache.insert(
+                &source,
+                Transcript {
+                    language: Some(language.into()),
+                    words,
+                },
+            );
+            let before = h.project().clone();
+            for reopen in [false, true] {
+                if reopen {
+                    panel.cache = Cache::new(dir.join("cache"));
+                }
+                let (placed, _, languages) =
+                    super::words(h.project(), &HashSet::new(), &mut panel.cache);
+                let hits = fillers::find(&placed, &languages);
+                let actual: Vec<_> = hits
+                    .iter()
+                    .filter(|h| !h.pause)
+                    .map(|h| placed[h.at].1.text.as_str())
+                    .collect();
+                assert_eq!(actual, expected, "{language}, reopen={reopen}");
+                h.apply(fillers::cut(&hits, &HashSet::new()).unwrap())
+                    .unwrap();
+                assert!(h.undo());
+                assert_eq!(h.project(), &before);
+            }
+        }
     }
 
     /// Acceptance: a fake transcript with four fillers and one long pause loses all five
@@ -718,8 +836,8 @@ mod tests {
         };
         panel.cache.insert(&source, heard);
         let none = HashSet::new();
-        let (words, _) = super::words(h.project(), &none, &mut panel.cache);
-        let hits = fillers::find(&words);
+        let (words, _, languages) = super::words(h.project(), &none, &mut panel.cache);
+        let hits = fillers::find(&words, &languages);
         let fillers: Vec<_> = hits
             .iter()
             .filter(|h| !h.pause)
@@ -743,17 +861,17 @@ mod tests {
 
         h.apply(fillers::cut(&hits, &HashSet::new()).unwrap())
             .unwrap();
-        let (after, _) = super::words(h.project(), &none, &mut panel.cache);
+        let (after, _, languages) = super::words(h.project(), &none, &mut panel.cache);
         assert_eq!(texts(&after), ["So", "I", "think.", "this", "works."]);
         // Ten seconds less four 0.3 s fillers and 1.95 s of pause.
         assert_eq!(length(&h), [t(6.85), t(6.85)]);
-        assert!(fillers::find(&after).is_empty());
+        assert!(fillers::find(&after, &languages).is_empty());
         h.undo();
         assert_eq!(h.project(), &before);
 
         let uh = HashSet::from([hits[1].start]);
         h.apply(fillers::cut(&hits, &uh).unwrap()).unwrap();
-        let (after, _) = super::words(h.project(), &none, &mut panel.cache);
+        let (after, _, _) = super::words(h.project(), &none, &mut panel.cache);
         assert_eq!(texts(&after), ["So", "I", "uh", "think.", "this", "works."]);
         assert_eq!(length(&h), [t(7.15), t(7.15)]);
     }

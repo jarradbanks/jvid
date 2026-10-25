@@ -148,6 +148,19 @@ tutorials = "Tutorials"
 
 # Exporting: the Export button, its dialog and the render queue.
 [export]
+phase_preparing = "Preparing"
+phase_analysis = "Analyzing Audio"
+phase_encoding = "Encoding · Pass {pass}"
+phase_retry = "Retrying in Software"
+phase_finalizing = "Finalizing"
+phase_copying = "Copying"
+sidecar_file_target = "Output target is not a regular file."
+sidecar_separate = "Media and subtitle outputs must be separate files."
+sidecar_recovery = "{error}; output recovery copies retained at {path} ({details})"
+no_gpu = "no GPU adapter: composited video needs a rendering device. Install a graphics driver or a software Vulkan adapter (Mesa lavapipe on Linux)."
+codec_no_encoder = "No usable {codec} encoder for these export settings. Use supported hardware, install a build with {encoders}, or choose another codec preset."
+codec_wrong = "Requested {expected}, but the encoded video is {actual}. The output was not published."
+encoder = "Encoders to Try"
 queue = "Render Queue"
 queue_pending.one = "{count} in the render queue"
 queue_pending.other = "{count} in the render queue"
@@ -242,6 +255,8 @@ gb = "{value} GB"
 # Why an export failed; shown after "Export failed:".
 no_file_name = "output path has no file name"
 attempt_error = "couldn't create export attempt: {error}"
+source_collision = "the output {path} is source media ({source}); choose a different output file"
+identity_error = "could not check whether {path} is source media: {error}"
 publish_error = "couldn't publish {path}: {error}"
 write_error = "couldn't write {path}: {error}"
 empty_range = "the export range is empty"
@@ -829,6 +844,8 @@ file_type = "Keymap"
 
 # The Preview panel.
 [preview]
+position = "Playback Position"
+more = "More"
 fit = "Fit"
 full = "Full"
 no_frame = "there's no frame to export"
@@ -1047,3 +1064,7 @@ remove = "Remove"
 remove_all = "Remove All"
 pause = "Pause {seconds} s"
 none = "No fillers or pauses"
+
+[analysis]
+audio_source = "Audio Source"
+source_stream = "{name} · Stream {number}"

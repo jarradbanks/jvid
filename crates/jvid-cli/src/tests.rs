@@ -79,3 +79,127 @@ fn target_size_goes_into_the_preset_in_bytes() {
         Some("25000000")
     );
 }
+
+#[test]
+fn cpu_exports_never_acquire_a_gpu_and_video_reports_code_four() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let root = std::env::temp_dir().join(format!("jvid-cli-cpu-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let pool = jvid_jobs::Pool::new(1);
+    jvid_media::ffmpeg::init().unwrap();
+    let source = root.join("source.mov");
+    let mut preset = jvid_core::preset::builtin()
+        .into_iter()
+        .find(|p| p.video == Some(VideoCodec::ProRes))
+        .unwrap();
+    preset.audio = None;
+    preset.size = None;
+    let rate = jvid_core::time::Rate::new(30, 1);
+    let mut encoder =
+        jvid_media::encode::Encoder::create(&source, (64, 64), rate, &preset).unwrap();
+    for _ in 0..60 {
+        encoder.video(&vec![128; 64 * 64 * 4]).unwrap();
+    }
+    encoder.finish().unwrap();
+    let mut history = jvid_core::history::History::new(Project::default());
+    use jvid_core::history::{Command, Created};
+    let Created::Asset(asset) = history.apply(Command::AddAsset(source.clone())).unwrap() else {
+        panic!("asset")
+    };
+    history
+        .apply(Command::SetAssetProbe {
+            id: asset,
+            probe: Some(jvid_media::probe::probe(&source).unwrap()),
+        })
+        .unwrap();
+    let Created::Track(track) = history
+        .apply(Command::AddTrack {
+            kind: jvid_core::model::TrackKind::Video,
+            name: "Video".into(),
+        })
+        .unwrap()
+    else {
+        panic!("track")
+    };
+    history
+        .apply(Command::AddClip {
+            track,
+            clip: jvid_core::model::NewClip {
+                asset,
+                source_in: Time(0),
+                source_out: rate.time_floor(60),
+                start: Time(0),
+                link: None,
+            },
+        })
+        .unwrap();
+    for lossless in [None, Some(Lossless::Copy), Some(Lossless::Smart)] {
+        let preset = if lossless.is_some() {
+            preset.clone()
+        } else {
+            jvid_core::preset::builtin()
+                .into_iter()
+                .find(|p| p.name == "Audio Only (WAV)")
+                .unwrap()
+        };
+        let path = root.join(format!("{lossless:?}.{}", preset.extension));
+        let req = Request {
+            path: path.clone(),
+            range: (Time(0), rate.time_floor(30)),
+            preset,
+            loudness: None,
+            lossless,
+            sidecar: false,
+        };
+        let called = AtomicBool::new(false);
+        let job = start_export(&pool, history.project().clone(), req, || {
+            called.store(true, Ordering::SeqCst);
+            Err("injected missing adapter".into())
+        });
+        assert!(
+            !called.load(Ordering::SeqCst),
+            "CPU export probed wgpu: {lossless:?}"
+        );
+        let (_, rx) = job.unwrap();
+        let result = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(result.is_ok(), "{result:?}");
+        assert!(path.is_file());
+    }
+    let path = root.join("video.mp4");
+    std::fs::write(&path, b"existing output").unwrap();
+    let req = Request {
+        path: path.clone(),
+        range: (Time(0), Time(23_520_000)),
+        preset: jvid_core::preset::builtin().remove(0),
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    let result = start_export(&pool, Project::default(), req, || {
+        Err("no GPU adapter: injected".into())
+    });
+    assert!(matches!(result, Err((4, ref e)) if e.contains("no GPU adapter")));
+    assert_eq!(std::fs::read(path).unwrap(), b"existing output");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn json_progress_names_phases_passes_retries_and_only_phase_eta() {
+    let mut status = export::Snapshot {
+        phase: export::Phase::Encoding { pass: 2 },
+        progress: Some(0.5),
+        retry: 1,
+        phase_seconds: 10.0,
+    };
+    assert_eq!(
+        progress_line(&status, true),
+        "{\"progress\":0.5000,\"phase\":\"encoding\",\"pass\":2,\"retry\":1,\"phase_eta_seconds\":10.0000}"
+    );
+    status.phase = export::Phase::Finalizing;
+    status.progress = None;
+    assert_eq!(
+        progress_line(&status, true),
+        "{\"progress\":null,\"phase\":\"finalizing\",\"pass\":null,\"retry\":1,\"phase_eta_seconds\":null}"
+    );
+    assert!(!progress_line(&status, false).contains("100"));
+}

@@ -22,6 +22,94 @@ const BARS: [[u8; 3]; 8] = [
 /// In 8-bit codes: limited-range rounding and 4:2:0 chroma cost a level or two.
 const TOLERANCE: i32 = 3;
 
+/// A Program RGB image exported and reopened in the viewer keeps its colors at HD sizes.
+/// Flat patch centers exclude 4:2:0 edges; four codes cover codec and YUV quantization.
+#[test]
+fn sdr_export_round_trips_the_program_colors() {
+    if !gpu() {
+        return;
+    }
+    jvid_media::ffmpeg::init().unwrap();
+    let (device, queue) = device().unwrap();
+    let patches = [
+        [255, 0, 0],
+        [0, 255, 0],
+        [0, 0, 255],
+        [128; 3],
+        [0; 3],
+        [255; 3],
+    ];
+    for (w, h) in [(1280, 720), (1920, 1080)] {
+        let rgba: Vec<_> = (0..h)
+            .flat_map(|_| {
+                (0..w).flat_map(|x| {
+                    let [r, g, b] = patches[(x * patches.len() as u32 / w) as usize];
+                    [r, g, b, 255]
+                })
+            })
+            .collect();
+        let path =
+            std::env::temp_dir().join(format!("jvid-program-sdr-{h}-{}.mov", std::process::id()));
+        let preset = jvid_core::preset::Preset {
+            name: "SDR color regression".into(),
+            extension: "mov".into(),
+            // FFmpeg's built-in ProRes encoder is available without GPL or hardware support,
+            // and keeps this regression independent of H.264 family fallback policy.
+            video: Some(jvid_core::preset::VideoCodec::ProRes),
+            audio: None,
+            size: None,
+            frame_rate: None,
+            options: std::collections::BTreeMap::from([
+                ("encoder".into(), "software".into()),
+                ("crf".into(), "12".into()),
+            ]),
+        };
+        let mut enc = jvid_media::encode::Encoder::create(
+            &path,
+            (w, h),
+            jvid_core::time::Rate::new(30, 1),
+            &preset,
+        )
+        .unwrap();
+        for _ in 0..3 {
+            enc.video(&rgba).unwrap();
+        }
+        enc.finish().unwrap();
+        let f = VideoDecoder::open(&path)
+            .unwrap()
+            .frame_at(Time(0))
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        preview.upload(
+            &device,
+            &queue,
+            &Yuv {
+                width: f.width,
+                height: f.height,
+                planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
+                bt709: f.bt709,
+                full_range: f.full_range,
+                hdr: f.hdr,
+            },
+            1,
+        );
+        let got = read_back(&device, &queue, &preview.image().unwrap());
+        for (i, want) in patches.iter().enumerate() {
+            let x = (2 * i + 1) * w as usize / (2 * patches.len());
+            let px = (h as usize / 2 * w as usize + x) * 4;
+            assert!(
+                got[px..px + 3]
+                    .iter()
+                    .zip(want)
+                    .all(|(g, w)| g.abs_diff(*w) <= 4),
+                "{w}x{h} patch {i}: {:?}, want {want:?}",
+                &got[px..px + 3]
+            );
+        }
+    }
+}
+
 #[test]
 fn corpus_colour_bars_match_reference_rgb() {
     let Some(dir) = corpus() else { return };
@@ -53,7 +141,7 @@ fn corpus_colour_bars_match_reference_rgb() {
             preview.upload(&device, &queue, &yuv, scale);
             let tex = preview.image().unwrap();
             assert_eq!((tex.width(), tex.height()), scaled(640, 360, scale));
-            let rgba = read_back(&device, &queue, tex);
+            let rgba = read_back(&device, &queue, &tex);
             for (i, want) in BARS.iter().enumerate() {
                 // Centre of bar i, halfway down.
                 let (x, y) = ((80 * i as u32 + 40) / scale, 180 / scale);
@@ -98,7 +186,8 @@ fn corpus_bars_survive_compositing() {
         1,
     );
     let mut comp = crate::composite::Compositor::new(&device);
-    let layers = [(preview.image().unwrap(), Default::default())];
+    let image = preview.image().unwrap();
+    let layers = [(&*image, Default::default())];
     let tex = comp.render(&device, &queue, (640, 360), 1, [0, 0, 0, 255], &layers);
     let rgba = read_back(&device, &queue, tex);
     for (i, want) in BARS.iter().enumerate() {
@@ -170,7 +259,7 @@ fn render_hdr_clip(hdr: Hdr, patches: &[[f32; 3]]) -> Vec<[u8; 3]> {
     };
     preview.upload(&device, &queue, &yuv, 1);
     let tex = preview.image().unwrap();
-    let rgba = read_back(&device, &queue, tex);
+    let rgba = read_back(&device, &queue, &tex);
     (0..patches.len())
         .map(|i| {
             let px = (8 * tex.width() as usize + 16 * i + 8) * 4;
@@ -259,6 +348,184 @@ fn matrix_inverts_ffmpeg_encode() {
 }
 
 #[test]
+fn auxiliary_images_match_original_view_for_sdr_and_hdr() {
+    use jvid_core::time::Rate;
+    use jvid_media::{decode::Frame, proxy::Proxies, thumbnails::Cache};
+    use std::sync::Arc;
+    if !gpu() {
+        return;
+    }
+    jvid_media::ffmpeg::init().unwrap();
+    let (device, queue) = device().unwrap();
+    let render = |f: &Frame| {
+        let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        preview.upload(
+            &device,
+            &queue,
+            &Yuv {
+                width: f.width,
+                height: f.height,
+                planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
+                bt709: f.bt709,
+                full_range: f.full_range,
+                hdr: f.hdr,
+            },
+            1,
+        );
+        image::RgbaImage::from_raw(
+            f.width,
+            f.height,
+            read_back(&device, &queue, &preview.image().unwrap()),
+        )
+        .unwrap()
+    };
+    let dir = std::env::temp_dir().join(format!("jvid-aux-color-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let sdr = [
+        [0.75, 0.0, 0.0],
+        [0.0, 0.75, 0.0],
+        [0.0, 0.0, 0.75],
+        [0.5; 3],
+        [0.0; 3],
+        [1.0; 3],
+        [0.75, 0.75, 0.0],
+        [0.1; 3],
+    ];
+    let pq = [26.0, 100.0, 203.0, 1000.0, 4000.0].map(|n| [nits_to_pq(n); 3]);
+    let colored_pq =
+        [[100.0, 20.0, 5.0], [20.0, 100.0, 5.0], [5.0, 20.0, 100.0]].map(|p| p.map(nits_to_pq));
+    let pq: Vec<_> = pq.into_iter().chain(colored_pq).collect();
+    let hlg = [
+        [0.0; 3],
+        [0.25; 3],
+        [0.5; 3],
+        [0.75; 3],
+        [1.0; 3],
+        [0.8, 0.4, 0.1],
+        [0.2, 0.7, 0.4],
+        [0.3, 0.1, 0.8],
+    ];
+    let cases = [
+        (false, false, None),
+        (true, false, None),
+        (false, true, None),
+        (true, true, None),
+        (true, false, Some(Hdr::Pq)),
+        (true, false, Some(Hdr::Hlg)),
+    ];
+    for (i, (bt709, full, hdr)) in cases.into_iter().enumerate() {
+        let patches = match hdr {
+            None => &sdr[..],
+            Some(Hdr::Pq) => &pq,
+            Some(Hdr::Hlg) => &hlg[..],
+        };
+        let src = dir.join(format!("source-{i}.mkv"));
+        jvid_media::test_media::color_patch_clip(&src, bt709, full, hdr, patches);
+        let original_bytes = std::fs::read(&src).unwrap();
+        let f = VideoDecoder::open_hdr(&src)
+            .unwrap()
+            .frame_at(Time(0))
+            .unwrap();
+        assert_eq!((f.bt709, f.full_range, f.hdr), (bt709, full, hdr));
+        let original = render(&f);
+        let proxies = Arc::new(Proxies::new(dir.join("proxies")));
+        let mut info = jvid_media::probe::probe(&src).unwrap();
+        info.frame_rate = Some(Rate::new(30, 1));
+        std::fs::create_dir_all(dir.join("proxies")).unwrap();
+        let proxy_path = proxies.path(&src).unwrap();
+        let proxy = match jvid_media::test_media::generate_test_proxy(&src, &proxy_path) {
+            Ok(()) => {
+                assert_eq!(proxies.existing(&src).as_ref(), Some(&proxy_path));
+                proxies.set_enabled(true);
+                assert_eq!(proxies.resolve(&src), proxy_path);
+                let pf = VideoDecoder::open_hdr(&proxy_path)
+                    .unwrap()
+                    .frame_at(Time(0))
+                    .unwrap();
+                assert_eq!(
+                    (pf.bt709, pf.full_range, pf.hdr),
+                    (true, false, None),
+                    "proxy is deliberately SDR BT.709"
+                );
+                Some(render(&pf))
+            }
+            Err(error) => {
+                let software = std::collections::BTreeMap::from([(
+                    "encoder".to_owned(),
+                    "software".to_owned(),
+                )]);
+                assert!(
+                    jvid_media::encode::video_encoders(
+                        jvid_core::preset::VideoCodec::H264,
+                        &software
+                    )
+                    .is_empty(),
+                    "unexpected proxy error: {error}"
+                );
+                assert!(
+                    error.contains("h264")
+                        && error.contains("libopenh264")
+                        && error.contains("gpl-ffmpeg"),
+                    "{error}"
+                );
+                assert!(!proxy_path.exists());
+                assert!(
+                    !proxy_path
+                        .with_extension(format!("{}.tmp.mp4", std::process::id()))
+                        .exists()
+                );
+                proxies.set_enabled(true);
+                assert_eq!(
+                    proxies.resolve(&src),
+                    src,
+                    "unavailable proxy keeps the original"
+                );
+                eprintln!(
+                    "verified unavailable H.264 proxy for case {i}; real proxy pixel comparison requires OpenH264 or gpl-ffmpeg; original/poster checks still run"
+                );
+                None
+            }
+        };
+        let poster = Cache::new(dir.join("posters"), u64::MAX)
+            .poster(&src, info.duration)
+            .unwrap();
+        for patch in 0..patches.len() {
+            let center = |img: &image::RgbaImage| {
+                img.get_pixel(
+                    ((2 * patch + 1) * img.width() as usize / (2 * patches.len())) as u32,
+                    img.height() / 2,
+                )
+                .0
+            };
+            let want = center(&original);
+            // Three codes for CPU/GPU float/UNORM rounding, six for an additional CRF23 proxy
+            // encode and YUV round-trip. Flat centers exclude downsampling/chroma boundaries.
+            let mut comparisons = vec![("poster", center(&poster), 3)];
+            if let Some(proxy) = &proxy {
+                comparisons.push(("proxy", center(proxy), 6));
+            }
+            for (what, got, tolerance) in comparisons {
+                assert!(
+                    got[..3]
+                        .iter()
+                        .zip(&want[..3])
+                        .all(|(g, w)| g.abs_diff(*w) <= tolerance),
+                    "case {i} {hdr:?} {what} patch {patch}: {got:?}, original {want:?}"
+                );
+            }
+        }
+        proxies.set_enabled(false);
+        assert_eq!(proxies.resolve(&src), src);
+        assert_eq!(
+            std::fs::read(&src).unwrap(),
+            original_bytes,
+            "source is immutable"
+        );
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn fit_letterboxes_and_pillarboxes() {
     // 16:9 in a tall view: full width, centred vertically.
     assert_eq!(
@@ -300,4 +567,425 @@ fn scale_rounds_up_and_never_hits_zero() {
     assert_eq!(scaled(1920, 1080, 4), (480, 270));
     assert_eq!(scaled(1081, 1, 2), (541, 1));
     assert_eq!(scaled(3, 3, 4), (1, 1));
+}
+
+/// Measures upload + conversion only: no decode, composition, or read-back in the timed loop.
+#[test]
+fn fixed_format_upload_allocation_counts_and_timing() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    let (w, h) = (1920, 1080);
+    let mut y = vec![126; (w * h) as usize];
+    let chroma = vec![128; (w * h / 4) as usize];
+    for _ in 0..3 {
+        preview.upload(
+            &device,
+            &queue,
+            &Yuv {
+                width: w,
+                height: h,
+                planes: [&y, &chroma, &chroma],
+                bt709: true,
+                full_range: false,
+                hdr: None,
+            },
+            1,
+        );
+    }
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let before = preview.upload_allocations();
+    let start = std::time::Instant::now();
+    for i in 0..30 {
+        y[0] = 16 + i;
+        preview.upload(
+            &device,
+            &queue,
+            &Yuv {
+                width: w,
+                height: h,
+                planes: [&y, &chroma, &chroma],
+                bt709: true,
+                full_range: false,
+                hdr: None,
+            },
+            1,
+        );
+    }
+    let submit = start.elapsed();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let total = start.elapsed();
+    let after = preview.upload_allocations();
+    eprintln!(
+        "upload-only 30x1920x1080 SDR: submit={submit:?}, drain={:?}, total={total:?}, warm={before:?}, end={after:?}",
+        total - submit
+    );
+    assert_eq!(
+        after.plane_textures, before.plane_textures,
+        "same-format plane textures must be retained"
+    );
+    assert_eq!(
+        after.conversion_buffers, before.conversion_buffers,
+        "same-format uniform must be retained"
+    );
+    assert_eq!(
+        after.converted_images, before.converted_images,
+        "unleased compatible outputs must be reused"
+    );
+    assert_eq!(
+        after.bind_groups, before.bind_groups,
+        "compatible bindings must be retained"
+    );
+}
+
+fn upload_frame(
+    preview: &mut Preview,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    f: &jvid_media::decode::Frame,
+    scale: u32,
+) {
+    preview.upload(
+        device,
+        queue,
+        &Yuv {
+            width: f.width,
+            height: f.height,
+            planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
+            bt709: f.bt709,
+            full_range: f.full_range,
+            hdr: f.hdr,
+        },
+        scale,
+    );
+}
+
+fn patterned_frame(
+    w: u32,
+    h: u32,
+    bt709: bool,
+    full_range: bool,
+    hdr: Option<Hdr>,
+    seed: u32,
+) -> jvid_media::decode::Frame {
+    let planes = std::array::from_fn(|plane| {
+        let n = if plane == 0 {
+            w * h
+        } else {
+            w.div_ceil(2) * h.div_ceil(2)
+        };
+        (0..n)
+            .flat_map(|i| {
+                let code = 16 + (i * 13 + seed * 29 + plane as u32 * 31) % 220;
+                if hdr.is_some() {
+                    ((code * 4) as u16).to_le_bytes().to_vec()
+                } else {
+                    vec![code as u8]
+                }
+            })
+            .collect()
+    });
+    jvid_media::decode::Frame {
+        width: w,
+        height: h,
+        pts: Time(0),
+        planes,
+        bt709,
+        full_range,
+        hdr,
+    }
+}
+
+#[test]
+fn reused_uploads_match_fresh_conversion_across_metadata_sizes_and_scales() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut reused = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    let cases = [
+        (true, false, None),
+        (false, false, None),
+        (false, true, None),
+        (true, true, None),
+        (true, false, Some(Hdr::Pq)),
+        (true, false, Some(Hdr::Hlg)),
+        (true, true, Some(Hdr::Pq)),
+        (true, true, Some(Hdr::Hlg)),
+    ];
+    for (w, h) in [(17, 9), (8, 16), (17, 9)] {
+        for scale in [1, 2, 4] {
+            for (seed, (bt709, full, hdr)) in cases.into_iter().enumerate() {
+                let f = patterned_frame(w, h, bt709, full, hdr, seed as u32);
+                let mut fresh = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+                let before = reused.upload_allocations();
+                let same_layout = reused
+                    .inputs
+                    .as_ref()
+                    .is_some_and(|inputs| inputs.key == (w, h, hdr.is_some()));
+                upload_frame(&mut reused, &device, &queue, &f, scale);
+                upload_frame(&mut fresh, &device, &queue, &f, scale);
+                assert_eq!(
+                    read_back(&device, &queue, &reused.image().unwrap()),
+                    read_back(&device, &queue, &fresh.image().unwrap()),
+                    "{w}x{h} scale={scale}, case={seed}"
+                );
+                assert_eq!(reused.outputs.len(), 1, "old sizes/layouts released");
+                if same_layout {
+                    assert_eq!(
+                        reused.upload_allocations().plane_textures,
+                        before.plane_textures
+                    );
+                    assert_eq!(
+                        reused.upload_allocations().conversion_buffers,
+                        before.conversion_buffers
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn retained_image_leases_stay_immutable_and_output_pool_is_bounded() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    let mut retained = Vec::new();
+    for seed in 0..12 {
+        let f = patterned_frame(16, 8, true, false, None, seed);
+        upload_frame(&mut preview, &device, &queue, &f, 1);
+        let image = preview.image().unwrap();
+        let expected = read_back(&device, &queue, &image);
+        retained.push((image.clone(), expected));
+        assert!(preview.outputs.len() <= OUTPUT_POOL_LIMIT);
+    }
+    assert_eq!(preview.outputs.len(), OUTPUT_POOL_LIMIT);
+    for (image, expected) in &retained {
+        assert_eq!(
+            read_back(&device, &queue, image),
+            *expected,
+            "retained frame overwritten"
+        );
+    }
+    drop(retained);
+    let before = preview.upload_allocations();
+    for seed in 12..24 {
+        upload_frame(
+            &mut preview,
+            &device,
+            &queue,
+            &patterned_frame(16, 8, true, false, None, seed),
+            1,
+        );
+    }
+    assert_eq!(
+        preview.upload_allocations(),
+        before,
+        "released leases should recycle outputs and inputs"
+    );
+    upload_frame(
+        &mut preview,
+        &device,
+        &queue,
+        &patterned_frame(9, 17, true, false, Some(Hdr::Pq), 0),
+        4,
+    );
+    assert_eq!(preview.outputs.len(), 1, "incompatible resources released");
+}
+
+#[test]
+fn queued_capture_scopes_and_composition_read_the_leased_frame() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    upload_frame(
+        &mut preview,
+        &device,
+        &queue,
+        &patterned_frame(16, 8, true, false, None, 0),
+        1,
+    );
+    let old = preview.image().unwrap();
+    let expected = read_back(&device, &queue, &old);
+    let copy = texture(&device, 16, 8, IMAGE_FORMAT, &[]);
+    let mut encoder = device.create_command_encoder(&Default::default());
+    encoder.copy_texture_to_texture(old.as_image_copy(), copy.as_image_copy(), old.size());
+    // The copy has been encoded but not submitted: waiting for conversion alone would not
+    // protect it. Its lease must prevent reuse while several later uploads finish.
+    for seed in 1..8 {
+        upload_frame(
+            &mut preview,
+            &device,
+            &queue,
+            &patterned_frame(16, 8, true, false, None, seed),
+            1,
+        );
+    }
+    queue.submit([encoder.finish()]);
+    assert_eq!(read_back(&device, &queue, &copy), expected);
+    let mut compositor = crate::composite::Compositor::new(&device);
+    let composed = compositor.render(
+        &device,
+        &queue,
+        (16, 8),
+        1,
+        [0; 4],
+        &[(&old, Default::default())],
+    );
+    assert_eq!(read_back(&device, &queue, composed), expected);
+    let mut scopes = crate::scope::Scopes::new(&device);
+    scopes.capture(&device, &queue, &old);
+    upload_frame(
+        &mut preview,
+        &device,
+        &queue,
+        &patterned_frame(16, 8, true, false, None, 20),
+        1,
+    );
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let analysis = scopes.poll(&device).expect("completed scope capture");
+    let reference = crate::scope::analyze(&expected, 16);
+    assert_eq!(analysis.histogram, reference.histogram);
+    assert_eq!(analysis.waveform, reference.waveform);
+    assert_eq!(analysis.vectorscope, reference.vectorscope);
+}
+
+#[test]
+fn leased_source_paint_reuses_outputs_after_submission() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    let target = texture(&device, 16, 8, IMAGE_FORMAT, &[]);
+    let view = target.create_view(&Default::default());
+    let mut source_lease = None;
+    let mut warm = None;
+    for seed in 0..8 {
+        // Mirrors Source's prepare/paint ownership: the preceding egui frame was submitted
+        // before prepare drops its lease, and this frame keeps its lease through submission.
+        drop(source_lease.take());
+        let frame = patterned_frame(16, 8, true, false, None, seed);
+        upload_frame(&mut preview, &device, &queue, &frame, 1);
+        source_lease = preview.image();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations::default(),
+                })],
+                ..Default::default()
+            });
+            preview.paint_image(&mut pass, source_lease.as_ref().unwrap());
+        }
+        queue.submit([encoder.finish()]);
+        if let Some(warm) = warm {
+            assert_eq!(preview.upload_allocations(), warm);
+        }
+        warm = Some(preview.upload_allocations());
+        assert_eq!(
+            read_back(&device, &queue, &target),
+            read_back(&device, &queue, source_lease.as_ref().unwrap())
+        );
+    }
+}
+
+#[test]
+fn unleased_paint_keeps_an_unsubmitted_draw_immutable() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    upload_frame(
+        &mut preview,
+        &device,
+        &queue,
+        &patterned_frame(16, 8, true, false, None, 0),
+        1,
+    );
+    let expected = read_back(&device, &queue, &preview.image().unwrap());
+    let target = texture(&device, 16, 8, IMAGE_FORMAT, &[]);
+    let view = target.create_view(&Default::default());
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations::default(),
+            })],
+            ..Default::default()
+        });
+        preview.paint(&mut pass);
+    }
+    upload_frame(
+        &mut preview,
+        &device,
+        &queue,
+        &patterned_frame(16, 8, true, false, None, 1),
+        1,
+    );
+    queue.submit([encoder.finish()]);
+    assert_eq!(read_back(&device, &queue, &target), expected);
+}
+
+#[test]
+fn pooled_upload_and_leased_paint_preserve_codes_on_srgb_targets() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    for format in [IMAGE_FORMAT, IMAGE_FORMAT.add_srgb_suffix()] {
+        let mut preview = Preview::new(&device, format);
+        for hdr in [None, Some(Hdr::Pq), Some(Hdr::Hlg)] {
+            let mut warm = None;
+            for seed in 0..3 {
+                upload_frame(
+                    &mut preview,
+                    &device,
+                    &queue,
+                    &patterned_frame(16, 8, true, false, hdr, seed),
+                    1,
+                );
+                let image = preview.image().unwrap();
+                let target = texture(&device, 16, 8, format, &[]);
+                let view = target.create_view(&Default::default());
+                let mut encoder = device.create_command_encoder(&Default::default());
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations::default(),
+                        })],
+                        ..Default::default()
+                    });
+                    preview.paint_image(&mut pass, &image);
+                }
+                queue.submit([encoder.finish()]);
+                assert_eq!(
+                    read_back(&device, &queue, &target),
+                    read_back(&device, &queue, &image),
+                    "{format:?} {hdr:?}"
+                );
+                if let Some(warm) = warm {
+                    assert_eq!(preview.upload_allocations(), warm);
+                }
+                warm = Some(preview.upload_allocations());
+            }
+        }
+    }
 }

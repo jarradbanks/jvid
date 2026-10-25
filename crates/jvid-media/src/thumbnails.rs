@@ -19,7 +19,7 @@ pub const WIDTH: u32 = 160;
 /// Most filmstrip frames per asset; short clips get one per second.
 pub const STRIP_MAX: i64 = 100;
 /// Bump when the thumbnail format changes so old entries miss.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 /// Filmstrip steps at least this long sample the keyframe before each step rather than the exact
 /// frame: a whole GOP decode per thumbnail makes a long recording's strip take minutes, and a GOP
@@ -39,7 +39,7 @@ pub struct Cache {
 impl Cache {
     /// A cache in `dir` decoding through FFmpeg (videos) or `decode_still` (images).
     pub fn new(dir: PathBuf, cap_bytes: u64) -> Self {
-        let pool = DecoderPool::default();
+        let pool = DecoderPool::hdr();
         Self::with_grab(
             dir,
             cap_bytes,
@@ -72,15 +72,33 @@ impl Cache {
         &self,
         path: &Path,
         duration: Time,
+        progress: impl FnMut(&RgbaImage),
+    ) -> Result<Vec<RgbaImage>, String> {
+        self.filmstrip_until(path, duration, progress, || false)
+    }
+
+    /// Incremental filmstrip with cooperative cancellation between grabs and before disk
+    /// publication. A single in-progress grab must return before cancellation can stop it.
+    pub fn filmstrip_until(
+        &self,
+        path: &Path,
+        duration: Time,
         mut progress: impl FnMut(&RgbaImage),
+        cancelled: impl Fn() -> bool,
     ) -> Result<Vec<RgbaImage>, String> {
         let step = FLICKS_PER_SECOND.max(duration.0 / STRIP_MAX);
         let n = (duration.0 / step).max(1);
         let exact = step < KEYFRAME_STEP.0;
-        let strip = self.cached(path, "strip", || {
+        let strip = self.cached_until(path, "strip", &cancelled, || {
             let frames = (0..n)
                 .map(|i| {
+                    if cancelled() {
+                        return Err("filmstrip cancelled".into());
+                    }
                     let f = (self.grab)(path, Time(i * step), exact)?;
+                    if cancelled() {
+                        return Err("filmstrip cancelled".into());
+                    }
                     progress(&f);
                     Ok(f)
                 })
@@ -120,6 +138,19 @@ impl Cache {
         kind: &str,
         make: impl FnOnce() -> Result<RgbaImage, String>,
     ) -> Result<RgbaImage, String> {
+        self.cached_until(path, kind, &|| false, make)
+    }
+
+    fn cached_until(
+        &self,
+        path: &Path,
+        kind: &str,
+        cancelled: &impl Fn() -> bool,
+        make: impl FnOnce() -> Result<RgbaImage, String>,
+    ) -> Result<RgbaImage, String> {
+        if cancelled() {
+            return Err("filmstrip cancelled".into());
+        }
         let file = self.dir.join(format!("{}.{kind}.png", key(path)?));
         if let Ok(img) = image::open(&file) {
             // The file's mtime is its last use, for LRU eviction.
@@ -130,18 +161,33 @@ impl Cache {
             return Ok(img.into_rgba8());
         }
         let img = make()?;
-        if let Err(e) = self.store(&file, &img) {
+        if cancelled() {
+            return Err("filmstrip cancelled".into());
+        }
+        if let Err(e) = self.store(&file, &img, cancelled) {
+            if cancelled() {
+                return Err(e);
+            }
             tracing::warn!("thumbnails: can't write {}: {e}", file.display());
         }
         Ok(img)
     }
 
-    fn store(&self, file: &Path, img: &RgbaImage) -> Result<(), String> {
+    fn store(
+        &self,
+        file: &Path,
+        img: &RgbaImage,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), String> {
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         // Write then rename, so a crash never leaves a half-written entry.
         let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
         img.save_with_format(&tmp, ImageFormat::Png)
             .map_err(|e| e.to_string())?;
+        if cancelled() {
+            let _ = fs::remove_file(&tmp);
+            return Err("filmstrip cancelled".into());
+        }
         fs::rename(&tmp, file).map_err(|e| e.to_string())?;
         evict(&self.dir, self.cap_bytes);
         Ok(())
@@ -201,25 +247,10 @@ fn grab(pool: &DecoderPool, path: &Path, t: Time, exact: bool) -> Result<RgbaIma
     Ok(to_rgba(&f, WIDTH))
 }
 
-/// Nearest-neighbour scale to `w` wide and BT.601 limited-range YUV to RGB.
-// shortcut: assumes BT.601 limited range; use the frame's colour info once Frame carries it (#23).
+/// Scale to `w` wide using the same metadata-aware SDR view as preview and proxies.
 fn to_rgba(f: &Frame, w: u32) -> RgbaImage {
     let h = (w as u64 * f.height as u64 / f.width.max(1) as u64).max(1) as u32;
-    let (fw, cw) = (f.width as usize, f.width.div_ceil(2) as usize);
-    RgbaImage::from_fn(w, h, |x, y| {
-        let sx = (x as u64 * f.width as u64 / w as u64) as usize;
-        let sy = (y as u64 * f.height as u64 / h as u64) as usize;
-        let c = 298 * (f.planes[0][sy * fw + sx] as i32 - 16);
-        let d = f.planes[1][sy / 2 * cw + sx / 2] as i32 - 128;
-        let e = f.planes[2][sy / 2 * cw + sx / 2] as i32 - 128;
-        let px = |v: i32| ((v + 128) >> 8).clamp(0, 255) as u8;
-        image::Rgba([
-            px(c + 409 * e),
-            px(c - 100 * d - 208 * e),
-            px(c + 516 * d),
-            255,
-        ])
-    })
+    f.view_rgba((w, h))
 }
 
 #[cfg(test)]
@@ -300,6 +331,32 @@ mod tests {
     }
 
     #[test]
+    fn old_color_conversion_cache_misses() {
+        let d = tmp("color-version");
+        let p = d.join("clip.mp4");
+        fs::write(&p, b"source remains unchanged").unwrap();
+        let m = fs::metadata(&p).unwrap();
+        let mut old = DefaultHasher::new();
+        (1u32, p.as_path(), m.len(), m.modified().ok()).hash(&mut old);
+        let old_key = format!("{:016x}", old.finish());
+        assert_ne!(key(&p).unwrap(), old_key);
+        let cache = d.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        RgbaImage::new(WIDTH, 90)
+            .save(cache.join(format!("{old_key}.poster.png")))
+            .unwrap();
+        let (c, n) = counting(cache, u64::MAX);
+        c.poster(&p, SECS).unwrap();
+        assert_eq!(
+            n.load(Ordering::SeqCst),
+            1,
+            "old conversion must regenerate"
+        );
+        assert_eq!(fs::read(&p).unwrap(), b"source remains unchanged");
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
     fn evicts_least_recently_used_over_the_cap() {
         let d = tmp("lru");
         let cache = d.join("cache");
@@ -352,6 +409,36 @@ mod tests {
     }
 
     #[test]
+    fn poster_conversion_honors_sdr_matrix_and_range() {
+        // Independently tabulated 75% yellow, rounded to 8-bit YUV codes. The 709/full patch
+        // fails by over ten codes with the old fixed 601/limited conversion.
+        for (bt709, full_range, yuv) in [
+            (false, false, [161, 44, 141]),
+            (false, true, [169, 33, 144]),
+            (true, false, [168, 44, 136]),
+            (true, true, [177, 33, 137]),
+        ] {
+            let f = Frame {
+                pts: Time(0),
+                width: 2,
+                height: 2,
+                planes: [vec![yuv[0]; 4], vec![yuv[1]], vec![yuv[2]]],
+                bt709,
+                full_range,
+                hdr: None,
+            };
+            let got = to_rgba(&f, 2).get_pixel(0, 0).0;
+            assert!(
+                got[..3]
+                    .iter()
+                    .zip([191, 191, 0])
+                    .all(|(g, w)| g.abs_diff(w) <= 3),
+                "709={bt709} full={full_range}: {got:?}"
+            );
+        }
+    }
+
+    #[test]
     fn real_decode_poster_and_strip() {
         let Some(dir) = crate::test_media::corpus() else {
             return;
@@ -378,6 +465,43 @@ mod tests {
         assert_eq!(strip.len(), 10);
         // Cached: all at once, nothing to report.
         c.filmstrip_with(&p, SECS, |_| panic!("cached")).unwrap();
+    }
+
+    #[test]
+    fn cancellation_after_last_frame_skips_publication_and_permits_retry() {
+        let d = tmp("cancel-publication");
+        let p = d.join("source.mov");
+        fs::write(&p, b"source").unwrap();
+        let (cache, grabs) = counting(d.join("cache"), u64::MAX);
+        let cancel = std::cell::Cell::new(false);
+        let mut seen = 0;
+        assert!(
+            cache
+                .filmstrip_until(
+                    &p,
+                    SECS,
+                    |_| {
+                        seen += 1;
+                        if seen == 10 {
+                            cancel.set(true);
+                        }
+                    },
+                    || cancel.get()
+                )
+                .is_err()
+        );
+        assert_eq!(seen, 10);
+        assert_eq!(grabs.load(Ordering::SeqCst), 10);
+        assert!(!d.join("cache").exists());
+        assert_eq!(cache.filmstrip(&p, SECS).unwrap().len(), 10);
+        assert_eq!(grabs.load(Ordering::SeqCst), 20);
+        // A cancelled cache-only request must not deliver frames or decode anything.
+        assert!(
+            cache
+                .filmstrip_until(&p, SECS, |_| panic!("cancelled"), || true)
+                .is_err()
+        );
+        assert_eq!(grabs.load(Ordering::SeqCst), 20);
     }
 
     #[test]

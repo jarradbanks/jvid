@@ -2210,6 +2210,75 @@ impl Sequence {
             .collect()
     }
 
+    /// Plans one selection move for both preview and application. Track offsets are
+    /// relative to the anchor; a destination outside the stack or of another kind refuses
+    /// the whole move. Linked partners join the selection even when not explicitly picked.
+    pub fn plan_move_selection(
+        &self,
+        ids: &[ClipId],
+        anchor: ClipId,
+        track: TrackId,
+        start: Time,
+    ) -> Result<Vec<(TrackId, Clip)>, ModelError> {
+        let (from, c) = self.clip(anchor).ok_or(ModelError::UnknownClip(anchor))?;
+        let offset = self.index(track)? as isize - self.index(from)? as isize;
+        let mut moving = BTreeMap::new();
+        for id in ids.iter().copied().chain(std::iter::once(anchor)) {
+            self.clip(id).ok_or(ModelError::UnknownClip(id))?;
+            for (t, c) in self.linked(id) {
+                moving.insert(c.id, (t, c.clone()));
+            }
+        }
+        let earliest = moving.values().map(|(_, c)| c.start).min().expect("anchor");
+        let by = (start - c.start).max(Time(0) - earliest);
+        moving
+            .into_values()
+            .map(|(from, mut c)| {
+                let ti = self.index(from)?;
+                let to = (ti as isize + offset)
+                    .try_into()
+                    .ok()
+                    .and_then(|i: usize| self.tracks.get(i))
+                    .ok_or(ModelError::WrongKind(track))?;
+                self.kind_check(to.id, self.tracks[ti].kind)?;
+                for t in [&self.tracks[ti], to] {
+                    if t.locked {
+                        return Err(ModelError::Locked(t.id));
+                    }
+                }
+                c.start = c.start + by;
+                Ok((to.id, c))
+            })
+            .collect()
+    }
+
+    pub(crate) fn move_selection(
+        &mut self,
+        ids: &[ClipId],
+        anchor: ClipId,
+        track: TrackId,
+        start: Time,
+    ) -> Result<(), ModelError> {
+        let moved = self.plan_move_selection(ids, anchor, track, start)?;
+        let mut s = self.clone();
+        for (_, c) in &moved {
+            s.remove_clip(c.id)?;
+        }
+        let mut links = BTreeMap::new();
+        // Clear every destination before inserting, so moving members cannot overwrite one
+        // another even where their new spans overlap another member's original position.
+        for (t, c) in &moved {
+            let ti = s.index(*t)?;
+            s.clear(ti, c.start, c.end(), &mut links);
+        }
+        for (t, c) in moved {
+            let ti = s.index(t)?;
+            insert_sorted(&mut s.tracks[ti].clips, c);
+        }
+        *self = s;
+        Ok(())
+    }
+
     /// Drags clip `id` to `start` on `track`, its linked clips by the same time on their own
     /// tracks, overwriting whatever they land on. Nothing moves before zero.
     pub(crate) fn drag_clip(
@@ -2247,23 +2316,53 @@ impl Sequence {
 }
 
 impl Sequence {
-    /// Removes the clips. Ripple closes each gap by pulling later clips on its track left.
+    /// Removes the clips atomically. Ripple plans each surviving linked group's common
+    /// shift from the union of deleted intervals relative to its members' starts. This
+    /// counts corresponding A/V intervals once even when the partners have an offset.
     pub(crate) fn remove_clips(&mut self, ids: &[ClipId], ripple: bool) -> Result<(), ModelError> {
         let mut s = self.clone();
         let mut gone = Vec::new();
         for &id in ids {
-            gone.push(s.remove_clip(id)?);
+            if !gone.iter().any(|(_, c): &(TrackId, Clip)| c.id == id) {
+                gone.push(s.remove_clip(id)?);
+            }
         }
         if ripple {
-            gone.sort_by_key(|(_, c)| std::cmp::Reverse(c.start));
-            for (t, c) in gone {
-                let ti = s.index(t)?;
-                for later in &mut s.tracks[ti].clips {
-                    if later.start >= c.start {
-                        later.start = later.start - c.duration();
+            let mut shifts = BTreeMap::new();
+            for track in &s.tracks {
+                for clip in &track.clips {
+                    if shifts.contains_key(&clip.id) {
+                        continue;
+                    }
+                    let group = s.linked(clip.id);
+                    let mut intervals: Vec<_> = group
+                        .iter()
+                        .flat_map(|(t, c)| {
+                            gone.iter()
+                                .filter(move |(from, removed)| {
+                                    from == t && removed.end() <= c.start
+                                })
+                                .map(|(_, removed)| {
+                                    (removed.start - c.start, removed.end() - c.start)
+                                })
+                        })
+                        .collect();
+                    intervals.sort_unstable();
+                    let mut union: Vec<(Time, Time)> = Vec::new();
+                    for (start, end) in intervals {
+                        if let Some(last) = union.last_mut().filter(|last| start <= last.1) {
+                            last.1 = last.1.max(end);
+                        } else {
+                            union.push((start, end));
+                        }
+                    }
+                    let by = union.into_iter().fold(Time(0), |by, (a, b)| by - (b - a));
+                    for (_, c) in group {
+                        shifts.insert(c.id, by);
                     }
                 }
             }
+            s.apply_shifts(&shifts)?;
         }
         *self = s;
         Ok(())
@@ -2742,30 +2841,95 @@ impl Project {
         })
     }
 
-    /// The enabled text clips on subtitle tracks as cues, sorted by start.
+    /// Visible subtitle cues in the open sequence, including every placed nested instance.
     pub fn subtitle_cues(&self) -> Vec<crate::srt::Cue> {
-        let tracks = self.sequence.tracks.iter().filter(|t| t.subtitles);
-        let mut cues: Vec<_> = tracks
-            .flat_map(|t| &t.clips)
-            .filter(|c| c.enabled)
-            .filter_map(|c| {
-                let text = self.asset(c.asset)?.text.as_ref()?;
-                Some(crate::srt::Cue {
-                    start: c.start,
-                    end: c.end(),
-                    text: text.content.clone(),
-                })
-            })
-            .collect();
+        let mut cues = self.subtitle_cues_in(&self.sequence, 1);
         cues.sort_by_key(|c| c.start);
         cues
     }
 
-    /// A copy with subtitle tracks hidden, for exporting them as a sidecar instead of burnt in.
+    fn subtitle_cues_in(&self, sequence: &Sequence, depth: usize) -> Vec<crate::srt::Cue> {
+        if depth > MAX_NEST_DEPTH {
+            return Vec::new();
+        }
+        let video = || {
+            sequence
+                .tracks
+                .iter()
+                .filter(|t| t.kind == TrackKind::Video)
+        };
+        let solo = video().any(|t| t.solo);
+        let mut cues = Vec::new();
+        for track in video().filter(|t| !t.hidden && (!solo || t.solo)) {
+            for clip in track.clips.iter().filter(|c| c.enabled) {
+                if track.subtitles
+                    && let Some(text) = self.asset(clip.asset).and_then(|a| a.text.as_ref())
+                {
+                    cues.push(crate::srt::Cue {
+                        start: clip.start,
+                        end: clip.end(),
+                        text: text.content.clone(),
+                    });
+                }
+                let Some(child) = self.nested(clip.asset) else {
+                    continue;
+                };
+                for mut cue in self.subtitle_cues_in(child, depth + 1) {
+                    let span = if let Some(frozen) = clip.freeze {
+                        (cue.start <= frozen && frozen < cue.end)
+                            .then_some((clip.start, clip.end()))
+                    } else {
+                        let (a, b) = (cue.start.max(clip.source_in), cue.end.min(clip.source_out));
+                        (a < b).then(|| {
+                            // Cue endpoints are half-open boundaries. Reverse playback's
+                            // sampled last flick is source_out - 1, but its boundary is out.
+                            let at = |s| {
+                                if clip.reverse {
+                                    clip.start + clip.timeline_len(s, clip.source_out)
+                                } else {
+                                    clip.timeline_at(s)
+                                }
+                            };
+                            let (x, y) = (at(a), at(b));
+                            (x.min(y).max(clip.start), x.max(y).min(clip.end()))
+                        })
+                    };
+                    if let Some((start, end)) = span.filter(|(a, b)| a < b) {
+                        (cue.start, cue.end) = (start, end);
+                        cues.push(cue);
+                    }
+                }
+            }
+        }
+        cues
+    }
+
+    /// A copy with subtitle text suppressed, for sidecar export. Subtitle-only tracks are
+    /// hidden; mixed tracks keep their containers/media and suppress direct text clips.
     pub fn without_subtitles(&self) -> Project {
         let mut p = self.clone();
-        for t in p.sequence.tracks.iter_mut().filter(|t| t.subtitles) {
-            t.hidden = true;
+        let text_assets: std::collections::BTreeSet<_> = p
+            .assets
+            .iter()
+            .filter(|a| a.text.is_some())
+            .map(|a| a.id)
+            .collect();
+        for sequence in std::iter::once(&mut p.sequence).chain(&mut p.sequences) {
+            for track in sequence.tracks.iter_mut().filter(|t| t.subtitles) {
+                // Nesting can put a whole section on a subtitle-marked outer track. Keep
+                // its container/media clips on that exact track with their original settings.
+                if track.clips.iter().any(|c| !text_assets.contains(&c.asset)) {
+                    for clip in track
+                        .clips
+                        .iter_mut()
+                        .filter(|c| text_assets.contains(&c.asset))
+                    {
+                        clip.enabled = false;
+                    }
+                } else {
+                    track.hidden = true;
+                }
+            }
         }
         p
     }
@@ -3020,6 +3184,18 @@ impl Sequence {
         Ok(())
     }
 
+    /// Validate the full mutation closure before a ripple changes any starts.
+    fn check_shift_locks(&self, ids: &[ClipId]) -> Result<(), ModelError> {
+        for id in ids {
+            for (track, _) in self.linked(*id) {
+                if self.track(track).is_some_and(|t| t.locked) {
+                    return Err(ModelError::Locked(track));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Moves `ids` and their linked partners on other tracks by `by`, so ripples keep sync.
     /// Fails, leaving `self` half-moved, if a moved clip would land on another or before zero.
     fn shift_synced(&mut self, mut ids: Vec<ClipId>, by: Time) -> Result<(), ModelError> {
@@ -3030,16 +3206,28 @@ impl Sequence {
                 }
             }
         }
+        let shifts = ids.into_iter().map(|id| (id, by)).collect();
+        self.apply_shifts(&shifts)
+    }
+
+    /// Applies a complete ripple plan on a private candidate, validating the final layout.
+    fn apply_shifts(&mut self, shifts: &BTreeMap<ClipId, Time>) -> Result<(), ModelError> {
+        let moving: Vec<_> = shifts
+            .iter()
+            .filter(|(_, by)| **by != Time(0))
+            .map(|(id, _)| *id)
+            .collect();
+        self.check_shift_locks(&moving)?;
         for t in &mut self.tracks {
-            for c in t.clips.iter_mut().filter(|c| ids.contains(&c.id)) {
-                c.start = c.start + by;
+            for c in &mut t.clips {
+                c.start = c.start + shifts.get(&c.id).copied().unwrap_or_default();
                 if c.start < Time(0) {
                     return Err(ModelError::Overlap(c.id));
                 }
             }
             t.clips.sort_by_key(|c| c.start);
             if let Some(w) = t.clips.windows(2).find(|w| w[0].end() > w[1].start) {
-                let hit = if ids.contains(&w[0].id) {
+                let hit = if moving.contains(&w[0].id) {
                     w[1].id
                 } else {
                     w[0].id

@@ -33,24 +33,23 @@ fn main() -> ExitCode {
         Ok(r) => r,
         Err(e) => return fail(2, &e),
     };
-    let gpu = match export::headless_gpu() {
-        Ok(g) => g,
-        Err(e) => return fail(4, &e),
-    };
     let pool = jvid_jobs::Pool::new(1);
-    let (handle, rx) = export::submit(&pool, project, req, gpu);
+    let (handle, rx) = match start_export(&pool, project, req, export::headless_gpu) {
+        Ok(job) => job,
+        Err((code, error)) => return fail(code, &error),
+    };
     let result = loop {
         match rx.recv_timeout(Duration::from_millis(250)) {
             Ok(r) => break r,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                progress(handle.progress(), args.json)
+                progress(&handle.snapshot(), args.json)
             }
             Err(e) => break Err(Error::Failed(e.to_string())),
         }
     };
+    progress(&handle.snapshot(), args.json);
     match result {
         Ok(_) => {
-            progress(1.0, args.json);
             if !args.json {
                 eprintln!();
             }
@@ -61,11 +60,50 @@ fn main() -> ExitCode {
     }
 }
 
-fn progress(p: f32, json: bool) {
-    if json {
-        eprintln!("{{\"progress\":{p:.4}}}");
+type ExportJob = (
+    export::ExportHandle,
+    std::sync::mpsc::Receiver<Result<jvid_core::model::ProbeInfo, Error>>,
+);
+
+fn start_export(
+    pool: &jvid_jobs::Pool,
+    project: Project,
+    req: Request,
+    acquire: impl FnOnce() -> Result<export::GpuContext, String>,
+) -> Result<ExportJob, (u8, String)> {
+    let gpu = if req.needs_gpu() {
+        Some(acquire().map_err(|e| (4, format!("{e}. Composited video needs a rendering device; install a working graphics driver or a software Vulkan adapter such as Mesa lavapipe.")))?)
     } else {
-        eprint!("\rrendering {:5.1}%", p * 100.0);
+        None
+    };
+    Ok(export::submit(pool, project, req, gpu))
+}
+
+fn progress_line(status: &export::Snapshot, json: bool) -> String {
+    let number = |value: Option<f64>| value.map_or("null".into(), |v| format!("{v:.4}"));
+    if json {
+        let pass = status.phase.pass().map_or("null".into(), |p| p.to_string());
+        format!(
+            "{{\"progress\":{},\"phase\":\"{}\",\"pass\":{pass},\"retry\":{},\"phase_eta_seconds\":{}}}",
+            number(status.progress.map(f64::from)),
+            status.phase.id(),
+            status.retry,
+            number(status.phase_left())
+        )
+    } else {
+        let fraction = status
+            .progress
+            .map_or(String::new(), |p| format!(" {:5.1}%", p * 100.0));
+        format!("{}{fraction}", status.phase.label())
+    }
+}
+
+fn progress(status: &export::Snapshot, json: bool) {
+    let line = progress_line(status, json);
+    if json {
+        eprintln!("{line}");
+    } else {
+        eprint!("\r{line}                    ");
     }
 }
 

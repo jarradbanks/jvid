@@ -21,13 +21,14 @@ use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Fx, Mixer, Output, SAMPLE_RATE, Strip, automate};
 use jvid_core::eval::{AudioSegment, Layer, audio_in, frame_at, gains};
 use jvid_core::model::{
-    AssetId, ClipId, MediaAsset, Project, ProjectSettings, Sequence, SequenceId, TrackKind,
-    Transform,
+    AssetId, ClipId, MediaAsset, Project, ProjectSettings, Sequence, SequenceId, TrackId,
+    TrackKind, Transform,
 };
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::decode::{DecoderPool, Frame};
 use jvid_media::proxy::Proxies;
+use jvid_media::stills;
 use jvid_render::composite::{self, Compositor};
 use jvid_render::preview::{Preview, Yuv};
 use jvid_render::{solid, text};
@@ -60,8 +61,17 @@ pub type OpenAudio = Box<dyn FnMut(&Path, usize) -> ClipAudio>;
 type Key = (AssetId, Time);
 /// A finished decode, the path it was decoded from and how long decoding took.
 type Done = (Key, PathBuf, Duration, Result<Frame, String>);
+/// A finished still decode and the explicit media-refresh generation that owns it.
+type StillDone = (AssetId, PathBuf, u64, Result<Arc<image::RgbaImage>, String>);
+
 /// A finished keyframe stand-in and the path it was decoded from.
-type QuickDone = (Key, PathBuf, Result<Frame, String>);
+type QuickDone = (Key, PathBuf, u64, Result<Frame, String>);
+
+struct QuickRequest {
+    path: PathBuf,
+    generation: u64,
+    handle: Handle,
+}
 
 /// What to draw for one timeline frame.
 pub struct Shown {
@@ -77,6 +87,10 @@ pub struct Shown {
 #[derive(Clone)]
 pub enum Pixels {
     Frame(Arc<Frame>),
+    /// A proxy or stand-in with the original asset's logical dimensions.
+    Sampled(Arc<Frame>, (u32, u32)),
+    /// An imported still, upright straight RGBA, shared for its file version.
+    Still(Arc<image::RgbaImage>),
     /// A solid color layer, straight RGBA.
     Solid([u8; 4]),
     /// A text layer rasterized at project size, straight RGBA.
@@ -223,9 +237,8 @@ pub(crate) struct Audio {
     seg: Vec<f32>,
     /// Source samples for a clip not at 100% speed, before resampling.
     stretch: Vec<f32>,
-    mixer: Mixer,
-    /// One buffer per audio track, reused across blocks.
-    inputs: Vec<Vec<f32>>,
+    /// Taken temporarily while its readers borrow the clip sources.
+    mixer: Option<Mixer>,
 }
 
 impl Audio {
@@ -242,8 +255,7 @@ impl Audio {
             scratch: Vec::new(),
             seg: Vec::new(),
             stretch: Vec::new(),
-            mixer: Mixer::new(0),
-            inputs: Vec::new(),
+            mixer: None,
         }
     }
 
@@ -252,6 +264,7 @@ impl Audio {
         self.clips.clear();
         self.fx.clear();
         self.nested.clear();
+        self.mixer = None;
     }
 
     /// Opens and seeks clips heard within [`AUDIO_AHEAD`] of `pos`, so they start on time, and
@@ -261,7 +274,19 @@ impl Audio {
     }
 
     fn prime_in(&mut self, project: &Project, seq: &Sequence, pos: Time) {
-        let segs = audio_in(seq, pos, pos + AUDIO_AHEAD);
+        // Open at the earliest input the effect readers will request. Otherwise the first
+        // render after a seek immediately seeks the asynchronous feeder backwards again.
+        let tracks = seq.tracks().iter().filter(|t| t.kind == TrackKind::Audio);
+        let track_fx = tracks.clone().any(|t| !t.fx.is_default());
+        let clip_fx = tracks
+            .flat_map(|t| t.clips())
+            .any(|c| !c.transform.audio_fx.is_default());
+        let history = (usize::from(track_fx) + usize::from(clip_fx)) * Fx::PREROLL;
+        let segs = audio_in(
+            seq,
+            pos - Time(history as i64 * FLICKS_PER_SAMPLE),
+            pos + AUDIO_AHEAD,
+        );
         self.clips.retain(|c, _| segs.iter().any(|s| s.clip == *c));
         self.fx.retain(|c, _| segs.iter().any(|s| s.clip == *c));
         self.nested.retain(|c, _| segs.iter().any(|s| s.clip == *c));
@@ -318,28 +343,96 @@ impl Audio {
                 fx: t.fx,
             })
             .collect();
-        if self.inputs.len() != tracks.len() {
-            self.mixer = Mixer::with_strips(&strips);
-            self.inputs = vec![Vec::new(); tracks.len()];
-        }
-        for b in &mut self.inputs {
-            b.clear();
-            b.resize(out.len(), 0.0);
-        }
+        let mut mixer = self
+            .mixer
+            .take()
+            .filter(|m| m.tracks() == tracks.len())
+            .unwrap_or_else(|| Mixer::with_strips(&strips));
+        mixer.set_strips(&strips);
+        mixer.render(start, out, |i, at, buf| {
+            self.track_input(project, seq, tracks[i].id, at, buf);
+        });
+        self.mixer = Some(mixer);
+    }
+
+    /// Builds one track at the timeline positions requested by its effects. Each clip's effect
+    /// reader independently pulls its own lookahead, then gain is applied at the output time.
+    fn track_input(
+        &mut self,
+        project: &Project,
+        seq: &Sequence,
+        track_id: TrackId,
+        start: i64,
+        out: &mut [f32],
+    ) {
+        out.fill(0.0);
         let frames = out.len() as i64 / 2;
         let span = |t: Time| (sample(t) - start).clamp(0, frames) as usize * 2;
         let end = Time((start + frames) * FLICKS_PER_SAMPLE);
-        for s in audio_in(seq, Time(start * FLICKS_PER_SAMPLE), end) {
-            let (Some(i), Some(asset)) = (
-                tracks.iter().position(|t| t.id == s.track),
-                project.asset(s.asset),
-            ) else {
+        let mut segment = std::mem::take(&mut self.seg);
+        for s in audio_in(seq, Time(start * FLICKS_PER_SAMPLE), end)
+            .into_iter()
+            .filter(|s| s.track == track_id)
+        {
+            let Some((t, c)) = seq.clip(s.clip) else {
                 continue;
             };
+            let Some(track) = seq.track(t) else { continue };
             let range = span(s.start)..span(s.end);
-            let out = &mut self.seg;
-            out.clear();
-            out.resize(range.len(), 0.0);
+            segment.clear();
+            segment.resize(range.len(), 0.0);
+            let mut fx = self.fx.remove(&s.clip).unwrap_or_default();
+            fx.render(
+                &c.transform.audio_fx,
+                sample(s.start),
+                &mut segment,
+                |at, buf| {
+                    self.clip_input(project, seq, s.clip, at, buf);
+                },
+            );
+            self.fx.insert(s.clip, fx);
+            let (first, gain) = (sample(s.start), gains(track, c));
+            let at = |i: usize| {
+                let t = Time((first + i as i64) * FLICKS_PER_SAMPLE);
+                let (v, p) = c.gain_at(t);
+                ((v * gain(t)) as f32, p as f32)
+            };
+            if c.gain_animated() || s.crossfade {
+                automate(&mut segment, at);
+            } else if c.transform.volume != 1.0 || c.transform.pan != 0.0 {
+                let g = at(0);
+                automate(&mut segment, |_| g);
+            }
+            out[range]
+                .iter_mut()
+                .zip(&segment)
+                .for_each(|(m, x)| *m += x);
+        }
+        self.seg = segment;
+    }
+
+    /// Raw clip input in timeline samples, including silence before/after its evaluated span.
+    /// Keeping trim/speed/transition evaluation here also bounds effect flushes to the clip.
+    fn clip_input(
+        &mut self,
+        project: &Project,
+        seq: &Sequence,
+        clip: ClipId,
+        start: i64,
+        out: &mut [f32],
+    ) {
+        out.fill(0.0);
+        let frames = out.len() as i64 / 2;
+        let span = |t: Time| (sample(t) - start).clamp(0, frames) as usize * 2;
+        let end = Time((start + frames) * FLICKS_PER_SAMPLE);
+        for s in audio_in(seq, Time(start * FLICKS_PER_SAMPLE), end)
+            .into_iter()
+            .filter(|s| s.clip == clip)
+        {
+            let Some(asset) = project.asset(s.asset) else {
+                continue;
+            };
+            let out = &mut out[span(s.start)..span(s.end)];
             if let Some(n) = project.nested(asset.id) {
                 let open = &self.open;
                 let child = self.nested.entry(s.clip);
@@ -362,33 +455,7 @@ impl Audio {
                     out.iter_mut().zip(&self.scratch).for_each(|(o, x)| *o += x);
                 }
             }
-            if let Some((t, c)) = seq.clip(s.clip)
-                && let Some(track) = seq.track(t)
-            {
-                // Effects before gain, so fades and automation don't change how it compresses.
-                if !c.transform.audio_fx.is_default() {
-                    let fx = self.fx.entry(s.clip).or_default();
-                    fx.process(&c.transform.audio_fx, out);
-                }
-                let (first, gain) = (sample(s.start), gains(track, c));
-                let at = |i: usize| {
-                    let t = Time((first + i as i64) * FLICKS_PER_SAMPLE);
-                    let (v, p) = c.gain_at(t);
-                    ((v * gain(t)) as f32, p as f32)
-                };
-                if c.gain_animated() || s.crossfade {
-                    automate(out, at);
-                } else if c.transform.volume != 1.0 || c.transform.pan != 0.0 {
-                    let g = at(0);
-                    automate(out, |_| g);
-                }
-            }
-            let mixed = &mut self.inputs[i][range];
-            mixed.iter_mut().zip(&*out).for_each(|(m, x)| *m += x);
         }
-        self.mixer.set_strips(&strips);
-        let inputs: Vec<&[f32]> = self.inputs.iter().map(Vec::as_slice).collect();
-        self.mixer.mix(&inputs, out);
     }
 }
 
@@ -441,10 +508,18 @@ fn open_streams(open: &mut OpenAudio, asset: &MediaAsset, stream: Option<u32>) -
 
 /// The timeline playback engine. See the module docs.
 pub struct Playback {
+    session: u64,
+    quick_handles: HashMap<Key, QuickRequest>,
+    quick_generation: u64,
     pub transport: Transport,
     pub cache: FrameCache,
+    stills: HashMap<AssetId, Arc<image::RgbaImage>>,
+    still_generation: u64,
+    still_tx: Sender<StillDone>,
+    still_done: Receiver<StillDone>,
     jobs: Pool,
     decode: DecodeFn,
+    decode_notify: Option<Arc<dyn Fn() + Send + Sync>>,
     pending: HashMap<Key, Handle>,
     /// Decodes the keyframe before a source time, for stand-ins; `None` shows none.
     pub quick: Option<DecodeFn>,
@@ -477,11 +552,20 @@ impl Playback {
     pub fn new(decode: DecodeFn, open_audio: OpenAudio, budget: usize) -> Self {
         let (done_tx, done) = channel();
         let (quick_tx, quick_done) = channel();
+        let (still_tx, still_done) = channel();
         Self {
+            session: 0,
+            quick_handles: HashMap::new(),
+            quick_generation: 0,
             transport: Transport::new(Time(0), Rate::new(30, 1)),
             cache: FrameCache::new(budget),
+            stills: HashMap::new(),
+            still_generation: 0,
+            still_tx,
+            still_done,
             jobs: Pool::new(DECODE_THREADS),
             decode,
+            decode_notify: None,
             pending: HashMap::new(),
             quick: None,
             quick_jobs: Pool::new(1),
@@ -499,6 +583,12 @@ impl Playback {
             audio: Audio::new(open_audio),
             sequence: SequenceId::default(),
         }
+    }
+
+    /// Wakes a host event loop after a decode publishes success or failure. The core needs no
+    /// event loop; tests and offline consumers may leave this unset.
+    pub fn set_decode_notify(&mut self, notify: Arc<dyn Fn() + Send + Sync>) {
+        self.decode_notify = Some(notify);
     }
 
     /// Decodes project media from files.
@@ -532,9 +622,51 @@ impl Playback {
         pb
     }
 
+    /// Retains decoder services while abandoning every project-local identity and reply.
+    pub fn reset_session(&mut self) {
+        self.session += 1;
+        for (_, handle) in self.pending.drain() {
+            handle.cancel();
+        }
+        for (_, request) in self.quick_handles.drain() {
+            request.handle.cancel();
+        }
+        (self.done_tx, self.done) = channel();
+        (self.quick_tx, self.quick_done) = channel();
+        (self.still_tx, self.still_done) = channel();
+        self.stills.clear();
+        self.still_generation += 1;
+        self.cache = FrameCache::new(self.cache.budget);
+        self.stand_ins.clear();
+        self.failed.clear();
+        self.paths.clear();
+        self.audio = Audio::sharing(self.audio.open.clone());
+        self.sequence = SequenceId::default();
+        self.transport = Transport::new(Time(0), Rate::new(30, 1));
+        self.latency = Duration::ZERO;
+        self.shown = None;
+    }
+
     /// Makes the next `tick` return the frame even if the playhead hasn't moved.
     pub fn refresh(&mut self) {
         self.shown = None;
+    }
+
+    /// Revalidate still file versions on decode workers after a media edit/reload. Plain
+    /// repaint, seek and effect edits reuse the loaded pixels and perform no filesystem I/O.
+    pub fn refresh_media(&mut self) {
+        self.still_generation += 1;
+        self.stills.clear();
+        let is_still = |id| self.paths.get(&id).is_some_and(|p| stills::is_still(p));
+        self.pending.retain(|(id, _), h| {
+            let keep = !is_still(*id);
+            if !keep {
+                h.cancel();
+            }
+            keep
+        });
+        self.failed.retain(|(id, _), _| !is_still(*id));
+        self.refresh();
     }
 
     /// Call every UI frame, after `out.poll()`: queues audio, decodes ahead, and returns the frame
@@ -585,9 +717,18 @@ impl Playback {
         }
         for a in project.assets() {
             if self.paths.get(&a.id).is_some_and(|p| *p != a.path) {
+                self.stills.remove(&a.id);
+                self.refresh();
                 self.cache.forget(a.id);
                 self.failed.retain(|k, _| k.0 != a.id);
                 self.stand_ins.retain(|k, _| k.0 != a.id);
+                self.quick_handles.retain(|k, request| {
+                    let keep = k.0 != a.id;
+                    if !keep {
+                        request.handle.cancel();
+                    }
+                    keep
+                });
                 self.pending.retain(|k, h| {
                     let keep = k.0 != a.id;
                     if !keep {
@@ -605,6 +746,24 @@ impl Playback {
     /// Takes finished decodes, then queues every layer of the next [`AHEAD`] frames that isn't
     /// cached or queued, nearest first, and cancels queued frames no longer ahead.
     fn decode_ahead(&mut self, project: &Project, clock: u64) {
+        while let Ok((id, path, generation, result)) = self.still_done.try_recv() {
+            if self.paths.get(&id) != Some(&path) || self.still_generation != generation {
+                continue;
+            }
+            let key = (id, Time(0));
+            if let Some(h) = self.pending.remove(&key) {
+                h.cancel();
+            }
+            match result {
+                Ok(image) => {
+                    self.stills.insert(id, image);
+                }
+                Err(e) => {
+                    tracing::warn!("still decode: {e}");
+                    self.failed.insert(key, Instant::now());
+                }
+            }
+        }
         while let Ok((k, path, took, r)) = self.done.try_recv() {
             // Decoded from the asset's path before a relink: its job was already dropped (#394).
             if self.paths.get(&k.0) != Some(&path) {
@@ -663,29 +822,70 @@ impl Playback {
                 break;
             }
             for layer in leaves(frame_at(project, time)) {
-                let key = (layer.asset, layer.source_time);
+                let still = project
+                    .asset(layer.asset)
+                    .is_some_and(|a| stills::is_still(&a.path));
+                let key = (layer.asset, if still { Time(0) } else { layer.source_time });
                 want.insert(key);
                 let Some(asset) = project.asset(layer.asset).filter(|a| !a.generated()) else {
                     continue;
                 };
-                if self.cache.contains(&key)
+                if self.stills.contains_key(&layer.asset)
+                    || self.cache.contains(&key)
                     || self.pending.contains_key(&key)
                     || self.failed.contains_key(&key)
                 {
                     continue;
                 }
-                let (decode, tx, path) = (
+                if still {
+                    let (tx, path, generation, notify) = (
+                        self.still_tx.clone(),
+                        asset.path.clone(),
+                        self.still_generation,
+                        self.decode_notify.clone(),
+                    );
+                    let job = format!(
+                        "still:{}:{}:{:?}:{:?}",
+                        self.session, asset.id.0, path, generation
+                    );
+                    let handle = self.jobs.submit(job, Priority::Interactive, move |ctx| {
+                        if !ctx.is_cancelled() {
+                            let result = stills::cached(&path);
+                            if !ctx.is_cancelled()
+                                && tx.send((key.0, path, generation, result)).is_ok()
+                                && let Some(notify) = notify
+                            {
+                                notify();
+                            }
+                        }
+                    });
+                    self.pending.insert(key, handle);
+                    continue;
+                }
+                let (decode, tx, path, notify) = (
                     self.decode.clone(),
                     self.done_tx.clone(),
                     asset.path.clone(),
+                    self.decode_notify.clone(),
                 );
                 // The path too, so a relink isn't handed the old path's job still running.
-                let job = format!("playback:{}:{}:{}", key.0.0, key.1.0, path.display());
+                let job = format!(
+                    "playback:{}:{}:{}:{}",
+                    self.session,
+                    key.0.0,
+                    key.1.0,
+                    path.display()
+                );
                 let handle = self.jobs.submit(job, Priority::Interactive, move |ctx| {
                     if !ctx.is_cancelled() {
                         let start = Instant::now();
                         let r = decode(&path, key.1);
-                        let _ = tx.send((key, path, start.elapsed(), r));
+                        if !ctx.is_cancelled()
+                            && tx.send((key, path, start.elapsed(), r)).is_ok()
+                            && let Some(notify) = notify
+                        {
+                            notify();
+                        }
                     }
                 });
                 self.pending.insert(key, handle);
@@ -703,44 +903,87 @@ impl Playback {
     /// Parked on a frame whose layers aren't decoded, queues each one's keyframe as a stand-in,
     /// since an exact frame deep in a long GOP can take a second. Playing, there are none.
     fn stand_in(&mut self, project: &Project, clock: u64) {
-        while let Ok((k, path, r)) = self.quick_done.try_recv() {
-            if self.paths.get(&k.0) != Some(&path) {
-                continue;
-            }
-            match r {
-                Ok(f) => self.stand_ins.insert(k, Some(Arc::new(f))),
-                Err(_) => self.stand_ins.remove(&k),
-            };
-        }
         let t = &self.transport;
-        let Some(quick) = self.quick.as_ref().filter(|_| t.speed() == 0) else {
-            self.stand_ins.clear();
-            return;
-        };
         let time = t.rate.time_floor(t.frame(clock));
-        let mut want = HashSet::new();
-        for layer in leaves(frame_at(project, time)) {
-            let key = (layer.asset, layer.source_time);
-            let Some(asset) = project.asset(layer.asset).filter(|a| !a.generated()) else {
-                continue;
-            };
-            if self.cache.contains(&key) || self.failed.contains_key(&key) {
+        let mut want = HashMap::new();
+        if self.quick.is_some() && t.speed() == 0 {
+            for layer in leaves(frame_at(project, time)) {
+                let key = (layer.asset, layer.source_time);
+                if let Some(asset) = project
+                    .asset(layer.asset)
+                    .filter(|a| !a.generated() && !stills::is_still(&a.path))
+                    && !self.cache.contains(&key)
+                    && !self.failed.contains_key(&key)
+                {
+                    want.insert(key, asset.path.clone());
+                }
+            }
+        }
+        // Cancel obsolete queued work before submitting replacements. A running FFmpeg call
+        // may finish, but checks cancellation before publishing and never replaces a new seek.
+        self.quick_handles.retain(|key, request| {
+            let keep = want.get(key) == Some(&request.path);
+            if !keep {
+                request.handle.cancel();
+            }
+            keep
+        });
+        self.stand_ins.retain(|key, _| want.contains_key(key));
+        while let Ok((key, path, generation, result)) = self.quick_done.try_recv() {
+            if !self
+                .quick_handles
+                .get(&key)
+                .is_some_and(|request| request.path == path && request.generation == generation)
+            {
                 continue;
             }
-            want.insert(key);
+            let request = self.quick_handles.remove(&key).expect("matched request");
+            request.handle.cancel();
+            // A failed stand-in is attempted once per wanted set. Exact decode still runs,
+            // and seeking away and back allows another stand-in attempt without a repaint loop.
+            self.stand_ins.insert(key, result.ok().map(Arc::new));
+        }
+        for (key, path) in want {
             if self.stand_ins.contains_key(&key) {
                 continue;
             }
             self.stand_ins.insert(key, None);
-            let (quick, tx, path) = (quick.clone(), self.quick_tx.clone(), asset.path.clone());
-            let job = format!("keyframe:{}:{}:{}", key.0.0, key.1.0, path.display());
-            self.quick_jobs
-                .submit(job, Priority::Interactive, move |_| {
-                    let r = quick(&path, key.1);
-                    let _ = tx.send((key, path, r));
+            self.quick_generation += 1;
+            let generation = self.quick_generation;
+            let quick = self.quick.as_ref().expect("wanted stand-in").clone();
+            let tx = self.quick_tx.clone();
+            let notify = self.decode_notify.clone();
+            let source = path.clone();
+            let job = format!(
+                "keyframe:{}:{}:{}:{}:{generation}",
+                self.session,
+                key.0.0,
+                key.1.0,
+                path.display()
+            );
+            let handle = self
+                .quick_jobs
+                .submit(job, Priority::Interactive, move |ctx| {
+                    if ctx.is_cancelled() {
+                        return;
+                    }
+                    let result = quick(&source, key.1);
+                    if !ctx.is_cancelled()
+                        && tx.send((key, source, generation, result)).is_ok()
+                        && let Some(notify) = notify
+                    {
+                        notify();
+                    }
                 });
+            self.quick_handles.insert(
+                key,
+                QuickRequest {
+                    path,
+                    generation,
+                    handle,
+                },
+            );
         }
-        self.stand_ins.retain(|k, _| want.contains(k));
     }
 
     /// The frame at the clock, once all its layers are decoded (or stood in for) and if it isn't
@@ -752,8 +995,17 @@ impl Playback {
         }
         let mut exact = true;
         let time = self.transport.rate.time_floor(index);
-        let (cache, failed, stand_ins) = (&mut self.cache, &self.failed, &self.stand_ins);
-        let layers = resolve::<(), _>(project, frame_at(project, time), &mut |_, layer| {
+        let (cache, failed, stand_ins, stills) =
+            (&mut self.cache, &self.failed, &self.stand_ins, &self.stills);
+        let layers = resolve::<(), _>(project, frame_at(project, time), &mut |asset, layer| {
+            if stills::is_still(&asset.path) {
+                if failed.contains_key(&(asset.id, Time(0))) {
+                    return Ok(None);
+                }
+                return Ok(Some(Pixels::Still(
+                    stills.get(&asset.id).ok_or(())?.clone(),
+                )));
+            }
             // Not decoded yet: keep what's on screen. A failed decode leaves the layer out.
             let key = (layer.asset, layer.source_time);
             if failed.contains_key(&key) {
@@ -766,7 +1018,18 @@ impl Playback {
                     stand_ins.get(&key).cloned().flatten().ok_or(())?
                 }
             };
-            Ok(Some(Pixels::Frame(f)))
+            let logical = asset
+                .probe
+                .as_ref()
+                .and_then(|p| Some((p.width?, p.height?)))
+                .filter(|(w, h)| *w > 0 && *h > 0)
+                .unwrap_or((f.width, f.height));
+            let px = if logical == (f.width, f.height) {
+                Pixels::Frame(f)
+            } else {
+                Pixels::Sampled(f, logical)
+            };
+            Ok(Some(px))
         })
         .ok()?;
         if self.shown == Some((index, exact)) {
@@ -787,6 +1050,7 @@ pub struct Gpu {
     layers: Vec<Preview>,
     /// Text uploads from the last draw, by raster; holding the `Arc` keeps its address unique.
     texts: Vec<(Arc<Vec<u8>>, wgpu::Texture)>,
+    still_textures: Vec<(Arc<image::RgbaImage>, wgpu::Texture)>,
     /// `.cube` paths already read into the compositor, or that failed to.
     /// shortcut: read once per session; a file edited on disk shows after a restart.
     luts: HashSet<String>,
@@ -810,6 +1074,7 @@ impl Gpu {
             compositor: Compositor::new(device),
             layers: Vec::new(),
             texts: Vec::new(),
+            still_textures: Vec::new(),
             luts: HashSet::new(),
             effects: Default::default(),
             pin_effects: false,
@@ -844,15 +1109,30 @@ impl Gpu {
         index: u32,
         layers: &[(Pixels, Transform)],
     ) -> &wgpu::Texture {
+        self.layers.truncate(layers.len());
         while self.layers.len() < layers.len() {
             self.layers.push(Preview::new(device, composite::FORMAT));
         }
         // shortcut: a solid texture per layer per frame; cache by color if playback profiles hot.
         let mut solids = Vec::new();
         let mut texts = Vec::new();
+        let mut still_textures = Vec::new();
         for (i, ((px, _), preview)) in layers.iter().zip(&mut self.layers).enumerate() {
             let f = match px {
-                Pixels::Frame(f) => f,
+                Pixels::Frame(f) | Pixels::Sampled(f, _) => f,
+                Pixels::Still(image) => {
+                    let old = self
+                        .still_textures
+                        .iter()
+                        .find(|(r, _)| Arc::ptr_eq(r, image));
+                    let tex = old.map_or_else(
+                        || text::texture(device, queue, image.dimensions(), image.as_raw()),
+                        |(_, t)| t.clone(),
+                    );
+                    still_textures.push((image.clone(), tex.clone()));
+                    solids.push(tex);
+                    continue;
+                }
                 Pixels::Nested(inner) => {
                     let (pin, before) = (self.pin_effects, self.before);
                     let gpu = self.nested.entry(i).or_insert_with(|| Gpu {
@@ -891,6 +1171,7 @@ impl Gpu {
             preview.upload(device, queue, &yuv, scale);
         }
         self.texts = texts;
+        self.still_textures = still_textures;
         for path in layers.iter().filter_map(|(_, t)| t.lut.as_ref()) {
             if self.luts.insert(path.clone()) {
                 let lut = std::fs::read_to_string(path)
@@ -935,19 +1216,32 @@ impl Gpu {
                 }
             }
         }
+        self.compositor.logical_sizes = layers
+            .iter()
+            .map(|(px, _)| match px {
+                Pixels::Frame(f) => [f.width as f32, f.height as f32],
+                Pixels::Sampled(_, (w, h)) => [*w as f32, *h as f32],
+                Pixels::Still(i) => [i.width() as f32, i.height() as f32],
+                _ => [s.width as f32, s.height as f32],
+            })
+            .collect();
         self.compositor.frame = index;
         self.compositor.before = self.before;
         self.compositor.premultiplied = layers
             .iter()
             .map(|(px, _)| matches!(px, Pixels::Nested(_)))
             .collect();
+        // Keep each image leased through the compositor's command submission.
+        let images: Vec<_> = self.layers.iter().map(Preview::image).collect();
         let layers: Vec<_> = layers
             .iter()
-            .zip(&self.layers)
+            .zip(&images)
             .scan(solids.iter(), |solids, ((px, t), p)| {
                 let tex = match px {
-                    Pixels::Frame(_) => p.image().expect("uploaded above"),
-                    Pixels::Solid(_) | Pixels::Text(_) | Pixels::Nested(_) => {
+                    Pixels::Frame(_) | Pixels::Sampled(_, _) => {
+                        p.as_deref().expect("uploaded above")
+                    }
+                    Pixels::Still(_) | Pixels::Solid(_) | Pixels::Text(_) | Pixels::Nested(_) => {
                         solids.next().expect("made above")
                     }
                 };

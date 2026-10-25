@@ -111,6 +111,9 @@ pub fn item(ui: &mut Ui, keymap: &Keymap, id: &str, label: Option<&str>, enabled
 impl Timeline {
     /// Whether action `id` would change anything now; menus grey out the rest.
     pub fn can(&mut self, id: &str, seq: &Sequence) -> bool {
+        if let Some(enabled) = self.key_capability(id, seq) {
+            return enabled;
+        }
         let any = !self.selected.is_empty();
         match id {
             "paste" => !self.clipboard.is_empty(),

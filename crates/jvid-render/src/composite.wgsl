@@ -178,11 +178,10 @@ fn graded_at(c: vec4<f32>, mask: f32, pos: vec4<f32>) -> vec4<f32> {
 
 // The image at `uv` with straight alpha.
 fn straight(uv: vec2<f32>) -> vec4<f32> {
-    let c = textureSample(image, image_smp, uv);
-    if params.opacity.z > 0.0 && c.a > 0.0 {
-        return vec4<f32>(c.rgb / c.a, c.a);
+    if params.opacity.z > 0.0 {
+        return jvid_straight(textureSample(image, image_smp, uv));
     }
-    return c;
+    return jvid_sample(uv);
 }
 
 // Straight-alpha source in, premultiplied out for premultiplied "over" blending.
@@ -218,4 +217,24 @@ fn fs_blend(in: Out) -> @location(0) vec4<f32> {
     let b = select(vec3<f32>(0.0), d.rgb / d.a, d.a > 0.0);
     let s = (1.0 - d.a) * c.rgb + d.a * mix_mode(u32(params.opacity.y), b, c.rgb);
     return vec4<f32>(a * s + (1.0 - a) * d.rgb, a + d.a * (1.0 - a));
+}
+
+fn jvid_premul(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(c.rgb * c.a, c.a);
+}
+fn jvid_straight(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(c.rgb / max(c.a, 1e-8), c.a);
+}
+fn jvid_sample(uv: vec2<f32>) -> vec4<f32> {
+    let size = vec2<i32>(textureDimensions(image));
+    let p = uv * vec2<f32>(size) - 0.5;
+    let at = vec2<i32>(floor(p));
+    let f = fract(p);
+    let lo = vec2<i32>(0);
+    let hi = size - 1;
+    let a = jvid_premul(textureLoad(image, clamp(at, lo, hi), 0));
+    let b = jvid_premul(textureLoad(image, clamp(at + vec2<i32>(1, 0), lo, hi), 0));
+    let c = jvid_premul(textureLoad(image, clamp(at + vec2<i32>(0, 1), lo, hi), 0));
+    let d = jvid_premul(textureLoad(image, clamp(at + vec2<i32>(1, 1), lo, hi), 0));
+    return jvid_straight(mix(mix(a, b, f.x), mix(c, d, f.x), f.y));
 }

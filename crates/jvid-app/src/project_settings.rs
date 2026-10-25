@@ -220,6 +220,8 @@ mod tests {
         let project = Project::default();
         let mut dialog = SettingsDialog::default();
         dialog.open(&project);
+        // This snapshot covers menu geometry; encoder availability has separate tests.
+        dialog.hdr10 = false;
         let mut fresh = true;
         let mut h = egui_kittest::Harness::builder()
             .with_size([1280.0, 720.0])

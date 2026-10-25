@@ -5,6 +5,7 @@ use std::process::Command;
 use jvid_app::export::{self, Request};
 use jvid_core::history::{Command as Edit, Created, History};
 use jvid_core::model::{NewClip, Project, TrackKind};
+use jvid_core::preset::VideoCodec;
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 
 #[test]
@@ -40,7 +41,11 @@ fn cli_matches_app_export() {
     jvid_app::project_file::save(h.project(), &file).unwrap();
     let project = jvid_app::project_file::load(&file).unwrap();
 
-    let preset = jvid_core::preset::builtin().remove(0);
+    // Parity must exercise real encoding without depending on H.264 hardware/licensing.
+    let preset = jvid_core::preset::builtin()
+        .into_iter()
+        .find(|preset| preset.video == Some(VideoCodec::ProRes))
+        .unwrap();
     let app = tmp.join(format!("app.{}", preset.extension));
     let cli = tmp.join(format!("cli.{}", preset.extension));
     let rate = project.settings().frame_rate;

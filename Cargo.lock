@@ -2253,6 +2253,7 @@ dependencies = [
  "jvid-transcribe",
  "proc-macro2",
  "rfd",
+ "same-file",
  "serde",
  "suite-ui",
  "syn 2.0.119",

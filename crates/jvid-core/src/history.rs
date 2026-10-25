@@ -43,6 +43,14 @@ pub enum Command {
         track: TrackId,
         start: Time,
     },
+    /// Moves the selection and all linked partners by a common time/track offset.
+    /// All moving clips are removed before any overwrite placement occurs.
+    MoveSelection {
+        ids: Vec<ClipId>,
+        anchor: ClipId,
+        track: TrackId,
+        start: Time,
+    },
     /// Removes clips; `ripple` closes the gaps on their tracks.
     RemoveClips {
         ids: Vec<ClipId>,
@@ -259,6 +267,17 @@ impl Command {
             Self::RemoveTrack(id)
             | Self::AddClip { track: id, .. }
             | Self::CloseGap { track: id, .. } => track(*id),
+            Self::MoveSelection {
+                ids,
+                anchor,
+                track: to,
+                ..
+            } => ids
+                .iter()
+                .copied()
+                .chain(std::iter::once(*anchor))
+                .find_map(linked)
+                .or_else(|| track(*to)),
             Self::MoveClip { id, track: to, .. } => clip(*id).or_else(|| track(*to)),
             Self::RemoveClip(id)
             | Self::TrimClip { id, .. }
@@ -401,6 +420,15 @@ impl Command {
                 for id in ids {
                     s.with_clip_mut(id, |c| *c.enabled = enabled)?;
                 }
+                Created::Nothing
+            }
+            Self::MoveSelection {
+                ids,
+                anchor,
+                track,
+                start,
+            } => {
+                s.move_selection(&ids, anchor, track, start)?;
                 Created::Nothing
             }
             Self::MoveClip { id, track, start } => {
@@ -856,6 +884,7 @@ impl History {
     }
 
     pub fn mark_saved(&mut self) {
+        self.end_gesture();
         self.saved_rev = self.rev;
     }
 
@@ -2490,3 +2519,361 @@ mod tests {
         assert_eq!((inner[0].source_start, inner[0].end), (Time(8), Time(10)));
     }
 }
+
+#[cfg(test)]
+mod audit_b04 {
+    use super::*;
+    use crate::time::FLICKS_PER_SECOND as S;
+
+    fn fixture() -> (History, TrackId, TrackId, ClipId, ClipId, ClipId) {
+        let mut p = Project::default();
+        let s = &mut p.sequence;
+        let v = s.add_track(TrackKind::Video, "V1");
+        let a = s.add_track(TrackKind::Audio, "A1");
+        let mut add = |t, at, len, link| {
+            s.add_clip(
+                t,
+                NewClip {
+                    asset: AssetId(1),
+                    start: Time(at * S),
+                    source_in: Time(0),
+                    source_out: Time(len * S),
+                    link,
+                },
+            )
+            .unwrap()
+        };
+        let intro = add(v, 0, 5, None);
+        let cv = add(v, 5, 10, Some(LinkId(900)));
+        let ca = add(a, 5, 10, Some(LinkId(900)));
+        (History::new(p), v, a, intro, cv, ca)
+    }
+
+    #[test]
+    fn ripple_commands_refuse_downstream_locked_partners_atomically() {
+        let (h, v, a, intro, _, _) = fixture();
+        let commands = vec![
+            Command::Trim {
+                trims: vec![(intro, Edge::Tail, Time(-S))],
+                ripple: true,
+            },
+            Command::SetClipSpeed {
+                id: intro,
+                speed: 2.0,
+                reverse: false,
+                ripple: true,
+            },
+            Command::SetSpeedKeys {
+                id: intro,
+                speed: 2.0,
+                keys: Vec::new(),
+                ripple: true,
+            },
+            Command::CutSpans {
+                spans: vec![(intro, Time(S), Time(2 * S))],
+                speed: None,
+            },
+            Command::CutSpans {
+                spans: vec![(intro, Time(S), Time(2 * S))],
+                speed: Some(2.0),
+            },
+        ];
+        for command in commands {
+            let mut p = h.project().clone();
+            let mut settings = p.sequence().track(a).unwrap().settings();
+            settings.locked = true;
+            p.sequence.set_track(settings).unwrap();
+            let mut h = History::new(p);
+            let before = h.project().clone();
+            let bytes = serde_json::to_vec(&before).unwrap();
+            assert_eq!(h.apply(command), Err(ModelError::Locked(a)));
+            assert_eq!(serde_json::to_vec(h.project()).unwrap(), bytes);
+            assert!(!h.can_undo() && !h.is_dirty());
+        }
+        let mut p = h.project().clone();
+        p.sequence.remove_clips(&[intro], false).unwrap();
+        let mut settings = p.sequence().track(a).unwrap().settings();
+        settings.locked = true;
+        p.sequence.set_track(settings).unwrap();
+        let mut h = History::new(p.clone());
+        assert_eq!(
+            h.apply(Command::CloseGap {
+                track: v,
+                at: Time(S)
+            }),
+            Err(ModelError::Locked(a))
+        );
+        assert_eq!(h.project(), &p);
+        assert!(!h.can_undo());
+    }
+
+    #[test]
+    fn ripple_trim_unlocked_preserves_later_sync() {
+        let (mut h, _, _, intro, cv, ca) = fixture();
+        let before = h.project().clone();
+        h.apply(Command::Trim {
+            trims: vec![(intro, Edge::Tail, Time(-S))],
+            ripple: true,
+        })
+        .unwrap();
+        for id in [cv, ca] {
+            assert_eq!(
+                h.project().sequence().clip(id).unwrap().1.start,
+                Time(4 * S)
+            );
+        }
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+    }
+
+    #[test]
+    fn ripple_delete_unlinked_intro_moves_later_linked_group_once() {
+        let (mut h, _, _, intro, cv, ca) = fixture();
+        let before = h.project().clone();
+        h.apply(Command::RemoveClips {
+            ids: vec![intro],
+            ripple: true,
+        })
+        .unwrap();
+        for id in [cv, ca] {
+            assert_eq!(h.project().sequence().clip(id).unwrap().1.start, Time(0));
+        }
+        let after = h.project().clone();
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert!(!h.can_undo());
+        assert!(h.redo());
+        assert_eq!(h.project(), &after);
+    }
+
+    #[test]
+    fn ripple_delete_offset_linked_pair_closes_one_interval() {
+        let (h, _, a, intro, cv, ca) = fixture();
+        let mut p = h.project().clone();
+        p.sequence.move_clip(ca, a, Time(6 * S)).unwrap();
+        let audio_intro = p
+            .sequence
+            .add_clip(
+                a,
+                NewClip {
+                    asset: AssetId(1),
+                    start: Time(S),
+                    source_in: Time(0),
+                    source_out: Time(5 * S),
+                    link: None,
+                },
+            )
+            .unwrap();
+        p.sequence.link_clips(&[intro, audio_intro], true).unwrap();
+        let before = p.clone();
+        let mut h = History::new(p);
+        h.apply(Command::RemoveClips {
+            ids: vec![intro, audio_intro],
+            ripple: true,
+        })
+        .unwrap();
+        assert_eq!(h.project().sequence().clip(cv).unwrap().1.start, Time(0));
+        assert_eq!(h.project().sequence().clip(ca).unwrap().1.start, Time(S));
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert!(!h.can_undo());
+    }
+
+    #[test]
+    fn ripple_delete_multiple_intervals_and_pair_are_not_counted_twice() {
+        let (h, v, a, intro, cv, ca) = fixture();
+        let mut p = h.project().clone();
+        // Delete the intro and the first half of the later pair; leave linked tails.
+        p.sequence.split_at(&[cv, ca], Time(10 * S)).unwrap();
+        let tails: Vec<_> = p
+            .sequence
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips())
+            .filter(|c| c.start == Time(10 * S))
+            .map(|c| c.id)
+            .collect();
+        let before = p.clone();
+        let mut h = History::new(p);
+        h.apply(Command::RemoveClips {
+            ids: vec![intro, cv, ca],
+            ripple: true,
+        })
+        .unwrap();
+        for id in tails {
+            assert_eq!(h.project().sequence().clip(id).unwrap().1.start, Time(0));
+        }
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert!(!h.can_undo());
+        // A colliding stationary clip on the partner's track refuses the whole delete.
+        let mut p = before;
+        p.sequence
+            .add_clip(
+                a,
+                NewClip {
+                    asset: AssetId(1),
+                    start: Time(0),
+                    source_in: Time(0),
+                    source_out: Time(S),
+                    link: None,
+                },
+            )
+            .unwrap();
+        let mut h = History::new(p.clone());
+        assert!(matches!(
+            h.apply(Command::RemoveClips {
+                ids: vec![intro],
+                ripple: true
+            }),
+            Err(ModelError::Overlap(_))
+        ));
+        assert_eq!(h.project(), &p);
+        assert!(!h.can_undo());
+        assert_eq!(h.project().sequence().track(v).unwrap().clips().len(), 3);
+    }
+
+    #[test]
+    fn save_finishes_a_coalesced_gesture() {
+        let (mut h, v, _, _, _, _) = fixture();
+        let setting = |h: &History, volume| {
+            let mut t = h.project().sequence().track(v).unwrap().settings();
+            t.volume = volume;
+            Command::SetTrack(t)
+        };
+        h.apply_coalesced(123, setting(&h, 0.7)).unwrap();
+        h.mark_saved();
+        h.apply_coalesced(123, setting(&h, 0.9)).unwrap();
+        assert!(h.is_dirty());
+        assert!(h.undo());
+        assert_eq!(h.project().sequence().track(v).unwrap().volume, 0.7);
+        assert!(!h.is_dirty());
+        assert!(h.undo());
+        assert_eq!(h.project().sequence().track(v).unwrap().volume, 1.0);
+    }
+
+    #[test]
+    fn move_selection_keeps_linked_and_unlinked_members_and_clamps_as_one() {
+        let (h, v, _, _, cv, ca) = fixture();
+        let mut p = h.project().clone();
+        let title_track = p.sequence.add_track(TrackKind::Video, "Titles");
+        let title = p
+            .sequence
+            .add_clip(
+                title_track,
+                NewClip {
+                    asset: AssetId(1),
+                    start: Time(2 * S),
+                    source_in: Time(0),
+                    source_out: Time(3 * S),
+                    link: None,
+                },
+            )
+            .unwrap();
+        let before = p.clone();
+        let mut h = History::new(p);
+        let command = |start| Command::MoveSelection {
+            ids: vec![cv, title],
+            anchor: cv,
+            track: v,
+            start,
+        };
+        h.apply(command(Time(8 * S))).unwrap();
+        for (id, expected) in [(cv, 8), (ca, 8), (title, 5)] {
+            assert_eq!(
+                h.project().sequence().clip(id).unwrap().1.start,
+                Time(expected * S)
+            );
+        }
+        assert_eq!(
+            h.project().sequence().clip(cv).unwrap().1.link,
+            before.sequence().clip(cv).unwrap().1.link
+        );
+        let after = h.project().clone();
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        assert!(!h.can_undo());
+        assert!(h.redo());
+        assert_eq!(h.project(), &after);
+        assert!(h.undo());
+        h.apply(command(Time(-10 * S))).unwrap();
+        for (id, expected) in [(cv, 3), (ca, 3), (title, 0)] {
+            assert_eq!(
+                h.project().sequence().clip(id).unwrap().1.start,
+                Time(expected * S)
+            );
+        }
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        let mut settings = h
+            .project()
+            .sequence()
+            .track(title_track)
+            .unwrap()
+            .settings();
+        settings.locked = true;
+        h.apply(Command::SetTrack(settings)).unwrap();
+        let locked = h.project().clone();
+        let rev = h.rev();
+        assert_eq!(
+            h.apply(command(Time(8 * S))),
+            Err(ModelError::Locked(title_track))
+        );
+        assert_eq!(h.project(), &locked);
+        assert_eq!(h.rev(), rev);
+    }
+
+    #[test]
+    fn move_selection_keeps_track_offsets_and_checks_all_destinations() {
+        let (h, v, _, _, cv, _) = fixture();
+        let mut p = h.project().clone();
+        let upper = p.sequence.add_track(TrackKind::Video, "V2");
+        let title = p
+            .sequence
+            .add_clip(
+                upper,
+                NewClip {
+                    asset: AssetId(1),
+                    start: Time(0),
+                    source_in: Time(0),
+                    source_out: Time(S),
+                    link: None,
+                },
+            )
+            .unwrap();
+        let top = p.sequence.add_track(TrackKind::Video, "V3");
+        // An unlinked video selection can move up one lane without changing its spacing.
+        p.sequence.link_clips(&[cv], false).unwrap();
+        let before = p.clone();
+        let mut h = History::new(p);
+        let cmd = Command::MoveSelection {
+            ids: vec![cv, title],
+            anchor: cv,
+            track: upper,
+            start: Time(5 * S),
+        };
+        h.apply(cmd.clone()).unwrap();
+        assert_eq!(h.project().sequence().clip(cv).unwrap().0, upper);
+        assert_eq!(h.project().sequence().clip(title).unwrap().0, top);
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        let mut settings = before.sequence().track(top).unwrap().settings();
+        settings.locked = true;
+        h.apply(Command::SetTrack(settings)).unwrap();
+        let locked = h.project().clone();
+        assert_eq!(h.apply(cmd), Err(ModelError::Locked(top)));
+        assert_eq!(h.project(), &locked);
+        assert!(h.undo());
+        assert!(
+            h.apply(Command::MoveSelection {
+                ids: vec![title],
+                anchor: title,
+                track: v,
+                start: Time(0),
+            })
+            .is_ok()
+        );
+    }
+}
+#[cfg(test)]
+mod audit_444;
