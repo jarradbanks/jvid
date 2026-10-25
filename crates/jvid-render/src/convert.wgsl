@@ -1,4 +1,6 @@
 // YUV 4:2:0 to RGB, drawn over the whole target; HDR tone-mapped to SDR.
+// The proxy/poster CPU mirror is Frame::view_rgba in jvid-media/decode.rs. Keep both in sync;
+// preview regressions compare original GPU output with actual proxies and cached posters.
 
 struct Convert {
     // rgb[i] = dot(rows[i].xyz, yuv) + rows[i].w, with yuv sampled as 0..1.

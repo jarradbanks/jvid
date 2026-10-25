@@ -347,6 +347,143 @@ fn matrix_inverts_ffmpeg_encode() {
 }
 
 #[test]
+fn auxiliary_images_match_original_view_for_sdr_and_hdr() {
+    use jvid_core::time::Rate;
+    use jvid_media::{decode::Frame, proxy::Proxies, thumbnails::Cache};
+    use std::sync::Arc;
+    if !gpu() {
+        return;
+    }
+    jvid_media::ffmpeg::init().unwrap();
+    let (device, queue) = device().unwrap();
+    let render = |f: &Frame| {
+        let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+        preview.upload(
+            &device,
+            &queue,
+            &Yuv {
+                width: f.width,
+                height: f.height,
+                planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
+                bt709: f.bt709,
+                full_range: f.full_range,
+                hdr: f.hdr,
+            },
+            1,
+        );
+        image::RgbaImage::from_raw(
+            f.width,
+            f.height,
+            read_back(&device, &queue, preview.image().unwrap()),
+        )
+        .unwrap()
+    };
+    let dir = std::env::temp_dir().join(format!("jvid-aux-color-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let sdr = [
+        [0.75, 0.0, 0.0],
+        [0.0, 0.75, 0.0],
+        [0.0, 0.0, 0.75],
+        [0.5; 3],
+        [0.0; 3],
+        [1.0; 3],
+        [0.75, 0.75, 0.0],
+        [0.1; 3],
+    ];
+    let pq = [26.0, 100.0, 203.0, 1000.0, 4000.0].map(|n| [nits_to_pq(n); 3]);
+    let colored_pq =
+        [[100.0, 20.0, 5.0], [20.0, 100.0, 5.0], [5.0, 20.0, 100.0]].map(|p| p.map(nits_to_pq));
+    let pq: Vec<_> = pq.into_iter().chain(colored_pq).collect();
+    let hlg = [
+        [0.0; 3],
+        [0.25; 3],
+        [0.5; 3],
+        [0.75; 3],
+        [1.0; 3],
+        [0.8, 0.4, 0.1],
+        [0.2, 0.7, 0.4],
+        [0.3, 0.1, 0.8],
+    ];
+    let cases = [
+        (false, false, None),
+        (true, false, None),
+        (false, true, None),
+        (true, true, None),
+        (true, false, Some(Hdr::Pq)),
+        (true, false, Some(Hdr::Hlg)),
+    ];
+    for (i, (bt709, full, hdr)) in cases.into_iter().enumerate() {
+        let patches = match hdr {
+            None => &sdr[..],
+            Some(Hdr::Pq) => &pq,
+            Some(Hdr::Hlg) => &hlg[..],
+        };
+        let src = dir.join(format!("source-{i}.mkv"));
+        jvid_media::test_media::color_patch_clip(&src, bt709, full, hdr, patches);
+        let original_bytes = std::fs::read(&src).unwrap();
+        let f = VideoDecoder::open_hdr(&src)
+            .unwrap()
+            .frame_at(Time(0))
+            .unwrap();
+        assert_eq!((f.bt709, f.full_range, f.hdr), (bt709, full, hdr));
+        let original = render(&f);
+        let proxies = Arc::new(Proxies::new(dir.join("proxies")));
+        let mut info = jvid_media::probe::probe(&src).unwrap();
+        info.frame_rate = Some(Rate::new(30, 1));
+        std::fs::create_dir_all(dir.join("proxies")).unwrap();
+        let proxy_path = proxies.path(&src).unwrap();
+        jvid_media::test_media::generate_test_proxy(&src, &proxy_path).unwrap();
+        assert_eq!(proxies.existing(&src).as_ref(), Some(&proxy_path));
+        proxies.set_enabled(true);
+        assert_eq!(proxies.resolve(&src), proxy_path);
+        let pf = VideoDecoder::open_hdr(&proxy_path)
+            .unwrap()
+            .frame_at(Time(0))
+            .unwrap();
+        assert_eq!(
+            (pf.bt709, pf.full_range, pf.hdr),
+            (true, false, None),
+            "proxy is deliberately SDR BT.709"
+        );
+        let proxy = render(&pf);
+        let poster = Cache::new(dir.join("posters"), u64::MAX)
+            .poster(&src, info.duration)
+            .unwrap();
+        for patch in 0..patches.len() {
+            let center = |img: &image::RgbaImage| {
+                img.get_pixel(
+                    ((2 * patch + 1) * img.width() as usize / (2 * patches.len())) as u32,
+                    img.height() / 2,
+                )
+                .0
+            };
+            let want = center(&original);
+            // Three codes for CPU/GPU float/UNORM rounding, six for an additional CRF23 proxy
+            // encode and YUV round-trip. Flat centers exclude downsampling/chroma boundaries.
+            for (what, got, tolerance) in
+                [("poster", center(&poster), 3), ("proxy", center(&proxy), 6)]
+            {
+                assert!(
+                    got[..3]
+                        .iter()
+                        .zip(&want[..3])
+                        .all(|(g, w)| g.abs_diff(*w) <= tolerance),
+                    "case {i} {hdr:?} {what} patch {patch}: {got:?}, original {want:?}"
+                );
+            }
+        }
+        proxies.set_enabled(false);
+        assert_eq!(proxies.resolve(&src), src);
+        assert_eq!(
+            std::fs::read(&src).unwrap(),
+            original_bytes,
+            "source is immutable"
+        );
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn fit_letterboxes_and_pillarboxes() {
     // 16:9 in a tall view: full width, centred vertically.
     assert_eq!(

@@ -117,6 +117,147 @@ pub fn hdr_clip(path: &Path, hdr: Hdr, patches: &[[f32; 3]]) -> Result<(), Error
     out.write_trailer()
 }
 
+/// Lossless, self-contained color fixtures: flat patches at 720p exercise actual proxy
+/// downsampling. No generated external corpus is needed for these regressions.
+pub fn color_patch_clip(
+    path: &std::path::Path,
+    bt709: bool,
+    full: bool,
+    hdr: Option<Hdr>,
+    patches: &[[f32; 3]],
+) {
+    use ffmpeg_next::{
+        self as ff,
+        color::{Primaries, Range, Space, TransferCharacteristic},
+        format::Pixel,
+    };
+    let (w, h) = (1280, 720);
+    let pixel = if hdr.is_some() {
+        Pixel::YUV420P10LE
+    } else {
+        Pixel::YUV420P
+    };
+    let codec = ff::encoder::find(ff::codec::Id::FFV1).unwrap();
+    let mut out = ff::format::output(path).unwrap();
+    let mut e = ff::codec::Context::new_with_codec(codec)
+        .encoder()
+        .video()
+        .unwrap();
+    e.set_width(w);
+    e.set_height(h);
+    e.set_format(pixel);
+    e.set_time_base((1, 30));
+    e.set_colorspace(if hdr.is_some() {
+        Space::BT2020NCL
+    } else if bt709 {
+        Space::BT709
+    } else {
+        Space::SMPTE170M
+    });
+    e.set_color_range(if full { Range::JPEG } else { Range::MPEG });
+    e.set_color_primaries(if hdr.is_some() {
+        Primaries::BT2020
+    } else {
+        Primaries::BT709
+    });
+    e.set_color_transfer_characteristic(match hdr {
+        Some(Hdr::Pq) => TransferCharacteristic::SMPTE2084,
+        Some(Hdr::Hlg) => TransferCharacteristic::ARIB_STD_B67,
+        None => TransferCharacteristic::BT709,
+    });
+    if out
+        .format()
+        .flags()
+        .contains(ff::format::Flags::GLOBAL_HEADER)
+    {
+        e.set_flags(ff::codec::Flags::GLOBAL_HEADER);
+    }
+    let mut enc = e.open_as(codec).unwrap();
+    let mut s = out.add_stream(codec).unwrap();
+    s.set_parameters(&enc);
+    s.set_time_base((1, 30));
+    out.write_header().unwrap();
+    let (kr, kb) = if hdr.is_some() {
+        (0.2627, 0.0593)
+    } else if bt709 {
+        (0.2126, 0.0722)
+    } else {
+        (0.299, 0.114)
+    };
+    let mul = if hdr.is_some() { 4.0 } else { 1.0 };
+    let (ys, cs, offset) = if full {
+        (255.0, 255.0, 0.0)
+    } else {
+        (219.0, 224.0, 16.0)
+    };
+    let codes: Vec<_> = patches
+        .iter()
+        .map(|&[r, g, b]| {
+            let y = kr * r + (1.0 - kr - kb) * g + kb * b;
+            [
+                offset + ys * y,
+                128.0 + cs * (b - y) / (2.0 * (1.0 - kb)),
+                128.0 + cs * (r - y) / (2.0 * (1.0 - kr)),
+            ]
+            .map(|c| (mul * c).round() as u16)
+        })
+        .collect();
+    let mut f = ff::frame::Video::new(pixel, w, h);
+    for plane in [0, 1, 2] {
+        let sub = if plane == 0 { 1 } else { 2 };
+        let stride = f.stride(plane);
+        for y in 0..(h / sub) as usize {
+            for x in 0..(w / sub) as usize {
+                let code = codes[x * sub as usize * patches.len() / w as usize][plane];
+                if hdr.is_some() {
+                    f.data_mut(plane)[y * stride + x * 2..][..2]
+                        .copy_from_slice(&code.to_le_bytes());
+                } else {
+                    f.data_mut(plane)[y * stride + x] = code as u8;
+                }
+            }
+        }
+    }
+    let write = |out: &mut ff::format::context::Output, enc: &mut ff::encoder::Video| {
+        let mut p = ff::Packet::empty();
+        while enc.receive_packet(&mut p).is_ok() {
+            p.set_stream(0);
+            p.rescale_ts((1, 30), out.stream(0).unwrap().time_base());
+            p.write_interleaved(out).unwrap();
+        }
+    };
+    for pts in 0..3 {
+        f.set_pts(Some(pts));
+        enc.send_frame(&f).unwrap();
+        write(&mut out, &mut enc);
+    }
+    enc.send_eof().unwrap();
+    write(&mut out, &mut enc);
+    out.write_trailer().unwrap();
+}
+
+/// Generates a three-frame color fixture proxy through a real job context, with a bounded
+/// wait. Shared by CPU/GPU regressions through the existing test-support feature.
+pub fn generate_test_proxy(src: &Path, dst: &Path) -> Result<(), String> {
+    let pool = jvid_jobs::Pool::new(1);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (src, dst) = (src.to_owned(), dst.to_owned());
+    let job = pool.submit("color-proxy", jvid_jobs::Priority::Proxy, move |ctx| {
+        let _ = tx.send(crate::proxy::generate(
+            &src,
+            &dst,
+            jvid_core::time::Rate::new(30, 1),
+            3,
+            ctx,
+        ));
+    });
+    let result = rx.recv_timeout(std::time::Duration::from_secs(60));
+    if result.is_err() {
+        job.cancel();
+    }
+    result.map_err(|e| e.to_string())?
+}
+
 /// Writes every packet `enc` has ready to stream 0.
 fn write(
     out: &mut format::context::Output,
