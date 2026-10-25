@@ -28,6 +28,7 @@ use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::decode::{DecoderPool, Frame};
 use jvid_media::proxy::Proxies;
+use jvid_media::stills;
 use jvid_render::composite::{self, Compositor};
 use jvid_render::preview::{Preview, Yuv};
 use jvid_render::{solid, text};
@@ -60,6 +61,9 @@ pub type OpenAudio = Box<dyn FnMut(&Path, usize) -> ClipAudio>;
 type Key = (AssetId, Time);
 /// A finished decode, the path it was decoded from and how long decoding took.
 type Done = (Key, PathBuf, Duration, Result<Frame, String>);
+/// A finished still decode and the explicit media-refresh generation that owns it.
+type StillDone = (AssetId, PathBuf, u64, Result<Arc<image::RgbaImage>, String>);
+
 /// A finished keyframe stand-in and the path it was decoded from.
 type QuickDone = (Key, PathBuf, Result<Frame, String>);
 
@@ -77,6 +81,8 @@ pub struct Shown {
 #[derive(Clone)]
 pub enum Pixels {
     Frame(Arc<Frame>),
+    /// An imported still, upright straight RGBA, shared for its file version.
+    Still(Arc<image::RgbaImage>),
     /// A solid color layer, straight RGBA.
     Solid([u8; 4]),
     /// A text layer rasterized at project size, straight RGBA.
@@ -498,6 +504,10 @@ pub struct Playback {
     quick_handles: Vec<Handle>,
     pub transport: Transport,
     pub cache: FrameCache,
+    stills: HashMap<AssetId, Arc<image::RgbaImage>>,
+    still_generation: u64,
+    still_tx: Sender<StillDone>,
+    still_done: Receiver<StillDone>,
     jobs: Pool,
     decode: DecodeFn,
     pending: HashMap<Key, Handle>,
@@ -532,11 +542,16 @@ impl Playback {
     pub fn new(decode: DecodeFn, open_audio: OpenAudio, budget: usize) -> Self {
         let (done_tx, done) = channel();
         let (quick_tx, quick_done) = channel();
+        let (still_tx, still_done) = channel();
         Self {
             session: 0,
             quick_handles: Vec::new(),
             transport: Transport::new(Time(0), Rate::new(30, 1)),
             cache: FrameCache::new(budget),
+            stills: HashMap::new(),
+            still_generation: 0,
+            still_tx,
+            still_done,
             jobs: Pool::new(DECODE_THREADS),
             decode,
             pending: HashMap::new(),
@@ -600,6 +615,9 @@ impl Playback {
         }
         (self.done_tx, self.done) = channel();
         (self.quick_tx, self.quick_done) = channel();
+        (self.still_tx, self.still_done) = channel();
+        self.stills.clear();
+        self.still_generation += 1;
         self.cache = FrameCache::new(self.cache.budget);
         self.stand_ins.clear();
         self.failed.clear();
@@ -614,6 +632,23 @@ impl Playback {
     /// Makes the next `tick` return the frame even if the playhead hasn't moved.
     pub fn refresh(&mut self) {
         self.shown = None;
+    }
+
+    /// Revalidate still file versions on decode workers after a media edit/reload. Plain
+    /// repaint, seek and effect edits reuse the loaded pixels and perform no filesystem I/O.
+    pub fn refresh_media(&mut self) {
+        self.still_generation += 1;
+        self.stills.clear();
+        let is_still = |id| self.paths.get(&id).is_some_and(|p| stills::is_still(p));
+        self.pending.retain(|(id, _), h| {
+            let keep = !is_still(*id);
+            if !keep {
+                h.cancel();
+            }
+            keep
+        });
+        self.failed.retain(|(id, _), _| !is_still(*id));
+        self.refresh();
     }
 
     /// Call every UI frame, after `out.poll()`: queues audio, decodes ahead, and returns the frame
@@ -664,6 +699,8 @@ impl Playback {
         }
         for a in project.assets() {
             if self.paths.get(&a.id).is_some_and(|p| *p != a.path) {
+                self.stills.remove(&a.id);
+                self.refresh();
                 self.cache.forget(a.id);
                 self.failed.retain(|k, _| k.0 != a.id);
                 self.stand_ins.retain(|k, _| k.0 != a.id);
@@ -684,6 +721,24 @@ impl Playback {
     /// Takes finished decodes, then queues every layer of the next [`AHEAD`] frames that isn't
     /// cached or queued, nearest first, and cancels queued frames no longer ahead.
     fn decode_ahead(&mut self, project: &Project, clock: u64) {
+        while let Ok((id, path, generation, result)) = self.still_done.try_recv() {
+            if self.paths.get(&id) != Some(&path) || self.still_generation != generation {
+                continue;
+            }
+            let key = (id, Time(0));
+            if let Some(h) = self.pending.remove(&key) {
+                h.cancel();
+            }
+            match result {
+                Ok(image) => {
+                    self.stills.insert(id, image);
+                }
+                Err(e) => {
+                    tracing::warn!("still decode: {e}");
+                    self.failed.insert(key, Instant::now());
+                }
+            }
+        }
         while let Ok((k, path, took, r)) = self.done.try_recv() {
             // Decoded from the asset's path before a relink: its job was already dropped (#394).
             if self.paths.get(&k.0) != Some(&path) {
@@ -742,15 +797,38 @@ impl Playback {
                 break;
             }
             for layer in leaves(frame_at(project, time)) {
-                let key = (layer.asset, layer.source_time);
+                let still = project
+                    .asset(layer.asset)
+                    .is_some_and(|a| stills::is_still(&a.path));
+                let key = (layer.asset, if still { Time(0) } else { layer.source_time });
                 want.insert(key);
                 let Some(asset) = project.asset(layer.asset).filter(|a| !a.generated()) else {
                     continue;
                 };
-                if self.cache.contains(&key)
+                if self.stills.contains_key(&layer.asset)
+                    || self.cache.contains(&key)
                     || self.pending.contains_key(&key)
                     || self.failed.contains_key(&key)
                 {
+                    continue;
+                }
+                if still {
+                    let (tx, path, generation) = (
+                        self.still_tx.clone(),
+                        asset.path.clone(),
+                        self.still_generation,
+                    );
+                    let job = format!(
+                        "still:{}:{}:{:?}:{:?}",
+                        self.session, asset.id.0, path, generation
+                    );
+                    let handle = self.jobs.submit(job, Priority::Interactive, move |ctx| {
+                        if !ctx.is_cancelled() {
+                            let result = stills::cached(&path);
+                            let _ = tx.send((key.0, path, generation, result));
+                        }
+                    });
+                    self.pending.insert(key, handle);
                     continue;
                 }
                 let (decode, tx, path) = (
@@ -806,7 +884,10 @@ impl Playback {
         let mut want = HashSet::new();
         for layer in leaves(frame_at(project, time)) {
             let key = (layer.asset, layer.source_time);
-            let Some(asset) = project.asset(layer.asset).filter(|a| !a.generated()) else {
+            let Some(asset) = project
+                .asset(layer.asset)
+                .filter(|a| !a.generated() && !stills::is_still(&a.path))
+            else {
                 continue;
             };
             if self.cache.contains(&key) || self.failed.contains_key(&key) {
@@ -846,8 +927,17 @@ impl Playback {
         }
         let mut exact = true;
         let time = self.transport.rate.time_floor(index);
-        let (cache, failed, stand_ins) = (&mut self.cache, &self.failed, &self.stand_ins);
-        let layers = resolve::<(), _>(project, frame_at(project, time), &mut |_, layer| {
+        let (cache, failed, stand_ins, stills) =
+            (&mut self.cache, &self.failed, &self.stand_ins, &self.stills);
+        let layers = resolve::<(), _>(project, frame_at(project, time), &mut |asset, layer| {
+            if stills::is_still(&asset.path) {
+                if failed.contains_key(&(asset.id, Time(0))) {
+                    return Ok(None);
+                }
+                return Ok(Some(Pixels::Still(
+                    stills.get(&asset.id).ok_or(())?.clone(),
+                )));
+            }
             // Not decoded yet: keep what's on screen. A failed decode leaves the layer out.
             let key = (layer.asset, layer.source_time);
             if failed.contains_key(&key) {
@@ -881,6 +971,7 @@ pub struct Gpu {
     layers: Vec<Preview>,
     /// Text uploads from the last draw, by raster; holding the `Arc` keeps its address unique.
     texts: Vec<(Arc<Vec<u8>>, wgpu::Texture)>,
+    still_textures: Vec<(Arc<image::RgbaImage>, wgpu::Texture)>,
     /// `.cube` paths already read into the compositor, or that failed to.
     /// shortcut: read once per session; a file edited on disk shows after a restart.
     luts: HashSet<String>,
@@ -904,6 +995,7 @@ impl Gpu {
             compositor: Compositor::new(device),
             layers: Vec::new(),
             texts: Vec::new(),
+            still_textures: Vec::new(),
             luts: HashSet::new(),
             effects: Default::default(),
             pin_effects: false,
@@ -944,9 +1036,23 @@ impl Gpu {
         // shortcut: a solid texture per layer per frame; cache by color if playback profiles hot.
         let mut solids = Vec::new();
         let mut texts = Vec::new();
+        let mut still_textures = Vec::new();
         for (i, ((px, _), preview)) in layers.iter().zip(&mut self.layers).enumerate() {
             let f = match px {
                 Pixels::Frame(f) => f,
+                Pixels::Still(image) => {
+                    let old = self
+                        .still_textures
+                        .iter()
+                        .find(|(r, _)| Arc::ptr_eq(r, image));
+                    let tex = old.map_or_else(
+                        || text::texture(device, queue, image.dimensions(), image.as_raw()),
+                        |(_, t)| t.clone(),
+                    );
+                    still_textures.push((image.clone(), tex.clone()));
+                    solids.push(tex);
+                    continue;
+                }
                 Pixels::Nested(inner) => {
                     let (pin, before) = (self.pin_effects, self.before);
                     let gpu = self.nested.entry(i).or_insert_with(|| Gpu {
@@ -985,6 +1091,7 @@ impl Gpu {
             preview.upload(device, queue, &yuv, scale);
         }
         self.texts = texts;
+        self.still_textures = still_textures;
         for path in layers.iter().filter_map(|(_, t)| t.lut.as_ref()) {
             if self.luts.insert(path.clone()) {
                 let lut = std::fs::read_to_string(path)
@@ -1041,7 +1148,7 @@ impl Gpu {
             .scan(solids.iter(), |solids, ((px, t), p)| {
                 let tex = match px {
                     Pixels::Frame(_) => p.image().expect("uploaded above"),
-                    Pixels::Solid(_) | Pixels::Text(_) | Pixels::Nested(_) => {
+                    Pixels::Still(_) | Pixels::Solid(_) | Pixels::Text(_) | Pixels::Nested(_) => {
                         solids.next().expect("made above")
                     }
                 };

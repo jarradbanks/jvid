@@ -1581,3 +1581,52 @@ fn track_volume_scales_its_clips_and_undoes() {
     assert!(h.undo());
     assert!(mix(h.project()) == before);
 }
+
+#[test]
+fn still_versions_are_checked_on_explicit_media_refresh_without_repaint_io() {
+    let dir = std::env::temp_dir().join(format!("jvid-b07-still-refresh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("still.png");
+    image::RgbaImage::from_pixel(12, 8, image::Rgba([255, 0, 0, 128]))
+        .save(&path)
+        .unwrap();
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, path.to_str().unwrap(), secs(2));
+    let mut pb = Playback::from_files(DEFAULT_BUDGET);
+    let wait = |pb: &mut Playback| {
+        let deadline = Instant::now() + HUNG;
+        loop {
+            if let Some(s) = pb.park(h.project())
+                && s.exact
+            {
+                return s;
+            }
+            assert!(Instant::now() < deadline, "still decode timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    let first = wait(&mut pb);
+    let Pixels::Still(first) = &first.layers[0].0 else {
+        panic!("still")
+    };
+    std::fs::remove_file(&path).unwrap();
+    // Removing the backing file proves parked repaints do not stat it: the old polling path
+    // invalidated the loaded image as soon as metadata failed and queued a failed re-decode.
+    for _ in 0..100 {
+        assert!(pb.park(h.project()).is_none());
+        assert!(pb.pending.is_empty());
+        assert!(Arc::ptr_eq(first, pb.stills.values().next().unwrap()));
+    }
+    image::RgbaImage::from_pixel(16, 10, image::Rgba([0, 255, 0, 128]))
+        .save(&path)
+        .unwrap();
+    pb.refresh_media();
+    let next = wait(&mut pb);
+    let Pixels::Still(next) = &next.layers[0].0 else {
+        panic!("still")
+    };
+    assert!(!Arc::ptr_eq(first, next));
+    assert_eq!(next.dimensions(), (16, 10));
+    assert_eq!(next.get_pixel(0, 0).0, [0, 255, 0, 128]);
+    std::fs::remove_dir_all(dir).unwrap();
+}

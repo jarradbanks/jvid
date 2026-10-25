@@ -1378,3 +1378,69 @@ fn a_reframed_wide_clip_fills_a_tall_frame_with_no_bars() {
         "background shows in the {w}x{ht} frame"
     );
 }
+
+#[test]
+fn transformed_still_edges_ignore_invisible_rgb_with_an_effect() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let dirty = image(&device, &queue, (16, 12), |x, _| match x {
+        0..=5 => [0, 255, 0, 0],
+        6..=9 => [255, 0, 0, 128],
+        _ => [255, 0, 0, 255],
+    });
+    let clean = image(&device, &queue, (16, 12), |x, _| match x {
+        0..=5 => [255, 0, 0, 0],
+        6..=9 => [255, 0, 0, 128],
+        _ => [255, 0, 0, 255],
+    });
+    let mut comp = Compositor::new(&device);
+    let shader = crate::effect::parse(include_str!("../effects/gaussian_blur.wgsl")).unwrap();
+    comp.set_effect(&device, "blur", Some(&shader)).unwrap();
+    for enabled in [false, true] {
+        let transform = Transform {
+            position: [0.5, -0.25],
+            scale: [1.4, 0.8],
+            rotation: 13.0,
+            effects: vec![Effect {
+                shader: "blur".into(),
+                params: [("radius".into(), 3.0)].into(),
+                enabled,
+                mask: None,
+            }],
+            ..Default::default()
+        };
+        let a = read_back(
+            &device,
+            &queue,
+            comp.render(
+                &device,
+                &queue,
+                (48, 36),
+                1,
+                [0, 0, 255, 255],
+                &[(&dirty, transform.clone())],
+            ),
+        );
+        let b = read_back(
+            &device,
+            &queue,
+            comp.render(
+                &device,
+                &queue,
+                (48, 36),
+                1,
+                [0, 0, 255, 255],
+                &[(&clean, transform)],
+            ),
+        );
+        assert_eq!(a, b, "invisible RGB leaked with effect enabled={enabled}");
+        assert!(
+            a.as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p[1] == 0 && p[3] == 255)
+        );
+        assert!(a.as_chunks::<4>().0.iter().any(|p| p[0] > 40 && p[2] > 40));
+    }
+}

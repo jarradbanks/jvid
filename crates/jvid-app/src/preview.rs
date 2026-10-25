@@ -115,7 +115,7 @@ impl Compare {
     }
 }
 
-type Decoded = (PathBuf, Time, Result<Frame, String>);
+type Decoded = (PathBuf, Time, Result<Pixels, String>);
 
 /// Keymap actions the Source tab handles while it's showing a clip.
 pub const SOURCE_ACTIONS: &[&str] = &[
@@ -186,6 +186,7 @@ pub struct Preview {
     pending: bool,
     source_job: Option<jvid_jobs::Handle>,
     frame: Option<Arc<Frame>>,
+    still: Option<Arc<image::RgbaImage>>,
     error: Option<String>,
     /// Bumped when `frame` or the preview scale changes; the GPU side re-uploads when it sees a new one.
     generation: u64,
@@ -254,6 +255,7 @@ impl Preview {
             pending: false,
             source_job: None,
             frame: None,
+            still: None,
             error: None,
             generation: 0,
             zoom: 0,
@@ -295,6 +297,7 @@ impl Preview {
             handle.cancel();
         }
         self.frame = None;
+        self.still = None;
         self.error = None;
         (self.tx, self.rx) = channel();
         self.generation += 1;
@@ -378,6 +381,20 @@ impl Preview {
         if let Some(out) = &mut self.output {
             out.flush();
         }
+        // Opening/reopening a Source is an explicit media refresh boundary. Metadata is
+        // checked by its decode worker, never on each UI frame.
+        if let Some(job) = self.source_job.take() {
+            job.cancel();
+        }
+        (self.tx, self.rx) = channel();
+        self.source = None;
+        self.requested = None;
+        self.pending = false;
+        self.frame = None;
+        self.still = None;
+        self.error = None;
+        self.generation += 1;
+        self.program.refresh_media();
         self.player = Some(Player {
             asset: id,
             path: a.path.clone(),
@@ -636,6 +653,13 @@ impl Preview {
         let pb = &mut self.program;
         let seq = project.sequence();
         let now = (seq, project.assets());
+        if self
+            .program_seq
+            .as_ref()
+            .is_none_or(|(_, assets)| assets.as_slice() != project.assets())
+        {
+            pb.refresh_media();
+        }
         if self.program_seq.as_ref().map(|(s, a)| (s, a.as_slice())) != Some(now) {
             self.program_seq = Some((seq.clone(), project.assets().to_vec()));
             pb.refresh();
@@ -810,12 +834,19 @@ impl Preview {
         let path = source.map(|(p, ..)| p);
         if self.source.as_deref() != path {
             self.source = path.map(Path::to_path_buf);
-            (self.frame, self.error, self.requested) = (None, None, None);
+            (self.frame, self.still, self.error, self.requested) = (None, None, None, None);
         }
         if offline {
             // Decodes (and warns) again once it's back.
-            (self.frame, self.error, self.requested) = (None, None, None);
+            (self.frame, self.still, self.error, self.requested) = (None, None, None, None);
         }
+        let source = source.map(|(path, t, video)| {
+            if jvid_media::stills::is_still(path) {
+                (path, Time(0), video)
+            } else {
+                (path, t, video)
+            }
+        });
         if let Some((path, t, true)) = source
             && !offline
             && self.requested != Some(t)
@@ -823,16 +854,33 @@ impl Preview {
         {
             (self.requested, self.pending) = (Some(t), true);
             let (tx, ctx, p) = (self.tx.clone(), ui.ctx().clone(), path.to_path_buf());
-            self.source_job = Some(self.pool.submit(
-                &self.jobs,
-                self.proxies.resolve(path),
-                t,
-                Priority::Interactive,
-                move |r| {
-                    let _ = tx.send((p, t, r.map_err(|e| e.to_string())));
-                    ctx.request_repaint();
-                },
-            ));
+            self.source_job = Some(if jvid_media::stills::is_still(path) {
+                self.jobs.submit(
+                    format!("source-still:{:?}:{}", p, self.generation),
+                    Priority::Interactive,
+                    move |_| {
+                        let r = jvid_media::stills::cached(&p).map(Pixels::Still);
+                        let _ = tx.send((p, t, r));
+                        ctx.request_repaint();
+                    },
+                )
+            } else {
+                self.pool.submit(
+                    &self.jobs,
+                    self.proxies.resolve(path),
+                    t,
+                    Priority::Interactive,
+                    move |r| {
+                        let _ = tx.send((
+                            p,
+                            t,
+                            r.map(|f| Pixels::Frame(Arc::new(f)))
+                                .map_err(|e| e.to_string()),
+                        ));
+                        ctx.request_repaint();
+                    },
+                )
+            });
         }
         while let Ok((path, t, r)) = self.rx.try_recv() {
             self.source_job = None;
@@ -847,7 +895,17 @@ impl Preview {
             match r {
                 Ok(f) => {
                     self.error = None;
-                    self.frame = Some(Arc::new(f));
+                    match f {
+                        Pixels::Frame(f) => {
+                            self.frame = Some(f);
+                            self.still = None;
+                        }
+                        Pixels::Still(f) => {
+                            self.still = Some(f);
+                            self.frame = None;
+                        }
+                        _ => unreachable!("only file pixels are decoded"),
+                    }
                     self.generation += 1;
                 }
                 Err(e) => {
@@ -890,13 +948,30 @@ impl Preview {
                 color::ink_2(),
             );
         }
+        let still_settings = self.still.as_ref().map(|i| ProjectSettings {
+            width: i.width(),
+            height: i.height(),
+            ..Default::default()
+        });
+        let still_shown = self.still.as_ref().map(|i| {
+            Arc::new(Shown {
+                index: 0,
+                layers: vec![(Pixels::Still(i.clone()), Default::default())],
+                exact: true,
+            })
+        });
+        let program = program.or_else(|| still_settings.as_ref().map(|s| (s, true)));
         let source = matches!(program, Some((_, true)));
-        let shown = match program {
-            Some((_, true)) => self
-                .source_shown
-                .as_ref()
-                .map(|(_, s)| (s, self.generation)),
-            _ => self.program_shown.as_ref().map(|s| (s, self.program_gen)),
+        let shown = if let Some(shown) = still_shown.as_ref().filter(|_| source) {
+            Some((shown, self.generation))
+        } else {
+            match program {
+                Some((_, true)) => self
+                    .source_shown
+                    .as_ref()
+                    .map(|(_, s)| (s, self.generation)),
+                _ => self.program_shown.as_ref().map(|s| (s, self.program_gen)),
+            }
         };
         let program = program.map(|(s, _)| s);
         let drawn = match (program, shown) {
@@ -1370,7 +1445,10 @@ impl Preview {
 
     /// The decode for the current source or program frame has come back, with a frame or an error.
     pub fn settled(&self) -> bool {
-        self.frame.is_some() || self.error.is_some() || self.program_shown.is_some()
+        self.frame.is_some()
+            || self.still.is_some()
+            || self.error.is_some()
+            || self.program_shown.is_some()
     }
 
     /// Plays through `out` instead of the audio device, so a test owns the clock.
@@ -1779,6 +1857,65 @@ mod program_tests {
         let (asset, shown) = p.source_shown.as_ref().expect("drawn");
         assert_eq!(asset.id, id);
         assert!(matches!(shown.layers[..], [(Pixels::Text(_), _)]));
+    }
+
+    #[test]
+    fn an_imported_still_uses_the_same_rgba_as_its_poster_and_program() {
+        use jvid_core::history::Created;
+        let dir = std::env::temp_dir().join(format!("jvid-b07-source-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("source.png");
+        let original = image::RgbaImage::from_fn(12, 8, |x, y| {
+            image::Rgba([
+                x as u8 * 20,
+                y as u8 * 30,
+                91,
+                [0, 128, 255][x as usize % 3],
+            ])
+        });
+        original.save(&path).unwrap();
+        let mut h = History::new(Project::default());
+        let Ok(Created::Asset(id)) = h.apply(Command::AddAsset(path.clone())) else {
+            panic!("asset")
+        };
+        let mut preview = Preview::new(None);
+        preview.open(h.project(), id);
+        let project = h.project().clone();
+        let mut fresh = true;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([640.0, 360.0])
+            .build_ui_state(
+                move |ui, p: &mut Preview| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    p.show_source(ui, &project, &HashSet::new());
+                },
+                preview,
+            );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while harness.state().still.is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Source decode timed out"
+            );
+            harness.run();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let source = harness.state().still.as_ref().unwrap().clone();
+        assert_eq!(*source, original);
+        assert!(Arc::ptr_eq(
+            &source,
+            &jvid_media::stills::cached(&path).unwrap()
+        ));
+        let posters = jvid_media::thumbnails::Cache::new(dir.join("posters"), 1 << 20);
+        let poster = posters.poster(&path, Time(0)).unwrap();
+        assert_eq!(poster, image::imageops::thumbnail(&original, 160, 106));
+        assert!(
+            harness.state().frame.is_none(),
+            "no opaque video conversion"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// The Source tab with `probe` imported at a path that doesn't exist, scrubbed across 20

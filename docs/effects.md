@@ -67,3 +67,11 @@ if the effect weren't there ("passthrough" in the Inspector) until the file is f
 once per pixel per frame, and one long or endless loop stalls the whole GPU until the driver
 resets it, which can take the app (and on some systems the desktop) down with it. Write a fixed
 number of samples out by hand instead, as chromatic aberration does.
+
+Imported stills and effect inputs use upright **straight RGBA**. The compositor interpolates
+straight-alpha layers by weighting their colours by alpha, then unpremultiplies before grading
+and premultiplies for source-over blending. Nested sequence outputs remain premultiplied.
+For spatial sampling in a user effect, `jvid_sample(uv)` provides alpha-aware, bilinear,
+clamped sampling of `src` and returns straight RGBA. Raw `textureSample` remains available
+with its existing WGSL behaviour. Weight RGB by alpha when averaging samples and divide by
+the accumulated alpha; invisible RGB must not tint an edge. Effects still return straight RGBA.

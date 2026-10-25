@@ -1963,3 +1963,108 @@ fn built_in_preset_names_are_their_english_catalog_names() {
     };
     assert_eq!(preset_name(all.len(), &mine), "Mine");
 }
+
+#[test]
+fn imported_still_alpha_survives_program_and_export() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("jvid-b07-alpha-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("logo.png");
+    let logo = image::RgbaImage::from_fn(12, 8, |x, y| {
+        image::Rgba(if y < 4 {
+            match x / 4 {
+                0 => [0, 255, 0, 0],
+                1 => [255, 0, 0, 128],
+                _ => [255, 255, 255, 255],
+            }
+        } else {
+            [255, 255, 0, 255]
+        })
+    });
+    logo.save(&path).unwrap();
+    let mut h = History::new(Project::default());
+    h.apply(Command::SetSettings(jvid_core::model::ProjectSettings {
+        width: 12,
+        height: 8,
+        background: [0, 0, 255, 255],
+        ..Default::default()
+    }))
+    .unwrap();
+    add(&mut h, TrackKind::Video, path, Time(0), secs(2));
+    let mut pb = crate::playback::Playback::from_files(1 << 20);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let shown = loop {
+        if let Some(s) = pb.park(h.project())
+            && s.exact
+        {
+            break s;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "still decode timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    let Pixels::Still(first) = &shown.layers[0].0 else {
+        panic!("expected RGBA still")
+    };
+    pb.transport.seek(secs(1), 0);
+    let later = pb
+        .park(h.project())
+        .expect("a second frame reuses the still");
+    let Pixels::Still(second) = &later.layers[0].0 else {
+        panic!("expected RGBA still")
+    };
+    assert!(Arc::ptr_eq(first, second), "no per-timeline-frame decode");
+    let mut gpu = Gpu::new(&device);
+    let got = jvid_render::composite::read_back(
+        &device,
+        &queue,
+        gpu.draw(&device, &queue, h.project().settings(), 1, &shown),
+    );
+    for (x, want) in [
+        (1, [0, 0, 255, 255]),
+        (5, [128, 0, 127, 255]),
+        (9, [255; 4]),
+    ] {
+        let at = (12 + x) * 4;
+        assert!(
+            got[at..at + 4]
+                .iter()
+                .zip(want)
+                .all(|(a, b)| a.abs_diff(b) <= 2),
+            "x={x}: {:?} want {want:?}",
+            &got[at..at + 4]
+        );
+    }
+    let request = Request {
+        path: dir.join("alpha.mov"),
+        range: (Time(0), h.project().settings().frame_rate.time_floor(3)),
+        preset: Preset {
+            size: Some([12, 8]),
+            frame_rate: Some(h.project().settings().frame_rate),
+            ..preset("ProRes Master")
+        },
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    run_now(h.project(), &request, false).unwrap();
+    let mut decoder = VideoDecoder::open(&request.path).unwrap();
+    let exported = decoder.frame_at(Time(0)).unwrap().view_rgba((12, 8));
+    for x in [1, 5, 9] {
+        let at = (12 + x) * 4;
+        assert!(
+            exported
+                .get_pixel(x as u32, 1)
+                .0
+                .iter()
+                .zip(&got[at..at + 4])
+                .all(|(a, b)| a.abs_diff(*b) <= 12),
+            "export differs at {x}"
+        );
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

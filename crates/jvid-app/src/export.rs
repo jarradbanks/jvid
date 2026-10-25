@@ -582,6 +582,10 @@ fn render(
         if enc.has_video() {
             let layers =
                 resolve::<String, _>(project, frame_at(project, time), &mut |asset, layer| {
+                    if jvid_media::stills::is_still(&asset.path) {
+                        return jvid_media::stills::cached(&asset.path)
+                            .map(|i| Some(Pixels::Still(i)));
+                    }
                     let f = decoders
                         .frame_at(&asset.path, layer.source_time)
                         .map_err(|e| {

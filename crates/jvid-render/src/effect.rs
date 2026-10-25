@@ -141,6 +141,25 @@ struct JvidFx { size: vec2<f32>, frame: f32, pass_index: f32 /*params*/ }
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
 @group(0) @binding(2) var<uniform> fx: JvidFx;
+fn jvid_premul(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(c.rgb * c.a, c.a);
+}
+fn jvid_straight(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(c.rgb / max(c.a, 1e-8), c.a);
+}
+fn jvid_sample(uv: vec2<f32>) -> vec4<f32> {
+    let size = vec2<i32>(textureDimensions(src));
+    let p = uv * vec2<f32>(size) - 0.5;
+    let at = vec2<i32>(floor(p));
+    let f = fract(p);
+    let lo = vec2<i32>(0);
+    let hi = size - 1;
+    let a = jvid_premul(textureLoad(src, clamp(at, lo, hi), 0));
+    let b = jvid_premul(textureLoad(src, clamp(at + vec2<i32>(1, 0), lo, hi), 0));
+    let c = jvid_premul(textureLoad(src, clamp(at + vec2<i32>(0, 1), lo, hi), 0));
+    let d = jvid_premul(textureLoad(src, clamp(at + vec2<i32>(1, 1), lo, hi), 0));
+    return jvid_straight(mix(mix(a, b, f.x), mix(c, d, f.x), f.y));
+}
 @vertex
 fn jvid_vs(@builtin(vertex_index) i: u32) -> JvidOut {
     let uv = vec2<f32>(f32(i & 1u), f32(i >> 1u));
