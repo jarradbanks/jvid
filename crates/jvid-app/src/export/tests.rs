@@ -2097,6 +2097,7 @@ fn imported_still_alpha_survives_program_and_export() {
             "export differs at {x}"
         );
     }
+    drop((decoder, pb));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -2281,6 +2282,7 @@ fn program_png_matches_full_video_composition_with_title_effect_and_mask() {
         before,
         "frame export preserves source aliases"
     );
+    drop((decoder, renderer));
     std::fs::remove_dir_all(dir).unwrap();
 }
 

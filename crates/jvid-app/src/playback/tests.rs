@@ -1714,6 +1714,7 @@ fn real_proxy_playback_keeps_original_pixel_effect_units() {
             .params["block"],
         24.0
     );
+    drop(pb);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
