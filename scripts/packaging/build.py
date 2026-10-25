@@ -21,8 +21,13 @@ ROOT = Path(__file__).resolve().parents[2]
 TARGETS = ("windows-x86_64", "macos-aarch64", "linux-x86_64")
 
 
-def run(*args):
-    return subprocess.check_output([str(a) for a in args], text=True, stderr=subprocess.STDOUT)
+def run(*args, quiet_failure=False):
+    try:
+        return subprocess.check_output([str(a) for a in args], text=True, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as error:
+        if error.output and not quiet_failure:
+            print(error.output, file=sys.stderr, end="" if error.output.endswith("\n") else "\n")
+        raise
 
 
 def sha256(path):
@@ -211,7 +216,7 @@ def native_licenses(stage, sources, target, ffmpeg):
             owner = None
             for candidate in candidates:
                 try:
-                    owner = run("dpkg-query", "-S", candidate).split(": /", 1)[0].splitlines()[0]
+                    owner = run("dpkg-query", "-S", candidate, quiet_failure=True).split(": /", 1)[0].splitlines()[0]
                     break
                 except subprocess.CalledProcessError:
                     pass
@@ -365,6 +370,7 @@ def sign_app(app):
     # Sign inside out; all edits and marker writes must precede this.
     for path in (app / "Contents/Frameworks").iterdir():
         run("codesign", "--force", *options, "--sign", identity, path)
+    run("codesign", "--force", *options, "--sign", identity, app / "Contents/MacOS/jvid-app")
     run("codesign", "--force", *options, "--sign", identity, app)
     run("codesign", "--verify", "--deep", "--strict", app)
 
