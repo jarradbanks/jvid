@@ -657,7 +657,8 @@ impl<'a> Selection<'a> {
             .first()
             .filter(|_| same)
             .and_then(|c| project.asset(c.asset))
-            .or(bin_selected.filter(|a| a.generated()));
+            // Timeline selection takes precedence, including mixed assets and audio-only.
+            .or(bin_selected.filter(|a| selected.is_empty() && a.generated()));
         let fitted = clips
             .iter()
             .map(|c| crate::masks::fitted(project, c))
@@ -4227,6 +4228,242 @@ mod tests {
             solid: None,
             text: text.then(Text::default),
             sequence: None,
+        }
+    }
+
+    /// #438: retained bin assets never supply an edit target for timeline selections.
+    #[test]
+    fn timeline_selection_precedes_retained_bin_title_and_solid() {
+        use jvid_core::history::Created;
+        use jvid_core::model::{NewClip, ProbeInfo};
+        let mut history = History::new(Project::default());
+        let Created::Asset(title) = history
+            .apply(Command::AddText {
+                name: "Retained Title".into(),
+                text: Text::default(),
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let Created::Asset(solid) = history
+            .apply(Command::AddSolid {
+                name: "Retained Solid".into(),
+                color: [1.0; 4],
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        history
+            .apply(Command::Import(vec![
+                (
+                    "/a.mp4".into(),
+                    ProbeInfo {
+                        duration: Time(100),
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "/b.mp4".into(),
+                    ProbeInfo {
+                        duration: Time(100),
+                        ..Default::default()
+                    },
+                ),
+            ]))
+            .unwrap();
+        let assets: Vec<_> = history.project().assets().iter().map(|a| a.id).collect();
+        let mut ids = Vec::new();
+        for (kind, asset) in [
+            (TrackKind::Video, assets[2]),
+            (TrackKind::Video, assets[3]),
+            (TrackKind::Audio, assets[2]),
+        ] {
+            let Created::Track(track) = history
+                .apply(Command::AddTrack {
+                    kind,
+                    name: "Track".into(),
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            let Created::Clip(id) = history
+                .apply(Command::AddClip {
+                    track,
+                    clip: NewClip {
+                        asset,
+                        source_in: Time(0),
+                        source_out: Time(100),
+                        start: Time(0),
+                        link: None,
+                    },
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            ids.push(id);
+        }
+        for retained in [title, solid] {
+            for (selected, panes) in [
+                (
+                    HashSet::from([ids[0], ids[1]]),
+                    vec![Pane::Video, Pane::Effects],
+                ),
+                (HashSet::from([ids[2]]), vec![Pane::Audio]),
+            ] {
+                let sel = Selection::new(
+                    history.project(),
+                    &selected,
+                    history.project().asset(retained),
+                );
+                assert_eq!(sel.panes(), panes);
+                assert!(sel.shared.is_none(), "no unrelated asset edit target");
+                // Even a stale Text tab cannot produce SetText or offer a text editor.
+                let mut h = egui_kittest::Harness::new_ui(|ui| {
+                    assert!(show(ui, &sel, Some(Pane::Text), Time(0)).0.is_none());
+                });
+                h.run();
+                use egui_kittest::kittest::Queryable;
+                assert!(
+                    h.query_by_role(egui::accesskit::Role::MultilineTextInput)
+                        .is_none()
+                );
+                let mut fresh = true;
+                let mut h = egui_kittest::Harness::new_ui(|ui| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    show(ui, &sel, Some(Pane::Video), Time(0));
+                });
+                h.run();
+                assert!(
+                    h.query_by_label("Color FFFFFF").is_none(),
+                    "no retained solid color editor"
+                );
+            }
+            let sel = Selection::new(
+                history.project(),
+                &HashSet::new(),
+                history.project().asset(retained),
+            );
+            assert_eq!(sel.shared.unwrap().id, retained);
+            assert_eq!(
+                sel.panes(),
+                if retained == title {
+                    vec![Pane::Text]
+                } else {
+                    vec![Pane::Video]
+                }
+            );
+        }
+    }
+
+    /// #438: both a bin-only title and two clips sharing it edit the intended asset.
+    #[test]
+    fn shared_and_bin_only_titles_edit_undo_redo_and_save() {
+        use egui_kittest::kittest::Queryable;
+        use jvid_core::history::Created;
+        use jvid_core::model::NewClip;
+        for timeline in [false, true] {
+            let mut history = History::new(Project::default());
+            let Created::Asset(asset) = history
+                .apply(Command::AddText {
+                    name: "Title".into(),
+                    text: Text::default(),
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            let Created::Track(track) = history
+                .apply(Command::AddTrack {
+                    kind: TrackKind::Video,
+                    name: "V1".into(),
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            let mut selected = HashSet::new();
+            for start in [0, 100] {
+                let Created::Clip(id) = history
+                    .apply(Command::AddClip {
+                        track,
+                        clip: NewClip {
+                            asset,
+                            source_in: Time(0),
+                            source_out: Time(100),
+                            start: Time(start),
+                            link: None,
+                        },
+                    })
+                    .unwrap()
+                else {
+                    panic!()
+                };
+                if timeline {
+                    selected.insert(id);
+                }
+            }
+            let before = history.project().clone();
+            let mut fresh = true;
+            let mut h = egui_kittest::Harness::builder()
+                .with_size([340.0, 720.0])
+                .build_ui_state(
+                    move |ui, history: &mut History| {
+                        if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                            return;
+                        }
+                        let sel = Selection::new(
+                            history.project(),
+                            &selected,
+                            history.project().asset(asset),
+                        );
+                        assert_eq!(sel.shared.unwrap().id, asset);
+                        assert!(sel.panes().contains(&Pane::Text));
+                        if let Some((command, gesture)) =
+                            show(ui, &sel, Some(Pane::Text), Time(0)).0
+                        {
+                            match gesture {
+                                Some(key) => history.apply_coalesced(key, command).unwrap(),
+                                None => history.apply(command).unwrap(),
+                            };
+                        }
+                    },
+                    history,
+                );
+            h.run();
+            h.get_by_role(egui::accesskit::Role::MultilineTextInput)
+                .click();
+            h.run();
+            h.get_by_role(egui::accesskit::Role::MultilineTextInput)
+                .type_text(" edited");
+            h.run();
+            assert_eq!(
+                h.state()
+                    .project()
+                    .asset(asset)
+                    .unwrap()
+                    .text
+                    .as_ref()
+                    .unwrap()
+                    .content,
+                "Title edited"
+            );
+            let edited = h.state().project().clone();
+            assert!(h.state_mut().undo());
+            assert_eq!(h.state().project(), &before);
+            assert!(h.state_mut().redo());
+            assert_eq!(h.state().project(), &edited);
+            let dir = std::path::Path::new("/project");
+            let json = jvid_core::file::to_json(&edited, dir).unwrap();
+            assert_eq!(
+                jvid_core::file::from_json(&json, dir, |_| false).unwrap(),
+                edited
+            );
         }
     }
 
