@@ -951,11 +951,12 @@ fn wheel_row(
             edit = Some((cmd, r.dragged().then_some(key)));
         };
         let h = ui.available_height();
+        let side = h.min((ui.available_width() - space::S4 - MIN_FIELD).max(0.0));
         let mut color = match value(clips[0], wheel, t) {
             Value::Vec2(v) => v,
             _ => [0.0; 2],
         };
-        let r = ui.add(ColorWheel::new(&mut color, h, label));
+        let r = ui.add(ColorWheel::new(&mut color, side, label));
         if r.changed() {
             let v = Value::Vec2(color);
             put(
@@ -988,8 +989,9 @@ fn wheel_row(
             .range(-100.0..=100.0)
             .width(rest.width());
         let field = ui.add(f);
-        let slider = ui.add(Slider::new(&mut shown, -100.0..=100.0, label).centred(true));
-        for (r, slot) in [(field, 1), (slider, 2)] {
+        let slider = (rest.width() >= MIN_SLIDER)
+            .then(|| ui.add(Slider::new(&mut shown, -100.0..=100.0, label).centred(true)));
+        for (r, slot) in std::iter::once((field, 1)).chain(slider.map(|r| (r, 2))) {
             if r.changed() {
                 let v = shown / 100.0;
                 put(ui, &r, set_field(clips, master, 0, |_| v, t), slot);
@@ -2670,6 +2672,8 @@ pub(crate) fn audio_fx(ui: &mut Ui, fxs: &[AudioFx]) -> Option<(FxEdit, Option<G
                 };
                 let (lo, hi) = (k.lo as f64, k.hi as f64);
                 let (r, c) = prop_row(ui, caption(k.id), tools, |ui| {
+                    let wide = numeric_slider(ui, 64.0);
+                    let width = if wide { 64.0 } else { ui.available_width() };
                     let mut field = v;
                     let f = DragField::new(&mut field)
                         .speed((hi - lo) / 200.0)
@@ -2677,18 +2681,17 @@ pub(crate) fn audio_fx(ui: &mut Ui, fxs: &[AudioFx]) -> Option<(FxEdit, Option<G
                         .suffix(k.suffix)
                         .mixed(mixed)
                         .range(lo..=hi)
-                        .width(64.0);
+                        .width(width);
                     let r = ui.add(f);
                     let to = |x: f64| if k.log { x.log10() } else { x };
                     let from = |x: f64| if k.log { 10f64.powf(x) } else { x };
                     let mut slid = to(v);
                     let s = Slider::new(&mut slid, to(lo)..=to(hi), caption(k.id))
                         .centred(lo < 0.0 && hi > 0.0);
-                    let s = ui.add(s);
+                    let s = wide.then(|| ui.add(s));
                     match () {
                         _ if r.changed() => Some((r, field)),
-                        _ if s.changed() => Some((s, from(slid))),
-                        _ => None,
+                        _ => s.filter(|s| s.changed()).map(|s| (s, from(slid))),
                     }
                 });
                 let slot = (b * 16 + n) as u64;
@@ -2764,6 +2767,13 @@ const GAP: f32 = 2.0;
 /// The narrowest a row's field gets, with its prefix and a three-digit value, before the
 /// row wraps.
 const MIN_FIELD: f32 = 44.0;
+/// The shared Slider widget enforces this minimum hit width.
+const MIN_SLIDER: f32 = 40.0;
+
+/// Keep numeric editing and the reserved tools usable; add a slider only if it fits.
+fn numeric_slider(ui: &Ui, field: f32) -> bool {
+    ui.available_width() >= field + ui.spacing().item_spacing.x + MIN_SLIDER
+}
 
 /// What a row's tool slots show, with names for screen readers. An empty slot keeps its
 /// place, so nothing moves when another appears.
@@ -2914,7 +2924,7 @@ fn row(
             let key = GESTURE ^ (index << 4 | slot as u64) ^ (drag << 16);
             edit = Some((cmd, r.dragged().then_some(key)));
         };
-        let slider = p.slider();
+        let slider = p.slider().filter(|_| numeric_slider(ui, 64.0));
         let width = match slider {
             Some(_) => 64.0,
             None => (ui.available_width() - space::S4 * (per - 1) as f32) / per as f32,
@@ -3414,7 +3424,7 @@ fn number(
     (slider, step): ((f64, f64), Option<f64>),
     name: &str,
 ) -> bool {
-    let wide = ui.available_width() >= SLIDER_ROOM;
+    let wide = numeric_slider(ui, 56.0);
     let speed = step.map_or(1.0, |s| s / 10.0);
     let f = DragField::new(v).range(lo..=hi).speed(speed).width(56.0);
     let mut changed = ui.add(f).changed();
@@ -4533,6 +4543,218 @@ mod tests {
         assert_eq!(label(&[&two]), "Effects 2");
         assert_eq!(label(&[&two, &two]), "Effects 2");
         assert_eq!(label(&[&two, &other]), "Effects");
+    }
+
+    /// #455: actual scalar rows keep every value hit region inside the value column.
+    #[test]
+    fn narrow_scalar_rows_keep_values_clear_of_reserved_tools() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::{NodeT, Queryable};
+        for width in [240.0, 288.0] {
+            let mut slots_before = None;
+            for mode in 0..4 {
+                let mut clips = vec![clip(1, 0), clip(2, 0)];
+                for c in &mut clips {
+                    c.transform
+                        .masks
+                        .push(new_mask(MaskShape::Rectangle, [100.0; 2]));
+                    c.transform.effects.push(Effect {
+                        shader: "test".into(),
+                        params: BTreeMap::from([("amount".into(), 0.0)]),
+                        enabled: true,
+                        mask: None,
+                    });
+                }
+                let mut fresh = true;
+                // Account for panel insets and the harness's own 8pt margins.
+                let mut h = egui_kittest::Harness::builder()
+                    .with_size([width - 24.0 + 16.0, 1800.0])
+                    .build_ui_state(
+                        move |ui, bounds: &mut Rect| {
+                            if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                                return;
+                            }
+                            let gutter = ui.spacing().scroll.allocated_width() + space::S4;
+                            ui.set_max_width(ui.available_width() - gutter);
+                            *bounds = Rect::from_min_max(
+                                pos2(
+                                    ui.max_rect().left() + size::INSPECTOR_LABEL + space::S4,
+                                    ui.max_rect().top(),
+                                ),
+                                pos2(
+                                    ui.max_rect().right() - TOOLS - space::S4,
+                                    ui.max_rect().bottom(),
+                                ),
+                            );
+                            let effect = Effect::key(0, "amount");
+                            let feather = Mask::key(0, "feather");
+                            let opacity = Mask::key(0, "opacity");
+                            let extra = [
+                                Prop {
+                                    range: (0.0, 1.0),
+                                    default: Some(0.0),
+                                    label: Some("Effect Amount"),
+                                    ..prop(&effect, ONE)
+                                },
+                                Prop {
+                                    slider: Some((0.0, 200.0)),
+                                    default: Some(0.0),
+                                    label: Some("Mask Feather"),
+                                    ..prop(&feather, ONE)
+                                },
+                                Prop {
+                                    range: (0.0, 1.0),
+                                    default: Some(1.0),
+                                    label: Some("Mask Opacity"),
+                                    ..prop(&opacity, ONE)
+                                },
+                            ];
+                            let props = SECTIONS
+                                .iter()
+                                .flat_map(|(_, p)| *p)
+                                .filter(|p| p.slider().is_some())
+                                .chain(&extra);
+                            for (i, p) in props.enumerate() {
+                                let mut here = clips.clone();
+                                if mode != 0 {
+                                    let name = p.names()[0];
+                                    let default = p.default(name, 0);
+                                    let v =
+                                        default + if default >= p.range.1 { -0.25 } else { 0.25 };
+                                    let indexes = if mode == 3 { 1 } else { here.len() };
+                                    for c in &mut here[..indexes] {
+                                        set(&mut c.transform, name, Value::Scalar(v));
+                                        if mode == 2 {
+                                            c.keyframes.insert(
+                                                name.into(),
+                                                vec![Keyframe {
+                                                    time: Time(10),
+                                                    value: get(&c.transform, name),
+                                                    easing: Easing::Linear,
+                                                }],
+                                            );
+                                        }
+                                    }
+                                }
+                                ui.push_id(i, |ui| {
+                                    row(ui, &refs(&here), p, Time(0), i as u64, &mut None);
+                                });
+                            }
+                            ui.push_id("wheels", |ui| {
+                                wheel_row(
+                                    ui,
+                                    &refs(&clips),
+                                    [Wheels::KEYS[0], Wheels::KEYS[1]],
+                                    Time(0),
+                                    100,
+                                    &mut None,
+                                );
+                            });
+                            let mut fxs = vec![AudioFx::default(); 2];
+                            if mode != 0 {
+                                let indexes = if mode == 3 { 1 } else { fxs.len() };
+                                for fx in &mut fxs[..indexes] {
+                                    set_preset(fx, "compressor", 2);
+                                }
+                            }
+                            audio_fx(ui, &fxs);
+                        },
+                        Rect::NOTHING,
+                    );
+                h.run();
+                let bounds = *h.state();
+                let controls: Vec<_> = h
+                    .query_all_by_role(Role::SpinButton)
+                    .chain(h.query_all_by_role(Role::Slider))
+                    .filter_map(|n| {
+                        let r = n.accesskit_node().bounding_box()?;
+                        // The Graphic EQ bank uses the entire row, with vertical controls.
+                        (r.x1 - r.x0 > r.y1 - r.y0).then_some(r)
+                    })
+                    .collect();
+                assert!(controls.len() > 20, "all scalar families were drawn");
+                for r in &controls {
+                    assert!(
+                        r.x0 >= bounds.left() as f64 - 0.5 && r.x1 <= bounds.right() as f64 + 0.5,
+                        "panel {width}, mode {mode}: {r:?} outside value column {bounds:?}"
+                    );
+                }
+                let keys: Vec<_> = h
+                    .query_all_by_label_contains("Animate ")
+                    .map(|n| n.rect().x_range())
+                    .collect();
+                if mode == 0 {
+                    slots_before = Some(keys);
+                } else if mode != 2 {
+                    assert_eq!(
+                        slots_before.as_ref().unwrap(),
+                        &keys,
+                        "reserved diamond column stays fixed"
+                    );
+                }
+                for reset in h.query_all_by_label("Reset") {
+                    let reset = reset.accesskit_node().bounding_box().unwrap();
+                    for r in &controls {
+                        assert!(
+                            r.intersect(reset).is_empty(),
+                            "{r:?} overlaps Reset {reset:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// #455: a numeric field remains keyboard editable when its slider gives way.
+    #[test]
+    fn narrow_numeric_field_types_and_drags_in_one_undo_step() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness();
+        h.set_size(vec2(216.0, 1600.0));
+        h.run();
+        assert!(h.query_by_role_and_label(Role::Slider, "Scale").is_none());
+        // Position has X/Y; Scale is the next numeric field.
+        let at = h
+            .get_all_by_role(Role::SpinButton)
+            .nth(2)
+            .unwrap()
+            .rect()
+            .center();
+        h.hover_at(at);
+        h.run();
+        h.drag_at(at);
+        h.run();
+        for dx in [5.0, 10.0, 15.0] {
+            h.hover_at(at + vec2(dx, 0.0));
+            h.run();
+        }
+        h.drop_at(at + vec2(15.0, 0.0));
+        h.run();
+        let scale = |h: &egui_kittest::Harness<'_, History>| {
+            h.state().project().sequence().tracks()[0].clips()[0]
+                .transform
+                .scale[0]
+        };
+        assert!(scale(&h) > 1.0);
+        assert!(h.state_mut().undo());
+        assert_eq!(scale(&h), 1.0);
+        h.run();
+        h.get_all_by_role(Role::SpinButton).nth(2).unwrap().focus();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run();
+        h.event(egui::Event::Text("125".into()));
+        h.run();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert_eq!(scale(&h), 1.25);
+        assert!(h.state_mut().undo());
+        assert_eq!(scale(&h), 1.0);
     }
 
     #[test]
