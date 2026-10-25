@@ -137,6 +137,13 @@ def smoke(archive, evidence, installer=None):
         exercise(binary, evidence / "portable-again", env)
         assert settings.read_text() == 'theme = "light"\n'
         assert model.read_bytes() == b"existing model sentinel"
+        other = tmp / "second portable copy"
+        extract(archive, other)
+        other_binary, = other.rglob(binary.name)
+        if sys.platform != "win32":
+            other_binary.chmod(0o755)
+        other_report = exercise(other_binary, evidence / "portable-independent", env)
+        assert str(data) not in other_report, "separate copies shared portable data"
         # A file blocks the data directory on every OS, even a privileged CI account.
         shutil.rmtree(data)
         data.write_bytes(b"blocked")

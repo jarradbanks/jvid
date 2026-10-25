@@ -76,9 +76,9 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          brew install ffmpeg pkg-config
-          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig" >> "$GITHUB_ENV"
-          major=$(PKG_CONFIG_PATH="$(brew --prefix ffmpeg)/lib/pkgconfig" pkg-config --modversion libavcodec | cut -d. -f1)
+          brew install ffmpeg@7 pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg@7)/lib/pkgconfig" >> "$GITHUB_ENV"
+          major=$(PKG_CONFIG_PATH="$(brew --prefix ffmpeg@7)/lib/pkgconfig" pkg-config --modversion libavcodec | cut -d. -f1)
           test "$major" -ge 58 && test "$major" -le 62
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1

@@ -82,11 +82,18 @@ def main():
         RULE,
         "FFmpeg",
         RULE,
-        "jvid uses FFmpeg (https://ffmpeg.org), dynamically linked, under the GNU Lesser General",
-        "Public License 2.1 or later. Its source is at https://ffmpeg.org/download.html, and you",
-        "may replace the FFmpeg libraries jvid loads with your own build. The licence follows.",
+        "jvid uses FFmpeg (https://ffmpeg.org), dynamically linked. Developer builds may use",
+        "LGPL FFmpeg; release packages include GPL FFmpeg with x264/x265. The exact licence",
+        "is reported by the linked runtime at startup. Packaged runtime-licenses/ contains",
+        "its additional notices. FFmpeg source: https://ffmpeg.org/download.html. You may",
+        "replace the FFmpeg libraries jvid loads with your own build. The LGPL and GPL",
+        "licence texts follow; including these texts does not change jvid source's licence.",
         "",
         (STANDARD / "LGPL-2.1.txt").read_text(encoding="utf-8").strip(),
+        "",
+        (STANDARD / "GPL-2.0.txt").read_text(encoding="utf-8").strip(),
+        "",
+        (STANDARD / "GPL-3.0.txt").read_text(encoding="utf-8").strip(),
     ]
     for p in crates:
         if p["name"] in VENDORED:

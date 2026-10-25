@@ -159,9 +159,10 @@ mod tests {
         );
         let (_, receiver) = channel();
         let mut components = Components {
+            open: false,
             jobs: Some(jobs),
             download: Some((job.clone(), receiver)),
-            ..Default::default()
+            error: None,
         };
         started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         components.cancel();
@@ -181,7 +182,9 @@ mod tests {
             |ui, c: &mut Components| c.show(ui.ctx()),
             Components {
                 open: true,
-                ..Default::default()
+                jobs: None,
+                download: None,
+                error: None,
             },
         );
         h.run();

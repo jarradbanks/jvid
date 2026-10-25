@@ -42,6 +42,9 @@ mod tests {
             "Community Data License Agreement - Permissive - Version 2.0",
             // FFmpeg
             "GNU LESSER GENERAL PUBLIC LICENSE",
+            // GPL runtime variants shipped by release packaging.
+            "Version 2, June 1991",
+            "Version 3, 29 June 2007",
             // Inter, Noto Sans CJK
             "SIL OPEN FONT LICENSE Version 1.1",
         ] {

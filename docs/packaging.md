@@ -171,7 +171,8 @@ Linux assembly requires `patchelf`, `ldd`, `ldconfig`, dpkg copyright files, and
 runtime client libraries listed in the workflow. It recursively copies dependency
 libraries and rewrites their relative loader paths; development prefix references
 must not be needed at runtime. macOS assembly requires `otool`,
-`install_name_tool`, `codesign`, `ditto`, `hdiutil` and Homebrew FFmpeg (the workflow rejects versions outside the supported 4.4–8.x range).
+`install_name_tool`, `codesign`, `ditto`, `hdiutil` and Homebrew `ffmpeg@7` (a supported 7.x runtime; the workflow rejects
+versions outside the supported 4.4–8.x range).
 Windows requires Inno Setup 6 and `--ffmpeg-dir`; `fetch_ffmpeg.py` downloads the
 reviewed GPL shared build and verifies `packaging/ffmpeg-windows.json`'s SHA-256.
 The upstream daily URL has finite retention: review and update the lock if it
