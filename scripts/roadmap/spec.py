@@ -1933,3 +1933,9 @@ I("transition-freeze", "Transitions work on untrimmed clips", None, ["core", "re
   ac=["Test: a Crossfade between two untrimmed clips is added, and rendering at the cut blends A's last frame with B's first",
       "Test: with handles present, rendering is unchanged (bit-identical to before)",
       "Test: two clips with a gap give the 'must touch' error, not the handles one"])
+
+I("timeline-amber-leftovers", "Timeline: replace off-spec amber", None, ["ui", "timeline"], "S", ["viewer-amber-leftovers"], labels=["later"],
+  summary="From PR #419: DESIGN.md keeps Amber for warnings, solo engaged and meter levels above -6 dBFS, but the timeline still paints it for non-warning things.",
+  scope=["Use DESIGN.md tokens (Light Blue for active or hot, Ink or Ink 2 for lines) for the volume rubber band line and points (rubber.rs), fade lines and handles (fades.rs), transition blocks (transitions.rs), open or on keyframe states (keyframes.rs), and the timeline.rs lane line at about line 1424",
+         "Leave the meter, Solo, and the Inspector and Export warning icons amber"],
+  ac=["A test renders a clip with a volume line, a fade, a transition and keyframes and asserts no amber pixels", "Snapshots are updated"])
