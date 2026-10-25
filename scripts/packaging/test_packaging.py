@@ -6,6 +6,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 import build
@@ -52,6 +53,33 @@ class PackagingTests(unittest.TestCase):
             build.native_licenses(stage, [source], "macos-aarch64", None)
             self.assertTrue((copied / "license-source.json").is_file())
             self.assertTrue(list(copied.glob('*-leptonica-1.87.0.txt')))
+
+    def test_macos_recovers_reuse_text_from_verified_source_and_rejects_corruption(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            keg = root / "glib/2.88.3"
+            (keg / ".brew").mkdir(parents=True)
+            archive = root / "glib.tar.gz"
+            with tarfile.open(archive, "w:gz") as out:
+                data = b"GNU LGPL source license text"
+                member = tarfile.TarInfo("glib/LICENSES/LGPL-2.1-or-later.txt")
+                member.size = len(data)
+                out.addfile(member, io.BytesIO(data))
+                link = tarfile.TarInfo("glib/COPYING")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "LICENSES/LGPL-2.1-or-later.txt"
+                out.addfile(link)
+            (keg / ".brew/glib.rb").write_text('url "https://example.invalid/glib.tar.gz"\nsha256 "' + build.sha256(archive) + '"\n')
+            dest = root / "notices"
+            dest.mkdir()
+            import shutil
+            with patch('build.urllib.request.urlretrieve', side_effect=lambda url, path: shutil.copy2(archive, path)):
+                build.recover_homebrew_licenses(keg, dest)
+                self.assertIn('GNU LGPL source license text', (dest / 'source-1-COPYING').read_text())
+                self.assertTrue((dest / 'license-source.json').is_file())
+                archive.write_bytes(b'corrupted source download')
+                with self.assertRaisesRegex(RuntimeError, 'checksum mismatch'):
+                    build.recover_homebrew_licenses(keg, dest)
 
     def test_archives_cannot_escape_extraction_root(self):
         with tempfile.TemporaryDirectory() as tmp:

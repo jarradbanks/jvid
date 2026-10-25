@@ -188,7 +188,11 @@ license/provenance files are collected in addition to the generated Rust/font/
 Whisper/sample notices. Where a Homebrew bottle omits a nonstandard upstream
 license (currently Leptonica 1.87.0), the version-pinned, checksum-checked text in
 `packaging/licenses` is included with its exact upstream source URL; an unknown
-missing notice still fails assembly. Their full corresponding source and build scripts must
+missing notice is recovered from the exact source archive URL and SHA-256 in the
+bottle's retained `.brew` formula. Archive paths are read only to recover notice
+texts (including REUSE license directories and COPYING symlink targets); source
+is never executed. A missing formula, checksum mismatch or absent source notices
+fails assembly. Their full corresponding source and build scripts must
 be reviewed before public distribution. Native package-manager provenance and
 upstream links alone are not treated as the completed corresponding-source offer.
 

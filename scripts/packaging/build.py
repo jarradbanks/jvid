@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
+import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -149,6 +151,45 @@ def notices(stage, providers):
     )
 
 
+def is_license(name):
+    path = Path(name)
+    return (re.match(r"^(COPYING|LICEN[CS]E|NOTICE|COPYRIGHT|leptonica-license)(\.|$|-)", path.name, re.I)
+            or any(part.lower() in ("license", "licenses", "licence", "licences") for part in path.parts[:-1]))
+
+
+def recover_homebrew_licenses(keg, dest):
+    """Some bottles omit COPYing symlink targets/REUSE texts. The bottle retains its
+    exact formula: verify that formula's source archive, then copy only notices.
+    Source archive contents are read, never executed or extracted as filesystem paths.
+    """
+    recipes = list((keg / ".brew").glob("*.rb"))
+    if len(recipes) != 1:
+        raise RuntimeError(f"missing unambiguous source formula for {keg}")
+    recipe = recipes[0].read_text()
+    url = re.search(r'^\s*url "(https://[^"#]+)"', recipe, re.M)
+    digest = re.search(r'^\s*sha256 "([0-9a-f]{64})"', recipe, re.M)
+    if not url or not digest:
+        raise RuntimeError(f"no pinned HTTPS source archive in {recipes[0]}")
+    with tempfile.TemporaryDirectory(prefix="jvid-runtime-notices-") as tmp:
+        archive = Path(tmp) / "source"
+        urllib.request.urlretrieve(url[1], archive)
+        if sha256(archive) != digest[1]:
+            raise RuntimeError(f"source archive checksum mismatch for {keg}")
+        with tarfile.open(archive) as source:
+            members = [m for m in source.getmembers() if (m.isfile() or m.issym()) and is_license(m.name)]
+            if not members:
+                raise RuntimeError(f"source contains no license text for {keg}")
+            for index, member in enumerate(members):
+                stream = source.extractfile(member)
+                if stream is None:
+                    raise RuntimeError(f"unreadable source license: {member.name}")
+                text = stream.read(2 * 1024 * 1024 + 1)
+                if len(text) > 2 * 1024 * 1024:
+                    raise RuntimeError(f"unexpectedly large license: {member.name}")
+                (dest / f"source-{index}-{Path(member.name).name}").write_bytes(text)
+    (dest / "license-source.json").write_text(json.dumps({"url": url[1], "sha256": digest[1], "formula": recipes[0].name}, indent=2) + "\n")
+
+
 def native_licenses(stage, sources, target, ffmpeg):
     dest = stage / "runtime-licenses"
     dest.mkdir()
@@ -197,19 +238,20 @@ def native_licenses(stage, sources, target, ffmpeg):
             if target_dir.exists():
                 continue
             target_dir.mkdir()
-            licenses = [p for p in keg.rglob("*") if p.is_file() and re.match(r"^(COPYING|LICEN[CS]E|NOTICE|COPYRIGHT|leptonica-license)(\.|$|-)", p.name, re.I)]
+            licenses = [p for p in keg.rglob("*") if p.is_file() and is_license(p.relative_to(keg))]
             if not licenses:
                 # Some Homebrew bottles omit upstream's nonstandard licence name.
                 # Only use explicitly reviewed text for that exact provider version.
                 license_root = ROOT / "packaging/licenses"
                 fallback = json.loads((license_root / "catalog.json").read_text()).get(f"{name}/{keg.name}")
                 if fallback is None:
-                    raise RuntimeError(f"no license text for {keg}")
-                path = license_root / fallback["file"]
-                if sha256(path) != fallback["sha256"]:
-                    raise RuntimeError(f"license checksum mismatch: {path}")
-                licenses = [path]
-                (target_dir / "license-source.json").write_text(json.dumps(fallback, indent=2) + "\n")
+                    recover_homebrew_licenses(keg, target_dir)
+                else:
+                    path = license_root / fallback["file"]
+                    if sha256(path) != fallback["sha256"]:
+                        raise RuntimeError(f"license checksum mismatch: {path}")
+                    licenses = [path]
+                    (target_dir / "license-source.json").write_text(json.dumps(fallback, indent=2) + "\n")
             for index, path in enumerate(licenses):
                 shutil.copy2(path, target_dir / f"{index}-{path.name}")
             for path in (keg / ".brew").glob("*.rb"):
@@ -317,10 +359,13 @@ def build(args):
 
 def sign_app(app):
     identity = os.environ.get("JVID_MACOS_SIGN_IDENTITY", "-")
+    # Ad hoc candidates have no Team ID for hardened library validation. Developer
+    # ID builds enable the hardened runtime and timestamp needed for notarization.
+    options = ["--timestamp=none"] if identity == "-" else ["--options", "runtime", "--timestamp"]
     # Sign inside out; all edits and marker writes must precede this.
     for path in (app / "Contents/Frameworks").iterdir():
-        run("codesign", "--force", "--options", "runtime", "--timestamp=none" if identity == "-" else "--timestamp", "--sign", identity, path)
-    run("codesign", "--force", "--options", "runtime", "--timestamp=none" if identity == "-" else "--timestamp", "--sign", identity, app)
+        run("codesign", "--force", *options, "--sign", identity, path)
+    run("codesign", "--force", *options, "--sign", identity, app)
     run("codesign", "--verify", "--deep", "--strict", app)
 
 
