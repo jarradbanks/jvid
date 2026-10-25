@@ -140,9 +140,13 @@ pub fn relativize(path: &Path, dir: &Path) -> Option<PathBuf> {
     }
     let (path, dir) = (normalize(path), normalize(dir));
     let (mut p, mut d) = (path.components().peekable(), dir.components().peekable());
-    if p.peek() != d.peek() {
+    if !same_root(p.peek(), d.peek()) {
         return None; // different drive on Windows
     }
+    // A verbatim prefix and its ordinary spelling identify the same root, but are unequal
+    // Components. Consume the checked root before comparing the remaining path components.
+    p.next();
+    d.next();
     while p.peek().is_some() && p.peek() == d.peek() {
         p.next();
         d.next();
@@ -150,6 +154,30 @@ pub fn relativize(path: &Path, dir: &Path) -> Option<PathBuf> {
     let mut out: PathBuf = d.map(|_| Component::ParentDir).collect();
     out.extend(p);
     Some(out)
+}
+
+fn same_root(left: Option<&Component<'_>>, right: Option<&Component<'_>>) -> bool {
+    #[cfg(windows)]
+    if let (Some(Component::Prefix(left)), Some(Component::Prefix(right))) = (left, right) {
+        use std::path::Prefix;
+        return match (left.kind(), right.kind()) {
+            (
+                Prefix::Disk(a) | Prefix::VerbatimDisk(a),
+                Prefix::Disk(b) | Prefix::VerbatimDisk(b),
+            ) => a.eq_ignore_ascii_case(&b),
+            (
+                Prefix::UNC(a, b) | Prefix::VerbatimUNC(a, b),
+                Prefix::UNC(c, d) | Prefix::VerbatimUNC(c, d),
+            ) => {
+                a.as_encoded_bytes()
+                    .eq_ignore_ascii_case(c.as_encoded_bytes())
+                    && b.as_encoded_bytes()
+                        .eq_ignore_ascii_case(d.as_encoded_bytes())
+            }
+            (a, b) => a == b,
+        };
+    }
+    left == right
 }
 
 /// `rel` resolved against `dir`, with `.` and `..` removed lexically.
@@ -204,10 +232,43 @@ mod tests {
     fn other_drive_keeps_only_absolute() {
         let dir = Path::new(r"C:\proj");
         assert_eq!(relativize(Path::new(r"D:\media\a.mkv"), dir), None);
-        assert_eq!(relativize(Path::new(r"\\?\C:\proj\a.mkv"), dir), None);
+        assert_eq!(relativize(Path::new(r"\\?\D:\media\a.mkv"), dir), None);
         let mut p = Project::default();
         p.add_asset(r"D:\media\a.mkv");
         assert!(!to_json(&p, dir).unwrap().contains("relative_path"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ordinary_and_verbatim_windows_roots_are_equivalent() {
+        for (source, directory, expected) in [
+            (r"\\?\C:\proj\media\a.mkv", r"C:\proj", r"media\a.mkv"),
+            (r"C:\proj\media\a.mkv", r"\\?\C:\proj", r"media\a.mkv"),
+            (r"\\?\c:\clips\a.mkv", r"C:\proj", r"..\clips\a.mkv"),
+            (
+                r"\\?\UNC\server\share\proj\media\a.mkv",
+                r"\\server\share\proj",
+                r"media\a.mkv",
+            ),
+            (
+                r"\\server\share\proj\media\a.mkv",
+                r"\\?\UNC\SERVER\SHARE\proj",
+                r"media\a.mkv",
+            ),
+        ] {
+            assert_eq!(
+                relativize(Path::new(source), Path::new(directory)),
+                Some(expected.into())
+            );
+        }
+        for (source, directory) in [
+            (r"\\?\UNC\server\other\a.mkv", r"\\server\share\proj"),
+            (r"\\?\UNC\other\share\a.mkv", r"\\server\share\proj"),
+            (r"\\?\Volume{123}\a.mkv", r"C:\proj"),
+            (r"\\.\C:\proj\a.mkv", r"C:\proj"),
+        ] {
+            assert_eq!(relativize(Path::new(source), Path::new(directory)), None);
+        }
     }
 
     #[test]
