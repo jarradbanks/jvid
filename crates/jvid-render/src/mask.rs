@@ -103,6 +103,8 @@ fn uniform(masks: &[Mask], fitted: [f32; 2], aa: f32) -> Option<Vec<f32>> {
 /// reused across frames.
 pub(crate) struct Masker {
     pipeline: wgpu::RenderPipeline,
+    /// Mixes an effect's output into its input by a mask's coverage; see [`Masker::mix`].
+    mix: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     pool: Vec<Option<(wgpu::Texture, wgpu::Buffer)>>,
     /// Masked in place of an image for coverage alone; made on first use.
@@ -115,32 +117,35 @@ impl Masker {
             label: Some("mask"),
             source: wgpu::ShaderSource::Wgsl(include_str!("mask.wgsl").into()),
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mask"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_mask"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_mask"),
-                targets: &[Some(FORMAT.into())],
-                compilation_options: Default::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = |entry| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("mask"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_mask"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some(entry),
+                    targets: &[Some(FORMAT.into())],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         Self {
-            pipeline,
+            pipeline: pipeline("fs_mask"),
+            mix: pipeline("fs_mix"),
             sampler: device.create_sampler(&wgpu::SamplerDescriptor {
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
@@ -272,6 +277,58 @@ impl Masker {
         pass.draw(0..4, 0..1);
         drop(pass);
         Some(out.clone())
+    }
+
+    /// Writes `fx` where `cover` (from [`Masker::apply`] with `cover`) covers and `orig`
+    /// elsewhere into `out`; all but `cover` are the same size.
+    pub fn mix(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        [orig, fx, cover]: [&wgpu::Texture; 3],
+        out: &wgpu::Texture,
+    ) {
+        let view = |t: &wgpu::Texture| {
+            t.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(t.format().remove_srgb_suffix()),
+                ..Default::default()
+            })
+        };
+        let views = [fx, orig, cover].map(view);
+        let entry = |binding, view| wgpu::BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::TextureView(view),
+        };
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.mix.get_bind_group_layout(0),
+            entries: &[
+                entry(0, &views[0]),
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                entry(3, &views[1]),
+                entry(4, &views[2]),
+            ],
+        });
+        let target = out.create_view(&Default::default());
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mask mix"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.mix);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.draw(0..4, 0..1);
     }
 }
 

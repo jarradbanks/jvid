@@ -1581,6 +1581,7 @@ mod program_tests {
             shader: "none".into(),
             params: Default::default(),
             enabled: true,
+            mask: None,
         };
         let draw = |id| {
             h.state()

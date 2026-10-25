@@ -97,3 +97,14 @@ fn fs_mask(in: Out) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(c.rgb, c.a * acc);
 }
+
+// An effect limited to a mask: `src` (the effected image) over `orig` by `cover`'s alpha, so
+// pixels the mask leaves out stay exactly as they were.
+@group(0) @binding(3) var orig: texture_2d<f32>;
+@group(0) @binding(4) var cover: texture_2d<f32>;
+
+@fragment
+fn fs_mix(in: Out) -> @location(0) vec4<f32> {
+    let p = vec2<i32>(in.pos.xy);
+    return mix(textureLoad(orig, p, 0), textureLoad(src, p, 0), textureSample(cover, smp, in.uv).a);
+}

@@ -524,6 +524,7 @@ fn add_key(app: &mut App) {
                 .map(|p| (p.name.clone(), p.default))
                 .collect(),
             enabled: true,
+            mask: None,
         })
     });
 }

@@ -693,6 +693,8 @@ add_effect = "Ajouter un effet"
 search_effects = "Rechercher des effets"
 masks = "Masques"
 add_mask = "Ajouter un masque"
+fx_mask = "Masque"
+fx_mask_none = "Aucun"
 mixed_masks = "Les plans sélectionnés ont des masques différents"
 # A mask block's title: its shape, then which mask it is, counting from 1.
 mask_title = "{shape} {n}"

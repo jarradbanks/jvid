@@ -855,6 +855,7 @@ fn effect(uv: vec2<f32>) -> vec4<f32> {
         shader: shader.into(),
         params: [("amount".to_owned(), amount)].into(),
         enabled: true,
+        mask: None,
     };
     let run = |comp: &mut Compositor, effects: Vec<Effect>| {
         let t = Transform {
@@ -897,6 +898,91 @@ fn effect(uv: vec2<f32>) -> vec4<f32> {
 }
 
 #[test]
+fn an_effect_limited_to_a_mask_leaves_pixels_outside_it_unchanged() {
+    use jvid_core::model::{Mask, MaskShape};
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping effect test: no software adapter on this platform");
+        return;
+    };
+    let (w, h) = (16, 8);
+    let src = image(&device, &queue, (w, h), |x, y| {
+        [x as u8 * 15, y as u8 * 30, 50, 255]
+    });
+    let invert = crate::effect::parse(
+        "// @jvid effect \"Invert\"
+fn effect(uv: vec2<f32>) -> vec4<f32> {
+    let c = textureSample(src, smp, uv);
+    return vec4<f32>(1.0 - c.rgb, c.a);
+}",
+    )
+    .unwrap();
+    let mut comp = Compositor::new(&device);
+    comp.set_effect(&device, "invert", Some(&invert)).unwrap();
+    // The left half, x 0..8.
+    let left = Mask {
+        id: 7,
+        ..Mask::new(MaskShape::Rectangle, vec![[-4.0, 0.0], [8.0, 8.0]])
+    };
+    let fx = |mask| Effect {
+        shader: "invert".into(),
+        params: Default::default(),
+        enabled: true,
+        mask,
+    };
+    let mut run = |effects: Vec<Effect>, masks: Vec<Mask>| {
+        let t = Transform {
+            effects,
+            masks,
+            ..Default::default()
+        };
+        let tex = comp.render(&device, &queue, (w, h), 1, [0; 4], &[(&src, t)]);
+        read_back(&device, &queue, tex)
+    };
+    let plain = run(vec![], vec![]);
+    let px = |rgba: &[u8], x: u32, y: u32| {
+        let i = ((y * w + x) * 4) as usize;
+        [0, 1, 2, 3].map(|c| rgba[i + c])
+    };
+    let inverted = |p: [u8; 4]| [255 - p[0], 255 - p[1], 255 - p[2], p[3]];
+    let check =
+        |rgba: &[u8], inside: &dyn Fn([u8; 4]) -> [u8; 4], outside: &dyn Fn([u8; 4]) -> [u8; 4]| {
+            for y in 0..h {
+                for x in 0..w {
+                    let (got, base) = (px(rgba, x, y), px(&plain, x, y));
+                    match x < 8 {
+                        true => {
+                            let want = inside(base);
+                            let ok = got.iter().zip(want).all(|(a, b)| near(*a, b as i32));
+                            assert!(ok, "inside at {x},{y}: {got:?} vs {want:?}");
+                        }
+                        // Bit for bit.
+                        false => assert_eq!(got, outside(base), "outside at {x},{y}"),
+                    }
+                }
+            }
+        };
+    let same = |p: [u8; 4]| p;
+    // Limited to the mask, which doesn't cut the image: inverted inside, untouched outside.
+    check(
+        &run(vec![fx(Some(7))], vec![left.clone()]),
+        &inverted,
+        &same,
+    );
+    // After or before a whole-image effect, so its input comes from the effect pool.
+    let both = run(vec![fx(None), fx(Some(7))], vec![left.clone()]);
+    check(&both, &same, &inverted);
+    let both = run(vec![fx(Some(7)), fx(None)], vec![left.clone()]);
+    check(&both, &same, &inverted);
+    // A bypassed or missing mask limits nothing.
+    let off = Mask {
+        enabled: false,
+        ..left
+    };
+    check(&run(vec![fx(Some(7))], vec![off]), &inverted, &inverted);
+    check(&run(vec![fx(Some(8))], vec![]), &inverted, &inverted);
+}
+
+#[test]
 fn effect_ignoring_fx_renders_and_extra_bindings_are_rejected() {
     let Some((device, queue)) = device() else {
         eprintln!("skipping effect test: no software adapter on this platform");
@@ -927,6 +1013,7 @@ fn effect_ignoring_fx_renders_and_extra_bindings_are_rejected() {
             shader: "swap".into(),
             params: Default::default(),
             enabled: true,
+            mask: None,
         }],
         ..Default::default()
     };
@@ -972,6 +1059,7 @@ fn chroma_key_shows_the_lower_track_and_suppresses_spill() {
                 ]
                 .into(),
                 enabled: true,
+                mask: None,
             }],
             ..Default::default()
         };
@@ -1138,6 +1226,7 @@ fn masked_blur_and_pixelate_change_only_inside_the_mask() {
                 shader: file.into(),
                 params: [(shader.params[0].name.clone(), params)].into(),
                 enabled: true,
+                mask: None,
             }],
             ..Default::default()
         };
@@ -1194,6 +1283,7 @@ fn blur_one_pixel_line(radius: f64) -> Option<(u32, Vec<u8>)> {
             shader: "blur".into(),
             params: [("radius".into(), radius)].into(),
             enabled: true,
+            mask: None,
         }],
         ..Default::default()
     };

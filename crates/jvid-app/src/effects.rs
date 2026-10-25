@@ -424,6 +424,7 @@ pub fn draw_thumbs(ctx: &egui::Context, preview: &crate::preview::Preview, shown
             shader: stem.clone(),
             params: Default::default(),
             enabled: true,
+            mask: None,
         };
         let id = preview.draw_thumb(old.by_stem.get(stem).copied(), |t, d, q| {
             t.effect(d, q, &fx)

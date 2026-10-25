@@ -1391,6 +1391,9 @@ fn effects_rows(
         if open {
             // Bypassed: the settings stay, greyed out, until it's back on.
             ui.add_enabled_ui(e.enabled, |ui| {
+                if let Some(e) = fx_mask_row(ui, clips, i) {
+                    edit = Some(e);
+                }
                 for (k, p) in (first + 1..).zip(&props) {
                     if let Some(e) = row(ui, clips, p, t, k, seek) {
                         edit = Some(e);
@@ -1420,6 +1423,45 @@ fn effects_rows(
         crate::hide_region::request(ui.ctx(), clips[0].id);
     }
     edit
+}
+
+/// Effect `i`'s Mask row: None or one of the first clip's masks, which the other clips take
+/// by position.
+fn fx_mask_row(ui: &mut Ui, clips: &[&Clip], i: usize) -> Option<Edit> {
+    let x = &clips[0].transform;
+    let names: Vec<String> = (x.masks.iter().enumerate())
+        .map(|(j, m)| {
+            tr!(
+                "inspector.mask_title",
+                shape = shape_name(m.shape),
+                n = j + 1
+            )
+        })
+        .collect();
+    let labels: Vec<&str> = std::iter::once(tr!("inspector.fx_mask_none"))
+        .chain(names.iter().map(String::as_str))
+        .collect();
+    let id = x.effects[i].mask;
+    let mut k = x
+        .masks
+        .iter()
+        .position(|m| Some(m.id) == id)
+        .map_or(0, |j| j + 1);
+    let (changed, _) = prop_row(ui, tr!("inspector.fx_mask"), Tools::default(), |ui| {
+        let w = ui.available_width();
+        ui.add(Dropdown::new(&mut k, &labels).width(w)).changed()
+    });
+    changed.then(|| (set_fx_mask(clips, i, k.checked_sub(1)), None))
+}
+
+/// Limits effect `i` of every clip to its mask `mask`, or to none; one undo step.
+fn set_fx_mask(clips: &[&Clip], i: usize, mask: Option<usize>) -> Command {
+    rewrite(clips, |_, x, _| {
+        let id = mask.and_then(|j| x.mask_id(j));
+        if let Some(e) = x.effects.get_mut(i) {
+            e.mask = id;
+        }
+    })
 }
 
 /// What an effect block's header shows.
@@ -1646,6 +1688,7 @@ pub(crate) fn new_effect(stem: &str, shader: &jvid_render::effect::Shader) -> Ef
             .map(|q| (q.name.clone(), q.default))
             .collect(),
         enabled: true,
+        mask: None,
     }
 }
 
@@ -1685,13 +1728,15 @@ fn shape_name(s: MaskShape) -> &'static str {
 }
 
 /// Rebuilds every clip's masks from old indices `f` gives, renumbering their keyframes to
-/// match and dropping those of masks left out, as [`restack`] does for effects.
+/// match and dropping those of masks left out, as [`restack`] does for effects, and effects'
+/// references to them.
 fn restack_masks(clips: &[&Clip], f: impl Fn(&mut Vec<usize>)) -> Command {
     rewrite(clips, |_, x, keys| {
         let mut order: Vec<usize> = (0..x.masks.len()).collect();
         f(&mut order);
         let old = std::mem::take(&mut x.masks);
         x.masks = order.iter().filter_map(|&j| old.get(j).cloned()).collect();
+        x.drop_stale_mask_refs();
         *keys = std::mem::take(keys)
             .into_iter()
             .filter_map(|(k, v)| match mask_param(&k) {
@@ -1721,6 +1766,7 @@ fn reset_mask(clips: &[&Clip], i: usize) -> Command {
         keys.remove(&Mask::key(i, "opacity"));
         if let Some(m) = x.masks.get_mut(i) {
             *m = Mask {
+                id: m.id,
                 enabled: m.enabled,
                 ..Mask::new(m.shape, std::mem::take(&mut m.points))
             };
@@ -3792,6 +3838,7 @@ mod tests {
             shader: shader.into(),
             params: [("amount".to_owned(), 0.5)].into(),
             enabled: true,
+            mask: None,
         };
         let mut clips = [clip(1, 0)];
         clips[0].transform.effects = vec![fx("a"), fx("b")];
@@ -3864,11 +3911,49 @@ mod tests {
     }
 
     #[test]
+    fn an_effect_takes_a_mask_by_id_and_loses_it_with_the_mask_in_one_step() {
+        let rect = Mask::new(MaskShape::Rectangle, vec![[0.0; 2], [100.0, 50.0]]);
+        let ellipse = Mask::new(MaskShape::Ellipse, vec![[5.0, 5.0], [20.0, 20.0]]);
+        let mut clips = [clip(1, 0), clip(2, 0)];
+        for c in &mut clips {
+            c.transform.masks = vec![rect.clone(), ellipse.clone()];
+            c.transform.effects = vec![Effect {
+                shader: "blur".into(),
+                params: Default::default(),
+                enabled: true,
+                mask: None,
+            }];
+        }
+        apply(&mut clips, |c| set_fx_mask(c, 0, Some(1)));
+        for c in &clips {
+            let x = &c.transform;
+            assert_ne!(x.masks[1].id, 0);
+            assert_eq!(x.effects[0].mask, Some(x.masks[1].id));
+        }
+        // The reference follows its mask when masks move, and survives a reset.
+        apply(&mut clips, |c| restack_masks(c, |o| o.swap(0, 1)));
+        apply(&mut clips, |c| reset_mask(c, 0));
+        let x = &clips[0].transform;
+        assert_eq!(x.effects[0].mask, Some(x.masks[0].id));
+        // Removing it clears the reference in the same edit.
+        apply(&mut clips, |c| {
+            restack_masks(c, |o| {
+                o.remove(0);
+            })
+        });
+        assert!(clips.iter().all(|c| c.transform.effects[0].mask.is_none()));
+        apply(&mut clips, |c| set_fx_mask(c, 0, Some(0)));
+        apply(&mut clips, |c| set_fx_mask(c, 0, None));
+        assert!(clips.iter().all(|c| c.transform.effects[0].mask.is_none()));
+    }
+
+    #[test]
     fn bypass_keeps_settings_and_keys_and_blocks_move_into_gaps() {
         let fx = |shader: &str| Effect {
             shader: shader.into(),
             params: [("amount".to_owned(), 0.5)].into(),
             enabled: true,
+            mask: None,
         };
         let mut clips = [clip(1, 0), clip(2, 0)];
         for c in &mut clips {
@@ -4191,6 +4276,7 @@ mod tests {
                     shader: s.to_string(),
                     params: BTreeMap::new(),
                     enabled: true,
+                    mask: None,
                 })
                 .collect();
             c

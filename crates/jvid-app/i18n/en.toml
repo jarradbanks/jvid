@@ -739,6 +739,9 @@ add_effect = "Add Effect"
 search_effects = "Search Effects"
 masks = "Masks"
 add_mask = "Add Mask"
+# The mask an effect is limited to.
+fx_mask = "Mask"
+fx_mask_none = "None"
 mixed_masks = "The selected clips have different masks"
 # A mask block's title: its shape, then which mask it is, counting from 1.
 mask_title = "{shape} {n}"
