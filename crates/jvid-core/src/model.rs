@@ -1628,8 +1628,10 @@ pub enum ModelError {
     BadSpeed,
     /// The time is outside the clip.
     OutsideClip(ClipId),
-    /// No media past the cut on one side or both for a transition there.
-    NoHandles(ClipId),
+    /// A clip at the cut is too short for a transition there.
+    TooShort(ClipId),
+    /// No clip starts where this one ends, so there's no cut for a transition.
+    NotTouching(ClipId),
     UnknownSequence(SequenceId),
     /// The edit would nest a sequence inside itself, directly or through others.
     Cycle,
@@ -1657,9 +1659,8 @@ impl std::fmt::Display for ModelError {
             Self::NoRange => f.write_str("no in/out range is marked"),
             Self::BadSpeed => f.write_str("speed must be above 0, and keyed from 1% to 10000%"),
             Self::OutsideClip(id) => write!(f, "time is outside clip {}", id.0),
-            Self::NoHandles(_) => f.write_str(
-                "no media handles at that cut for a transition: trim the clips so media remains past it on both sides",
-            ),
+            Self::TooShort(_) => f.write_str("These clips are too short for a transition."),
+            Self::NotTouching(_) => f.write_str("The clips must touch to add a transition."),
             Self::UnknownSequence(id) => write!(f, "unknown sequence {}", id.0),
             Self::Cycle => f.write_str("a sequence can't be nested inside itself"),
             Self::SequenceOpen => f.write_str("the open sequence can't be removed"),
@@ -3027,12 +3028,7 @@ impl Project {
         let (mut lo, mut hi) = (Time(i64::MIN / 4), Time(i64::MAX / 4));
         for (t, c) in s.linked(id) {
             let clips = s.track(t).expect("listed").clips();
-            // Stills and solids report no duration and extend freely, as does a freeze; a
-            // sequence is held to its length.
-            let media = self.asset(c.asset).filter(|a| !a.generated());
-            let media = media.and_then(|a| a.probe.as_ref()).map(|p| p.duration);
-            let media = media.or(self.nested(c.asset).map(Sequence::duration));
-            let media = media.filter(|d| *d > Time(0)).map(|d| (c.source_out, d));
+            let media = self.media_len(c.asset).map(|d| (c.source_out, d));
             // Source ranges to spare before the first frame shown and after the last.
             let head = Some((Time(0), c.source_in));
             let (before, after) = match (c.freeze, c.reverse) {
@@ -3066,24 +3062,31 @@ impl Project {
         if lo > hi { Time(0) } else { by.clamp(lo, hi) }
     }
 
+    /// How long `asset`'s media runs: a file's probed length or a sequence's. `None` for
+    /// stills and solids, which extend freely.
+    pub fn media_len(&self, asset: AssetId) -> Option<Time> {
+        let media = self.asset(asset).filter(|a| !a.generated());
+        let media = media.and_then(|a| a.probe.as_ref()).map(|p| p.duration);
+        let media = media.or(self.nested(asset).map(Sequence::duration));
+        media.filter(|d| *d > Time(0))
+    }
+
     /// The longest transition at the cut after `id` (the end it shares with the next clip),
-    /// a whole even number of frames held to the media handles on both sides.
+    /// a whole even number of frames at most half of either clip's length. Past a clip's
+    /// media the transition holds its end frame ([`crate::eval::frame_at`]).
     pub fn transition_room(&self, id: ClipId) -> Result<Time, ModelError> {
         let s = &self.sequence;
         let (t, c) = s.clip(id).ok_or(ModelError::UnknownClip(id))?;
         let mut next = s.track(t).expect("listed").clips().iter();
         let next = next
             .find(|n| n.start == c.end())
-            .ok_or(ModelError::NoHandles(id))?;
-        let far = Time(i64::MAX / 8);
-        let after = self.trim_limit(id, Edge::Tail, far, true);
-        let before = Time(0) - self.trim_limit(next.id, Edge::Head, Time(0) - far, true);
+            .ok_or(ModelError::NotTouching(id))?;
         let r = self.settings.frame_rate;
-        // Stills and solids have endless handles; a minute either side is plenty.
         let minute = Time(60 * crate::time::FLICKS_PER_SECOND);
-        let half = r.index_floor(after.min(before).min(minute));
+        let len = c.duration().min(next.duration());
+        let half = r.index_floor(Time(len.0 / 4).min(minute));
         if half < 1 {
-            return Err(ModelError::NoHandles(id));
+            return Err(ModelError::TooShort(id));
         }
         Ok(r.time_floor(2 * half))
     }

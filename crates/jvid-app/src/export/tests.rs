@@ -454,6 +454,73 @@ fn a_ramped_clip_exports_its_curve() {
     std::fs::remove_file(&path).unwrap();
 }
 
+/// A crossfade between two whole files holds each one's end frame through the part past its
+/// media: at the cut, A's last frame (299) shows at half over B's first (0).
+#[test]
+fn untrimmed_crossfade_blends_the_end_frames() {
+    use jvid_core::model::{Transition, TransitionKind};
+    let (Some(dir), Some(_)) = (corpus(), device()) else {
+        return eprintln!("skipping export test: needs the corpus and a software adapter");
+    };
+    let video = dir.join("frame-index-1080p30.mp4");
+    let probe = jvid_media::probe::probe(&video).unwrap();
+    let len = probe.duration;
+    let mut h = History::new(Project::default());
+    h.apply(Command::Import(vec![(video, probe)])).unwrap();
+    let asset = h.project().assets()[0].id;
+    let (kind, name) = (TrackKind::Video, "V1".into());
+    let Ok(Created::Track(track)) = h.apply(Command::AddTrack { kind, name }) else {
+        panic!("track")
+    };
+    for start in [Time(0), len] {
+        let clip = NewClip {
+            asset,
+            source_in: Time(0),
+            source_out: len,
+            start,
+            link: None,
+        };
+        h.apply(Command::AddClip { track, clip }).unwrap();
+    }
+    let a = h.project().sequence().tracks()[0].clips()[0].clone();
+    let transition = Some(Transition {
+        kind: TransitionKind::Crossfade,
+        duration: secs(1),
+    });
+    let t = jvid_core::model::Transform {
+        transition,
+        ..a.transform.clone()
+    };
+    h.apply(Command::SetClipProps(vec![(a.id, t, a.keyframes.clone())]))
+        .unwrap();
+
+    let path = out("untrimmed-crossfade.mp4");
+    let req = Request {
+        path: path.clone(),
+        range: (len - half(1), len + half(1)),
+        preset: preset("YouTube 1080p"),
+        loudness: None,
+        lossless: None,
+        sidecar: false,
+    };
+    run_now(&small(h.project().clone()), &req, false).unwrap();
+    let f = VideoDecoder::open(&path)
+        .unwrap()
+        .frame_at(half(1))
+        .unwrap();
+    let w = f.width as usize;
+    // Each frame-index block's luma at its centre: white where 299 has the bit, at half.
+    for bit in 0..9 {
+        let y = f.planes[0][32 * w + bit * 120 + 60];
+        if 299 >> bit & 1 == 1 {
+            assert!((90..=170).contains(&y), "bit {bit}: {y}");
+        } else {
+            assert!(y < 60, "bit {bit}: {y}");
+        }
+    }
+    std::fs::remove_file(&path).unwrap();
+}
+
 /// The dialog's In to Out range exports exactly the marked frames: In at 1 s, Out at 2.5 s.
 #[test]
 fn in_to_out_exports_the_marked_range() {

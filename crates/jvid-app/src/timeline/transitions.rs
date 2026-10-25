@@ -15,7 +15,7 @@ use super::{Edit, Timeline, View};
 
 /// Undo gesture for block drags, xored with the clip and drag count.
 const GESTURE: GestureKey = 0x7472_616e_0000; // "tran"
-/// The length a new transition asks for, held to the handles.
+/// The length a new transition asks for, held to [`Project::transition_room`].
 const DEFAULT: Time = Time(FLICKS_PER_SECOND);
 
 /// The keymap action adding each kind.
@@ -26,14 +26,15 @@ pub const ACTIONS: [(&str, TransitionKind); 3] = [
 ];
 
 /// Sets the transition at the cut after `id`, and after its linked clips that end on a cut,
-/// to `x`, its length held to the handles; `None` removes them. Errors with the message to
-/// show when there are no handles.
+/// to `x`, its length held to [`Project::transition_room`]; `None` removes them. Errors with
+/// the message to show when the clips don't touch or are too short.
 pub fn set(project: &Project, id: ClipId, x: Option<Transition>) -> Result<Command, String> {
     let seq = project.sequence();
     let x = match x {
         Some(x) => {
             let room = project.transition_room(id).map_err(|e| match e {
-                ModelError::NoHandles(_) => tr!("timeline.no_handles").to_owned(),
+                ModelError::TooShort(_) => tr!("timeline.transition_too_short").to_owned(),
+                ModelError::NotTouching(_) => tr!("timeline.clips_must_touch").to_owned(),
                 e => e.to_string(),
             })?;
             Some(Transition {
@@ -200,35 +201,39 @@ mod tests {
     }
 
     #[test]
-    fn needs_handles_then_applies_holds_and_undoes() {
+    fn applies_on_untrimmed_clips_holds_and_undoes() {
         use jvid_core::model::Edge;
         let mut h = History::new(project(4));
         let t = Timeline::default();
-        let [a, b] = [0, 1].map(|i| clips(&h)[i].id);
-        // b starts at source 0: nothing before its first frame to fade in from.
-        let msg = t.transition_action("crossfade", h.project()).unwrap_err();
-        assert!(msg.contains("no media handles"), "{msg}");
-        let s = FLICKS_PER_SECOND;
-        let trims = vec![(b, Edge::Head, Time(s / 2))];
-        h.apply(Command::Trim {
-            trims,
-            ripple: true,
-        })
-        .unwrap();
+        let a = clips(&h)[0].id;
+        // b starts at source 0: its first frame holds before the cut.
         h.apply(t.transition_action("dip_to_white", h.project()).unwrap())
             .unwrap();
         let x = clips(&h)[0].transform.transition.unwrap();
         assert_eq!((x.kind, x.duration), (TransitionKind::DipToWhite, DEFAULT));
+        let s = FLICKS_PER_SECOND;
         let long = Transition {
             duration: Time(10 * s),
             ..x
         };
         h.apply(set(h.project(), a, Some(long)).unwrap()).unwrap();
         let got = clips(&h)[0].transform.transition.unwrap().duration;
-        assert_eq!(got, Time(s), "held to half a second each side");
+        assert_eq!(got, Time(s), "held to half of either 2 s clip");
         h.apply(set(h.project(), a, None).unwrap()).unwrap();
         assert_eq!(clips(&h)[0].transform.transition, None);
         assert!(h.undo());
-        assert_eq!(clips(&h)[0].transform.transition, Some(x));
+        let held = Transition {
+            duration: Time(s),
+            ..x
+        };
+        assert_eq!(clips(&h)[0].transform.transition, Some(held));
+        let trims = vec![(a, Edge::Tail, Time(-s / 2))];
+        h.apply(Command::Trim {
+            trims,
+            ripple: false,
+        })
+        .unwrap();
+        let msg = set(h.project(), a, Some(x)).unwrap_err();
+        assert_eq!(msg, tr!("timeline.clips_must_touch"));
     }
 }
