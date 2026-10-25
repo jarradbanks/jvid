@@ -34,6 +34,7 @@ jobs:
         # PRs run Linux only; nightly and manual runs get all three.
         os: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       # rust-toolchain.toml pins stable + rustfmt + clippy; rustup installs it on first cargo call.

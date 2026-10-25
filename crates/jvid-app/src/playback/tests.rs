@@ -90,6 +90,9 @@ fn cache_evicts_least_recently_used_over_budget() {
     assert_eq!(c.bytes(), 500);
 }
 
+/// Longer than any fake decode takes, however loaded the machine, and well under a CI timeout.
+const HUNG: Duration = Duration::from_secs(10);
+
 /// `pb`'s finished decodes, taken from it so the test hands them back when it chooses.
 struct Decodes {
     decoded: Receiver<Done>,
@@ -105,7 +108,7 @@ impl Decodes {
 
     /// Hands back the decodes `pb` queues at `clock` as they finish, each as instant so the lead
     /// stays zero however loaded the machine, until `done`. Bounded by decodes, not time: a decode
-    /// queued over and over fails rather than hangs.
+    /// queued over and over fails rather than hangs; one never finishing fails after [`HUNG`].
     fn until(
         &self,
         pb: &mut Playback,
@@ -119,7 +122,9 @@ impl Decodes {
                 return;
             }
             assert!(!pb.pending.is_empty(), "nothing left to decode");
-            let (k, _, r) = self.decoded.recv().unwrap();
+            let (k, _, r) = self.decoded.recv_timeout(HUNG).unwrap_or_else(|_| {
+                panic!("no decode finished in {HUNG:?}: {:?}", pb.pending.keys())
+            });
             self.to_pb.send((k, Duration::ZERO, r)).unwrap();
         }
         panic!("decodes never settled");
@@ -502,6 +507,22 @@ fn failed_decodes_retry_and_relink_redecodes() {
         .unwrap();
     assert_eq!(layers(&mut pb, h.project(), held), Some(1), "relinked");
     assert!(paths.lock().unwrap().contains(&"new.mp4".into()));
+}
+
+/// A frame retried the moment its failure is taken is decoded again: its job is still live in the
+/// pool then, and must not hand the retry its spent handle (#371). Racy by nature, so many times.
+#[test]
+fn retry_queued_as_a_failure_lands_redecodes() {
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, "v.mp4", secs(1));
+    let p = h.project();
+    let mut pb = Playback::new(Arc::new(|_, _| Err("no".into())), silent(), DEFAULT_BUDGET);
+    let d = Decodes::take(&mut pb);
+    pb.sync(p);
+    for _ in 0..1_000 {
+        d.settle(&mut pb, p, 0);
+        pb.failed.values_mut().for_each(|at| *at -= RETRY);
+    }
 }
 
 /// Release only (debug FFmpeg and GPU code is too slow to say anything): ten seconds of two
