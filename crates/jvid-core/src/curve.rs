@@ -125,6 +125,8 @@ impl Curve {
             [] => kind.neutral(x),
             [only] => only[1],
             _ if kind == Kind::Hue => {
+                // A point at 1 (only from a hand-edited file) would sit on the next lap's 0.
+                let p: Vec<_> = p.iter().filter(|q| q[0] < 1.0).copied().collect();
                 // Three laps, so every point's slope sees its neighbours across the wrap.
                 let lap = |d: f64| p.iter().map(move |&[x, y]| [x + d, y]);
                 let p: Vec<_> = lap(-1.0).chain(lap(0.0)).chain(lap(1.0)).collect();
@@ -308,6 +310,12 @@ mod tests {
         assert_eq!(hue.points()[1], [0.25, 0.5]);
         assert!((hue.at(0.0, Kind::Hue) - hue.at(1.0 - 1e-9, Kind::Hue)).abs() < 1e-6);
         assert!((hue.at(1.1, Kind::Hue) - 0.9).abs() < 1e-12);
+        let loaded: Curve = serde_json::from_str("[[0.0,0.2],[1.0,0.8]]").unwrap();
+        assert_eq!(
+            loaded.at(0.5, Kind::Hue),
+            0.2,
+            "a saved point at 1 is ignored"
+        );
     }
 
     #[test]
