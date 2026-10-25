@@ -124,7 +124,9 @@ impl Shot {
 
     /// Text pixels in the panel's header: (left x, top y, baseline y).
     fn label(&self, r: Rect) -> (u32, u32, u32) {
-        let xs = self.px(r.left()) + 1..self.px(r.right()) - 1;
+        // Clear of the header's actions (the Program view's two compare toggles).
+        let actions = 2.0 * (size::CONTROL + space::S4) + space::S8;
+        let xs = self.px(r.left()) + 1..self.px(r.right() - actions) - 1;
         let ys = self.px(r.top()) + 1..self.px(r.top() + size::HEADER) - 1;
         let mut rows = Vec::new();
         let mut left = u32::MAX;

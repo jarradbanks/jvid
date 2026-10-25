@@ -584,6 +584,7 @@ mod tests {
         keys.extend(jvid_core::model::Text::ANIMATED);
         keys.extend(jvid_core::model::Wheels::KEYS);
         keys.extend(jvid_core::model::Curves::NAMES);
+        keys.extend(jvid_core::model::Secondary::KEYS);
         let lanes: Vec<&str> = CATALOG
             .keys("en")
             .into_iter()

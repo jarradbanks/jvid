@@ -20,6 +20,12 @@ struct Params {
     wheels: array<vec4<f32>, 4>,
     // x is 1 when the curves are non-neutral and y the curve table's width.
     curves: vec4<f32>,
+    // The secondary (jvid_core::model::Secondary): hue, hue width, softness and 1 when its
+    // correction is non-zero; the saturation then luma range; hue shift, saturation, exposure
+    // and 1 when the clip's masks limit it.
+    secondary: array<vec4<f32>, 3>,
+    // x: output pixels left of it draw ungraded, the Program monitor's before/after.
+    view: vec4<f32>,
 }
 
 @group(0) @binding(0) var image: texture_2d<f32>;
@@ -30,6 +36,8 @@ struct Params {
 // The layer's baked curves (jvid_core::curve::Curves::bake): Red, Green, Blue and Master in row
 // 0, then Hue vs Sat, Hue vs Hue and Luma vs Sat; a 1x1 stand-in when curves.x is 0.
 @group(0) @binding(5) var curve_table: texture_2d<f32>;
+// The clip's mask coverage in alpha when secondary[2].w is 1, else a stand-in.
+@group(0) @binding(6) var cover: texture_2d<f32>;
 
 @vertex
 fn vs_layer(@builtin(vertex_index) i: u32) -> Out {
@@ -45,10 +53,11 @@ fn to_srgb(c: vec3<f32>) -> vec3<f32> {
     return select(1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3<f32>(0.0031308));
 }
 
-// The layer's color adjustments on a straight-alpha sample, in linear light, then its LUT with
-// trilinear filtering. Each is skipped when neutral so untouched clips stay bit-identical.
-fn graded(c: vec4<f32>) -> vec4<f32> {
-    var rgb = curved(adjusted(c.rgb));
+// The layer's color adjustments on a straight-alpha sample, in linear light, its curves and
+// secondary, then its LUT with trilinear filtering. Each is skipped when neutral so untouched
+// clips stay bit-identical; `mask` is the mask coverage at the sample.
+fn graded(c: vec4<f32>, mask: f32) -> vec4<f32> {
+    var rgb = secondary(curved(adjusted(c.rgb)), mask);
     if params.grade2.z > 0.0 {
         // Texel centres: input 0 and 1 land on the first and last nodes.
         let n = params.grade2.w;
@@ -124,6 +133,49 @@ fn curved(c: vec3<f32>) -> vec3<f32> {
     return from_hsv(hsv);
 }
 
+// 1 inside lo..hi, fading to 0 over `soft` past each end.
+fn band(x: f32, lo: f32, hi: f32, soft: f32) -> f32 {
+    return smoothstep(lo - soft, lo, x) * (1.0 - smoothstep(hi, hi + soft, x));
+}
+
+// The secondary's correction, mixed in by how much the qualifier (and masks) pick `c`.
+fn secondary(c: vec3<f32>, mask: f32) -> vec3<f32> {
+    let q = params.secondary[0];
+    if q.w == 0.0 {
+        return c;
+    }
+    let r = params.secondary[1];
+    let k = params.secondary[2];
+    let v = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    var hsv = to_hsv(v);
+    let luma = dot(v, vec3<f32>(0.2126, 0.7152, 0.0722));
+    // At least a hair, so a hard edge doesn't divide by zero in smoothstep.
+    let soft = max(q.z * 0.25, 1e-4);
+    let d = abs(fract(hsv.x - q.x + 0.5) - 0.5);
+    // A grey's hue means nothing, so a narrowed hue fades out with saturation.
+    let near = (1.0 - smoothstep(q.y * 0.5, q.y * 0.5 + soft, d)) * smoothstep(0.0, 0.05, hsv.y);
+    let hue = select(near, 1.0, q.y >= 1.0);
+    let pick = hue * band(hsv.y, r.x, r.y, soft) * band(luma, r.z, r.w, soft)
+        * select(1.0, mask, k.w > 0.0);
+    if pick <= 0.0 {
+        return c;
+    }
+    hsv.x = fract(hsv.x + k.x);
+    var out = from_hsv(hsv);
+    let l = dot(out, vec3<f32>(0.2126, 0.7152, 0.0722));
+    out = max(mix(vec3<f32>(l), out, 1.0 + k.y), vec3<f32>(0.0));
+    out = to_srgb(clamp(to_linear(out) * exp2(k.z), vec3<f32>(0.0), vec3<f32>(1.0)));
+    return mix(c, out, pick);
+}
+
+// Unless `pos` is in the ungraded part of the Program monitor's before/after.
+fn graded_at(c: vec4<f32>, mask: f32, pos: vec4<f32>) -> vec4<f32> {
+    if pos.x < params.view.x {
+        return c;
+    }
+    return graded(c, mask);
+}
+
 // The image at `uv` with straight alpha.
 fn straight(uv: vec2<f32>) -> vec4<f32> {
     let c = textureSample(image, image_smp, uv);
@@ -136,7 +188,7 @@ fn straight(uv: vec2<f32>) -> vec4<f32> {
 // Straight-alpha source in, premultiplied out for premultiplied "over" blending.
 @fragment
 fn fs_layer(in: Out) -> @location(0) vec4<f32> {
-    let c = graded(straight(in.uv));
+    let c = graded_at(straight(in.uv), textureSample(cover, image_smp, in.uv).a, in.pos);
     let a = c.a * params.opacity.x;
     return vec4<f32>(c.rgb * a, a);
 }
@@ -160,7 +212,7 @@ fn mix_mode(mode: u32, b: vec3<f32>, s: vec3<f32>) -> vec3<f32> {
 // W3C separable blending then source-over, written over the copied backdrop (no fixed blend).
 @fragment
 fn fs_blend(in: Out) -> @location(0) vec4<f32> {
-    let c = graded(straight(in.uv));
+    let c = graded_at(straight(in.uv), textureSample(cover, image_smp, in.uv).a, in.pos);
     let a = c.a * params.opacity.x;
     let d = textureLoad(backdrop, vec2<i32>(in.pos.xy), 0);
     let b = select(vec3<f32>(0.0), d.rgb / d.a, d.a > 0.0);

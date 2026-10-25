@@ -2,6 +2,7 @@
 //! its [`Mask`]s' combined coverage. Layers without an enabled mask skip it.
 
 use jvid_core::model::{Mask, MaskMode, MaskShape};
+use wgpu::util::DeviceExt;
 
 use crate::composite::FORMAT;
 use crate::preview::place;
@@ -104,6 +105,8 @@ pub(crate) struct Masker {
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     pool: Vec<Option<(wgpu::Texture, wgpu::Buffer)>>,
+    /// Masked in place of an image for coverage alone; made on first use.
+    white: Option<wgpu::Texture>,
 }
 
 impl Masker {
@@ -144,13 +147,14 @@ impl Masker {
                 ..Default::default()
             }),
             pool: Vec::new(),
+            white: None,
         }
     }
 
     /// `tex` with `masks` applied into `encoder`, or `None` when none draws. The image fits a
     /// `frame`-sized project drawn `target` pixels big; a smaller image, such as a solid's, is
     /// masked at its drawn size so edges stay sharp. `slot` (the layer index) picks the pooled
-    /// texture and uniform.
+    /// texture and uniform. With `cover`, the output is the coverage alone, in alpha over white.
     #[allow(clippy::too_many_arguments)]
     pub fn apply(
         &mut self,
@@ -161,6 +165,7 @@ impl Masker {
         tex: &wgpu::Texture,
         masks: &[Mask],
         (frame, target): ([f32; 2], [f32; 2]),
+        cover: bool,
     ) -> Option<wgpu::Texture> {
         if !masks.iter().any(|m| m.enabled) {
             return None;
@@ -206,8 +211,28 @@ impl Masker {
         };
         let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_ne_bytes()).collect();
         queue.write_buffer(buf, 0, &bytes);
-        let view = tex.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(tex.format().remove_srgb_suffix()),
+        let src = match cover {
+            true => self.white.get_or_insert_with(|| {
+                let desc = wgpu::TextureDescriptor {
+                    label: Some("white"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: FORMAT,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                };
+                device.create_texture_with_data(queue, &desc, Default::default(), &[255; 4])
+            }),
+            false => tex,
+        };
+        let view = src.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(src.format().remove_srgb_suffix()),
             ..Default::default()
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {

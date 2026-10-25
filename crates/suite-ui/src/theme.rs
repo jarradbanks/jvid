@@ -54,6 +54,7 @@ pub mod icon {
     pub const CIRCLE_CHECK: &str = "\u{E226}";
     pub const LOADER: &str = "\u{E10E}";
     pub const PANEL_BOTTOM: &str = "\u{E431}";
+    pub const COMPARE: &str = "\u{E3BA}";
 }
 
 /// Inter Medium (500), for Body Strong, buttons, tabs and the timecode.
