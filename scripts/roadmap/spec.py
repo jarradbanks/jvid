@@ -1885,3 +1885,8 @@ I("viewer-amber-leftovers", "Viewer: remaining amber strokes", None, ["ui"], "S"
   summary="From #400 (PR #407): the on-picture text-edit caret and selection highlight, and the stroke in zoom.rs, are still amber, against DESIGN.md's Neutral Viewer Rule.",
   scope=["Draw the viewer's text caret, text selection and zoom stroke in DESIGN.md viewer colours (DARK tokens, as PR #407 does)"],
   ac=["grep finds no color::amber() in viewer drawing code; a snapshot of a title being edited shows no amber"])
+
+I("reframe-dim", "Reframe: dim the wide shot outside the frame", None, ["ui"], "S", ["reframe"], labels=["later"],
+  summary="From #352 (PR #396), owner's call: while aiming a reframed clip, show the wide shot outside the new frame dimmed, so you can see what's being cropped away.",
+  scope=["When the reframe box shows, the Program monitor draws the clip's picture outside the frame, dimmed, in the overlay only; export and playback output are unchanged"],
+  ac=["A kittest snapshot shows dimmed picture outside the reframe box; a render test shows export output is unchanged"])
