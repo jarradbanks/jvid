@@ -1539,3 +1539,45 @@ fn a_clip_id_shared_across_a_sequence_switch_plays_its_own_audio() {
     assert!(want.iter().all(|&s| s != 0.0));
     assert_eq!(got, want);
 }
+
+/// Acceptance (#373): a track's Volume scales the mix of every clip on it, and undo restores it.
+#[test]
+fn track_volume_scales_its_clips_and_undoes() {
+    let mut h = History::new(Project::default());
+    let a = add_at(&mut h, TrackKind::Audio, "/a.wav", Time(0), secs(1));
+    let (t, first) = h.project().sequence().clip(a).unwrap();
+    let clip = NewClip {
+        asset: first.asset,
+        source_in: Time(0),
+        source_out: secs(1),
+        start: secs(1),
+        link: None,
+    };
+    h.apply(Command::AddClip { track: t, clip }).unwrap();
+    let mix = |p: &Project| {
+        let mut audio = Audio::new(indexed());
+        let mut all = Vec::new();
+        for block in 0..(2 * SAMPLE_RATE as i64 / 1000) {
+            let mut out = vec![0.0; 2000];
+            audio.prime(p, Time(block * 1000 * FLICKS_PER_SAMPLE));
+            audio.mix(p, block * 1000, &mut out);
+            all.extend(out);
+        }
+        all
+    };
+    let before = mix(h.project());
+    let s = h.project().sequence().track(t).unwrap().settings();
+    h.apply(Command::SetTrack(TrackSettings { volume: 0.5, ..s }))
+        .unwrap();
+    let after = mix(h.project());
+    let half = SAMPLE_RATE as usize * 2;
+    for (range, name) in [(0..half, "first clip"), (half..2 * half, "second clip")] {
+        let (a, b) = (&before[range.clone()], &after[range]);
+        assert!(a.iter().any(|&s| s != 0.0), "{name} is silent");
+        for (x, y) in a.iter().zip(b) {
+            assert!((x * 0.5 - y).abs() < 1e-4, "{name}: {y} is not half of {x}");
+        }
+    }
+    assert!(h.undo());
+    assert!(mix(h.project()) == before);
+}

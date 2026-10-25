@@ -28,7 +28,7 @@ use jvid_media::thumbnails;
 use jvid_media::waveforms::{self, BUCKET, Peak, Pyramid};
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, TextInput};
+use suite_ui::widgets::{Button, Slider, TextInput};
 
 use crate::i18n::{tr, trn, verbatim};
 use crate::keymap::Keymap;
@@ -47,6 +47,10 @@ mod transitions;
 
 /// The undo gesture a track-height drag coalesces under.
 pub const RESIZE_GESTURE: GestureKey = 0x7472_6163_6b68; // "trackh"
+/// The undo gesture a track Volume drag coalesces under, xored with the track's ID.
+const VOLUME_GESTURE: GestureKey = 0x7472_6b76_6f6c; // "trkvol"
+/// Width of the Volume slider on an audio track header.
+const VOLUME_WIDTH: f32 = 56.0;
 /// Track heights snap to this step.
 const HEIGHT_STEP: f32 = 4.0;
 /// Zoom limits in points per second: about four hours across 1000pt, to a frame 40pt wide.
@@ -1983,7 +1987,22 @@ impl Timeline {
         // Audio tracks put record arm before the rest, so the columns line up across kinds.
         let audio = track.kind == TrackKind::Audio;
         let arm_x = x - step;
-        let name_right = if audio { arm_x } else { x } - space::S4;
+        let name_right = if audio { arm_x - VOLUME_WIDTH } else { x } - space::S4;
+        if audio {
+            let r = Rect::from_x_y_ranges(
+                arm_x - VOLUME_WIDTH..=arm_x - space::S4,
+                mid - size::SMALL_CONTROL / 2.0..=mid + size::SMALL_CONTROL / 2.0,
+            );
+            let mut v = f64::from(track.volume);
+            let name = tr!("inspector.volume");
+            let s = ui.put(r.intersect(column), Slider::new(&mut v, 0.0..=2.0, name));
+            if s.changed() {
+                let mut t = track.settings();
+                t.volume = v as f32;
+                edit = Some((Command::SetTrack(t), Some(VOLUME_GESTURE ^ track.id.0)));
+            }
+            s.on_hover_text(format!("{name} {:.0}%", v * 100.0));
+        }
         for (n, (glyph, on, font, tip, solo)) in toggles.into_iter().enumerate() {
             let r = Rect::from_min_size(
                 pos2(x, mid - size::SMALL_CONTROL / 2.0),
@@ -3559,6 +3578,31 @@ mod tests {
         for _ in 0..5 {
             assert!(h.state_mut().1.undo());
         }
+        assert_eq!(h.state().1.project(), &project(2));
+    }
+
+    #[test]
+    fn track_volume_drag_is_one_undo_step() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness(project(2));
+        let volume = |h: &egui_kittest::Harness<'_, (Timeline, History)>| {
+            h.state().1.project().sequence().tracks()[1].volume
+        };
+        let r = h.get_by_label("Volume").rect();
+        let y = r.center().y;
+        h.drag_at(pos2(r.center().x, y));
+        h.run();
+        for x in [r.left() + 10.0, r.left() + 4.0, r.left()] {
+            h.hover_at(pos2(x, y));
+            h.run();
+        }
+        h.drop_at(pos2(r.left(), y));
+        h.run();
+        assert_eq!(volume(&h), 0.0);
+        assert!(h.state_mut().1.undo());
         assert_eq!(h.state().1.project(), &project(2));
     }
 
