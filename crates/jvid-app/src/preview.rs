@@ -343,33 +343,12 @@ impl Preview {
             .map(|rs| (rs.device.clone(), rs.queue.clone()))
     }
 
-    /// Writes the shown frame as a PNG, composited at full project size over its background.
-    /// shortcut: one layer, the frame the viewer shows; composite `video_at` at the playhead
-    /// once the timeline (#33) and playback (#32) land.
-    pub fn export_frame(&self, settings: &ProjectSettings, path: &Path) -> Result<(), String> {
-        let (Some(rs), Some(f)) = (&self.render_state, &self.frame) else {
+    /// Saves the immutable timeline snapshot at `time` using the full-resolution Program path.
+    pub fn export_frame(&self, project: &Project, time: Time, path: &Path) -> Result<(), String> {
+        let Some(rs) = &self.render_state else {
             return Err(tr!("preview.no_frame").into());
         };
-        let mut rgb = render::Preview::new(&rs.device, rs.target_format);
-        let yuv = Yuv {
-            width: f.width,
-            height: f.height,
-            planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
-            bt709: f.bt709,
-            full_range: f.full_range,
-            hdr: f.hdr,
-        };
-        rgb.upload(&rs.device, &rs.queue, &yuv, 1);
-        let image = rgb.image().expect("uploaded");
-        jvid_render::composite::export_png(
-            &rs.device,
-            &rs.queue,
-            (settings.width, settings.height),
-            settings.background,
-            &[(image, Default::default())],
-            path,
-        )
-        .map_err(|e| e.to_string())
+        crate::export::frame_png(project, time, &rs.device, &rs.queue, path)
     }
 
     /// Opens an asset in the Source tab, parked at its start.
@@ -1638,10 +1617,10 @@ mod program_tests {
     }
 
     /// The Program tab of `history`, at its start, in an app with wgpu.
-    struct Program {
-        preview: Preview,
-        history: History,
-        fresh: bool,
+    pub(super) struct Program {
+        pub(super) preview: Preview,
+        pub(super) history: History,
+        pub(super) fresh: bool,
     }
 
     impl eframe::App for Program {
@@ -2013,5 +1992,97 @@ mod program_tests {
             "it kept asking as it scrubbed"
         );
         assert_eq!(log.matches("preview decode of").count(), 1, "{log}");
+    }
+}
+
+#[cfg(test)]
+mod frame_export_tests {
+    use super::*;
+    use jvid_core::history::{Created, History};
+    use jvid_core::model::{NewClip, Text, TrackKind};
+    use jvid_core::time::FLICKS_PER_SECOND;
+
+    #[test]
+    fn export_frame_renders_a_title_without_ever_opening_source() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([640.0, 360.0])
+            .wgpu()
+            .build_eframe(|cc| super::program_tests::Program {
+                preview: Preview::new(cc.wgpu_render_state.as_ref()),
+                history: History::new(Project::default()),
+                fresh: true,
+            });
+        let h = &mut harness.state_mut().history;
+        h.apply(Command::SetSettings(ProjectSettings {
+            width: 96,
+            height: 64,
+            ..Default::default()
+        }))
+        .unwrap();
+        let Ok(Created::Asset(asset)) = h.apply(Command::AddText {
+            name: "Title".into(),
+            text: Text {
+                content: "Title".into(),
+                size: 24.0,
+                ..Default::default()
+            },
+        }) else {
+            panic!("title")
+        };
+        let Ok(Created::Track(track)) = h.apply(Command::AddTrack {
+            kind: TrackKind::Video,
+            name: "V1".into(),
+        }) else {
+            panic!("track")
+        };
+        h.apply(Command::AddClip {
+            track,
+            clip: NewClip {
+                asset,
+                start: Time(0),
+                source_in: Time(0),
+                source_out: Time(FLICKS_PER_SECOND),
+                link: None,
+            },
+        })
+        .unwrap();
+        let state = harness.state();
+        assert!(state.preview.player.is_none());
+        let path =
+            std::env::temp_dir().join(format!("jvid-b07-title-frame-{}.png", std::process::id()));
+        state
+            .preview
+            .export_frame(state.history.project(), Time(0), &path)
+            .unwrap();
+        let png = image::open(&path).unwrap().into_rgba8();
+        assert_eq!(png.dimensions(), (96, 64));
+        assert!(png.pixels().any(|p| p[0] > 100), "the title is visible");
+        let h = &mut harness.state_mut().history;
+        let Ok(Created::Asset(source)) = h.apply(Command::AddSolid {
+            name: "Different Source".into(),
+            color: [0.0, 0.0, 1.0, 1.0],
+        }) else {
+            panic!("source")
+        };
+        let project = h.project().clone();
+        let preview = &mut harness.state_mut().preview;
+        preview.open(&project, source);
+        let expected = png.clone();
+        for quality in 0..3 {
+            preview.quality = quality;
+            for proxy in [false, true] {
+                preview.proxies.set_enabled(proxy);
+                preview.export_frame(&project, Time(0), &path).unwrap();
+                assert_eq!(
+                    image::open(&path).unwrap().into_rgba8(),
+                    expected,
+                    "Source selection, quality {quality}, proxy {proxy}"
+                );
+            }
+        }
+        std::fs::remove_file(path).unwrap();
     }
 }

@@ -833,7 +833,7 @@ impl App {
         }
     }
 
-    /// Saves the shown frame as a PNG at full project resolution.
+    /// Saves the timeline playhead as a full-resolution Program PNG.
     fn export_frame(&mut self) {
         let Some(path) = FileDialog::new()
             .set_title(tr!("action.export_frame"))
@@ -843,9 +843,9 @@ impl App {
         else {
             return;
         };
-        if let Err(e) = self
-            .preview
-            .export_frame(self.history.project().settings(), &path)
+        if let Err(e) =
+            self.preview
+                .export_frame(self.history.project(), self.timeline.playhead(), &path)
         {
             self.error(tr!("app.export_failed", path = path.display(), error = e));
         }
