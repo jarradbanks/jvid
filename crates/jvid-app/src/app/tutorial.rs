@@ -194,7 +194,7 @@ const TOUR: Lesson = Lesson {
         Step {
             anchor: "export",
             text: |_| tr!("tutorial.tour_export").into(),
-            done: |a| !a.queue.is_empty(),
+            done: |a| queued(a).next().is_some(),
             show_me: |a| {
                 let Some(gpu) = a.preview.gpu() else {
                     return;
@@ -780,6 +780,12 @@ fn sample(name: &str) -> std::io::Result<PathBuf> {
     crate::samples::path(name)?.ok_or_else(|| std::io::ErrorKind::NotFound.into())
 }
 
+/// The lengths of the exports queued since the lesson started.
+fn queued(app: &App) -> impl Iterator<Item = Time> + '_ {
+    let mark = app.lesson.as_ref().map_or(0, |r| r.baseline.queued);
+    app.queue.since(mark)
+}
+
 fn apply(app: &mut App, c: Command) {
     if let Err(e) = app.history.apply(c) {
         tracing::warn!("lesson edit failed: {e}");
@@ -877,7 +883,15 @@ pub struct Run {
     warned: bool,
     /// A step passed its check rather than being skipped.
     completed: bool,
+    /// State outside the sandbox project as the lesson started, for checks to compare against.
+    pub baseline: Baseline,
     stash: Stash,
+}
+
+/// What a lesson's checks measure from, so state from before it can't pass a step.
+pub struct Baseline {
+    /// [`crate::export::queue::Queue::pushed`]: exports queued since count, earlier ones don't.
+    pub queued: usize,
 }
 
 impl Run {
@@ -897,6 +911,8 @@ struct Stash {
     timeline: Timeline,
     bin_tab: usize,
     bin_selected: Option<AssetId>,
+    /// Started from the Welcome screen, so exit goes back there.
+    on_welcome: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -936,6 +952,7 @@ impl App {
             timeline: std::mem::replace(&mut self.timeline, timeline),
             bin_tab: self.bin.tab,
             bin_selected: self.bin.selected.take(),
+            on_welcome: std::mem::take(&mut self.on_welcome),
         };
         self.import(media);
         self.lesson = Some(Run {
@@ -946,6 +963,9 @@ impl App {
             revealed: false,
             warned: false,
             completed: false,
+            baseline: Baseline {
+                queued: self.queue.pushed(),
+            },
             stash,
         });
     }
@@ -969,6 +989,7 @@ impl App {
         self.timeline = s.timeline;
         self.bin.tab = s.bin_tab;
         self.bin.selected = s.bin_selected;
+        self.on_welcome = s.on_welcome;
     }
 
     /// Esc exits the lesson unless a dialog, menu or text field would take it. Runs before
@@ -1011,7 +1032,10 @@ impl App {
         }
         let steps = run.lesson.steps;
         if let Some(step) = steps.get(run.step) {
+            // Back on `self` for the check, which reads the baseline.
+            self.lesson = Some(run);
             let done = (step.done)(self);
+            run = self.lesson.take().expect("the check can't end the lesson");
             if done && run.armed {
                 run.completed = true;
                 self.next_step(&mut run);
@@ -1583,6 +1607,58 @@ mod tests {
         h.run();
         assert!(crate::settings_file::load_from(&path).tour_offered);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// One step that passes once an export is queued.
+    const EXPORT: Lesson = Lesson {
+        id: "export",
+        title: || "Export",
+        minutes: 1,
+        media: &[],
+        setup: |_| {},
+        steps: &[Step {
+            anchor: "render_queue",
+            text: |_| String::new(),
+            done: |a| queued(a).next().is_some(),
+            show_me: |a| fake_export(a),
+            reveal: None,
+            ghost: None,
+            also: &[],
+        }],
+    };
+
+    /// Lists an export in the Render Queue that never renders.
+    fn fake_export(app: &mut App) {
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let handle = app
+            .exports
+            .submit("fake", jvid_jobs::Priority::Interactive, |_| {});
+        let path = PathBuf::from(format!("/m/{}.mp4", app.queue.pushed()));
+        app.queue.push(path, String::new(), Time(1), (handle, rx));
+    }
+
+    #[test]
+    fn an_export_queued_before_the_lesson_doesnt_pass_its_step() {
+        let mut h = harness();
+        fake_export(h.state_mut());
+        h.state_mut().start_lesson(&EXPORT);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(0));
+        click(&mut h, tr!("tutorial.show_me"));
+        settle(&mut h);
+        assert_eq!(step(&h), Some(1));
+    }
+
+    #[test]
+    fn exiting_a_tour_from_the_welcome_screen_shows_it_again() {
+        let mut h = first_launch(&Default::default());
+        h.state_mut().settings_path = None;
+        h.get_by_label(tr!("welcome.tour")).click();
+        h.run();
+        click(&mut h, tr!("tutorial.exit"));
+        assert!(h.state().lesson.is_none());
+        assert!(h.state().on_welcome);
+        assert!(h.query_by_label(tr!("welcome.tour")).is_none());
     }
 
     #[test]

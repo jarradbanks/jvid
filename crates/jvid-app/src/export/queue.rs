@@ -31,6 +31,8 @@ struct Job {
     rx: Receiver<Result<ProbeInfo, Error>>,
     /// When the job became the one running, for time left.
     started: Option<Instant>,
+    /// Its place in the order jobs were pushed, counting ones since cleared.
+    seq: usize,
     /// `Some` once the job is over.
     result: Option<Result<(), Error>>,
     /// The file's size in bytes, once done.
@@ -102,6 +104,8 @@ pub struct Queue {
     confirm_all: bool,
     /// A job failed since the menu or the panel was last shown.
     pub failed_unseen: bool,
+    /// Jobs pushed so far, cleared ones included.
+    pushed: usize,
 }
 
 impl Queue {
@@ -123,9 +127,11 @@ impl Queue {
             handle,
             rx,
             started: None,
+            seq: self.pushed,
             result: None,
             size: None,
         });
+        self.pushed += 1;
         true
     }
 
@@ -191,6 +197,19 @@ impl Queue {
 
     pub fn is_empty(&self) -> bool {
         self.jobs.is_empty()
+    }
+
+    /// Jobs pushed so far, cleared ones included: a mark for [`Queue::since`].
+    pub fn pushed(&self) -> usize {
+        self.pushed
+    }
+
+    /// The lengths of the jobs still listed that were pushed after `mark`.
+    pub fn since(&self, mark: usize) -> impl Iterator<Item = Time> + '_ {
+        self.jobs
+            .iter()
+            .filter(move |j| j.seq >= mark)
+            .map(|j| j.duration)
     }
 
     /// Every job, oldest first; only the first live one renders.
