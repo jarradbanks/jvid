@@ -1,7 +1,7 @@
 //! Remove Fillers: the um, uh and long pauses in the transcript, found from its words and the
 //! gaps between them, and cut out in one ripple delete.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use jvid_core::history::Command;
 use jvid_core::model::ClipId;
@@ -128,18 +128,25 @@ fn squeeze(s: &str) -> String {
     out
 }
 
-/// Whether `text` is a filler in any language, drawn out or not ("Ummm," is "um"), but no
-/// shorter than it ("e", Italian for "and", isn't "ee").
-// shortcut: the cache doesn't keep the transcript's language, so every list is checked; keep
-// the language with the words if one list's sound is another's word.
-pub fn is_filler(text: &str) -> bool {
+/// Whether `text` is a hesitation in its source's recognized language. Unknown or
+/// unsupported languages have no automatic word deletions; pauses remain available.
+pub fn is_filler(text: &str, language: Option<&str>) -> bool {
+    let code = language
+        .unwrap_or_default()
+        .split('-')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let Some((_, _, sounds)) = LANGS.iter().find(|l| l.0 == code) else {
+        return false;
+    };
     let w: String = text
         .chars()
         .filter(|c| c.is_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect();
     let (n, sq) = (w.chars().count(), squeeze(&w));
-    let all = LANGS.iter().flat_map(|l| l.2.iter());
+    let all = sounds.iter();
     !w.is_empty()
         && all
             .into_iter()
@@ -159,10 +166,10 @@ pub struct Hit {
 
 /// The fillers and pauses in `words` (sorted, in timeline time), in order. A pause is cut down
 /// to [`KEEP`] each side; one between clips is left, as the clips may not be next to each other.
-pub fn find(words: &[(ClipId, Word)]) -> Vec<Hit> {
+pub fn find(words: &[(ClipId, Word)], languages: &HashMap<ClipId, Option<String>>) -> Vec<Hit> {
     let mut hits = Vec::new();
     for (i, (c, w)) in words.iter().enumerate() {
-        if is_filler(&w.text) {
+        if is_filler(&w.text, languages.get(c).and_then(|s| s.as_deref())) {
             hits.push(Hit {
                 clip: *c,
                 start: w.start,
@@ -234,16 +241,42 @@ mod tests {
 
     #[test]
     fn fillers_are_hesitation_sounds_drawn_out_or_not() {
-        for f in [
-            "um", "Um,", "Ummm...", "uh", "Hmm.", "euh", "ähm", "Э-э,", "Yyy", "嗯",
+        for (language, f) in [
+            ("en", "um"),
+            ("en", "Um,"),
+            ("en", "Ummm..."),
+            ("en", "uh"),
+            ("en", "Hmm."),
+            ("fr", "euh"),
+            ("de", "ähm"),
+            ("ru", "Э-э,"),
+            ("pl", "Yyy"),
+            ("zh", "嗯"),
         ] {
-            assert!(is_filler(f), "{f}");
+            assert!(is_filler(f, Some(language)), "{language}: {f}");
         }
         for w in ["umbrella", "so", "like", "e", "y", "m", "", "...", "Hello,"] {
-            assert!(!is_filler(w), "{w}");
+            assert!(!is_filler(w, Some("en")), "{w}");
         }
         assert_eq!(prompt("de"), LANGS[3].1);
         assert_eq!(prompt("xx"), LANGS[0].1);
+    }
+
+    #[test]
+    fn audit_443_ordinary_multilingual_words_are_never_cross_matched() {
+        for (language, words, expected) in [
+            (Some("de"), "Er kommt ähm", vec!["ähm"]),
+            (Some("pt-BR"), "um livro hum", vec!["hum"]),
+            (Some("en"), "um umbrella uhhh", vec!["um", "uhhh"]),
+            (None, "Er um ähm", vec![]),
+            (Some("xx"), "Er um ähm", vec![]),
+        ] {
+            let hits: Vec<_> = words
+                .split(' ')
+                .filter(|w| is_filler(w, language))
+                .collect();
+            assert_eq!(hits, expected, "{language:?}");
+        }
     }
 
     #[test]
@@ -260,9 +293,11 @@ mod tests {
             )
         };
         let words = [w(1, "a", 0.0), w(2, "b", 3.0)];
-        assert!(find(&words).is_empty());
+        assert!(find(&words, &HashMap::new()).is_empty());
         let words = [w(1, "a", 0.0), w(1, "b", 3.0)];
-        let [hit] = &find(&words)[..] else { panic!() };
+        let [hit] = &find(&words, &HashMap::new())[..] else {
+            panic!()
+        };
         assert_eq!((hit.start, hit.end), (t(0.625), t(2.875)));
         assert_eq!(context(&words, hit, "[3 s]"), "a [3 s] b");
     }
