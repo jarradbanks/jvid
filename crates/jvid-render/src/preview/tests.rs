@@ -94,7 +94,7 @@ fn sdr_export_round_trips_the_program_colors() {
             },
             1,
         );
-        let got = read_back(&device, &queue, preview.image().unwrap());
+        let got = read_back(&device, &queue, &preview.image().unwrap());
         for (i, want) in patches.iter().enumerate() {
             let x = (2 * i + 1) * w as usize / (2 * patches.len());
             let px = (h as usize / 2 * w as usize + x) * 4;
@@ -141,7 +141,7 @@ fn corpus_colour_bars_match_reference_rgb() {
             preview.upload(&device, &queue, &yuv, scale);
             let tex = preview.image().unwrap();
             assert_eq!((tex.width(), tex.height()), scaled(640, 360, scale));
-            let rgba = read_back(&device, &queue, tex);
+            let rgba = read_back(&device, &queue, &tex);
             for (i, want) in BARS.iter().enumerate() {
                 // Centre of bar i, halfway down.
                 let (x, y) = ((80 * i as u32 + 40) / scale, 180 / scale);
@@ -186,7 +186,8 @@ fn corpus_bars_survive_compositing() {
         1,
     );
     let mut comp = crate::composite::Compositor::new(&device);
-    let layers = [(preview.image().unwrap(), Default::default())];
+    let image = preview.image().unwrap();
+    let layers = [(&*image, Default::default())];
     let tex = comp.render(&device, &queue, (640, 360), 1, [0, 0, 0, 255], &layers);
     let rgba = read_back(&device, &queue, tex);
     for (i, want) in BARS.iter().enumerate() {
@@ -258,7 +259,7 @@ fn render_hdr_clip(hdr: Hdr, patches: &[[f32; 3]]) -> Vec<[u8; 3]> {
     };
     preview.upload(&device, &queue, &yuv, 1);
     let tex = preview.image().unwrap();
-    let rgba = read_back(&device, &queue, tex);
+    let rgba = read_back(&device, &queue, &tex);
     (0..patches.len())
         .map(|i| {
             let px = (8 * tex.width() as usize + 16 * i + 8) * 4;
@@ -374,7 +375,7 @@ fn auxiliary_images_match_original_view_for_sdr_and_hdr() {
         image::RgbaImage::from_raw(
             f.width,
             f.height,
-            read_back(&device, &queue, preview.image().unwrap()),
+            read_back(&device, &queue, &preview.image().unwrap()),
         )
         .unwrap()
     };
@@ -566,4 +567,425 @@ fn scale_rounds_up_and_never_hits_zero() {
     assert_eq!(scaled(1920, 1080, 4), (480, 270));
     assert_eq!(scaled(1081, 1, 2), (541, 1));
     assert_eq!(scaled(3, 3, 4), (1, 1));
+}
+
+/// Measures upload + conversion only: no decode, composition, or read-back in the timed loop.
+#[test]
+fn fixed_format_upload_allocation_counts_and_timing() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    let (w, h) = (1920, 1080);
+    let mut y = vec![126; (w * h) as usize];
+    let chroma = vec![128; (w * h / 4) as usize];
+    for _ in 0..3 {
+        preview.upload(
+            &device,
+            &queue,
+            &Yuv {
+                width: w,
+                height: h,
+                planes: [&y, &chroma, &chroma],
+                bt709: true,
+                full_range: false,
+                hdr: None,
+            },
+            1,
+        );
+    }
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let before = preview.upload_allocations();
+    let start = std::time::Instant::now();
+    for i in 0..30 {
+        y[0] = 16 + i;
+        preview.upload(
+            &device,
+            &queue,
+            &Yuv {
+                width: w,
+                height: h,
+                planes: [&y, &chroma, &chroma],
+                bt709: true,
+                full_range: false,
+                hdr: None,
+            },
+            1,
+        );
+    }
+    let submit = start.elapsed();
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let total = start.elapsed();
+    let after = preview.upload_allocations();
+    eprintln!(
+        "upload-only 30x1920x1080 SDR: submit={submit:?}, drain={:?}, total={total:?}, warm={before:?}, end={after:?}",
+        total - submit
+    );
+    assert_eq!(
+        after.plane_textures, before.plane_textures,
+        "same-format plane textures must be retained"
+    );
+    assert_eq!(
+        after.conversion_buffers, before.conversion_buffers,
+        "same-format uniform must be retained"
+    );
+    assert_eq!(
+        after.converted_images, before.converted_images,
+        "unleased compatible outputs must be reused"
+    );
+    assert_eq!(
+        after.bind_groups, before.bind_groups,
+        "compatible bindings must be retained"
+    );
+}
+
+fn upload_frame(
+    preview: &mut Preview,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    f: &jvid_media::decode::Frame,
+    scale: u32,
+) {
+    preview.upload(
+        device,
+        queue,
+        &Yuv {
+            width: f.width,
+            height: f.height,
+            planes: [&f.planes[0], &f.planes[1], &f.planes[2]],
+            bt709: f.bt709,
+            full_range: f.full_range,
+            hdr: f.hdr,
+        },
+        scale,
+    );
+}
+
+fn patterned_frame(
+    w: u32,
+    h: u32,
+    bt709: bool,
+    full_range: bool,
+    hdr: Option<Hdr>,
+    seed: u32,
+) -> jvid_media::decode::Frame {
+    let planes = std::array::from_fn(|plane| {
+        let n = if plane == 0 {
+            w * h
+        } else {
+            w.div_ceil(2) * h.div_ceil(2)
+        };
+        (0..n)
+            .flat_map(|i| {
+                let code = 16 + (i * 13 + seed * 29 + plane as u32 * 31) % 220;
+                if hdr.is_some() {
+                    ((code * 4) as u16).to_le_bytes().to_vec()
+                } else {
+                    vec![code as u8]
+                }
+            })
+            .collect()
+    });
+    jvid_media::decode::Frame {
+        width: w,
+        height: h,
+        pts: Time(0),
+        planes,
+        bt709,
+        full_range,
+        hdr,
+    }
+}
+
+#[test]
+fn reused_uploads_match_fresh_conversion_across_metadata_sizes_and_scales() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut reused = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    let cases = [
+        (true, false, None),
+        (false, false, None),
+        (false, true, None),
+        (true, true, None),
+        (true, false, Some(Hdr::Pq)),
+        (true, false, Some(Hdr::Hlg)),
+        (true, true, Some(Hdr::Pq)),
+        (true, true, Some(Hdr::Hlg)),
+    ];
+    for (w, h) in [(17, 9), (8, 16), (17, 9)] {
+        for scale in [1, 2, 4] {
+            for (seed, (bt709, full, hdr)) in cases.into_iter().enumerate() {
+                let f = patterned_frame(w, h, bt709, full, hdr, seed as u32);
+                let mut fresh = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+                let before = reused.upload_allocations();
+                let same_layout = reused
+                    .inputs
+                    .as_ref()
+                    .is_some_and(|inputs| inputs.key == (w, h, hdr.is_some()));
+                upload_frame(&mut reused, &device, &queue, &f, scale);
+                upload_frame(&mut fresh, &device, &queue, &f, scale);
+                assert_eq!(
+                    read_back(&device, &queue, &reused.image().unwrap()),
+                    read_back(&device, &queue, &fresh.image().unwrap()),
+                    "{w}x{h} scale={scale}, case={seed}"
+                );
+                assert_eq!(reused.outputs.len(), 1, "old sizes/layouts released");
+                if same_layout {
+                    assert_eq!(
+                        reused.upload_allocations().plane_textures,
+                        before.plane_textures
+                    );
+                    assert_eq!(
+                        reused.upload_allocations().conversion_buffers,
+                        before.conversion_buffers
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn retained_image_leases_stay_immutable_and_output_pool_is_bounded() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    let mut retained = Vec::new();
+    for seed in 0..12 {
+        let f = patterned_frame(16, 8, true, false, None, seed);
+        upload_frame(&mut preview, &device, &queue, &f, 1);
+        let image = preview.image().unwrap();
+        let expected = read_back(&device, &queue, &image);
+        retained.push((image.clone(), expected));
+        assert!(preview.outputs.len() <= OUTPUT_POOL_LIMIT);
+    }
+    assert_eq!(preview.outputs.len(), OUTPUT_POOL_LIMIT);
+    for (image, expected) in &retained {
+        assert_eq!(
+            read_back(&device, &queue, image),
+            *expected,
+            "retained frame overwritten"
+        );
+    }
+    drop(retained);
+    let before = preview.upload_allocations();
+    for seed in 12..24 {
+        upload_frame(
+            &mut preview,
+            &device,
+            &queue,
+            &patterned_frame(16, 8, true, false, None, seed),
+            1,
+        );
+    }
+    assert_eq!(
+        preview.upload_allocations(),
+        before,
+        "released leases should recycle outputs and inputs"
+    );
+    upload_frame(
+        &mut preview,
+        &device,
+        &queue,
+        &patterned_frame(9, 17, true, false, Some(Hdr::Pq), 0),
+        4,
+    );
+    assert_eq!(preview.outputs.len(), 1, "incompatible resources released");
+}
+
+#[test]
+fn queued_capture_scopes_and_composition_read_the_leased_frame() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    upload_frame(
+        &mut preview,
+        &device,
+        &queue,
+        &patterned_frame(16, 8, true, false, None, 0),
+        1,
+    );
+    let old = preview.image().unwrap();
+    let expected = read_back(&device, &queue, &old);
+    let copy = texture(&device, 16, 8, IMAGE_FORMAT, &[]);
+    let mut encoder = device.create_command_encoder(&Default::default());
+    encoder.copy_texture_to_texture(old.as_image_copy(), copy.as_image_copy(), old.size());
+    // The copy has been encoded but not submitted: waiting for conversion alone would not
+    // protect it. Its lease must prevent reuse while several later uploads finish.
+    for seed in 1..8 {
+        upload_frame(
+            &mut preview,
+            &device,
+            &queue,
+            &patterned_frame(16, 8, true, false, None, seed),
+            1,
+        );
+    }
+    queue.submit([encoder.finish()]);
+    assert_eq!(read_back(&device, &queue, &copy), expected);
+    let mut compositor = crate::composite::Compositor::new(&device);
+    let composed = compositor.render(
+        &device,
+        &queue,
+        (16, 8),
+        1,
+        [0; 4],
+        &[(&old, Default::default())],
+    );
+    assert_eq!(read_back(&device, &queue, composed), expected);
+    let mut scopes = crate::scope::Scopes::new(&device);
+    scopes.capture(&device, &queue, &old);
+    upload_frame(
+        &mut preview,
+        &device,
+        &queue,
+        &patterned_frame(16, 8, true, false, None, 20),
+        1,
+    );
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let analysis = scopes.poll(&device).expect("completed scope capture");
+    let reference = crate::scope::analyze(&expected, 16);
+    assert_eq!(analysis.histogram, reference.histogram);
+    assert_eq!(analysis.waveform, reference.waveform);
+    assert_eq!(analysis.vectorscope, reference.vectorscope);
+}
+
+#[test]
+fn leased_source_paint_reuses_outputs_after_submission() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    let target = texture(&device, 16, 8, IMAGE_FORMAT, &[]);
+    let view = target.create_view(&Default::default());
+    let mut source_lease = None;
+    let mut warm = None;
+    for seed in 0..8 {
+        // Mirrors Source's prepare/paint ownership: the preceding egui frame was submitted
+        // before prepare drops its lease, and this frame keeps its lease through submission.
+        drop(source_lease.take());
+        let frame = patterned_frame(16, 8, true, false, None, seed);
+        upload_frame(&mut preview, &device, &queue, &frame, 1);
+        source_lease = preview.image();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations::default(),
+                })],
+                ..Default::default()
+            });
+            preview.paint_image(&mut pass, source_lease.as_ref().unwrap());
+        }
+        queue.submit([encoder.finish()]);
+        if let Some(warm) = warm {
+            assert_eq!(preview.upload_allocations(), warm);
+        }
+        warm = Some(preview.upload_allocations());
+        assert_eq!(
+            read_back(&device, &queue, &target),
+            read_back(&device, &queue, source_lease.as_ref().unwrap())
+        );
+    }
+}
+
+#[test]
+fn unleased_paint_keeps_an_unsubmitted_draw_immutable() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    let mut preview = Preview::new(&device, wgpu::TextureFormat::Rgba8Unorm);
+    upload_frame(
+        &mut preview,
+        &device,
+        &queue,
+        &patterned_frame(16, 8, true, false, None, 0),
+        1,
+    );
+    let expected = read_back(&device, &queue, &preview.image().unwrap());
+    let target = texture(&device, 16, 8, IMAGE_FORMAT, &[]);
+    let view = target.create_view(&Default::default());
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations::default(),
+            })],
+            ..Default::default()
+        });
+        preview.paint(&mut pass);
+    }
+    upload_frame(
+        &mut preview,
+        &device,
+        &queue,
+        &patterned_frame(16, 8, true, false, None, 1),
+        1,
+    );
+    queue.submit([encoder.finish()]);
+    assert_eq!(read_back(&device, &queue, &target), expected);
+}
+
+#[test]
+fn pooled_upload_and_leased_paint_preserve_codes_on_srgb_targets() {
+    if !gpu() {
+        return;
+    }
+    let (device, queue) = device().unwrap();
+    for format in [IMAGE_FORMAT, IMAGE_FORMAT.add_srgb_suffix()] {
+        let mut preview = Preview::new(&device, format);
+        for hdr in [None, Some(Hdr::Pq), Some(Hdr::Hlg)] {
+            let mut warm = None;
+            for seed in 0..3 {
+                upload_frame(
+                    &mut preview,
+                    &device,
+                    &queue,
+                    &patterned_frame(16, 8, true, false, hdr, seed),
+                    1,
+                );
+                let image = preview.image().unwrap();
+                let target = texture(&device, 16, 8, format, &[]);
+                let view = target.create_view(&Default::default());
+                let mut encoder = device.create_command_encoder(&Default::default());
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations::default(),
+                        })],
+                        ..Default::default()
+                    });
+                    preview.paint_image(&mut pass, &image);
+                }
+                queue.submit([encoder.finish()]);
+                assert_eq!(
+                    read_back(&device, &queue, &target),
+                    read_back(&device, &queue, &image),
+                    "{format:?} {hdr:?}"
+                );
+                if let Some(warm) = warm {
+                    assert_eq!(preview.upload_allocations(), warm);
+                }
+                warm = Some(preview.upload_allocations());
+            }
+        }
+    }
 }

@@ -236,6 +236,7 @@ impl Preview {
             let gpu = Gpu {
                 preview,
                 shown: None,
+                source_image: None,
                 program: playback::Gpu::new(&rs.device),
                 program_view: render::Preview::new(&rs.device, rs.target_format),
                 program_drawn: None,
@@ -1562,6 +1563,8 @@ impl SourceRow {
 /// The GPU half, kept in egui-wgpu's callback resources.
 struct Gpu {
     preview: render::Preview,
+    /// Kept from prepare through egui's paint submission; released on the next upload.
+    source_image: Option<render::Image>,
     /// The generation of the uploaded image.
     shown: Option<u64>,
     program: playback::Gpu,
@@ -1608,12 +1611,12 @@ impl CallbackTrait for ProgramPaint {
             if self.thumb
                 && let Some(img) = gpu.program_view.image()
             {
-                gpu.thumbs.set_frame(device, queue, img);
+                gpu.thumbs.set_frame(device, queue, &img);
             }
             if self.scope
                 && let Some(img) = gpu.program_view.image()
             {
-                gpu.scopes.capture(device, queue, img);
+                gpu.scopes.capture(device, queue, &img);
             }
             gpu.program_view.set_dst(queue, self.clip);
         }
@@ -1662,7 +1665,12 @@ impl CallbackTrait for Paint {
                     full_range: f.full_range,
                     hdr: f.hdr,
                 };
+                // egui submitted the preceding frame before this prepare. Retain the new
+                // lease through paint and submission, so normal Source playback can reuse it
+                // on the next frame without the conservative unleased-paint fallback.
+                gpu.source_image = None;
                 gpu.preview.upload(device, queue, &yuv, self.scale);
+                gpu.source_image = gpu.preview.image();
             }
             gpu.preview.set_dst(queue, self.clip);
         }
@@ -1675,8 +1683,10 @@ impl CallbackTrait for Paint {
         pass: &mut wgpu::RenderPass<'static>,
         resources: &CallbackResources,
     ) {
-        if let Some(gpu) = resources.get::<Gpu>() {
-            gpu.preview.paint(pass);
+        if let Some(gpu) = resources.get::<Gpu>()
+            && let Some(image) = &gpu.source_image
+        {
+            gpu.preview.paint_image(pass, image);
         }
     }
 }

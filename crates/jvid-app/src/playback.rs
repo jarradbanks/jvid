@@ -1109,6 +1109,7 @@ impl Gpu {
         index: u32,
         layers: &[(Pixels, Transform)],
     ) -> &wgpu::Texture {
+        self.layers.truncate(layers.len());
         while self.layers.len() < layers.len() {
             self.layers.push(Preview::new(device, composite::FORMAT));
         }
@@ -1230,12 +1231,16 @@ impl Gpu {
             .iter()
             .map(|(px, _)| matches!(px, Pixels::Nested(_)))
             .collect();
+        // Keep each image leased through the compositor's command submission.
+        let images: Vec<_> = self.layers.iter().map(Preview::image).collect();
         let layers: Vec<_> = layers
             .iter()
-            .zip(&self.layers)
+            .zip(&images)
             .scan(solids.iter(), |solids, ((px, t), p)| {
                 let tex = match px {
-                    Pixels::Frame(_) | Pixels::Sampled(_, _) => p.image().expect("uploaded above"),
+                    Pixels::Frame(_) | Pixels::Sampled(_, _) => {
+                        p.as_deref().expect("uploaded above")
+                    }
                     Pixels::Still(_) | Pixels::Solid(_) | Pixels::Text(_) | Pixels::Nested(_) => {
                         solids.next().expect("made above")
                     }
