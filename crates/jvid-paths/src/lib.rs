@@ -33,28 +33,28 @@ fn platform() -> Option<directories::ProjectDirs> {
 pub fn config_dir() -> Option<PathBuf> {
     portable_root().map_or_else(
         || platform().map(|d| d.config_dir().to_owned()),
-        |r| Some(r.join("jvid-data/config")),
+        |r| Some(r.join("jvid-data").join("config")),
     )
 }
 
 pub fn data_dir() -> Option<PathBuf> {
     portable_root().map_or_else(
         || platform().map(|d| d.data_dir().to_owned()),
-        |r| Some(r.join("jvid-data/data")),
+        |r| Some(r.join("jvid-data").join("data")),
     )
 }
 
 pub fn data_local_dir() -> Option<PathBuf> {
     portable_root().map_or_else(
         || platform().map(|d| d.data_local_dir().to_owned()),
-        |r| Some(r.join("jvid-data/data")),
+        |r| Some(r.join("jvid-data").join("data")),
     )
 }
 
 pub fn cache_dir() -> Option<PathBuf> {
     portable_root().map_or_else(
         || platform().map(|d| d.cache_dir().to_owned()),
-        |r| Some(r.join("jvid-data/cache")),
+        |r| Some(r.join("jvid-data").join("cache")),
     )
 }
 

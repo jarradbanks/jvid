@@ -127,8 +127,9 @@ def smoke(archive, evidence, installer=None):
             package_root = package_root.parent
         data = package_root / "jvid-data"
         assert "portable=true" in report
-        assert str(data / "config/settings.toml") in report
-        assert str(data / "data/models") in report
+        reported = dict(line.split("=", 1) for line in report.splitlines() if "=" in line)
+        assert Path(reported["config"]).resolve() == (data / "config/settings.toml").resolve()
+        assert Path(reported["models"]).resolve() == (data / "data/models").resolve()
         # Settings survive repeated launches, and two copies remain independent.
         settings = data / "config/settings.toml"
         settings.write_text('theme = "light"\n')
