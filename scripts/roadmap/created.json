@@ -796,6 +796,14 @@
     "effect-masks": {
       "number": 385,
       "id": 6016605978
+    },
+    "relink-stale-frame": {
+      "number": 394,
+      "id": 6019214046
+    },
+    "highlights-fast-scan": {
+      "number": 395,
+      "id": 6019214322
     }
   },
   "links": [
@@ -1962,6 +1970,14 @@
     [
       "effect-masks",
       "privacy-blur"
+    ],
+    [
+      "relink-stale-frame",
+      "windows-playback-hang"
+    ],
+    [
+      "highlights-fast-scan",
+      "find-highlights"
     ]
   ]
 }

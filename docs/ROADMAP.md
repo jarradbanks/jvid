@@ -522,6 +522,8 @@ Planned after v0.3.0, or better suited to plugins. Tracked with the [`later`](ht
 - [#383](https://github.com/jarradbanks/jvid/issues/383) **Hide Region: one click to blur part of a clip** — From #351 (PR #374): hiding a region today takes duplicate clip, add mask, add Blur.
 - [#384](https://github.com/jarradbanks/jvid/issues/384) **Blur: separable two-pass blur for large radii** — From #351 (PR #374): the single 7x7 pass leaves visible steps at big radii, which can leak detail when blurring faces or text.
 - [#385](https://github.com/jarradbanks/jvid/issues/385) **Per-effect masks** — From #351 (PR #374): limit an effect to a mask region without duplicating the clip.
+- [#394](https://github.com/jarradbanks/jvid/issues/394) **Playback: no stale frame after relink** — From #371 (PR #393): decode jobs are keyed without the media path, so an old-path decode still pending at relink can cache a stale frame; the keyframe stand-in path has the same race.
+- [#395](https://github.com/jarradbanks/jvid/issues/395) **Find Highlights: fast scene scan on long recordings** — From #347 (PR #392): the scene scan decodes every frame at full size, so a two-hour recording takes many minutes.
 
 ---
 

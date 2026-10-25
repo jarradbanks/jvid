@@ -1860,3 +1860,13 @@ I("effect-masks", "Per-effect masks", None, ["render", "ui"], "M", ["privacy-blu
   summary="From #351 (PR #374): limit an effect to a mask region without duplicating the clip.",
   scope=["An effect can reference one of the clip's masks; the effect only applies inside it"],
   ac=["An effect limited to a mask leaves pixels outside it unchanged (render test)", "Old projects load unchanged"])
+
+I("relink-stale-frame", "Playback: no stale frame after relink", None, ["timeline"], "S", ["windows-playback-hang"], labels=["later"],
+  summary="From #371 (PR #393): decode jobs are keyed without the media path, so an old-path decode still pending at relink can cache a stale frame; the keyframe stand-in path has the same race.",
+  scope=["Key decode jobs (and the stand-in path) so a relink can't receive a result decoded from the old file"],
+  ac=["A test that relinks while an old-path decode is pending shows only frames from the new file"])
+
+I("highlights-fast-scan", "Find Highlights: fast scene scan on long recordings", None, ["media"], "S", ["find-highlights"], labels=["later"],
+  summary="From #347 (PR #392): the scene scan decodes every frame at full size, so a two-hour recording takes many minutes.",
+  scope=["Scan with keyframe-only or downscaled decode (or both), keeping the scene accuracy the tests check"],
+  ac=["The long-2h-1440p60 corpus file scans at least 5x faster than PR #392's scan, with the same scene test passing"])
