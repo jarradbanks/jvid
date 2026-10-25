@@ -604,7 +604,10 @@ fn lossless_source_aliases_are_rejected_before_writing() {
             let symlink = files.dir.join("symlink.mov");
             match std::os::windows::fs::symlink_file(&source, &symlink) {
                 Ok(()) => aliases.push(symlink),
-                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::PermissionDenied
+                        || e.raw_os_error() == Some(1314) =>
+                {
                     eprintln!("symlink alias unverified: Windows symlink permission unavailable");
                 }
                 Err(e) => panic!("creating source symlink: {e}"),
