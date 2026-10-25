@@ -139,6 +139,9 @@ about = "Om jvid…"
 tutorials = "Opplæring"
 
 [export]
+codec_no_encoder = "Ingen brukbar {codec}-koder for disse eksportinnstillingene. Bruk støttet maskinvare, installer en versjon med {encoders}, eller velg en forhåndsinnstilling med en annen kodek."
+codec_wrong = "{expected} ble forespurt, men den kodede videoen er {actual}. Utdatafilen ble ikke publisert."
+encoder = "Kodere å Prøve"
 queue = "Rendringskø"
 queue_pending.one = "{count} i rendringskøen"
 queue_pending.other = "{count} i rendringskøen"

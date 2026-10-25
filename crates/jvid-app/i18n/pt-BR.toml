@@ -139,6 +139,9 @@ about = "Sobre o jvid…"
 tutorials = "Tutoriais"
 
 [export]
+codec_no_encoder = "Nenhum codificador {codec} utilizável com estas configurações de exportação. Use hardware compatível, instale uma versão com {encoders} ou escolha uma predefinição com outro codec."
+codec_wrong = "Foi solicitado {expected}, mas o vídeo codificado é {actual}. O arquivo de saída não foi publicado."
+encoder = "Codificadores a Testar"
 queue = "Fila de renderização"
 queue_pending.one = "{count} na fila de renderização"
 queue_pending.many = "{count} na fila de renderização"

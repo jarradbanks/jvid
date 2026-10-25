@@ -139,6 +139,9 @@ about = "O aplikaci jvid…"
 tutorials = "Výukové lekce"
 
 [export]
+codec_no_encoder = "Pro tato nastavení exportu není dostupný použitelný kodér {codec}. Použijte podporovaný hardware, nainstalujte sestavení s {encoders} nebo vyberte předvolbu s jiným kodekem."
+codec_wrong = "Byl požadován {expected}, ale kódované video je ve formátu {actual}. Výstupní soubor nebyl publikován."
+encoder = "Kodéry k Vyzkoušení"
 queue = "Fronta renderování"
 queue_pending.one = "{count} ve frontě renderování"
 queue_pending.few = "{count} ve frontě renderování"

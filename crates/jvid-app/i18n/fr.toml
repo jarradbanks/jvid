@@ -139,6 +139,9 @@ about = "À propos de jvid…"
 tutorials = "Tutoriels"
 
 [export]
+codec_no_encoder = "Aucun encodeur {codec} utilisable avec ces paramètres d’exportation. Utilisez du matériel compatible, installez une version avec {encoders} ou choisissez un préréglage avec un autre codec."
+codec_wrong = "Le codec demandé est {expected}, mais la vidéo encodée est en {actual}. Le fichier de sortie n’a pas été publié."
+encoder = "Encodeurs à Essayer"
 queue = "File d'attente de rendu"
 queue_pending.one = "{count} dans la file d'attente de rendu"
 queue_pending.many = "{count} dans la file d'attente de rendu"

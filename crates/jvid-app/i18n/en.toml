@@ -148,6 +148,9 @@ tutorials = "Tutorials"
 
 # Exporting: the Export button, its dialog and the render queue.
 [export]
+codec_no_encoder = "No usable {codec} encoder for these export settings. Use supported hardware, install a build with {encoders}, or choose another codec preset."
+codec_wrong = "Requested {expected}, but the encoded video is {actual}. The output was not published."
+encoder = "Encoders to Try"
 queue = "Render Queue"
 queue_pending.one = "{count} in the render queue"
 queue_pending.other = "{count} in the render queue"

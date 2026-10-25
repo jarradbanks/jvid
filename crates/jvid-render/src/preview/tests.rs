@@ -432,20 +432,59 @@ fn auxiliary_images_match_original_view_for_sdr_and_hdr() {
         info.frame_rate = Some(Rate::new(30, 1));
         std::fs::create_dir_all(dir.join("proxies")).unwrap();
         let proxy_path = proxies.path(&src).unwrap();
-        jvid_media::test_media::generate_test_proxy(&src, &proxy_path).unwrap();
-        assert_eq!(proxies.existing(&src).as_ref(), Some(&proxy_path));
-        proxies.set_enabled(true);
-        assert_eq!(proxies.resolve(&src), proxy_path);
-        let pf = VideoDecoder::open_hdr(&proxy_path)
-            .unwrap()
-            .frame_at(Time(0))
-            .unwrap();
-        assert_eq!(
-            (pf.bt709, pf.full_range, pf.hdr),
-            (true, false, None),
-            "proxy is deliberately SDR BT.709"
-        );
-        let proxy = render(&pf);
+        let proxy = match jvid_media::test_media::generate_test_proxy(&src, &proxy_path) {
+            Ok(()) => {
+                assert_eq!(proxies.existing(&src).as_ref(), Some(&proxy_path));
+                proxies.set_enabled(true);
+                assert_eq!(proxies.resolve(&src), proxy_path);
+                let pf = VideoDecoder::open_hdr(&proxy_path)
+                    .unwrap()
+                    .frame_at(Time(0))
+                    .unwrap();
+                assert_eq!(
+                    (pf.bt709, pf.full_range, pf.hdr),
+                    (true, false, None),
+                    "proxy is deliberately SDR BT.709"
+                );
+                Some(render(&pf))
+            }
+            Err(error) => {
+                let software = std::collections::BTreeMap::from([(
+                    "encoder".to_owned(),
+                    "software".to_owned(),
+                )]);
+                assert!(
+                    jvid_media::encode::video_encoders(
+                        jvid_core::preset::VideoCodec::H264,
+                        &software
+                    )
+                    .is_empty(),
+                    "unexpected proxy error: {error}"
+                );
+                assert!(
+                    error.contains("h264")
+                        && error.contains("libopenh264")
+                        && error.contains("gpl-ffmpeg"),
+                    "{error}"
+                );
+                assert!(!proxy_path.exists());
+                assert!(
+                    !proxy_path
+                        .with_extension(format!("{}.tmp.mp4", std::process::id()))
+                        .exists()
+                );
+                proxies.set_enabled(true);
+                assert_eq!(
+                    proxies.resolve(&src),
+                    src,
+                    "unavailable proxy keeps the original"
+                );
+                eprintln!(
+                    "verified unavailable H.264 proxy for case {i}; real proxy pixel comparison requires OpenH264 or gpl-ffmpeg; original/poster checks still run"
+                );
+                None
+            }
+        };
         let poster = Cache::new(dir.join("posters"), u64::MAX)
             .poster(&src, info.duration)
             .unwrap();
@@ -460,9 +499,11 @@ fn auxiliary_images_match_original_view_for_sdr_and_hdr() {
             let want = center(&original);
             // Three codes for CPU/GPU float/UNORM rounding, six for an additional CRF23 proxy
             // encode and YUV round-trip. Flat centers exclude downsampling/chroma boundaries.
-            for (what, got, tolerance) in
-                [("poster", center(&poster), 3), ("proxy", center(&proxy), 6)]
-            {
+            let mut comparisons = vec![("poster", center(&poster), 3)];
+            if let Some(proxy) = &proxy {
+                comparisons.push(("proxy", center(proxy), 6));
+            }
+            for (what, got, tolerance) in comparisons {
                 assert!(
                     got[..3]
                         .iter()

@@ -34,6 +34,8 @@ cargo run --release -p jvid-app    # the desktop app
 cargo run --release -p jvid-cli -- render project.jvid -o out.mp4    # headless render
 ```
 
+H.264 export needs working hardware encoding or an FFmpeg build with OpenH264 (`libopenh264`). Software x264/x265 require a GPL FFmpeg build and jvid built with `--features gpl-ffmpeg`; installing a GPL FFmpeg alone does not enable them. Export never substitutes MPEG-4 Part 2 for H.264. If no encoder supports the requested family and settings, install a supported build or explicitly choose another preset such as ProRes Master or GIF. The export dialog lists encoder candidates in preference order; the log records the encoder actually opened.
+
 `scripts/preview/build` regenerates the preview at the top of this page. It drives the real app frame by frame, then lays the capture out with [HyperFrames](https://github.com/heygen-com/hyperframes) from `scripts/preview/motion.html`. It needs the FFmpeg command line tools, Node 22 or later and a Vulkan driver (Mesa's lavapipe works), and downloads its footage once into `target/preview/`.
 
 ## Workspace

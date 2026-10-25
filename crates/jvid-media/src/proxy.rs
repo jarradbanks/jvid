@@ -14,7 +14,7 @@ use jvid_core::time::{Rate, Time};
 use jvid_jobs::{Ctx, Handle, Pool, Priority};
 
 use crate::decode::VideoDecoder;
-use crate::encode::Encoder;
+use crate::encode::{CreateError, Encoder};
 
 /// Proxy height in pixels; width follows the source aspect.
 pub const HEIGHT: u32 = 540;
@@ -109,7 +109,7 @@ pub fn generate(src: &Path, dst: &Path, rate: Rate, frames: i64, ctx: &Ctx) -> R
 }
 
 /// Returns false when cancelled.
-fn encode(src: &Path, dst: &Path, rate: Rate, frames: i64, ctx: &Ctx) -> Result<bool, Error> {
+fn encode(src: &Path, dst: &Path, rate: Rate, frames: i64, ctx: &Ctx) -> Result<bool, CreateError> {
     let mut dec = VideoDecoder::open_hdr(src)?;
     let first = dec.frame_at(rate.time_floor(0))?;
     let size = size((first.width, first.height));
@@ -137,10 +137,10 @@ fn encode(src: &Path, dst: &Path, rate: Rate, frames: i64, ctx: &Ctx) -> Result<
         if i > 0 {
             f = dec.frame_at(rate.time_floor(i))?;
         }
-        enc.video(f.view_rgba(size).as_raw())?;
+        enc.video(f.view_rgba(size).as_raw()).map_err(Error::from)?;
         ctx.set_progress(i as f32 / frames as f32);
     }
-    enc.finish()?;
+    enc.finish().map_err(Error::from)?;
     Ok(true)
 }
 
@@ -256,11 +256,11 @@ mod tests {
         crate::ffmpeg::init().unwrap();
         let dir = std::env::temp_dir().join(format!("jvid-proxy-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let src = dir.join("src.mp4");
+        let src = dir.join("src.mov");
         let rate = Rate::new(30, 1);
         let mut preset = jvid_core::preset::builtin()
             .into_iter()
-            .find(|p| p.video == Some(VideoCodec::H264))
+            .find(|p| p.video == Some(VideoCodec::ProRes))
             .unwrap();
         preset.frame_rate = None;
         let (w, h) = (1280, 720);
@@ -273,43 +273,79 @@ mod tests {
         let proxies = Arc::new(Proxies::new(dir.join("proxies")));
         assert_eq!(proxies.resolve(&src), src);
         let mut info = crate::probe::probe(&src).unwrap();
-        // The average rate of a 12-frame clip is skewed by its last frame's missing duration.
         info.frame_rate = Some(rate);
         let pool = Pool::new(1);
         let job = proxies.submit(&pool, src.clone(), &info);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while !job.is_finished() {
+            assert!(std::time::Instant::now() < deadline, "proxy job timed out");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let proxy = proxies.existing(&src).expect("proxy made");
-        assert_eq!(proxies.resolve(&src), src, "off until toggled");
-        proxies.set_enabled(true);
-        assert_eq!(proxies.resolve(&src), proxy);
-
-        let p = crate::probe::probe(&proxy).unwrap();
-        assert_eq!((p.width, p.height), (Some(960), Some(540)));
-        // All intra: the keyframe at or before every frame is that frame.
-        let (mut key, mut exact) = (
-            VideoDecoder::open(&proxy).unwrap(),
-            VideoDecoder::open(&proxy).unwrap(),
-        );
-        for i in [0, 5, 11] {
-            let t = rate.time_floor(i);
-            assert_eq!(
-                key.keyframe_at(t).unwrap().pts,
-                exact.frame_at(t).unwrap().pts
+        let proxy_options = BTreeMap::from([("encoder".to_owned(), "software".to_owned())]);
+        if crate::encode::video_encoders(VideoCodec::H264, &proxy_options).is_empty() {
+            assert!(
+                proxies.existing(&src).is_none(),
+                "no mislabeled MPEG-4 proxy"
             );
+            proxies.set_enabled(true);
+            assert_eq!(proxies.resolve(&src), src, "original remains playable");
+            // Exercise the public production path and retain the actionable creation error.
+            let dst = dir.join("unavailable.mp4");
+            let original = fs::read(&src).unwrap();
+            fs::write(&dst, b"previous proxy").unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (source, target) = (src.clone(), dst.clone());
+            let _job = pool.submit("unavailable proxy", Priority::Proxy, move |ctx| {
+                tx.send(generate(&source, &target, rate, 12, ctx)).unwrap();
+            });
+            let error = rx
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .unwrap()
+                .unwrap_err();
+            assert!(
+                error.contains("h264")
+                    && error.contains("libopenh264")
+                    && error.contains("gpl-ffmpeg"),
+                "{error}"
+            );
+            assert_eq!(fs::read(&dst).unwrap(), b"previous proxy");
+            assert_eq!(fs::read(&src).unwrap(), original);
+            assert!(
+                !dst.with_extension(format!("{}.tmp.mp4", std::process::id()))
+                    .exists()
+            );
+        } else {
+            let proxy = proxies.existing(&src).expect("proxy made");
+            assert_eq!(proxies.resolve(&src), src, "off until toggled");
+            proxies.set_enabled(true);
+            assert_eq!(proxies.resolve(&src), proxy);
+
+            let p = crate::probe::probe(&proxy).unwrap();
+            assert_eq!((p.width, p.height), (Some(960), Some(540)));
+            // All intra: the keyframe at or before every frame is that frame.
+            let (mut key, mut exact) = (
+                VideoDecoder::open(&proxy).unwrap(),
+                VideoDecoder::open(&proxy).unwrap(),
+            );
+            for i in [0, 5, 11] {
+                let t = rate.time_floor(i);
+                assert_eq!(
+                    key.keyframe_at(t).unwrap().pts,
+                    exact.frame_at(t).unwrap().pts
+                );
+            }
+            // The last frame made it, give or take lossy encoding (frames step 17 luma levels).
+            let luma = |p: &Path| {
+                VideoDecoder::open(p)
+                    .unwrap()
+                    .frame_at(rate.time_floor(11))
+                    .unwrap()
+                    .planes[0][0]
+            };
+            assert!(luma(&proxy).abs_diff(luma(&src)) < 4);
+            // Windows can't delete a file still open.
+            drop((key, exact));
         }
-        // The last frame made it, give or take lossy encoding (frames step 17 luma levels).
-        let luma = |p: &Path| {
-            VideoDecoder::open(p)
-                .unwrap()
-                .frame_at(rate.time_floor(11))
-                .unwrap()
-                .planes[0][0]
-        };
-        assert!(luma(&proxy).abs_diff(luma(&src)) < 4);
-        // Windows can't delete a file still open.
-        drop((key, exact));
         fs::remove_dir_all(&dir).unwrap();
     }
 }

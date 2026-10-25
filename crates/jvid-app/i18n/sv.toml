@@ -139,6 +139,9 @@ about = "Om jvid…"
 tutorials = "Självstudier"
 
 [export]
+codec_no_encoder = "Ingen användbar {codec}-kodare för dessa exportinställningar. Använd maskinvara som stöds, installera en version med {encoders} eller välj en förinställning med en annan kodek."
+codec_wrong = "{expected} begärdes, men den kodade videon är {actual}. Utdatafilen publicerades inte."
+encoder = "Kodare att Prova"
 queue = "Renderingskö"
 queue_pending.one = "{count} i renderingskön"
 queue_pending.other = "{count} i renderingskön"

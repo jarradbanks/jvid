@@ -139,6 +139,9 @@ about = "O programie jvid…"
 tutorials = "Samouczki"
 
 [export]
+codec_no_encoder = "Brak dostępnego kodera {codec} dla tych ustawień eksportu. Użyj obsługiwanego sprzętu, zainstaluj kompilację z {encoders} lub wybierz ustawienie z innym kodekiem."
+codec_wrong = "Zażądano {expected}, ale zakodowane wideo ma format {actual}. Plik wyjściowy nie został opublikowany."
+encoder = "Kodery do Wypróbowania"
 queue = "Kolejka renderowania"
 queue_pending.one = "{count} w kolejce renderowania"
 queue_pending.few = "{count} w kolejce renderowania"

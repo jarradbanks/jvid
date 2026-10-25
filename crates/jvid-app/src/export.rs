@@ -9,12 +9,12 @@ use eframe::egui_wgpu::wgpu;
 use jvid_audio::{Limiter, Meter};
 use jvid_core::eval::frame_at;
 use jvid_core::model::{ProbeInfo, Project};
-use jvid_core::preset::Preset;
+use jvid_core::preset::{Preset, VideoCodec};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
 use jvid_jobs::{Ctx, Handle, Pool, Priority};
 use jvid_media::audio::AudioDecoder;
 use jvid_media::decode::DecoderPool;
-use jvid_media::encode::{EncodeError, Encoder};
+use jvid_media::encode::{CreateError, EncodeError, Encoder};
 use jvid_render::composite::Readback;
 
 use crate::i18n::tr;
@@ -389,7 +389,7 @@ fn encode_attempt(
         return Err(tr!("export.hdr_no_encoder").to_string().into());
     }
     let enc = Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
-        .map_err(|e| tr!("export.create_error", path = req.path.display(), error = e))?;
+        .map_err(|e| create_error(&req.path, e))?;
     let partial = Partial(&req.path);
     let gain = match req.loudness.filter(|_| req.preset.audio.is_some()) {
         Some(target) => measure(project, req, ctx)?.map(|lufs| 10f64.powf((target - lufs) / 20.0)),
@@ -419,9 +419,7 @@ fn encode_attempt(
                 };
                 let enc =
                     Encoder::create(&req.path, (s.width, s.height), s.frame_rate, &req.preset)
-                        .map_err(|e| {
-                            tr!("export.create_error", path = req.path.display(), error = e)
-                        })?;
+                        .map_err(|e| create_error(&req.path, e))?;
                 render(project, &req, enc, limiter(), device, queue, ctx)?;
                 let size = std::fs::metadata(&req.path)
                     .map_err(|e| e.to_string())?
@@ -729,6 +727,26 @@ fn render(
     Ok(())
 }
 
+fn create_error(path: &Path, error: CreateError) -> String {
+    let error = match error {
+        CreateError::NoVideoEncoder(codec) => dialog::codec_unavailable(codec),
+        other => other.to_string(),
+    };
+    tr!("export.create_error", path = path.display(), error = error)
+}
+
+fn validate_video_family(expected: VideoCodec, actual: &str) -> Result<(), Error> {
+    if actual != jvid_media::encode::video_codec_id(expected).name() {
+        return Err(tr!(
+            "export.codec_wrong",
+            expected = dialog::codec_name(expected),
+            actual = actual
+        )
+        .into());
+    }
+    Ok(())
+}
+
 fn err(e: impl std::fmt::Display) -> String {
     tr!("export.encode_error", error = e)
 }
@@ -745,6 +763,13 @@ fn validate(project: &Project, req: &Request) -> Result<ProbeInfo, Error> {
     let p = &req.preset;
     if info.width.is_some() != p.video.is_some() || (info.audio_streams > 0) != p.audio.is_some() {
         return Err(tr!("export.streams_wrong").to_string().into());
+    }
+    if let Some(expected) = p.video {
+        for stream in &info.streams {
+            if let jvid_core::model::StreamInfo::Video(video) = stream {
+                validate_video_family(expected, &video.codec)?;
+            }
+        }
     }
     if (info.duration - want).0.abs() > frame.0 {
         let secs = |t: Time| t.0 as f64 / FLICKS_PER_SECOND as f64;
@@ -793,3 +818,6 @@ pub use lossless::Lossless;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod audit_b10a;
