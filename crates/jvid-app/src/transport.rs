@@ -18,6 +18,21 @@ pub const MAX_SPEED: i32 = 8;
 /// How far ahead of the clock audio is queued, in sample frames (50ms).
 const LEAD: u64 = SAMPLE_RATE as u64 / 20;
 
+/// Remembers the pointer's selected frame independently of the advancing playback position.
+/// Resubmitting a held target would flush the output and replay the start of that frame.
+#[derive(Clone, Default)]
+pub(crate) struct SeekGesture {
+    target: Option<Time>,
+}
+
+impl SeekGesture {
+    /// A changed target seeks once. `None` ends the gesture so the next press can seek again.
+    pub(crate) fn update(&mut self, target: Option<Time>) -> Option<Time> {
+        let previous = std::mem::replace(&mut self.target, target);
+        target.filter(|t| Some(*t) != previous)
+    }
+}
+
 pub struct Transport {
     /// Shuttle speed: 0 stopped, 1 play, negative reverse.
     speed: i32,
@@ -416,6 +431,105 @@ pub(crate) mod tests {
                     );
                 }
                 assert!(src.buf.chunks.len() <= AHEAD);
+            }
+        }
+    }
+
+    /// Real decoder/resampler and asynchronous feeder coverage, with output and DSP checked
+    /// against an offline reader. Rapid obsolete requests must settle at the latest position.
+    #[test]
+    fn repeated_seeks_settle_to_reference_audio_with_and_without_effects() {
+        let Some(dir) = jvid_media::test_media::corpus() else {
+            return;
+        };
+        jvid_media::ffmpeg::init().unwrap();
+        for file in ["tone-1khz-44k.wav", "tone-1khz.wav", "tone-1khz.m4a"] {
+            let path = dir.join(file);
+            let mut decoder = AudioDecoder::open(&path, 0).unwrap();
+            let mut reference = Vec::new();
+            while let Some(chunk) = decoder.next_chunk().unwrap() {
+                reference.resize(chunk.start as usize * 2, 0.0);
+                reference.extend(chunk.samples);
+            }
+            for effects in [false, true] {
+                let mut params = jvid_core::model::AudioFx::default();
+                params.high_pass.freq = 100.0;
+                params.eq.bands[5] = 3.0;
+                params.compressor.ratio = 4.0;
+                params.noise_reduction.amount = 25.0;
+                params.high_pass.enabled = effects;
+                params.eq.enabled = effects;
+                params.compressor.enabled = effects;
+                params.noise_reduction.enabled = effects;
+                let mut source = AudioSource::open(&path, true);
+                let mut fx = jvid_audio::Fx::default();
+                let mut expected_fx = jvid_audio::Fx::default();
+                let fake = Fake::default();
+                let mut out = Output::new(Box::new(fake.clone()), None);
+                let mut transport = Transport::new(secs(5), FPS30);
+                transport.toggle(out.clock());
+                for target in [96_000, 24_000, 144_000, 48_000] {
+                    // Queue several jumps without waiting for the decoder, as during a drag.
+                    for obsolete in [192_000, 12_000, 168_000] {
+                        source.fill(obsolete, &mut [0.0; 1600]);
+                    }
+                    out.flush();
+                    transport.seek(
+                        Time(target * FLICKS_PER_SECOND / SAMPLE_RATE as i64),
+                        out.clock(),
+                    );
+                    let history = if params.is_default() {
+                        0
+                    } else {
+                        jvid_audio::Fx::PREROLL as i64
+                    };
+                    let latency = jvid_audio::Fx::latency(&params) as i64;
+                    let mut expected = VecDeque::new();
+                    for step in 0..12 {
+                        let start = transport.next_sample;
+                        let from = start - if step == 0 { history } else { 0 };
+                        // Hold the device clock while decoding catches up; no timing-dependent
+                        // sleeps determine correctness or allow an obsolete generation to pass.
+                        let deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(3);
+                        loop {
+                            source.fill(from, &mut []);
+                            if source.buf.end() >= start + LEAD as i64 + latency {
+                                break;
+                            }
+                            assert!(
+                                std::time::Instant::now() < deadline,
+                                "{file}: feeder timed out"
+                            );
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                        transport.tick(&mut out, &mut |start, buf| {
+                            fx.render(&params, start, buf, |at, b| source.fill(at, b));
+                            let mut want = vec![0.0; buf.len()];
+                            expected_fx.render(&params, start, &mut want, |at, b| {
+                                b.copy_from_slice(
+                                    &reference[at as usize * 2..at as usize * 2 + b.len()],
+                                );
+                            });
+                            expected.extend(want);
+                        });
+                        for got in fake.pull(800) {
+                            let want = expected.pop_front().unwrap();
+                            assert!(
+                                (got - want).abs() < 0.003,
+                                "{file}, effects={effects}, target={target}, step={step}: {got} vs {want}"
+                            );
+                        }
+                        assert_eq!(transport.speed(), 1);
+                        assert_eq!(
+                            transport.position(out.clock()),
+                            Time(
+                                (target + (step + 1) * 800) * FLICKS_PER_SECOND
+                                    / SAMPLE_RATE as i64
+                            )
+                        );
+                    }
+                }
             }
         }
     }
