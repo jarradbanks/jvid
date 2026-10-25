@@ -559,7 +559,7 @@ impl App {
     fn reframe(&mut self, aspect: [u32; 2]) {
         let [aw, ah] = aspect;
         let Some(mut path) = project_dialog()
-            .set_file_name(format!("{} {aw}x{ah}.jvid", self.name()))
+            .set_file_name(format!("{}-{aw}x{ah}.jvid", self.name()))
             .save_file()
         else {
             return;
