@@ -574,6 +574,98 @@ fn default_wheels_change_nothing_and_lift_raises_shadows_but_not_white() {
     assert!(at(&run(t), 0) > 0);
 }
 
+#[test]
+fn identity_curves_change_nothing_and_an_s_curve_adds_contrast() {
+    use jvid_core::curve::{Curve, Kind};
+    let Some((device, queue)) = device() else {
+        eprintln!("skipping curves test: no software adapter on this platform");
+        return;
+    };
+    // Every 8-bit code on each channel, as the grade test.
+    let px = |x: u32, y: u32| {
+        [
+            x as u8,
+            (x as u8).wrapping_add(85 * y as u8),
+            255 - x as u8,
+            255,
+        ]
+    };
+    let img = image(&device, &queue, (256, 4), px);
+    let mut comp = Compositor::new(&device);
+    let mut run = |t: Transform| {
+        let tex = comp.render(&device, &queue, (256, 4), 1, [0, 0, 0, 255], &[(&img, t)]);
+        read_back(&device, &queue, tex)
+    };
+    let want: Vec<u8> = (0..256 * 4).flat_map(|i| px(i % 256, i / 256)).collect();
+    // Identity points on every curve: the ones a new curve starts with.
+    let mut t = Transform::default();
+    for name in jvid_core::model::Curves::NAMES {
+        let (c, kind) = t.curves.get_mut(name).unwrap();
+        *c = kind.seed();
+    }
+    assert!(!t.curves.is_default() && t.curves.is_neutral());
+    assert_eq!(run(t.clone()), want, "identity curves are pixel-identical");
+    t.blend = jvid_core::model::Blend::Lighten;
+    assert_eq!(run(t.clone()), want, "through the blend pipeline too");
+
+    let s = Curve::new(
+        &[
+            [0.0, 0.0],
+            [0.25, 0.15],
+            [0.5, 0.5],
+            [0.75, 0.85],
+            [1.0, 1.0],
+        ],
+        Kind::Level,
+    );
+    let at = |rgba: &[u8], x: usize| [rgba[x * 4], rgba[x * 4 + 1], rgba[x * 4 + 2]];
+    let mut t = Transform::default();
+    t.curves.master = s;
+    let sc = run(t.clone());
+    // Red runs 0..=255 along x: shadows darken, highlights brighten, the ends and middle hold.
+    assert!(at(&sc, 64)[0] < 60, "shadows darken: {:?}", at(&sc, 64));
+    assert!(
+        at(&sc, 192)[0] > 196,
+        "highlights brighten: {:?}",
+        at(&sc, 192)
+    );
+    assert!((at(&sc, 128)[0] as i32 - 128).abs() <= 2);
+    assert_eq!((at(&sc, 0)[0], at(&sc, 255)[0]), (0, 255));
+
+    // A Red curve leaves green and blue alone.
+    let mut t = Transform::default();
+    t.curves.red = s;
+    let red = run(t);
+    for x in 0..256 {
+        let (got, was) = (at(&red, x), at(&want, x));
+        assert!(
+            near(got[1], was[1].into()) && near(got[2], was[2].into()),
+            "{x}: {got:?}"
+        );
+    }
+
+    // Hue vs Sat at 0 everywhere greys every pixel; Luma vs Sat at 0 does too.
+    let flat = |y| Curve::new(&[[0.0, y], [0.5, y]], Kind::Hue);
+    let grey = |rgba: &[u8]| {
+        (0..256 * 4).all(|i| {
+            let c = &rgba[i * 4..i * 4 + 3];
+            c.iter().all(|v| (*v as i32 - c[0] as i32).abs() <= 1)
+        })
+    };
+    let mut t = Transform::default();
+    t.curves.hue_sat = flat(0.0);
+    assert!(grey(&run(t)));
+    let mut t = Transform::default();
+    t.curves.luma_sat = Curve::new(&[[0.0, 0.0], [1.0, 0.0]], Kind::Luma);
+    assert!(grey(&run(t)));
+    // Hue vs Hue a third of a turn on: yellow (x 255 on the first row) turns cyan.
+    let mut t = Transform::default();
+    t.curves.hue_hue = flat(0.5 + 1.0 / 3.0);
+    assert_eq!(at(&want, 255), [255, 255, 0]);
+    let c = at(&run(t), 255);
+    assert!(c[0] < 20 && c[1] > 235 && c[2] > 235, "{c:?}");
+}
+
 /// Trilinear lookup on the CPU, the reference the shader must match.
 fn lut_reference(lut: &crate::lut::Lut, c: [f32; 3]) -> [f32; 3] {
     let n = lut.size as usize;

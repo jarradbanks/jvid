@@ -7,14 +7,18 @@ use std::cell::RefCell;
 
 use serde::{Deserialize, Serialize};
 
+use crate::curve::Curve;
 use crate::time::Time;
 
 /// An animatable value. Color is straight RGBA in 0..=1.
+// A curve's fixed-size points keep `Value` `Copy`; a few hundred bytes per keyframe is cheap.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Scalar(f64),
     Vec2([f64; 2]),
     Color([f64; 4]),
+    Curve(Curve),
 }
 
 impl Value {
@@ -25,6 +29,7 @@ impl Value {
             (Self::Scalar(a), Self::Scalar(b)) => Self::Scalar(l(a, b)),
             (Self::Vec2(a), Self::Vec2(b)) => Self::Vec2([l(a[0], b[0]), l(a[1], b[1])]),
             (Self::Color(a), Self::Color(b)) => Self::Color(std::array::from_fn(|i| l(a[i], b[i]))),
+            (Self::Curve(a), Self::Curve(b)) => Self::Curve(a.lerp(&b, t)),
             _ => self,
         }
     }

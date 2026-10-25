@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::curve::{Curve, Curves};
 use crate::hdr::Hdr;
 use crate::keyframe::{Keyframe, SPEEDS, Value};
 use crate::time::{Rate, Time};
@@ -544,6 +545,9 @@ pub struct Transform {
     /// Lift, Gamma, Gain and Offset, after the adjustments and before the LUT.
     #[serde(skip_serializing_if = "Wheels::is_default")]
     pub wheels: Wheels,
+    /// Level, hue and luma curves, in display light after the wheels and before the LUT.
+    #[serde(skip_serializing_if = "Curves::is_default")]
+    pub curves: Curves,
     /// Fade lengths from the clip's start and end; they scale opacity and gain, and trims keep
     /// them since they hang off the edges. Longer than the clip clamps to it.
     pub fade_in: Time,
@@ -1101,6 +1105,7 @@ impl Default for Transform {
             lut: None,
             lut_intensity: 1.0,
             wheels: Wheels::default(),
+            curves: Curves::default(),
             fade_in: Time(0),
             fade_out: Time(0),
             fade_curve: FadeCurve::Linear,
@@ -1128,7 +1133,7 @@ impl Transform {
     }
 
     /// Keyframe names of everything Paste Grade carries.
-    pub const GRADE_KEYS: [&str; 14] = [
+    pub const GRADE_KEYS: [&str; 21] = [
         "exposure",
         "contrast",
         "saturation",
@@ -1143,9 +1148,16 @@ impl Transform {
         "gain_master",
         "offset",
         "offset_master",
+        "curve_master",
+        "curve_red",
+        "curve_green",
+        "curve_blue",
+        "hue_vs_sat",
+        "hue_vs_hue",
+        "luma_vs_sat",
     ];
 
-    /// Copies `from`'s color adjustments, LUT and wheels, the grade Copy Grade carries.
+    /// Copies `from`'s color adjustments, LUT, wheels and curves, the grade Copy Grade carries.
     pub fn paste_grade(&mut self, from: &Transform) {
         self.exposure = from.exposure;
         self.contrast = from.contrast;
@@ -1155,6 +1167,7 @@ impl Transform {
         self.lut.clone_from(&from.lut);
         self.lut_intensity = from.lut_intensity;
         self.wheels = from.wheels;
+        self.curves = from.curves;
     }
 }
 
@@ -1358,6 +1371,13 @@ impl Clip {
                     _ => {}
                 }
                 *w = w.clamped();
+            }
+        }
+        for name in Curves::NAMES {
+            if let Some(crate::keyframe::Value::Curve(v)) = self.value_at(name, t)
+                && let Some((c, _)) = x.curves.get_mut(name)
+            {
+                *c = v;
             }
         }
         for (i, e) in x.effects.iter_mut().enumerate() {
@@ -3280,10 +3300,12 @@ mod tests {
             ..Default::default()
         };
         from.wheels.lift.master = 0.3;
+        from.curves.hue_sat = crate::curve::Kind::Hue.seed();
         let mut to = Transform::default();
         to.paste_grade(&from);
         assert_eq!((to.exposure, to.lut.as_deref()), (1.0, Some("a.cube")));
         assert_eq!((to.wheels, to.opacity), (from.wheels, 1.0));
+        assert_eq!(to.curves, from.curves);
     }
 
     #[test]
@@ -3351,6 +3373,22 @@ mod tests {
         let w = c.transform_at(Time(10)).wheels;
         assert_eq!(w.lift.color, [1.0, 0.0], "keyed and pulled into the disc");
         assert_eq!(w.gain.master, -1.0);
+        let level = |y| {
+            Curve::new(
+                &[[0.0, 0.0], [0.5, y], [1.0, 1.0]],
+                crate::curve::Kind::Level,
+            )
+        };
+        let curve = vec![
+            key(100, Value::Curve(level(0.2))),
+            key(120, Value::Curve(level(0.6))),
+        ];
+        c.keyframes.insert("curve_red".into(), curve);
+        let red = c.transform_at(Time(10)).curves.red;
+        assert!(
+            (red.points()[1][1] - 0.4).abs() < 1e-9,
+            "curves key point by point"
+        );
         c.keyframes
             .insert("scale".into(), vec![key(0, Value::Vec2([0.5, 2.0]))]);
         assert_eq!(c.transform_at(Time(10)).scale, [0.5, 2.0]);

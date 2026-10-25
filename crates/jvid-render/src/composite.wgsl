@@ -18,6 +18,8 @@ struct Params {
     grade2: vec4<f32>,
     // Lift, gamma, gain and offset per channel (jvid_core::model::Wheel::rgb) in xyz.
     wheels: array<vec4<f32>, 4>,
+    // x is 1 when the curves are non-neutral and y the curve table's width.
+    curves: vec4<f32>,
 }
 
 @group(0) @binding(0) var image: texture_2d<f32>;
@@ -25,6 +27,9 @@ struct Params {
 @group(0) @binding(2) var<uniform> params: Params;
 // The layer's .cube LUT, or a 1x1x1 stand-in when grade2.z is 0.
 @group(0) @binding(4) var lut: texture_3d<f32>;
+// The layer's baked curves (jvid_core::curve::Curves::bake): Red, Green, Blue and Master in row
+// 0, then Hue vs Sat, Hue vs Hue and Luma vs Sat; a 1x1 stand-in when curves.x is 0.
+@group(0) @binding(5) var curve_table: texture_2d<f32>;
 
 @vertex
 fn vs_layer(@builtin(vertex_index) i: u32) -> Out {
@@ -43,7 +48,7 @@ fn to_srgb(c: vec3<f32>) -> vec3<f32> {
 // The layer's color adjustments on a straight-alpha sample, in linear light, then its LUT with
 // trilinear filtering. Each is skipped when neutral so untouched clips stay bit-identical.
 fn graded(c: vec4<f32>) -> vec4<f32> {
-    var rgb = adjusted(c.rgb);
+    var rgb = curved(adjusted(c.rgb));
     if params.grade2.z > 0.0 {
         // Texel centres: input 0 and 1 land on the first and last nodes.
         let n = params.grade2.w;
@@ -69,6 +74,54 @@ fn adjusted(c: vec3<f32>) -> vec3<f32> {
     l = max(l + 0.25 * w[0].xyz * (1.0 - l), vec3<f32>(0.0));
     l = pow(l * exp2(w[2].xyz), exp2(-w[1].xyz));
     return to_srgb(clamp(l, vec3<f32>(0.0), vec3<f32>(1.0)));
+}
+
+// Row `row` of the curve table at `x` in 0..1, linear between its samples.
+fn curve(x: f32, row: i32) -> vec4<f32> {
+    let n = params.curves.y;
+    let f = clamp(x, 0.0, 1.0) * (n - 1.0);
+    let i = i32(f);
+    let a = textureLoad(curve_table, vec2<i32>(i, row), 0);
+    let b = textureLoad(curve_table, vec2<i32>(min(i + 1, i32(n) - 1), row), 0);
+    return mix(a, b, f - f32(i));
+}
+
+fn to_hsv(c: vec3<f32>) -> vec3<f32> {
+    let hi = max(c.r, max(c.g, c.b));
+    let d = hi - min(c.r, min(c.g, c.b));
+    var h = 0.0;
+    if d > 0.0 {
+        if hi == c.r {
+            h = (c.g - c.b) / d;
+        } else if hi == c.g {
+            h = (c.b - c.r) / d + 2.0;
+        } else {
+            h = (c.r - c.g) / d + 4.0;
+        }
+    }
+    return vec3<f32>(fract(h / 6.0), select(0.0, d / hi, hi > 0.0), hi);
+}
+
+fn from_hsv(c: vec3<f32>) -> vec3<f32> {
+    let k = (vec3<f32>(5.0, 3.0, 1.0) + c.x * 6.0) % 6.0;
+    return c.z - c.z * c.y * clamp(min(k, 4.0 - k), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// The layer's curves in display light: Master then each channel's own, then saturation by hue
+// and luma and the hue shift, where 0.5 changes nothing. Skipped when all are neutral.
+fn curved(c: vec3<f32>) -> vec3<f32> {
+    if params.curves.x == 0.0 {
+        return c;
+    }
+    let v = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    let m = vec3<f32>(curve(v.r, 0).a, curve(v.g, 0).a, curve(v.b, 0).a);
+    let rgb = vec3<f32>(curve(m.r, 0).r, curve(m.g, 0).g, curve(m.b, 0).b);
+    var hsv = to_hsv(rgb);
+    let by_hue = curve(hsv.x, 1);
+    let by_luma = curve(dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722)), 1).b;
+    hsv.y = clamp(hsv.y * 4.0 * by_hue.r * by_luma, 0.0, 1.0);
+    hsv.x = fract(hsv.x + by_hue.g - 0.5);
+    return from_hsv(hsv);
 }
 
 // The image at `uv` with straight alpha.
