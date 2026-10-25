@@ -27,6 +27,7 @@ mod audio;
 mod colour;
 mod markers;
 mod masks;
+mod subtitles;
 
 /// One lesson. Its `id` is the progress key in `settings.toml`.
 pub struct Lesson {
@@ -72,6 +73,7 @@ pub const LESSONS: &[Lesson] = &[
     GREEN_SCREEN,
     SCREEN,
     markers::MARKERS,
+    subtitles::SUBTITLES,
 ];
 
 /// The sample the tour edits.
@@ -1594,6 +1596,8 @@ mod tests {
         let dir = tmp("show-me");
         for lesson in LESSONS.iter().chain([&BASICS]) {
             let mut h = harness_with(Harness::builder().wgpu(), &Default::default());
+            // Transcripts stay in memory, not in the user's cache.
+            h.state_mut().transcript.cache = Default::default();
             // Where Show Me's export lands.
             h.state_mut().export_dialog.set_path(dir.join("x.mp4"));
             h.state_mut().start_lesson(lesson);
@@ -1620,6 +1624,8 @@ mod tests {
                     click(&mut h, tr!("tutorial.skip_step"));
                     continue;
                 }
+                // Generating frees the model when done, so it's put back each time.
+                h.state_mut().subtitles.engine = Some(fake());
                 h.get_by_label(tr!("tutorial.show_me")).click();
                 // Each frame renders, as in the app: the scopes count a rendered frame, so a
                 // step reading them passes a few frames on.
@@ -2105,6 +2111,90 @@ mod tests {
         c.keyframes
             .insert("volume".into(), vec![key(0, 1.0), key(1, 0.3)]);
         assert!(ducked(&c));
+    }
+
+    /// The Fast model, as the fake transcriber of the Generate Subtitles tests.
+    fn fake() -> (
+        jvid_transcribe::models::Model,
+        std::sync::Arc<dyn jvid_transcribe::Transcriber>,
+    ) {
+        let fake = crate::app::tests::FakeTranscriber {
+            slow: false,
+            asked: Default::default(),
+        };
+        (
+            jvid_transcribe::models::Model::Base,
+            std::sync::Arc::new(fake),
+        )
+    }
+
+    /// Acceptance: Show Me runs the whole lesson on a fake transcriber, without a GPU, a model
+    /// or the network.
+    #[test]
+    fn the_subtitles_lesson_runs_by_show_me_with_a_fake_transcriber() {
+        use subtitles::{SUBTITLES, cut};
+        let mut h = harness();
+        h.state_mut().transcript.cache = Default::default();
+        h.state_mut().start_lesson(&SUBTITLES);
+        settle(&mut h);
+        assert!(!h.state().history.can_undo());
+        assert!(!cut(h.state()), "the whole voice plays at the start");
+        for (i, s) in SUBTITLES.steps.iter().enumerate() {
+            assert_eq!(step(&h), Some(i));
+            assert!(!(s.done)(h.state()), "step {i} done before Show Me");
+            h.state_mut().subtitles.engine = Some(fake());
+            h.get_by_label(tr!("tutorial.show_me")).click();
+            let start = std::time::Instant::now();
+            while !(s.done)(h.state()) {
+                assert!(
+                    start.elapsed().as_secs() < 30,
+                    "step {i}: Show Me didn't pass"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                h.step();
+            }
+            settle(&mut h);
+            next(&mut h);
+        }
+        assert_eq!(step(&h), Some(SUBTITLES.steps.len()));
+        assert!(h.state().tutorials_done.iter().any(|d| d == SUBTITLES.id));
+        let project = h.state().history.project();
+        let cues: Vec<String> = project
+            .subtitle_cues()
+            .into_iter()
+            .map(|c| c.text)
+            .collect();
+        assert_eq!(cues, ["hello there.", "This is a test."]);
+        assert!(cut(h.state()));
+    }
+
+    /// Without a model, Show Me opens Generate Subtitles on its download choice and starts
+    /// nothing; Cancel and Skip Step move on offline.
+    #[test]
+    fn without_a_model_the_subtitles_lesson_waits_on_the_download_choice() {
+        use jvid_transcribe::models::{self, Model};
+        // A model on this machine would load for real.
+        if models::dir().is_some_and(|d| Model::Base.is_downloaded(&d)) {
+            return;
+        }
+        let mut h = harness();
+        h.state_mut().transcript.cache = Default::default();
+        h.state_mut().start_lesson(&subtitles::SUBTITLES);
+        settle(&mut h);
+        click(&mut h, tr!("tutorial.show_me"));
+        assert!(h.state().subtitles.is_open());
+        let size = (Model::Base.size() as f64 / 1e6).round().to_string();
+        let fast = tr!(
+            "subtitles.with_size",
+            name = tr!("subtitles.fast"),
+            size = size
+        );
+        assert!(h.query_by_label(&fast).is_some(), "the model's size shows");
+        assert!(h.query_by_label(tr!("subtitles.downloading")).is_none());
+        click(&mut h, tr!("prompt.cancel"));
+        assert!(!h.state().subtitles.is_open());
+        click(&mut h, tr!("tutorial.skip_step"));
+        assert_eq!(step(&h), Some(1));
     }
 
     #[test]

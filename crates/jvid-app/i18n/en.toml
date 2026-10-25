@@ -989,6 +989,15 @@ audio_levels = "Select the music clip and lower its Volume in the Inspector."
 audio_duck = "{key}+click the music's volume line twice, then drag the second point down."
 audio_eq = "Select the voice clip and drag a band of its EQ in the Inspector."
 audio_record = "Press {key} to record a voiceover, then press it again to stop."
+# Subtitles and Edit by Text: generate subtitles from the voice sample, fix and restyle one,
+# then cut a phrase from the transcript. Generate, Transcribe, Transcript, Inspector, Size and
+# Fill are the names the editor shows; {key} is a shortcut or key.
+subtitles = "Subtitles and Edit by Text"
+subtitles_generate = "With the voice clip selected, press {key}, then click Generate."
+subtitles_fix = "Select a subtitle on the Timeline and fix a misheard word in the Inspector."
+subtitles_style = "Restyle the subtitle in the Inspector, such as its Size or Fill color."
+subtitles_transcribe = "Click Transcribe to read the voice clip's words."
+subtitles_cut = "Drag across a phrase in Transcript and press {key} to cut it from the Timeline."
 # Keyframes and Easing, a lesson that animates a title in. Position, Opacity, Previous
 # Keyframe, Ease Out and Open Graph Editor are the names the editor shows for them.
 keys = "Keyframes and Easing"
