@@ -439,3 +439,45 @@ fn audit_457_single_click_and_nested_sequence_keep_existing_destinations() {
     assert_eq!(h.state().history.project().sequence().id(), seq);
     assert!(h.state().preview.source_asset().is_none());
 }
+
+#[test]
+fn audit_470_default_and_remapped_focus_effects_select_and_focus_bin() {
+    for origin in ["focus_timeline", "focus_source", "focus_inspector"] {
+        for remapped in [false, true] {
+            let mut h = editor();
+            h.state_mut().run_action(origin, false);
+            h.state_mut().bin.tab = 2;
+            let selected = h.state().timeline.selected().clone();
+            if remapped {
+                h.state_mut().keymap = Keymap::from_toml("focus_effects = \"Ctrl+Alt+E\"").unwrap();
+            }
+            h.key_press_modifiers(
+                if remapped {
+                    Modifiers::COMMAND | Modifiers::ALT
+                } else {
+                    Modifiers::SHIFT
+                },
+                if remapped { Key::E } else { Key::Num7 },
+            );
+            h.run_steps(3);
+            assert_eq!(h.state().bin.tab, 1);
+            assert_eq!(
+                h.state_mut().dock.find_active_focused().map(|(_, t)| *t),
+                Some(Tab::Media)
+            );
+            assert_eq!(h.state().timeline.selected(), &selected);
+            h.state_mut().run_action("focus_timeline", false);
+            h.key_press_modifiers(Modifiers::SHIFT, Key::Num1);
+            h.run_steps(2);
+            assert_eq!(
+                h.state_mut().dock.find_active_focused().map(|(_, t)| *t),
+                Some(Tab::Media)
+            );
+            assert_eq!(
+                h.state().bin.tab,
+                1,
+                "Focus Media retains its existing tab policy"
+            );
+        }
+    }
+}

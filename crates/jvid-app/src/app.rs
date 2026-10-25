@@ -960,6 +960,10 @@ impl App {
         }
         let tab = match id {
             "focus_media" => Tab::Media,
+            "focus_effects" => {
+                self.bin.tab = 1;
+                Tab::Media
+            }
             "focus_timeline" => Tab::Timeline,
             "focus_inspector" => Tab::Inspector,
             "focus_source" => {
