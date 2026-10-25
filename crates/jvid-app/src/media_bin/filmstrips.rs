@@ -102,7 +102,8 @@ impl Drop for Refresh {
 #[derive(Clone, Debug, PartialEq)]
 enum Terminal {
     Success,
-    Failed(String),
+    // Decode errors are logged by the worker; consumers only need the classification.
+    Failed,
     Cancelled,
 }
 
@@ -146,7 +147,7 @@ struct Completion(Arc<Request>);
 impl Drop for Completion {
     fn drop(&mut self) {
         self.0.finish(if std::thread::panicking() {
-            Terminal::Failed("filmstrip decoder panicked".into())
+            Terminal::Failed
         } else {
             Terminal::Cancelled
         });
@@ -234,7 +235,7 @@ impl Filmstrips {
             .filter(|request| {
                 !matches!(
                     request.0.lock().unwrap().terminal,
-                    Some(Terminal::Failed(_) | Terminal::Cancelled)
+                    Some(Terminal::Failed | Terminal::Cancelled)
                 )
             });
         let (request, fresh) = match existing {
@@ -297,7 +298,7 @@ impl Filmstrips {
                                         "filmstrip for {}: {error}",
                                         source.path.display()
                                     );
-                                    Terminal::Failed(error)
+                                    Terminal::Failed
                                 }
                             }
                         };
@@ -343,7 +344,7 @@ impl Drop for Subscription {
     }
 }
 
-// Retry on later input/repaint, without a timer repeatedly decoding a broken source.
+// Retry on later UI activity, without a timer repeatedly decoding a broken source.
 pub(crate) const RETRY_DELAY: Duration = Duration::from_millis(250);
 
 /// Panel-local subscriptions and generation stamps, separate from reusable GPU textures.
@@ -383,10 +384,13 @@ impl FilmstripRequests {
         let Some(caches) = caches else { return };
         if subscribe
             && !strips.contains_key(path)
-            && self
-                .retry_after
-                .get(path)
-                .is_none_or(|at| ctx.input(|i| i.time) >= *at)
+            && self.retry_after.get(path).is_none_or(|at| {
+                // Completion requests multiple egui passes. At a low frame rate those
+                // passes can cross the backoff and sustain their own retry loop. Let
+                // them drain; input or a later paint after idle can start another try.
+                ctx.input(|i| i.time >= *at)
+                    && (ctx.input(|i| !i.events.is_empty()) || !ctx.requested_repaint_last_pass())
+            })
         {
             let source = self
                 .sources
@@ -440,7 +444,7 @@ impl FilmstripRequests {
         retry_after: &mut HashMap<PathBuf, f64>,
     ) -> bool {
         let (frames, terminal) = subscription.poll();
-        if matches!(terminal, Some(Terminal::Failed(_) | Terminal::Cancelled)) {
+        if matches!(terminal, Some(Terminal::Failed | Terminal::Cancelled)) {
             strips.remove(path);
             retry_after.insert(
                 path.to_owned(),
@@ -528,5 +532,37 @@ impl Filmstrips {
                 )
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decoder_unwind_delivers_failure_and_wakes_the_subscriber() {
+        let request = Arc::new(Request::default());
+        let ctx = Context::default();
+        let wakes = Arc::new(AtomicU64::new(0));
+        let count = wakes.clone();
+        ctx.set_request_repaint_callback(move |_| {
+            count.fetch_add(1, Ordering::Relaxed);
+        });
+        request.0.lock().unwrap().subscribers.insert(1, ctx);
+        let mut subscriber = Subscription {
+            request: request.clone(),
+            id: 1,
+            cursor: 0,
+        };
+        let completion = Completion(request.clone());
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _completion = completion;
+            panic!("injected decoder panic");
+        }));
+        assert!(unwind.is_err());
+        assert_eq!(subscriber.poll(), (Vec::new(), Some(Terminal::Failed)));
+        assert!(wakes.load(Ordering::Relaxed) > 0);
+        drop(subscriber);
+        assert!(request.0.lock().unwrap().subscribers.is_empty());
     }
 }

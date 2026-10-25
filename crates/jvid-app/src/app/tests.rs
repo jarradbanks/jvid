@@ -429,17 +429,39 @@ fn offline_snapshots() {
 #[test]
 fn hover_remove_button_uses_the_remove_flow() {
     use jvid_core::model::AssetId;
+    // Let hover's worker roundtrip finish, then require its completion repaints to
+    // drain within the harness's normal limit. A retry loop must not pass as settled.
+    fn settle_hover(h: &mut Harness<'_, App>) {
+        h.step();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !h.state().bin.filmstrip_test_state().2 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "bin jobs never finished"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.run();
+        let (pending, _, idle) = h.state().bin.filmstrip_test_state();
+        assert_eq!(pending, 0);
+        assert!(idle);
+    }
     let mut results = egui_kittest::SnapshotResults::new();
     let mut h = bin_harness();
     h.hover_at(egui::pos2(90.0, 160.0));
-    h.run();
+    settle_hover(&mut h);
+    assert_eq!(h.state().bin.filmstrip_test_state(), (0, 1, true));
     if gpu() {
         results.add(h.try_snapshot("bin_grid_hover"));
     }
+    // A later pointer event can retry the failed source; its completion also goes idle.
+    h.hover_at(egui::pos2(91.0, 160.0));
+    settle_hover(&mut h);
+    assert_eq!(h.state().bin.filmstrip_test_state(), (0, 2, true));
     h.state_mut().bin.list = true;
     // clutch_round_3.mkv, used by two clips: warns.
     h.hover_at(egui::pos2(100.0, 164.0));
-    h.run();
+    settle_hover(&mut h);
     if gpu() {
         results.add(h.try_snapshot("bin_list_hover"));
     }
@@ -449,7 +471,7 @@ fn hover_remove_button_uses_the_remove_flow() {
     h.get_by_label("Cancel").click();
     // arena_01.mkv is unused: removed at once.
     h.hover_at(egui::pos2(100.0, 132.0));
-    h.run();
+    settle_hover(&mut h);
     h.get_by_label("Remove from Project").click();
     h.run();
     assert!(h.state().history.project().asset(AssetId(1)).is_none());
