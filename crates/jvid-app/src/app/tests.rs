@@ -13,6 +13,8 @@ use suite_ui::test_support::gpu;
 use super::*;
 use crate::import::Importer;
 
+mod audit_b08;
+
 const SIZES: [[f32; 2]; 2] = [[1280.0, 720.0], [1920.0, 1080.0]];
 const SCALES: [f32; 2] = [1.0, 1.5];
 
