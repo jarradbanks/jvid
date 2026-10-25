@@ -79,6 +79,11 @@ impl Default for ExportDialog {
 }
 
 impl ExportDialog {
+    /// Whether the export modal currently owns input, including before its first draw.
+    pub fn is_open(&self) -> bool {
+        self.range.is_some()
+    }
+
     /// Sets the output file, whose folder the next `open` keeps; for tests that need a fixed path.
     #[doc(hidden)]
     pub fn set_path(&mut self, path: PathBuf) {

@@ -257,7 +257,7 @@ impl Keymap {
     /// None while a text field has focus; no Up or Down while any widget has it, such as a
     /// hovered EQ band.
     pub fn pressed(&self, ctx: &egui::Context, timeline_focused: bool) -> Vec<&'static str> {
-        if ctx.text_edit_focused() {
+        if ctx.text_edit_focused() || ctx.memory(|m| m.top_modal_layer().is_some()) {
             return Vec::new();
         }
         let focused = ctx.memory(|m| m.focused().is_some());

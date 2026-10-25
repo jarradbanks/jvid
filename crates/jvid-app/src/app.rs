@@ -872,6 +872,20 @@ impl App {
         }
     }
 
+    /// App dialogs own keyboard input from opening through dismissal, including their
+    /// first frame before egui has registered a modal layer. Nested widget modals use
+    /// egui's shared ownership state instead of another app-specific list.
+    fn modal_owns_input(&self, ctx: &egui::Context) -> bool {
+        self.settings_dialog.draft.is_some()
+            || self.export_dialog.is_open()
+            || self.preferences.is_open()
+            || self.keymap_editor.is_open()
+            || self.subtitles.is_open()
+            || !self.prompts.is_empty()
+            || self.bin.confirm_remove.is_some()
+            || ctx.memory(|m| m.top_modal_layer().is_some())
+    }
+
     /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
     /// focus. shortcut: unimplemented actions are stubs until their features land.
     fn run_action(&mut self, id: &str, menu: bool) {
@@ -1353,7 +1367,10 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
             }
         }
-        self.lesson_keys(&ctx);
+        let modal_owned_input = self.modal_owns_input(&ctx);
+        if !modal_owned_input {
+            self.lesson_keys(&ctx);
+        }
         let was_closing = self.closing;
         self.show_prompt(&ctx);
         if self.closing && !was_closing {
@@ -1364,11 +1381,7 @@ impl eframe::App for App {
             .dock
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
-        let pressed = if self.closing
-            || self.keymap_editor.is_open()
-            || self.subtitles.is_open()
-            || !self.prompts.is_empty()
-        {
+        let pressed = if self.closing || modal_owned_input {
             Vec::new()
         } else {
             self.keymap.pressed(&ctx, timeline)
