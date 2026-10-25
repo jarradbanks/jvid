@@ -27,6 +27,7 @@ mod scopes;
 pub mod settings_file;
 mod subtitles;
 mod timeline;
+mod transcript;
 mod transport;
 mod welcome;
 mod zoom;

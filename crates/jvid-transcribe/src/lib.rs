@@ -124,6 +124,7 @@ fn run(
         .map_err(Error::Failed)?
         .ok_or(Error::Cancelled)?;
     let (speech, spans) = skip_silence(&audio);
+    let voiced = voiced(&audio);
     // An hour of speech-rate audio is about 230 MB.
     drop(audio);
     let mut t = if speech.is_empty() {
@@ -133,8 +134,11 @@ fn run(
     };
     let offset = Rate::new(SAMPLE_RATE, 1).time_floor(s.range.start.max(0));
     for w in &mut t.words {
-        let (start, end) = to_source(w.start, w.end, &spans);
-        (w.start, w.end) = (offset + start, offset + end);
+        (w.start, w.end) = to_source(w.start, w.end, &spans);
+    }
+    snap(&mut t.words, &voiced);
+    for w in &mut t.words {
+        (w.start, w.end) = (offset + w.start, offset + w.end);
     }
     ctx.set_progress(1.0);
     Ok(t)
@@ -149,6 +153,50 @@ const _: () = assert!(
     PAD % BUCKET != 0,
     "skip_silence tells a leading cut by a == PAD"
 );
+
+/// Frames per second of [`voiced`].
+const FRAMES: u32 = 100;
+/// Kept before a word's first voiced frame and after its last: consonants start and trail off
+/// under the threshold.
+const LEAD: Time = Time(jvid_core::time::FLICKS_PER_SECOND * 3 / 100);
+const TAIL: Time = Time(jvid_core::time::FLICKS_PER_SECOND * 5 / 100);
+
+/// Whether each 10 ms of `audio` is speech: 15 dB over the noise floor (the quietest tenth of
+/// it), but at least [`SILENCE_DB`].
+// shortcut: the threshold is capped at -35 dBFS so loud backgrounds count as speech and leave
+// whisper's edges alone; use a voice-activity model if music beds trim words.
+fn voiced(audio: &[f32]) -> Vec<bool> {
+    let db: Vec<f32> = (audio.chunks((SPEECH_RATE / FRAMES) as usize))
+        .map(|c| {
+            let ms = c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32;
+            10.0 * ms.max(1e-12).log10()
+        })
+        .collect();
+    let mut sorted = db.clone();
+    sorted.sort_by(f32::total_cmp);
+    let floor = sorted.get(sorted.len() / 10).copied().unwrap_or(SILENCE_DB);
+    let threshold = (floor + 15.0).clamp(SILENCE_DB, -35.0);
+    db.into_iter().map(|d| d > threshold).collect()
+}
+
+/// Pulls each word's edges in onto its speech, so a cut on them neither clips the word nor
+/// keeps the pause beside it: whisper's ends run into the next pause and its starts can sit
+/// early in the one before. A word with no voiced frame keeps its times.
+fn snap(words: &mut [Word], voiced: &[bool]) {
+    let rate = Rate::new(FRAMES, 1);
+    for w in words {
+        let frame = |t: Time| (rate.index_floor(t).max(0) as usize).min(voiced.len());
+        let span = frame(w.start)..frame(w.end);
+        let (Some(first), Some(last)) = (
+            span.clone().find(|&i| voiced[i]),
+            span.rev().find(|&i| voiced[i]),
+        ) else {
+            continue;
+        };
+        w.start = w.start.max(rate.time_floor(first as i64) - LEAD);
+        w.end = w.end.min(rate.time_floor(last as i64 + 1) + TAIL);
+    }
+}
 
 /// `audio` with long silences spliced out, and where each kept span starts: `(in the result, in
 /// audio)`, both as [`Time`] from the start.
@@ -275,6 +323,48 @@ mod tests {
         assert!(skip_silence(&vec![0.0; 3 * S]).0.is_empty());
         // Too short to hold a silence, even the length of a pad.
         assert_eq!(skip_silence(&vec![0.0; PAD as usize]).0.len(), PAD as usize);
+    }
+
+    /// Acceptance for word timing: on tone bursts in quiet noise, sloppy word edges (a start in
+    /// the pause before, an end running through the pause after) land on the bursts.
+    #[test]
+    fn word_edges_snap_to_speech_energy() {
+        // 0.5 s quiet, 0.5 s "word", 0.7 s quiet, 0.4 s "word", 0.4 s quiet; noise at -60 dBFS.
+        let noise = |n: usize| (0..n).map(|i| if i % 2 == 0 { 0.001 } else { -0.001 });
+        let audio: Vec<f32> = noise(S / 2)
+            .chain(tone(S / 2))
+            .chain(noise(7 * S / 10))
+            .chain(tone(2 * S / 5))
+            .chain(noise(2 * S / 5))
+            .collect();
+        let word = |start, end| Word {
+            text: String::new(),
+            start: secs(start),
+            end: secs(end),
+            confidence: 1.0,
+        };
+        let mut words = [
+            word(0.2, 1.4),
+            word(1.4, 2.4),
+            word(0.6, 0.9),
+            word(2.2, 2.4),
+        ];
+        snap(&mut words, &voiced(&audio));
+        let near = |t: Time, want: f64| (t.0 - secs(want).0).abs() <= secs(0.011).0;
+        let edges = |w: &Word| (w.start, w.end);
+        assert!(
+            near(words[0].start, 0.47) && near(words[0].end, 1.05),
+            "{:?}",
+            edges(&words[0])
+        );
+        assert!(
+            near(words[1].start, 1.67) && near(words[1].end, 2.15),
+            "{:?}",
+            edges(&words[1])
+        );
+        // Inside speech already: unchanged. All quiet: unchanged.
+        assert_eq!(edges(&words[2]), (secs(0.6), secs(0.9)));
+        assert_eq!(edges(&words[3]), (secs(2.2), secs(2.4)));
     }
 
     /// Hears one word per kept second, and with `slow` keeps running until cancelled.

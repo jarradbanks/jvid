@@ -2052,3 +2052,97 @@ fn a_crashed_transcription_shows_an_error() {
     assert!(h.state().subtitles.is_open());
     assert_eq!(h.state().history.project(), &before);
 }
+
+/// Acceptance, end to end: Timeline > Transcript lists a cached fake transcript; clicking the
+/// first word seeks to it, Shift+clicking the last picks the run, and Delete cuts it from the
+/// clip as one undo step.
+#[test]
+fn transcript_panel_cuts_the_picked_words() {
+    use jvid_core::history::Created;
+    use jvid_core::model::{NewClip, TrackKind};
+    use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/samples/voice.m4a");
+    jvid_media::ffmpeg::init().unwrap();
+    let probe = jvid_media::probe::probe(&path).unwrap();
+    let mut h = plain_harness();
+    let app = h.state_mut();
+    app.on_welcome = false;
+    let duration = probe.duration;
+    app.history
+        .apply(Command::Import(vec![(path.clone(), probe)]))
+        .unwrap();
+    let (kind, name) = (TrackKind::Audio, String::new());
+    let Ok(Created::Track(track)) = app.history.apply(Command::AddTrack { kind, name }) else {
+        panic!("track")
+    };
+    let clip = NewClip {
+        asset: app.history.project().assets()[0].id,
+        source_in: Time(0),
+        source_out: duration,
+        start: Time(0),
+        link: None,
+    };
+    app.history.apply(Command::AddClip { track, clip }).unwrap();
+    let dir = std::env::temp_dir().join(format!("jvid-transcript-ui-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    app.transcript.cache = crate::transcript::Cache::new(dir);
+    // "one" at 0.2 s to "three" ending at 1.4 s.
+    let at = |s: f64| Time((s * S as f64) as i64);
+    let words = ["one", "two", "three"].iter().enumerate().map(|(i, w)| {
+        let start = 0.2 + 0.4 * i as f64;
+        jvid_transcribe::Word {
+            text: (*w).into(),
+            start: at(start),
+            end: at(start + 0.4),
+            confidence: 1.0,
+        }
+    });
+    let source = jvid_transcribe::Source {
+        path,
+        nth: 0,
+        range: 0..i64::MAX,
+    };
+    let heard = jvid_transcribe::Transcript {
+        language: None,
+        words: words.collect(),
+    };
+    app.transcript.cache.insert(&source, heard);
+    h.run();
+    h.get_by_label("Timeline").click();
+    h.run();
+    h.get_by_label("Transcript").click();
+    h.run();
+    let r = h.get_by_label("one two three").rect();
+    let click = |h: &mut Harness<'static, App>, x: f32, modifiers| {
+        let pos = egui::pos2(x, r.center().y);
+        h.event(egui::Event::ModifiersChanged(modifiers));
+        h.run();
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers,
+            });
+            h.run();
+        }
+        h.event(egui::Event::ModifiersChanged(Default::default()));
+    };
+    click(&mut h, r.left() + 2.0, Default::default());
+    assert_eq!(h.state().timeline.playhead(), at(0.2));
+    click(&mut h, r.right() - 2.0, egui::Modifiers::SHIFT);
+    h.key_press(egui::Key::Delete);
+    h.run();
+    let clips = |h: &Harness<'static, App>| {
+        let seq = h.state().history.project().sequence();
+        let c = |c: &jvid_core::model::Clip| (c.start, c.source_in, c.source_out);
+        seq.tracks()[0].clips().iter().map(c).collect::<Vec<_>>()
+    };
+    let cut = vec![(Time(0), Time(0), at(0.2)), (at(0.2), at(1.4), duration)];
+    assert_eq!(clips(&h), cut);
+    assert!(h.query_by_label("one two three").is_none());
+    h.state_mut().history.undo();
+    h.run();
+    assert_eq!(clips(&h), [(Time(0), Time(0), duration)]);
+    assert!(h.query_by_label("one two three").is_some());
+}

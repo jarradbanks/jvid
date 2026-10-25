@@ -1,7 +1,8 @@
 //! Generate Subtitles: transcribes the selected clips, or the audio between In and Out, and
 //! lays the words out as caption cues on a new subtitle track, as one undoable edit.
 //! The model downloads on first use; its progress and Cancel show in the dialog, and closing
-//! the dialog cancels whatever is running.
+//! the dialog cancels whatever is running. The same dialog transcribes whole files for the
+//! Transcript panel ([`Subtitles::open_transcribe`]).
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -117,33 +118,36 @@ fn soft_break(w: &str) -> bool {
 /// A clip to transcribe, as it was when Generate was clicked, and the part of the timeline to
 /// caption.
 #[derive(Clone)]
-struct Target {
-    clip: Clip,
-    span: (Time, Time),
-    source: Source,
+pub(crate) struct Target {
+    pub clip: Clip,
+    pub span: (Time, Time),
+    pub source: Source,
 }
 
 impl Target {
-    /// `t`'s words that fall in the span, moved to timeline time.
-    fn place(&self, t: Transcript) -> impl Iterator<Item = Word> + '_ {
+    /// The `words` (in file time) that fall in the span, moved to timeline time.
+    pub fn place<'a>(&'a self, words: &'a [Word]) -> impl Iterator<Item = Word> + 'a {
         let c = &self.clip;
-        t.words.into_iter().filter_map(move |mut w| {
+        words.iter().filter_map(move |w| {
             let (start, end) = (c.timeline_at(w.start), c.timeline_at(w.end));
-            (start >= self.span.0 && start < self.span.1).then(|| {
-                (w.start, w.end) = (start, end.min(self.span.1));
-                w
+            (start >= self.span.0 && start < self.span.1).then(|| Word {
+                start,
+                end: end.min(self.span.1),
+                ..w.clone()
             })
         })
     }
 }
 
 /// The audio clips to caption: the selected ones and those linked to them, else every enabled
-/// one on an unmuted track between In and Out. Reversed and frozen clips are left out.
-fn targets(project: &Project, selected: &HashSet<ClipId>) -> Vec<Target> {
+/// one on an unmuted track between In and Out, or with `whole` across the whole sequence.
+/// Reversed and frozen clips are left out.
+pub(crate) fn targets(project: &Project, selected: &HashSet<ClipId>, whole: bool) -> Vec<Target> {
     let seq = project.sequence();
     let plays = |c: &Clip| c.freeze.is_none() && !c.reverse;
     let mut spans: Vec<(&Clip, (Time, Time))> = if selected.is_empty() {
-        let Some((from, to)) = in_out(seq) else {
+        let span = whole.then_some((Time(0), seq.duration()));
+        let Some((from, to)) = span.or_else(|| in_out(seq)) else {
             return Vec::new();
         };
         seq.tracks()
@@ -240,10 +244,10 @@ impl Drop for Run {
 impl Run {
     fn load(&mut self, jobs: &Pool, path: PathBuf) {
         self.stage = Stage::Loading;
-        let tx = self.tx.clone();
+        let (tx, model) = (self.tx.clone(), self.model);
         let key = format!("whisper:{}", path.display());
         let job = jobs.submit(key, Priority::Interactive, move |_| {
-            let r = Whisper::load(&path).map(|w| Arc::new(w) as Arc<dyn Transcriber>);
+            let r = Whisper::load(&path, model).map(|w| Arc::new(w) as Arc<dyn Transcriber>);
             let _ = tx.send(Msg::Loaded(r));
         });
         self.handles = vec![job];
@@ -273,7 +277,7 @@ impl Run {
         let mut words = Vec::new();
         for t in &self.targets {
             let i = self.sources.iter().position(|s| *s == t.source)?;
-            words.extend(t.place(self.done[i].clone()?));
+            words.extend(t.place(&self.done[i].as_ref()?.words));
         }
         words.sort_by_key(|w| w.start);
         Some(cues(&words))
@@ -282,6 +286,14 @@ impl Run {
 
 /// The value column's width.
 const FIELD: f32 = 220.0;
+
+/// What a finished run hands back.
+pub enum Done {
+    /// The subtitle track, to apply.
+    Edit(Box<Command>),
+    /// [`Subtitles::open_transcribe`]'s sources, each with its transcript.
+    Transcribed(Vec<(Source, Transcript)>),
+}
 
 /// The Generate Subtitles dialog and the jobs it runs.
 #[derive(Default)]
@@ -296,6 +308,8 @@ pub struct Subtitles {
     downloaded: Vec<Model>,
     run: Option<Run>,
     error: Option<String>,
+    /// Set by [`Self::open_transcribe`]: transcribes these instead of making subtitles.
+    transcribe: Option<Vec<Source>>,
     /// Started on the first Generate, so launching the editor spawns no threads for it.
     pub(crate) jobs: Option<Pool>,
     /// The model loaded for this dialog, freed when it closes; tests put a fake here.
@@ -305,10 +319,22 @@ pub struct Subtitles {
 impl Subtitles {
     /// Whether there's audio to caption: selected clips, or clips between In and Out.
     pub fn can_open(project: &Project, selected: &HashSet<ClipId>) -> bool {
-        !targets(project, selected).is_empty()
+        !targets(project, selected, false).is_empty()
     }
 
     pub fn open(&mut self) {
+        self.transcribe = None;
+        self.show_dialog();
+    }
+
+    /// Opens as Transcribe: the same choices bar Translate, as cuts need the spoken words.
+    pub fn open_transcribe(&mut self, sources: Vec<Source>) {
+        self.show_dialog();
+        self.translate = false;
+        self.transcribe = Some(sources);
+    }
+
+    fn show_dialog(&mut self) {
         self.open = true;
         self.error = None;
         let dir = models::dir();
@@ -338,8 +364,11 @@ impl Subtitles {
     }
 
     fn start(&mut self, project: &Project, selected: &HashSet<ClipId>) {
-        let targets = targets(project, selected);
-        let mut sources: Vec<Source> = Vec::new();
+        let targets = match self.transcribe {
+            Some(_) => Vec::new(),
+            None => targets(project, selected, false),
+        };
+        let mut sources: Vec<Source> = self.transcribe.clone().unwrap_or_default();
         for t in &targets {
             if !sources.contains(&t.source) {
                 sources.push(t.source.clone());
@@ -381,7 +410,7 @@ impl Subtitles {
     }
 
     /// Moves the run on with what its jobs sent; the edit once every transcript is in.
-    fn poll(&mut self) -> Option<Command> {
+    fn poll(&mut self) -> Option<Done> {
         let Self {
             run: Some(run),
             jobs: Some(jobs),
@@ -401,7 +430,7 @@ impl Subtitles {
                         f && (stage != Stage::Transcribing || run.done[i].is_none())
                     };
                     if run.stage == stage && finished.iter().enumerate().any(lost) {
-                        break tr!("subtitles.failed", error = Error::Failed("crashed".into()));
+                        break self.failed(Error::Failed("crashed".into()));
                     }
                     return None;
                 }
@@ -415,18 +444,26 @@ impl Subtitles {
                 }
                 Ok(Msg::Transcribed(i, Ok(t))) => {
                     run.done[i] = Some(t);
-                    if let Some(cues) = run.cues() {
+                    if self.transcribe.is_some() {
+                        if run.done.iter().all(Option::is_some) {
+                            let done = run.done.iter_mut().map(|t| t.take().unwrap_or_default());
+                            let done = run.sources.iter().cloned().zip(done).collect();
+                            self.close();
+                            return Some(Done::Transcribed(done));
+                        }
+                    } else if let Some(cues) = run.cues() {
                         if cues.is_empty() {
                             break tr!("subtitles.no_speech").to_owned();
                         }
                         let [.., (_, style)] = Text::presets();
                         let name = tr!("app.subtitles").to_owned();
                         self.close();
-                        return Some(Command::ImportSubtitles { name, cues, style });
+                        let c = Command::ImportSubtitles { name, cues, style };
+                        return Some(Done::Edit(Box::new(c)));
                     }
                 }
                 Ok(Msg::Downloaded(Err(e)) | Msg::Loaded(Err(e)) | Msg::Transcribed(_, Err(e))) => {
-                    break tr!("subtitles.failed", error = e);
+                    break self.failed(e);
                 }
             }
         };
@@ -435,13 +472,20 @@ impl Subtitles {
         None
     }
 
-    /// Shows the dialog while open; returns the edit once the subtitles are ready.
+    fn failed(&self, e: Error) -> String {
+        match self.transcribe {
+            Some(_) => tr!("transcript.failed", error = e),
+            None => tr!("subtitles.failed", error = e),
+        }
+    }
+
+    /// Shows the dialog while open; returns the result once it's ready.
     pub fn show(
         &mut self,
         ui: &mut Ui,
         project: &Project,
         selected: &HashSet<ClipId>,
-    ) -> Option<Command> {
+    ) -> Option<Done> {
         if !self.open {
             return None;
         }
@@ -452,7 +496,14 @@ impl Subtitles {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
         }
-        let can = Self::can_open(project, selected);
+        let can = match &self.transcribe {
+            Some(sources) => !sources.is_empty(),
+            None => Self::can_open(project, selected),
+        };
+        let (title, action) = match self.transcribe {
+            Some(_) => (tr!("transcript.transcribe"), tr!("transcript.transcribe")),
+            None => (tr!("subtitles.title"), tr!("subtitles.generate")),
+        };
         let (mut start, mut close) = (false, false);
         let modal = egui::Modal::new(egui::Id::new("generate_subtitles"))
             .frame(
@@ -466,7 +517,7 @@ impl Subtitles {
                 let bounds = (ui.ctx())
                     .memory(|m| m.area_rect(egui::Id::new("generate_subtitles")))
                     .unwrap_or(ui.ctx().content_rect());
-                ui.label(RichText::new(tr!("subtitles.title")).font(theme::headline()));
+                ui.label(RichText::new(title).font(theme::headline()));
                 ui.add_space(space::S8);
                 let idle = if self.run.is_none() {
                     State::Live
@@ -507,10 +558,12 @@ impl Subtitles {
                         ui.add(d.width(FIELD).bounds(bounds).state(idle));
                         ui.end_row();
 
-                        ui.label(verbatim(""));
-                        let translate = tr!("subtitles.translate");
-                        ui.add(Checkbox::new(&mut self.translate, translate).state(idle));
-                        ui.end_row();
+                        if self.transcribe.is_none() {
+                            ui.label(verbatim(""));
+                            let translate = tr!("subtitles.translate");
+                            ui.add(Checkbox::new(&mut self.translate, translate).state(idle));
+                            ui.end_row();
+                        }
                     });
                 if let Some(run) = &self.run {
                     ui.add_space(space::S16);
@@ -548,7 +601,7 @@ impl Subtitles {
                     } else {
                         State::Disabled
                     };
-                    let generate = Button::primary(tr!("subtitles.generate"))
+                    let generate = Button::primary(action)
                         .loading(self.run.is_some())
                         .state(ready);
                     start = ui.add(generate).clicked();
@@ -715,12 +768,12 @@ mod tests {
     fn selected_audio_or_in_to_out_is_transcribed_and_placed_on_the_timeline() {
         let (mut h, audio) = project();
         let none = HashSet::new();
-        assert!(targets(h.project(), &none).is_empty());
+        assert!(targets(h.project(), &none, false).is_empty());
         let video = h.project().sequence().tracks()[0].clips()[0].id;
         // A video clip alone has no audio to read.
-        assert!(targets(h.project(), &HashSet::from([video])).is_empty());
+        assert!(targets(h.project(), &HashSet::from([video]), false).is_empty());
 
-        let [t] = &targets(h.project(), &HashSet::from([audio]))[..] else {
+        let [t] = &targets(h.project(), &HashSet::from([audio]), false)[..] else {
             panic!()
         };
         let rate = SAMPLE_RATE as i64;
@@ -731,7 +784,7 @@ mod tests {
             language: Some("en".into()),
             words: vec![word("before", 9.0, 9.5), word("hello", 11.0, 11.5)],
         };
-        let placed: Vec<Word> = t.place(heard.clone()).collect();
+        let placed: Vec<Word> = t.place(&heard.words).collect();
         assert_eq!(placed, [word("hello", 3.0, 3.5)]);
 
         h.apply(Command::SetInOut {
@@ -739,11 +792,21 @@ mod tests {
             out_point: Some(Time(8 * S)),
         })
         .unwrap();
-        let [t] = &targets(h.project(), &none)[..] else {
+        let [t] = &targets(h.project(), &none, false)[..] else {
             panic!()
         };
         assert_eq!(t.source.range, 13 * rate..16 * rate);
         assert_eq!(t.span, (Time(5 * S), Time(8 * S)));
-        assert!(t.place(heard).next().is_none());
+        assert!(t.place(&heard.words).next().is_none());
+        // The whole sequence, for the Transcript panel.
+        h.apply(Command::SetInOut {
+            in_point: None,
+            out_point: None,
+        })
+        .unwrap();
+        let [t] = &targets(h.project(), &none, true)[..] else {
+            panic!()
+        };
+        assert_eq!(t.span, (Time(2 * S), Time(12 * S)));
     }
 }

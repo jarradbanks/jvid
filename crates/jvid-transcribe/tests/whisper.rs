@@ -29,7 +29,7 @@ fn whisper(jobs: &Pool) -> (MutexGuard<'static, ()>, Arc<Whisper>) {
     }
     (
         one,
-        Arc::new(Whisper::load(&Model::Base.path(&dir)).unwrap()),
+        Arc::new(Whisper::load(&Model::Base.path(&dir), Model::Base).unwrap()),
     )
 }
 

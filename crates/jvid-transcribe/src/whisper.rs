@@ -7,10 +7,11 @@ use std::time::Duration;
 use jvid_core::time::Time;
 use jvid_jobs::Ctx;
 use whisper_rs::{
-    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperError,
-    WhisperState, WhisperTokenId,
+    DtwMode, DtwModelPreset, DtwParameters, FullParams, SamplingStrategy, WhisperContext,
+    WhisperContextParameters, WhisperError, WhisperState, WhisperTokenId,
 };
 
+use crate::models::Model;
 use crate::{Error, Options, Transcriber, Transcript, Word};
 
 /// Whisper reports times in centiseconds.
@@ -25,13 +26,24 @@ const FLICKS_PER_CS: i64 = jvid_core::time::FLICKS_PER_SECOND / 100;
 pub struct Whisper(WhisperContext);
 
 impl Whisper {
-    /// Loads a ggml model file such as one from [`crate::models::Model::path`]. It reads the whole
-    /// file and can take seconds, so load it on the job pool, not the UI thread.
-    pub fn load(model: &Path) -> Result<Self, Error> {
+    /// Loads `model`'s ggml file at `path` (see [`Model::path`]), with its DTW attention
+    /// heads for word timing. It reads the whole file and can take seconds, so load it on the
+    /// job pool, not the UI thread.
+    pub fn load(path: &Path, model: Model) -> Result<Self, Error> {
         whisper_rs::install_logging_hooks();
-        WhisperContext::new_with_params(model, WhisperContextParameters::default())
+        let model_preset = match model {
+            Model::Base => DtwModelPreset::Base,
+            Model::Small => DtwModelPreset::Small,
+            Model::LargeV3Turbo => DtwModelPreset::LargeV3Turbo,
+        };
+        let mut params = WhisperContextParameters::default();
+        params.dtw_parameters(DtwParameters {
+            mode: DtwMode::ModelPreset { model_preset },
+            ..DtwParameters::default()
+        });
+        WhisperContext::new_with_params(path, params)
             .map(Self)
-            .map_err(|e| Error::Failed(format!("can't load {}: {e}", model.display())))
+            .map_err(|e| Error::Failed(format!("can't load {}: {e}", path.display())))
     }
 }
 
@@ -60,6 +72,20 @@ impl Transcriber for Whisper {
             }
         }
     }
+}
+
+/// How late DTW times run behind the speech, at most (0.1–0.6 s on the JFK sample).
+const DTW_LATE_CS: i64 = 60;
+
+/// A word's start, in centiseconds, from its segment's `start` and `end` and its first token's
+/// DTW time (`-1` when there's none). Segment starts can sit early in the pause before a word
+/// and DTW runs late, so the start is clamped to `dtw - DTW_LATE_CS..=dtw`; energy snapping in
+/// [`crate::snap`] then finds the onset.
+fn start_cs(start: i64, end: i64, dtw: i64) -> i64 {
+    if dtw < 0 {
+        return start;
+    }
+    start.clamp(dtw - DTW_LATE_CS, dtw).min(end)
 }
 
 fn failed(e: WhisperError) -> Error {
@@ -111,21 +137,41 @@ fn full(
     for s in state.as_iter() {
         let text = s.to_str_lossy().map_err(failed)?.trim().to_owned();
         // Text tokens only: special ones ([_BEG_], timestamps) sit at or above end-of-text.
-        let p: Vec<f32> = (0..s.n_tokens())
+        let tokens: Vec<_> = (0..s.n_tokens())
             .filter_map(|i| s.get_token(i))
             .filter(|t| t.token_id() < eot)
-            .map(|t| t.token_probability())
             .collect();
+        let p: Vec<f32> = tokens.iter().map(|t| t.token_probability()).collect();
         if text.is_empty() || p.is_empty() {
             continue;
         }
+        let dtw = tokens[0].token_data().t_dtw;
+        let (start, end) = (s.start_timestamp(), s.end_timestamp());
         words.push(Word {
             text,
-            start: Time(s.start_timestamp() * FLICKS_PER_CS),
-            end: Time(s.end_timestamp() * FLICKS_PER_CS),
+            start: Time(start_cs(start, end, dtw) * FLICKS_PER_CS),
+            end: Time(end * FLICKS_PER_CS),
             confidence: p.iter().sum::<f32>() / p.len() as f32,
         });
     }
     let language = whisper_rs::get_lang_str(state.full_lang_id_from_state()).map(str::to_owned);
     Ok(Transcript { language, words })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn segment_start_is_clamped_to_dtw() {
+        // "ask": the segment starts at the onset, DTW 0.6 s late: the segment wins.
+        assert_eq!(start_cs(320, 360, 382), 322);
+        // "what": whisper put the segment in the pause before it; DTW pulls it forward.
+        assert_eq!(start_cs(427, 600, 550), 490);
+        // A segment start after DTW comes back to it, never past the segment's end.
+        assert_eq!(start_cs(500, 520, 480), 480);
+        assert_eq!(start_cs(500, 520, 700), 520);
+        // No DTW time: the segment's own.
+        assert_eq!(start_cs(427, 600, -1), 427);
+    }
 }

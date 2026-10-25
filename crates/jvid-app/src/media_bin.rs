@@ -53,6 +53,8 @@ pub struct Caches {
     pub peaks: Arc<waveforms::Cache>,
     pub jobs: Pool,
     pub proxies: Arc<Proxies>,
+    /// Where the Transcript panel keeps whole files' transcripts.
+    pub transcripts: PathBuf,
 }
 
 impl Caches {
@@ -66,6 +68,7 @@ impl Caches {
             .unwrap_or_else(std::env::temp_dir);
         // shortcut: proxies aren't under the cache cap; evict them too if disk use complains.
         let proxies = Arc::new(Proxies::new(dir.join("proxies")));
+        let transcripts = dir.join("transcripts");
         let dir = dir.join("thumbnails");
         let cap = s.cache_max_mb << 20;
         Arc::new(Self {
@@ -73,6 +76,7 @@ impl Caches {
             peaks: Arc::new(waveforms::Cache::new(dir, cap)),
             jobs: Pool::new(2),
             proxies,
+            transcripts,
         })
     }
 }
@@ -1538,6 +1542,7 @@ mod tests {
                 peaks: Arc::new(waveforms::Cache::new(d.join("cache"), u64::MAX)),
                 jobs: Pool::new(1),
                 proxies: Arc::new(Proxies::new(d.join("proxies"))),
+                transcripts: d.join("transcripts"),
             })),
             ..Default::default()
         };
