@@ -2258,6 +2258,13 @@ impl Sequence {
             gone.sort_by_key(|(_, c)| std::cmp::Reverse(c.start));
             for (t, c) in gone {
                 let ti = s.index(t)?;
+                let later: Vec<_> = s.tracks[ti]
+                    .clips
+                    .iter()
+                    .filter(|later| later.start >= c.start)
+                    .map(|c| c.id)
+                    .collect();
+                s.check_shift_locks(&later)?;
                 for later in &mut s.tracks[ti].clips {
                     if later.start >= c.start {
                         later.start = later.start - c.duration();
@@ -3020,6 +3027,18 @@ impl Sequence {
         Ok(())
     }
 
+    /// Validate the full mutation closure before a ripple changes any starts.
+    fn check_shift_locks(&self, ids: &[ClipId]) -> Result<(), ModelError> {
+        for id in ids {
+            for (track, _) in self.linked(*id) {
+                if self.track(track).is_some_and(|t| t.locked) {
+                    return Err(ModelError::Locked(track));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Moves `ids` and their linked partners on other tracks by `by`, so ripples keep sync.
     /// Fails, leaving `self` half-moved, if a moved clip would land on another or before zero.
     fn shift_synced(&mut self, mut ids: Vec<ClipId>, by: Time) -> Result<(), ModelError> {
@@ -3029,6 +3048,9 @@ impl Sequence {
                     ids.push(c.id);
                 }
             }
+        }
+        if by != Time(0) {
+            self.check_shift_locks(&ids)?;
         }
         for t in &mut self.tracks {
             for c in t.clips.iter_mut().filter(|c| ids.contains(&c.id)) {

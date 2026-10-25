@@ -1535,6 +1535,7 @@ impl eframe::App for App {
                 tracing::warn!("edit failed: {e}");
                 // Refusals a bin drop or delete can meet, which nothing else explains.
                 let msg = match e {
+                    ModelError::Locked(_) => Some(tr!("timeline.track_locked").to_owned()),
                     ModelError::Cycle => Some(tr!("timeline.cycle").to_owned()),
                     ModelError::TooDeep => Some(tr!("timeline.too_deep", max = MAX_NEST_DEPTH)),
                     ModelError::SequenceOpen => Some(tr!("bin.sequence_open").to_owned()),

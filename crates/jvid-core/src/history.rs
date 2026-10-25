@@ -2490,3 +2490,110 @@ mod tests {
         assert_eq!((inner[0].source_start, inner[0].end), (Time(8), Time(10)));
     }
 }
+
+#[cfg(test)]
+mod audit_b04 {
+    use super::*;
+    use crate::time::FLICKS_PER_SECOND as S;
+
+    fn fixture() -> (History, TrackId, TrackId, ClipId, ClipId, ClipId) {
+        let mut p = Project::default();
+        let s = &mut p.sequence;
+        let v = s.add_track(TrackKind::Video, "V1");
+        let a = s.add_track(TrackKind::Audio, "A1");
+        let mut add = |t, at, len, link| {
+            s.add_clip(
+                t,
+                NewClip {
+                    asset: AssetId(1),
+                    start: Time(at * S),
+                    source_in: Time(0),
+                    source_out: Time(len * S),
+                    link,
+                },
+            )
+            .unwrap()
+        };
+        let intro = add(v, 0, 5, None);
+        let cv = add(v, 5, 10, Some(LinkId(900)));
+        let ca = add(a, 5, 10, Some(LinkId(900)));
+        (History::new(p), v, a, intro, cv, ca)
+    }
+
+    #[test]
+    fn ripple_commands_refuse_downstream_locked_partners_atomically() {
+        let (h, v, a, intro, _, _) = fixture();
+        let commands = vec![
+            Command::Trim {
+                trims: vec![(intro, Edge::Tail, Time(-S))],
+                ripple: true,
+            },
+            Command::SetClipSpeed {
+                id: intro,
+                speed: 2.0,
+                reverse: false,
+                ripple: true,
+            },
+            Command::SetSpeedKeys {
+                id: intro,
+                speed: 2.0,
+                keys: Vec::new(),
+                ripple: true,
+            },
+            Command::CutSpans {
+                spans: vec![(intro, Time(S), Time(2 * S))],
+                speed: None,
+            },
+            Command::CutSpans {
+                spans: vec![(intro, Time(S), Time(2 * S))],
+                speed: Some(2.0),
+            },
+        ];
+        for command in commands {
+            let mut p = h.project().clone();
+            let mut settings = p.sequence().track(a).unwrap().settings();
+            settings.locked = true;
+            p.sequence.set_track(settings).unwrap();
+            let mut h = History::new(p);
+            let before = h.project().clone();
+            let bytes = serde_json::to_vec(&before).unwrap();
+            assert_eq!(h.apply(command), Err(ModelError::Locked(a)));
+            assert_eq!(serde_json::to_vec(h.project()).unwrap(), bytes);
+            assert!(!h.can_undo() && !h.is_dirty());
+        }
+        let mut p = h.project().clone();
+        p.sequence.remove_clips(&[intro], false).unwrap();
+        let mut settings = p.sequence().track(a).unwrap().settings();
+        settings.locked = true;
+        p.sequence.set_track(settings).unwrap();
+        let mut h = History::new(p.clone());
+        assert_eq!(
+            h.apply(Command::CloseGap {
+                track: v,
+                at: Time(S)
+            }),
+            Err(ModelError::Locked(a))
+        );
+        assert_eq!(h.project(), &p);
+        assert!(!h.can_undo());
+    }
+
+    #[test]
+    fn ripple_trim_unlocked_preserves_later_sync() {
+        let (mut h, _, _, intro, cv, ca) = fixture();
+        let before = h.project().clone();
+        h.apply(Command::Trim {
+            trims: vec![(intro, Edge::Tail, Time(-S))],
+            ripple: true,
+        })
+        .unwrap();
+        for id in [cv, ca] {
+            assert_eq!(
+                h.project().sequence().clip(id).unwrap().1.start,
+                Time(4 * S)
+            );
+        }
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+    }
+}
