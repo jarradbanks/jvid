@@ -276,7 +276,7 @@ impl Compositor {
         tex: &wgpu::Texture,
         effects: &[Effect],
         masks: &[Mask],
-        sizes: ([f32; 2], [f32; 2]),
+        sizes: ([f32; 2], [f32; 2], [f32; 2]),
         logical_size: [f32; 2],
     ) -> Option<wgpu::Texture> {
         if self.fx_pool.len() <= slot {
@@ -442,12 +442,14 @@ impl Compositor {
             .iter()
             .enumerate()
             .map(|(i, (tex, t))| {
-                let sizes = ([size.0 as f32, size.1 as f32], [w as f32, h as f32]);
+                let frame = [size.0 as f32, size.1 as f32];
                 let logical = self
                     .logical_sizes
                     .get(i)
                     .copied()
                     .unwrap_or([tex.width() as f32, tex.height() as f32]);
+                let [_, _, fw, fh] = place(logical, [0.0, 0.0, frame[0], frame[1]], None);
+                let sizes = ([fw, fh], frame, [w as f32, h as f32]);
                 // Masks an effect is limited to only limit it.
                 let own: Vec<Mask> = (t.masks.iter())
                     .filter(|m| m.id == 0 || !t.effects.iter().any(|e| e.mask == Some(m.id)))
@@ -462,7 +464,6 @@ impl Compositor {
                 // mask historically enlarged a smaller source to its fitted project extent;
                 // keep that reference fixed even when its sampled texture is now reduced.
                 let effect_logical = if !cover && masked.is_some() {
-                    let [_, _, fw, _] = place(logical, [0.0, 0.0, sizes.0[0], sizes.0[1]], None);
                     let k = (fw / logical[0]).max(1.0);
                     logical.map(|v| (v * k).round())
                 } else {

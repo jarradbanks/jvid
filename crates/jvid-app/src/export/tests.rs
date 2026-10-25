@@ -2376,7 +2376,20 @@ fn cpu_exports_accept_absent_gpu_and_composited_video_preserves_output() {
 fn framing_program_export_and_metadata_agree() {
     use crate::playback::Playback;
     use jvid_core::framing::Framing;
-    use jvid_core::model::ProjectSettings;
+    use jvid_core::model::{Mask, MaskShape, ProjectSettings};
+    fn shown(project: &Project) -> Shown {
+        let mut pb = Playback::from_files(1 << 20);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if let Some(s) = pb.park(project)
+                && s.exact
+            {
+                return s;
+            }
+            assert!(std::time::Instant::now() < deadline, "decode timed out");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
     let Some((device, queue)) = device() else {
         return;
     };
@@ -2404,25 +2417,37 @@ fn framing_program_export_and_metadata_agree() {
     enc.finish().unwrap();
     let anamorphic = dir.join("anamorphic.mov");
     let rotated = dir.join("rotated.mov");
+    let rotated_anamorphic = dir.join("rotated-anamorphic.mov");
     let help = std::process::Command::new("ffmpeg")
         .args(["-h", "full"])
         .output()
         .unwrap();
     let modern_rotation = String::from_utf8_lossy(&help.stdout).contains("-display_rotation");
     let rotation_options = if modern_rotation {
-        (&rotated, vec!["-display_rotation", "-90"], vec![])
+        (vec!["-display_rotation", "-90"], vec![])
     } else {
-        (&rotated, vec![], vec!["-metadata:s:v:0", "rotate=90"])
+        (vec![], vec!["-metadata:s:v:0", "rotate=90"])
     };
-    for (dst, input_flags, flags) in [
-        (&anamorphic, vec![], vec!["-aspect", "16:9"]),
-        rotation_options,
+    for (src, dst, input_flags, flags) in [
+        (&source, &anamorphic, vec![], vec!["-aspect", "16:9"]),
+        (
+            &source,
+            &rotated,
+            rotation_options.0.clone(),
+            rotation_options.1.clone(),
+        ),
+        (
+            &anamorphic,
+            &rotated_anamorphic,
+            rotation_options.0,
+            rotation_options.1,
+        ),
     ] {
         let result = std::process::Command::new("ffmpeg")
             .args(["-nostdin", "-v", "error", "-y"])
             .args(input_flags)
             .arg("-i")
-            .arg(&source)
+            .arg(src)
             .args(["-c", "copy"])
             .args(flags)
             .arg(dst)
@@ -2438,6 +2463,7 @@ fn framing_program_export_and_metadata_agree() {
         (&source, [144.0, 108.0]),
         (&anamorphic, [192.0, 108.0]),
         (&rotated, [108.0, 144.0]),
+        (&rotated_anamorphic, [108.0, 192.0]),
     ] {
         let probe = jvid_media::probe::probe(source).unwrap();
         assert_eq!(
@@ -2470,17 +2496,7 @@ fn framing_program_export_and_metadata_agree() {
         for mode in [Framing::Fit, Framing::Fill, Framing::Stretch] {
             h.apply(crate::framing::command(h.project(), &[id], mode, Time(0)).unwrap())
                 .unwrap();
-            let mut pb = Playback::from_files(1 << 20);
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            let shown = loop {
-                if let Some(s) = pb.park(h.project())
-                    && s.exact
-                {
-                    break s;
-                }
-                assert!(std::time::Instant::now() < deadline, "decode timed out");
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            };
+            let shown = shown(h.project());
             let mut gpu = Gpu::new(&device);
             let program = jvid_render::composite::read_back(
                 &device,
@@ -2546,6 +2562,94 @@ fn framing_program_export_and_metadata_agree() {
                     "encoded {mode:?} pixel ({x},{y})"
                 );
             }
+        }
+        // Mask points and their Program overlay use fitted project pixels, even for SAR
+        // plus rotation. Check the actual Program/export paths and encoded masked output.
+        h.apply(crate::framing::command(h.project(), &[id], Framing::Fit, Time(0)).unwrap())
+            .unwrap();
+        let c = h.project().sequence().clip(id).unwrap().1;
+        let mut x = c.transform.clone();
+        x.masks = vec![Mask::new(
+            MaskShape::Rectangle,
+            vec![[0.0; 2], [48.0, 54.0]],
+        )];
+        h.apply(Command::SetClipProps(vec![(id, x, c.keyframes.clone())]))
+            .unwrap();
+        let shown = shown(h.project());
+        let mut gpu = Gpu::new(&device);
+        let program = jvid_render::composite::read_back(
+            &device,
+            &queue,
+            gpu.draw(&device, &queue, h.project().settings(), 1, &shown),
+        );
+        let export = jvid_render::composite::read_back(
+            &device,
+            &queue,
+            FrameRenderer::new(&device)
+                .render(h.project(), Time(0), &device, &queue)
+                .unwrap(),
+        );
+        assert_eq!(program, export, "masked {}", source.display());
+        for quality in [1, 2, 4] {
+            let rgba = jvid_render::composite::read_back(
+                &device,
+                &queue,
+                gpu.draw(&device, &queue, h.project().settings(), quality, &shown),
+            );
+            let (w, h) = (192 / quality, 108 / quality);
+            for y in 0..h {
+                for x in 0..w {
+                    let (dx, dy) = (
+                        ((x as f64 + 0.5) * quality as f64 - 96.0).abs(),
+                        ((y as f64 + 0.5) * quality as f64 - 54.0).abs(),
+                    );
+                    // Allow the two output pixels surrounding a filtered/antialiased edge.
+                    let margin = (2 * quality) as f64;
+                    let red = rgba[((y * w + x) * 4) as usize];
+                    if dx < 24.0 - margin && dy < 27.0 - margin {
+                        assert!(
+                            red > 50,
+                            "inside mask {x},{y}, quality {quality}, {}",
+                            source.display()
+                        );
+                    } else if dx > 24.0 + margin || dy > 27.0 + margin {
+                        assert!(
+                            red < 3,
+                            "outside mask {x},{y}, quality {quality}, {}: {red}",
+                            source.display()
+                        );
+                    }
+                }
+            }
+        }
+        let request = Request {
+            path: dir.join(format!(
+                "{}-masked.mov",
+                source.file_stem().unwrap().to_string_lossy()
+            )),
+            range: (Time(0), rate.time_floor(3)),
+            preset: Preset {
+                size: Some([192, 108]),
+                frame_rate: Some(rate),
+                ..preset("ProRes Master")
+            },
+            loudness: None,
+            lossless: None,
+            sidecar: false,
+        };
+        run_now(h.project(), &request, false).unwrap();
+        let encoded = VideoDecoder::open(&request.path)
+            .unwrap()
+            .frame_at(Time(0))
+            .unwrap()
+            .view_rgba((192, 108));
+        for (x, y) in [(64, 54), (76, 54), (96, 54), (128, 54), (96, 20), (96, 88)] {
+            let red = program[((y * 192 + x) * 4) as usize];
+            assert!(
+                encoded.get_pixel(x, y)[0].abs_diff(red) < 15,
+                "encoded mask at {x},{y}, {}",
+                source.display()
+            );
         }
     }
     std::fs::remove_dir_all(dir).unwrap();
