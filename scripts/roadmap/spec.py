@@ -1880,3 +1880,8 @@ I("overlay-design-lines", "Transform overlay: DESIGN.md lines instead of amber",
   summary="From #352 (PR #396): the Program monitor's transform overlay draws an amber outline, but DESIGN.md's Neutral Viewer Rule asks for 1px Ink or Light Blue lines.",
   scope=["Draw the transform overlay's outline and handles in the DESIGN.md viewer colours, keeping the reframe box distinct"],
   ac=["A kittest snapshot of a selected clip shows no amber in the overlay"])
+
+I("viewer-amber-leftovers", "Viewer: remaining amber strokes", None, ["ui"], "S", ["overlay-design-lines"], labels=["later"],
+  summary="From #400 (PR #407): the on-picture text-edit caret and selection highlight, and the stroke in zoom.rs, are still amber, against DESIGN.md's Neutral Viewer Rule.",
+  scope=["Draw the viewer's text caret, text selection and zoom stroke in DESIGN.md viewer colours (DARK tokens, as PR #407 does)"],
+  ac=["grep finds no color::amber() in viewer drawing code; a snapshot of a title being edited shows no amber"])
