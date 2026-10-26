@@ -1,13 +1,8 @@
-Changes in 0.2.0
+Changes in 0.2.1
 
-- Keep release snapshots and path fixtures stable across versions and platforms
-- Wait for asynchronous bin fixture decoding before requiring idle UI
-- Update grouped transcript snapshots for copy and export controls
-- Update shortcut dialog snapshot for subtitle export action
-- Add transcript copy and UTF-8 text export
-- Reuse persistent recognition between subtitles and Transcript
-- feat(app): enable draggable dock tabs and layout reset (#482)
-- Add standalone subtitle SRT export (#485)
+- Fix Windows updater when the editor has already exited
+
+**Windows users updating from 0.2.0 or earlier:** download and run the `jvid-0.2.1-windows-x86_64-setup.exe` installer manually once. Older installed update helpers can incorrectly report “Editor did not exit” before starting the installer. Install into the same directory to replace that helper and keep your settings, projects and models. Future in-app updates will use the repaired helper.
 
 Choose the download for your system:
 
