@@ -6,6 +6,7 @@
 //! one undo step. Fillers lists the um, uh and long pauses to cut the same way ([`fillers`]).
 
 pub mod fillers;
+pub(crate) mod text;
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -258,6 +259,8 @@ pub struct Output {
     pub command: Option<Command>,
     /// Transcribe was clicked: this source scope can be reused, completed or recognized again.
     pub transcribe: Option<Vec<Source>>,
+    /// Snapshot of the current displayed scope to save as plain text.
+    pub export: Option<String>,
     pub close: bool,
 }
 
@@ -275,6 +278,54 @@ pub struct TranscriptPanel {
 }
 
 impl TranscriptPanel {
+    /// Called before app key routing. Find retains its native clipboard behavior;
+    /// Copy in the focused transcript belongs only to its selected words.
+    pub(crate) fn copy_shortcut(
+        &mut self,
+        ctx: &egui::Context,
+        project: &Project,
+        selected: &HashSet<ClipId>,
+    ) {
+        if ctx.text_edit_focused() {
+            return;
+        }
+        let copy = ctx.input_mut(|input| {
+            let event = input.events.iter().any(|e| matches!(e, egui::Event::Copy));
+            input.events.retain(|e| !matches!(e, egui::Event::Copy));
+            input.consume_key(egui::Modifiers::COMMAND, Key::C) || event
+        });
+        if copy {
+            let selected = self.sources.selection(project.sequence(), selected);
+            let placed = self.cache.placed(project, &selected);
+            if let Some(picked) = self.picked(&placed.0) {
+                ctx.copy_text(text::plain(&placed.0[picked]));
+            }
+        }
+    }
+
+    fn text_actions(&self, ui: &mut Ui, words: &[(ClipId, Word)], out: &mut Output) {
+        let ready = |yes| if yes { State::Live } else { State::Disabled };
+        if ui
+            .add(Button::secondary(tr!("action.copy")).state(ready(self.picked(words).is_some())))
+            .clicked()
+            && let Some(picked) = self.picked(words)
+        {
+            ui.ctx().copy_text(text::plain(&words[picked]));
+        }
+        if ui
+            .add(Button::secondary(tr!("transcript.copy_all")).state(ready(!words.is_empty())))
+            .clicked()
+        {
+            ui.ctx().copy_text(text::plain(words));
+        }
+        if ui
+            .add(Button::secondary(tr!("transcript.export_text")).state(ready(!words.is_empty())))
+            .clicked()
+        {
+            out.export = Some(text::plain(words));
+        }
+    }
+
     /// Source-time recognition is reusable; word selections and searches are not.
     pub fn reset_session(&mut self) {
         self.sources = AudioSources::default();
@@ -364,6 +415,19 @@ impl TranscriptPanel {
             let bar = egui::Frame::NONE
                 .inner_margin(Margin::symmetric(space::INSET as i8, space::S8 as i8));
             bar.show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| self.text_actions(ui, words, &mut out));
+                let scope = if selected_input.is_empty() {
+                    tr!("export.entire")
+                } else {
+                    tr!("export.selected")
+                };
+                ui.label(
+                    egui::RichText::new(tr!("transcript.scope", scope = scope))
+                        .color(color::ink_3()),
+                );
+                if !missing.is_empty() {
+                    ui.label(egui::RichText::new(tr!("transcript.partial")).color(color::ink_3()));
+                }
                 // Right to left, so Find takes what Transcribe leaves.
                 let rtl = egui::Layout::right_to_left(egui::Align::Center);
                 let row = vec2(ui.available_width(), size::CONTROL);
@@ -412,9 +476,7 @@ impl TranscriptPanel {
                     }
                 });
             });
-            if !missing.is_empty() {
-                ui.label(egui::RichText::new(tr!("transcript.partial")).color(color::ink_3()));
-            } else if words.is_empty() {
+            if missing.is_empty() && words.is_empty() {
                 ui.label(egui::RichText::new(tr!("subtitles.no_speech")).color(color::ink_3()));
             }
             egui::ScrollArea::vertical()
@@ -602,6 +664,7 @@ impl TranscriptPanel {
             }
         }
         ui.painter().galley(rect.min, galley, color::ink());
+        response.context_menu(|ui| self.text_actions(ui, words, out));
     }
 }
 
@@ -689,6 +752,179 @@ mod tests {
 
     fn texts(words: &[(ClipId, Word)]) -> Vec<&str> {
         words.iter().map(|(_, w)| w.text.as_str()).collect()
+    }
+
+    #[test]
+    fn copy_shortcut_claims_native_and_key_events_and_only_copies_picked_timeline_words() {
+        let dir = tmp("copy-shortcut");
+        let (history, mut panel) = project(&dir);
+        let ctx = egui::Context::default();
+        let events = [
+            egui::Event::Copy,
+            egui::Event::Key {
+                key: Key::C,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::COMMAND,
+            },
+        ];
+        let selected = HashSet::new();
+        let placed = panel.cache.placed(history.project(), &selected);
+        panel.selection = Some((placed.0[1].1.start, placed.0[3].1.start));
+        let original = history.project().clone();
+        for event in events {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![event],
+                    ..Default::default()
+                },
+                |ui| {
+                    let ctx = ui.ctx();
+                    panel.copy_shortcut(ctx, history.project(), &selected);
+                    assert!(ctx.input(|i| i.events.is_empty()));
+                },
+            );
+            assert!(output.platform_output.commands.iter().any(|command| {
+                matches!(command, egui::OutputCommand::CopyText(text) if text == "one two three")
+            }));
+            assert_eq!(history.project(), &original);
+            output.textures_delta.clear();
+        }
+        panel.selection = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Copy],
+                ..Default::default()
+            },
+            |ui| {
+                panel.copy_shortcut(ui.ctx(), history.project(), &selected);
+            },
+        );
+        assert!(
+            !output
+                .platform_output
+                .commands
+                .iter()
+                .any(|c| matches!(c, egui::OutputCommand::CopyText(_)))
+        );
+        output.textures_delta.clear();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn copy_all_text_uses_trimmed_reordered_and_repeated_timeline_placements() {
+        let dir = tmp("text-scope");
+        let (mut history, mut panel) = project(&dir);
+        let project = history.project();
+        let audio = project
+            .sequence()
+            .tracks()
+            .iter()
+            .find(|t| t.kind == TrackKind::Audio)
+            .unwrap();
+        let original = audio.clips()[0].clone();
+        let track = audio.id;
+        history
+            .apply(Command::AddClip {
+                track,
+                clip: NewClip {
+                    asset: original.asset,
+                    source_in: t(12.0),
+                    source_out: t(14.0),
+                    start: t(20.0),
+                    link: None,
+                },
+            })
+            .unwrap();
+        let selected = HashSet::from([original.id]);
+        let placed = panel.cache.placed(history.project(), &selected);
+        assert_eq!(
+            text::plain(&placed.0),
+            "zero one two three four five six seven eight nine"
+        );
+        let all = panel.cache.placed(history.project(), &HashSet::new());
+        assert!(text::plain(&all.0).ends_with("\n\ntwo three"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn transcript_copy_and_export_controls_are_non_destructive_and_find_keeps_copy() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        struct State {
+            history: History,
+            panel: TranscriptPanel,
+            copied: Vec<String>,
+            exported: Vec<String>,
+        }
+        let dir = tmp("text-controls");
+        let (history, mut panel) = project(&dir);
+        panel.selection = Some((t(3.0), t(5.0)));
+        let original = history.project().clone();
+        let mut fresh = true;
+        let mut h = Harness::builder().with_size([900.0, 480.0]).build_ui_state(
+            move |ui, state: &mut State| {
+                if fresh {
+                    theme::install(ui.ctx());
+                    fresh = false;
+                    ui.ctx().request_repaint();
+                    return;
+                }
+                let selected = HashSet::new();
+                state
+                    .panel
+                    .copy_shortcut(ui.ctx(), state.history.project(), &selected);
+                let out = state
+                    .panel
+                    .show(ui, state.history.project(), &selected, Time(0), true);
+                assert!(out.seek.is_none() && out.command.is_none() && out.transcribe.is_none());
+                if let Some(text) = out.export {
+                    state.exported.push(text);
+                }
+                state.copied.extend(ui.ctx().output(|out| {
+                    out.commands
+                        .iter()
+                        .filter_map(|command| match command {
+                            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                }));
+            },
+            State {
+                history,
+                panel,
+                copied: Vec::new(),
+                exported: Vec::new(),
+            },
+        );
+        h.run();
+        h.get_by_label(tr!("action.copy")).click();
+        h.run();
+        assert_eq!(h.state().copied.last().unwrap(), "one two three");
+        h.get_by_label(tr!("transcript.copy_all")).click();
+        h.run();
+        let all = "zero one two three four five six seven eight nine";
+        assert_eq!(h.state().copied.last().unwrap(), all);
+        h.get_by_label(tr!("transcript.export_text")).click();
+        h.run();
+        assert_eq!(h.state().exported, [all]);
+        assert_eq!(h.state().history.project(), &original);
+
+        h.get_by_role(egui::accesskit::Role::TextInput).click();
+        h.run();
+        h.event(egui::Event::Text("search words".into()));
+        h.run();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
+        h.run();
+        h.event(egui::Event::Copy);
+        h.run();
+        assert_eq!(h.state().copied.last().unwrap(), "search words");
+        assert_eq!(h.state().panel.selection, Some((t(3.0), t(5.0))));
+        assert_eq!(h.state().history.project(), &original);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     /// Each clip's (timeline start, source in, source out), track by track.
@@ -944,6 +1180,70 @@ mod tests {
 #[cfg(test)]
 mod coverage_tests {
     use super::*;
+
+    #[test]
+    fn partial_cached_words_can_be_copied_and_exported_without_transcribing_gaps() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (history, mut panel) = super::tests::project(dir.path());
+        let path = history.project().assets()[0].path.clone();
+        let transcript = panel.cache.get(&path, 0).unwrap();
+        panel.cache.store = Store::default().shared();
+        let rate = jvid_media::audio::SAMPLE_RATE as i64;
+        panel.cache.insert(
+            &Source {
+                path,
+                nth: 0,
+                range: 10 * rate..14 * rate,
+            },
+            transcript,
+        );
+        let original = history.project().clone();
+        let mut fresh = true;
+        let mut h = Harness::builder().with_size([900.0, 480.0]).build_ui_state(
+            move |ui,
+                  (history, panel, copied, exported): &mut (
+                jvid_core::history::History,
+                TranscriptPanel,
+                Vec<String>,
+                Option<String>,
+            )| {
+                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                let out = panel.show(ui, history.project(), &HashSet::new(), Time(0), true);
+                assert!(out.transcribe.is_none() && out.command.is_none());
+                if out.export.is_some() {
+                    *exported = out.export;
+                }
+                copied.extend(ui.ctx().output(|out| {
+                    out.commands
+                        .iter()
+                        .filter_map(|command| match command {
+                            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                }));
+            },
+            (history, panel, Vec::new(), None),
+        );
+        h.run();
+        assert_eq!(h.get_all_by_label(tr!("transcript.partial")).count(), 1);
+        h.get_by_label(tr!("transcript.copy_all")).click();
+        h.run();
+        assert_eq!(h.state().2, ["zero one two three"]);
+        h.get_by_label(tr!("transcript.export_text")).click();
+        h.run();
+        assert_eq!(h.state().3.as_deref(), Some("zero one two three"));
+        let (history, panel, _, _) = h.state_mut();
+        let missing = panel.missing(history.project(), &HashSet::new());
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].range, 14 * rate..20 * rate);
+        assert_eq!(history.project(), &original);
+    }
 
     #[test]
     fn missing_coverage_never_becomes_a_remove_fillers_pause() {

@@ -3,6 +3,7 @@
 # instructions imperatives with vykání. Terms follow docs/i18n/cs.md.
 
 [action]
+export_subtitles = "Exportovat titulky (.srt)…"
 new_project = "Nový projekt"
 open_project = "Otevřít projekt"
 save = "Uložit"
@@ -974,6 +975,12 @@ screen_callout = "Přetáhněte titulek z karty Text na časovou osu nad klip ja
 
 [transcript]
 partial = "Část zvuku ještě nebyla přepsána. Spusťte přepis pro doplnění mezer."
+copy_all = "Kopírovat vše"
+export_text = "Exportovat přepis…"
+text_filter = "Textové soubory"
+scope = "Rozsah: {scope}"
+txt_required = "Zvolte název souboru končící na .txt."
+protected_destination = "Zvolte jiný soubor; tento cíl je projekt nebo zdrojové médium."
 transcribe = "Přepsat"
 # The search field's placeholder.
 find = "Najít"
@@ -1025,3 +1032,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Všechny viditelné titulkové stopy v aktuální sekvenci, včetně vložených vnořených sekvencí. Zdrojové přepisy jsou vynechány."
+save = "Uložit SRT…"
+empty = "V tomto rozsahu nejsou žádné titulky."
+extension = "Vyberte cíl s příponou .srt."
+project_collision = "Vyberte jiný cíl: tento soubor je projekt."
+saved = "Titulky uloženy do {path}"
+video_help = "Vypálení vykreslí titulky do videa; samostatný soubor SRT se uloží vedle něj. Pouze SRT: Časová osa > Exportovat titulky."

@@ -3,6 +3,7 @@
 # items use the infinitive. Terms follow docs/i18n/uk.md.
 
 [action]
+export_subtitles = "Експорт субтитрів (.srt)…"
 new_project = "Новий проєкт"
 open_project = "Відкрити проєкт"
 save = "Зберегти"
@@ -981,6 +982,12 @@ screen_callout = "Перетягніть титр із вкладки «Текс
 
 [transcript]
 partial = "Частину звуку ще не розпізнано. Запустіть розпізнавання, щоб заповнити прогалини."
+copy_all = "Копіювати все"
+export_text = "Експортувати розшифрування…"
+text_filter = "Текстові файли"
+scope = "Область: {scope}"
+txt_required = "Виберіть ім’я файлу з розширенням .txt."
+protected_destination = "Виберіть інший файл: це призначення є проєктом або вихідним медіафайлом."
 transcribe = "Транскрибувати"
 # The search field's placeholder.
 find = "Знайти"
@@ -1032,3 +1039,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Усі видимі доріжки субтитрів поточної секвенції, включно з розміщеними вкладеними секвенціями. Вихідні розшифровки виключено."
+save = "Зберегти SRT…"
+empty = "У цьому діапазоні немає субтитрів."
+extension = "Виберіть шлях із розширенням .srt."
+project_collision = "Виберіть інший шлях: цей файл є проєктом."
+saved = "Субтитри збережено в {path}"
+video_help = "Впалювання малює субтитри у відео; окремий SRT зберігається поруч. Лише SRT: Часова шкала > Експорт субтитрів."

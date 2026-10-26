@@ -5,6 +5,7 @@
 # every English key.
 
 [action]
+export_subtitles = "导出字幕 (.srt)…"
 new_project = "新建项目"
 open_project = "打开项目"
 save = "保存"
@@ -990,6 +991,12 @@ screen_callout = "把“文本”中的一个标题拖到时间线上片段的�
 
 [transcript]
 partial = "部分音频尚未转录。请转录以填补缺失部分。"
+copy_all = "复制全部"
+export_text = "导出转录文本…"
+text_filter = "文本文件"
+scope = "范围：{scope}"
+txt_required = "请选择以 .txt 结尾的文件名。"
+protected_destination = "请选择其他文件；此目标是项目或源媒体。"
 transcribe = "转写"
 # The search field's placeholder.
 find = "查找"
@@ -1041,3 +1048,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "导出当前序列中所有可见的字幕轨道，包括已放置的嵌套序列。不包含源转录文本。"
+save = "保存 SRT…"
+empty = "此范围内没有字幕。"
+extension = "请选择扩展名为 .srt 的目标文件。"
+project_collision = "请选择其他目标：此文件是项目文件。"
+saved = "字幕已保存到 {path}"
+video_help = "烧录会将字幕绘制到视频中；独立 SRT 会保存在视频旁边。仅导出 SRT：时间线 > 导出字幕。"

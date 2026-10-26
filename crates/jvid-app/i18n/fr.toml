@@ -3,6 +3,7 @@
 # docs/i18n/fr.md. The spaces before : ; ? ! and inside « » are no-break spaces (U+00A0).
 
 [action]
+export_subtitles = "Exporter les sous-titres (.srt)…"
 new_project = "Nouveau projet"
 open_project = "Ouvrir un projet"
 save = "Enregistrer"
@@ -980,6 +981,12 @@ screen_callout = "Faites glisser un titre de Texte sur la timeline au-dessus du 
 
 [transcript]
 partial = "Une partie de l’audio n’a pas été transcrite. Transcrivez pour combler les lacunes."
+copy_all = "Tout copier"
+export_text = "Exporter la transcription…"
+text_filter = "Fichiers texte"
+scope = "Portée : {scope}"
+txt_required = "Choisissez un nom de fichier se terminant par .txt."
+protected_destination = "Choisissez un autre fichier ; cette destination est un projet ou un média source."
 transcribe = "Transcrire"
 # The search field's placeholder.
 find = "Rechercher"
@@ -1031,3 +1038,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Toutes les pistes de sous-titres visibles de la séquence actuelle, y compris les séquences imbriquées placées. Les transcriptions sources sont exclues."
+save = "Enregistrer le SRT…"
+empty = "Aucun sous-titre dans cette plage."
+extension = "Choisissez une destination avec l’extension .srt."
+project_collision = "Choisissez une autre destination : ce fichier est le projet."
+saved = "Sous-titres enregistrés dans {path}"
+video_help = "Incruster dessine les sous-titres dans la vidéo ; le fichier .srt séparé les enregistre à côté. Pour le SRT seul : Montage > Exporter les sous-titres."

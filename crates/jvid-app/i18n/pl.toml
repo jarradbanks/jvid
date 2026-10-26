@@ -3,6 +3,7 @@
 # docs/i18n/pl.md.
 
 [action]
+export_subtitles = "Eksportuj napisy (.srt)…"
 new_project = "Nowy projekt"
 open_project = "Otwórz projekt"
 save = "Zapisz"
@@ -981,6 +982,12 @@ screen_callout = "Przeciągnij tytuł z karty Tekst na oś czasu nad klipem jako
 
 [transcript]
 partial = "Część dźwięku nie została przetranskrybowana. Wykonaj transkrypcję, aby uzupełnić luki."
+copy_all = "Kopiuj wszystko"
+export_text = "Eksportuj transkrypcję…"
+text_filter = "Pliki tekstowe"
+scope = "Zakres: {scope}"
+txt_required = "Wybierz nazwę pliku z rozszerzeniem .txt."
+protected_destination = "Wybierz inny plik; to miejsce docelowe jest projektem lub materiałem źródłowym."
 transcribe = "Transkrybuj"
 # The search field's placeholder.
 find = "Znajdź"
@@ -1032,3 +1039,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Wszystkie widoczne ścieżki napisów w bieżącej sekwencji, w tym umieszczone sekwencje zagnieżdżone. Transkrypcje źródłowe są pomijane."
+save = "Zapisz SRT…"
+empty = "Brak napisów w tym zakresie."
+extension = "Wybierz miejsce docelowe z rozszerzeniem .srt."
+project_collision = "Wybierz inne miejsce docelowe: ten plik jest projektem."
+saved = "Napisy zapisano w {path}"
+video_help = "Wypalanie rysuje napisy w filmie; osobny plik SRT jest zapisywany obok. Sam SRT: Oś czasu > Eksportuj napisy."

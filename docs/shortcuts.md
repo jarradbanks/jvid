@@ -16,6 +16,7 @@ Work in any panel except while typing in a text field.
 | Save As | `Ctrl+Shift+S` |
 | Import | `Ctrl+I` |
 | Import Subtitles | `Ctrl+Shift+I` |
+| Export Subtitles (.srt)… | — |
 | Export Media | `Ctrl+M` |
 | Quit | `Ctrl+Q` |
 | Play/Stop | `Space` |

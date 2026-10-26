@@ -3,6 +3,7 @@
 # use the imperative (Gem). Terms follow docs/i18n/da.md.
 
 [action]
+export_subtitles = "Eksportér undertekster (.srt)…"
 new_project = "Nyt projekt"
 open_project = "Åbn projekt"
 save = "Gem"
@@ -957,6 +958,12 @@ screen_callout = "Træk en titel fra Tekst op på tidslinjen over klippet som en
 
 [transcript]
 partial = "Noget lyd er ikke transskriberet. Transskriber for at udfylde hullerne."
+copy_all = "Kopiér alt"
+export_text = "Eksportér transskription…"
+text_filter = "Tekstfiler"
+scope = "Omfang: {scope}"
+txt_required = "Vælg et filnavn, der slutter med .txt."
+protected_destination = "Vælg en anden fil; denne destination er et projekt eller et kildemedie."
 transcribe = "Transskriber"
 # The search field's placeholder.
 find = "Find"
@@ -1008,3 +1015,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Alle synlige undertekstspor i den aktuelle sekvens, inklusive placerede indlejrede sekvenser. Kildetransskriptioner udelades."
+save = "Gem SRT…"
+empty = "Ingen undertekster i dette interval."
+extension = "Vælg en destination med filtypen .srt."
+project_collision = "Vælg en anden destination: denne fil er projektet."
+saved = "Undertekster gemt i {path}"
+video_help = "Indbrænding tegner undertekster i videoen; en separat SRT-fil gemmes ved siden af. Kun SRT: Tidslinje > Eksportér undertekster."

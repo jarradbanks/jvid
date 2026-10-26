@@ -3,6 +3,7 @@
 # Terms follow docs/i18n/pt-BR.md.
 
 [action]
+export_subtitles = "Exportar legendas (.srt)…"
 new_project = "Novo projeto"
 open_project = "Abrir projeto"
 save = "Salvar"
@@ -973,6 +974,12 @@ screen_callout = "Arraste um título de Texto para a linha do tempo acima do cli
 
 [transcript]
 partial = "Parte do áudio não foi transcrita. Transcreva para preencher as lacunas."
+copy_all = "Copiar tudo"
+export_text = "Exportar transcrição…"
+text_filter = "Arquivos de texto"
+scope = "Escopo: {scope}"
+txt_required = "Escolha um nome de arquivo terminado em .txt."
+protected_destination = "Escolha outro arquivo; este destino é um projeto ou uma mídia de origem."
 transcribe = "Transcrever"
 # The search field's placeholder.
 find = "Localizar"
@@ -1024,3 +1031,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Todas as faixas de legendas visíveis na sequência atual, incluindo sequências aninhadas posicionadas. As transcrições de origem são excluídas."
+save = "Salvar SRT…"
+empty = "Nenhuma legenda neste intervalo."
+extension = "Escolha um destino com a extensão .srt."
+project_collision = "Escolha outro destino: este arquivo é o projeto."
+saved = "Legendas salvas em {path}"
+video_help = "Gravar no vídeo desenha as legendas no vídeo; o arquivo .srt separado é salvo ao lado. Para salvar só o SRT: Linha do tempo > Exportar legendas."

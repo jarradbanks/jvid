@@ -2,6 +2,7 @@
 # Spanish labels use sentence case (Guardar como), not English Title Case.
 
 [action]
+export_subtitles = "Exportar subtítulos (.srt)…"
 new_project = "Nuevo proyecto"
 open_project = "Abrir proyecto"
 save = "Guardar"
@@ -971,6 +972,12 @@ screen_callout = "Arrastra un título de Texto a la línea de tiempo, encima del
 
 [transcript]
 partial = "Parte del audio no se ha transcrito. Transcribe para completar los huecos."
+copy_all = "Copiar todo"
+export_text = "Exportar transcripción…"
+text_filter = "Archivos de texto"
+scope = "Ámbito: {scope}"
+txt_required = "Elige un nombre de archivo que termine en .txt."
+protected_destination = "Elige otro archivo; este destino es un proyecto o un medio de origen."
 transcribe = "Transcribir"
 # The search field's placeholder.
 find = "Buscar"
@@ -1022,3 +1029,13 @@ worker_failed = "El proceso de actualización se detuvo inesperadamente. Vuelve 
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Todas las pistas de subtítulos visibles de la secuencia actual, incluidas las secuencias anidadas colocadas. Se excluyen las transcripciones de origen."
+save = "Guardar SRT…"
+empty = "No hay subtítulos en este intervalo."
+extension = "Elige un destino con la extensión .srt."
+project_collision = "Elige otro destino: este archivo es el proyecto."
+saved = "Subtítulos guardados en {path}"
+video_help = "Incrustar dibuja los subtítulos en el vídeo; Archivo .srt aparte los guarda junto a él. Para guardar solo el SRT: Línea de tiempo > Exportar subtítulos."

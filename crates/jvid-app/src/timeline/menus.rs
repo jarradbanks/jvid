@@ -25,6 +25,7 @@ pub const FILE: &[&str] = &[
     "",
     "import",
     "import_subtitles",
+    "export_subtitles",
     "export",
     "",
     "quit",
@@ -165,7 +166,12 @@ impl Timeline {
         project: &Project,
         clip: ClipId,
     ) -> Option<jvid_core::history::Command> {
-        let c = seq.clip(clip).expect("clicked clip").1;
+        let (track, c) = seq.clip(clip).expect("clicked clip");
+        if seq.track(track).is_some_and(|t| t.subtitles)
+            && ui.button(tr!("action.export_subtitles")).clicked()
+        {
+            self.export_subtitles = true;
+        }
         self.items(ui, seq, keymap, CLIP);
         ui.separator();
         let edit = crate::framing::menu(ui, project, Some(clip), self.playhead());

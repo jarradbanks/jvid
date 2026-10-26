@@ -3,6 +3,7 @@
 # items use the imperative (Lagre). Terms follow docs/i18n/nb.md.
 
 [action]
+export_subtitles = "Eksporter undertekster (.srt)…"
 new_project = "Nytt prosjekt"
 open_project = "Åpne prosjekt"
 save = "Lagre"
@@ -957,6 +958,12 @@ screen_callout = "Dra en tittel fra Tekst til tidslinjen over klippet som en for
 
 [transcript]
 partial = "Noe lyd er ikke transkribert. Transkriber for å fylle hullene."
+copy_all = "Kopier alt"
+export_text = "Eksporter transkripsjon…"
+text_filter = "Tekstfiler"
+scope = "Omfang: {scope}"
+txt_required = "Velg et filnavn som slutter med .txt."
+protected_destination = "Velg en annen fil; målet er et prosjekt eller et kildemedium."
 transcribe = "Transkriber"
 # The search field's placeholder.
 find = "Finn"
@@ -1008,3 +1015,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Alle synlige undertekstspor i gjeldende sekvens, inkludert plasserte nestede sekvenser. Kildetranskripsjoner utelates."
+save = "Lagre SRT…"
+empty = "Ingen undertekster i dette området."
+extension = "Velg et mål med filtypen .srt."
+project_collision = "Velg et annet mål: denne filen er prosjektet."
+saved = "Undertekster lagret i {path}"
+video_help = "Innbrenning tegner undertekster i videoen; en separat SRT-fil lagres ved siden av. Bare SRT: Tidslinje > Eksporter undertekster."

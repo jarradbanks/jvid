@@ -1023,6 +1023,7 @@ fn blocking(path: &Path, nth: usize) -> ClipAudio {
 pub mod dialog;
 pub mod lossless;
 pub mod queue;
+pub(crate) mod subtitles;
 
 pub use lossless::Lossless;
 

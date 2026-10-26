@@ -5,6 +5,7 @@
 # {placeholder}: vowel harmony can't follow it. Terms follow docs/i18n/tr.md.
 
 [action]
+export_subtitles = "Altyazıları dışa aktar (.srt)…"
 new_project = "Yeni Proje"
 open_project = "Proje Aç"
 save = "Kaydet"
@@ -960,6 +961,12 @@ screen_callout = "Metin'den bir başlığı açıklama olarak klibin üstüne, Z
 
 [transcript]
 partial = "Sesin bir kısmı henüz yazıya dökülmedi. Boşlukları doldurmak için yazıya dökün."
+copy_all = "Tümünü Kopyala"
+export_text = "Dökümü Dışa Aktar…"
+text_filter = "Metin dosyaları"
+scope = "Kapsam: {scope}"
+txt_required = ".txt ile biten bir dosya adı seçin."
+protected_destination = "Başka bir dosya seçin; bu hedef bir proje veya kaynak medyadır."
 transcribe = "Yazıya Dök"
 # The search field's placeholder.
 find = "Bul"
@@ -1011,3 +1018,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Yerleştirilmiş iç içe sekanslar dahil, geçerli sekanstaki tüm görünür altyazı kanalları. Kaynak dökümler hariç tutulur."
+save = "SRT kaydet…"
+empty = "Bu aralıkta altyazı yok."
+extension = ".srt uzantılı bir hedef seçin."
+project_collision = "Başka bir hedef seçin: bu dosya projedir."
+saved = "Altyazılar {path} konumuna kaydedildi"
+video_help = "Videoya gömme altyazıları videoya çizer; ayrı SRT dosyası yanına kaydedilir. Yalnızca SRT için: Zaman çizelgesi > Altyazıları dışa aktar."

@@ -3,6 +3,7 @@
 # imperatives (Desa, Obre) and messages address the user as vós (Seleccioneu). See docs/i18n/ca.md.
 
 [action]
+export_subtitles = "Exporta els subtítols (.srt)…"
 new_project = "Projecte nou"
 open_project = "Obre un projecte"
 save = "Desa"
@@ -969,6 +970,12 @@ screen_callout = "Arrossegueu un títol de Text a la línia de temps sobre el cl
 
 [transcript]
 partial = "Una part de l’àudio no s’ha transcrit. Transcriu per omplir els buits."
+copy_all = "Copia-ho tot"
+export_text = "Exporta la transcripció…"
+text_filter = "Fitxers de text"
+scope = "Abast: {scope}"
+txt_required = "Tria un nom de fitxer acabat en .txt."
+protected_destination = "Tria un altre fitxer; aquesta destinació és un projecte o un mitjà d’origen."
 transcribe = "Transcriu"
 # The search field's placeholder.
 find = "Cerca"
@@ -1020,3 +1027,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Totes les pistes de subtítols visibles de la seqüència actual, incloses les seqüències imbricades col·locades. Les transcripcions d’origen queden excloses."
+save = "Desa l’SRT…"
+empty = "No hi ha subtítols en aquest interval."
+extension = "Tria una destinació amb l’extensió .srt."
+project_collision = "Tria una altra destinació: aquest fitxer és el projecte."
+saved = "Subtítols desats a {path}"
+video_help = "Incrustar dibuixa els subtítols al vídeo; el fitxer SRT separat es desa al costat. Només SRT: Línia de temps > Exporta els subtítols."
