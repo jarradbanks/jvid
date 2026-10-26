@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import zlib
 
 from build import ROOT, TARGETS, version
 from assert_assets import expected_assets
@@ -243,6 +244,8 @@ def verify_archive(path, data):
                     raise RuntimeError("unexpected data after source archive")
         while reader.read(CHUNK):
             pass
+    except (tarfile.TarError, gzip.BadGzipFile, EOFError, zlib.error, ValueError) as error:
+        raise RuntimeError("invalid source archive or embedded manifest") from error
     finally:
         reader.close()
     if "SOURCE-MANIFEST.json" not in seen or observed != data["files"]:
@@ -308,6 +311,8 @@ class PartWriter:
 def bundle(root, output, target, providers, assets, revision, limit=PART_LIMIT):
     if target not in BUNDLES or not providers:
         raise RuntimeError("missing source bundle providers or unknown target")
+    if output.resolve().is_relative_to(root.resolve()):
+        raise RuntimeError("source bundle output must be outside the source tree")
     if (root / "SOURCE-MANIFEST.json").exists() or (root / "SOURCE-MANIFEST.json").is_symlink():
         raise RuntimeError("reserved source manifest already exists")
     configuration = build_configuration(target)
@@ -336,6 +341,7 @@ def bundle(root, output, target, providers, assets, revision, limit=PART_LIMIT):
                     # Materialize hardlinked files so inventory entries always bind bytes.
                     if info.islnk():
                         info.type, info.linkname = tarfile.REGTYPE, ""
+                        info.size = path.stat().st_size
                     if info.isfile():
                         with path.open("rb") as stream:
                             archive.addfile(info, stream)
@@ -476,23 +482,28 @@ def collect_release(source_artifacts, native, destination, verify_only=False):
                 raise RuntimeError(f"staged source asset mismatch: {name}")
         return
     destination.mkdir(parents=True, exist_ok=True)
-    for name, path in sorted(to_copy.items()):
-        if (destination / name).exists():
+    index_name = f"jvid-{version()}-source-manifest.json"
+    for name in {*to_copy, "reassemble_sources.py", index_name, "SOURCE-README.txt"}:
+        if (destination / name).exists() or (destination / name).is_symlink():
             raise RuntimeError(f"source asset already exists: {name}")
-        shutil.copy2(path, destination / name)
-    shutil.copy2(ROOT / "scripts/packaging/reassemble_sources.py", destination / "reassemble_sources.py")
-    (destination / f"jvid-{version()}-source-manifest.json").write_text(
-        json.dumps(index, indent=2) + "\n", encoding="utf-8")
-    (destination / "SOURCE-README.txt").write_text(
-        "The source-manifest records the exact release commit, binary checksums and four\n"
-        "source bundles. Keep each bundle's .json and all .tar.gz.partNNN files together.\n"
-        "Verify SHA256SUMS.txt, then join any bundle using Python 3:\n"
-        "  python reassemble_sources.py jvid-VERSION-sources-BUNDLE.json sources.tar.gz\n"
-        "This checks every part and the full archive checksum without overwriting files.\n"
-        "Extract the resulting sources.tar.gz with your archive utility. The Rust bundle\n"
-        "contains workspace/, Cargo vendor configuration and build/release documentation.\n"
-        "Native bundles contain provider sources, patches, recipes and provenance.\n",
-        encoding="utf-8")
+    to_copy["reassemble_sources.py"] = ROOT / "scripts/packaging/reassemble_sources.py"
+    for name, path in sorted(to_copy.items()):
+        with path.open("rb") as source, (destination / name).open("xb") as output:
+            shutil.copyfileobj(source, output, length=CHUNK)
+    with (destination / index_name).open("x", encoding="utf-8") as stream:
+        stream.write(json.dumps(index, indent=2) + "\n")
+    with (destination / "SOURCE-README.txt").open("x", encoding="utf-8") as stream:
+        stream.write(
+            "The source-manifest records the exact release commit, binary checksums and four\n"
+            "source bundles. Keep each bundle's .json and all .tar.gz.partNNN files together.\n"
+            "Verify SHA256SUMS.txt, then join any bundle using Python 3:\n"
+            "  python reassemble_sources.py jvid-VERSION-sources-BUNDLE.json sources.tar.gz\n"
+            "This checks every part and the full archive checksum without overwriting files.\n"
+            "Extract the resulting sources.tar.gz with your archive utility. The Rust bundle\n"
+            "contains workspace/, Cargo vendor configuration and build/release documentation.\n"
+            "BUILD-CONFIG.json retains public compile-time configuration, including the updater\n"
+            "public key and CPU/CRT flags; private keys and tokens are not part of that file.\n"
+            "Native bundles contain provider sources, patches, recipes and provenance.\n")
 
 
 def main():

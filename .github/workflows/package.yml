@@ -96,6 +96,16 @@ jobs:
             libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev \
             libasound2-dev libx11-6 libxcursor1 libxi6 libxrandr2 libxkbcommon0 libxkbcommon-x11-0 \
             libwayland-client0 libwayland-cursor0 libwayland-egl1 libfontconfig1 libfreetype6 libdbus-1-3
+          # Hosted images can retain superseded libraries whose source indexes have
+          # expired. Align those exact binary packages before compiling/staging.
+          # setup-python adds its own libpython search path. Inspect the system
+          # runtime using the runner's system Python without that unrelated override.
+          env -u LD_LIBRARY_PATH /usr/bin/python3 scripts/packaging/prepare_linux_runtime.py --output "$RUNNER_TEMP/jvid-native-upgrades.txt"
+          mapfile -t upgrade_packages < "$RUNNER_TEMP/jvid-native-upgrades.txt"
+          if ((${#upgrade_packages[@]})); then
+            sudo apt-get "${apt_options[@]}" install -y --only-upgrade "${upgrade_packages[@]}"
+          fi
+          env -u LD_LIBRARY_PATH /usr/bin/python3 scripts/packaging/prepare_linux_runtime.py --check
       - name: macOS build dependencies
         if: runner.os == 'macOS'
         shell: bash
@@ -248,6 +258,7 @@ jobs:
           python scripts/packaging/collect.py packages release-assets
           python scripts/packaging/assert_assets.py release-assets
           python scripts/packaging/sources.py release --sources sources --native release-assets --output release-assets
+          python scripts/packaging/sources.py release --sources release-assets --native release-assets --output release-assets --verify-only
           python scripts/packaging/checksums.py release-assets
       - uses: actions/upload-artifact@v4
         with:

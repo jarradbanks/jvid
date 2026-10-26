@@ -81,8 +81,8 @@ does not need a separately hosted source archive or external source URL/checksum
 
    Package captures the exact jvid checkout, vendored Rust/native crate sources and
    native provider sources, patches and build recipes. The source contract binds these
-   to the same commit and final native package bytes before signing. `GITHUB_TOKEN` is supplied by Actions; no
-   personal access token is required by this workflow. Missing or mismatched updater keys
+   to the same commit, public verification key and final native package bytes before
+   signing. Actions supplies `GITHUB_TOKEN`; no personal access token is required. Missing or mismatched updater keys
    prevent release metadata generation. Ordinary builds/tests need no production seed;
    an editor built without a public key runs with update checking/installation disabled.
 3. **Complete the platform signing and clean-machine gates.** Current CI produces

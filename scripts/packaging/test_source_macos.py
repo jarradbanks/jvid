@@ -18,6 +18,7 @@ import source_macos as sources
 ARCHIVE = b"fixture exact source archive\n"
 RESOURCE = b"fixture source resource\n"
 TAP_REVISION = "a" * 40
+RUBY = shutil.which("ruby")
 
 
 class Response(io.BytesIO):
@@ -226,13 +227,68 @@ class MacSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(sources.SourceError, "patch source payload missing"):
             sources._validate_plan(self.provider(), self.plan)
 
+    def run_loader_fixture(self, signature, body, formula_body=""):
+        # Replace only the Homebrew entry point, then run the production helper.
+        # Exiting in the loader isolates argument compatibility from the DSL.
+        library = self.root / "ruby-library"
+        library.mkdir(exist_ok=True)
+        (library / "formula.rb").write_text("class Formula\n" + formula_body + "\nend\n")
+        (library / "formulary.rb").write_text('require "pathname"\n'
+            'class Tap\n  def self.fetch(name); name; end\nend\n'
+            'module Formulary\n  def self.from_contents(' + signature + ')\n' + body + '\n  end\nend\n')
+        request = {"name": "fixture", "recipe": str(self.recipe.resolve()),
+                   "version": "1.2.3_2", "receipt": self.receipt}
+        return subprocess.run([RUBY, "-I", str(library), str(sources.HELPER)],
+                              input=json.dumps(request), capture_output=True, text=True, timeout=30)
+
+    @unittest.skipUnless(RUBY, "Ruby is required for Homebrew loader API fixtures")
+    def test_homebrew_loader_keyword_capabilities_preserve_exact_inputs(self):
+        signature = "name, path, contents, spec = :stable, tap: nil, flags: []"
+        for keyword in ("", ", from_metadata: false", ", from_metadata:"):
+            with self.subTest(keyword=keyword):
+                result = self.run_loader_fixture(signature + keyword,
+                    '$stdout.write(JSON.generate({"name" => name, "path" => path.to_s,\n'
+                    '  "contents" => contents, "spec" => spec, "tap" => tap, "flags" => flags,\n'
+                    '  "from_metadata" => (defined?(from_metadata) ? from_metadata : nil)}))\nexit')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), {
+                    "name": "fixture", "path": str(self.recipe.resolve()), "contents": self.recipe.read_text(),
+                    "spec": "stable", "tap": "homebrew/core", "flags": self.receipt["used_options"],
+                    "from_metadata": True if keyword else None})
+
+    @unittest.skipUnless(RUBY, "Ruby is required for Homebrew loader API fixtures")
+    def test_homebrew_loader_recipe_argument_error_is_not_retried(self):
+        result = self.run_loader_fixture(
+            "name, path, contents, spec = :stable, tap: nil, flags: [], from_metadata: false",
+            '$stdout.write("called\\n")\nraise ArgumentError, "retained recipe failed"')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("retained recipe failed", result.stderr)
+        self.assertEqual(result.stdout, "called\n")
+
+    @unittest.skipUnless(RUBY, "Ruby is required for Homebrew loader API fixtures")
+    def test_older_homebrew_retains_legacy_autobump_annotation_as_string(self):
+        for reason in (":requires_manual_review", ":versioned_formula", '"custom reason"'):
+            with self.subTest(reason=reason):
+                result = self.run_loader_fixture(
+                    "name, path, contents, spec = :stable, tap: nil, flags: []",
+                    'Formula.no_autobump!(because: ' + reason + ')\nexit',
+                    'def self.no_autobump!(because:)\n'
+                    '  raise "obsolete symbol" if because == :requires_manual_review\n'
+                    '  $stdout.write(JSON.generate([because, because.class.name]))\nend')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = {":requires_manual_review": ["requires_manual_review", "String"],
+                            ":versioned_formula": ["versioned_formula", "Symbol"],
+                            '"custom reason"': ["custom reason", "String"]}
+                self.assertEqual(json.loads(result.stdout), expected[reason])
+
     @unittest.skipUnless(sys.platform == "darwin" and shutil.which("brew"), "native macOS Homebrew is required")
     def test_native_homebrew_resolves_test_resource_and_inline_patch(self):
         # Exercise the real Homebrew API while proving that test/install bodies
         # are not executed, and that current formula lookup is unnecessary.
         self.recipe.write_text('class Fixture < Formula\n  desc "Fixture"\n  homepage "https://example.invalid"\n'
             '  url "https://sources.invalid/fixture-1.2.3.tar.gz"\n  sha256 "' + hashlib.sha256(ARCHIVE).hexdigest() + '"\n'
-            '  revision 2\n  patch :DATA\n  def install\n    raise "must not run install"\n  end\n'
+            '  revision 2\n  no_autobump! because: :requires_manual_review\n'
+            '  patch :DATA\n  def install\n    raise "must not run install"\n  end\n'
             '  test do\n    raise "must not run test"\n    resource "support" do\n'
             '      url "https://sources.invalid/support.tar.xz"\n      sha256 "' + hashlib.sha256(RESOURCE).hexdigest() + '"\n'
             '    end\n  end\nend\n__END__\ndiff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n')
@@ -241,6 +297,28 @@ class MacSourceTests(unittest.TestCase):
         plan = sources._formula_plan(self.provider())
         self.assertEqual(plan["resource_declarations"], ["support"])
         self.assertEqual([item["kind"] for item in plan["payloads"]], ["archive", "inline", "archive"])
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("brew"), "native macOS Homebrew is required")
+    def test_native_homebrew_resolves_external_local_and_resource_patches(self):
+        digest = hashlib.sha256(RESOURCE).hexdigest()
+        self.recipe.write_text('class Fixture < Formula\n  desc "Fixture"\n  homepage "https://example.invalid"\n'
+            '  url "https://sources.invalid/fixture-1.2.3.tar.gz"\n  sha256 "' + hashlib.sha256(ARCHIVE).hexdigest() + '"\n'
+            '  revision 2\n  patch do\n    url "https://sources.invalid/fixes.tar.gz"\n'
+            '    sha256 "' + digest + '"\n    apply "fix.patch"\n  end\n'
+            '  patch do\n    file "Patches/fixture/local.diff"\n  end\n'
+            '  resource "support" do\n    url "https://sources.invalid/support.tar.xz"\n'
+            '    sha256 "' + digest + '"\n    patch do\n      url "https://sources.invalid/support.patch"\n'
+            '      sha256 "' + digest + '"\n    end\n  end\nend\n')
+        self.receipt["used_options"] = []
+        self.write_receipt()
+        plan = sources._formula_plan(self.provider())
+        self.assertEqual([item["kind"] for item in plan["payloads"]],
+                         ["archive", "archive", "tap-file", "archive", "archive"])
+        self.assertEqual([item["role"] for item in plan["payloads"]],
+                         ["source", "patch", "patch", "resource", "patch"])
+        self.assertEqual(plan["payloads"][1]["apply"], ["fix.patch"])
+        self.assertEqual(plan["payloads"][2]["path"], "Patches/fixture/local.diff")
+        self.assertEqual(plan["payloads"][4]["sha256"], digest)
 
 
 class GitSnapshotTests(unittest.TestCase):

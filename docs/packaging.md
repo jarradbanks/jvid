@@ -225,7 +225,8 @@ changed parts and altered native package bytes fail before release signing.
 Each bundle has `jvid-VERSION-sources-BUNDLE.json` plus ordered
 `.tar.gz.partNNN` files, each at most 1 GiB, so large upstream source caches fit
 GitHub's per-asset limit. `jvid-VERSION-source-manifest.json` records the complete
-source/native relationship. `SOURCE-README.txt` and the standalone standard-library
+source/native relationship. Each bundle records its public updater verification key
+and compile flags in `BUILD-CONFIG.json`. `SOURCE-README.txt` and the standalone standard-library
 `reassemble_sources.py` explain reconstruction. For example, with the Rust bundle
 manifest and all its parts in one folder:
 

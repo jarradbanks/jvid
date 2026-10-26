@@ -30,9 +30,25 @@ raise "Expected a retained formula file" unless recipe.file? && recipe.basename.
 source = recipe.read
 # from_contents is the same loader Homebrew exposes for retained metadata, and
 # accepts a staged recipe outside the live Cellar/tap without name resolution.
-formula = Formulary.from_contents(request.fetch("name"), recipe, source, :stable,
-                                 tap: Tap.fetch(receipt.fetch("source").fetch("tap")),
-                                 flags: receipt.fetch("used_options"), from_metadata: true)
+loader = Formulary.method(:from_contents)
+options = { tap: Tap.fetch(receipt.fetch("source").fetch("tap")), flags: receipt.fetch("used_options") }
+# Older runner Homebrew lacks this keyword. Inspect the API before calling it:
+# rescuing ArgumentError could hide a recipe error and evaluate it a second time.
+if loader.parameters.any? { |kind, name| %i[key keyreq].include?(kind) && name == :from_metadata }
+  options[:from_metadata] = true
+else
+  require "formula"
+  # Older Homebrew disables this historical update-automation annotation even
+  # in retained recipes. Its supported string reason keeps autobump disabled;
+  # leave every source/build DSL call and every other annotation untouched.
+  module RetainedFormulaAutobumpReason
+    def no_autobump!(because:)
+      super(because: because == :requires_manual_review ? because.to_s : because)
+    end
+  end
+  Formula.singleton_class.prepend(RetainedFormulaAutobumpReason)
+end
+formula = loader.call(request.fetch("name"), recipe, source, :stable, **options)
 raise "Homebrew substituted another recipe" unless formula.path.realpath == recipe.realpath
 raise "Formula version differs from installed receipt" unless formula.pkg_version.to_s == request.fetch("version")
 raise "Formula name differs from provider" unless formula.name == request.fetch("name")
