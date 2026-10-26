@@ -5,6 +5,7 @@
 # every English key.
 
 [action]
+export_subtitles = "자막 내보내기 (.srt)…"
 new_project = "새 프로젝트"
 open_project = "프로젝트 열기"
 save = "저장"
@@ -1003,3 +1004,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "배치된 중첩 시퀀스를 포함하여 현재 시퀀스의 표시된 모든 자막 트랙을 내보냅니다. 소스 받아쓰기 텍스트는 제외됩니다."
+save = "SRT 저장…"
+empty = "이 범위에 자막이 없습니다."
+extension = ".srt 확장자를 사용하는 저장 위치를 선택하세요."
+project_collision = "다른 저장 위치를 선택하세요. 이 파일은 프로젝트입니다."
+saved = "자막을 {path}에 저장했습니다"
+video_help = "번인은 자막을 영상에 그리며 별도 SRT는 영상 옆에 저장합니다. SRT만 저장하려면: 타임라인 > 자막 내보내기."

@@ -3,6 +3,7 @@
 # imperatives, as on Windows and macOS. Terms follow docs/i18n/it.md.
 
 [action]
+export_subtitles = "Esporta sottotitoli (.srt)…"
 new_project = "Nuovo progetto"
 open_project = "Apri progetto"
 save = "Salva"
@@ -1013,3 +1014,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Tutte le tracce di sottotitoli visibili nella sequenza attuale, comprese le sequenze nidificate posizionate. Le trascrizioni sorgente sono escluse."
+save = "Salva SRT…"
+empty = "Nessun sottotitolo in questo intervallo."
+extension = "Scegli una destinazione con estensione .srt."
+project_collision = "Scegli un’altra destinazione: questo file è il progetto."
+saved = "Sottotitoli salvati in {path}"
+video_help = "Incorpora disegna i sottotitoli nel video; il file .srt separato viene salvato accanto. Per il solo SRT: Timeline > Esporta sottotitoli."

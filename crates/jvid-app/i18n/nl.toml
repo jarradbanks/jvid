@@ -3,6 +3,7 @@
 # infinitive, as in Dutch Windows. Terms follow docs/i18n/nl.md.
 
 [action]
+export_subtitles = "Ondertitels exporteren (.srt)…"
 new_project = "Nieuw project"
 open_project = "Project openen"
 save = "Opslaan"
@@ -1016,3 +1017,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Alle zichtbare ondertitelsporen in de huidige sequentie, inclusief geplaatste geneste sequenties. Brontranscripties worden uitgesloten."
+save = "SRT opslaan…"
+empty = "Geen ondertitels in dit bereik."
+extension = "Kies een bestemming met de extensie .srt."
+project_collision = "Kies een andere bestemming: dit bestand is het project."
+saved = "Ondertitels opgeslagen in {path}"
+video_help = "Inbranden tekent ondertitels in de video; een apart SRT-bestand wordt ernaast opgeslagen. Alleen SRT: Tijdlijn > Ondertitels exporteren."

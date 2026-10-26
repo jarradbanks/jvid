@@ -174,6 +174,7 @@ pub struct App {
     keymap_editor: crate::keymap_editor::KeymapEditor,
     exports: jvid_jobs::Pool,
     export_dialog: crate::export::dialog::ExportDialog,
+    subtitle_export: crate::export::subtitles::SubtitleExport,
     autosave: crate::autosave::Autosave,
     queue: crate::export::queue::Queue,
     subtitles: crate::subtitles::Subtitles,
@@ -318,6 +319,7 @@ impl App {
             keymap_editor: Default::default(),
             exports,
             export_dialog: Default::default(),
+            subtitle_export: Default::default(),
             autosave: Default::default(),
             queue: Default::default(),
             subtitles: Default::default(),
@@ -343,6 +345,7 @@ impl App {
         self.subtitles.close();
         self.settings_dialog = Default::default();
         self.export_dialog = Default::default();
+        self.subtitle_export = Default::default();
         self.autosave.reset_session();
         self.preview_active = 1;
         self.prompts.clear();
@@ -606,14 +609,18 @@ impl App {
     /// The Timeline menu, its left edge at `left`. Returns its right edge.
     fn timeline_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
         let button = menu_button(ui, tr!("menu.timeline"), left);
-        let (mut picked, mut transcript) = (false, false);
+        let (mut picked, mut transcript, mut export) = (false, false, false);
         egui::Popup::menu(&button).show(|ui| {
             let can = self.can_generate_subtitles();
             picked = menus::item(ui, &self.keymap, "generate_subtitles", None, can);
+            export = menus::item(ui, &self.keymap, "export_subtitles", None, true);
             transcript = ui.button(tr!("menu.transcript")).clicked();
         });
         if picked {
             self.run_action("generate_subtitles", true);
+        }
+        if export {
+            self.run_action("export_subtitles", true);
         }
         if transcript {
             self.show_panel(Tab::Transcript);
@@ -919,6 +926,7 @@ impl App {
     fn modal_owns_input(&self, ctx: &egui::Context) -> bool {
         self.settings_dialog.draft.is_some()
             || self.export_dialog.is_open()
+            || self.subtitle_export.is_open()
             || self.preferences.is_open()
             || self.components.open
             || self.updates.open
@@ -953,6 +961,10 @@ impl App {
             "save_as" => return self.file_action(FileAction::SaveAs),
             "import" => return self.import_dialog(),
             "import_subtitles" => return self.import_subtitles(),
+            "export_subtitles" => {
+                self.subtitle_export.open(&self.name());
+                return;
+            }
             "generate_subtitles" => {
                 if self.can_generate_subtitles() {
                     self.subtitles.open();
@@ -1657,6 +1669,9 @@ impl eframe::App for App {
             if import {
                 self.import_dialog();
             }
+            if std::mem::take(&mut self.timeline.export_subtitles) {
+                self.run_action("export_subtitles", true);
+            }
             if let Some(id) = relink {
                 self.relink_dialog(id);
             }
@@ -1666,6 +1681,15 @@ impl eframe::App for App {
                 tracing::warn!("keymap: can't save: {e}");
             }
             let selected = self.timeline.selected();
+            if let Some(path) =
+                self.subtitle_export
+                    .show(ui, self.history.project(), self.path.as_deref())
+            {
+                self.toasts.push((
+                    tr!("subtitle_export.saved", path = path.display()),
+                    now + TOAST_SECS,
+                ));
+            }
             if let Some((reqs, _)) = self
                 .export_dialog
                 .show(ui, self.history.project(), selected)

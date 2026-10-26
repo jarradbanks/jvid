@@ -3,6 +3,7 @@
 # items use the infinitive. Terms follow docs/i18n/ru.md.
 
 [action]
+export_subtitles = "Экспорт субтитров (.srt)…"
 new_project = "Новый проект"
 open_project = "Открыть проект"
 save = "Сохранить"
@@ -1025,3 +1026,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Все видимые дорожки субтитров текущей секвенции, включая размещённые вложенные секвенции. Исходные расшифровки исключены."
+save = "Сохранить SRT…"
+empty = "В этом диапазоне нет субтитров."
+extension = "Выберите путь с расширением .srt."
+project_collision = "Выберите другой путь: этот файл является проектом."
+saved = "Субтитры сохранены в {path}"
+video_help = "Вжигание рисует субтитры в видео; отдельный SRT сохраняется рядом. Только SRT: Таймлайн > Экспорт субтитров."
