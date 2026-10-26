@@ -257,13 +257,22 @@ it does not claim the new app ran. Automatic restart itself does not prove an up
 the installed version shown on the next launch.
 
 `update-result.txt` beside settings and `update-result.installer.log` record the outcome and
-Inno log. The update window shows the previous result. If installation was interrupted or
-the helper cannot restart, launch the existing installed executable; if necessary rerun the
+Inno log. On Windows these are under `%APPDATA%\jvid\config`; the Inno log exists
+only after the installer starts. The helper accepts an editor process that has already
+exited, waits up to 120 seconds if it is still closing, and records PowerShell's diagnostic
+if a genuine lookup/wait failure defers installation. The update window shows the previous
+result. If installation was interrupted or the helper cannot restart, launch the existing installed executable; if necessary rerun the
 verified installer retained in its `jvid-update-*` system temp directory. Before execution
 the helper can revalidate the signed stage by being invoked with that directory. Never
 substitute an unverified downloaded executable as recovery. The OS may later clean temp
 files; a fresh in-app download is then required. Reinstalling program files must preserve
 the user data directories. No automatic retry runs on startup.
+
+The helpers shipped before 0.2.1 could falsely report “Editor did not exit” when the
+editor had already exited before PowerShell started. Install the 0.2.1 (or newer) Windows
+installer manually once to replace that helper. Retrying from an older installed editor
+still runs its old helper, even when the downloaded installer contains the fix. Keep the
+same installation directory; the installer preserves user data as described above.
 
 ## Validation status
 
@@ -281,7 +290,9 @@ and simulated installer/restart errors. Generator tests exercise disposable loca
 and prove that absent signing/public configuration emits no metadata. These tests never
 publish a release or use a production private key.
 
-Native Windows tests also exercise a real child-process wait, executing a signed fixture
+Native Windows tests also exercise an already-exited parent, a still-running parent,
+a genuine wait timeout and an invalid PID. Both the signed executable fixture and real
+Inno upgrade run with the parent still closing and with it already gone. They also cover executing a signed fixture
 `.exe`, and restarting a fixture app after installer exit codes 0 and 5. A changed staged
 executable is refused. The fixture writes version/restart markers in an isolated temporary
 installation, including a path with spaces; it is not Inno and does not replace the editor.

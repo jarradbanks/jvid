@@ -85,6 +85,12 @@ fn sign_stage(stage: &Path, setup: &Path, version: &str, key: &SigningKey) {
 #[test]
 #[ignore = "requires native Windows and JVID_INNO_ISCC; installs only into a temporary directory"]
 fn native_inno_upgrade_waits_replaces_restarts_preserves_and_rejects_portable() {
+    for already_exited in [false, true] {
+        inno_upgrade(already_exited);
+    }
+}
+
+fn inno_upgrade(already_exited: bool) {
     let iscc = PathBuf::from(std::env::var_os("JVID_INNO_ISCC").expect("Set JVID_INNO_ISCC"));
     assert!(iscc.is_file(), "Inno compiler missing: {}", iscc.display());
     let dir = tempfile::tempdir().unwrap();
@@ -178,15 +184,22 @@ fn native_inno_upgrade_waits_replaces_restarts_preserves_and_rejects_portable() 
         .arg("--hold")
         .spawn()
         .unwrap();
+    let parent_pid = parent.id();
+    if already_exited {
+        assert!(parent.wait().unwrap().success());
+    }
+    let mut parent = (!already_exited).then_some(parent);
     let plan = Plan {
         executable: root.join("jvid-app.exe"),
-        parent_pid: parent.id(),
+        parent_pid,
         tag: format!("v{next}"),
         report: dir.path().join("update-result.txt"),
     };
     fs::write(stage.join("plan.json"), serde_json::to_vec(&plan).unwrap()).unwrap();
     run_helper_with_key(&stage, &key.verifying_key().to_bytes()).unwrap();
-    assert!(parent.try_wait().unwrap().is_some());
+    if let Some(parent) = parent.as_mut() {
+        assert!(parent.try_wait().unwrap().is_some());
+    }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while fs::read_to_string(root.join("restarted")).ok().as_deref() != Some(&next)
         && std::time::Instant::now() < deadline

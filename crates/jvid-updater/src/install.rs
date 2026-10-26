@@ -117,6 +117,47 @@ fn validate(
     Ok(payload)
 }
 
+// Fixed script: only numeric values travel through the environment. An absent parent
+// is the normal case when the editor exits before PowerShell starts. Other lookup errors
+// and a real wait timeout must still prevent installation.
+const WAIT_FOR_PARENT: &str = r#"
+$ErrorActionPreference = 'Stop'
+try {
+    $parent = Get-Process -Id ([int]$env:JVID_UPDATE_PARENT) -ErrorAction Stop
+} catch {
+    if ($_.FullyQualifiedErrorId -eq 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand') {
+        exit 0
+    }
+    throw
+}
+$parent | Wait-Process -Timeout ([int]$env:JVID_UPDATE_WAIT_SECONDS)
+exit 0
+"#;
+
+fn wait_for_parent(parent_pid: u32, timeout_seconds: u32) -> Result<()> {
+    let shell = PathBuf::from(std::env::var_os("SystemRoot").ok_or("No SystemRoot.")?)
+        .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    let mut command = Command::new(shell);
+    command
+        .args(["-NoProfile", "-NonInteractive", "-Command", WAIT_FOR_PARENT])
+        .env("JVID_UPDATE_PARENT", parent_pid.to_string())
+        .env("JVID_UPDATE_WAIT_SECONDS", timeout_seconds.to_string());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let output = command.output().map_err(error)?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "Could not confirm the editor exited; installation was deferred. PowerShell {}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
+}
+
 /// Always attempt to relaunch the existing path after installer cancellation/failure. Inno
 /// leaves the old install in place on a failed transaction. A reboot-required result is
 /// reported instead of being mistaken for a completed in-app upgrade.
@@ -163,15 +204,7 @@ fn run_helper_with_key(dir: &Path, key: &[u8; 32]) -> Result<()> {
         {
             return Err("The install location is no longer an installed Windows build.".into());
         }
-        // Fixed script; no path or untrusted text is interpolated into PowerShell code.
-        let shell = PathBuf::from(std::env::var_os("SystemRoot").ok_or("No SystemRoot.")?)
-            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
-        let status = Command::new(shell).args(["-NoProfile", "-NonInteractive", "-Command",
-            "$ErrorActionPreference='Stop'; $p=Get-Process -Id ([int]$env:JVID_UPDATE_PARENT) -ErrorAction SilentlyContinue; if ($p) { $p | Wait-Process -Timeout 120 }"])
-            .env("JVID_UPDATE_PARENT", plan.parent_pid.to_string()).status().map_err(error)?;
-        if !status.success() {
-            return Err("Editor did not exit; installation was deferred.".into());
-        }
+        wait_for_parent(plan.parent_pid, 120)?;
         let payload = validate(dir, &plan, key, TARGET, VERSION)?;
         let log = plan.report.with_extension("installer.log");
         install_and_restart(
@@ -320,6 +353,30 @@ mod tests {
         assert!(err.contains("installer failed") && err.contains("restart failed"));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn native_windows_parent_wait_accepts_exited_process_and_rejects_timeout_or_bad_pid() {
+        let powershell = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let mut parent = Command::new(powershell)
+            .args(["-NoProfile", "-NonInteractive", "-Command", "exit 0"])
+            .spawn()
+            .unwrap();
+        let pid = parent.id();
+        assert!(parent.wait().unwrap().success());
+        drop(parent);
+        wait_for_parent(pid, 1).unwrap();
+
+        // This test process remains alive: a timeout must fail rather than install.
+        let timeout = wait_for_parent(std::process::id(), 1).unwrap_err();
+        assert!(
+            timeout.contains("installation was deferred")
+                && timeout.contains("ProcessNotTerminated")
+        );
+        // Conversion errors must not be mistaken for a process that has already exited.
+        assert!(wait_for_parent(u32::MAX, 1).is_err());
+    }
+
     /// Exercises native Windows waiting, .exe invocation, arguments, and relaunch using a
     /// harmless locally compiled fixture. This is deliberately not an Inno upgrade test.
     #[cfg(windows)]
@@ -380,7 +437,7 @@ mod tests {
         fs::write(stage.join(SIGNATURE), key.sign(&bytes).to_bytes()).unwrap();
         let powershell = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
             .join("System32/WindowsPowerShell/v1.0/powershell.exe");
-        for code in [0, 5] {
+        for (code, already_exited) in [(0, false), (5, false), (0, true), (5, true)] {
             fs::write(root.join("version"), b"1.0.0").unwrap();
             fs::write(root.join("exit-code"), code.to_string()).unwrap();
             let _ = fs::remove_file(root.join("restarted"));
@@ -394,9 +451,15 @@ mod tests {
                 ])
                 .spawn()
                 .unwrap();
+            let parent_pid = parent.id();
+            if already_exited {
+                assert!(parent.wait().unwrap().success());
+            }
+            // Drop the reaped process handle so Get-Process sees a genuinely absent PID.
+            let mut parent = (!already_exited).then_some(parent);
             let plan = Plan {
                 executable: exe.clone(),
-                parent_pid: parent.id(),
+                parent_pid,
                 tag: "v1.2.0".into(),
                 report: dir.path().join("result.txt"),
             };
@@ -405,7 +468,9 @@ mod tests {
                 run_helper_with_key(&stage, &key.verifying_key().to_bytes()).is_ok(),
                 code == 0
             );
-            assert!(parent.try_wait().unwrap().is_some());
+            if let Some(parent) = parent.as_mut() {
+                assert!(parent.try_wait().unwrap().is_some());
+            }
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             while !root.join("restarted").is_file() && std::time::Instant::now() < deadline {
                 std::thread::sleep(std::time::Duration::from_millis(20));
