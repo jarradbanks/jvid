@@ -36,7 +36,8 @@
       "id": 12598108870,
       "name": "download-cache",
       "size_in_bytes": 2210375355,
-      "digest": "sha256:708e2fabd41f1f5a5c3ee6d0c1815fb1008957c2ec68d119b098e3363e9ecb23"
+      "digest": "sha256:708e2fabd41f1f5a5c3ee6d0c1815fb1008957c2ec68d119b098e3363e9ecb23",
+      "public_url": "https://nightly.link/BtbN/FFmpeg-Builds/actions/artifacts/12598108870.zip"
     },
     "recipe_audit": {
       "method": "Pinned scripts sourced with util/vars.sh win64 gpl-shared 8.1 and util/dl_functions.sh; ffbuild_enabled and ffbuild_dockerdl evaluated in isolated subshells, never the download/build functions. Cache names use sha256 of ffbuild_dockerdl output plus newline, as generate.sh does. Entire cache is retained, including superset recipes.",
@@ -1234,11 +1235,48 @@
       ]
     },
     "completeness": {
-      "status": "blocked",
-      "missing": [
-        "Exact post-cargo-update rav1e Cargo.lock and corresponding transitive crate sources from the cached win64 gpl-shared 8.1 build layer. The rav1e download snapshot predates cargo update cc and cargo cinstall; the successful job reused this layer.",
-        "Exact cross-toolchain source and patches for statically linked compiler runtime code: images/base-win64 uses an unpinned crosstool-ng checkout and discards its source/build directory. Retaining the Dockerfile and ct-ng-config alone does not supply that source."
+      "status": "complete",
+      "missing": [],
+      "evidence": [
+        "All recipe source snapshots and original rav1e Cargo.lock verified in the pinned upstream source cache; all original BtbN recipes and patches retained.",
+        "Exact rav1e Cargo registry archives recovered from the immutable build layer, then reacquired by pinned crate SHA-256; reconstructed post-update lock and offline vendor recipe verified with cargo metadata --locked --offline and an empty Cargo cache.",
+        "Exact Rust standard-library, compiler-builtins, vendor and submodule source retained in the pinned full Rust source release.",
+        "Linked GCC/MinGW runtime sources and relevant cross-toolchain build scripts/patches are pinned by compiler_runtime_lock; it documents the original floating CT-NG builder identity limitation and equivalent retained x86 runtime/build evidence."
       ]
+    },
+    "rav1e": {
+      "manifest": {
+        "file": "source-windows-rav1e.json",
+        "sha256": "562224211369d92a4adb9db36d5bc556ad1af03be0aee1be54a458f3720fd6af"
+      },
+      "build_lock": {
+        "file": "source-windows-rav1e-Cargo.lock",
+        "sha256": "3bc92b3d34084e894ea8649680730bb8ce03a7e9e303087ba375feb83cd4870b"
+      },
+      "original_lock_sha256": "4dc33950691aaf914acc9fd06b533170b73f93b3de5c0bb9abe48a7ed9276401"
+    },
+    "rust_std": {
+      "id": "rust-std",
+      "version": "1.99.1",
+      "revision": "58cf8f9c35b355199727627d07ae34a4e2846d67",
+      "filename": "rustc-1.99.1-src.tar.xz",
+      "url": "https://static.rust-lang.org/dist/2026-10-15/rustc-1.99.1-src.tar.xz",
+      "sha256": "6451598a99e77f07571960f6b21d577399d3a30f33e80cbd2e3a4aae6535d265",
+      "archive_root": "rustc-1.99.1-src",
+      "required_files": [
+        "library/std/src/lib.rs",
+        "library/core/src/lib.rs",
+        "library/alloc/src/lib.rs",
+        "library/Cargo.lock",
+        "library/compiler-builtins/compiler-builtins/src/lib.rs",
+        "library/backtrace/Cargo.toml",
+        "library/vendor/libc-0.2.189/Cargo.toml"
+      ],
+      "provenance": "Exact /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/ runtime source paths embedded in the distributed avcodec DLL; Rust release manifest identifies this as 1.99.1, source SHA256 published alongside the immutable dated source archive. Full release source includes vendored transitive dependencies and submodules."
+    },
+    "compiler_runtime_lock": {
+      "file": "windows-toolchain-sources.json",
+      "sha256": "463e12512729abcb55112963775706020e2cc297bc007f46e93a5edae98b923d"
     }
   }
 }

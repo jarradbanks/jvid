@@ -4,12 +4,14 @@
 Uses only Python's standard library on Windows and Linux. GH_TOKEN is used only
 on api.github.com with redirects disabled. The artifact download is a separate,
 unauthenticated request. No signed URL or token is saved in provenance/errors.
-The source lock deliberately remains blocked until the missing cached-build
-inputs identified there have been recovered and reviewed.
+All network inputs are bound to the reviewed runtime lock. The BtbN dependency
+artifact is a ZIP containing a gzip tar containing individual xz source tars;
+each level is streamed, without extracting Unix links on a Windows filesystem.
 """
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -29,6 +31,7 @@ API_LIMIT = 8 * 1024 * 1024
 MAX_DOWNLOAD_SECONDS = 2 * 60 * 60
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_CACHE_EXPANDED = 40 * 1024 * 1024 * 1024
+MAX_MEMBERS = 2_000_000
 
 
 class SourceError(RuntimeError):
@@ -62,9 +65,8 @@ def _request(url: str, *, api=False):
         headers.update({'Accept': 'application/vnd.github+json',
                         'X-GitHub-Api-Version': '2022-11-28'})
         token = os.environ.get('GH_TOKEN')
-        if not token:
-            raise SourceError('GH_TOKEN is required for the pinned GitHub source artifact')
-        headers['Authorization'] = 'Bearer ' + token
+        if token:
+            headers['Authorization'] = 'Bearer ' + token
     return urllib.request.Request(url, headers=headers)
 
 
@@ -75,7 +77,16 @@ def _open(request):
 
 def api_json(endpoint: str) -> dict:
     try:
-        with _open(_request('https://api.github.com/' + endpoint, api=True)) as response:
+        url = 'https://api.github.com/' + endpoint
+        try:
+            response = _open(_request(url, api=True))
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (401, 403, 404):
+                raise
+            # Provenance is public; a restricted job token must not prevent
+            # the same immutable metadata being read anonymously.
+            response = _open(_request(url))
+        with response:
             data = response.read(API_LIMIT + 1)
         if len(data) > API_LIMIT:
             raise SourceError('GitHub source metadata exceeds size limit')
@@ -126,12 +137,35 @@ def download(url: str, dest: Path, digest: str, max_bytes: int, *, exact_size=No
         part.unlink(missing_ok=True)
 
 
-def artifact_url(endpoint: str) -> str:
+def fetch(url: str, dest: Path, digest: str, max_bytes: int, *, exact_size=None):
+    """Optional local provider cache, still rehashed before every collection."""
+    if not re.fullmatch(r'[0-9a-f]{64}', digest):
+        raise SourceError('missing pinned source SHA-256')
+    cache = os.environ.get('JVID_WINDOWS_SOURCE_CACHE')
+    cached = Path(cache) / digest if cache else None
+    if cached and cached.is_file():
+        size = cached.stat().st_size
+        if (size > max_bytes or (exact_size is not None and size != exact_size)
+                or sha256(cached) != digest):
+            raise SourceError('cached Windows source size/SHA-256 mismatch')
+        shutil.copyfile(cached, dest)
+        return
+    download(url, dest, digest, max_bytes, exact_size=exact_size)
+
+
+def artifact_url(endpoint: str, public_url: str | None = None) -> str:
     """Consume the authenticated API redirect without following it."""
     try:
         with _open(_request('https://api.github.com/' + endpoint, api=True)):
             raise SourceError('expected GitHub artifact redirect')
     except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403, 404) and public_url:
+            # The job's repository-scoped github.token may not read another
+            # repository's artifacts. nightly.link accesses the same immutable
+            # public artifact ID; the GitHub metadata and ZIP digest are still
+            # independently checked. No token goes to that transport.
+            _https(public_url, 'nightly.link')
+            return public_url
         if exc.code != 302 or not exc.headers.get('Location'):
             raise SourceError('pinned source artifact is unavailable') from None
         location = exc.headers['Location']
@@ -193,6 +227,13 @@ def validate_stage(stage: Path, lock: dict):
         raise SourceError('FFmpeg archive does not use the exact revision')
     if not source['build_scripts']['url'].endswith('/' + lock['build_scripts_commit']):
         raise SourceError('build scripts archive does not use the exact revision')
+    cache = source['cache']
+    if (not re.fullmatch(r'sha256:[0-9a-f]{64}', cache.get('digest', ''))
+            or not isinstance(cache.get('size_in_bytes'), int) or cache['size_in_bytes'] <= 0):
+        raise SourceError('missing pinned source artifact digest/size')
+    _match(cache.get('public_url'),
+           f"https://nightly.link/{source['repository']}/actions/artifacts/{cache['id']}.zip",
+           'immutable public source artifact transport')
 
 
 def validate_provenance(lock: dict) -> dict:
@@ -234,11 +275,32 @@ def expected_run(source, lock):
             'event': source['event'], 'status': 'completed', 'conclusion': 'success'}
 
 
-def _member_path(name):
+def _member_path(name, *, portable=True):
     path = PurePosixPath(name)
-    if path.is_absolute() or '..' in path.parts or '\\' in name or ':' in name:
+    if (path.is_absolute() or '..' in path.parts or '\0' in name
+            or (portable and ('\\' in name or ':' in name))):
         raise SourceError('unsafe path in pinned source archive')
     return path
+
+
+def validate_ffmpeg(archive: Path, revision: str):
+    required = {'configure', 'Makefile', 'COPYING.GPLv3', 'libavcodec/avcodec.h',
+                'libavformat/avformat.h', 'libavutil/avutil.h'}
+    prefix = 'FFmpeg-' + revision
+    expanded = 0
+    with tarfile.open(archive, 'r|gz') as tar:
+        for index, member in enumerate(tar):
+            tar.members.clear()  # Bound TarInfo retention as well as payload reads.
+            parts = _member_path(member.name, portable=False).parts
+            if not parts or parts[0] != prefix:
+                raise SourceError('FFmpeg source archive root mismatch')
+            expanded += member.size
+            if index > MAX_MEMBERS or expanded > MAX_ARCHIVE_BYTES:
+                raise SourceError('FFmpeg source archive exceeds size limit')
+            if member.isfile() and member.size:
+                required.discard(PurePosixPath(*parts[1:]).as_posix())
+    if required:
+        raise SourceError('FFmpeg archive lacks required source/build payload')
 
 
 def read_scripts(archive: Path, revision: str) -> dict[str, bytes]:
@@ -248,6 +310,7 @@ def read_scripts(archive: Path, revision: str) -> dict[str, bytes]:
     total = 0
     with tarfile.open(archive, 'r|gz') as tar:
         for member in tar:
+            tar.members.clear()
             parts = _member_path(member.name).parts
             if not parts or parts[0] != prefix:
                 raise SourceError('build scripts archive root mismatch')
@@ -296,58 +359,195 @@ def validate_recipes(files: dict, lock: dict):
     return sorted(patches)
 
 
-def validate_cache(path: Path, lock: dict) -> list[dict]:
-    """Map all recipes to immutable cache entries; inspect sources without extracting.
+def _inspect_snapshot(stream, item, lock):
+    source_files = build_files = expanded = 0
+    original_lock = None
+    with tarfile.open(fileobj=stream, mode='r|xz') as tar:
+        for index, member in enumerate(tar):
+            tar.members.clear()  # Bound TarInfo retention as well as payload reads.
+            # Unix source test fixtures may contain ':' or '\\'. They remain
+            # inside the original tar, never native Windows output paths.
+            parts = _member_path(member.name, portable=False).parts
+            expanded += member.size
+            if index > MAX_MEMBERS or expanded > MAX_CACHE_EXPANDED:
+                raise SourceError('dependency snapshot exceeds expanded size/member limit')
+            # Links stay inside the retained archive; nothing is extracted.
+            if not member.isfile() or '.git' in parts:
+                continue
+            suffix = PurePosixPath(member.name).suffix.lower()
+            if suffix in ('.c', '.cc', '.cpp', '.h', '.hpp', '.rs', '.asm', '.s', '.py', '.xml', '.in'):
+                source_files += 1
+            if PurePosixPath(member.name).name in ('configure', 'configure.ac', 'CMakeLists.txt', 'meson.build', 'Makefile.am', 'Cargo.toml', 'Makefile', 'build.xml', 'makefile.am'):
+                build_files += 1
+            if item['recipe'] == 'scripts.d/50-rav1e.sh' and parts == ('Cargo.lock',):
+                with tar.extractfile(member) as source:
+                    original_lock = hashlib.sha256(source.read(1024 * 1024)).hexdigest()
+    if not source_files or not build_files:
+        raise SourceError('dependency cache lacks source/build payload: ' + item['download'])
+    if item['recipe'] == 'scripts.d/50-rav1e.sh':
+        _match(original_lock, lock['source']['rav1e']['original_lock_sha256'], 'rav1e original Cargo.lock')
+    return {**item, 'cache_entry': '.cache/downloads/' + item['download'],
+            'source_files': source_files, 'build_files': build_files,
+            'coverage': 'source snapshot and recipe'}
 
-    The ZIP stays intact to preserve Unix symlinks, Git metadata and submodules
-    which cannot always be extracted faithfully on a native Windows host.
-    """
+
+def validate_cache(path: Path, lock: dict) -> list[dict]:
+    """Stream ZIP -> cache.tar.gz -> downloads/*.tar.xz; preserve all links."""
     audit = lock['source']['recipe_audit']['recipes']
+    expected = {item['download']: item for item in audit if item['download']}
+    if len(expected) != sum(bool(item['download']) for item in audit):
+        raise SourceError('duplicate dependency source cache recipe')
+    found, names, aliases = {}, set(), {}
+    expanded = 0
     with zipfile.ZipFile(path) as archive:
-        entries = {}
-        total = 0
-        for entry in archive.infolist():
-            _member_path(entry.filename)
-            if entry.is_dir():
-                continue
-            if entry.filename != PurePosixPath(entry.filename).name or entry.filename in entries:
-                raise SourceError('unexpected or duplicate BtbN cache entry')
-            total += entry.file_size
-            if total > MAX_CACHE_EXPANDED:
-                raise SourceError('BtbN source cache exceeds expanded size limit')
-            entries[entry.filename] = entry
-        results = []
-        for item in audit:
-            name = item['download']
-            if not name:
-                if item['enabled']:
-                    results.append({**item, 'coverage': 'recipe only; no download stage'})
-                continue
-            if name not in entries:
-                raise SourceError('missing exact BtbN dependency snapshot: ' + name)
-            if not re.fullmatch(r'[A-Za-z0-9_-]+_[0-9a-f]{64}\.tar\.xz', name):
-                raise SourceError('invalid pinned BtbN cache filename')
-            # Upload-artifact preserves symlinks as files with the target contents.
-            # We require the hashed real archive, never the unversioned alias.
-            source_files = build_files = 0
-            expanded = 0
-            with archive.open(entries[name]) as stream, tarfile.open(fileobj=stream, mode='r|xz') as tar:
-                for member in tar:
-                    parts = _member_path(member.name).parts
-                    expanded += member.size
-                    if expanded > MAX_CACHE_EXPANDED:
-                        raise SourceError('dependency snapshot exceeds expanded size limit')
-                    if member.isfile() and '.git' not in parts:
-                        suffix = PurePosixPath(member.name).suffix.lower()
-                        if suffix in ('.c', '.cc', '.cpp', '.h', '.hpp', '.rs', '.asm', '.s', '.py', '.xml', '.in'):
-                            source_files += 1
-                        if PurePosixPath(member.name).name in ('configure', 'configure.ac', 'CMakeLists.txt', 'meson.build', 'Makefile.am', 'Cargo.toml', 'Makefile', 'build.xml', 'makefile.am'):
-                            build_files += 1
-            if not source_files or not build_files:
-                raise SourceError('dependency cache lacks source/build payload: ' + name)
-            results.append({**item, 'cache_entry': name, 'source_files': source_files,
-                            'build_files': build_files, 'coverage': 'source snapshot and recipe'})
-    return results
+        entries = archive.infolist()
+        if len(entries) != 1 or entries[0].filename != 'cache.tar.gz':
+            raise SourceError('expected single cache.tar.gz in BtbN source artifact')
+        if entries[0].file_size > MAX_CACHE_EXPANDED:
+            raise SourceError('BtbN source cache exceeds expanded size limit')
+        with archive.open(entries[0]) as stream, tarfile.open(fileobj=stream, mode='r|gz') as tar:
+            for index, member in enumerate(tar):
+                tar.members.clear()  # Bound TarInfo retention as well as payload reads.
+                path = _member_path(member.name)
+                if index > MAX_MEMBERS:
+                    raise SourceError('BtbN source cache exceeds member limit')
+                if member.isdir() and path.as_posix() in ('.cache', '.cache/downloads'):
+                    continue
+                if path.parent.as_posix() != '.cache/downloads' or path.name in names:
+                    raise SourceError('unexpected or duplicate BtbN source cache entry')
+                names.add(path.name)
+                if member.issym():
+                    target = _member_path(member.linkname)
+                    if len(target.parts) != 1 or not re.fullmatch(r'[A-Za-z0-9_-]+_[0-9a-f]{64}\.tar\.xz', target.name):
+                        raise SourceError('unsafe source cache alias')
+                    aliases[path.name] = target.name
+                    continue
+                if not member.isfile() or not re.fullmatch(r'[A-Za-z0-9_-]+_[0-9a-f]{64}\.tar\.xz', path.name):
+                    raise SourceError('invalid BtbN source snapshot entry')
+                expanded += member.size
+                if expanded > MAX_CACHE_EXPANDED:
+                    raise SourceError('BtbN source cache exceeds expanded size limit')
+                if path.name in expected:
+                    with tar.extractfile(member) as snapshot:
+                        found[path.name] = _inspect_snapshot(snapshot, expected[path.name], lock)
+            # Reading through ZIP EOF also checks its CRC; tar readers stop at
+            # tar EOF and otherwise leave the ZIP trailer unchecked.
+            while stream.read(CHUNK):
+                pass
+    if set(expected) - set(found):
+        raise SourceError('missing exact BtbN dependency snapshot: ' + sorted(set(expected) - set(found))[0])
+    if set(aliases.values()) - names:
+        raise SourceError('missing BtbN source cache alias target')
+    return [found[item['download']] if item['download'] else
+            {**item, 'coverage': 'recipe only; no download stage'}
+            for item in audit if item['download'] or item['enabled']]
+
+
+def cargo_packages(text: str) -> dict[str, str]:
+    """Read the fixed Cargo.lock package fields, without requiring third-party TOML."""
+    packages = {}
+    for block in text.split('[[package]]')[1:]:
+        fields = dict(re.findall(r'^(name|version|source|checksum) = "([^"\n]+)"$', block, re.M))
+        if fields.get('source', '').startswith('registry+'):
+            if fields['source'] != 'registry+https://github.com/rust-lang/crates.io-index':
+                raise SourceError('unreviewed rav1e package registry')
+            key = fields['name'] + '-' + fields['version']
+            if key in packages or not re.fullmatch(r'[0-9a-f]{64}', fields.get('checksum', '')):
+                raise SourceError('invalid rav1e package checksum/identity')
+            packages[key] = fields['checksum']
+        elif 'source' in fields:
+            raise SourceError('unrepresented rav1e Git source')
+    if not packages:
+        raise SourceError('missing rav1e crate source inventory')
+    return packages
+
+
+def collect_rav1e(out: Path, lock: dict) -> list[str]:
+    spec = lock['source']['rav1e']
+    retained = []
+    for field in ('manifest', 'build_lock'):
+        name = spec[field]['file']
+        if PurePosixPath(name).name != name:
+            raise SourceError('invalid rav1e evidence file path')
+        path = ROOT / 'packaging' / name
+        if not path.is_file() or sha256(path) != spec[field]['sha256']:
+            raise SourceError('rav1e source inventory/lock checksum mismatch')
+        shutil.copyfile(path, out / name)
+        retained.append(name)
+    manifest = json.loads((out / retained[0]).read_text(encoding='utf-8'))
+    crates = manifest['crates']
+    packages = {item['name'] + '-' + item['version']: item['sha256'] for item in crates}
+    if len(packages) != len(crates):
+        raise SourceError('duplicate rav1e crate source')
+    _match(packages, cargo_packages((out / retained[1]).read_text(encoding='utf-8')),
+           'rav1e build lock crate coverage')
+    recipe = next((r for r in lock['source']['recipe_audit']['recipes']
+                   if r['recipe'] == 'scripts.d/50-rav1e.sh'), {})
+    _match(manifest['revision'], recipe.get('source_refs', {}).get('COMMIT'), 'rav1e source revision')
+    _match(manifest['provenance']['original_lock_sha256'], spec['original_lock_sha256'],
+           'rav1e original lock provenance')
+    directory = out / 'rav1e-crates'
+    directory.mkdir()
+    def capture(item):
+        name, version, digest = item['name'], item['version'], item['sha256']
+        if not re.fullmatch(r'[A-Za-z0-9_-]+', name) or not re.fullmatch(r'[A-Za-z0-9.+-]+', version):
+            raise SourceError('unsafe rav1e crate identity')
+        filename = name + '-' + version + '.crate'
+        fetch(f'https://static.crates.io/crates/{name}/{filename}', directory / filename,
+              digest, 64 * CHUNK)
+        return 'rav1e-crates/' + filename
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        retained.extend(pool.map(capture, crates))
+    helper = 'source_windows_rav1e.py'
+    shutil.copyfile(Path(__file__).with_name(helper), out / helper)
+    retained.append(helper)
+    return retained
+
+
+def collect_rust_std(out: Path, lock: dict) -> dict:
+    spec = lock['source']['rust_std']
+    path = out / 'rust-runtime-source.tar.xz'
+    fetch(spec['url'], path, spec['sha256'], MAX_ARCHIVE_BYTES)
+    required = set(spec['required_files'])
+    expanded = 0
+    with tarfile.open(path, 'r|xz') as archive:
+        for index, member in enumerate(archive):
+            archive.members.clear()
+            parts = _member_path(member.name, portable=False).parts
+            if not parts or parts[0] != spec['archive_root']:
+                raise SourceError('Rust runtime source archive root mismatch')
+            expanded += member.size
+            if index > MAX_MEMBERS or expanded > MAX_CACHE_EXPANDED:
+                raise SourceError('Rust runtime source archive exceeds size limit')
+            if member.isfile() and member.size:
+                required.discard(PurePosixPath(*parts[1:]).as_posix())
+    if required:
+        raise SourceError('Rust runtime archive lacks required source/build/vendor payload')
+    return {'id': 'windows-rust-standard-library', 'source': spec['url'],
+            'version': spec['version'], 'revision': spec['revision'],
+            'provenance': spec['provenance'],
+            'files': ['rust-runtime-source.tar.xz', 'runtime-source-lock.json']}
+
+
+def collect_compiler_runtimes(out: Path, lock: dict) -> list[dict]:
+    import compiler_runtime_sources as compiler
+    expected = lock['source']['compiler_runtime_lock']
+    if compiler.LOCK.name != expected['file'] or sha256(compiler.LOCK) != expected['sha256']:
+        raise SourceError('compiler runtime source lock checksum mismatch')
+    runtime_lock = json.loads(compiler.LOCK.read_text(encoding='utf-8')).get('runtime', {})
+    source = lock['source']
+    for key, value in {'repository': source['repository'],
+                       'build_scripts_commit': lock['build_scripts_commit'],
+                       'run_id': source['run_id'], 'target': source['target'],
+                       'variant': source['variant'], 'addin': ' '.join(source['addins'])}.items():
+        _match(runtime_lock.get(key), value, 'compiler runtime ' + key)
+    runtime = out / 'compiler-runtime'
+    runtime.mkdir()
+    records = compiler.collect(runtime)
+    if not records:
+        raise SourceError('missing linked compiler runtime source providers')
+    return [{**record, 'files': ['compiler-runtime/' + name for name in record['files']]}
+            for record in records]
 
 
 def _require_complete(source):
@@ -385,25 +585,59 @@ def collect_pinned_inputs(stage: Path, out: Path, lock: dict) -> list[dict]:
     records = []
     for key, filename in (('ffmpeg', 'ffmpeg.tar.gz'), ('build_scripts', 'btbn-build-scripts.tar.gz')):
         spec = source[key]
-        download(spec['url'], out / filename, spec['sha256'], MAX_ARCHIVE_BYTES)
+        fetch(spec['url'], out / filename, spec['sha256'], MAX_ARCHIVE_BYTES)
+    validate_ffmpeg(out / 'ffmpeg.tar.gz', source['ffmpeg']['revision'])
     scripts = read_scripts(out / 'btbn-build-scripts.tar.gz', lock['build_scripts_commit'])
     patches = validate_recipes(scripts, lock)
+    records.extend(collect_compiler_runtimes(out, lock))
+    records.append(collect_rust_std(out, lock))
     cache = source['cache']
     endpoint = f"repos/{source['repository']}/actions/artifacts/{cache['id']}/zip"
-    download(artifact_url(endpoint), out / 'dependency-source-cache.zip',
+    # Resolve the API redirect even with a local cache, so artifact access and
+    # retention are revalidated on every actual collection.
+    fetch(artifact_url(endpoint, cache['public_url']), out / 'dependency-source-cache.zip',
              cache['digest'].removeprefix('sha256:'), cache['size_in_bytes'],
              exact_size=cache['size_in_bytes'])
     coverage = validate_cache(out / 'dependency-source-cache.zip', lock)
+    rav1e_files = collect_rav1e(out, lock)
     _write_json(out / 'recipe-source-coverage.json', {'recipes': coverage, 'patches': patches,
                 'completeness': source['completeness']})
+    (out / 'REBUILD-SOURCES.txt').write_text(
+        'Windows corresponding-source inputs\n\n'
+        'The runtime-source-lock.json and github-provenance.json bind these inputs '
+        'to the exact BtbN run and win64 gpl-shared 8.1 variant.\n'
+        'btbn-build-scripts.tar.gz retains the original recipes, patches, image '
+        'Dockerfiles, toolchain configuration, addins and build/package scripts.\n'
+        'dependency-source-cache.zip contains cache.tar.gz, which contains '
+        '.cache/downloads/<recipe>_<recipe-hash>.tar.xz source snapshots. '
+        'Extract on a Unix filesystem to preserve source/Git/submodule symlinks.\n'
+        'ffmpeg.tar.gz is the exact FFmpeg revision in the lock. The upstream '
+        'build.sh normally clones a branch: use this retained tree when rebuilding, '
+        'rather than resolving the branch again.\n'
+        'rav1e uses the original Cargo.lock inside its source snapshot, followed '
+        'by cargo update cc in the original recipe. source-windows-rav1e-Cargo.lock '
+        'is an explicitly reconstructed post-update build lock, supported by the '
+        'immutable OCI build-layer evidence in source-windows-rav1e.json. '
+        'After extracting the rav1e source snapshot, run '
+        'python source_windows_rav1e.py <rav1e-source-tree> to install that lock '
+        'and vendor the retained .crate sources for offline Cargo use.\n'
+        'rust-runtime-source.tar.xz retains exact Rust standard-library and '
+        'compiler-builtins source, submodules and library vendor dependencies.\n'
+        'compiler-runtime/ retains GCC/MinGW runtime source and the cross-toolchain '
+        'build scripts/patches; its provenance describes external compiler and '
+        'OS build-tool prerequisites.\n', encoding='utf-8')
     shared = ['runtime-source-lock.json', 'github-provenance.json', 'SOURCE-INFO.txt',
-              'btbn-build-scripts.tar.gz', 'recipe-source-coverage.json']
+              'btbn-build-scripts.tar.gz', 'recipe-source-coverage.json', 'REBUILD-SOURCES.txt']
     records.append({'id': 'windows-ffmpeg', 'source': 'https://github.com/FFmpeg/FFmpeg',
                     'version': source['ffmpeg']['revision'], 'provider': 'BtbN/FFmpeg-Builds',
                     'runtime_url': lock['url'], 'runtime_sha256': lock['sha256'],
                     'provenance': {'run_id': source['run_id'], 'target': source['target'],
                                    'variant': source['variant'], 'addins': source['addins']},
                     'files': ['ffmpeg.tar.gz', *shared]})
+    records.append({'id': 'windows-rav1e-crates', 'source': 'https://crates.io',
+                    'version': source['rav1e']['manifest']['sha256'],
+                    'provenance': 'Exact registry archives recovered from the pinned rav1e build layer; build Cargo.lock is explicitly reconstructed.',
+                    'files': [*rav1e_files, *shared]})
     for item in coverage:
         records.append({'id': 'windows-btbn-' + item['recipe'].removeprefix('scripts.d/').removesuffix('.sh').replace('/', '-'),
                         'source': item.get('source_refs', {'recipe': item['recipe']}),
