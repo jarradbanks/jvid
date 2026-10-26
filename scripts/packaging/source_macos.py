@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -32,6 +33,26 @@ TAP = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 MAX_DOWNLOAD_BYTES = 4 * 1024**3
 NETWORK_SECONDS = 900
 HELPER = Path(__file__).with_name("source_macos_formula.rb")
+# These recoveries describe the exact historical inputs, not replacement
+# versions. See Homebrew/core commits 0619ed8265b992a3e08faff4afad026f05b3b4d8
+# (SRT's moved tag) and 78dd0b36788851f1c12293c1623c39ec073e09f7 (deleted snum).
+SRT_RECOVERY = (
+    "srt", "1.5.7", "source", "srt",
+    "https://github.com/Haivision/srt/archive/refs/tags/v1.5.7.tar.gz",
+    "fee6aee6b4933f01ba8b7e18d5d9e4896ad604053fdad2ac55df4a4f1561f30a",
+)
+SRT_ORIGINAL_REVISION = "d99d2e1a3b1a213b03c7dfbea5133898935fdeea"
+SRT_SOURCE_MIRROR = (
+    "https://src.fedoraproject.org/repo/pkgs/srt/srt-1.5.7.tar.gz/sha512/"
+    "877d69f8323a3a2964a76a97f3cb51ab43f762f6e8cc8f00f72c4d5e93ffb3045c092ce64a0a5f853522086d1f4f57080fead17113061f22657d653fa27899c5/"
+    "srt-1.5.7.tar.gz"
+)
+SNUM_RECOVERY = (
+    "tesseract", "5.5.3", "resource", "snum",
+    "https://github.com/USCDataScience/counterfeit-electronics-tesseract/raw/"
+    "319a6eeacff181dad5c02f3e7a3aff804eaadeca/Training%20Tesseract/snum.traineddata",
+    "36f772980ff17c66a767f584a0d80bf2302a1afa585c01a226c1863afcea1392",
+)
 
 
 def _json(path: Path):
@@ -47,6 +68,12 @@ def _hash(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _verify_archive(path: Path, digest: str) -> None:
+    observed = _hash(path)
+    if observed != digest:
+        raise SourceError(f"source archive checksum mismatch (expected SHA-256 {digest}, observed {observed})")
 
 
 def _run(*args, input=None, cwd=None, stdout=None, timeout=NETWORK_SECONDS):
@@ -100,25 +127,79 @@ def _download(url: str, digest: str, dest: Path) -> None:
                 if size > MAX_DOWNLOAD_BYTES or time.monotonic() - started > NETWORK_SECONDS:
                     raise SourceError("source download exceeded its size or time limit")
                 stream.write(chunk)
-        if _hash(dest) != digest:
-            raise SourceError("source archive checksum mismatch")
+        _verify_archive(dest, digest)
     except Exception as exc:
         dest.unlink(missing_ok=True)
         if isinstance(exc, SourceError):
             raise
-        raise SourceError("source download failed") from exc
+        # Exception text and redirect URLs can contain credentials or signed
+        # query strings. Keep the diagnostic to the safe status code, if any.
+        status = f" (HTTP {exc.code})" if isinstance(exc, urllib.error.HTTPError) else ""
+        raise SourceError(f"source download failed{status}") from None
 
 
-def _archive_input(item: dict, dest: Path) -> str:
+def _archive_input(item: dict, dest: Path, *, provider: dict | None = None) -> str:
     """Only the retained recipe's mirrors, with the very same pinned digest."""
-    failure = None
-    for url in dict.fromkeys([item["url"], *item.get("mirrors", [])]):
+    failures = []
+    for index, url in enumerate(dict.fromkeys([item["url"], *item.get("mirrors", [])]), 1):
         try:
             _download(url, item["sha256"], dest)
             return url
         except SourceError as exc:
-            failure = exc
-    raise SourceError("all recorded source locations failed verification or download") from failure
+            failures.append(f"location {index}: {exc}")
+    # Identity comes from the retained recipe, never a potentially signed URL.
+    # Bound and escape labels so one bad resource cannot flood a CI log.
+    def label(value):
+        return ascii(str(value)[:120])
+    identity = f"{item.get('role', 'payload')} {label(item.get('name', item['id']))} ({label(item['id'])})"
+    if provider is not None:
+        identity = f"homebrew:{provider['name'][:120]}@{provider['version'][:120]} {identity}"
+    raise SourceError(f"all recorded source locations failed verification or download: {identity}; "
+                      + "; ".join(failures)) from None
+
+
+def _recover_archive_input(item: dict, dest: Path, provider: dict) -> dict | None:
+    key = (provider["name"], provider["version"], item.get("role"), item.get("name"),
+           item.get("url"), item.get("sha256"))
+    if key == SRT_RECOVERY:
+        # Fedora's immutable lookaside retains the original archive, including
+        # its original Git pax commit and compression. The moved GitHub tag
+        # has different source contents; never adopt its replacement checksum.
+        _download(SRT_SOURCE_MIRROR, item["sha256"], dest)
+        return {"retrieved_from": SRT_SOURCE_MIRROR, "recovery": {
+            "kind": "exact-hash-source-mirror", "original_revision": SRT_ORIGINAL_REVISION,
+            "evidence": "https://github.com/Haivision/srt/issues/3378",
+        }}
+    if key == SNUM_RECOVERY:
+        return _installed_resource(item, dest, provider, "share/tessdata/snum.traineddata")
+    return None
+
+
+def _installed_resource(item: dict, dest: Path, provider: dict, relative: str) -> dict:
+    # The retained recipe installs this data verbatim. Recover from only that
+    # exact recorded keg, and require its receipt, recipe AND resource to match.
+    keg = provider["cellar"]
+    try:
+        if (_hash(keg / "INSTALL_RECEIPT.json") != _hash(provider["receipt_path"])
+                or _hash(keg / ".brew" / f"{provider['name']}.rb") != _hash(provider["recipe"])):
+            raise SourceError("installed resource provider differs from retained provenance")
+        original = keg / relative
+        if original.is_symlink() or not original.is_file():
+            raise SourceError("original installed resource is unavailable")
+        if original.stat().st_size > MAX_DOWNLOAD_BYTES:
+            raise SourceError("installed resource exceeded its size limit")
+        _verify_archive(original, item["sha256"])
+        shutil.copyfile(original, dest)
+        _verify_archive(dest, item["sha256"])
+    except (OSError, SourceError) as exc:
+        dest.unlink(missing_ok=True)
+        if isinstance(exc, SourceError):
+            raise
+        raise SourceError("original installed resource is unavailable") from None
+    return {"retrieved_from": "installed-provider-resource", "recovery": {
+        "kind": "installed-resource", "provider": f"homebrew:{provider['name']}@{provider['version']}", "path": relative,
+        "verification": "retained receipt, recipe and original resource SHA-256",
+    }}
 
 
 def _providers(stage: Path) -> list[dict]:
@@ -128,6 +209,7 @@ def _providers(stage: Path) -> list[dict]:
     except OSError as exc:
         raise SourceError("missing SOURCE-INFO.txt") from exc
     expected = {}
+    cellars = {}
     for line in info.splitlines():
         if "/Cellar/" not in line:
             continue
@@ -137,6 +219,7 @@ def _providers(stage: Path) -> list[dict]:
         if match[1] in expected:
             raise SourceError(f"duplicate Homebrew provider: {match[1]}")
         expected[match[1]] = match[2]
+        cellars[match[1]] = Path(line.strip())
     if not expected:
         raise SourceError("SOURCE-INFO.txt records no Homebrew providers")
     licenses = stage / "runtime-licenses"
@@ -175,7 +258,7 @@ def _providers(stage: Path) -> list[dict]:
             if not isinstance(receipt.get(option_key), list) or not all(isinstance(x, str) for x in receipt[option_key]):
                 raise SourceError(f"missing receipt build options: {name}")
         providers.append({"name": name, "version": version, "recipe": recipe,
-                          "receipt_path": receipt_path, "receipt": receipt})
+                          "receipt_path": receipt_path, "receipt": receipt, "cellar": cellars[name]})
     return providers
 
 
@@ -377,7 +460,16 @@ def collect(stage: Path, out: Path) -> list[dict]:
                     suffix = "".join(Path(filename).suffixes)[-32:]
                     suffix = suffix if re.fullmatch(r"(?:\.[A-Za-z0-9_-]+)*", suffix) else ""
                     target = dest / (stem + suffix)
-                    item = dict(item, retrieved_from=_archive_input(item, target))
+                    try:
+                        retrieved = {"retrieved_from": _archive_input(item, target, provider=provider)}
+                    except SourceError as download_failure:
+                        try:
+                            retrieved = _recover_archive_input(item, target, provider)
+                        except SourceError as recovery_failure:
+                            raise SourceError(f"{download_failure}; exact source recovery failed: {recovery_failure}") from None
+                        if retrieved is None:
+                            raise
+                    item = dict(item, **retrieved)
                 elif item["kind"] == "git":
                     target = dest / (stem + ".tar")
                     item = dict(item, repositories=_git_snapshot(item["url"], item["revision"], target, cache))
@@ -404,7 +496,8 @@ def collect(stage: Path, out: Path) -> list[dict]:
         instructions.write_text(
             "Each providers/ directory retains the installed bottle's exact formula, unmodified\n"
             "INSTALL_RECEIPT.json (including options/compiler), source inputs, and source-plan.json.\n"
-            "Archives are original verified downloads; Git tar snapshots correspond to verified\n"
+            "Archive inputs match their original retained SHA-256; exact historical recovery\n"
+            "provenance is in source-plan.json. Git tar snapshots correspond to verified\n"
             "commits. For submodules, extract each separately at its recorded repository path.\n"
             "The build-support tap snapshots contain dependency recipes and tap-local patches\n"
             "at the receipt's tap revision. Use those recipes, not current Homebrew formulae.\n"

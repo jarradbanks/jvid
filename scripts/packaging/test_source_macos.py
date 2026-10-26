@@ -116,6 +116,38 @@ class MacSourceTests(unittest.TestCase):
                 sources._download("https://sources.invalid/source", hashlib.sha256(ARCHIVE).hexdigest(), dest)
         self.assertFalse(dest.exists())
 
+    def test_archive_failure_identifies_provider_resource_and_both_hashes(self):
+        item = dict(self.plan["payloads"][1], url="https://sources.invalid/resource?secret=original",
+                    mirrors=["https://mirror.invalid/resource?token=mirror"])
+        corrupt = b"upstream returned an HTML challenge instead of the retained resource"
+        with mock.patch.object(sources.urllib.request, "urlopen", side_effect=[Response(corrupt), Response(corrupt)]):
+            with self.assertRaises(sources.SourceError) as raised:
+                sources._archive_input(item, self.out / "resource", provider=self.provider())
+        message = str(raised.exception)
+        self.assertIn("homebrew:fixture@1.2.3_2", message)
+        self.assertIn("resource 'support' ('resource-0')", message)
+        self.assertIn("expected SHA-256 " + item["sha256"], message)
+        self.assertIn("observed " + hashlib.sha256(corrupt).hexdigest(), message)
+        self.assertIn("location 1:", message)
+        self.assertIn("location 2:", message)
+        self.assertNotIn("https://", message)
+        self.assertNotIn("secret", message)
+        self.assertNotIn("token", message)
+        self.assertFalse((self.out / "resource").exists())
+
+    def test_download_failure_does_not_expose_signed_redirect(self):
+        failure = urllib.error.HTTPError("https://redirect.invalid/?secret=signed", 403,
+                                         "secret=signed", {}, None)
+        with mock.patch.object(sources.urllib.request, "urlopen", side_effect=failure):
+            with self.assertRaises(sources.SourceError) as raised:
+                sources._download(self.plan["payloads"][0]["url"],
+                                  self.plan["payloads"][0]["sha256"], self.out / "resource")
+        import traceback
+        diagnostic = "".join(traceback.format_exception(raised.exception))
+        self.assertIn("source download failed (HTTP 403)", diagnostic)
+        self.assertNotIn("secret", diagnostic)
+        self.assertNotIn("redirect.invalid", diagnostic)
+
     def test_unavailable_resource_fails_collection(self):
         with mock.patch.object(sources, "_formula_plan", return_value=self.plan), \
              mock.patch.object(sources, "_build_support", side_effect=self.fake_support), \
@@ -134,6 +166,81 @@ class MacSourceTests(unittest.TestCase):
         with mock.patch.object(sources.urllib.request, "urlopen", side_effect=[Response(b"bad primary"), Response(b"bad mirror")]):
             with self.assertRaisesRegex(sources.SourceError, "recorded source locations failed"):
                 sources._archive_input(item, dest)
+        self.assertFalse(dest.exists())
+
+    def installed_resource(self):
+        keg = self.root / "Cellar/fixture/1.2.3_2"
+        (keg / ".brew").mkdir(parents=True)
+        shutil.copyfile(self.recipe, keg / ".brew/fixture.rb")
+        shutil.copyfile(self.provider_dir / "INSTALL_RECEIPT.json", keg / "INSTALL_RECEIPT.json")
+        resource = keg / "share/tessdata/snum.traineddata"
+        resource.parent.mkdir(parents=True)
+        resource.write_bytes(RESOURCE)
+        provider = self.provider()
+        # Keep the provenance fixture in macOS form, while using a real temporary
+        # keg on each host (including Windows) to exercise resource verification.
+        provider["cellar"] = keg
+        return provider, resource
+
+    def test_deleted_resource_recovered_only_from_exact_installed_provider(self):
+        provider, _ = self.installed_resource()
+        item = self.plan["payloads"][1]
+        key = (provider["name"], provider["version"], item["role"], item["name"], item["url"], item["sha256"])
+        # Exercise a small fixture through the same checked recovery dispatch;
+        # production's exact snum bytes are independently verified in replay.
+        with mock.patch.object(sources, "SNUM_RECOVERY", key), \
+             mock.patch.object(sources, "_providers", return_value=[provider]), \
+             mock.patch.object(sources, "_formula_plan", return_value=self.plan), \
+             mock.patch.object(sources, "_build_support", side_effect=self.fake_support), \
+             mock.patch.object(sources.urllib.request, "urlopen", side_effect=[Response(ARCHIVE), urllib.error.URLError("deleted")]):
+            records = sources.collect(self.stage, self.out)
+        plan = json.loads((self.out / "providers/fixture/source-plan.json").read_text())
+        recovered = plan["sources"][1]
+        self.assertEqual(recovered["url"], item["url"])
+        self.assertEqual(recovered["sha256"], item["sha256"])
+        self.assertEqual(recovered["retrieved_from"], "installed-provider-resource")
+        self.assertEqual(recovered["recovery"]["path"], "share/tessdata/snum.traineddata")
+        self.assertEqual((self.out / recovered["file"]).read_bytes(), RESOURCE)
+        self.assertNotIn(str(self.root), json.dumps(records) + json.dumps(plan))
+
+    def test_installed_resource_rejects_changed_provenance_or_bytes(self):
+        provider, resource = self.installed_resource()
+        dest = self.out / "resource"
+        originals = {path: path.read_bytes() for path in (
+            provider["cellar"] / "INSTALL_RECEIPT.json", provider["cellar"] / ".brew/fixture.rb", resource)}
+        for path in originals:
+            with self.subTest(path=path.name):
+                path.write_bytes(b"changed")
+                with self.assertRaises(sources.SourceError):
+                    sources._installed_resource(self.plan["payloads"][1], dest, provider,
+                                                "share/tessdata/snum.traineddata")
+                self.assertFalse(dest.exists())
+                path.write_bytes(originals[path])
+
+    def test_known_recoveries_never_apply_to_other_inputs(self):
+        for key in (sources.SNUM_RECOVERY, sources.SRT_RECOVERY):
+            for index in range(len(key)):
+                with self.subTest(provider=key[0], changed_field=index):
+                    changed = list(key)
+                    changed[index] += "changed"
+                    name, version, role, resource, url, sha = changed
+                    item = {"role": role, "name": resource, "url": url, "sha256": sha}
+                    provider = {"name": name, "version": version}
+                    self.assertIsNone(sources._recover_archive_input(item, self.out / "resource", provider))
+
+    def test_srt_recovery_mirror_requires_original_hash_and_records_revision(self):
+        name, version, role, resource, url, sha = sources.SRT_RECOVERY
+        provider = {"name": name, "version": version}
+        item = {"role": role, "name": resource, "url": url, "sha256": sha}
+        dest = self.out / "srt.tar.gz"
+        with mock.patch.object(sources, "_download") as download:
+            provenance = sources._recover_archive_input(item, dest, provider)
+        download.assert_called_once_with(sources.SRT_SOURCE_MIRROR, sha, dest)
+        self.assertEqual(provenance["retrieved_from"], sources.SRT_SOURCE_MIRROR)
+        self.assertEqual(provenance["recovery"]["original_revision"], sources.SRT_ORIGINAL_REVISION)
+        with mock.patch.object(sources.urllib.request, "urlopen", return_value=Response(b"replacement tag archive")):
+            with self.assertRaisesRegex(sources.SourceError, "checksum mismatch.*" + sha):
+                sources._recover_archive_input(item, dest, provider)
         self.assertFalse(dest.exists())
 
     def test_collect_external_and_tap_relative_patches(self):
