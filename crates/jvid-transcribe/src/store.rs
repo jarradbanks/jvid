@@ -641,18 +641,30 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn exact_non_unicode_source_paths_are_persistent_identities() {
+    fn exact_source_paths_are_persistent_identities() {
         use std::os::unix::ffi::OsStringExt;
         let (dir, mut store, mut source, settings) = fixture();
-        source.path = dir
-            .path()
-            .join(std::ffi::OsString::from_vec(b"voice-\xff.wav".to_vec()));
-        fs::write(&source.path, b"first take").unwrap();
-        let request = store.request(&source, &settings).unwrap();
-        store.insert(&request, spoken(2)).unwrap();
+        // APFS requires valid UTF-8 names. Other Unix filesystems also exercise
+        // byte paths that would collide under a lossy Unicode conversion.
+        let names: [&[u8]; 2] = if cfg!(target_os = "macos") {
+            ["voice-é.wav".as_bytes(), "声.wav".as_bytes()]
+        } else {
+            [b"voice-\xff.wav", b"voice-\xfe.wav"]
+        };
+        let mut expected = Vec::new();
+        for (name, start) in names.into_iter().zip([2, 4]) {
+            source.path = dir.path().join(std::ffi::OsString::from_vec(name.to_vec()));
+            fs::write(&source.path, b"same content, distinct source").unwrap();
+            let request = store.request(&source, &settings).unwrap();
+            let transcript = spoken(start);
+            store.insert(&request, transcript.clone()).unwrap();
+            expected.push((source.clone(), transcript));
+        }
         let mut reopened = Store::new(dir.path().join("cache"));
-        let request = reopened.request(&source, &settings).unwrap();
-        assert_eq!(reopened.lookup(&request).transcript, spoken(2));
+        for (source, transcript) in expected {
+            let request = reopened.request(&source, &settings).unwrap();
+            assert_eq!(reopened.lookup(&request).transcript, transcript);
+        }
     }
 
     #[cfg(unix)]
