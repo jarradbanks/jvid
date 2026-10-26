@@ -7,6 +7,7 @@ import json
 import os
 import posixpath
 import stat
+import struct
 from pathlib import Path
 import shutil
 import subprocess
@@ -86,11 +87,32 @@ def clean_env(tmp):
 
 
 def exercise(binary, scratch, env):
+    if binary.suffix.lower() == ".exe":
+        verify_windows_gui(binary)
     subprocess.run([str(binary), "--smoke-test", str(scratch)], env=env, check=True, timeout=120)
     report = (scratch / "smoke-report.txt").read_text()
     if "import_decode_export=passed" not in report:
         raise RuntimeError("missing media smoke evidence")
     return report
+
+
+def verify_windows_gui(binary):
+    """Check the shipped editor's PE subsystem, including installed/upgraded copies."""
+    with binary.open("rb") as source:
+        dos = source.read(64)
+        if len(dos) != 64 or dos[:2] != b"MZ":
+            raise RuntimeError("editor is not a Windows PE executable")
+        source.seek(struct.unpack_from("<I", dos, 60)[0])
+        header = source.read(24)
+        if len(header) != 24 or header[:4] != b"PE\0\0":
+            raise RuntimeError("editor has an invalid PE header")
+        optional_size = struct.unpack_from("<H", header, 20)[0]
+        optional = source.read(optional_size)
+        if (len(optional) != optional_size or optional_size < 70
+                or struct.unpack_from("<H", optional)[0] not in (0x10b, 0x20b)):
+            raise RuntimeError("editor has an invalid PE optional header")
+        if struct.unpack_from("<H", optional, 68)[0] != 2:
+            raise RuntimeError("Windows editor must use the GUI subsystem, not open a console")
 
 
 def windows_install(installer, tmp, env):

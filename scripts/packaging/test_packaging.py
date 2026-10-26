@@ -4,6 +4,7 @@ import io
 import json
 import sys
 import stat
+import struct
 from pathlib import Path
 import tarfile
 import tempfile
@@ -16,6 +17,28 @@ import smoke
 
 
 class PackagingTests(unittest.TestCase):
+    def test_windows_editor_rejects_console_subsystem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "jvid-app.exe"
+            # Both PE32 and PE32+ put Subsystem at optional-header offset 68.
+            for magic, size in ((0x10b, 224), (0x20b, 240)):
+                image = bytearray(64 + 24 + size)
+                image[:2] = b"MZ"
+                struct.pack_into("<I", image, 60, 64)
+                image[64:68] = b"PE\0\0"
+                struct.pack_into("<H", image, 84, size)
+                struct.pack_into("<H", image, 88, magic)
+                struct.pack_into("<H", image, 88 + 68, 3)
+                binary.write_bytes(image)
+                with self.assertRaisesRegex(RuntimeError, "GUI subsystem"):
+                    smoke.verify_windows_gui(binary)
+                struct.pack_into("<H", image, 88 + 68, 2)
+                binary.write_bytes(image)
+                smoke.verify_windows_gui(binary)
+                binary.write_bytes(image[:-1])
+                with self.assertRaisesRegex(RuntimeError, "invalid PE optional"):
+                    smoke.verify_windows_gui(binary)
+
     def test_marker_inventory_and_detecting_corruption(self):
         with tempfile.TemporaryDirectory() as tmp:
             stage = Path(tmp)
