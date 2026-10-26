@@ -92,6 +92,7 @@ fn editor_menus_inspector_and_dialogs_show_spanish() {
 
     h.get_by_label("Edición").click();
     h.run();
+    assert!(has(&h, "Restablecer distribución de paneles"));
     h.get_by_label("Preferencias…").click();
     h.run();
     assert!(has(&h, "Preferencias") && has(&h, "Idioma"));
@@ -276,6 +277,7 @@ fn click_rightmost(h: &mut Harness<'_, impl Sized>, label: &str) {
     let x = |n: &egui_kittest::Node<'_>| n.rect().min.x;
     let tab = h
         .get_all_by_label(label)
+        .filter(|n| n.accesskit_node().role() != Role::Tab)
         .max_by(|a, b| x(a).total_cmp(&x(b)));
     tab.unwrap().click();
     h.run();
@@ -285,6 +287,7 @@ fn click_leftmost(h: &mut Harness<'_, impl Sized>, label: &str) {
     let x = |n: &egui_kittest::Node<'_>| n.rect().min.x;
     let tab = h
         .get_all_by_label(label)
+        .filter(|n| n.accesskit_node().role() != Role::Tab)
         .min_by(|a, b| x(a).total_cmp(&x(b)));
     tab.unwrap().click();
     h.run();

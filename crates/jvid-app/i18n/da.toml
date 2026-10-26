@@ -94,6 +94,7 @@ export_frame = "Eksportér billede"
 record = "Optag speak"
 
 [panel]
+drag_tab = "Træk for at gruppere eller opdele paneler; rul for at se flere faner."
 media = "Medier"
 preview = "Forhåndsvisning"
 inspector = "Inspektør"
@@ -123,6 +124,7 @@ no_media = "ingen video- eller lydstrømme"
 unsupported_codec = "codec understøttes ikke: {codec}"
 
 [menu]
+reset_layout = "Nulstil panellayout"
 project_tooltip = "Opret, åbn og gem"
 new_project = "Nyt projekt"
 open = "Åbn…"

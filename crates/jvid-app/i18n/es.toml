@@ -93,6 +93,7 @@ export_frame = "Exportar fotograma"
 record = "Grabar locución"
 
 [panel]
+drag_tab = "Arrastra para agrupar o dividir paneles; desplázate para ver más pestañas."
 media = "Medios"
 preview = "Vista previa"
 inspector = "Inspector"
@@ -122,6 +123,7 @@ no_media = "no tiene pistas de vídeo ni de audio"
 unsupported_codec = "códec no compatible: {codec}"
 
 [menu]
+reset_layout = "Restablecer distribución de paneles"
 project_tooltip = "Nuevo, abrir y guardar"
 new_project = "Nuevo proyecto"
 open = "Abrir…"

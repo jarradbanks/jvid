@@ -121,7 +121,7 @@ Panels sit in the standard editor layout: media bin on the left, preview in the 
 | Panel minimum | 240px | Narrowest a docked panel may get |
 
 ### Named Rules
-**The One Header Line Rule.** Every panel header is exactly 32px tall, sits at the top of its panel and ends in the same 1px Border divider. Panels side by side start at the same y, so their headers and dividers form one straight line across the window. A panel with a single view shows its title where a tab would be, so a titled panel and a tabbed panel match in height, type and label position. Tabs, toolbars and actions share that one row; a search field or filter goes in the panel's content, never in a second header row. This prevents the misalignment in `01-editor.png`, where the bin's tabs and divider sat on a different line from the preview's.
+**The One Header Line Rule.** Every dock group starts with a 32px tab strip and a 1px Border divider. Panels side by side start at the same y, so their strips, dividers and title baselines line up. Even a single panel keeps its dock tab visible and draggable. Editing controls never share the dock drag target: Timeline's tools and Render Queue's actions sit in a separate 32px toolbar inside their panel, below the strip. Media, Preview and Inspector keep their view selectors inside the panel as well; an empty Inspector and Transcript need no second title row. Search and filters stay in the content. Standalone panels outside the editor dock retain their title or view header.
 
 **The Rows Face Each Other Rule.** Rows that sit side by side line up. The timeline ruler and its corner cell are one 24px row. Each track header is exactly as tall as its lane and starts at the same y. Inspector section heads use the 32px header height, so a fully collapsed inspector reads as a stack of headers.
 
@@ -164,6 +164,7 @@ These specs are for the first `suite-ui` build. The next `/impeccable document` 
 - **Panel:** Panel fill, 1px Border, 8px radius. A panel with keyboard focus swaps its border to Blue, because focus decides what shortcuts do.
 - **Header:** a 32px row with a Border divider at its bottom.
 - **Tabs:** a panel's tabs fill its header. The group runs from 4px in on the left to the header actions, or to 4px from the right edge, and the tabs share that width equally, 4px apart, up to 160px each. Side panels (Media, Inspector) drop the cap and share the full width. A wide panel such as the preview keeps its tabs at 160px, left-aligned. Each tab is a 24px pill centred vertically in the header (4px above and below), with its Body Strong label centred in the pill. Active: Ink text on Raised. Inactive: Ink 3, turning Ink 2 on hover. Tabs that would shrink below 64px move into a chevron menu at the end of the group.
+- **Dock tabs:** the same 32px strip, 24px controls, 4px inset and spacing, Body Strong labels, Raised active fill and muted inactive text. Labels truncate to keep each tab at most 160px and never smaller than 64px, including the optional panel's separate 24px close target. Overflow uses a horizontal scrollbar and wheel scrolling. Light Blue drop targets preview grouping or a split. The editor keeps tabs docked in its main window; core panels cannot close. View-selector tabs inside panels still use the chevron overflow menu above.
 - **Actions:** 24px icon buttons at the right, 4px apart.
 
 ### Buttons
