@@ -513,6 +513,10 @@ dip_to_black = "Via zwart"
 dip_to_white = "Via wit"
 
 [subtitles]
+source_changed = "De bron is tijdens de transcriptie gewijzigd. Transcribeer opnieuw."
+recognize_again = "Opnieuw herkennen"
+reuse_hint = "Compatibele resultaten worden hergebruikt; alleen ontbrekende audio wordt getranscribeerd."
+reused = "Compatibele herkenningsresultaten hergebruikt."
 title = "Ondertitels genereren"
 language = "Taal"
 auto = "Automatisch"
@@ -965,6 +969,7 @@ screen_zoom = "Selecteer de clip en verhoog Schaal in de Inspector om in te zoom
 screen_callout = "Sleep een titel uit Tekst naar de tijdlijn boven je clip als toelichting."
 
 [transcript]
+partial = "Een deel van de audio is nog niet getranscribeerd. Transcribeer om de hiaten te vullen."
 transcribe = "Transcriberen"
 # The search field's placeholder.
 find = "Zoeken"

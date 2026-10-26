@@ -516,6 +516,10 @@ dip_to_black = "Fondu au noir"
 dip_to_white = "Fondu au blanc"
 
 [subtitles]
+source_changed = "La source a changé pendant la transcription. Relancez la transcription."
+recognize_again = "Reconnaître à nouveau"
+reuse_hint = "Les résultats compatibles sont réutilisés ; seul l’audio manquant est transcrit."
+reused = "Résultats de reconnaissance compatibles réutilisés."
 title = "Générer des sous-titres"
 language = "Langue"
 auto = "Automatique"
@@ -973,6 +977,7 @@ screen_zoom = "Sélectionnez le plan, puis augmentez Échelle dans l'Inspecteur 
 screen_callout = "Faites glisser un titre de Texte sur la timeline au-dessus du plan pour en faire une bulle."
 
 [transcript]
+partial = "Une partie de l’audio n’a pas été transcrite. Transcrivez pour combler les lacunes."
 transcribe = "Transcrire"
 # The search field's placeholder.
 find = "Rechercher"

@@ -505,6 +505,10 @@ dip_to_black = "Toning via svart"
 dip_to_white = "Toning via hvitt"
 
 [subtitles]
+source_changed = "Kilden ble endret under transkriberingen. Transkriber på nytt."
+recognize_again = "Gjenkjenn på nytt"
+reuse_hint = "Kompatible resultater brukes om igjen; bare manglende lyd transkriberes."
+reused = "Kompatible gjenkjenningsresultater ble brukt om igjen."
 title = "Generer undertekster"
 language = "Språk"
 auto = "Automatisk"
@@ -950,6 +954,7 @@ screen_zoom = "Velg klippet, og øk Skala i Inspektør for å zoome inn på skri
 screen_callout = "Dra en tittel fra Tekst til tidslinjen over klippet som en forklaring."
 
 [transcript]
+partial = "Noe lyd er ikke transkribert. Transkriber for å fylle hullene."
 transcribe = "Transkriber"
 # The search field's placeholder.
 find = "Finn"

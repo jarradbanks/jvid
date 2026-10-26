@@ -523,6 +523,10 @@ dip_to_black = "Przejście przez czerń"
 dip_to_white = "Przejście przez biel"
 
 [subtitles]
+source_changed = "Źródło zmieniło się podczas transkrypcji. Wykonaj transkrypcję ponownie."
+recognize_again = "Rozpoznaj ponownie"
+reuse_hint = "Zgodne wyniki są używane ponownie; transkrybowany jest tylko brakujący dźwięk."
+reused = "Ponownie użyto zgodnych wyników rozpoznawania."
 title = "Generuj napisy"
 language = "Język"
 auto = "Automatycznie"
@@ -974,6 +978,7 @@ screen_zoom = "Zaznacz klip i zwiększ Skalę w Inspektorze, aby przybliżyć wp
 screen_callout = "Przeciągnij tytuł z karty Tekst na oś czasu nad klipem jako objaśnienie."
 
 [transcript]
+partial = "Część dźwięku nie została przetranskrybowana. Wykonaj transkrypcję, aby uzupełnić luki."
 transcribe = "Transkrybuj"
 # The search field's placeholder.
 find = "Znajdź"

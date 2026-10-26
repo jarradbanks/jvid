@@ -515,6 +515,10 @@ dip_to_black = "Fade para preto"
 dip_to_white = "Fade para branco"
 
 [subtitles]
+source_changed = "A fonte mudou durante a transcrição. Transcreva novamente."
+recognize_again = "Reconhecer novamente"
+reuse_hint = "Resultados compatíveis são reutilizados; apenas o áudio ausente é transcrito."
+reused = "Resultados de reconhecimento compatíveis reutilizados."
 title = "Gerar legendas"
 language = "Idioma"
 auto = "Automático"
@@ -966,6 +970,7 @@ screen_zoom = "Selecione o clipe e aumente Escala no Inspetor para aproximar o t
 screen_callout = "Arraste um título de Texto para a linha do tempo acima do clipe como destaque."
 
 [transcript]
+partial = "Parte do áudio não foi transcrita. Transcreva para preencher as lacunas."
 transcribe = "Transcrever"
 # The search field's placeholder.
 find = "Localizar"

@@ -512,6 +512,10 @@ dip_to_black = "Fundido a negro"
 dip_to_white = "Fundido a blanco"
 
 [subtitles]
+source_changed = "La fuente cambió durante la transcripción. Vuelve a transcribir."
+recognize_again = "Volver a reconocer"
+reuse_hint = "Se reutiliza el reconocimiento compatible; solo se transcribe el audio que falta."
+reused = "Se han reutilizado los resultados de reconocimiento compatibles."
 title = "Generar subtítulos"
 language = "Idioma"
 auto = "Automático"
@@ -964,6 +968,7 @@ screen_zoom = "Selecciona el clip y sube Escala en el Inspector para acercarte a
 screen_callout = "Arrastra un título de Texto a la línea de tiempo, encima del clip, como llamada."
 
 [transcript]
+partial = "Parte del audio no se ha transcrito. Transcribe para completar los huecos."
 transcribe = "Transcribir"
 # The search field's placeholder.
 find = "Buscar"

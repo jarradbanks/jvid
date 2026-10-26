@@ -111,12 +111,6 @@ pub fn prompt(code: &str) -> &'static str {
     LANGS.iter().find(|l| l.0 == code).unwrap_or(&LANGS[0]).1
 }
 
-/// Every prompt, for the transcript cache key: one made with another prompt, or none, may be
-/// missing fillers.
-pub fn prompts() -> impl Iterator<Item = &'static str> {
-    LANGS.iter().map(|l| l.1)
-}
-
 /// `s` with each run of one character as one: "ummm" is "um".
 fn squeeze(s: &str) -> String {
     let mut out = String::new();

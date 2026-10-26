@@ -514,6 +514,10 @@ dip_to_black = "Dissolvenza al nero"
 dip_to_white = "Dissolvenza al bianco"
 
 [subtitles]
+source_changed = "La sorgente è cambiata durante la trascrizione. Trascrivi di nuovo."
+recognize_again = "Riconosci di nuovo"
+reuse_hint = "I risultati compatibili vengono riutilizzati; si trascrive solo l’audio mancante."
+reused = "Risultati di riconoscimento compatibili riutilizzati."
 title = "Genera sottotitoli"
 language = "Lingua"
 auto = "Automatica"
@@ -962,6 +966,7 @@ screen_zoom = "Seleziona la clip, poi aumenta Scala nell'Inspector per ingrandir
 screen_callout = "Trascina un titolo da Testo sulla timeline sopra la clip come richiamo."
 
 [transcript]
+partial = "Parte dell’audio non è stata trascritta. Trascrivi per colmare le lacune."
 transcribe = "Trascrivi"
 # The search field's placeholder.
 find = "Trova"

@@ -505,6 +505,10 @@ dip_to_black = "Schwarzblende"
 dip_to_white = "Weißblende"
 
 [subtitles]
+source_changed = "Die Quelle wurde während der Transkription geändert. Transkribieren Sie erneut."
+recognize_again = "Erneut erkennen"
+reuse_hint = "Kompatible Ergebnisse werden wiederverwendet; nur fehlendes Audio wird transkribiert."
+reused = "Kompatible Erkennungsergebnisse wurden wiederverwendet."
 title = "Untertitel erstellen"
 language = "Sprache"
 auto = "Automatisch"
@@ -950,6 +954,7 @@ screen_zoom = "Wählen Sie den Clip aus und erhöhen Sie im Inspektor die Skalie
 screen_callout = "Ziehen Sie einen Titel aus Text als Hinweis über dem Clip auf die Timeline."
 
 [transcript]
+partial = "Ein Teil des Audios wurde noch nicht transkribiert. Transkribieren Sie, um die Lücken zu füllen."
 transcribe = "Transkribieren"
 # The search field's placeholder.
 find = "Suchen"

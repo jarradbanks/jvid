@@ -507,6 +507,10 @@ dip_to_black = "검정으로 물들이기"
 dip_to_white = "흰색으로 물들이기"
 
 [subtitles]
+source_changed = "변환 중에 소스가 변경되었습니다. 다시 변환하세요."
+recognize_again = "다시 인식"
+reuse_hint = "호환되는 인식 결과를 재사용하고 누락된 오디오만 변환합니다."
+reused = "호환되는 인식 결과를 재사용했습니다."
 title = "자막 생성"
 language = "언어"
 auto = "자동"
@@ -952,6 +956,7 @@ screen_zoom = "클립을 선택한 다음 인스펙터에서 스케일을 높여
 screen_callout = "텍스트에서 타이틀을 설명선으로 타임라인의 클립 위쪽에 드래그하세요."
 
 [transcript]
+partial = "일부 오디오가 아직 변환되지 않았습니다. 변환하여 누락된 부분을 채우세요."
 transcribe = "받아쓰기"
 # The search field's placeholder.
 find = "찾기"

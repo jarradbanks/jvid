@@ -1,7 +1,7 @@
 //! Generate Subtitles: transcribes the selected clips, or the audio between In and Out, and
 //! lays the words out as caption cues on a new subtitle track, as one undoable edit.
 //! The model downloads on first use; its progress and Cancel show in the dialog, and closing
-//! the dialog cancels whatever is running. The same dialog transcribes whole files for the
+//! the dialog cancels whatever is running. The same dialog transcribes source intervals for the
 //! Transcript panel ([`Subtitles::open_transcribe`]).
 
 use std::collections::HashSet;
@@ -17,6 +17,7 @@ use jvid_core::time::{FLICKS_PER_SECOND as S, Rate, Time};
 use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::audio::SAMPLE_RATE;
 use jvid_transcribe::models::{self, Model};
+use jvid_transcribe::store::{Request, Settings, Shared, merge_sources};
 use jvid_transcribe::{Error, Options, Source, Transcriber, Transcript, Whisper, Word};
 use suite_ui::i18n::{self, LANGUAGES};
 use suite_ui::theme;
@@ -333,15 +334,23 @@ fn in_out(seq: &Sequence) -> Option<(Time, Time)> {
 }
 
 /// What a job sends back.
+struct Prepared {
+    requests: Vec<Request>,
+    pending: Vec<Request>,
+    reused: bool,
+}
+
 enum Msg {
+    Prepared(Result<Prepared, Error>),
     Downloaded(Result<PathBuf, Error>),
     Loaded(Result<Arc<dyn Transcriber>, Error>),
-    /// The transcript of `Run::sources[i]`.
+    /// The transcript of `Run::pending[i]`.
     Transcribed(usize, Result<Transcript, Error>),
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Stage {
+    Preparing,
     Downloading,
     Loading,
     Transcribing,
@@ -354,7 +363,10 @@ struct Run {
     targets: Vec<Target>,
     /// Each source once: duplicated clips share a transcript, and the pool would drop a
     /// second identical job's result.
-    sources: Vec<Source>,
+    requests: Vec<Request>,
+    pending: Vec<Request>,
+    store: Shared,
+    reused: bool,
     done: Vec<Option<Transcript>>,
     stage: Stage,
     handles: Vec<Handle>,
@@ -382,13 +394,19 @@ impl Run {
 
     fn transcribe(&mut self, jobs: &Pool, engine: &Arc<dyn Transcriber>) {
         self.stage = Stage::Transcribing;
-        self.handles = (self.sources.iter().enumerate())
+        self.handles = (self.pending.iter().enumerate())
             .map(|(i, s)| {
                 let tx = self.tx.clone();
                 let done = move |r| {
                     let _ = tx.send(Msg::Transcribed(i, r));
                 };
-                jvid_transcribe::submit(jobs, engine.clone(), s.clone(), self.opts.clone(), done)
+                jvid_transcribe::submit(
+                    jobs,
+                    engine.clone(),
+                    s.decode_source(),
+                    self.opts.clone(),
+                    done,
+                )
             })
             .collect();
     }
@@ -399,15 +417,27 @@ impl Run {
         (self.stage != Stage::Loading).then(|| sum / self.handles.len().max(1) as f32)
     }
 
-    /// Every target's words as captions, once every source is transcribed.
-    fn cues(&self) -> Option<Vec<Cue>> {
+    fn transcripts(&self) -> Vec<(Source, Transcript)> {
+        let store = self.store.lock().unwrap();
+        self.requests
+            .iter()
+            .map(|r| (r.source.clone(), store.lookup(r).transcript))
+            .collect()
+    }
+
+    /// Caption layout and placement always derive from source words, including cache hits.
+    fn cues(&self) -> Vec<Cue> {
+        let transcripts = self.transcripts();
         let mut words = Vec::new();
         for t in &self.targets {
-            let i = self.sources.iter().position(|s| *s == t.source)?;
-            words.extend(t.place(&self.done[i].as_ref()?.words));
+            for (source, transcript) in &transcripts {
+                if source.path == t.source.path && source.nth == t.source.nth {
+                    words.extend(t.place(&transcript.words));
+                }
+            }
         }
         words.sort_by_key(|w| w.start);
-        Some(cues(&words))
+        cues(&words)
     }
 }
 
@@ -418,7 +448,7 @@ const FIELD: f32 = 220.0;
 pub enum Done {
     /// The subtitle track, to apply.
     Edit(Box<Command>),
-    /// [`Subtitles::open_transcribe`]'s sources, each with its transcript.
+    /// [`Subtitles::open_transcribe`]'s sources, each with its already cached transcript.
     Transcribed(Vec<(Source, Transcript)>),
 }
 
@@ -432,6 +462,10 @@ pub struct Subtitles {
     /// 0 is Fast, 1 Accurate.
     quality: usize,
     translate: bool,
+    /// Bypass compatible coverage for a deliberate new recognition pass.
+    force: bool,
+    pub(crate) store: Shared,
+    pub(crate) feedback: Option<String>,
     /// The models on disk, as of opening.
     downloaded: Vec<Model>,
     run: Option<Run>,
@@ -466,6 +500,7 @@ impl Subtitles {
     fn show_dialog(&mut self) {
         self.open = true;
         self.error = None;
+        self.force = false;
         let dir = models::dir();
         self.downloaded = (Model::ALL.into_iter())
             .filter(|m| dir.as_deref().is_some_and(|d| m.is_downloaded(d)))
@@ -501,58 +536,168 @@ impl Subtitles {
         }
     }
 
+    /// The spoken-word policy also used by Transcript. UI language only chooses Auto's
+    /// filler prompt; its exact text is part of compatibility, never a hidden cache assumption.
+    pub(crate) fn transcript_settings(&self) -> Settings {
+        self.settings(false)
+    }
+
+    fn settings(&self, translate: bool) -> Settings {
+        let language = self
+            .language
+            .checked_sub(1)
+            .map(|i| whisper_code(LANGUAGES[i]));
+        let prompt = (!translate).then(|| {
+            crate::transcript::fillers::prompt(language.unwrap_or(whisper_code(i18n::language())))
+                .to_owned()
+        });
+        let model = match (self.quality, translate) {
+            (0, _) => Model::Base,
+            (_, true) => Model::Small,
+            _ => Model::LargeV3Turbo,
+        };
+        Settings::new(
+            model,
+            Options {
+                language: language.map(str::to_owned),
+                initial_prompt: prompt,
+                translate,
+            },
+        )
+    }
+
     fn start(&mut self, project: &Project, selected: &HashSet<ClipId>) {
         let targets = match self.transcribe {
             Some(_) => Vec::new(),
             None => targets_with_sources(project, selected, false, &self.sources),
         };
-        let mut sources: Vec<Source> = self.transcribe.clone().unwrap_or_default();
-        for t in &targets {
-            if !sources.contains(&t.source) {
-                sources.push(t.source.clone());
-            }
-        }
+        let mut sources = self.transcribe.clone().unwrap_or_default();
+        sources.extend(targets.iter().map(|t| t.source.clone()));
+        let sources = merge_sources(sources);
+        let settings = self.settings(self.translate);
         let (tx, rx) = channel();
-        let language = (self.language.checked_sub(1)).map(|i| whisper_code(LANGUAGES[i]));
-        // Edit by Text keeps the fillers so Fillers can find them; Auto guesses the UI language's.
-        let fillers = (self.transcribe.as_ref()).map(|_| {
-            crate::transcript::fillers::prompt(language.unwrap_or(whisper_code(i18n::language())))
-        });
-        let mut run = Run {
-            model: self.model(),
-            opts: Options {
-                language: language.map(str::to_owned),
-                initial_prompt: fillers.map(str::to_owned),
-                translate: self.translate,
+        let store = self.store.clone();
+        let force = self.force;
+        let result = tx.clone();
+        let opts = settings.options.clone();
+        let job = self.jobs.get_or_insert_with(|| Pool::new(1)).submit(
+            format!("recognition:prepare:{sources:?}:{settings:?}:{force}"),
+            Priority::Interactive,
+            move |ctx| {
+                let prepared = (|| -> std::io::Result<_> {
+                    let paths: HashSet<_> = sources.iter().map(|s| &s.path).collect();
+                    for path in paths {
+                        let identity =
+                            jvid_transcribe::store::Store::identify(path, &|| ctx.is_cancelled())?;
+                        store.lock().unwrap().accept(identity)?;
+                    }
+                    let mut store = store.lock().unwrap();
+                    let requests: Vec<_> = sources
+                        .iter()
+                        .map(|s| store.request_known(s, &settings))
+                        .collect::<Result<_, _>>()?;
+                    let mut pending = Vec::new();
+                    let mut reused = false;
+                    for request in &requests {
+                        let found = store.lookup(request);
+                        reused |= !force
+                            && found
+                                .missing
+                                .iter()
+                                .map(|s| s.range.end - s.range.start)
+                                .sum::<i64>()
+                                < request.source.range.end - request.source.range.start;
+                        if force {
+                            pending.push(request.clone());
+                        } else {
+                            pending.extend(
+                                found
+                                    .missing
+                                    .into_iter()
+                                    .map(|s| request.with_range(s.range)),
+                            );
+                        }
+                    }
+                    Ok(Prepared {
+                        requests,
+                        pending,
+                        reused,
+                    })
+                })();
+                if !ctx.is_cancelled() {
+                    let _ = result.send(Msg::Prepared(
+                        prepared.map_err(|e| Error::Failed(e.to_string())),
+                    ));
+                }
             },
-            done: vec![None; sources.len()],
+        );
+        self.error = None;
+        let run = Run {
+            model: self.model(),
+            opts,
             targets,
-            sources,
-            stage: Stage::Loading,
-            handles: Vec::new(),
+            requests: Vec::new(),
+            pending: Vec::new(),
+            reused: false,
+            done: Vec::new(),
+            store: self.store.clone(),
+            stage: Stage::Preparing,
+            handles: vec![job],
             tx,
             rx,
         };
-        let jobs = self.jobs.get_or_insert_with(|| Pool::new(1));
-        self.error = None;
-        match (&self.engine, models::dir()) {
-            (Some((m, engine)), _) if *m == run.model => run.transcribe(jobs, engine),
-            (_, None) => return self.error = Some(tr!("subtitles.no_folder").into()),
-            (_, Some(dir)) if run.model.is_downloaded(&dir) => run.load(jobs, run.model.path(&dir)),
-            (_, Some(dir)) => {
-                run.stage = Stage::Downloading;
-                let tx = run.tx.clone();
-                let job = run.model.download(jobs, &dir, move |r| {
-                    let _ = tx.send(Msg::Downloaded(r));
-                });
-                run.handles = vec![job];
-            }
-        }
+
         self.run = Some(run);
+    }
+
+    fn finish(&mut self) -> Option<Done> {
+        let run = self.run.as_ref()?;
+        if run.stage != Stage::Transcribing || !run.done.iter().all(Option::is_some) {
+            return None;
+        }
+        if run
+            .requests
+            .iter()
+            .any(|r| !run.store.lock().unwrap().lookup(r).missing.is_empty())
+        {
+            self.error = Some(tr!("subtitles.source_changed").into());
+            self.run = None;
+            return None;
+        }
+        if run.reused {
+            self.feedback = Some(tr!("subtitles.reused").into());
+        }
+        if self.transcribe.is_some() {
+            let done = run.transcripts();
+            self.close();
+            Some(Done::Transcribed(done))
+        } else {
+            let cues = run.cues();
+            if cues.is_empty() {
+                self.error = Some(tr!("subtitles.no_speech").into());
+                self.run = None;
+                return None;
+            }
+            let [.., (_, style)] = Text::presets();
+            let name = tr!("app.subtitles").to_owned();
+            self.close();
+            Some(Done::Edit(Box::new(Command::ImportSubtitles {
+                name,
+                cues,
+                style,
+            })))
+        }
     }
 
     /// Moves the run on with what its jobs sent; the edit once every transcript is in.
     fn poll(&mut self) -> Option<Done> {
+        if self
+            .run
+            .as_ref()
+            .is_some_and(|r| r.stage == Stage::Transcribing && r.done.iter().all(Option::is_some))
+        {
+            return self.finish();
+        }
         let Self {
             run: Some(run),
             jobs: Some(jobs),
@@ -576,6 +721,30 @@ impl Subtitles {
                     }
                     return None;
                 }
+                Ok(Msg::Prepared(Ok(prepared))) => {
+                    run.requests = prepared.requests;
+                    run.pending = prepared.pending;
+                    run.reused = prepared.reused;
+                    run.done = vec![None; run.pending.len()];
+                    if run.pending.is_empty() {
+                        run.stage = Stage::Transcribing;
+                        return self.finish();
+                    }
+                    match (&self.engine, models::dir()) {
+                        (Some((m, engine)), _) if *m == run.model => run.transcribe(jobs, engine),
+                        (_, None) => break tr!("subtitles.no_folder").to_owned(),
+                        (_, Some(dir)) if run.model.is_downloaded(&dir) => {
+                            run.load(jobs, run.model.path(&dir))
+                        }
+                        (_, Some(dir)) => {
+                            run.stage = Stage::Downloading;
+                            let tx = run.tx.clone();
+                            run.handles = vec![run.model.download(jobs, &dir, move |r| {
+                                let _ = tx.send(Msg::Downloaded(r));
+                            })];
+                        }
+                    }
+                }
                 Ok(Msg::Downloaded(Ok(path))) => {
                     self.downloaded.push(run.model);
                     run.load(jobs, path);
@@ -585,26 +754,21 @@ impl Subtitles {
                     self.engine = Some((run.model, engine));
                 }
                 Ok(Msg::Transcribed(i, Ok(t))) => {
+                    let saved = run.store.lock().unwrap().insert(&run.pending[i], t.clone());
+                    if let Err(e) = saved {
+                        break self.failed(Error::Failed(e.to_string()));
+                    }
                     run.done[i] = Some(t);
-                    if self.transcribe.is_some() {
-                        if run.done.iter().all(Option::is_some) {
-                            let done = run.done.iter_mut().map(|t| t.take().unwrap_or_default());
-                            let done = run.sources.iter().cloned().zip(done).collect();
-                            self.close();
-                            return Some(Done::Transcribed(done));
-                        }
-                    } else if let Some(cues) = run.cues() {
-                        if cues.is_empty() {
-                            break tr!("subtitles.no_speech").to_owned();
-                        }
-                        let [.., (_, style)] = Text::presets();
-                        let name = tr!("app.subtitles").to_owned();
-                        self.close();
-                        let c = Command::ImportSubtitles { name, cues, style };
-                        return Some(Done::Edit(Box::new(c)));
+                    if run.done.iter().all(Option::is_some) {
+                        return self.finish();
                     }
                 }
-                Ok(Msg::Downloaded(Err(e)) | Msg::Loaded(Err(e)) | Msg::Transcribed(_, Err(e))) => {
+                Ok(
+                    Msg::Prepared(Err(e))
+                    | Msg::Downloaded(Err(e))
+                    | Msg::Loaded(Err(e))
+                    | Msg::Transcribed(_, Err(e)),
+                ) => {
                     break self.failed(e);
                 }
             }
@@ -725,12 +889,17 @@ impl Subtitles {
                             ui.end_row();
                         }
                     });
+                ui.add_space(space::S8);
+                ui.add(
+                    Checkbox::new(&mut self.force, tr!("subtitles.recognize_again")).state(idle),
+                );
+                ui.label(RichText::new(tr!("subtitles.reuse_hint")).color(color::ink_3()));
                 if let Some(run) = &self.run {
                     ui.add_space(space::S16);
                     let status = match run.stage {
                         Stage::Downloading => tr!("subtitles.downloading"),
                         Stage::Loading => tr!("subtitles.loading"),
-                        Stage::Transcribing => tr!("subtitles.transcribing"),
+                        Stage::Preparing | Stage::Transcribing => tr!("subtitles.transcribing"),
                     };
                     let progress = run.progress();
                     ui.horizontal(|ui| {
@@ -808,43 +977,20 @@ mod tests {
         cues.iter().map(|c| c.text.as_str()).collect()
     }
 
-    struct Silent;
-
-    impl Transcriber for Silent {
-        fn transcribe(
-            &self,
-            _: Vec<f32>,
-            _: &Options,
-            _: &jvid_jobs::Ctx,
-        ) -> Result<Transcript, Error> {
-            Ok(Transcript::default())
-        }
-    }
-
-    /// Transcribe for Edit by Text keeps the fillers, in the chosen language; subtitles don't.
     #[test]
-    fn transcribe_prompts_for_fillers_and_subtitles_do_not() {
-        let mut s = Subtitles {
-            engine: Some((Model::Base, Arc::new(Silent))),
-            ..Subtitles::default()
+    fn normal_subtitles_and_transcript_share_filler_preserving_policy() {
+        let s = Subtitles {
+            language: 1 + LANGUAGES.iter().position(|&l| l == "de").unwrap(),
+            ..Default::default()
         };
-        let source = Source {
-            path: PathBuf::from("missing.mp4"),
-            nth: 0,
-            range: 0..i64::MAX,
-        };
-        s.open_transcribe(vec![source]);
-        s.language = 1 + LANGUAGES.iter().position(|&l| l == "de").unwrap();
-        let none = HashSet::new();
-        s.start(&Project::default(), &none);
-        let prompt = s.run.as_ref().unwrap().opts.initial_prompt.clone();
+        let settings = s.transcript_settings();
         assert_eq!(
-            prompt.as_deref(),
+            settings.options.initial_prompt.as_deref(),
             Some(crate::transcript::fillers::prompt("de"))
         );
-        s.open();
-        s.start(&Project::default(), &none);
-        assert!(s.run.as_ref().unwrap().opts.initial_prompt.is_none());
+        assert_eq!(s.settings(false), settings);
+        assert_ne!(s.settings(true), settings);
+        assert!(s.settings(true).options.initial_prompt.is_none());
     }
 
     /// Acceptance: lines of at most 42 characters, at most two, at most about 7 s, breaking
@@ -1056,8 +1202,11 @@ pub(crate) mod test_support {
 
     pub(crate) fn two_streams(mic_first: bool) -> (Project, ClipId, ClipId) {
         let mut h = History::new(Project::default());
+        let dir = tempfile::tempdir().unwrap().keep();
+        let path = dir.join("two-streams.mkv");
+        std::fs::write(&path, b"two-stream stand-in").unwrap();
         h.apply(Command::Import(vec![(
-            PathBuf::from("/fake/two-streams.mkv"),
+            path,
             ProbeInfo {
                 duration: Time(6 * S),
                 width: Some(640),
@@ -1098,3 +1247,6 @@ pub(crate) mod test_support {
         (h.project().clone(), audio(1), audio(0))
     }
 }
+
+#[cfg(test)]
+mod reuse_tests;

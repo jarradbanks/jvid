@@ -231,6 +231,7 @@ impl App {
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
         app.preview.set_proxies(caches.proxies.clone());
         app.transcript.cache = crate::transcript::Cache::new(caches.transcripts.clone());
+        app.subtitles.store = app.transcript.cache.store.clone();
         app.timeline = Timeline::new(caches);
         app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
         app.theme_setting = settings.theme.clone();
@@ -1543,6 +1544,9 @@ impl eframe::App for App {
             top: 0,
             bottom: gutter,
         });
+        self.transcript
+            .cache
+            .set_settings(self.subtitles.transcript_settings());
         // Before the dock, so the Effects tab and Add Effect menu draw this frame's thumbnails.
         crate::effects::draw_thumbs(&ctx, &self.preview, self.bin.tab == 1);
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
@@ -1687,12 +1691,12 @@ impl eframe::App for App {
                         tracing::warn!("subtitles failed: {e}");
                     }
                 }
-                Some(Done::Transcribed(done)) => {
-                    for (source, t) in done {
-                        self.transcript.cache.insert(&source, t);
-                    }
-                }
+                // Both paths have already saved exact source coverage in the shared store.
+                Some(Done::Transcribed(done)) => drop(done),
                 None => {}
+            }
+            if let Some(message) = self.subtitles.feedback.take() {
+                self.toasts.push((message, now + TOAST_SECS));
             }
             let (language, input) = (&mut self.language, &mut self.input_device);
             let (theme, motion) = (&mut self.theme_setting, &mut self.reduce_motion);

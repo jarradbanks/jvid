@@ -514,6 +514,10 @@ dip_to_black = "Přechod přes černou"
 dip_to_white = "Přechod přes bílou"
 
 [subtitles]
+source_changed = "Zdroj se během přepisu změnil. Spusťte přepis znovu."
+recognize_again = "Rozpoznat znovu"
+reuse_hint = "Kompatibilní výsledky se použijí znovu; přepíše se jen chybějící zvuk."
+reused = "Kompatibilní výsledky rozpoznávání byly použity znovu."
 title = "Vytvořit titulky"
 language = "Jazyk"
 auto = "Automaticky"
@@ -967,6 +971,7 @@ screen_zoom = "Vyberte klip a v Inspektoru zvyšte Měřítko, abyste přiblíž
 screen_callout = "Přetáhněte titulek z karty Text na časovou osu nad klip jako popisek."
 
 [transcript]
+partial = "Část zvuku ještě nebyla přepsána. Spusťte přepis pro doplnění mezer."
 transcribe = "Přepsat"
 # The search field's placeholder.
 find = "Najít"

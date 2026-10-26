@@ -505,6 +505,10 @@ dip_to_black = "Toning till svart"
 dip_to_white = "Toning till vitt"
 
 [subtitles]
+source_changed = "Källan ändrades under transkriberingen. Transkribera igen."
+recognize_again = "Känn igen igen"
+reuse_hint = "Kompatibla resultat återanvänds; bara ljud som saknas transkriberas."
+reused = "Kompatibla igenkänningsresultat återanvändes."
 title = "Skapa undertexter"
 language = "Språk"
 auto = "Automatiskt"
@@ -950,6 +954,7 @@ screen_zoom = "Markera klippet och höj Skala i Inspektör för att zooma in på
 screen_callout = "Dra en titel från Text till tidslinjen ovanför klippet som en förklaring."
 
 [transcript]
+partial = "En del ljud har inte transkriberats. Transkribera för att fylla luckorna."
 transcribe = "Transkribera"
 # The search field's placeholder.
 find = "Sök"
