@@ -1,3 +1,13 @@
+Changes in 0.2.0
+
+- Wait for asynchronous bin fixture decoding before requiring idle UI
+- Update grouped transcript snapshots for copy and export controls
+- Update shortcut dialog snapshot for subtitle export action
+- Add transcript copy and UTF-8 text export
+- Reuse persistent recognition between subtitles and Transcript
+- feat(app): enable draggable dock tabs and layout reset (#482)
+- Add standalone subtitle SRT export (#485)
+
 Choose the download for your system:
 
 - Windows x86_64: **setup.exe** installs for your user with shortcuts and an uninstaller; **portable.zip** runs after extraction.
