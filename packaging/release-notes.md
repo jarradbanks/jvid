@@ -8,6 +8,8 @@ Required FFmpeg playback/export libraries and the integrated speech engine are i
 
 Keep the entire portable folder together. Portable settings and models live in `jvid-data` at the package root; macOS keeps it beside the .app. Preserve that folder when replacing program files. See the [installation and packaging guide](https://github.com/jarradbanks/jvid/blob/main/docs/packaging.md) for paths, upgrade instructions, supported systems, source/licensing details and validation limits.
 
-Verify downloads using SHA256SUMS.txt. Generated source bundles, a source manifest and reconstruction instructions accompany the GPL runtime distribution.
+Download the app packages above to install jvid. The separate `sources-*.json`, `.tar.gz.partNNN`, source manifest and reconstruction files provide corresponding source for review/rebuilding; they are not app installers. Verify downloaded files using `SHA256SUMS.txt`.
 
-This is a draft until the maintainer records clean-machine validation and completes signing/notarization and the source review.
+Release candidates are tested before merge; the final main tag build is published automatically after the maintainer approves the protected release job.
+
+Platform acceptance and signing/notarization status are documented in the installation and packaging guide.
