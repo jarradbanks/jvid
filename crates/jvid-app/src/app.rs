@@ -874,6 +874,30 @@ impl App {
         }
     }
 
+    /// Saves the visible transcript text without touching project state or rendering.
+    fn export_transcript(&mut self, text: &str) {
+        let Some(path) = FileDialog::new()
+            .set_title(tr!("transcript.export_text"))
+            .add_filter(tr!("transcript.text_filter"), &["txt"])
+            .set_file_name(format!("{}-transcript.txt", self.name()))
+            .save_file()
+        else {
+            return;
+        };
+        if let Err(error) = crate::transcript::text::export(
+            &path,
+            text,
+            self.history.project(),
+            self.path.as_deref(),
+        ) {
+            self.error(tr!(
+                "app.export_failed",
+                path = path.display(),
+                error = error
+            ));
+        }
+    }
+
     /// Saves the timeline playhead as a full-resolution Program PNG.
     fn export_frame(&mut self) {
         let Some(path) = FileDialog::new()
@@ -1457,6 +1481,16 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(ViewportCommand::Close);
         }
 
+        if !self.closing
+            && !modal_owned_input
+            && self
+                .dock
+                .find_active_focused()
+                .is_some_and(|(_, t)| *t == Tab::Transcript)
+        {
+            self.transcript
+                .copy_shortcut(&ctx, self.history.project(), self.timeline.selected());
+        }
         let timeline = self
             .dock
             .find_active_focused()
@@ -1589,6 +1623,9 @@ impl eframe::App for App {
             );
             if transcript.close {
                 self.close_panel(Tab::Transcript);
+            }
+            if let Some(text) = transcript.export {
+                self.export_transcript(&text);
             }
             if let Some(sources) = transcript.transcribe {
                 self.subtitles.open_transcribe(sources);

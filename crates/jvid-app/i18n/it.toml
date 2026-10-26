@@ -962,6 +962,13 @@ screen_zoom = "Seleziona la clip, poi aumenta Scala nell'Inspector per ingrandir
 screen_callout = "Trascina un titolo da Testo sulla timeline sopra la clip come richiamo."
 
 [transcript]
+copy_all = "Copia tutto"
+export_text = "Esporta trascrizione…"
+text_filter = "File di testo"
+scope = "Ambito: {scope}"
+partial = "Parte dell’audio non è ancora stata trascritta."
+txt_required = "Scegli un nome di file che termini con .txt."
+protected_destination = "Scegli un altro file; questa destinazione è un progetto o un contenuto sorgente."
 transcribe = "Trascrivi"
 # The search field's placeholder.
 find = "Trova"

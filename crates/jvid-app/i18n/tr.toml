@@ -953,6 +953,13 @@ screen_zoom = "Klibi seçin ve yazılanı yakınlaştırmak için Denetçi'de Ö
 screen_callout = "Metin'den bir başlığı açıklama olarak klibin üstüne, Zaman Çizelgesi'ne sürükleyin."
 
 [transcript]
+copy_all = "Tümünü Kopyala"
+export_text = "Dökümü Dışa Aktar…"
+text_filter = "Metin dosyaları"
+scope = "Kapsam: {scope}"
+partial = "Sesin bir bölümü henüz yazıya dökülmedi."
+txt_required = ".txt ile biten bir dosya adı seçin."
+protected_destination = "Başka bir dosya seçin; bu hedef bir proje veya kaynak medyadır."
 transcribe = "Yazıya Dök"
 # The search field's placeholder.
 find = "Bul"

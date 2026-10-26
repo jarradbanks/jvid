@@ -962,6 +962,13 @@ screen_zoom = "Seleccioneu el clip i augmenteu Escala a l'Inspector per apropar-
 screen_callout = "Arrossegueu un títol de Text a la línia de temps sobre el clip com a anotació."
 
 [transcript]
+copy_all = "Copia-ho tot"
+export_text = "Exporta la transcripció…"
+text_filter = "Fitxers de text"
+scope = "Abast: {scope}"
+partial = "Una part de l’àudio encara no s’ha transcrit."
+txt_required = "Tria un nom de fitxer acabat en .txt."
+protected_destination = "Tria un altre fitxer; aquesta destinació és un projecte o un mitjà d’origen."
 transcribe = "Transcriu"
 # The search field's placeholder.
 find = "Cerca"

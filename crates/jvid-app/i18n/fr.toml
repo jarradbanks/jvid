@@ -973,6 +973,13 @@ screen_zoom = "Sélectionnez le plan, puis augmentez Échelle dans l'Inspecteur 
 screen_callout = "Faites glisser un titre de Texte sur la timeline au-dessus du plan pour en faire une bulle."
 
 [transcript]
+copy_all = "Tout copier"
+export_text = "Exporter la transcription…"
+text_filter = "Fichiers texte"
+scope = "Portée : {scope}"
+partial = "Une partie de l’audio n’a pas encore été transcrite."
+txt_required = "Choisissez un nom de fichier se terminant par .txt."
+protected_destination = "Choisissez un autre fichier ; cette destination est un projet ou un média source."
 transcribe = "Transcrire"
 # The search field's placeholder.
 find = "Rechercher"

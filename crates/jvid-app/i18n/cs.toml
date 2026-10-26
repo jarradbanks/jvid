@@ -967,6 +967,13 @@ screen_zoom = "Vyberte klip a v Inspektoru zvyšte Měřítko, abyste přiblíž
 screen_callout = "Přetáhněte titulek z karty Text na časovou osu nad klip jako popisek."
 
 [transcript]
+copy_all = "Kopírovat vše"
+export_text = "Exportovat přepis…"
+text_filter = "Textové soubory"
+scope = "Rozsah: {scope}"
+partial = "Část zvuku ještě nebyla přepsána."
+txt_required = "Zvolte název souboru končící na .txt."
+protected_destination = "Zvolte jiný soubor; tento cíl je projekt nebo zdrojové médium."
 transcribe = "Přepsat"
 # The search field's placeholder.
 find = "Najít"

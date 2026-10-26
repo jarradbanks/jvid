@@ -952,6 +952,13 @@ screen_zoom = "クリップを選択し、インスペクタの「スケール�
 screen_callout = "「テキスト」のタイトルを吹き出しとして、タイムラインのクリップの上にドラッグします。"
 
 [transcript]
+copy_all = "すべてコピー"
+export_text = "文字起こしを書き出す…"
+text_filter = "テキストファイル"
+scope = "範囲: {scope}"
+partial = "まだ文字起こしされていない音声があります。"
+txt_required = "ファイル名の末尾を .txt にしてください。"
+protected_destination = "別のファイルを選択してください。この保存先はプロジェクトまたは元のメディアです。"
 transcribe = "文字起こし"
 # The search field's placeholder.
 find = "検索"

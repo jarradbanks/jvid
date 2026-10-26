@@ -952,6 +952,13 @@ screen_zoom = "클립을 선택한 다음 인스펙터에서 스케일을 높여
 screen_callout = "텍스트에서 타이틀을 설명선으로 타임라인의 클립 위쪽에 드래그하세요."
 
 [transcript]
+copy_all = "모두 복사"
+export_text = "대본 내보내기…"
+text_filter = "텍스트 파일"
+scope = "범위: {scope}"
+partial = "아직 대본으로 변환되지 않은 오디오가 있습니다."
+txt_required = ".txt로 끝나는 파일 이름을 선택하세요."
+protected_destination = "다른 파일을 선택하세요. 이 대상은 프로젝트 또는 원본 미디어입니다."
 transcribe = "받아쓰기"
 # The search field's placeholder.
 find = "찾기"
