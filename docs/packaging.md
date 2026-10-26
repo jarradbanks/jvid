@@ -204,18 +204,49 @@ fails assembly. Their full corresponding source and build scripts must
 be reviewed before public distribution. Native package-manager provenance and
 upstream links alone are not treated as the completed corresponding-source offer.
 
-Tagged builds can create a **draft** only when `JVID_RELEASE_ENABLED=true` is
-explicitly configured and the protected `release` environment allows it. The job
-requires `JVID_CORRESPONDING_SOURCE_URL` (HTTPS) and
-`JVID_CORRESPONDING_SOURCE_SHA256`, downloads that reviewed complete source archive,
-checks its hash, and includes it as `jvid-{version}-corresponding-source.tar.gz`.
-That archive must cover jvid (including vendored Rust/native code), the exact
-FFmpeg runtime and all bundled dependencies, patches, and their build/install
-scripts. Preparing/reviewing the archive and maintaining its availability are
-release-owner tasks; unreviewed CI candidates are not approved public releases.
-Final signatures and notarization must precede updater metadata and checksums.
-The draft release must remain a draft until the validation checklist below is
-recorded. This work does not merge PRs or publish a release.
+Package generates corresponding-source bundles alongside its native packages:
+
+- The exact Git checkout and locked Cargo sources, including embedded native crate
+  code, assets, build scripts and a working vendor configuration. Cargo metadata is
+  verified offline with an empty Cargo home.
+- Linux's exact recorded Debian source packages, original archives, Debian patches
+  and build recipes, verified against authenticated APT metadata and `.dsc` checksums.
+- macOS's retained Homebrew recipes and receipts, source archives/Git revisions,
+  resource inputs, patches and build support.
+- Windows's pinned FFmpeg checkout, BtbN dependency source inputs, patches and build
+  recipes, with immutable revision/checksum provenance.
+
+The `complete release source contract` job requires all four source bundles at the
+same commit/tree and version as its five native assets. It verifies every archive
+part and checks each source bundle's native package hashes before assembling the
+`release-candidate` artifact. Missing providers, wrong versions/commits, missing or
+changed parts and altered native package bytes fail before release signing.
+
+Each bundle has `jvid-VERSION-sources-BUNDLE.json` plus ordered
+`.tar.gz.partNNN` files, each at most 1 GiB, so large upstream source caches fit
+GitHub's per-asset limit. `jvid-VERSION-source-manifest.json` records the complete
+source/native relationship. `SOURCE-README.txt` and the standalone standard-library
+`reassemble_sources.py` explain reconstruction. For example, with the Rust bundle
+manifest and all its parts in one folder:
+
+```sh
+python reassemble_sources.py jvid-0.1.0-sources-rust.json workspace-sources.tar.gz
+```
+
+The helper verifies every part and the combined archive hash and refuses to overwrite
+an existing output. Extract the resulting tarball with an archive utility. Provider
+archives remain intact with their reconstruction/build recipes. Toolchains and OS
+SDKs described by those recipes remain external build prerequisites.
+
+Tagged builds create a **draft** only when `JVID_RELEASE_ENABLED=true` is configured
+and the protected `release` environment allows it. The job downloads the verified
+candidate, rechecks its source index/native hashes, then signs updater metadata and
+attaches native/source assets and final checksums. No external corresponding-source
+URL/checksum variables or separate hosting are required. PR/manual runs produce
+candidate artifacts and never create releases. Source completeness and platform
+acceptance still require maintainer review before publishing. Final signing and
+notarization must precede metadata/checksums; keep drafts unpublished until the
+validation checklist below is recorded.
 
 ## Verification and remaining platform acceptance
 

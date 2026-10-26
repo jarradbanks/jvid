@@ -2,5 +2,1243 @@
   "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-25-13-00/ffmpeg-n8.1.3-24-g92611900bb-win64-gpl-shared-8.1.zip",
   "sha256": "7416150e7dbab588c54e8aa38d4fa2f93adcfd8d0498a88c829e4ea236e442f5",
   "build_scripts_commit": "937868360a21d711ec94a33f5591d345ad9b7754",
-  "policy": "GPL shared; x264 and x265 required. Not a nonfree build."
+  "policy": "GPL shared; x264 and x265 required. Not a nonfree build.",
+  "source": {
+    "ffmpeg": {
+      "revision": "92611900bb112123e9bf997fdcc2d78e4c4922fc",
+      "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/92611900bb112123e9bf997fdcc2d78e4c4922fc",
+      "sha256": "12c02b1eaf52ec310acae385e76810f4bb71bacc21cacc01d6d9e95ac3b83bbb"
+    },
+    "build_scripts": {
+      "url": "https://codeload.github.com/BtbN/FFmpeg-Builds/tar.gz/937868360a21d711ec94a33f5591d345ad9b7754",
+      "sha256": "9ee4b55c6bf1ea2f9ee50a63bac8887532117ce9f7e7b0e2842a533b2d5f046a"
+    },
+    "repository": "BtbN/FFmpeg-Builds",
+    "repository_id": 292087234,
+    "run_id": 40192150700,
+    "run_attempt": 1,
+    "workflow": ".github/workflows/build.yml",
+    "event": "schedule",
+    "target": "win64",
+    "variant": "gpl-shared",
+    "addins": [
+      "8.1"
+    ],
+    "build_job": {
+      "id": 121168651641,
+      "name": "Build ffmpeg (win64, gpl-shared 8.1)"
+    },
+    "variant_job": {
+      "id": 121166259282,
+      "name": "Build target-variant image (ubuntu-latest, win64, gpl-shared 8.1)"
+    },
+    "cache": {
+      "id": 12598108870,
+      "name": "download-cache",
+      "size_in_bytes": 2210375355,
+      "digest": "sha256:708e2fabd41f1f5a5c3ee6d0c1815fb1008957c2ec68d119b098e3363e9ecb23"
+    },
+    "recipe_audit": {
+      "method": "Pinned scripts sourced with util/vars.sh win64 gpl-shared 8.1 and util/dl_functions.sh; ffbuild_enabled and ffbuild_dockerdl evaluated in isolated subshells, never the download/build functions. Cache names use sha256 of ffbuild_dockerdl output plus newline, as generate.sh does. Entire cache is retained, including superset recipes.",
+      "recipes": [
+        {
+          "recipe": "scripts.d/10-mingw-std-threads.sh",
+          "enabled": true,
+          "download": "10-mingw-std-threads_f6fe5dc5a067e90cd8b37a748b33962ac2eb09f3b486b287265803070dbf02d2.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/meganz/mingw-std-threads.git",
+            "COMMIT": "c931bac289dd431f1dd30fc4a5d1a7be36668073"
+          }
+        },
+        {
+          "recipe": "scripts.d/10-mingw.sh",
+          "enabled": true,
+          "download": "10-mingw_4a5947515b3202347fc7a8634b92a4da4c0981c56f574cc19d1b5ae025802126.tar.xz",
+          "source_refs": {
+            "REPO": "https://git.code.sf.net/p/mingw-w64/mingw-w64.git",
+            "COMMIT": "57b595039040eaa15bece85b7cc71d952281b269"
+          }
+        },
+        {
+          "recipe": "scripts.d/10-xorg-macros.sh",
+          "enabled": false,
+          "download": "10-xorg-macros_4cc4d5b80fc71eb608dd47d9a2e05d5d724e1d7f93cb06a56141d73e90108378.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/util/macros.git",
+            "COMMIT": "ea1e15a4909ac8b03b2c5a08ac3810b385985157"
+          }
+        },
+        {
+          "recipe": "scripts.d/15-base.sh",
+          "enabled": true,
+          "download": null
+        },
+        {
+          "recipe": "scripts.d/20-libiconv.sh",
+          "enabled": true,
+          "download": "20-libiconv_d305d67ced0587cd182ccb111e5b58aa20270faf665afb5444c0fbaed0762844.tar.xz",
+          "source_refs": {
+            "REPO": "https://git.savannah.gnu.org/git/libiconv.git",
+            "COMMIT": "1df3087ba8110c7f3ed3eb5f8869b814dbbe00b0",
+            "REPO2": "https://git.savannah.gnu.org/git/gnulib.git",
+            "COMMIT2": "eb72eb6f75f5621c5d648acd11467fd124584617"
+          }
+        },
+        {
+          "recipe": "scripts.d/20-zlib.sh",
+          "enabled": true,
+          "download": "20-zlib_bf2e5201ff9a94837b6910b9c13a9cdd9d2d5934f12ac9f32eda1538d1fcde49.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/madler/zlib.git",
+            "COMMIT": "767c4c947852e143f582c85f14cf573411df1b35"
+          }
+        },
+        {
+          "recipe": "scripts.d/25-fftw3.sh",
+          "enabled": true,
+          "download": "25-fftw3_f590d55efb2139d10bea09f7f3542f648290d35fc2ecb3122d6896bf2af049e3.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/FFTW/fftw3.git",
+            "COMMIT": "93ed4c786934aec9946f8dda4b4e3eb08f8be41c"
+          }
+        },
+        {
+          "recipe": "scripts.d/25-fribidi.sh",
+          "enabled": true,
+          "download": "25-fribidi_a9c156a32e2270c78ca34f8bfd98b17b8669e2d809cc9a9c5f6d1c063c644f1e.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/fribidi/fribidi.git",
+            "COMMIT": "4c914a92e94a9fe4f30ae83a1130099841566448"
+          }
+        },
+        {
+          "recipe": "scripts.d/25-gmp.sh",
+          "enabled": true,
+          "download": "25-gmp_db2c1ce62ef8c1b88dcc4d27b07bfb6e847e740125923386ccf9967cd05dc93f.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/BtbN/gmplib.git",
+            "COMMIT": "763b40df71c0f4d5f5d7b33dc55038c8c9377ecf"
+          }
+        },
+        {
+          "recipe": "scripts.d/25-libogg.sh",
+          "enabled": true,
+          "download": "25-libogg_bdea5ee518d129340be457dcc11c2cef63053ac3c827e71311caff1dd3c43339.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/xiph/ogg.git",
+            "COMMIT": "06a5e0262cdc28aa4ae6797627a783b5010440f0"
+          }
+        },
+        {
+          "recipe": "scripts.d/25-libpng.sh",
+          "enabled": true,
+          "download": "25-libpng_b948a48a853c9c7e1727e7244e4f21554dae18b83ce7f00e8a5421c0e907b73b.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/glennrp/libpng.git",
+            "COMMIT": "964b4135949703b705fc760fc3fb546b86e5ab47"
+          }
+        },
+        {
+          "recipe": "scripts.d/25-libxml2.sh",
+          "enabled": true,
+          "download": "25-libxml2_dddeb5d5d186abb11e5f3a0c2d05938fcdb6348804e56c03a7f06263620cdc83.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/GNOME/libxml2.git",
+            "COMMIT": "91586dc6742ab335682235120363f6e126eea5e2"
+          }
+        },
+        {
+          "recipe": "scripts.d/25-openssl.sh",
+          "enabled": true,
+          "download": "25-openssl_6f695916f5dbd6cd60d7719032826032a028d9b83164ebea7a13c72254f690a5.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/openssl/openssl.git",
+            "COMMIT": "openssl-3.6.4"
+          }
+        },
+        {
+          "recipe": "scripts.d/25-xz.sh",
+          "enabled": true,
+          "download": "25-xz_b47aea19d87bc74ee9a1ba179e240b0c2998eed272c980ba9065827d8cfb0276.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/tukaani-project/xz.git",
+            "COMMIT": "3b1efb04d17c3a9ef7f473d73af13f1531428ffe"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-brotli.sh",
+          "enabled": true,
+          "download": "45-brotli_5b1766c0a935049ea5bf0b54743ec092ee5bf45fd169a8e1bab2b0263b676105.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/google/brotli.git",
+            "COMMIT": "a3abcbee0d945e51dddeec81e647ffe0cde182c2"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-lcms2.sh",
+          "enabled": true,
+          "download": "45-lcms2_b9d421bd54de499208c092b61240854de0e2d9f0c3080c61d533026fa237d379.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/mm2/Little-CMS.git",
+            "COMMIT": "35cef8775e0ab46f0dda0b46aae1e69d27524432"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-libffi.sh",
+          "enabled": true,
+          "download": "45-libffi_4926a5ddb533e7af1ceb6847462394f09f68adb6ad0e7ec5408d79e5ab3fe73a.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/libffi/libffi.git",
+            "COMMIT": "bc553867367246d140cd156f060bd0409f57f157"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-libsamplerate.sh",
+          "enabled": true,
+          "download": "45-libsamplerate_0810498d6a2fa7146ea7d224b33501c0e4ea37740e12902f1ffa9ab432f4213c.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/libsndfile/libsamplerate.git",
+            "COMMIT": "0844c208f683527c08ea8a80acc13b398aa9c8bf"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-libudfread.sh",
+          "enabled": true,
+          "download": "45-libudfread_fd3762aa44b177492e9294237da9af64f7c2a22b97658e6e2a5395d1ae3a13c0.tar.xz",
+          "source_refs": {
+            "REPO": "https://code.videolan.org/videolan/libudfread.git",
+            "COMMIT": "b0bc6957e7e07d5f35391f210596d9eb71cffdd9"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-libunibreak.sh",
+          "enabled": true,
+          "download": "45-libunibreak_e861a261ce25cfd0ba5db1e70cbdc0c0eb8ea42a4e1bb3443c928e9604315d37.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/adah1972/libunibreak.git",
+            "COMMIT": "28a2756b864c343f438cd22537d49d394d4666a5"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-libvorbis.sh",
+          "enabled": true,
+          "download": "45-libvorbis_0ab43e5711b2585b0c19dd71023f5852d755c633bda0215caad53dc63c62a644.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/xiph/vorbis.git",
+            "COMMIT": "1b75110b5a2754ba1931d82dd83cb822b266a21d"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-opencl.sh",
+          "enabled": true,
+          "download": "45-opencl_060b32b588efb8a3dfd71f4ff90e2247d753cd22ecf2713cf7ad2814ef23c71a.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/KhronosGroup/OpenCL-Headers.git",
+            "COMMIT": "e6060189f4ebe8b52d885c37af71b9a50c272154",
+            "REPO2": "https://github.com/KhronosGroup/OpenCL-ICD-Loader.git",
+            "COMMIT2": "5192c84f8059e5f703e5452929b613f9487f6e4c"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-pcre2.sh",
+          "enabled": true,
+          "download": "45-pcre2_8f18f3d355cedfce208fb5a70fbe344e39dc7f54fc1825128dc862c6d97be0e7.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/PCRE2Project/pcre2.git",
+            "COMMIT": "09eb19dc1102b34e7557408f33318364cb97d2b0"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-pixman.sh",
+          "enabled": true,
+          "download": "45-pixman_ffb8f7552f1012347d02eb8fe976cbc9c3bc79e42df005f8c7389b8379ce581c.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/pixman/pixman.git",
+            "COMMIT": "96c04d1b87934dc4b9396197a2dff737698ab310"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-pulseaudio.sh",
+          "enabled": false,
+          "download": "45-pulseaudio_75fc5468c2f6f4d4b273e1e1ee3e15bfeca5d31f131e21e4724c56b5484089c9.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/pulseaudio/pulseaudio.git",
+            "COMMIT": "77d25a1e613095bdf87a1d13b65e7c330565077a"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-vmaf.sh",
+          "enabled": true,
+          "download": "45-vmaf_aaf0bdf34f8f3d15cc4ef5b243507514c911ea8730cd37a98b2f8a3ecf123af7.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/Netflix/vmaf.git",
+            "COMMIT": "86da14d0306a138fd3f01319860b905169746516"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-xxhash.sh",
+          "enabled": true,
+          "download": "45-xxhash_90443f50c5c918c094cb124be955f12ad18dc2724f27908d13c1a37ac35a3a60.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/Cyan4973/xxHash.git",
+            "COMMIT": "680bf463fa1ca0461b9a7c2dab7556e1f54cf4cf"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-zstd.sh",
+          "enabled": true,
+          "download": "45-zstd_9f04325d227f92889df5ecc6912624c2e8a1dc2fb507377b8ba1d3e1f293c937.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/facebook/zstd.git",
+            "COMMIT": "01b7154f1172432f8abe9b3bb9909e14a1176b7d"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-amf.sh",
+          "enabled": true,
+          "download": "50-amf_7c25b9629d2f3a45b07d6701c869180793da062cf1cedbda5d281768afdb6cf0.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git",
+            "COMMIT": "6277e353fd625121a8f627b1d0540323ef372a49"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-aom.sh",
+          "enabled": true,
+          "download": "50-aom_354b34b41392cdc88ea61b139b54314d146a8b324ed77c148ece5418cffd761b.tar.xz",
+          "source_refs": {
+            "REPO": "https://aomedia.googlesource.com/aom",
+            "COMMIT": "b4ce2cd097b00921b0327bfb5f07b5f8361ade99"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-avisynth.sh",
+          "enabled": true,
+          "download": "50-avisynth_8ab1bb9093ff4aa59410b5463256de23838ef94867b7cc6a3a525892fddc9b85.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/AviSynth/AviSynthPlus.git",
+            "COMMIT": "5c82777b374bdef16e13007a11e77d735ac1e4eb"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-chromaprint.sh",
+          "enabled": true,
+          "download": "50-chromaprint_fd1913f99597fe11aa0a070aaaee173d271d06a2578bd240a1e6f9d7e5d9e344.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/acoustid/chromaprint.git",
+            "COMMIT": "aed8eba2202dd9d7b3b0a56c77904cc805490d72"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-dav1d.sh",
+          "enabled": true,
+          "download": "50-dav1d_289ebd1742c2ee56189cd4064c2a059c9289918f8a99c32140e72aa47d2ab690.tar.xz",
+          "source_refs": {
+            "REPO": "https://code.videolan.org/videolan/dav1d.git",
+            "COMMIT": "9711965b60bb692ae24004659acf61f5c7d9ed61"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-davs2.sh",
+          "enabled": true,
+          "download": "50-davs2_a2d3a5d05dbd810e7a33f41ca77f70f1775ab8318ffe3e1b365105e8ad813d7e.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/pkuvcl/davs2.git",
+            "COMMIT": "b41cf117452e2d73d827f02d3e30aa20f1c721ac"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-fdk-aac.sh",
+          "enabled": false,
+          "download": "50-fdk-aac_c919f9aa670966a01b7561c8677a4ad8d7c4db34fd3a954ed72ac873053639b0.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/mstorsjo/fdk-aac.git",
+            "COMMIT": "7c83d08002332b2730c845eec3497e6bf585dd28"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-ffnvcodec.sh",
+          "enabled": true,
+          "download": "50-ffnvcodec_ef2a38b483abf36f56dfe74a3ab3909ef01360a01619123b6a4cfac4eece7e28.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/FFmpeg/nv-codec-headers.git",
+            "COMMIT": "eddcea9e27f6b772057c9b3f87de2cc1737faffc",
+            "REPO2": "https://github.com/FFmpeg/nv-codec-headers.git",
+            "COMMIT2": "ced4f8eba3ba5dd431932cba17928f0dffdaeb2b",
+            "REPO3": "https://github.com/FFmpeg/nv-codec-headers.git",
+            "COMMIT3": "833faee5f7b8d3f56444347c587f4aed11ee213f"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-frei0r.sh",
+          "enabled": true,
+          "download": "50-frei0r_55b6f225efa82d03fca598c78033acf1831f46a37ae8f66567882818b520d1fc.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/dyne/frei0r.git",
+            "COMMIT": "4c95b2a02b2d03c71d5f6d7980d16c99acfd5a5f"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-gme.sh",
+          "enabled": true,
+          "download": "50-gme_a777e130690856e910357309c2a2ece4423a149328c5a5780012b7d4ad3641ff.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/libgme/game-music-emu.git",
+            "COMMIT": "f68963b1de0633149b05732113d3c3113c6f63a1"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-kvazaar.sh",
+          "enabled": true,
+          "download": "50-kvazaar_da165ff1fadcc81a1f9d7a5f3d96e8a4e14f630022b723e710efe6bbe54d3d52.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/ultravideo/kvazaar.git",
+            "COMMIT": "2b06691bb5844404c0e703f12a5d7b0fee914ec7"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-lcevcdec.sh",
+          "enabled": true,
+          "download": "50-lcevcdec_9610d27cbf57b4db022177a4e8df5b12077765c4e14519ffa2047d330c2b139e.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/v-novaltd/LCEVCdec.git",
+            "COMMIT": "17804ac54db8fbb42717f3275b1e73f3c0b067d3"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libaribb24.sh",
+          "enabled": true,
+          "download": "50-libaribb24_3dd74ffb861f7ef9133dab074b9845408d84ebc49db9aee5d91829efba6d52ce.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/nkoriyama/aribb24.git",
+            "COMMIT": "5e9be272f96e00f15a2f3c5f8ba7e124862aec38"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libaribcaption.sh",
+          "enabled": true,
+          "download": "50-libaribcaption_8315a724d2e43047c02fb15f99a6decc2824fd4abd55c795ca1063dca443bf8e.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/xqq/libaribcaption.git",
+            "COMMIT": "c64c23b8905ba514b87c9789269e9f66f949ffe0"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libass.sh",
+          "enabled": true,
+          "download": "50-libass_8d32f6ca9b508226966e8a676c7e47ed5a6ad66bd2caab05a6738c80d45feaab.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/libass/libass.git",
+            "COMMIT": "f61db567e6593df3470e91594bcd4ad2d0473aff"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libbluray.sh",
+          "enabled": true,
+          "download": "50-libbluray_cbdd227c469333ec53b78a1b5c8b26cb3db25c331d9052740a38136bd96b13b0.tar.xz",
+          "source_refs": {
+            "REPO": "https://code.videolan.org/videolan/libbluray.git",
+            "COMMIT": "a24f4fad4d62893de647abc8671397747b2359dd"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libmp3lame.sh",
+          "enabled": true,
+          "download": "50-libmp3lame_53b8bea5c8c8e8f4284a83912b2208082e5f7e0abce7f205c02dfea85bc13dd3.tar.xz",
+          "source_refs": {
+            "REPO": "https://svn.code.sf.net/p/lame/svn/trunk/lame",
+            "REV": "6835"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libopus.sh",
+          "enabled": true,
+          "download": "50-libopus_a188c018d9bc2b808f76091aaf419e1c910d45c8e477f131ff5c25cd614b4252.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/xiph/opus.git",
+            "COMMIT": "503d81b138d76621aae4b12786e90de48aa8db3a"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libplacebo.sh",
+          "enabled": true,
+          "download": "50-libplacebo_b1173e45f6ca17988eb02814accda180095e8d85a5c1eab7391ec1c6c331f17a.tar.xz",
+          "source_refs": {
+            "REPO": "https://code.videolan.org/videolan/libplacebo.git",
+            "COMMIT": "1937beef3a2f508266c68efea1491e3fc4600e04"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libssh.sh",
+          "enabled": true,
+          "download": "50-libssh_ac0a192544cbf9bc9aaf242e5f5ad0fbb279e56d4acfca69960d626fa8f480c9.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.com/libssh/libssh-mirror.git",
+            "COMMIT": "76e0a8639e61436c28d877586f65a7707edc6ee5"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libtheora.sh",
+          "enabled": true,
+          "download": "50-libtheora_c5b1505081f2493a61c94a64ef8eef6de9b851447fab834bd5f9b6e35ee1d008.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/xiph/theora.git",
+            "COMMIT": "28fd5ec77f0ad0e07a371cef1047828116f6bd8a"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libvpx.sh",
+          "enabled": true,
+          "download": "50-libvpx_66163f7ac0c48afe3d2318e764e53fcf97fff72e44b32a57727302baff6bd899.tar.xz",
+          "source_refs": {
+            "REPO": "https://chromium.googlesource.com/webm/libvpx",
+            "COMMIT": "5e680f30801d03c21078f8c4b772464752516211"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libwebp.sh",
+          "enabled": true,
+          "download": "50-libwebp_79c6c8cf003854f9dc6cd81c05a1439d21e2a45650669646d1aaa3837370dddf.tar.xz",
+          "source_refs": {
+            "REPO": "https://chromium.googlesource.com/webm/libwebp",
+            "COMMIT": "5c168cd23b1872969c38e34b01b04dcf29849288"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libzmq.sh",
+          "enabled": true,
+          "download": "50-libzmq_e68f6ea67cc2e84e0b320f3a4b5538dc90d97142264dc310dd8bbcb5f989d9e2.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/zeromq/libzmq.git",
+            "COMMIT": "46493370217ac135246617fa2f6ac819d8b61bfc"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-onevpl.sh",
+          "enabled": true,
+          "download": "50-onevpl_c67accd07bdf24795034753f097eec4331f1a1174ce643cf5bcf94cb26ddd5e4.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/intel/libvpl.git",
+            "COMMIT": "674d015bcb294bc39fa276e99a652ea045423e82"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-openal.sh",
+          "enabled": true,
+          "download": "50-openal_0700515d0775bd9b112b23ea3a1d34d3c041a100f4ab32be289061310616a628.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/kcat/openal-soft.git",
+            "COMMIT": "c89b8cf7bba4822f230c69f0a6696a52e5322dca"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-openapv.sh",
+          "enabled": true,
+          "download": "50-openapv_f9089a3b6e8982ec62ef7be45a6b23c21641728fbfdd52aa94a39ffc294800aa.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/AcademySoftwareFoundation/openapv.git",
+            "COMMIT": "a58ce739be0dfb083643d929aee8f0e0ba9bdf63"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-opencore-amr.sh",
+          "enabled": true,
+          "download": "50-opencore-amr_5d7ec3b8ffdd0f32309a659256916e3286724f08acf0f625a4b4f1f9c17ebf7c.tar.xz",
+          "source_refs": {
+            "REPO": "https://git.code.sf.net/p/opencore-amr/code",
+            "COMMIT": "7dba8c32238418ce0b316a852b2224df586ca896"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-openh264.sh",
+          "enabled": true,
+          "download": "50-openh264_df57c5a2e7a2f7a6becacd28a386ff00892c36cf873d6ea9a758a95e626a3cee.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/cisco/openh264.git",
+            "COMMIT": "8b2d28faade10d74d99ac80e199aef664c9c5a3b"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-openjpeg.sh",
+          "enabled": true,
+          "download": "50-openjpeg_b35ab3ef10d52ce49eb8146e05af61e7560bf3b18aa2dd750cb5b083079caac4.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/uclouvain/openjpeg.git",
+            "COMMIT": "8314119b067c0fc77834731168daaebd379fdb12"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-openmpt.sh",
+          "enabled": true,
+          "download": "50-openmpt_fa065e57891ed593a40690197f5c027d148bb241a74dbfb31cef5bce63a9887e.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/OpenMPT/openmpt.git",
+            "COMMIT": "f83cedb0cd5446e4dfaa83ac97e3087107e26767"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-rav1e.sh",
+          "enabled": true,
+          "download": "50-rav1e_b2d3a4caec12576416c156eb16b4f83433caf3dc3a8270ed0bfe4fb74098dd54.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/xiph/rav1e.git",
+            "COMMIT": "31435de9d76fddd38f6dcc31d4014574cebb2092"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-rubberband.sh",
+          "enabled": true,
+          "download": "50-rubberband_5d3ca7b4a1f4c07ead3f23ba9c7a3736384a9394a34e41bf70a78075e0ed9593.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/breakfastquay/rubberband.git",
+            "COMMIT": "e4296ac80b1170018a110bc326fd0d45a0eb27d6"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-schannel.sh",
+          "enabled": true,
+          "download": null
+        },
+        {
+          "recipe": "scripts.d/50-sdl.sh",
+          "enabled": true,
+          "download": "50-sdl_eee5ab03d781d41488d330d6a245a878eb37f50acea8ea99d6bcc807af794507.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/libsdl-org/SDL.git",
+            "COMMIT": "b90ac95029d801c5abc59472ba8e2200dff31e1e"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-snappy.sh",
+          "enabled": true,
+          "download": "50-snappy_8e53b9981df8ab90cbd88fd1dd2e976bf99f9b13e069ada011d6fcb5fd4a1dec.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/google/snappy.git",
+            "COMMIT": "9c28114a38866f6deeaa826db918293bc28ae410"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-soxr.sh",
+          "enabled": true,
+          "download": "50-soxr_d24c000584012b62b406f09325af85575932219b972b87ab3e2b1037bdc97c6a.tar.xz",
+          "source_refs": {
+            "REPO": "https://git.code.sf.net/p/soxr/code",
+            "COMMIT": "945b592b70470e29f917f4de89b4281fbbd540c0"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-srt.sh",
+          "enabled": true,
+          "download": "50-srt_b47647b4bf2fd74999325f793b3c0968d3513719af9b3008922131e8c465e179.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/Haivision/srt.git",
+            "COMMIT": "ff8ab25c57aece5b7351defe36dacc94fc28527f"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-svtav1.sh",
+          "enabled": true,
+          "download": "50-svtav1_46a954dc6763b77684fc6cc76317f9eb478ab707091181bb8bf3ccc6f245296f.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.com/AOMediaCodec/SVT-AV1.git",
+            "COMMIT": "5ed9ffbcb5086da23f30fe9bc5b00145358462da"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-twolame.sh",
+          "enabled": true,
+          "download": "50-twolame_b034b56f3c8caa730922980b6e8aca15c6f3b46e3fa98d3229c337aeb7858f71.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/njh/twolame.git",
+            "COMMIT": "6fced852d4d5cfad58cf9dbe3ea619b08e87d398"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-uavs3d.sh",
+          "enabled": true,
+          "download": "50-uavs3d_f5c1983f0fc2360d5846298e08a8f89f2f345caa3beb83100ca9b48eff5ded6b.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/uavs3/uavs3d.git",
+            "COMMIT": "0e20d2c291853f196c68922a264bcd8471d75b68"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-vapoursynth.sh",
+          "enabled": true,
+          "download": "50-vapoursynth_6754f770821a8db36a57df5e8600263caf20ad3466ea18862102b7b954c25157.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/vapoursynth/vapoursynth.git",
+            "COMMIT": "R80"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-vidstab.sh",
+          "enabled": true,
+          "download": "50-vidstab_4775a069821691e584b2eb878047d58081f140d98fc8d3c759766f099723179e.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/georgmartius/vid.stab.git",
+            "COMMIT": "e2445c4081658318223762a696eb1c645c2d7168"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-vvenc.sh",
+          "enabled": true,
+          "download": "50-vvenc_7f1746781e3f2a5a225448e524e8f8ee11540497871a44a82fa21768f1c82442.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/fraunhoferhhi/vvenc.git",
+            "COMMIT": "b1cfb2ad495af6ae4cc214b7a060e8b4166c4629"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-whisper.sh",
+          "enabled": false,
+          "download": "50-whisper_9ba53b377debcd62ae6b84e71410df622da3b76347b5ee3d1a5f0ca560170cf5.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/ggml-org/whisper.cpp.git",
+            "COMMIT": "a44e07845931421bb6f3447ce0010ed9dc76a118"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-x264.sh",
+          "enabled": true,
+          "download": "50-x264_7aee4cf46b7c0eff1a5ad3d23ae43a29562065ef2866a4a883d7ad2db0fb755d.tar.xz",
+          "source_refs": {
+            "REPO": "https://code.videolan.org/videolan/x264.git",
+            "COMMIT": "0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-x265.sh",
+          "enabled": true,
+          "download": "50-x265_b37b40782670703ea27b2ac7c6b8a4d89f6753cc82f1a6fea29fa60d9fa6b435.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/Multicorewareinc/x265.git",
+            "COMMIT": "020d7054dbecfd3be8e62efe33ff8a305d41856e"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-xavs2.sh",
+          "enabled": true,
+          "download": "50-xavs2_983aacbab6d33318bf9c4742b41a1ed9d42afc12a0493ba97d07404a99734009.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/pkuvcl/xavs2.git",
+            "COMMIT": "eae1e8b9d12468059bdd7dee893508e470fa83d8"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-xvid.sh",
+          "enabled": true,
+          "download": "50-xvid_03619a39e7e15a372b56fc954435c35668ed47258d7e7d3f2e47ba521e3b884f.tar.xz",
+          "source_refs": {
+            "REPO": "https://svn.xvid.org/trunk/xvidcore",
+            "REV": "2204"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-zimg.sh",
+          "enabled": true,
+          "download": "50-zimg_7ac9b5905a13db62bae8b61a2a7b3806f25a5f3e173cc0c6c79edf9f38d8b437.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/sekrit-twc/zimg.git",
+            "COMMIT": "67e0603271c080e22c8429856dd4a8a56587e61e"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-zvbi.sh",
+          "enabled": true,
+          "download": "50-zvbi_7369ec5938a995eb4283992070b303e140fc8a3b5f53d80e2a5df0b84794a75b.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/zapping-vbi/zvbi",
+            "COMMIT": "d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0"
+          }
+        },
+        {
+          "recipe": "scripts.d/55-rustdedup.sh",
+          "enabled": true,
+          "download": null
+        },
+        {
+          "recipe": "scripts.d/zz-final.sh",
+          "enabled": true,
+          "download": null
+        },
+        {
+          "recipe": "scripts.d/45-fonts/25-freetype.sh",
+          "enabled": true,
+          "download": "25-freetype_839dfebde0a38da3f7515004bed2270140526899f2f9b5f77298b7daac9ba42b.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/freetype/freetype.git",
+            "COMMIT": "d333439633039de426f943f28a2926c7f97b5ae5"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-fonts/35-fontconfig.sh",
+          "enabled": true,
+          "download": "35-fontconfig_ce2e0916ca408e9567ab57c27be06a7166a9f9a3da902c751fef1bbb969f6a1a.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/fontconfig/fontconfig.git",
+            "COMMIT": "bd8f7b597de96761750d0365abb49b19d2f8d5c3"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-fonts/45-harfbuzz.sh",
+          "enabled": true,
+          "download": "45-harfbuzz_23f9e500f00621c247219aacc18850d66d1ac0e974cb33a1423055284aceb5e3.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/harfbuzz/harfbuzz.git",
+            "COMMIT": "b3bab62307017934dd7f532c52a696fefb12b3ad"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-fonts/50-freetype.sh",
+          "enabled": true,
+          "download": "50-freetype_839dfebde0a38da3f7515004bed2270140526899f2f9b5f77298b7daac9ba42b.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/freetype/freetype.git",
+            "COMMIT": "d333439633039de426f943f28a2926c7f97b5ae5"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/10-xcbproto.sh",
+          "enabled": false,
+          "download": "10-xcbproto_aecb3156bc10c1a8bae6c1bb11f21b8d7f768876cddde7302804c9e8ffba7484.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/proto/xcbproto.git",
+            "COMMIT": "cf7e2581b613802f2f8ec2a4b50a6a20aad4bf52"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/10-xproto.sh",
+          "enabled": false,
+          "download": "10-xproto_eda019c71417e4c5134f404b0c4b3c70aa0f7133926f80480ec4bb98cf9c3d56.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/proto/xorgproto.git",
+            "COMMIT": "fd86fbff46eb7ab8e193c12b8a529e90bae31835"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/10-xtrans.sh",
+          "enabled": false,
+          "download": "10-xtrans_b41af1c6913f15c4007f45375796b3cfe701cce8003bc6a1682f8f6952fea4c2.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxtrans.git",
+            "COMMIT": "79f6b0bfe2170496e8c37626043d009f4cd3f1e1"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/20-libxau.sh",
+          "enabled": false,
+          "download": "20-libxau_8144e82dbddb1c5a8ac1ef670f5a78a7474aaf2dd418aebb50e572e40dbc5244.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxau.git",
+            "COMMIT": "be1daeb909f1d678e7859ac1555e90b4e768d5c4"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/30-libxcb.sh",
+          "enabled": false,
+          "download": "30-libxcb_e78cc0b6487fa3ecc322f0597baffacca986ff88601f35dce32807d12d845013.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxcb.git",
+            "COMMIT": "d4e07bab5729c7d7cc3d2b95568cd9a661a53c4f"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/40-libx11.sh",
+          "enabled": false,
+          "download": "40-libx11_8833a2f9698260b0e9390e02dfb8a910020ba5755dd49efaa8df94eb514e6f36.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libx11.git",
+            "COMMIT": "13f9b8de400335f4b86bb0672da02f8166c0e796"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/50-libxext.sh",
+          "enabled": false,
+          "download": "50-libxext_63e9942f10f8639169486c0c50997c583892b495d6aa9608c99f22bec8f9cbb6.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxext.git",
+            "COMMIT": "508f8adca2540ff8926ac8456cb1c553a8caae76"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/50-libxfixes.sh",
+          "enabled": false,
+          "download": "50-libxfixes_b0399b879cf10da97be556a7d224dc7e04f3caad8b63a46fcc683e8507fb1495.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxfixes.git",
+            "COMMIT": "55bb2d1d57d43e0595ce45393f26eb433d75a7cc"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/50-libxi.sh",
+          "enabled": false,
+          "download": "50-libxi_eee0fb41d36c9b949851a3c1e815e0632ece32d866e0e1d358ac082042c25330.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxi.git",
+            "COMMIT": "3a0adabd16d8bf19c772061ad67f25c51281edf3"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/50-libxinerama.sh",
+          "enabled": false,
+          "download": "50-libxinerama_ba0cdf4b001e4bcb597ff1724ca04a818f15665b64bf9241c52047031c063f79.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxinerama.git",
+            "COMMIT": "d7162b962710bc724b41cabab4e7cea303c4b541"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/50-libxrender.sh",
+          "enabled": false,
+          "download": "50-libxrender_7d6e7a256b86772c0becc40b1a7b8e980f33a155dd1ae4266480c05406712bf6.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxrender.git",
+            "COMMIT": "f32afe9f877ae032c6bc9c27b17b7978b1b4c856"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/50-libxscrnsaver.sh",
+          "enabled": false,
+          "download": "50-libxscrnsaver_5c9dcd646e93ff51cbd135d4e0985d88853f250ce626ab0889723b8bee770e3d.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxscrnsaver.git",
+            "COMMIT": "3f753e7a4050db083474444ae91cc17a849eaa4d"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/50-libxxf86vm.sh",
+          "enabled": false,
+          "download": "50-libxxf86vm_03e86e2ea8e466bee1b235888c6ce6a6239689b2dd3d8f1f2a8c2f1ce5abdadc.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxxf86vm.git",
+            "COMMIT": "c76fde6bffcc87e5dd98d8196bb01a299bdc3236"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/60-libglvnd.sh",
+          "enabled": false,
+          "download": "60-libglvnd_b5decd6ef0d35071d5ef435a736000a7c2dfe94707206653267c61e11630c960.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/glvnd/libglvnd.git",
+            "COMMIT": "c046a760d845416e98ac4128757b2b356c47fdaa"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/60-libxcursor.sh",
+          "enabled": false,
+          "download": "60-libxcursor_899caf3541ff1f0fdf3a60cbc483877819b6bc6b8fc6d56ae9863dd95d5b4a45.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxcursor.git",
+            "COMMIT": "15efad7ccd035f5d1ddc8d437e047569d1775fa7"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/60-libxrandr.sh",
+          "enabled": false,
+          "download": "60-libxrandr_76ce7ef426d59979a255619444de369567889d5bfe2af130ef77700c096230fc.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxrandr.git",
+            "COMMIT": "8a4ba1974bcf07057cf891128d86ae1ab5303574"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/60-libxv.sh",
+          "enabled": false,
+          "download": "60-libxv_cda840dfd0f852c6535789148438618900c0a214b03a010c02ff1364a5499e02.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libxv.git",
+            "COMMIT": "f315ec50fcad9bdbaed46c3e78dc5e7fe209f933"
+          }
+        },
+        {
+          "recipe": "scripts.d/45-x11/99-finalize.sh",
+          "enabled": false,
+          "download": null
+        },
+        {
+          "recipe": "scripts.d/47-vulkan/40-vulkan-headers.sh",
+          "enabled": true,
+          "download": "40-vulkan-headers_3d08793cac3f0e3cac071b802aae1634fe925048f94a56d388c4c618a1ea8482.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+            "COMMIT": "v1.4.363"
+          }
+        },
+        {
+          "recipe": "scripts.d/47-vulkan/45-vulkan-loader.sh",
+          "enabled": true,
+          "download": "45-vulkan-loader_ab4a5b2a493729e8ea13712813acbf64e333ec5f23ab04320f11cadc2755079f.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/BtbN/Vulkan-Shim-Loader.git",
+            "COMMIT": "65b3936528cd92eb4ea3de485d03f858a3850484",
+            "REPO2": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+            "COMMIT2": "v1.4.363"
+          }
+        },
+        {
+          "recipe": "scripts.d/47-vulkan/50-shaderc.sh",
+          "enabled": true,
+          "download": "50-shaderc_9ff3096908159ae870c6a5086e7e01e4e0de535fb9c6d52de76ce7d4cf73b600.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/google/shaderc.git",
+            "COMMIT": "a8abeb0b8a9d4b11e3d59ca9f4550b8213e733ab"
+          }
+        },
+        {
+          "recipe": "scripts.d/47-vulkan/55-spirv-cross.sh",
+          "enabled": true,
+          "download": "55-spirv-cross_7ee82163958c020ff8f9cfd2a6eff8aefdfc6391d36898ec54a24f09f58479d4.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/KhronosGroup/SPIRV-Cross.git",
+            "COMMIT": "aa217aeb6c9f0ace7a0ab233b28807edf45eb165"
+          }
+        },
+        {
+          "recipe": "scripts.d/47-vulkan/60-spirv-headers.sh",
+          "enabled": true,
+          "download": "60-spirv-headers_23fe5e903430db492bfbae8fb0b6124c0169bcc550874b85f068cfe8d8adfffb.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+            "COMMIT": "2b7475f6d664efbad4d4315c94ecec9640831e5b"
+          }
+        },
+        {
+          "recipe": "scripts.d/47-vulkan/99-enable.sh",
+          "enabled": true,
+          "download": null
+        },
+        {
+          "recipe": "scripts.d/50-dvd/30-libdvdcss.sh",
+          "enabled": true,
+          "download": "30-libdvdcss_8e6c469595eeef1d2ca7962b68faabe5531518009472d449f700665a616bc66c.tar.xz",
+          "source_refs": {
+            "REPO": "https://code.videolan.org/videolan/libdvdcss.git",
+            "COMMIT": "811ce97a1d4d1c9d936f4b2707f533a9ef768251"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-dvd/40-libdvdread.sh",
+          "enabled": true,
+          "download": "40-libdvdread_05480a48c37dea2502d831aa7dd0b71c28c6d32cfabf95e0cbb16512fe45d8f0.tar.xz",
+          "source_refs": {
+            "REPO": "https://code.videolan.org/videolan/libdvdread.git",
+            "COMMIT": "0f30df53125b564ef45903714403ce0a1e6c5e9e"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-dvd/50-libdvdnav.sh",
+          "enabled": true,
+          "download": "50-libdvdnav_20088474345356fbabc64ef14250d1f5ed698d04d2facb7d73dddfc9ace7b684.tar.xz",
+          "source_refs": {
+            "REPO": "https://code.videolan.org/videolan/libdvdnav.git",
+            "COMMIT": "8147ccd35e5aae4afdd21171cf7b6b4d8f179d28"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libcurl/40-libpsl.sh",
+          "enabled": true,
+          "download": "40-libpsl_98fe7b40f3a7fadcaa0072493abd6577bf96604b22391ebce98110c0c374e6d0.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/rockdaboot/libpsl.git",
+            "COMMIT": "a629c831d09011f76974d931be7f6167be90673e",
+            "REPO2": "https://github.com/publicsuffix/list.git",
+            "COMMIT2": "a179a48c465e818cfd8d626691cb317985da87fb"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libcurl/40-nghttp2.sh",
+          "enabled": true,
+          "download": "40-nghttp2_8a58e301b2f9dd8d89cd4f43840fe89b59b10a5c00bbac222b2196aac413a891.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/nghttp2/nghttp2.git",
+            "COMMIT": "19d06e62185d93d2398d85241cdbb460349bfe44"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libcurl/40-nghttp3.sh",
+          "enabled": true,
+          "download": "40-nghttp3_d5e8fc055db9c1cc26a042c7ef25d572aa7bf5b456daabe4271e8161a5077055.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/ngtcp2/nghttp3.git",
+            "COMMIT": "2304973e5a0c8b1fa4bb380b47945a000357f87f"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libcurl/40-ngtcp2.sh",
+          "enabled": true,
+          "download": "40-ngtcp2_b804f5b9f0432ea31707601a0e9c8ebb2e6f761372fb9ba38db9f2557ebba33e.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/ngtcp2/ngtcp2.git",
+            "COMMIT": "a4925d70647b75286b28c37be260de3729c2de3d"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libcurl/50-libcurl.sh",
+          "enabled": false,
+          "download": "50-libcurl_1c6d890a6f32f86e0a415b0efc59ac6093ab33ab391c0fb339c3959c252941ef.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/curl/curl.git",
+            "COMMIT": "4c67658f953751de9e66bb5f9729af821a641341"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-libjxl/50-libjxl.sh",
+          "enabled": true,
+          "download": "50-libjxl_4e9888f992f7e59816f63ab6d0751f7d2c4c2ccd9f7b376158705b3c7b036b52.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/libjxl/libjxl.git",
+            "COMMIT": "b87738951c1254cd8cccaa6d47712ba735da56d8"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-librist/40-mbedtls.sh",
+          "enabled": true,
+          "download": "40-mbedtls_8dd146455b388b9a7236d83bb2904ff89bba41fa28da9af8a310fc01f4ff1b53.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/ARMmbed/mbedtls.git",
+            "COMMIT": "v4.2.0"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-librist/50-librist.sh",
+          "enabled": true,
+          "download": "50-librist_c44a5e59d58d44b672c8df850ae76b4ad372ebab3a4a63a003ac35d45aa9d1a2.tar.xz",
+          "source_refs": {
+            "REPO": "https://code.videolan.org/rist/librist.git",
+            "COMMIT": "4f45ef8f78983892d52ccd52d9f675435b23738f"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-librsvg/10-glib.sh",
+          "enabled": true,
+          "download": "10-glib_5402d13c8cec3808b3aeedfebf49bf0062a14163059573ff9a30fe5add2b473a.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/GNOME/glib.git",
+            "COMMIT": "5a124d1e66a6c2dc56989303b4d6d4781c2952ed"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-librsvg/20-cairo.sh",
+          "enabled": true,
+          "download": "20-cairo_b460be039dc49e1a252ad8a1ed08863785f51cdb1156ceb585ca590d4f98beea.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/cairo/cairo.git",
+            "COMMIT": "74755964edef651691d5cd36ff140108298e4e6e"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-librsvg/30-pango.sh",
+          "enabled": true,
+          "download": "30-pango_fa28105e276f1fc77de3a3231765da71db0cf4b93c57adba61921bcb240e30d7.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/GNOME/pango.git",
+            "COMMIT": "8e74c27c113c98664b77272d16b14bbce542c184"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-librsvg/99-librsvg.sh",
+          "enabled": true,
+          "download": "99-librsvg_20412ad6b5a08e06a6b2f15951458980805d4c0f40b762745e4c2575169a8c3c.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/GNOME/librsvg.git",
+            "COMMIT": "7612431eb02dc009319094f8513d63c1faaecfb4"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-lilv/96-lv2.sh",
+          "enabled": true,
+          "download": "96-lv2_1833e554a5a1760aa41062569225bbb9856f09f3c23d37301074d82a17b0624e.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/lv2/lv2.git",
+            "COMMIT": "3c57dae600a5ad8d05acd53ee3490f7d91cb7be6"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-lilv/96-serd.sh",
+          "enabled": true,
+          "download": "96-serd_257c27b8651c05a3b7179f2477bd69ed036feac4eb253312569096821e69a8e7.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/drobilla/serd.git",
+            "COMMIT": "b6053bb2a4533e6a8e3821c1061f140d5e666938"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-lilv/96-zix.sh",
+          "enabled": true,
+          "download": "96-zix_21e780c9ab8c0f8067c36bb53b76fcabc2dd828153b3f1ab082ed44281f62d13.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/drobilla/zix.git",
+            "COMMIT": "17d632393f5addb6fa24dda2927b96515407cca7"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-lilv/97-sord.sh",
+          "enabled": true,
+          "download": "97-sord_6ef433b3c59e64a645002e31f929dfec02cbd979f0d70b5373173e1ca217125d.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/drobilla/sord.git",
+            "COMMIT": "4b5232bb91e7f2f1b84df384494d073fabbcd312"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-lilv/98-sratom.sh",
+          "enabled": true,
+          "download": "98-sratom_a7e01a157b247bfecbce4a5c63016fa503ddd5703ffc208af3f81805a7d30535.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/lv2/sratom.git",
+            "COMMIT": "9e8ee84eed502e6030ce8bb49694fd28542b08fc"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-lilv/99-lilv.sh",
+          "enabled": true,
+          "download": "99-lilv_0543a3c15e7971c2371260e51aad5ead6ffbc7a539de39540a906ebf944d829d.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/lv2/lilv.git",
+            "COMMIT": "4b8f30055fa5cb4134a2eb45fc1555bc04289314"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-vaapi/30-libpciaccess.sh",
+          "enabled": false,
+          "download": "30-libpciaccess_7e6e74a7ea243214bf8b5e16e9bdfe5b22f577c4daba8ee93b59b3e5dfa8c1ad.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/xorg/lib/libpciaccess.git",
+            "COMMIT": "38e6f15f839fba2c49982e7ad61cde681fd5d4d6"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-vaapi/40-libdrm.sh",
+          "enabled": false,
+          "download": "40-libdrm_8704cddf087daeac8ce3e20f4802cf55e5a3484345df1107c0d3a8c92495176e.tar.xz",
+          "source_refs": {
+            "REPO": "https://gitlab.freedesktop.org/mesa/drm.git",
+            "COMMIT": "b97cbde15c5c3abfe44d78e8f57139e50f612fec"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-vaapi/50-libva.sh",
+          "enabled": true,
+          "download": "50-libva_2bc55ab7571e4ab9d59dc473d3dfaebb2cbc6caca5da95e1e680eaae56e62d03.tar.xz",
+          "source_refs": {
+            "REPO": "https://github.com/intel/libva.git",
+            "COMMIT": "6b07f7100512817f736967e899b8c26313c20623"
+          }
+        },
+        {
+          "recipe": "scripts.d/50-vaapi/99-finalize.sh",
+          "enabled": true,
+          "download": null
+        }
+      ]
+    },
+    "completeness": {
+      "status": "blocked",
+      "missing": [
+        "Exact post-cargo-update rav1e Cargo.lock and corresponding transitive crate sources from the cached win64 gpl-shared 8.1 build layer. The rav1e download snapshot predates cargo update cc and cargo cinstall; the successful job reused this layer.",
+        "Exact cross-toolchain source and patches for statically linked compiler runtime code: images/base-win64 uses an unpinned crosstool-ng checkout and discards its source/build directory. Retaining the Dockerfile and ct-ng-config alone does not supply that source."
+      ]
+    }
+  }
 }
