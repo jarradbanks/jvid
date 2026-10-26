@@ -6,6 +6,7 @@ import inspect
 import io
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -118,6 +119,7 @@ class RuntimePlanTests(unittest.TestCase):
             self.assertEqual(target.read_text(), "keep")
 
 
+@unittest.skipIf(sys.platform == "win32", "Linux dependency-path fixtures require POSIX paths")
 class RuntimeClosureTests(unittest.TestCase):
     def setUp(self):
         stack = contextlib.ExitStack()
@@ -179,6 +181,21 @@ class RuntimeClosureTests(unittest.TestCase):
                     patch.object(prepare, "_run", return_value=output):
                 with self.assertRaises(RuntimeError):
                     prepare.runtime_libraries([Path("/usr/lib/libseed.so.1")])
+
+    def test_data_only_shared_library_is_retained_when_dynamic_table_has_no_needed_entries(self):
+        library = Path("/usr/lib/libicudata.so.70.1")
+        def run(command, *args):
+            return "statically linked\n" if command == "ldd" else "Dynamic section at offset 0x1000 contains 8 entries:\n (SYMTAB) 0x200\n"
+        with patch.object(prepare, "_library", side_effect=Path), patch.object(prepare, "_run", side_effect=run):
+            self.assertEqual(prepare.runtime_libraries([library]), [library])
+
+    def test_static_ldd_description_cannot_hide_needed_libraries_or_invalid_elf(self):
+        for dynamic in ("Dynamic section at offset 0x1000:\n (NEEDED) Shared library: [libhidden.so.1]\n",
+                        "There is no dynamic section in this file.\n"):
+            with self.subTest(dynamic=dynamic), patch.object(prepare, "_library", side_effect=Path), \
+                    patch.object(prepare, "_run", side_effect=["statically linked\n", dynamic]):
+                with self.assertRaisesRegex(RuntimeError, "unrecognized ldd"):
+                    prepare.runtime_libraries([Path("/usr/lib/libicudata.so.70.1")])
 
     def test_same_soname_cannot_resolve_to_two_providers(self):
         def run(command, library):

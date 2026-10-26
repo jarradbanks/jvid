@@ -110,6 +110,13 @@ def runtime_libraries(roots):
         output = _run("ldd", original)
         if "not found" in output or not output.strip():
             raise RuntimeError(f"unresolved runtime dependency: {source.name}")
+        if output.strip() == "statically linked":
+            # Data-only DSOs such as libicudata are valid shared objects without
+            # DT_NEEDED entries. Verify that case instead of skipping a dependency.
+            dynamic = _run("readelf", "--dynamic", "--wide", source)
+            if "Dynamic section" not in dynamic or re.search(r"\(NEEDED\)", dynamic):
+                raise RuntimeError(f"unrecognized ldd dependency for {source.name}")
+            continue
         for line in output.splitlines():
             match = re.fullmatch(r"\s*(\S+) => (/\S+) \(0x[0-9a-fA-F]+\)\s*", line)
             if match:

@@ -92,7 +92,7 @@ jobs:
           EOF
           apt_options=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/jvid-release.sources -o Dir::Etc::sourceparts=- -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
-          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends clang libclang-dev pkg-config patchelf \
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends clang libclang-dev pkg-config patchelf binutils \
             libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev \
             libasound2-dev libx11-6 libxcursor1 libxi6 libxrandr2 libxkbcommon0 libxkbcommon-x11-0 \
             libwayland-client0 libwayland-cursor0 libwayland-egl1 libfontconfig1 libfreetype6 libdbus-1-3
