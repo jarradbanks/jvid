@@ -53,6 +53,11 @@ impl Model {
         self.file().1
     }
 
+    /// Exact identity of the pinned model weights, for recognition cache compatibility.
+    pub fn fingerprint(self) -> &'static str {
+        self.file().2
+    }
+
     pub fn url(self) -> String {
         format!(
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/{REVISION}/{}",

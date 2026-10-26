@@ -3,6 +3,7 @@
 # items use the infinitive. Terms follow docs/i18n/uk.md.
 
 [action]
+export_subtitles = "Експорт субтитрів (.srt)…"
 new_project = "Новий проєкт"
 open_project = "Відкрити проєкт"
 save = "Зберегти"
@@ -94,6 +95,7 @@ export_frame = "Експортувати кадр"
 record = "Записати закадровий голос"
 
 [panel]
+drag_tab = "Перетягніть для групування або поділу панелей; прокрутіть для перегляду вкладок."
 media = "Медіа"
 preview = "Перегляд"
 inspector = "Інспектор"
@@ -123,6 +125,7 @@ no_media = "немає відео- й аудіопотоків"
 unsupported_codec = "непідтримуваний кодек: {codec}"
 
 [menu]
+reset_layout = "Скинути розташування панелей"
 project_tooltip = "Створити, відкрити й зберегти"
 new_project = "Новий проєкт"
 open = "Відкрити…"
@@ -523,6 +526,10 @@ dip_to_black = "Перехід через чорний"
 dip_to_white = "Перехід через білий"
 
 [subtitles]
+source_changed = "Джерело змінилося під час розпізнавання. Повторіть розпізнавання."
+recognize_again = "Розпізнати знову"
+reuse_hint = "Сумісні результати використовуються повторно; розпізнається лише відсутній звук."
+reused = "Сумісні результати розпізнавання використано повторно."
 title = "Створити субтитри"
 language = "Мова"
 auto = "Автоматично"
@@ -974,6 +981,13 @@ screen_zoom = "Виберіть кліп і збільште «Масштаб» 
 screen_callout = "Перетягніть титр із вкладки «Текст» на таймлайн над кліпом як виноску."
 
 [transcript]
+partial = "Частину звуку ще не розпізнано. Запустіть розпізнавання, щоб заповнити прогалини."
+copy_all = "Копіювати все"
+export_text = "Експортувати розшифрування…"
+text_filter = "Текстові файли"
+scope = "Область: {scope}"
+txt_required = "Виберіть ім’я файлу з розширенням .txt."
+protected_destination = "Виберіть інший файл: це призначення є проєктом або вихідним медіафайлом."
 transcribe = "Транскрибувати"
 # The search field's placeholder.
 find = "Знайти"
@@ -1025,3 +1039,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Усі видимі доріжки субтитрів поточної секвенції, включно з розміщеними вкладеними секвенціями. Вихідні розшифровки виключено."
+save = "Зберегти SRT…"
+empty = "У цьому діапазоні немає субтитрів."
+extension = "Виберіть шлях із розширенням .srt."
+project_collision = "Виберіть інший шлях: цей файл є проєктом."
+saved = "Субтитри збережено в {path}"
+video_help = "Впалювання малює субтитри у відео; окремий SRT зберігається поруч. Лише SRT: Часова шкала > Експорт субтитрів."

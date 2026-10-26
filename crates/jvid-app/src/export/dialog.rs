@@ -260,7 +260,9 @@ impl ExportDialog {
                                     loudness_picker(ui, &mut self.loudness, bounds)
                                 });
                             });
-                            if seq.tracks().iter().any(|t| t.subtitles) {
+                            if seq.tracks().iter().any(|t| t.subtitles)
+                                || !project.subtitle_cues().is_empty()
+                            {
                                 row(ui, tr!("app.subtitles"), |ui| {
                                     let mut i = self.sidecar as usize;
                                     let options = [tr!("export.burn_in"), tr!("export.sidecar")];
@@ -268,6 +270,7 @@ impl ExportDialog {
                                         self.sidecar = i == 1;
                                     }
                                 });
+                                note(ui, Note::Help, tr!("subtitle_export.video_help"));
                             }
 
                             section(ui, tr!("export.range"), false);

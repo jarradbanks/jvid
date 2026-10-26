@@ -3,6 +3,7 @@
 
 # Keyboard actions, by keymap.toml id: menus, the shortcut editor and docs/shortcuts.md.
 [action]
+export_subtitles = "Export Subtitles (.srt)…"
 new_project = "New Project"
 open_project = "Open Project"
 save = "Save"
@@ -95,6 +96,7 @@ record = "Record Voiceover"
 
 # Dock panel titles.
 [panel]
+drag_tab = "Drag to group or split panels; scroll to see more tabs."
 media = "Media"
 preview = "Preview"
 inspector = "Inspector"
@@ -131,6 +133,7 @@ unsupported_codec = "unsupported codec: {codec}"
 
 # The app bar menus.
 [menu]
+reset_layout = "Reset Panel Layout"
 project_tooltip = "New, open and save"
 new_project = "New Project"
 open = "Open…"
@@ -555,6 +558,10 @@ dip_to_white = "Dip to White"
 # Detect Silence (clip right-click menu): cut or speed up quiet stretches.
 # Generate Subtitles: speech to a subtitle track.
 [subtitles]
+source_changed = "The source changed during transcription. Transcribe again."
+recognize_again = "Recognize Again"
+reuse_hint = "Compatible recognition is reused; only missing audio is transcribed."
+reused = "Reused compatible recognition results."
 title = "Generate Subtitles"
 language = "Language"
 auto = "Auto"
@@ -1056,6 +1063,13 @@ screen_zoom = "Select the clip, then raise Scale in the Inspector to zoom in on 
 screen_callout = "Drag a title from Text onto the Timeline above your clip as a callout."
 
 [transcript]
+partial = "Some audio has not been transcribed. Transcribe to fill the gaps."
+copy_all = "Copy All"
+export_text = "Export Transcript…"
+text_filter = "Text files"
+scope = "Scope: {scope}"
+txt_required = "Choose a filename ending in .txt."
+protected_destination = "Choose a different file; this destination is a project or source media."
 transcribe = "Transcribe"
 # The search field's placeholder.
 find = "Find"
@@ -1107,3 +1121,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "All visible subtitle tracks in the current sequence, including placed nested sequences. Source transcripts are excluded."
+save = "Save SRT…"
+empty = "No subtitles in this range."
+extension = "Choose a destination with the .srt extension."
+project_collision = "Choose a different destination: this file is the project."
+saved = "Subtitles saved to {path}"
+video_help = "Burn In draws captions into video; Sidecar saves an SRT beside it. For SRT alone: Timeline > Export Subtitles."

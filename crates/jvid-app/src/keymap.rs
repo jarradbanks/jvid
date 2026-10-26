@@ -54,6 +54,7 @@ pub const ACTIONS: &[Action] = &[
     a("save_as", "Ctrl+Shift+S"),
     a("import", "Ctrl+I"),
     a("import_subtitles", "Ctrl+Shift+I"),
+    a("export_subtitles", ""),
     a("export", "Ctrl+M"),
     a("quit", "Ctrl+Q"),
     a("play_stop", "Space"),

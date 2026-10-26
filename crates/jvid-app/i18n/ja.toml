@@ -5,6 +5,7 @@
 # every English key.
 
 [action]
+export_subtitles = "字幕を書き出す (.srt)…"
 new_project = "新規プロジェクト"
 open_project = "プロジェクトを開く"
 save = "保存"
@@ -96,6 +97,7 @@ export_frame = "フレームを書き出し"
 record = "ボイスオーバーを録音"
 
 [panel]
+drag_tab = "ドラッグしてパネルをまとめたり分割したりできます。スクロールすると他のタブが表示されます。"
 media = "メディア"
 preview = "プレビュー"
 inspector = "インスペクタ"
@@ -125,6 +127,7 @@ no_media = "ビデオまたはオーディオのストリームがありませ�
 unsupported_codec = "未対応のコーデック：{codec}"
 
 [menu]
+reset_layout = "パネルの配置をリセット"
 project_tooltip = "新規作成、開く、保存"
 new_project = "新規プロジェクト"
 open = "開く…"
@@ -507,6 +510,10 @@ dip_to_black = "暗転"
 dip_to_white = "ホワイトアウト"
 
 [subtitles]
+source_changed = "文字起こし中にソースが変更されました。もう一度文字起こししてください。"
+recognize_again = "再認識"
+reuse_hint = "互換性のある認識結果を再利用し、未処理の音声だけを文字起こしします。"
+reused = "互換性のある認識結果を再利用しました。"
 title = "字幕を生成"
 language = "言語"
 auto = "自動"
@@ -952,6 +959,13 @@ screen_zoom = "クリップを選択し、インスペクタの「スケール�
 screen_callout = "「テキスト」のタイトルを吹き出しとして、タイムラインのクリップの上にドラッグします。"
 
 [transcript]
+partial = "まだ文字起こしされていない音声があります。文字起こしを実行して補完してください。"
+copy_all = "すべてコピー"
+export_text = "文字起こしを書き出す…"
+text_filter = "テキストファイル"
+scope = "範囲: {scope}"
+txt_required = "ファイル名の末尾を .txt にしてください。"
+protected_destination = "別のファイルを選択してください。この保存先はプロジェクトまたは元のメディアです。"
 transcribe = "文字起こし"
 # The search field's placeholder.
 find = "検索"
@@ -1003,3 +1017,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "現在のシーケンスにある表示中の字幕トラックすべてを、配置されたネストシーケンスも含めて書き出します。ソースの文字起こしは含みません。"
+save = "SRTを保存…"
+empty = "この範囲に字幕はありません。"
+extension = "拡張子が.srtの保存先を選択してください。"
+project_collision = "別の保存先を選択してください。このファイルはプロジェクトです。"
+saved = "字幕を{path}に保存しました"
+video_help = "焼き込みは字幕を映像に描画し、サイドカーは動画の隣にSRTを保存します。SRTのみの場合：タイムライン > 字幕を書き出す。"

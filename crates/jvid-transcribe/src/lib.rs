@@ -4,6 +4,7 @@
 //! Models are downloaded on request into the data folder ([`models`]); none is bundled.
 
 pub mod models;
+pub mod store;
 mod whisper;
 
 use std::fmt;
@@ -20,7 +21,7 @@ use jvid_media::waveforms::BUCKET;
 pub use whisper::Whisper;
 
 /// A recognised word and when it was spoken.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Word {
     /// As spoken, with any punctuation whisper attached ("Hello," or "world.").
     pub text: String,
@@ -31,7 +32,7 @@ pub struct Word {
 }
 
 /// What a transcription heard.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Transcript {
     /// ISO 639-1 code of the language spoken (the one asked for, or the one detected); `None` when
     /// the audio was all silence.
@@ -39,7 +40,7 @@ pub struct Transcript {
     pub words: Vec<Word>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Options {
     /// ISO 639-1 code such as "en"; `None` detects the language.
     pub language: Option<String>,
@@ -99,8 +100,8 @@ pub fn submit(
     // Same audio with other options or another model is another job: the pool hands a duplicate
     // the live job's handle and drops its `done`.
     let key = format!(
-        "transcribe:{}:{}:{:?}:{:?}:{:p}",
-        source.path.display(),
+        "transcribe:{:?}:{}:{:?}:{:?}:{:p}",
+        source.path,
         source.nth,
         source.range,
         opts,

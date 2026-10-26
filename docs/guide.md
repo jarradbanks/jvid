@@ -28,6 +28,16 @@ The start screen offers **New project** (pick a frame size preset, or **Match so
 - **Missing media:** if a source file has moved, the clip shows as offline. Right-click it in the bin and choose **Relink…**; other missing files in the same folder are found too.
 - **Panels:** Media, Source, Program, Timeline, Inspector and Effects. `Shift+1` to `Shift+7` focus them.
 
+## Arranging panels
+
+Every editor panel has a draggable tab strip. Open **Timeline → Transcript** or **Export → Show Render Queue** to place that optional panel beside Timeline. Drag its tab onto Timeline's strip to share one full-width panel; click a tab to switch views. All three can share a group. Drag a tab along the strip to reorder it, or into another panel's body and choose a highlighted edge to create a separate split. Drop feedback shows the destination before you release. Panels stay inside the editor window.
+
+Timeline's editing actions sit in a separate toolbar below its tab strip. Drag the tab to move the panel; use the toolbar to edit. At narrow widths the tab strip scrolls horizontally with the mouse wheel or its scrollbar, and long labels have an ellipsis and show their full name on hover.
+
+Close Transcript or Render Queue with the **×** on its tab (or middle-click the tab). Showing an already-open panel activates its existing tab wherever you moved it. Reopening a closed optional panel creates a split immediately to Timeline's right. Closing Render Queue leaves exports running; closing Transcript keeps its cached recognition.
+
+Groups, tab order, split sizes and active tabs are saved automatically across restarts. **Edit → Reset Panel Layout** restores the standard editor arrangement and places any open optional panels beside Timeline. Resetting the layout keeps the project, transcript search and render jobs intact.
+
 ## Editing basics
 
 **Playback.** `Space` plays and stops. `J`/`K`/`L` shuttle; press `J` or `L` again to go faster. `Left`/`Right` step one frame, `Home`/`End` jump to the ends. The Program monitor's preview resolution menu trades sharpness for speed while scrubbing.
@@ -75,6 +85,12 @@ Each preset centers the whole source, clears crop and anchor offsets, and resets
 
 **Zoom to a region.** Select a video clip, hold `Alt` and drag a rectangle on the Program monitor. From the playhead the clip zooms in on it, holds for 2 seconds and zooms back out. The rectangle keeps the project's shape. Pick **Quick** or **Smooth** in the bar that appears while `Alt` is held. The zoom is one undo step, made of scale and position keyframes you can edit like any others.
 
+## Transcript text
+
+Open **Transcript** from the Timeline menu to work with recognized speech. **Copy** copies the selected words; the platform Copy shortcut (`Ctrl+C`, or `Cmd+C` on macOS) does the same when the Transcript panel has focus. The Find field keeps its normal text-copy behavior.
+
+**Copy All** and **Export Transcript (.txt)…** use the whole displayed transcript scope: selected clips when clips are selected, otherwise the current sequence, using the chosen audio sources. They follow timeline order, trims, removals and repeated clip instances. The scope is shown above the text; a partial-results message explains when some sources still need recognition. Export uses a native save dialog and writes readable UTF-8 text with punctuation and paragraph breaks. These actions use available recognition results and leave the project and playhead unchanged.
+
 ## Effects
 
 The bin's Effects tab lists the WGSL effects in your effects folder; add one to the selected clips
@@ -84,12 +100,21 @@ parameter is a keyframeable slider. Effects run top to bottom: drag a block's he
 drops out of the Program monitor and exports until you turn it back on. To write your own, see
 [Writing effects](effects.md).
 
+## Subtitles
+
+Use **File > Import Subtitles** for an existing SRT, or **Timeline > Generate Subtitles** to turn speech into editable captions. Edit a caption's text in the Inspector and trim or move its timeline clip to adjust timing.
+
+To save captions without exporting video, choose **Timeline > Export Subtitles (.srt)…**, **File > Export Subtitles (.srt)…**, or right-click a subtitle track header or caption clip and choose **Export Subtitles (.srt)…**. Choose **Entire Timeline** for the whole current sequence, or explicitly choose **In to Out**, then **Save SRT…** to open the native save dialog. One missing mark means the sequence start or end. Captions crossing the range edges are clipped, and times start at zero at the range's In point.
+
+The SRT contains the current edited text (including Unicode and line breaks), ordered by time, from visible subtitle tracks in the current sequence and its placed nested sequences. Hidden tracks, tracks excluded by video solo, and disabled clips are omitted, just as in video sidecar export. Ordinary titles, unplaced sequences and source transcripts are not captions and are excluded. This export does not render, transcribe, download a speech model or need a GPU. An empty range explains that there are no subtitles to export; cancelling the save dialog writes nothing. Existing SRT destinations use the native replacement confirmation, and project/source files are protected.
+
 ## Export
 
 Click **Export** in the header. The dialog opens on In to Out when you've marked a range, otherwise the whole timeline.
 
 - **Presets:** Highlight 1080p60, Highlight 1440p60, Screen Recording (Sharp Text), YouTube 1080p, YouTube 4K, Shorts/Reels 9:16 and ProRes Master. jvid warns when a preset's aspect ratio doesn't match the project.
 - Pick the video and audio codecs, loudness target and output file, and check the estimated size.
+- With visible captions, the **Subtitles** row offers **Burn In** to draw them into the video, or **Sidecar .srt** to render the video and save a separate SRT beside it. Both use the chosen video range; for an SRT alone, use **Timeline > Export Subtitles (.srt)…**.
 - Exports run in the **Render Queue** while you keep editing. The menu beside **Export** shows the running export and the last few results; **Show Render Queue** opens the full list as a panel beside the Timeline, with **Cancel**, **Reveal**, **Cancel All** and **Clear Finished**.
 
 **Export frame** (`Ctrl+Shift+E`) saves the current Program frame as a PNG.

@@ -3,6 +3,7 @@
 # Terms follow docs/i18n/pt-BR.md.
 
 [action]
+export_subtitles = "Exportar legendas (.srt)…"
 new_project = "Novo projeto"
 open_project = "Abrir projeto"
 save = "Salvar"
@@ -94,6 +95,7 @@ export_frame = "Exportar quadro"
 record = "Gravar narração"
 
 [panel]
+drag_tab = "Arraste para agrupar ou dividir painéis; role para ver mais abas."
 media = "Mídia"
 preview = "Visualização"
 inspector = "Inspetor"
@@ -123,6 +125,7 @@ no_media = "sem fluxos de vídeo ou áudio"
 unsupported_codec = "codec sem suporte: {codec}"
 
 [menu]
+reset_layout = "Redefinir layout dos painéis"
 project_tooltip = "Criar, abrir e salvar"
 new_project = "Novo projeto"
 open = "Abrir…"
@@ -515,6 +518,10 @@ dip_to_black = "Fade para preto"
 dip_to_white = "Fade para branco"
 
 [subtitles]
+source_changed = "A fonte mudou durante a transcrição. Transcreva novamente."
+recognize_again = "Reconhecer novamente"
+reuse_hint = "Resultados compatíveis são reutilizados; apenas o áudio ausente é transcrito."
+reused = "Resultados de reconhecimento compatíveis reutilizados."
 title = "Gerar legendas"
 language = "Idioma"
 auto = "Automático"
@@ -966,6 +973,13 @@ screen_zoom = "Selecione o clipe e aumente Escala no Inspetor para aproximar o t
 screen_callout = "Arraste um título de Texto para a linha do tempo acima do clipe como destaque."
 
 [transcript]
+partial = "Parte do áudio não foi transcrita. Transcreva para preencher as lacunas."
+copy_all = "Copiar tudo"
+export_text = "Exportar transcrição…"
+text_filter = "Arquivos de texto"
+scope = "Escopo: {scope}"
+txt_required = "Escolha um nome de arquivo terminado em .txt."
+protected_destination = "Escolha outro arquivo; este destino é um projeto ou uma mídia de origem."
 transcribe = "Transcrever"
 # The search field's placeholder.
 find = "Localizar"
@@ -1017,3 +1031,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Todas as faixas de legendas visíveis na sequência atual, incluindo sequências aninhadas posicionadas. As transcrições de origem são excluídas."
+save = "Salvar SRT…"
+empty = "Nenhuma legenda neste intervalo."
+extension = "Escolha um destino com a extensão .srt."
+project_collision = "Escolha outro destino: este arquivo é o projeto."
+saved = "Legendas salvas em {path}"
+video_help = "Gravar no vídeo desenha as legendas no vídeo; o arquivo .srt separado é salvo ao lado. Para salvar só o SRT: Linha do tempo > Exportar legendas."

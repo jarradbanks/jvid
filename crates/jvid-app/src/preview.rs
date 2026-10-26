@@ -588,6 +588,59 @@ impl Preview {
         }
     }
 
+    /// Docking can cover Preview. Keep transport/audio and the timeline playhead running
+    /// without drawing a hidden viewer or its controls.
+    pub(crate) fn hidden(
+        &mut self,
+        ctx: &egui::Context,
+        project: &Project,
+        playhead: Time,
+        source: bool,
+    ) -> Option<Time> {
+        if source {
+            if self
+                .player
+                .as_ref()
+                .is_some_and(|p| project.asset(p.asset).is_none())
+            {
+                self.player = None;
+            }
+            if self.program.transport.speed() != 0 {
+                self.program_action("shuttle_stop");
+            }
+            if let Some(p) = &mut self.player {
+                if let Some(out) = &mut self.output {
+                    out.poll();
+                    let audio = &mut p.audio;
+                    p.transport.tick(out, &mut |s, b| audio.fill(s, b));
+                }
+                if p.transport.speed() != 0 {
+                    ctx.request_repaint();
+                }
+            }
+            return None;
+        }
+        if let Some(p) = &mut self.player
+            && p.transport.speed() != 0
+        {
+            p.transport
+                .stop(self.output.as_ref().map_or(0, Output::clock));
+        }
+        if project.sequence().duration() == Time(0) {
+            return None;
+        }
+        self.proxy_sources(project);
+        let notify = ctx.clone();
+        self.program
+            .set_decode_notify(Arc::new(move || notify.request_repaint()));
+        let dragging = ctx.input(|i| i.pointer.primary_down());
+        let follow = self.sync_program(project, playhead, dragging);
+        if self.program.transport.speed() != 0 {
+            ctx.request_repaint();
+        }
+        follow
+    }
+
     /// The Program tab: the timeline composited at `playhead`, or `trim` (the source frame at a
     /// dragged clip edge, and whether it has video to decode) instead, with the transport row.
     /// Returns where the playhead moved to while playing or from a transport button.

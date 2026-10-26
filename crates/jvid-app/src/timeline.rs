@@ -143,6 +143,8 @@ pub struct Timeline {
     pub hide_region: Option<ClipId>,
     /// The sequence picked in the header to show instead; the app opens it.
     pub open_sequence: Option<SequenceId>,
+    /// Subtitle context menus ask the app to open the standalone SRT dialog.
+    pub export_subtitles: bool,
     /// The sequence shown last frame, to drop a selection made in another.
     shown_sequence: SequenceId,
     /// Keyframe lanes: expanded clips, picked keys and their clipboard.
@@ -237,6 +239,7 @@ impl Default for Timeline {
             notice: None,
             hide_region: None,
             open_sequence: None,
+            export_subtitles: false,
             shown_sequence: SequenceId::default(),
             keys: keyframes::Keys::default(),
             silence: None,
@@ -1010,6 +1013,22 @@ impl Timeline {
         }
     }
 
+    /// Menu edits and clipboard output still run while another dock tab covers Timeline.
+    pub(crate) fn pending_action(
+        &mut self,
+        ctx: &egui::Context,
+        project: &Project,
+    ) -> Option<Command> {
+        let command = self.pending.take();
+        if std::mem::take(&mut self.copied) {
+            // Ctrl+V only reaches us as a paste event when the system clipboard has text.
+            let n = self.clipboard.len();
+            ctx.copy_text(trn!("timeline.copied", n));
+        }
+        self.sync(project);
+        command
+    }
+
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -1020,13 +1039,7 @@ impl Timeline {
         self.media
             .strip_requests
             .on_focus(ui.ctx(), self.media.caches.as_deref());
-        let mut edit = self.pending.take().map(|c| (c, None));
-        if std::mem::take(&mut self.copied) {
-            // Ctrl+V only reaches us as a paste event when the system clipboard has text.
-            let n = self.clipboard.len();
-            ui.ctx().copy_text(trn!("timeline.copied", n));
-        }
-        self.sync(project);
+        let mut edit = self.pending_action(ui.ctx(), project).map(|c| (c, None));
         if self.keys.graph.is_some() {
             return edit.or(self.graph(ui, ui.max_rect(), project.sequence()));
         }
@@ -2291,6 +2304,9 @@ impl Timeline {
         let same_kind: Vec<_> = tracks.iter().filter(|t| t.kind == track.kind).collect();
         let pos = same_kind.iter().position(|t| t.id == track.id).unwrap_or(0);
         body.context_menu(|ui| {
+            if track.subtitles && ui.button(tr!("action.export_subtitles")).clicked() {
+                self.export_subtitles = true;
+            }
             if ui.button(tr!("timeline.rename")).clicked() {
                 self.renaming = Some((track.id, track.name.clone()));
             }

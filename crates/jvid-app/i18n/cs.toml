@@ -3,6 +3,7 @@
 # instructions imperatives with vykání. Terms follow docs/i18n/cs.md.
 
 [action]
+export_subtitles = "Exportovat titulky (.srt)…"
 new_project = "Nový projekt"
 open_project = "Otevřít projekt"
 save = "Uložit"
@@ -94,6 +95,7 @@ export_frame = "Exportovat snímek"
 record = "Nahrát komentář"
 
 [panel]
+drag_tab = "Přetažením seskupíte nebo rozdělíte panely; posunutím zobrazíte další karty."
 media = "Média"
 preview = "Náhled"
 inspector = "Inspektor"
@@ -123,6 +125,7 @@ no_media = "žádný video ani zvukový stream"
 unsupported_codec = "nepodporovaný kodek: {codec}"
 
 [menu]
+reset_layout = "Obnovit rozložení panelů"
 project_tooltip = "Vytvořit, otevřít a uložit"
 new_project = "Nový projekt"
 open = "Otevřít…"
@@ -514,6 +517,10 @@ dip_to_black = "Přechod přes černou"
 dip_to_white = "Přechod přes bílou"
 
 [subtitles]
+source_changed = "Zdroj se během přepisu změnil. Spusťte přepis znovu."
+recognize_again = "Rozpoznat znovu"
+reuse_hint = "Kompatibilní výsledky se použijí znovu; přepíše se jen chybějící zvuk."
+reused = "Kompatibilní výsledky rozpoznávání byly použity znovu."
 title = "Vytvořit titulky"
 language = "Jazyk"
 auto = "Automaticky"
@@ -967,6 +974,13 @@ screen_zoom = "Vyberte klip a v Inspektoru zvyšte Měřítko, abyste přiblíž
 screen_callout = "Přetáhněte titulek z karty Text na časovou osu nad klip jako popisek."
 
 [transcript]
+partial = "Část zvuku ještě nebyla přepsána. Spusťte přepis pro doplnění mezer."
+copy_all = "Kopírovat vše"
+export_text = "Exportovat přepis…"
+text_filter = "Textové soubory"
+scope = "Rozsah: {scope}"
+txt_required = "Zvolte název souboru končící na .txt."
+protected_destination = "Zvolte jiný soubor; tento cíl je projekt nebo zdrojové médium."
 transcribe = "Přepsat"
 # The search field's placeholder.
 find = "Najít"
@@ -1018,3 +1032,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Všechny viditelné titulkové stopy v aktuální sekvenci, včetně vložených vnořených sekvencí. Zdrojové přepisy jsou vynechány."
+save = "Uložit SRT…"
+empty = "V tomto rozsahu nejsou žádné titulky."
+extension = "Vyberte cíl s příponou .srt."
+project_collision = "Vyberte jiný cíl: tento soubor je projekt."
+saved = "Titulky uloženy do {path}"
+video_help = "Vypálení vykreslí titulky do videa; samostatný soubor SRT se uloží vedle něj. Pouze SRT: Časová osa > Exportovat titulky."

@@ -3,6 +3,7 @@
 # infinitive, as in Dutch Windows. Terms follow docs/i18n/nl.md.
 
 [action]
+export_subtitles = "Ondertitels exporteren (.srt)…"
 new_project = "Nieuw project"
 open_project = "Project openen"
 save = "Opslaan"
@@ -94,6 +95,7 @@ export_frame = "Frame exporteren"
 record = "Voice-over opnemen"
 
 [panel]
+drag_tab = "Sleep om panelen te groeperen of te splitsen; scrol voor meer tabbladen."
 media = "Media"
 preview = "Voorvertoning"
 inspector = "Inspector"
@@ -126,6 +128,7 @@ no_media = "geen video- of audiostreams"
 unsupported_codec = "niet-ondersteunde codec: {codec}"
 
 [menu]
+reset_layout = "Paneelindeling herstellen"
 project_tooltip = "Nieuw, openen en opslaan"
 new_project = "Nieuw project"
 open = "Openen…"
@@ -513,6 +516,10 @@ dip_to_black = "Via zwart"
 dip_to_white = "Via wit"
 
 [subtitles]
+source_changed = "De bron is tijdens de transcriptie gewijzigd. Transcribeer opnieuw."
+recognize_again = "Opnieuw herkennen"
+reuse_hint = "Compatibele resultaten worden hergebruikt; alleen ontbrekende audio wordt getranscribeerd."
+reused = "Compatibele herkenningsresultaten hergebruikt."
 title = "Ondertitels genereren"
 language = "Taal"
 auto = "Automatisch"
@@ -965,6 +972,13 @@ screen_zoom = "Selecteer de clip en verhoog Schaal in de Inspector om in te zoom
 screen_callout = "Sleep een titel uit Tekst naar de tijdlijn boven je clip als toelichting."
 
 [transcript]
+partial = "Een deel van de audio is nog niet getranscribeerd. Transcribeer om de hiaten te vullen."
+copy_all = "Alles kopiëren"
+export_text = "Transcript exporteren…"
+text_filter = "Tekstbestanden"
+scope = "Bereik: {scope}"
+txt_required = "Kies een bestandsnaam die eindigt op .txt."
+protected_destination = "Kies een ander bestand; dit doel is een project of bronmedium."
 transcribe = "Transcriberen"
 # The search field's placeholder.
 find = "Zoeken"
@@ -1016,3 +1030,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Alle zichtbare ondertitelsporen in de huidige sequentie, inclusief geplaatste geneste sequenties. Brontranscripties worden uitgesloten."
+save = "SRT opslaan…"
+empty = "Geen ondertitels in dit bereik."
+extension = "Kies een bestemming met de extensie .srt."
+project_collision = "Kies een andere bestemming: dit bestand is het project."
+saved = "Ondertitels opgeslagen in {path}"
+video_help = "Inbranden tekent ondertitels in de video; een apart SRT-bestand wordt ernaast opgeslagen. Alleen SRT: Tijdlijn > Ondertitels exporteren."

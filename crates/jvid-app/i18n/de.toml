@@ -3,6 +3,7 @@
 # items use the infinitive (Speichern). Terms follow docs/i18n/de.md.
 
 [action]
+export_subtitles = "Untertitel exportieren (.srt)…"
 new_project = "Neues Projekt"
 open_project = "Projekt öffnen"
 save = "Speichern"
@@ -94,6 +95,7 @@ export_frame = "Frame exportieren"
 record = "Voiceover aufzeichnen"
 
 [panel]
+drag_tab = "Ziehen, um Bereiche zu gruppieren oder zu teilen; scrollen, um weitere Tabs zu sehen."
 media = "Medien"
 preview = "Vorschau"
 inspector = "Inspektor"
@@ -123,6 +125,7 @@ no_media = "keine Video- oder Audiostreams"
 unsupported_codec = "nicht unterstützter Codec: {codec}"
 
 [menu]
+reset_layout = "Bereichsanordnung zurücksetzen"
 project_tooltip = "Neu, Öffnen und Speichern"
 new_project = "Neues Projekt"
 open = "Öffnen…"
@@ -505,6 +508,10 @@ dip_to_black = "Schwarzblende"
 dip_to_white = "Weißblende"
 
 [subtitles]
+source_changed = "Die Quelle wurde während der Transkription geändert. Transkribieren Sie erneut."
+recognize_again = "Erneut erkennen"
+reuse_hint = "Kompatible Ergebnisse werden wiederverwendet; nur fehlendes Audio wird transkribiert."
+reused = "Kompatible Erkennungsergebnisse wurden wiederverwendet."
 title = "Untertitel erstellen"
 language = "Sprache"
 auto = "Automatisch"
@@ -950,6 +957,13 @@ screen_zoom = "Wählen Sie den Clip aus und erhöhen Sie im Inspektor die Skalie
 screen_callout = "Ziehen Sie einen Titel aus Text als Hinweis über dem Clip auf die Timeline."
 
 [transcript]
+partial = "Ein Teil des Audios wurde noch nicht transkribiert. Transkribieren Sie, um die Lücken zu füllen."
+copy_all = "Alles kopieren"
+export_text = "Transkript exportieren…"
+text_filter = "Textdateien"
+scope = "Umfang: {scope}"
+txt_required = "Wähle einen Dateinamen mit der Endung .txt."
+protected_destination = "Wähle eine andere Datei; dieses Ziel ist ein Projekt oder ein Quellmedium."
 transcribe = "Transkribieren"
 # The search field's placeholder.
 find = "Suchen"
@@ -1001,3 +1015,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Alle sichtbaren Untertitelspuren der aktuellen Sequenz, einschließlich platzierter verschachtelter Sequenzen. Quelltranskripte sind ausgeschlossen."
+save = "SRT speichern…"
+empty = "Keine Untertitel in diesem Bereich."
+extension = "Wähle ein Ziel mit der Erweiterung .srt."
+project_collision = "Wähle ein anderes Ziel: Diese Datei ist das Projekt."
+saved = "Untertitel in {path} gespeichert"
+video_help = "Einbrennen zeichnet Untertitel ins Video; die separate SRT-Datei wird daneben gespeichert. Nur SRT: Zeitleiste > Untertitel exportieren."
