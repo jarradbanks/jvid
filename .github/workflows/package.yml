@@ -1,4 +1,5 @@
 name: Package
+run-name: ${{ (github.event_name == 'push' || inputs.release) && startsWith(github.ref, 'refs/tags/v') && format('Release {0}', github.ref_name) || format('Package {0}', github.ref_name) }}
 
 on:
   pull_request:
@@ -6,6 +7,7 @@ on:
       - '.github/workflows/package.yml'
       - 'packaging/**'
       - 'scripts/packaging/**'
+      - 'scripts/release/**'
       - 'crates/jvid-paths/**'
       - 'crates/jvid-updater/**'
       - 'Cargo.toml'
@@ -13,6 +15,12 @@ on:
       - 'crates/jvid-app/src/components.rs'
       - 'crates/jvid-app/src/package_smoke.rs'
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish this immutable version tag after protected release approval
+        type: boolean
+        required: false
+        default: false
   push:
     tags: ['v*']
 
@@ -21,7 +29,7 @@ permissions:
 
 concurrency:
   group: package-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -31,7 +39,29 @@ env:
   JVID_UPDATE_PUBLIC_KEY: ${{ vars.JVID_UPDATE_PUBLIC_KEY }}
 
 jobs:
+  release-status:
+    name: release publication gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.status.outputs.build }}
+      publish: ${{ steps.status.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Skip published releases and enforce explicit tag opt-in
+        id: status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE: ${{ inputs.release }}
+          JVID_RELEASE_ENABLED: ${{ vars.JVID_RELEASE_ENABLED }}
+        run: python scripts/release/publish.py status
+
   build:
+    needs: release-status
+    if: needs.release-status.outputs.build == 'true'
     name: package (${{ matrix.target }})
     strategy:
       fail-fast: false
@@ -213,6 +243,8 @@ jobs:
           if-no-files-found: error
 
   sources-rust:
+    needs: release-status
+    if: needs.release-status.outputs.build == 'true'
     name: workspace and vendored source
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -268,26 +300,40 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-  # Disabled unless explicitly configured by the maintainer; manual/PR runs never publish.
-  # A draft gives the maintainer a final signing/source/clean-machine review boundary.
+  # Approval of the existing tag-only release environment authorizes publication.
   release-draft:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && vars.JVID_RELEASE_ENABLED == 'true'
-    needs: source-check
+    name: approve, sign and publish
+    timeout-minutes: 60
+    if: needs.release-status.outputs.publish == 'true' && startsWith(github.ref, 'refs/tags/v') && vars.JVID_RELEASE_ENABLED == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release))
+    needs: [source-check, release-status]
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Recheck immutable release before signing
+        id: writable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE: ${{ inputs.release }}
+          JVID_RELEASE_ENABLED: ${{ vars.JVID_RELEASE_ENABLED }}
+        run: python scripts/release/publish.py preflight
       - uses: actions/download-artifact@v4
+        if: steps.writable.outputs.publish == 'true'
         with:
           name: release-candidate
           path: release-assets
       - name: Verify generated source and native release contract
+        if: steps.writable.outputs.publish == 'true'
         run: |
           python scripts/packaging/assert_assets.py release-assets
           python scripts/packaging/sources.py release --sources release-assets --native release-assets --output release-assets --verify-only
       - name: Sign final updater metadata
+        if: steps.writable.outputs.publish == 'true'
         env:
           JVID_UPDATE_SIGNING_KEY: ${{ secrets.JVID_UPDATE_SIGNING_KEY }}
         run: |
@@ -295,9 +341,12 @@ jobs:
           cargo run --release --locked -p jvid-updater --bin jvid-update-metadata -- "${GITHUB_REF_NAME#v}" packaging/release-notes.md release-assets
           test -s release-assets/jvid-update.json
           test "$(wc -c < release-assets/jvid-update.json.sig)" -eq 64
-      - name: Create reviewable draft release
+      - name: Verify, upload draft assets and publish
+        if: steps.writable.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE: ${{ inputs.release }}
+          JVID_RELEASE_ENABLED: ${{ vars.JVID_RELEASE_ENABLED }}
         run: |
           python scripts/packaging/checksums.py release-assets
-          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "jvid $GITHUB_REF_NAME" --notes-file packaging/release-notes.md release-assets/*
+          python scripts/release/publish.py publish

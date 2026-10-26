@@ -160,13 +160,21 @@ uploads `jvid-update.json` and its 64-byte raw `jvid-update.json.sig` alongside 
 exact native assets and their checksums. No signed metadata is fabricated by
 packaging alone. The editor's update guard includes `self.components.is_busy()`:
 it stays true while cancelled downloads unwind as well as during active model
-transfers. The draft-release job runs only for enabled tag pushes; PR and manual
-runs, including manual runs against a tag, never create a release.
+transfers. Publication runs only for enabled version-tag pushes or explicit tag dispatches
+with `release=true`, after the existing `release` environment approval. PR and
+branch candidates never create releases; manual dispatch defaults to `release=false`.
 
 ## Building candidates and release controls
 
-The **Package** workflow runs all three native toolchains, uploads artifacts and
-smoke evidence, and never creates a release on PR or manual runs. Locally:
+The **Package** workflow runs all three native toolchains and uploads artifacts and
+smoke evidence. Prepare release dispatches it on a frozen `release/vVERSION` branch
+with publication disabled, alongside manual CI on all three OSes. Feature work
+merges into develop; only this temporary branch contains the release version bump.
+After the reviewed release PR merges into main, automation tags the exact merge
+and explicitly dispatches Package with `release=true`. Its final job waits for the
+existing protected release approval, then signs, verifies uploads and publishes.
+See [updating.md](updating.md#prepare-and-test-a-candidate) for review, retry and
+hotfix instructions. Locally:
 
 ```sh
 cargo build --locked --release -p jvid-app --features gpl-ffmpeg
@@ -243,15 +251,28 @@ an existing output. Extract the resulting tarball with an archive utility. Provi
 archives remain intact with their reconstruction/build recipes. Toolchains and OS
 SDKs described by those recipes remain external build prerequisites.
 
-Tagged builds create a **draft** only when `JVID_RELEASE_ENABLED=true` is configured
-and the protected `release` environment allows it. The job downloads the verified
-candidate, rechecks its source index/native hashes, then signs updater metadata and
-attaches native/source assets and final checksums. No external corresponding-source
-URL/checksum variables or separate hosting are required. PR/manual runs produce
-candidate artifacts and never create releases. Source completeness and platform
-acceptance still require maintainer review before publishing. Final signing and
-notarization must precede metadata/checksums; keep drafts unpublished until the
-validation checklist below is recorded.
+Native app downloads and corresponding-source bundles are separate release
+assets. Users install the five native formats listed above; they do not install
+source manifests or multipart source archives. Keep all source parts with their
+bundle manifest when reviewing or rebuilding source.
+
+Publication requires `JVID_RELEASE_ENABLED=true`, a matching immutable `vVERSION`
+tag, and the existing `release` environment's required reviewer and `v*` tag policy.
+A tag push remains supported; main's bot-created tag explicitly dispatches Package
+with `release=true` because `GITHUB_TOKEN` pushes do not trigger another workflow.
+Ordinary manual dispatches default to false; PR/branch candidates cannot publish.
+The run for an opted-in tag is named **Release vVERSION**.
+
+Before approving, review the tag build's complete source/native contract, candidate
+OS tests and any required signing/notarization. Approval authorizes automatic public
+publication. The protected job rechecks sources, uses the environment private key
+only in its updater-signing step, verifies that signature using the public key,
+creates/resumes a draft and uploads exact assets and checksums. It verifies every
+remote name, uploaded state, size and GitHub SHA-256 digest before publishing the
+stable release. It preserves completed matching uploads, retries incomplete upload
+objects, refuses conflicting bytes, and never edits a published release. Recover
+failed uploads with the original Package run's **failed jobs** and original artifact;
+see the [retry procedure](updating.md#release-retry-and-hotfix-procedure).
 
 ## Verification and remaining platform acceptance
 

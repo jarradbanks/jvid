@@ -2,14 +2,13 @@ name: CI
 
 on:
   pull_request:
-  # main is checked nightly (and on demand) on all three OSes instead of on every merge.
+  # Nightly and manual runs cover all three OSes; PRs and branch pushes run Linux.
   schedule:
     - cron: '0 17 * * *'
   workflow_dispatch:
-  # Dependency changes refresh main's Linux cache; workflow changes also validate CI itself.
+  # Verify combined develop integration before preparing a frozen release candidate.
   push:
-    branches: [main]
-    paths: ['Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml', '.github/workflows/**']
+    branches: [main, develop]
 
 permissions:
   contents: read
@@ -164,7 +163,7 @@ jobs:
           path: crates/*/tests/snapshots/*.png
           if-no-files-found: ignore
       # Playback throughput (#32) only means anything optimised. Its release build costs PRs 2-5 minutes, so it runs on main only (Linux).
-      - if: runner.os == 'Linux' && github.event_name != 'pull_request'
+      - if: runner.os == 'Linux' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash # pipefail, so the tee doesn't hide a failure
         # The grep fails the gate if the test didn't run (the tests are in the lib, not the bin).
         run: |
@@ -174,7 +173,7 @@ jobs:
           JVID_GPU_TESTS: required
           JVID_TEST_MEDIA_REQUIRED: '1'
       # Perf numbers against docs/perf.md, reported to the job summary; non-blocking (noisy runners, lavapipe).
-      - if: runner.os == 'Linux' && github.event_name != 'pull_request'
+      - if: runner.os == 'Linux' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         name: perf report
         continue-on-error: true
         shell: bash
@@ -215,10 +214,21 @@ jobs:
     if: needs.changes.outputs.i18n == 'true'
     uses: ./.github/workflows/i18n.yml
 
+  release-automation:
+    name: release automation tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s scripts/release -p 'test_*.py'
+
   # Require this one check in branch protection; the individual jobs may legitimately skip.
   required:
     name: CI required
-    needs: [changes, check, deny, i18n]
+    needs: [changes, check, deny, i18n, release-automation]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -229,6 +239,9 @@ jobs:
         with:
           script: |
             const needs = JSON.parse(process.env.NEEDS);
+            if (needs['release-automation'].result !== 'success') {
+              core.setFailed(`Release automation ${needs['release-automation'].result}`);
+            }
             if (needs.changes.result !== 'success') {
               core.setFailed(`Change detection ${needs.changes.result}`);
               return;
