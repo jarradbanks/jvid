@@ -2,6 +2,8 @@ Changes in 0.2.1
 
 - Fix Windows updater when the editor has already exited
 
+**Windows users updating from 0.2.0 or earlier:** download and run the `jvid-0.2.1-windows-x86_64-setup.exe` installer manually once. Older installed update helpers can incorrectly report “Editor did not exit” before starting the installer. Install into the same directory to replace that helper and keep your settings, projects and models. Future in-app updates will use the repaired helper.
+
 Choose the download for your system:
 
 - Windows x86_64: **setup.exe** installs for your user with shortcuts and an uninstaller; **portable.zip** runs after extraction.
