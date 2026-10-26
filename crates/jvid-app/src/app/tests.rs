@@ -2666,9 +2666,10 @@ fn audit_461_named_recovery_discard_survives_reopen_and_preserves_other_projects
         })
         .unwrap();
     // Explicit timestamps avoid relying on filesystem timestamp resolution.
-    let main = std::fs::File::open(&path).unwrap();
+    let main = std::fs::File::options().write(true).open(&path).unwrap();
     main.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1))
         .unwrap();
+    drop(main);
     autosave::write(edited.project(), &path).unwrap();
     autosave::write(edited.project(), &other).unwrap();
     let other_bytes = std::fs::read(autosave::slot(&other, 1)).unwrap();
