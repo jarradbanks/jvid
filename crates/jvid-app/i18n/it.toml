@@ -94,6 +94,7 @@ export_frame = "Esporta fotogramma"
 record = "Registra voce fuori campo"
 
 [panel]
+drag_tab = "Trascina per raggruppare o dividere i pannelli; scorri per vedere altre schede."
 media = "Media"
 preview = "Anteprima"
 inspector = "Inspector"
@@ -123,6 +124,7 @@ no_media = "nessun flusso video o audio"
 unsupported_codec = "codec non supportato: {codec}"
 
 [menu]
+reset_layout = "Ripristina disposizione pannelli"
 project_tooltip = "Crea, apri e salva"
 new_project = "Nuovo progetto"
 open = "Apri…"

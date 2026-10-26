@@ -28,6 +28,16 @@ The start screen offers **New project** (pick a frame size preset, or **Match so
 - **Missing media:** if a source file has moved, the clip shows as offline. Right-click it in the bin and choose **Relink…**; other missing files in the same folder are found too.
 - **Panels:** Media, Source, Program, Timeline, Inspector and Effects. `Shift+1` to `Shift+7` focus them.
 
+## Arranging panels
+
+Every editor panel has a draggable tab strip. Open **Timeline → Transcript** or **Export → Show Render Queue** to place that optional panel beside Timeline. Drag its tab onto Timeline's strip to share one full-width panel; click a tab to switch views. All three can share a group. Drag a tab along the strip to reorder it, or into another panel's body and choose a highlighted edge to create a separate split. Drop feedback shows the destination before you release. Panels stay inside the editor window.
+
+Timeline's editing actions sit in a separate toolbar below its tab strip. Drag the tab to move the panel; use the toolbar to edit. At narrow widths the tab strip scrolls horizontally with the mouse wheel or its scrollbar, and long labels have an ellipsis and show their full name on hover.
+
+Close Transcript or Render Queue with the **×** on its tab (or middle-click the tab). Showing an already-open panel activates its existing tab wherever you moved it. Reopening a closed optional panel creates a split immediately to Timeline's right. Closing Render Queue leaves exports running; closing Transcript keeps its cached recognition.
+
+Groups, tab order, split sizes and active tabs are saved automatically across restarts. **Edit → Reset Panel Layout** restores the standard editor arrangement and places any open optional panels beside Timeline. Resetting the layout keeps the project, transcript search and render jobs intact.
+
 ## Editing basics
 
 **Playback.** `Space` plays and stops. `J`/`K`/`L` shuttle; press `J` or `L` again to go faster. `Left`/`Right` step one frame, `Home`/`End` jump to the ends. The Program monitor's preview resolution menu trades sharpness for speed while scrubbing.

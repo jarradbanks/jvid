@@ -267,6 +267,12 @@ impl Queue {
     }
 
     /// The Render Queue dock panel.
+    pub(crate) fn panel_docked(&mut self, ui: &mut Ui, focused: bool) -> Option<Action> {
+        self.failed_unseen = false;
+        let a = panel_inner(ui, &self.rows(), self.confirm_all, focused, true);
+        a.inspect(|a| self.apply(*a))
+    }
+
     pub fn panel(&mut self, ui: &mut Ui, focused: bool) -> Option<Action> {
         self.failed_unseen = false;
         let a = panel(ui, &self.rows(), self.confirm_all, focused);
@@ -531,35 +537,47 @@ const NARROW: f32 = 640.0;
 
 /// The Render Queue panel: Cancel All and Clear Finished in its header, then one row per job.
 pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<Action> {
+    panel_inner(ui, rows, confirm, focused, false)
+}
+
+fn panel_inner(
+    ui: &mut Ui,
+    rows: &[Row],
+    confirm: bool,
+    focused: bool,
+    docked: bool,
+) -> Option<Action> {
     let mut action = None;
     let close = [(icon::X, tr!("export.close_queue"))];
-    let r = Panel::titled(tr!("export.queue"))
-        .actions(&close)
-        .focused(focused)
-        .show(ui, |ui| {
-            if rows.is_empty() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(space::S32);
-                    let t = RichText::new(tr!("export.empty_title")).font(theme::title());
-                    ui.label(t.color(color::ink()));
-                    ui.add_space(space::S4);
-                    ui.label(RichText::new(tr!("export.empty_help")).color(color::ink_3()));
-                });
-                return;
-            }
-            let wide = ui.available_width() >= NARROW;
-            header_row(ui, wide);
-            egui::ScrollArea::vertical()
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    for (i, r) in rows.iter().enumerate() {
-                        if let Some(a) = row(ui, i, r, wide) {
-                            action = Some(a);
-                        }
+    let panel = if docked {
+        Panel::toolbar().embedded(true)
+    } else {
+        Panel::titled(tr!("export.queue")).actions(&close)
+    };
+    let r = panel.focused(focused).show(ui, |ui| {
+        if rows.is_empty() {
+            ui.vertical_centered(|ui| {
+                ui.add_space(space::S32);
+                let t = RichText::new(tr!("export.empty_title")).font(theme::title());
+                ui.label(t.color(color::ink()));
+                ui.add_space(space::S4);
+                ui.label(RichText::new(tr!("export.empty_help")).color(color::ink_3()));
+            });
+            return;
+        }
+        let wide = ui.available_width() >= NARROW;
+        header_row(ui, wide);
+        egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (i, r) in rows.iter().enumerate() {
+                    if let Some(a) = row(ui, i, r, wide) {
+                        action = Some(a);
                     }
-                });
-        });
+                }
+            });
+    });
     if r.action == Some(0) {
         action = Some(Action::Close);
     }
@@ -568,14 +586,25 @@ pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<
         .response
         .rect
         .with_max_y(r.response.rect.top() + size::HEADER);
-    let right = header.right() - space::S8 - size::CONTROL - space::S8;
+    let right = header.right()
+        - space::S8
+        - if docked {
+            0.0
+        } else {
+            size::CONTROL + space::S8
+        };
     let painter = ui.painter().clone();
     let text_w = move |s: &str, font| {
         let g = painter.layout_no_wrap(s.into(), font, color::ink());
         g.size().x.ceil()
     };
-    let left = header.left() + space::INSET + text_w(tr!("export.queue"), theme::body_strong());
-    let left = left + space::S12;
+    let left = header.left()
+        + space::INSET
+        + if docked {
+            0.0
+        } else {
+            text_w(tr!("export.queue"), theme::body_strong()) + space::S12
+        };
     if right <= left {
         return action;
     }

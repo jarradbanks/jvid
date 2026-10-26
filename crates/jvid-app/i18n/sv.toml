@@ -94,6 +94,7 @@ export_frame = "Exportera bildruta"
 record = "Spela in speakerröst"
 
 [panel]
+drag_tab = "Dra för att gruppera eller dela paneler; rulla för att se fler flikar."
 media = "Media"
 preview = "Förhandsvisning"
 inspector = "Inspektör"
@@ -123,6 +124,7 @@ no_media = "inga video- eller ljudströmmar"
 unsupported_codec = "kodek som inte stöds: {codec}"
 
 [menu]
+reset_layout = "Återställ panellayout"
 project_tooltip = "Skapa, öppna och spara"
 new_project = "Nytt projekt"
 open = "Öppna…"
