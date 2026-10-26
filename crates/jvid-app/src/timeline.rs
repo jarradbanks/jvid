@@ -1013,6 +1013,22 @@ impl Timeline {
         }
     }
 
+    /// Menu edits and clipboard output still run while another dock tab covers Timeline.
+    pub(crate) fn pending_action(
+        &mut self,
+        ctx: &egui::Context,
+        project: &Project,
+    ) -> Option<Command> {
+        let command = self.pending.take();
+        if std::mem::take(&mut self.copied) {
+            // Ctrl+V only reaches us as a paste event when the system clipboard has text.
+            let n = self.clipboard.len();
+            ctx.copy_text(trn!("timeline.copied", n));
+        }
+        self.sync(project);
+        command
+    }
+
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -1023,13 +1039,7 @@ impl Timeline {
         self.media
             .strip_requests
             .on_focus(ui.ctx(), self.media.caches.as_deref());
-        let mut edit = self.pending.take().map(|c| (c, None));
-        if std::mem::take(&mut self.copied) {
-            // Ctrl+V only reaches us as a paste event when the system clipboard has text.
-            let n = self.clipboard.len();
-            ui.ctx().copy_text(trn!("timeline.copied", n));
-        }
-        self.sync(project);
+        let mut edit = self.pending_action(ui.ctx(), project).map(|c| (c, None));
         if self.keys.graph.is_some() {
             return edit.or(self.graph(ui, ui.max_rect(), project.sequence()));
         }

@@ -27,7 +27,10 @@ fn discoverable_subtitle_export_saves_without_gpu_models_recognition_or_video_jo
     let dir = tempfile::tempdir().unwrap();
     let destination = dir.path().join("captions.srt");
     let before = h.state().history.project().clone();
-    h.get_by_label("Timeline").click();
+    h.get_all_by_label("Timeline")
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .unwrap()
+        .click();
     h.run();
     h.get_by_label("Export Subtitles (.srt)… ").click();
     h.run();

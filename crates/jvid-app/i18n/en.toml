@@ -96,6 +96,7 @@ record = "Record Voiceover"
 
 # Dock panel titles.
 [panel]
+drag_tab = "Drag to group or split panels; scroll to see more tabs."
 media = "Media"
 preview = "Preview"
 inspector = "Inspector"
@@ -132,6 +133,7 @@ unsupported_codec = "unsupported codec: {codec}"
 
 # The app bar menus.
 [menu]
+reset_layout = "Reset Panel Layout"
 project_tooltip = "New, open and save"
 new_project = "New Project"
 open = "Open…"

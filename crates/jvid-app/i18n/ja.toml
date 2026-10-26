@@ -97,6 +97,7 @@ export_frame = "フレームを書き出し"
 record = "ボイスオーバーを録音"
 
 [panel]
+drag_tab = "ドラッグしてパネルをまとめたり分割したりできます。スクロールすると他のタブが表示されます。"
 media = "メディア"
 preview = "プレビュー"
 inspector = "インスペクタ"
@@ -126,6 +127,7 @@ no_media = "ビデオまたはオーディオのストリームがありませ�
 unsupported_codec = "未対応のコーデック：{codec}"
 
 [menu]
+reset_layout = "パネルの配置をリセット"
 project_tooltip = "新規作成、開く、保存"
 new_project = "新規プロジェクト"
 open = "開く…"

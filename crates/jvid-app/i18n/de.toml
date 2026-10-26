@@ -95,6 +95,7 @@ export_frame = "Frame exportieren"
 record = "Voiceover aufzeichnen"
 
 [panel]
+drag_tab = "Ziehen, um Bereiche zu gruppieren oder zu teilen; scrollen, um weitere Tabs zu sehen."
 media = "Medien"
 preview = "Vorschau"
 inspector = "Inspektor"
@@ -124,6 +125,7 @@ no_media = "keine Video- oder Audiostreams"
 unsupported_codec = "nicht unterstützter Codec: {codec}"
 
 [menu]
+reset_layout = "Bereichsanordnung zurücksetzen"
 project_tooltip = "Neu, Öffnen und Speichern"
 new_project = "Neues Projekt"
 open = "Öffnen…"

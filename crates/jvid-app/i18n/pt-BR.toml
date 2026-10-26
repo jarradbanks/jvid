@@ -95,6 +95,7 @@ export_frame = "Exportar quadro"
 record = "Gravar narração"
 
 [panel]
+drag_tab = "Arraste para agrupar ou dividir painéis; role para ver mais abas."
 media = "Mídia"
 preview = "Visualização"
 inspector = "Inspetor"
@@ -124,6 +125,7 @@ no_media = "sem fluxos de vídeo ou áudio"
 unsupported_codec = "codec sem suporte: {codec}"
 
 [menu]
+reset_layout = "Redefinir layout dos painéis"
 project_tooltip = "Criar, abrir e salvar"
 new_project = "Novo projeto"
 open = "Abrir…"

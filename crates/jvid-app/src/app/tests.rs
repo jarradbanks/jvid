@@ -16,6 +16,7 @@ use crate::import::Importer;
 mod audit_b08;
 mod audit_b09;
 mod audit_b11;
+mod docking;
 mod subtitle_export;
 mod updates;
 
@@ -238,7 +239,12 @@ fn hairlines_are_one_physical_pixel() {
         for &(t, r) in &s.panels {
             let down = s.column(r);
             let ctx = format!("{}: {t:?} down {down:?}", s.ctx);
-            assert_eq!(down.len(), 3, "{ctx}");
+            let lines = if matches!(t, Tab::Media | Tab::Preview | Tab::Timeline) {
+                4
+            } else {
+                3
+            };
+            assert_eq!(down.len(), lines, "{ctx}");
             assert!(down.iter().all(|r| r.1 == 1), "{ctx}");
             assert_eq!(down[1].0 - down[0].0, s.px(size::HEADER) - 1, "{ctx}");
         }
@@ -461,8 +467,9 @@ fn hover_remove_button_uses_the_remove_flow() {
     settle_hover(&mut h);
     assert_eq!(h.state().bin.filmstrip_test_state(), (0, 2, true));
     h.state_mut().bin.list = true;
-    // clutch_round_3.mkv, used by two clips: warns.
-    h.hover_at(egui::pos2(100.0, 164.0));
+    h.run();
+    // clutch_round_3.mkv, used by two clips: the dock strip adds one header above the list.
+    h.hover_at(egui::pos2(100.0, 164.0 + size::HEADER));
     settle_hover(&mut h);
     if gpu() {
         results.add(h.try_snapshot("bin_list_hover"));
@@ -472,7 +479,7 @@ fn hover_remove_button_uses_the_remove_flow() {
     assert_eq!(h.state().bin.confirm_remove, Some(AssetId(2)));
     h.get_by_label("Cancel").click();
     // arena_01.mkv is unused: removed at once.
-    h.hover_at(egui::pos2(100.0, 132.0));
+    h.hover_at(egui::pos2(100.0, 132.0 + size::HEADER));
     settle_hover(&mut h);
     h.get_by_label("Remove from Project").click();
     h.run();
@@ -643,7 +650,7 @@ fn dock_layout_persists() {
     );
     assert_eq!((i.surface, i.node), (t.surface, t.node));
     for (_, node) in restored.dock.iter_all_nodes() {
-        assert!(!node.is_leaf() || node.is_tab_bar_hidden());
+        assert!(!node.is_leaf() || !node.is_tab_bar_hidden());
     }
 }
 
@@ -683,7 +690,7 @@ fn render_queue_docks_beside_timeline_and_reopens_there() {
     let mut app = App::restore(Some(&storage));
     assert!(beside(&app));
     for (_, node) in app.dock.iter_all_nodes() {
-        assert!(!node.is_leaf() || node.is_tab_bar_hidden());
+        assert!(!node.is_leaf() || !node.is_tab_bar_hidden());
     }
 
     let ctx = egui::Context::default();
@@ -1095,7 +1102,7 @@ fn inspector_tabs_fill_the_header() {
         let right = h
             .query_all_by_label(last)
             .map(|n| n.rect())
-            .find(|r| panel.contains_rect(*r) && r.top() < panel.top() + size::HEADER)
+            .find(|r| panel.contains_rect(*r) && r.top() < panel.top() + 2.0 * size::HEADER)
             .unwrap()
             .right();
         assert!(
@@ -1389,7 +1396,8 @@ fn effect_rows_show_each_effect_and_hover_only_fills() {
     let tmp = std::env::temp_dir().join(format!("jvid-fx-rows-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     crate::effects::scan_for_test(&tmp);
-    let mut h = harness([1280.0, 720.0], 1.0);
+    // All six effect rows must be visible for the pixel comparisons below.
+    let mut h = harness([1280.0, 900.0], 1.0);
     h.state_mut().bin.tab = 1;
     h.run();
     let names = [
@@ -1531,7 +1539,11 @@ fn title_harness_sized(
     h.run();
     let shot = Shot::take(&mut h, "title".into());
     let r = shot.panel(Tab::Preview);
-    let center = egui::pos2(r.center().x, r.center().y - size::HEADER / 2.0);
+    let path = h.state().dock.find_tab(&Tab::Preview).unwrap();
+    let viewport = h.state().dock.leaf(path.node_path()).unwrap().viewport;
+    assert!(r.contains_rect(viewport));
+    // The view selector and transport are both 32pt; their offsets cancel inside the body.
+    let center = viewport.center();
     (h, id, center)
 }
 
@@ -1972,7 +1984,10 @@ fn subtitles_harness(
         .select_clip(app.history.project().sequence(), id);
     app.subtitles.engine = Some((jvid_transcribe::models::Model::Base, fake));
     h.run();
-    h.get_by_label("Timeline").click();
+    h.get_all_by_label("Timeline")
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .unwrap()
+        .click();
     h.run();
     h.get_by_label("Generate Subtitles… Ctrl+Alt+G").click();
     h.run();
@@ -2138,7 +2153,10 @@ fn transcript_panel_cuts_the_picked_words() {
     };
     app.transcript.cache.insert(&source, heard);
     h.run();
-    h.get_by_label("Timeline").click();
+    h.get_all_by_label("Timeline")
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .unwrap()
+        .click();
     h.run();
     h.get_by_label("Transcript").click();
     h.run();

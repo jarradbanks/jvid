@@ -135,6 +135,8 @@ pub struct App {
     editor_context: Option<egui::Context>,
     path: Option<PathBuf>,
     dock: DockState<Tab>,
+    /// A show/focus action also scrolls the requested dock tab into view.
+    reveal_panel: Option<Tab>,
     /// The preview's views: one shows as a title, several as tabs.
     preview_views: &'static [&'static str],
     preview_active: usize,
@@ -282,11 +284,8 @@ impl App {
             project_session: 0,
             editor_context: None,
             path: None,
-            dock: {
-                let mut dock = dock;
-                hide_tab_bars(&mut dock);
-                dock
-            },
+            dock: visible_dock(dock),
+            reveal_panel: None,
             preview_views: &["source", "program"],
             preview_active: 1,
             window_title: String::new(),
@@ -592,6 +591,9 @@ impl App {
                 }
             }
             ui.separator();
+            if ui.button(tr!("menu.reset_layout")).clicked() {
+                self.reset_layout();
+            }
             if ui.button(tr!("menu.preferences")).clicked() {
                 use jvid_audio::InputBackend;
                 self.preferences.open(
@@ -826,11 +828,38 @@ impl App {
                 }
                 None => self.dock.push_to_first_leaf(tab),
             }
-            hide_tab_bars(&mut self.dock);
         }
+        self.focus_panel(tab);
+    }
+
+    /// Activate as well as focus: a leaf may contain several tabs.
+    fn focus_panel(&mut self, tab: Tab) {
         if let Some(path) = self.dock.find_tab(&tab) {
+            let _ = self.dock.set_active_tab(path);
             self.dock.set_focused_node_and_surface(path.node_path());
+            self.reveal_panel = Some(tab);
+            if let Some(ctx) = &self.editor_context {
+                ctx.memory_mut(|m| {
+                    if let Some(id) = m.focused() {
+                        m.surrender_focus(id);
+                    }
+                });
+                ctx.request_repaint();
+            }
         }
+    }
+
+    /// Restore panel placement, keeping optional panels open and their work intact.
+    fn reset_layout(&mut self) {
+        let optional: Vec<_> = [Tab::Transcript, Tab::RenderQueue]
+            .into_iter()
+            .filter(|tab| self.dock.find_tab(tab).is_some())
+            .collect();
+        self.dock = default_dock();
+        for tab in optional {
+            self.show_panel(tab);
+        }
+        self.focus_panel(Tab::Timeline);
     }
 
     fn close_panel(&mut self, tab: Tab) {
@@ -1036,9 +1065,7 @@ impl App {
                 return;
             }
         };
-        if let Some(path) = self.dock.find_tab(&tab) {
-            self.dock.set_focused_node_and_surface(path.node_path());
-        }
+        self.focus_panel(tab);
     }
 
     /// Starts a voiceover take on the armed track at the playhead, and plays the timeline
@@ -1559,7 +1586,32 @@ impl eframe::App for App {
         crate::effects::draw_thumbs(&ctx, &self.preview, self.bin.tab == 1);
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             let focused = self.dock.find_active_focused().map(|(_, t)| *t);
+            let titles = dock_titles(ui, &self.dock);
+            let active_tabs: HashSet<_> = self
+                .dock
+                .iter_leaves()
+                .filter_map(|(_, leaf)| leaf.tabs.get(leaf.active.0).copied())
+                .collect();
+            let command = if active_tabs.contains(&Tab::Timeline) {
+                None
+            } else {
+                self.timeline
+                    .pending_action(ui.ctx(), self.history.project())
+            };
+            if !active_tabs.contains(&Tab::Preview)
+                && let Some(t) = self.preview.hidden(
+                    ui.ctx(),
+                    self.history.project(),
+                    self.timeline.playhead(),
+                    self.preview_active == 0,
+                )
+            {
+                self.timeline.seek(t);
+            }
             let mut viewer = Viewer {
+                active_tabs,
+                titles,
+                tab_rects: Vec::new(),
                 preview_views: self.preview_views,
                 preview_active: &mut self.preview_active,
                 focused,
@@ -1569,7 +1621,7 @@ impl eframe::App for App {
                 missing: &self.missing,
                 relink: None,
                 import_clicked: false,
-                command: None,
+                command,
                 gesture: None,
                 open: None,
                 preview: &mut self.preview,
@@ -1582,15 +1634,15 @@ impl eframe::App for App {
             };
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
-                .hidable_tab_bars(true)
-                .draggable_tabs(false)
+                .hidable_tab_bars(false)
+                .draggable_tabs(true)
                 .tab_context_menus(false)
-                .show_close_buttons(false)
+                .show_close_buttons(true)
                 .show_add_buttons(false)
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            let (import, command, gesture, relink, open, queue, transcript) = (
+            let (import, command, gesture, relink, open, queue, transcript, tab_rects) = (
                 viewer.import_clicked,
                 viewer.command,
                 viewer.gesture,
@@ -1598,7 +1650,25 @@ impl eframe::App for App {
                 viewer.open,
                 viewer.queue_action,
                 viewer.transcript_out,
+                viewer.tab_rects,
             );
+            paint_dock_frames(ui, &self.dock);
+            if let Some(tab) = self.reveal_panel.take()
+                && let Some(path) = self.dock.find_tab(&tab)
+                && let Ok(leaf) = self.dock.leaf_mut(path.node_path())
+                && let Some((_, rect)) = tab_rects.iter().find(|(t, _)| *t == tab)
+            {
+                let strip = leaf.rect.shrink(space::S4);
+                let shift = if rect.left() < strip.left() {
+                    rect.left() - strip.left()
+                } else {
+                    (rect.right() - strip.right()).max(0.0)
+                };
+                if shift.abs() > 0.5 {
+                    leaf.scroll = (leaf.scroll - shift).min(0.0);
+                    ui.ctx().request_repaint();
+                }
+            }
             if transcript.close {
                 self.close_panel(Tab::Transcript);
             }
@@ -1804,16 +1874,20 @@ pub fn default_dock() -> DockState<Tab> {
     dock
 }
 
-/// Each panel draws its own suite-ui header, so egui_dock's tab bars stay hidden.
-fn hide_tab_bars(dock: &mut DockState<Tab>) {
+/// Migrate layouts saved before dock strips were exposed, without changing their topology.
+fn visible_dock(mut dock: DockState<Tab>) -> DockState<Tab> {
     for (_, node) in dock.iter_all_nodes_mut() {
+        if !node.is_empty() {
+            node.set_collapsed(false);
+        }
         if node.is_leaf() {
-            node.set_tab_bar_hidden(true);
+            node.set_tab_bar_hidden(false);
         }
     }
+    dock
 }
 
-/// egui_dock draws only the 4px Ground gutters; the panels draw everything else.
+/// Dock strips use the same tokens as panel controls. Overflow scrolls horizontally.
 fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     let mut s = egui_dock::Style::from_egui(egui_style);
     s.dock_area_padding = None;
@@ -1829,13 +1903,113 @@ fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     body.inner_margin = Margin::ZERO;
     body.stroke = Stroke::NONE;
     body.bg_fill = egui::Color32::TRANSPARENT;
-    body.hidden_tab_bar_drag_height = Some(0.0);
-    s.buttons.show_tab_bar_size = 0.0;
-    s.buttons.show_tab_bar_hover_expand = 0.0;
+    s.tab_bar.height = size::HEADER;
+    s.tab_bar.inner_margin = Margin::same(space::S4 as i8);
+    s.tab_bar.bg_fill = color::panel();
+    s.tab_bar.corner_radius = egui::CornerRadius {
+        nw: suite_ui::tokens::radius::PANEL,
+        ne: suite_ui::tokens::radius::PANEL,
+        ..Default::default()
+    };
+    s.tab_bar.hline_color = egui::Color32::TRANSPARENT;
+    s.tab_bar.show_scroll_bar_on_overflow = true;
+    s.tab.spacing = space::S4;
+    s.tab.minimum_width = Some(size::TAB_MIN);
+    for (state, ink, fill) in [
+        (&mut s.tab.active, color::ink(), color::raised()),
+        (&mut s.tab.focused, color::ink(), color::raised()),
+        (&mut s.tab.inactive, color::ink_3(), color::panel()),
+        (&mut s.tab.hovered, color::ink_2(), color::raised()),
+        (
+            &mut s.tab.active_with_kb_focus,
+            color::ink(),
+            color::raised(),
+        ),
+        (
+            &mut s.tab.focused_with_kb_focus,
+            color::ink(),
+            color::raised(),
+        ),
+        (
+            &mut s.tab.inactive_with_kb_focus,
+            color::ink_2(),
+            color::raised(),
+        ),
+    ] {
+        state.text_color = ink;
+        state.bg_fill = fill;
+        state.outline_color = egui::Color32::TRANSPARENT;
+        state.corner_radius = egui::CornerRadius::same(suite_ui::tokens::radius::CONTROL);
+    }
+    s.buttons.close_tab_color = color::ink_2();
+    s.buttons.close_tab_active_color = color::ink();
+    s.buttons.close_tab_bg_fill = color::raised();
+    s.overlay.selection_color = color::light_blue().gamma_multiply(0.3);
+    s.overlay.overlay_type = egui_dock::OverlayType::HighlightedAreas;
+    s.overlay.button_color = color::raised();
+    s.overlay.button_border_stroke = Stroke::new(1.0, color::light_blue());
     s
 }
 
+/// One border around the whole group, including its dock strip.
+fn paint_dock_frames(ui: &Ui, dock: &DockState<Tab>) {
+    for (path, leaf) in dock.iter_leaves() {
+        if !path.surface.is_main() {
+            continue;
+        }
+        let rect = leaf.rect;
+        let px = ui.pixels_per_point().recip();
+        ui.painter().rect_filled(
+            egui::Rect::from_x_y_ranges(
+                rect.x_range(),
+                rect.top() + size::HEADER - px..=rect.top() + size::HEADER,
+            ),
+            0.0,
+            color::border(),
+        );
+        let ink = if dock.focused_leaf() == Some(path) {
+            color::blue()
+        } else {
+            color::border()
+        };
+        ui.painter().rect_stroke(
+            rect,
+            suite_ui::tokens::radius::PANEL,
+            theme::hairline(ui.ctx(), ink),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+/// Keep labels and close targets inside compact tabs, including long translations.
+fn dock_titles(ui: &Ui, dock: &DockState<Tab>) -> std::collections::HashMap<Tab, egui::WidgetText> {
+    let mut titles = std::collections::HashMap::new();
+    for (_, leaf) in dock.iter_leaves() {
+        let width = ((leaf.rect.width() - space::S8) / leaf.tabs.len() as f32 - space::S4)
+            .clamp(size::TAB_MIN, size::TAB_MAX);
+        for tab in &leaf.tabs {
+            let close = if matches!(tab, Tab::Transcript | Tab::RenderQueue) {
+                size::CONTROL
+            } else {
+                0.0
+            };
+            let galley = suite_ui::widgets::fit_text(
+                ui,
+                tab.title(),
+                theme::body_strong(),
+                egui::Color32::PLACEHOLDER,
+                width - 16.0 - close,
+            );
+            titles.insert(*tab, galley.into());
+        }
+    }
+    titles
+}
+
 struct Viewer<'a> {
+    active_tabs: HashSet<Tab>,
+    titles: std::collections::HashMap<Tab, egui::WidgetText>,
+    tab_rects: Vec<(Tab, egui::Rect)>,
     preview_views: &'static [&'static str],
     preview_active: &'a mut usize,
     focused: Option<Tab>,
@@ -1866,10 +2040,68 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn title(&mut self, tab: &mut Tab) -> egui::WidgetText {
-        tab.title().into()
+        self.titles
+            .get(tab)
+            .cloned()
+            .unwrap_or_else(|| tab.title().into())
+    }
+
+    fn is_closeable(&self, tab: &Tab) -> bool {
+        matches!(tab, Tab::Transcript | Tab::RenderQueue)
+    }
+
+    fn allowed_in_windows(&self, _tab: &mut Tab) -> bool {
+        false
+    }
+
+    fn on_tab_button(&mut self, tab: &mut Tab, response: &egui::Response) {
+        self.tab_rects.push((*tab, response.rect));
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tab.title()));
+        response.ctx.accesskit_node_builder(response.id, |node| {
+            node.set_role(egui::accesskit::Role::Tab);
+            node.set_selected(self.active_tabs.contains(tab));
+        });
+        if self.is_closeable(tab) {
+            // egui_dock supplies the hit target but no accessible name for its close button.
+            let mut close = response.clone();
+            close.id = response.id.with("close-button");
+            close.rect = egui::Rect::from_center_size(
+                response.rect.right_center() - vec2(size::CONTROL / 2.0, 0.0),
+                egui::Vec2::splat(size::CONTROL),
+            );
+            let name = match tab {
+                Tab::Transcript => tr!("transcript.close"),
+                _ => tr!("export.close_queue"),
+            };
+            close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+        }
+        response.clone().on_hover_ui(|ui| {
+            ui.label(tab.title());
+            ui.label(tr!("panel.drag_tab"));
+        });
+        if response.clicked() {
+            // Dock focus routes shortcuts; a tab button must not retain text/widget focus.
+            response.ctx.memory_mut(|m| {
+                if let Some(id) = m.focused() {
+                    m.surrender_focus(id);
+                }
+            });
+            self.focused = Some(*tab);
+        }
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
+        let rect = ui.max_rect();
+        ui.painter().rect_filled(
+            rect,
+            egui::CornerRadius {
+                sw: suite_ui::tokens::radius::PANEL,
+                se: suite_ui::tokens::radius::PANEL,
+                ..Default::default()
+            },
+            color::panel(),
+        );
         tutorial::anchor(ui.ctx(), tab.anchor(), ui.max_rect());
         let focused = self.focused == Some(*tab);
         if *tab == Tab::Media {
@@ -1880,7 +2112,7 @@ impl TabViewer for Viewer<'_> {
             self.bin.fx_apply = !crate::inspector::video_clips(self.project, selected).is_empty();
             let r = self
                 .bin
-                .show(ui, self.project, focused, self.importing, self.missing);
+                .show_docked(ui, self.project, focused, self.importing, self.missing);
             self.import_clicked |= r.import;
             // The Source tab may have set one this frame too.
             self.command = r.command.or(self.command.take());
@@ -1897,12 +2129,14 @@ impl TabViewer for Viewer<'_> {
             return;
         }
         if *tab == Tab::RenderQueue {
-            self.queue_action = self.queue.panel(ui, focused);
+            self.queue_action = self.queue.panel_docked(ui, focused);
             return;
         }
         if *tab == Tab::Transcript {
             let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
-            let mut out = self.transcript.show(ui, self.project, selected, t, focused);
+            let mut out = self
+                .transcript
+                .show_docked(ui, self.project, selected, t, focused);
             if let Some(t) = out.seek.take() {
                 self.timeline.seek(t);
             }
@@ -1915,9 +2149,10 @@ impl TabViewer for Viewer<'_> {
         let panel = match (*tab, views.as_slice()) {
             (Tab::Preview, [one]) => Panel::titled(one),
             (Tab::Preview, views) => Panel::tabbed(views, self.preview_active),
+            (Tab::Timeline, _) => Panel::toolbar(),
             _ => Panel::titled(tab.title()),
         };
-        let panel = panel.focused(focused);
+        let panel = panel.focused(focused).embedded(true);
         let (actions, on) = self.preview.compare_actions();
         let panel = if *tab == Tab::Preview && !source_tab {
             panel.actions(&actions).on(&on)
@@ -2008,12 +2243,7 @@ impl TabViewer for Viewer<'_> {
                 .response
                 .rect
                 .with_max_y(r.response.rect.top() + size::HEADER);
-            let title_w = ui
-                .painter()
-                .layout_no_wrap(tab.title().to_owned(), theme::body_strong(), color::ink())
-                .size()
-                .x;
-            let left = header.left() + space::INSET + title_w + space::S12;
+            let left = header.left() + space::INSET;
             let (project, keymap) = (self.project, self.keymap);
             self.timeline.toolbar(ui, header, left, project, keymap);
             return;
@@ -2028,12 +2258,12 @@ impl TabViewer for Viewer<'_> {
             let shown = crate::inspector::active(ui.ctx(), &panes);
             let mut active = shown;
             let panel = if panes.is_empty() {
-                Panel::titled(tab.title())
+                Panel::body()
             } else {
                 Panel::tabbed(&labels, &mut active).wide(true)
             };
             // The new tab shows next frame; the click already repaints.
-            panel.focused(focused).show(ui, |ui| {
+            panel.focused(focused).embedded(true).show(ui, |ui| {
                 let t = self.timeline.playhead();
                 let pane = panes.get(shown).copied();
                 let (edit, seek) = egui::ScrollArea::vertical()

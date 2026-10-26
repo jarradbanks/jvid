@@ -95,6 +95,7 @@ export_frame = "Eksportuj klatkę"
 record = "Nagraj lektora"
 
 [panel]
+drag_tab = "Przeciągnij, aby grupować lub dzielić panele; przewiń, aby zobaczyć więcej kart."
 media = "Multimedia"
 preview = "Podgląd"
 inspector = "Inspektor"
@@ -124,6 +125,7 @@ no_media = "brak strumieni wideo i audio"
 unsupported_codec = "nieobsługiwany kodek: {codec}"
 
 [menu]
+reset_layout = "Przywróć układ paneli"
 project_tooltip = "Tworzenie, otwieranie i zapisywanie"
 new_project = "Nowy projekt"
 open = "Otwórz…"

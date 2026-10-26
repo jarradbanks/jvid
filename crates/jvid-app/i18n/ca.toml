@@ -95,6 +95,7 @@ export_frame = "Exporta el fotograma"
 record = "Enregistra una veu en off"
 
 [panel]
+drag_tab = "Arrossega per agrupar o dividir plafons; desplaça per veure més pestanyes."
 media = "Mitjans"
 preview = "Previsualització"
 inspector = "Inspector"
@@ -124,6 +125,7 @@ no_media = "no té cap flux de vídeo ni d'àudio"
 unsupported_codec = "còdec no compatible: {codec}"
 
 [menu]
+reset_layout = "Restableix la disposició dels plafons"
 project_tooltip = "Crea, obre i desa"
 new_project = "Projecte nou"
 open = "Obre…"

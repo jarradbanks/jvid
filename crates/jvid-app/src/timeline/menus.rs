@@ -1,5 +1,5 @@
 //! Mouse routes to the timeline's keymap actions: the Edit menu's rows, a toolbar in the
-//! panel header, and right-click menus on clips and empty lane space. Every one runs
+//! panel toolbar, and right-click menus on clips and empty lane space. Every one runs
 //! [`Timeline::action`], the code its shortcut runs, so it undoes the same way.
 
 use egui::{Rect, Ui, Vec2, pos2};
@@ -90,7 +90,7 @@ const CLIP: &[&str] = &[
     "dip_to_white",
 ];
 
-/// Header toolbar, left to right.
+/// Panel toolbar, left to right (separate from the dock tab strip).
 const TOOLBAR: &[(&str, &str)] = &[
     ("selection_tool", icon::POINTER),
     ("razor_tool", icon::SCISSORS),
@@ -217,7 +217,15 @@ impl Timeline {
         keymap: &Keymap,
     ) {
         let mut left = left;
-        for &(id, glyph) in TOOLBAR {
+        let available = (header.right() - space::S8 - left).max(0.0);
+        let full = TOOLBAR.len() as f32 * (size::CONTROL + space::S4) - space::S4;
+        let shown = if full <= available {
+            TOOLBAR.len()
+        } else {
+            ((available - size::CONTROL - space::S4).max(0.0) / (size::CONTROL + space::S4))
+                as usize
+        };
+        for &(id, glyph) in &TOOLBAR[..shown] {
             let y = header.center().y - size::CONTROL / 2.0;
             let r = Rect::from_min_size(pos2(left, y), Vec2::splat(size::CONTROL));
             left = r.right() + space::S4;
@@ -250,6 +258,20 @@ impl Timeline {
                 self.action(id, project);
                 ui.ctx().request_repaint();
             }
+        }
+        if shown < TOOLBAR.len() {
+            let y = header.center().y - size::CONTROL / 2.0;
+            let r = Rect::from_min_size(pos2(left, y), Vec2::splat(size::CONTROL));
+            let overflow = ui.put(r, Button::icon(icon::ELLIPSIS, tr!("preview.more")));
+            egui::Popup::menu(&overflow).show(|ui| {
+                for &(id, _) in &TOOLBAR[shown..] {
+                    let enabled = self.can(id, project.sequence());
+                    if item(ui, keymap, id, None, enabled) {
+                        self.action(id, project);
+                    }
+                }
+            });
+            left = r.right() + space::S4;
         }
         // Which sequence the timeline shows, once Nest has made a second.
         let seqs = project.sequences();

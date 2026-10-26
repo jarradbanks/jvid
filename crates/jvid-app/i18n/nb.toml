@@ -95,6 +95,7 @@ export_frame = "Eksporter bilde"
 record = "Ta opp voiceover"
 
 [panel]
+drag_tab = "Dra for å gruppere eller dele paneler; rull for å se flere faner."
 media = "Medier"
 preview = "Forhåndsvisning"
 inspector = "Inspektør"
@@ -124,6 +125,7 @@ no_media = "ingen video- eller lydstrømmer"
 unsupported_codec = "kodeken støttes ikke: {codec}"
 
 [menu]
+reset_layout = "Tilbakestill paneloppsett"
 project_tooltip = "Nytt, åpne og lagre"
 new_project = "Nytt prosjekt"
 open = "Åpne…"

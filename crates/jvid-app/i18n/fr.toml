@@ -95,6 +95,7 @@ export_frame = "Exporter l'image"
 record = "Enregistrer une voix off"
 
 [panel]
+drag_tab = "Faites glisser pour grouper ou séparer les panneaux ; faites défiler pour voir les autres onglets."
 media = "Médias"
 preview = "Aperçu"
 inspector = "Inspecteur"
@@ -124,6 +125,7 @@ no_media = "aucun flux vidéo ni audio"
 unsupported_codec = "codec non pris en charge : {codec}"
 
 [menu]
+reset_layout = "Réinitialiser la disposition des panneaux"
 project_tooltip = "Créer, ouvrir et enregistrer"
 new_project = "Nouveau projet"
 open = "Ouvrir…"
