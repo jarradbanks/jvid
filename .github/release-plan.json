@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "version": "0.2.0",
+  "previous_version": "0.1.0",
+  "bump": "minor",
+  "source_commit": "9315302e3c1189c31feb57e62072fa73518bdc84",
+  "source_branch": "develop",
+  "main_commit": "7a5d224f4d1a48a799ec54da4fca35e645861f50",
+  "base_commit": "9315302e3c1189c31feb57e62072fa73518bdc84",
+  "notes_sha256": "e8fd71e60454164bdcae444a2bf5e4b48d28f45e2d22bfc2473251e1094cd0a9"
+}
