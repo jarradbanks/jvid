@@ -50,9 +50,9 @@ The detached signature is 64 raw bytes, not hex/base64.
 
 ### Release-owner activation checklist
 
-This is owner work after the installer and updater PRs merge. Repository variables,
-secrets and environments were all unconfigured when reviewed on 2026-10-25. Merging the
-code alone does not activate production updates; no production key is supplied by the repo.
+Merging the code alone does not activate production updates; no production key is supplied
+by the repository. Source bundles are generated and verified by Package, so the owner
+does not need a separately hosted source archive or external source URL/checksum settings.
 
 1. **Create and protect the GitHub environment named `release`.** In repository Settings →
    Environments, require a release reviewer and restrict deployment to reviewed release
@@ -71,22 +71,18 @@ code alone does not activate production updates; no production key is supplied b
    | `JVID_UPDATE_PUBLIC_KEY` | Repository **variable** | 64-hex public key compiled into every editor and helper; do not shadow it with an environment variable. |
    | `JVID_UPDATE_SIGNING_KEY` | `release` environment **secret** | Matching 64-hex private seed; available only to the metadata step after approval. |
    | `JVID_RELEASE_ENABLED` | Repository **variable** | Literal `true` enables tagged draft creation; leave unset until the remaining prerequisites are ready. |
-   | `JVID_CORRESPONDING_SOURCE_URL` | `release` environment **variable** | HTTPS URL of the reviewed complete corresponding-source archive for this exact release. |
-   | `JVID_CORRESPONDING_SOURCE_SHA256` | `release` environment **variable** | SHA-256 of those archive bytes; update together with the URL for every release. |
 
    Example owner commands, run only after the environment is protected:
 
    ```sh
    gh variable set JVID_UPDATE_PUBLIC_KEY --repo jarradbanks/jvid --body "$JVID_UPDATE_PUBLIC_KEY"
    gh secret set JVID_UPDATE_SIGNING_KEY --repo jarradbanks/jvid --env release < /secure/path/jvid-update-seed.hex
-   gh variable set JVID_CORRESPONDING_SOURCE_URL --repo jarradbanks/jvid --env release --body "$SOURCE_URL"
-   gh variable set JVID_CORRESPONDING_SOURCE_SHA256 --repo jarradbanks/jvid --env release --body "$SOURCE_SHA256"
    ```
 
-   The source archive must include the exact jvid/native dependencies, FFmpeg and its
-   bundled libraries, patches and build/install scripts; a GitHub source snapshot alone
-   does not satisfy the packaging contract. `GITHUB_TOKEN` is supplied by Actions; no
-   personal access token is required by this workflow. Missing or mismatched updater keys
+   Package captures the exact jvid checkout, vendored Rust/native crate sources and
+   native provider sources, patches and build recipes. The source contract binds these
+   to the same commit, public verification key and final native package bytes before
+   signing. Actions supplies `GITHUB_TOKEN`; no personal access token is required. Missing or mismatched updater keys
    prevent release metadata generation. Ordinary builds/tests need no production seed;
    an editor built without a public key runs with update checking/installation disabled.
 3. **Complete the platform signing and clean-machine gates.** Current CI produces
@@ -108,7 +104,17 @@ code alone does not activate production updates; no production key is supplied b
    gh workflow run package.yml --repo jarradbanks/jvid --ref main
    gh run list --repo jarradbanks/jvid --workflow package.yml --limit 5
    gh run watch "$RUN_ID" --repo jarradbanks/jvid --exit-status
-   gh run download "$RUN_ID" --repo jarradbanks/jvid --dir candidate-packages
+   gh run download "$RUN_ID" --repo jarradbanks/jvid --name release-candidate --dir candidate-packages
+   ```
+
+   The **complete release source contract** job must pass. Its `release-candidate` artifact
+   includes the five native packages, four generated source bundles with manifests,
+   `SOURCE-README.txt`, `reassemble_sources.py` and `SHA256SUMS.txt`. Review the provider
+   records and verify the checksums before approving the protected release job. Each
+   archive is split into parts of at most 1 GiB. Reconstruction verifies all parts:
+
+   ```sh
+   python reassemble_sources.py jvid-VERSION-sources-rust.json workspace-sources.tar.gz
    ```
 
    The workflow sets `JVID_UPDATE_VERSION` from the workspace version and passes the
@@ -138,8 +144,10 @@ code alone does not activate production updates; no production key is supplied b
    signs metadata, writes checksums, and creates a **draft**. It does not publish it.
 6. **Inspect and publish the complete stable release.** The draft must contain exactly
    the five native packages in the table below, `jvid-update.json`, its `.sig`,
-   `SHA256SUMS.txt` and `jvid-VERSION-corresponding-source.tar.gz`. Metadata must reference
-   those exact final package bytes. Review the assets and all manual gates, then publish:
+   `SHA256SUMS.txt`, `jvid-VERSION-source-manifest.json`, the four per-bundle
+   `jvid-VERSION-sources-BUNDLE.json` files and all their `.tar.gz.partNNN` files, plus
+   the source README and reconstruction helper. Metadata must reference those exact
+   final native package bytes; the source index binds the archives to those same bytes. Review the assets and all manual gates, then publish:
 
    ```sh
    gh release view "v$release_version" --repo jarradbanks/jvid --json isDraft,isPrerelease,assets
