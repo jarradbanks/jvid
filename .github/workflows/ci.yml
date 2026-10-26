@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-  # main is checked nightly (and on demand) on all three OSes instead of on every merge.
+  # Nightly and manual runs cover all three OSes; PRs and branch pushes run Linux.
   schedule:
     - cron: '0 17 * * *'
   workflow_dispatch:
