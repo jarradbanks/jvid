@@ -530,6 +530,10 @@ dip_to_black = "黑场过渡"
 dip_to_white = "白场过渡"
 
 [subtitles]
+source_changed = "转录期间源文件已更改。请重新转录。"
+recognize_again = "重新识别"
+reuse_hint = "复用兼容的识别结果，仅转录缺失的音频。"
+reused = "已复用兼容的识别结果。"
 title = "生成字幕"
 language = "语言"
 auto = "自动"
@@ -986,11 +990,11 @@ screen_zoom = "选中片段，然后在检查器中调大“缩放”，放大�
 screen_callout = "把“文本”中的一个标题拖到时间线上片段的上方，作为标注。"
 
 [transcript]
+partial = "部分音频尚未转录。请转录以填补缺失部分。"
 copy_all = "复制全部"
 export_text = "导出转录文本…"
 text_filter = "文本文件"
 scope = "范围：{scope}"
-partial = "部分音频尚未转录。"
 txt_required = "请选择以 .txt 结尾的文件名。"
 protected_destination = "请选择其他文件；此目标是项目或源媒体。"
 transcribe = "转写"

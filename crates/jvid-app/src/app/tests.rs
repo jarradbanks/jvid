@@ -1961,6 +1961,8 @@ fn subtitles_harness(
     let probe = jvid_media::probe::probe(&path).unwrap();
     let mut h = plain_harness();
     let app = h.state_mut();
+    // Each fake-engine test starts without recognition from another run or the user's cache.
+    app.set_recognition_cache(Default::default());
     app.on_welcome = false;
     let duration = probe.duration;
     app.history
@@ -2130,7 +2132,7 @@ fn transcript_panel_cuts_the_picked_words() {
     app.history.apply(Command::AddClip { track, clip }).unwrap();
     let dir = std::env::temp_dir().join(format!("jvid-transcript-ui-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    app.transcript.cache = crate::transcript::Cache::new(dir);
+    app.set_recognition_cache(crate::transcript::Cache::new(dir));
     // "one" at 0.2 s to "three" ending at 1.4 s.
     let at = |s: f64| Time((s * S as f64) as i64);
     let words = ["one", "two", "three"].iter().enumerate().map(|(i, w)| {

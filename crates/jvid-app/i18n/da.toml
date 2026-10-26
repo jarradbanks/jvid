@@ -508,6 +508,10 @@ dip_to_black = "Toning til sort"
 dip_to_white = "Toning til hvid"
 
 [subtitles]
+source_changed = "Kilden blev ændret under transskriptionen. Transskriber igen."
+recognize_again = "Genkend igen"
+reuse_hint = "Kompatible resultater genbruges; kun manglende lyd transskriberes."
+reused = "Kompatible genkendelsesresultater blev genbrugt."
 title = "Generér undertekster"
 language = "Sprog"
 auto = "Automatisk"
@@ -953,11 +957,11 @@ screen_zoom = "Vælg klippet, og øg Skalering i Inspektør for at zoome ind på
 screen_callout = "Træk en titel fra Tekst op på tidslinjen over klippet som en forklaring."
 
 [transcript]
+partial = "Noget lyd er ikke transskriberet. Transskriber for at udfylde hullerne."
 copy_all = "Kopiér alt"
 export_text = "Eksportér transskription…"
 text_filter = "Tekstfiler"
 scope = "Omfang: {scope}"
-partial = "Noget af lyden er endnu ikke transskriberet."
 txt_required = "Vælg et filnavn, der slutter med .txt."
 protected_destination = "Vælg en anden fil; denne destination er et projekt eller et kildemedie."
 transcribe = "Transskriber"

@@ -508,6 +508,10 @@ dip_to_black = "Toning till svart"
 dip_to_white = "Toning till vitt"
 
 [subtitles]
+source_changed = "Källan ändrades under transkriberingen. Transkribera igen."
+recognize_again = "Känn igen igen"
+reuse_hint = "Kompatibla resultat återanvänds; bara ljud som saknas transkriberas."
+reused = "Kompatibla igenkänningsresultat återanvändes."
 title = "Skapa undertexter"
 language = "Språk"
 auto = "Automatiskt"
@@ -953,11 +957,11 @@ screen_zoom = "Markera klippet och höj Skala i Inspektör för att zooma in på
 screen_callout = "Dra en titel från Text till tidslinjen ovanför klippet som en förklaring."
 
 [transcript]
+partial = "En del ljud har inte transkriberats. Transkribera för att fylla luckorna."
 copy_all = "Kopiera allt"
 export_text = "Exportera transkription…"
 text_filter = "Textfiler"
 scope = "Omfång: {scope}"
-partial = "En del av ljudet har inte transkriberats ännu."
 txt_required = "Välj ett filnamn som slutar med .txt."
 protected_destination = "Välj en annan fil; målet är ett projekt eller ett källmedium."
 transcribe = "Transkribera"

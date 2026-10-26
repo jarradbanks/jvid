@@ -15,7 +15,10 @@ jvid-paths.workspace = true
 jvid-core.workspace = true
 jvid-jobs.workspace = true
 jvid-media.workspace = true
-sha2 = "0.10"
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
 tracing.workspace = true
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 whisper-rs = { version = "0.16", features = ["tracing_backend"] }

@@ -510,6 +510,10 @@ dip_to_black = "Siyaha Geçiş"
 dip_to_white = "Beyaza Geçiş"
 
 [subtitles]
+source_changed = "Kaynak, yazıya dökme sırasında değişti. Yeniden yazıya dökün."
+recognize_again = "Yeniden tanı"
+reuse_hint = "Uyumlu sonuçlar yeniden kullanılır; yalnızca eksik ses yazıya dökülür."
+reused = "Uyumlu tanıma sonuçları yeniden kullanıldı."
 title = "Altyazı Oluştur"
 language = "Dil"
 auto = "Otomatik"
@@ -956,11 +960,11 @@ screen_zoom = "Klibi seçin ve yazılanı yakınlaştırmak için Denetçi'de Ö
 screen_callout = "Metin'den bir başlığı açıklama olarak klibin üstüne, Zaman Çizelgesi'ne sürükleyin."
 
 [transcript]
+partial = "Sesin bir kısmı henüz yazıya dökülmedi. Boşlukları doldurmak için yazıya dökün."
 copy_all = "Tümünü Kopyala"
 export_text = "Dökümü Dışa Aktar…"
 text_filter = "Metin dosyaları"
 scope = "Kapsam: {scope}"
-partial = "Sesin bir bölümü henüz yazıya dökülmedi."
 txt_required = ".txt ile biten bir dosya adı seçin."
 protected_destination = "Başka bir dosya seçin; bu hedef bir proje veya kaynak medyadır."
 transcribe = "Yazıya Dök"

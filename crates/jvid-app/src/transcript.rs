@@ -8,12 +8,12 @@
 pub mod fillers;
 pub(crate) mod text;
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+
+#[cfg(test)]
+use std::fs;
 use std::rc::Rc;
 
 use egui::text::{CCursor, LayoutJob, TextFormat};
@@ -21,7 +21,10 @@ use egui::{Color32, Key, Margin, Sense, Ui, vec2};
 use jvid_core::history::Command;
 use jvid_core::model::{ClipId, Project};
 use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
-use jvid_transcribe::{Source, Transcript, Word};
+#[cfg(test)]
+use jvid_transcribe::Transcript;
+use jvid_transcribe::store::{Settings, Shared, Store};
+use jvid_transcribe::{Source, Word};
 use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
 use suite_ui::tokens::{color, size, space};
@@ -30,168 +33,210 @@ use suite_ui::widgets::{Button, Checkbox, State, TextInput};
 use crate::i18n::tr;
 use crate::subtitles::{AudioSources, targets};
 
-/// Bumped when the file format or the word timing changes, so older transcripts are redone.
-const VERSION: u32 = 3;
-const HEADER: &str = "transcript";
-/// The cache file's last line, before the word count.
-const END: &str = "end";
 /// A pause this long between words starts a new paragraph.
 const PARAGRAPH: Time = Time(S);
 /// Line height of the words, roomier than Body's for reading.
 const LINE: f32 = 20.0;
 
-/// Whole audio streams' transcripts, in a folder and loaded as needed.
-#[derive(Default)]
+/// The Transcript view of the shared source-time recognition store. Selection and placed-word
+/// APIs stay local to this panel; caption edits never alter the store.
 pub struct Cache {
-    dir: Option<PathBuf>,
-    /// By path and stream; `None` when not transcribed.
-    loaded: HashMap<(PathBuf, usize), Option<Transcript>>,
-    /// The last [`words`], with the project and selection it was placed for.
-    placed: Option<(Project, HashSet<ClipId>, Rc<Placed>)>,
+    pub(crate) store: Shared,
+    settings: Settings,
+    heard: HashSet<(PathBuf, usize)>,
+    jobs: Option<jvid_jobs::Pool>,
+    verifying: HashMap<PathBuf, (u64, jvid_jobs::Handle)>,
+    read_revision: u64,
+    placed: Option<(Project, HashSet<ClipId>, u64, Rc<Placed>)>,
 }
 
-/// The words to show, in timeline time with the clip each is in, sorted; and the whole
-/// streams not transcribed yet.
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            store: Store::default().shared(),
+            settings: crate::subtitles::Subtitles::default().transcript_settings(),
+            heard: HashSet::new(),
+            jobs: None,
+            verifying: HashMap::new(),
+            read_revision: 0,
+            placed: None,
+        }
+    }
+}
+
+/// The words in timeline time, missing source intervals, and detected language per clip.
 type Languages = HashMap<ClipId, Option<String>>;
-type Placed = (Vec<(ClipId, Word)>, Vec<Source>, Languages);
+pub(crate) type Placed = (Vec<(ClipId, Word)>, Vec<Source>, Languages);
 
 impl Cache {
     pub fn new(dir: PathBuf) -> Self {
         Self {
-            dir: Some(dir),
+            store: Store::new(dir).shared(),
             ..Self::default()
         }
     }
 
-    /// Changes whenever the file is moved, resized or rewritten, or the filler prompts change.
-    // shortcut: DefaultHasher may change between Rust releases, which only costs a re-transcribe.
-    fn file(&self, path: &Path, nth: usize) -> Option<PathBuf> {
-        let m = fs::metadata(path).ok()?;
-        let mut h = DefaultHasher::new();
-        (VERSION, path, m.len(), m.modified().ok()).hash(&mut h);
-        fillers::prompts().for_each(|p| p.hash(&mut h));
-        Some(
-            self.dir
-                .as_ref()?
-                .join(format!("{:016x}.{nth}.txt", h.finish())),
-        )
+    pub(crate) fn set_settings(&mut self, settings: Settings) {
+        if self.settings != settings {
+            self.settings = settings;
+            self.placed = None;
+            self.heard.clear();
+        }
     }
 
-    /// The words of audio stream `nth` of `path`, timed from the file's start; `None` until
-    /// it's transcribed.
-    pub fn get(&mut self, path: &Path, nth: usize) -> Option<&Transcript> {
-        let key = (path.to_owned(), nth);
-        if !self.loaded.contains_key(&key) {
-            let text = self
-                .file(path, nth)
-                .and_then(|f| fs::read_to_string(f).ok());
-            self.loaded
-                .insert(key.clone(), text.and_then(|t| parse(&t)));
-        }
-        self.loaded[&key].as_ref()
+    #[cfg(test)]
+    pub fn get(&mut self, path: &Path, nth: usize) -> Option<Transcript> {
+        let mut store = self.store.lock().unwrap();
+        let request = store
+            .request(
+                &Source {
+                    path: path.into(),
+                    nth,
+                    range: 0..i64::MAX,
+                },
+                &self.settings,
+            )
+            .ok()?;
+        let found = store.lookup(&request);
+        found.missing.is_empty().then_some(found.transcript)
     }
 
-    /// Keeps `t`, the transcript of the whole of `source`, and saves it.
-    pub fn insert(&mut self, source: &Source, t: Transcript) {
-        if let Some(file) = self.file(&source.path, source.nth) {
-            // Written aside then renamed, so a crash never leaves half a transcript.
-            let tmp = file.with_extension("tmp");
-            let saved = file.parent().map_or(Ok(()), fs::create_dir_all);
-            let saved = saved
-                .and_then(|_| fs::write(&tmp, format(&t)))
-                .and_then(|_| fs::rename(&tmp, &file));
-            if let Err(e) = saved {
-                tracing::warn!("transcript: can't save {}: {e}", file.display());
-            }
-        }
-        let key = (source.path.clone(), source.nth);
-        self.loaded.insert(key, Some(t));
+    /// Test fixtures insert recognized source words through the same persistent store.
+    #[cfg(test)]
+    pub fn insert(&mut self, source: &Source, transcript: Transcript) {
+        let mut store = self.store.lock().unwrap();
+        let request = store.request(source, &self.settings).unwrap();
+        store.insert(&request, transcript).unwrap();
         self.placed = None;
     }
 
-    /// [`words`], placed again only when the project or the selection changes.
-    fn placed(&mut self, project: &Project, selected: &HashSet<ClipId>) -> Rc<Placed> {
+    /// Hash source content on a cancellable job before reading persistent words. The UI
+    /// never waits for another tool's verification lock or reads a large media file itself.
+    fn prepare(&mut self, project: &Project, selected: &HashSet<ClipId>) -> Option<u64> {
+        let sources = targets(project, selected, true);
+        let Ok(mut store) = self.store.try_lock() else {
+            return None;
+        };
+        for source in &sources {
+            store.observe(&source.source.path);
+        }
+        let paths: HashSet<_> = sources
+            .iter()
+            .map(|t| t.source.path.clone())
+            .filter(|p| p.is_file() && !store.has_identity(p))
+            .collect();
+        let revision = store.revision();
+        drop(store);
+        if paths.is_empty() {
+            return Some(revision);
+        }
+        for path in paths {
+            if self
+                .verifying
+                .get(&path)
+                .is_some_and(|(r, handle)| *r == revision || !handle.is_finished())
+            {
+                continue;
+            }
+            let shared = self.store.clone();
+            let file = path.clone();
+            let handle = self
+                .jobs
+                .get_or_insert_with(|| jvid_jobs::Pool::new(1))
+                .submit(
+                    format!("recognition:identity:{}:{revision}", path.display()),
+                    jvid_jobs::Priority::Interactive,
+                    move |ctx| {
+                        if let Ok(identity) = Store::identify(&file, &|| ctx.is_cancelled()) {
+                            let _ = shared.lock().unwrap().accept(identity);
+                        }
+                    },
+                );
+            self.verifying.insert(path, (revision, handle));
+        }
+        None
+    }
+
+    /// Memoize placement while observing source changes even when the project stays unchanged.
+    pub(crate) fn placed(&mut self, project: &Project, selected: &HashSet<ClipId>) -> Rc<Placed> {
+        let Some(revision) = self.prepare(project, selected) else {
+            self.placed = None;
+            self.heard.clear();
+            return Rc::new((
+                Vec::new(),
+                jvid_transcribe::store::merge_sources(
+                    targets(project, selected, true)
+                        .into_iter()
+                        .map(|t| t.source)
+                        .collect(),
+                ),
+                Languages::new(),
+            ));
+        };
         match &self.placed {
-            Some((p, s, w)) if p == project && s == selected => w.clone(),
+            Some((p, s, r, w)) if p == project && s == selected && *r == revision => w.clone(),
             _ => {
                 let w = Rc::new(words(project, selected, self));
-                self.placed = Some((project.clone(), selected.clone(), w.clone()));
+                let revision = self.read_revision;
+                self.placed = Some((project.clone(), selected.clone(), revision, w.clone()));
                 w
             }
         }
     }
 }
 
-/// One word per line: start and end in flicks, then the text, tab separated; then `end` and
-/// the word count, so a cut-short file shows.
-fn format(t: &Transcript) -> String {
-    let words = &t.words;
-    let line = |w: &Word| {
-        let text = w.text.replace(['\t', '\n', '\r'], " ");
-        format!("{}\t{}\t{text}\n", w.start.0, w.end.0)
-    };
-    let lines: String = words.iter().map(line).collect();
-    let language = t
-        .language
-        .as_deref()
-        .filter(|s| valid_language(s))
-        .unwrap_or_default();
-    format!(
-        "{HEADER}\t{VERSION}\t{language}\n{lines}{END}\t{}\n",
-        words.len()
-    )
-}
-
-/// `None` unless the whole file reads.
-fn valid_language(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
-}
-
-fn parse(text: &str) -> Option<Transcript> {
-    let word = |line: &str| {
-        let mut f = line.splitn(3, '\t');
-        Some(Word {
-            start: Time(f.next()?.parse().ok()?),
-            end: Time(f.next()?.parse().ok()?),
-            text: f.next()?.to_owned(),
-            confidence: 1.0,
-        })
-    };
-    let mut input = text.lines();
-    let header = input.next()?;
-    let language = header.strip_prefix(&format!("{HEADER}\t{VERSION}\t"))?;
-    if !language.is_empty() && !valid_language(language) {
-        return None;
-    }
-    let mut lines: Vec<&str> = input.collect();
-    let end = lines.pop()?;
-    (end == format!("{END}\t{}", lines.len())).then_some(())?;
-    Some(Transcript {
-        language: (!language.is_empty()).then(|| language.to_owned()),
-        words: lines.into_iter().map(word).collect::<Option<_>>()?,
-    })
-}
-
-/// The words to show and the streams not transcribed yet; see [`Placed`].
+/// Cached partial words are visible immediately; only genuinely missing intervals are asked
+/// for. A covered silent interval has neither words nor missing coverage.
 fn words(project: &Project, selected: &HashSet<ClipId>, cache: &mut Cache) -> Placed {
-    let (mut words, mut missing) = (Vec::new(), Vec::<Source>::new());
+    let (mut words, mut missing) = (Vec::new(), Vec::new());
     let mut languages = Languages::new();
+    cache.heard.clear();
+    let mut store = cache.store.lock().unwrap();
     for t in targets(project, selected, true) {
-        let whole = Source {
-            range: 0..i64::MAX,
-            ..t.source.clone()
-        };
-        match cache.get(&whole.path, whole.nth) {
-            Some(transcript) => {
-                languages.insert(t.clip.id, transcript.language.clone());
-                words.extend(t.place(&transcript.words).map(|w| (t.clip.id, w)));
+        match store.request_known(&t.source, &cache.settings) {
+            Ok(request) => {
+                let found = store.lookup(&request);
+                if found.missing.is_empty() {
+                    cache.heard.insert((t.source.path.clone(), t.source.nth));
+                }
+                languages.insert(t.clip.id, found.transcript.language.clone());
+                words.extend(t.place(&found.transcript.words).map(|w| (t.clip.id, w)));
+                missing.extend(found.missing);
             }
-            None if !missing.contains(&whole) => missing.push(whole),
-            None => {}
+            Err(_) => missing.push(t.source),
         }
     }
     words.sort_by_key(|(c, w)| (w.start, c.0));
-    (words, missing, languages)
+    cache.read_revision = store.revision();
+    (
+        words,
+        jvid_transcribe::store::merge_sources(missing),
+        languages,
+    )
+}
+
+/// An unrecognized gap is not a detected pause. Keep filler words available while refusing
+/// automatic pause cuts across any missing source coverage.
+fn covered_hits(
+    words: &[(ClipId, Word)],
+    languages: &Languages,
+    missing: &[Source],
+    project: &Project,
+    selected: &HashSet<ClipId>,
+) -> Vec<fillers::Hit> {
+    let mut hits = fillers::find(words, languages);
+    let rate = jvid_core::time::Rate::new(jvid_media::audio::SAMPLE_RATE, 1);
+    for target in targets(project, selected, true) {
+        for source in missing
+            .iter()
+            .filter(|s| s.path == target.source.path && s.nth == target.source.nth)
+        {
+            let a = target.clip.timeline_at(rate.time_floor(source.range.start));
+            let b = target.clip.timeline_at(rate.time_floor(source.range.end));
+            hits.retain(|h| !h.pause || h.clip != target.clip.id || h.end <= a || h.start >= b);
+        }
+    }
+    hits
 }
 
 /// Ripple deletes `words[picked]`: each run of neighbouring words in one clip is one span,
@@ -212,7 +257,7 @@ fn cut(words: &[(ClipId, Word)], picked: Range<usize>) -> Option<Command> {
 pub struct Output {
     pub seek: Option<Time>,
     pub command: Option<Command>,
-    /// Transcribe was clicked: these streams have no transcript yet.
+    /// Transcribe was clicked: this source scope can be reused, completed or recognized again.
     pub transcribe: Option<Vec<Source>>,
     /// Snapshot of the current displayed scope to save as plain text.
     pub export: Option<String>,
@@ -281,7 +326,7 @@ impl TranscriptPanel {
         }
     }
 
-    /// Whole-file transcript caches are reusable; word selections and searches are not.
+    /// Source-time recognition is reusable; word selections and searches are not.
     pub fn reset_session(&mut self) {
         self.sources = AudioSources::default();
         self.query.clear();
@@ -332,13 +377,25 @@ impl TranscriptPanel {
         focused: bool,
         docked: bool,
     ) -> Output {
+        if self.cache.jobs.as_ref().is_some_and(|p| !p.is_idle()) {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
         let selected_input = selected;
         let mut out = Output::default();
         // Before Find draws, which may let go of the focus this frame.
         let typing = ui.ctx().text_edit_focused();
         let selected = self.sources.selection(project.sequence(), selected);
         let placed = self.cache.placed(project, &selected);
+        if self.cache.jobs.as_ref().is_some_and(|p| !p.is_idle()) {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
         let (words, missing, languages) = &*placed;
+        let hits = self
+            .unticked
+            .as_ref()
+            .map(|_| covered_hits(words, languages, missing, project, &selected));
         let close = [(icon::X, tr!("transcript.close"))];
         let panel = if docked {
             Panel::body().embedded(true)
@@ -382,11 +439,16 @@ impl TranscriptPanel {
                         self.unticked = (!listing).then(HashSet::new);
                     }
                     let button = Button::secondary(tr!("transcript.transcribe"));
-                    if !missing.is_empty() && ui.add(button).clicked() {
-                        out.transcribe = Some(missing.clone());
+                    if ui.add(button).clicked() {
+                        out.transcribe = Some(
+                            targets(project, &selected, true)
+                                .into_iter()
+                                .map(|t| t.source)
+                                .collect(),
+                        );
                     }
                     if let Some(unticked) = &self.unticked {
-                        let hits = fillers::find(words, languages);
+                        let hits = hits.as_deref().unwrap_or_default();
                         let ready = match hits.is_empty() {
                             true => State::Disabled,
                             false => State::Live,
@@ -396,9 +458,9 @@ impl TranscriptPanel {
                         let all = Button::secondary(tr!("transcript.remove_all"));
                         let all = ui.add(all.state(ready));
                         if all.clicked() {
-                            out.command = fillers::cut(&hits, &HashSet::new());
+                            out.command = fillers::cut(hits, &HashSet::new());
                         } else if remove.clicked() {
-                            out.command = fillers::cut(&hits, unticked);
+                            out.command = fillers::cut(hits, unticked);
                         }
                         if remove.clicked() || all.clicked() {
                             self.unticked = None;
@@ -414,13 +476,16 @@ impl TranscriptPanel {
                     }
                 });
             });
+            if missing.is_empty() && words.is_empty() {
+                ui.label(egui::RichText::new(tr!("subtitles.no_speech")).color(color::ink_3()));
+            }
             egui::ScrollArea::vertical()
                 .auto_shrink(false)
                 .show(ui, |ui| {
                     let frame = egui::Frame::NONE
                         .inner_margin(Margin::symmetric(space::INSET as i8, space::S4 as i8));
                     frame.show(ui, |ui| match self.unticked.is_some() {
-                        true => self.hits(ui, words, languages, &mut out),
+                        true => self.hits(ui, words, hits.as_deref().unwrap_or_default(), &mut out),
                         false => self.text(ui, words, playhead, &mut out),
                     });
                 });
@@ -445,17 +510,16 @@ impl TranscriptPanel {
         &mut self,
         ui: &mut Ui,
         words: &[(ClipId, Word)],
-        languages: &Languages,
+        hits: &[fillers::Hit],
         out: &mut Output,
     ) {
-        let hits = fillers::find(words, languages);
         let Some(unticked) = &mut self.unticked else {
             return;
         };
         if hits.is_empty() {
             ui.label(egui::RichText::new(tr!("transcript.none")).color(color::ink_3()));
         }
-        for h in &hits {
+        for h in hits {
             let seconds = format!("{:.1}", (h.end - h.start).0 as f64 / S as f64);
             let pause = tr!("transcript.pause", seconds = seconds);
             let label = fillers::context(words, h, &pause);
@@ -476,12 +540,9 @@ impl TranscriptPanel {
         self.cache.placed(project, &selected).1.clone()
     }
 
-    /// Whether audio stream `nth` of `path` has a transcript loaded.
+    /// Whether displayed intervals of audio stream `nth` of `path` have recognition loaded.
     pub(crate) fn heard(&self, path: &Path, nth: usize) -> bool {
-        matches!(
-            self.cache.loaded.get(&(path.to_owned(), nth)),
-            Some(Some(_))
-        )
+        self.cache.heard.contains(&(path.to_owned(), nth))
     }
 
     /// What Delete does with words `picked` (clamped to the words there are), for a lesson's
@@ -631,7 +692,7 @@ mod tests {
 
     /// A file's video and audio, linked, 10–20 s of it at 2 s on the timeline, with a fake
     /// transcript of the file cached: a word a second from 10 s.
-    fn project(dir: &Path) -> (History, TranscriptPanel) {
+    pub(super) fn project(dir: &Path) -> (History, TranscriptPanel) {
         let path = dir.join("talk.mp4");
         fs::write(&path, b"stand-in").unwrap();
         let mut h = History::new(Project::default());
@@ -920,53 +981,12 @@ mod tests {
         // Rewriting the file makes it another file.
         fs::write(path, b"another take").unwrap();
         assert!(Cache::new(dir.join("cache")).get(path, 0).is_none());
-        // Nothing transcribed: the panel asks for the whole stream.
+        // Nothing transcribed: the panel asks only for the visible source span.
         let mut empty = Cache::new(dir.join("other"));
         let (none, missing, _) = super::words(h.project(), &HashSet::new(), &mut empty);
         assert!(none.is_empty());
         assert_eq!(missing.len(), 1);
-        assert_eq!(missing[0].range, 0..i64::MAX);
-        assert_eq!(
-            parse(&format(&Transcript {
-                language: Some("en".into()),
-                words: vec![word("a\tb", 1.0, 2.0)]
-            }))
-            .unwrap()
-            .words[0]
-                .text,
-            "a b"
-        );
-    }
-
-    /// A file cut short, mid line or between lines, is no transcript, so Transcribe shows.
-    #[test]
-    fn a_cut_short_cache_file_is_no_transcript() {
-        let dir = tmp("short");
-        let (h, panel) = project(&dir);
-        let path = &h.project().assets()[0].path;
-        let file = panel.cache.file(path, 0).unwrap();
-        let full = fs::read_to_string(&file).unwrap();
-        assert_eq!(parse(&full).unwrap().words.len(), 10);
-        assert_eq!(
-            parse("transcript\t3\t\nend\t0\n"),
-            Some(Transcript::default())
-        );
-        assert!(
-            parse("end\t0\n").is_none(),
-            "old caches lack language metadata"
-        );
-        let lines: Vec<&str> = full.lines().collect();
-        for short in [&full[..full.len() / 2], &lines[..5].join("\n"), ""] {
-            assert!(parse(short).is_none(), "{short:?}");
-        }
-        fs::write(&file, &full[..full.len() / 2]).unwrap();
-        let mut cache = Cache::new(dir.join("cache"));
-        assert!(cache.get(path, 0).is_none());
-        let (_, missing, _) = super::words(h.project(), &HashSet::new(), &mut cache);
-        assert_eq!(missing.len(), 1);
-        // Saving leaves no temporary file behind.
-        let names = fs::read_dir(dir.join("cache")).unwrap().count();
-        assert_eq!(names, 1);
+        assert_eq!(missing[0].range, 10 * 48_000..20 * 48_000);
     }
 
     /// Placing runs again only when the project, the selection or a transcript changes.
@@ -1054,6 +1074,7 @@ mod tests {
             for reopen in [false, true] {
                 if reopen {
                     panel.cache = Cache::new(dir.join("cache"));
+                    panel.cache.get(&source.path, source.nth).unwrap();
                 }
                 let (placed, _, languages) =
                     super::words(h.project(), &HashSet::new(), &mut panel.cache);
@@ -1153,5 +1174,141 @@ mod tests {
             [(ClipId(1), t(0.0), t(1.5)), (ClipId(2), t(2.0), t(3.5))]
         );
         assert!(cut(&words, 1..1).is_none());
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn partial_cached_words_can_be_copied_and_exported_without_transcribing_gaps() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (history, mut panel) = super::tests::project(dir.path());
+        let path = history.project().assets()[0].path.clone();
+        let transcript = panel.cache.get(&path, 0).unwrap();
+        panel.cache.store = Store::default().shared();
+        let rate = jvid_media::audio::SAMPLE_RATE as i64;
+        panel.cache.insert(
+            &Source {
+                path,
+                nth: 0,
+                range: 10 * rate..14 * rate,
+            },
+            transcript,
+        );
+        let original = history.project().clone();
+        let mut fresh = true;
+        let mut h = Harness::builder().with_size([900.0, 480.0]).build_ui_state(
+            move |ui,
+                  (history, panel, copied, exported): &mut (
+                jvid_core::history::History,
+                TranscriptPanel,
+                Vec<String>,
+                Option<String>,
+            )| {
+                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                let out = panel.show(ui, history.project(), &HashSet::new(), Time(0), true);
+                assert!(out.transcribe.is_none() && out.command.is_none());
+                if out.export.is_some() {
+                    *exported = out.export;
+                }
+                copied.extend(ui.ctx().output(|out| {
+                    out.commands
+                        .iter()
+                        .filter_map(|command| match command {
+                            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                }));
+            },
+            (history, panel, Vec::new(), None),
+        );
+        h.run();
+        assert_eq!(h.get_all_by_label(tr!("transcript.partial")).count(), 1);
+        h.get_by_label(tr!("transcript.copy_all")).click();
+        h.run();
+        assert_eq!(h.state().2, ["zero one two three"]);
+        h.get_by_label(tr!("transcript.export_text")).click();
+        h.run();
+        assert_eq!(h.state().3.as_deref(), Some("zero one two three"));
+        let (history, panel, _, _) = h.state_mut();
+        let missing = panel.missing(history.project(), &HashSet::new());
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].range, 14 * rate..20 * rate);
+        assert_eq!(history.project(), &original);
+    }
+
+    #[test]
+    fn missing_coverage_never_becomes_a_remove_fillers_pause() {
+        let dir = tempfile::tempdir().unwrap();
+        let (h, mut panel) = super::tests::project(dir.path());
+        // Replace the fixture with two recognized ranges separated by an unheard gap.
+        panel.cache.store = Store::default().shared();
+        let path = h.project().assets()[0].path.clone();
+        let rate = jvid_media::audio::SAMPLE_RATE as i64;
+        let settings = panel.cache.settings.clone();
+        for (from, to, at) in [(10, 12, 11), (16, 20, 17)] {
+            let source = Source {
+                path: path.clone(),
+                nth: 0,
+                range: from * rate..to * rate,
+            };
+            let mut store = panel.cache.store.lock().unwrap();
+            let request = store.request(&source, &settings).unwrap();
+            store
+                .insert(
+                    &request,
+                    Transcript {
+                        language: Some("en".into()),
+                        words: vec![Word {
+                            text: "um".into(),
+                            start: Time(at * S),
+                            end: Time(at * S + S / 2),
+                            confidence: 1.0,
+                        }],
+                    },
+                )
+                .unwrap();
+        }
+        let selected = HashSet::new();
+        let (words, missing, languages) = words(h.project(), &selected, &mut panel.cache);
+        assert_eq!(
+            fillers::find(&words, &languages)
+                .iter()
+                .filter(|h| h.pause)
+                .count(),
+            1
+        );
+        let honest = covered_hits(&words, &languages, &missing, h.project(), &selected);
+        assert_eq!(honest.len(), 2, "the filler words can still be removed");
+        assert!(honest.iter().all(|h| !h.pause));
+        // A successful silent result closes the gap and makes the pause meaningful.
+        let source = missing[0].clone();
+        panel.cache.insert(&source, Transcript::default());
+        let (words, missing, languages) = super::words(h.project(), &selected, &mut panel.cache);
+        assert!(missing.is_empty());
+        assert_eq!(
+            covered_hits(&words, &languages, &missing, h.project(), &selected).len(),
+            3
+        );
+    }
+
+    #[test]
+    fn source_rewrite_invalidates_a_live_placed_view_even_without_project_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let (h, mut panel) = super::tests::project(dir.path());
+        let selected = HashSet::new();
+        assert_eq!(panel.cache.placed(h.project(), &selected).0.len(), 10);
+        std::fs::write(&h.project().assets()[0].path, b"new-take").unwrap();
+        let placed = panel.cache.placed(h.project(), &selected);
+        assert!(placed.0.is_empty());
+        assert_eq!(placed.1.len(), 1);
     }
 }

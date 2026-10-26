@@ -510,6 +510,10 @@ dip_to_black = "暗転"
 dip_to_white = "ホワイトアウト"
 
 [subtitles]
+source_changed = "文字起こし中にソースが変更されました。もう一度文字起こししてください。"
+recognize_again = "再認識"
+reuse_hint = "互換性のある認識結果を再利用し、未処理の音声だけを文字起こしします。"
+reused = "互換性のある認識結果を再利用しました。"
 title = "字幕を生成"
 language = "言語"
 auto = "自動"
@@ -955,11 +959,11 @@ screen_zoom = "クリップを選択し、インスペクタの「スケール�
 screen_callout = "「テキスト」のタイトルを吹き出しとして、タイムラインのクリップの上にドラッグします。"
 
 [transcript]
+partial = "まだ文字起こしされていない音声があります。文字起こしを実行して補完してください。"
 copy_all = "すべてコピー"
 export_text = "文字起こしを書き出す…"
 text_filter = "テキストファイル"
 scope = "範囲: {scope}"
-partial = "まだ文字起こしされていない音声があります。"
 txt_required = "ファイル名の末尾を .txt にしてください。"
 protected_destination = "別のファイルを選択してください。この保存先はプロジェクトまたは元のメディアです。"
 transcribe = "文字起こし"

@@ -15,6 +15,9 @@ fn audit_442_caption_and_transcript_sources_agree_with_selected_microphone() {
         assert_eq!((caption[0].clip.id, caption[0].source.nth), (mic, 1));
         assert_eq!(caption[0].source.range, 48_000..240_000);
         let mut panel = crate::transcript::TranscriptPanel::default();
+        // This source-selection fixture starts with a verified file identity. Background
+        // verification has its own tests; a pending identity is not recognized coverage.
+        assert!(panel.cache.get(&p.assets()[0].path, 1).is_none());
         let missing = panel.missing(&p, &selected);
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].nth, 1);

@@ -1616,7 +1616,7 @@ mod tests {
         for lesson in LESSONS.iter().chain([&BASICS]) {
             let mut h = harness_with(Harness::builder().wgpu(), &Default::default());
             // Transcripts stay in memory, not in the user's cache.
-            h.state_mut().transcript.cache = Default::default();
+            h.state_mut().set_recognition_cache(Default::default());
             // Where Show Me's export lands.
             h.state_mut().export_dialog.set_path(dir.join("x.mp4"));
             h.state_mut().start_lesson(lesson);
@@ -2152,8 +2152,12 @@ mod tests {
     #[test]
     fn the_subtitles_lesson_runs_by_show_me_with_a_fake_transcriber() {
         use subtitles::{SUBTITLES, cut};
+        let fake = std::sync::Arc::new(crate::app::tests::FakeTranscriber {
+            slow: false,
+            asked: Default::default(),
+        });
         let mut h = harness();
-        h.state_mut().transcript.cache = Default::default();
+        h.state_mut().set_recognition_cache(Default::default());
         h.state_mut().start_lesson(&SUBTITLES);
         settle(&mut h);
         assert!(!h.state().history.can_undo());
@@ -2161,7 +2165,8 @@ mod tests {
         for (i, s) in SUBTITLES.steps.iter().enumerate() {
             assert_eq!(step(&h), Some(i));
             assert!(!(s.done)(h.state()), "step {i} done before Show Me");
-            h.state_mut().subtitles.engine = Some(fake());
+            h.state_mut().subtitles.engine =
+                Some((jvid_transcribe::models::Model::Base, fake.clone()));
             h.get_by_label(tr!("tutorial.show_me")).click();
             let start = std::time::Instant::now();
             while !(s.done)(h.state()) {
@@ -2185,6 +2190,11 @@ mod tests {
             .collect();
         assert_eq!(cues, ["hello there.", "This is a test."]);
         assert!(cut(h.state()));
+        assert_eq!(
+            fake.asked.lock().unwrap().len(),
+            1,
+            "Transcript and its cut must reuse the subtitle recognition"
+        );
     }
 
     /// Without a model, Show Me opens Generate Subtitles on its download choice and starts
@@ -2197,7 +2207,7 @@ mod tests {
             return;
         }
         let mut h = harness();
-        h.state_mut().transcript.cache = Default::default();
+        h.state_mut().set_recognition_cache(Default::default());
         h.state_mut().start_lesson(&subtitles::SUBTITLES);
         settle(&mut h);
         click(&mut h, tr!("tutorial.show_me"));

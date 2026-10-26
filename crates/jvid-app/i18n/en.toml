@@ -558,6 +558,10 @@ dip_to_white = "Dip to White"
 # Detect Silence (clip right-click menu): cut or speed up quiet stretches.
 # Generate Subtitles: speech to a subtitle track.
 [subtitles]
+source_changed = "The source changed during transcription. Transcribe again."
+recognize_again = "Recognize Again"
+reuse_hint = "Compatible recognition is reused; only missing audio is transcribed."
+reused = "Reused compatible recognition results."
 title = "Generate Subtitles"
 language = "Language"
 auto = "Auto"
@@ -1059,11 +1063,11 @@ screen_zoom = "Select the clip, then raise Scale in the Inspector to zoom in on 
 screen_callout = "Drag a title from Text onto the Timeline above your clip as a callout."
 
 [transcript]
+partial = "Some audio has not been transcribed. Transcribe to fill the gaps."
 copy_all = "Copy All"
 export_text = "Export Transcript…"
 text_filter = "Text files"
 scope = "Scope: {scope}"
-partial = "Some audio has not been transcribed yet."
 txt_required = "Choose a filename ending in .txt."
 protected_destination = "Choose a different file; this destination is a project or source media."
 transcribe = "Transcribe"

@@ -526,6 +526,10 @@ dip_to_black = "Przejście przez czerń"
 dip_to_white = "Przejście przez biel"
 
 [subtitles]
+source_changed = "Źródło zmieniło się podczas transkrypcji. Wykonaj transkrypcję ponownie."
+recognize_again = "Rozpoznaj ponownie"
+reuse_hint = "Zgodne wyniki są używane ponownie; transkrybowany jest tylko brakujący dźwięk."
+reused = "Ponownie użyto zgodnych wyników rozpoznawania."
 title = "Generuj napisy"
 language = "Język"
 auto = "Automatycznie"
@@ -977,11 +981,11 @@ screen_zoom = "Zaznacz klip i zwiększ Skalę w Inspektorze, aby przybliżyć wp
 screen_callout = "Przeciągnij tytuł z karty Tekst na oś czasu nad klipem jako objaśnienie."
 
 [transcript]
+partial = "Część dźwięku nie została przetranskrybowana. Wykonaj transkrypcję, aby uzupełnić luki."
 copy_all = "Kopiuj wszystko"
 export_text = "Eksportuj transkrypcję…"
 text_filter = "Pliki tekstowe"
 scope = "Zakres: {scope}"
-partial = "Część dźwięku nie została jeszcze przepisana."
 txt_required = "Wybierz nazwę pliku z rozszerzeniem .txt."
 protected_destination = "Wybierz inny plik; to miejsce docelowe jest projektem lub materiałem źródłowym."
 transcribe = "Transkrybuj"
