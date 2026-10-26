@@ -953,6 +953,13 @@ screen_zoom = "Markera klippet och höj Skala i Inspektör för att zooma in på
 screen_callout = "Dra en titel från Text till tidslinjen ovanför klippet som en förklaring."
 
 [transcript]
+copy_all = "Kopiera allt"
+export_text = "Exportera transkription…"
+text_filter = "Textfiler"
+scope = "Omfång: {scope}"
+partial = "En del av ljudet har inte transkriberats ännu."
+txt_required = "Välj ett filnamn som slutar med .txt."
+protected_destination = "Välj en annan fil; målet är ett projekt eller ett källmedium."
 transcribe = "Transkribera"
 # The search field's placeholder.
 find = "Sök"

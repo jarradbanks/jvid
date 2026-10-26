@@ -977,6 +977,13 @@ screen_zoom = "Zaznacz klip i zwiększ Skalę w Inspektorze, aby przybliżyć wp
 screen_callout = "Przeciągnij tytuł z karty Tekst na oś czasu nad klipem jako objaśnienie."
 
 [transcript]
+copy_all = "Kopiuj wszystko"
+export_text = "Eksportuj transkrypcję…"
+text_filter = "Pliki tekstowe"
+scope = "Zakres: {scope}"
+partial = "Część dźwięku nie została jeszcze przepisana."
+txt_required = "Wybierz nazwę pliku z rozszerzeniem .txt."
+protected_destination = "Wybierz inny plik; to miejsce docelowe jest projektem lub materiałem źródłowym."
 transcribe = "Transkrybuj"
 # The search field's placeholder.
 find = "Znajdź"

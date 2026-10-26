@@ -968,6 +968,13 @@ screen_zoom = "Selecteer de clip en verhoog Schaal in de Inspector om in te zoom
 screen_callout = "Sleep een titel uit Tekst naar de tijdlijn boven je clip als toelichting."
 
 [transcript]
+copy_all = "Alles kopiëren"
+export_text = "Transcript exporteren…"
+text_filter = "Tekstbestanden"
+scope = "Bereik: {scope}"
+partial = "Een deel van de audio is nog niet getranscribeerd."
+txt_required = "Kies een bestandsnaam die eindigt op .txt."
+protected_destination = "Kies een ander bestand; dit doel is een project of bronmedium."
 transcribe = "Transcriberen"
 # The search field's placeholder.
 find = "Zoeken"
