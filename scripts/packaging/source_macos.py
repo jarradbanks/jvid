@@ -138,10 +138,30 @@ def _download(url: str, digest: str, dest: Path) -> None:
         raise SourceError(f"source download failed{status}") from None
 
 
+def _raw_api_location(url: str) -> str | None:
+    """Serve VideoLAN raw blobs through its public GitLab API at the same ref."""
+    parsed = urllib.parse.urlsplit(url)
+    if (parsed.scheme != "https" or parsed.netloc != "code.videolan.org"
+            or parsed.query or parsed.fragment):
+        return None
+    match = re.fullmatch(r"/([^/]+)/([^/]+)/(?:-/)?raw/([^/]+)/(.+)", parsed.path)
+    if not match:
+        return None
+    owner, repository, revision, path = (urllib.parse.unquote(value) for value in match.groups())
+    project = urllib.parse.quote(owner + "/" + repository, safe="")
+    path = urllib.parse.quote(path, safe="")
+    query = urllib.parse.urlencode({"ref": revision})
+    return f"https://code.videolan.org/api/v4/projects/{project}/repository/files/{path}/raw?{query}"
+
+
 def _archive_input(item: dict, dest: Path, *, provider: dict | None = None) -> str:
-    """Only the retained recipe's mirrors, with the very same pinned digest."""
+    """Verify retained mirrors and equivalent raw-file transport against one digest."""
     failures = []
-    for index, url in enumerate(dict.fromkeys([item["url"], *item.get("mirrors", [])]), 1):
+    locations = [item["url"], *item.get("mirrors", [])]
+    api = _raw_api_location(item["url"])
+    if api is not None:
+        locations.append(api)
+    for index, url in enumerate(dict.fromkeys(locations), 1):
         try:
             _download(url, item["sha256"], dest)
             return url

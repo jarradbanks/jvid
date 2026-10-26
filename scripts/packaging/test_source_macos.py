@@ -148,6 +148,31 @@ class MacSourceTests(unittest.TestCase):
         self.assertNotIn("secret", diagnostic)
         self.assertNotIn("redirect.invalid", diagnostic)
 
+    def test_videolan_raw_api_recovers_same_pinned_bytes_after_web_challenge(self):
+        item = dict(self.plan["payloads"][1],
+                    url="https://code.videolan.org/videolan/dav1d-test-data/raw/1.1.0/8-bit/data/00000000.ivf")
+        api = ("https://code.videolan.org/api/v4/projects/videolan%2Fdav1d-test-data/"
+               "repository/files/8-bit%2Fdata%2F00000000.ivf/raw?ref=1.1.0")
+        with mock.patch.object(sources.urllib.request, "urlopen",
+                               side_effect=[Response(b"<html>web challenge</html>"), Response(RESOURCE)]):
+            self.assertEqual(sources._archive_input(item, self.out / "resource"), api)
+        self.assertEqual((self.out / "resource").read_bytes(), RESOURCE)
+        with mock.patch.object(sources.urllib.request, "urlopen", return_value=Response(b"wrong")):
+            with self.assertRaisesRegex(sources.SourceError, "checksum mismatch"):
+                sources._archive_input(item, self.out / "corrupt")
+        self.assertFalse((self.out / "corrupt").exists())
+
+    def test_raw_api_transport_preserves_ref_and_is_limited_to_known_public_host(self):
+        url = "https://code.videolan.org/owner/repo/-/raw/commit%20id/path%20name/file.ivf"
+        self.assertEqual(sources._raw_api_location(url),
+                         "https://code.videolan.org/api/v4/projects/owner%2Frepo/"
+                         "repository/files/path%20name%2Ffile.ivf/raw?ref=commit+id")
+        for url in ("https://other.invalid/owner/repo/raw/ref/file",
+                    "http://code.videolan.org/owner/repo/raw/ref/file",
+                    "https://code.videolan.org/owner/repo/raw/ref/file?token=private",
+                    "https://code.videolan.org/owner/repo/-/archive/ref/repo.tar.gz"):
+            self.assertIsNone(sources._raw_api_location(url))
+
     def test_unavailable_resource_fails_collection(self):
         with mock.patch.object(sources, "_formula_plan", return_value=self.plan), \
              mock.patch.object(sources, "_build_support", side_effect=self.fake_support), \
