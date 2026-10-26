@@ -43,131 +43,169 @@ these properties; see the installation layout in `docs/packaging.md` from #476.
 `jvid-updater` has no UI/media/FFmpeg dependency. It contains the app's check/download logic,
 `jvid-update-helper` and `jvid-update-metadata`. The [Package workflow](../.github/workflows/package.yml)
 builds the helper for Windows, passes the same public key/version to the editor and helper,
-asserts all five native assets, and generates metadata in its protected `release-draft` job.
+asserts all five native assets, and generates metadata in its protected **approve, sign and publish** job.
 The generator reads its seed only from the environment, rejects a mismatched public key,
 hashes final versioned files, signs the exact UTF-8 manifest bytes and verifies its output.
 The detached signature is 64 raw bytes, not hex/base64.
 
-### Release-owner activation checklist
+### Release prerequisites
 
-Merging the code alone does not activate production updates; no production key is supplied
-by the repository. Source bundles are generated and verified by Package, so the owner
-does not need a separately hosted source archive or external source URL/checksum settings.
+The automation bootstrap changes workflows, tests and documentation only. It keeps
+`workspace.package.version` at `0.1.0` and adds no `.github/release-plan.json`;
+merging it cannot release. The normal flow is **develop → temporary
+release/vVERSION → main → immutable vVERSION tag → protected approval → publish**.
 
-1. **Create and protect the GitHub environment named `release`.** In repository Settings →
-   Environments, require a release reviewer and restrict deployment to reviewed release
-   tags. Ensure the repository plan supports the chosen protections. Protect the release
-   workflow and tag creation too: build jobs run before environment approval, and approval
-   must only authorize code and native packages that were reviewed.
-2. **Provision a production Ed25519 key outside the repository and keep a recovery copy.**
-   Use your secure key-management process; neither the agent nor this checklist generates
-   a production private key. The seed is exactly 32 raw bytes encoded as 64 hex characters;
-   the public key is the corresponding raw 32-byte key encoded as 64 hex characters.
-   PEM/OpenSSH strings are not accepted. Never use the public disposable fixture seed
-   from the tests. Configure the following names exactly:
+Retain the existing `release` environment, its required reviewer `jarradbanks`,
+and its `v*` tag-only deployment policy. The approval authorizes signing **and
+public publication**, so record source review, candidate testing and any required
+platform signing/notarization before approving. Build and source checks complete
+before the environment asks for approval. The automation does not approve itself.
 
-   | Name | GitHub location | Value / purpose |
-   | --- | --- | --- |
-   | `JVID_UPDATE_PUBLIC_KEY` | Repository **variable** | 64-hex public key compiled into every editor and helper; do not shadow it with an environment variable. |
-   | `JVID_UPDATE_SIGNING_KEY` | `release` environment **secret** | Matching 64-hex private seed; available only to the metadata step after approval. |
-   | `JVID_RELEASE_ENABLED` | Repository **variable** | Literal `true` enables tagged draft creation; leave unset until the remaining prerequisites are ready. |
+Keep the existing configuration names and locations:
 
-   Example owner commands, run only after the environment is protected:
+| Name | GitHub location | Purpose |
+| --- | --- | --- |
+| `JVID_UPDATE_PUBLIC_KEY` | Repository variable | Raw 32-byte Ed25519 public key as 64 hex characters, compiled into the editor/helper and recorded in source provenance. |
+| `JVID_UPDATE_SIGNING_KEY` | `release` environment secret | Matching 32-byte private seed as 64 hex characters; injected only into the metadata signing step after approval. |
+| `JVID_RELEASE_ENABLED` | Repository variable | Literal `true` enables release tag dispatch and protected publication. |
+
+An owner provisions and recovers production keys outside this repository. No
+production seed, PAT or test fixture seed belongs in code, command arguments or
+logs. Missing/mismatched keys stop signing. The publisher independently verifies
+the detached signature using the public key; it never needs the private seed.
+
+Repository Actions must allow `GITHUB_TOKEN` to **create pull requests** for
+Prepare release. This setting does not authorize bot approval, bypass reviews or
+remove required checks. The repository's default workflow token remains read-only;
+Prepare alone requests contents/PR/actions write, main dispatch requests
+contents/actions write, and the protected publisher requests contents write.
+Keep `CI required` enforced on both main and develop. It now includes the cheap
+Python release automation tests as well as the existing conditional checks.
+
+Windows Authenticode signing and macOS Developer ID provisioning/notarization
+remain separate platform acceptance work. macOS assembly currently uses ad hoc
+signing by default; `JVID_MACOS_SIGN_IDENTITY` alone is not a complete notarization
+pipeline. If required for a release, finalize signing/stapling in the native build
+jobs before source/native verification, metadata and checksums. Never change
+asset bytes after metadata generation. A green smoke test does not complete the
+manual acceptance checklist in [packaging.md](packaging.md).
+
+### Prepare and test a candidate
+
+1. Merge reviewed feature/fix PRs into **develop**. Sync current main into develop
+   through a reviewed PR when needed after a prior release. Normal feature PRs do
+   not bump the version. Develop pushes run Linux CI; manual CI runs all three OSes.
+2. From main's Actions page, run **Prepare release**, choosing patch/minor/major
+   (minor is the default). For example, from `0.1.0`, minor creates
+   `release/v0.2.0`. The helper snapshots develop, includes current main on the
+   temporary branch, changes only workspace versions in `Cargo.toml`/`Cargo.lock`,
+   generates commit-subject notes plus `packaging/release-notes-template.md`, and
+   opens its release PR against main. It never pushes a version bump to develop.
+3. Prepare explicitly dispatches **CI** and **Package** on that frozen branch.
+   CI's manual path tests all three OSes; Package builds the five native assets,
+   runs package smoke checks and verifies all four corresponding-source bundles.
+   Bot-created pushes/PRs alone do not trigger recursive Actions runs, so both
+   dispatches are required. These candidate runs have publication disabled.
+4. Review the PR's notes, all CI/Package results, source provider records and clean
+   supported-OS evidence. Download `release-candidate` from the exact Package run:
 
    ```sh
-   gh variable set JVID_UPDATE_PUBLIC_KEY --repo jarradbanks/jvid --body "$JVID_UPDATE_PUBLIC_KEY"
-   gh secret set JVID_UPDATE_SIGNING_KEY --repo jarradbanks/jvid --env release < /secure/path/jvid-update-seed.hex
+   gh run download "$CANDIDATE_RUN_ID" --repo jarradbanks/jvid \
+     --name release-candidate --dir candidate-packages
+   (cd candidate-packages && sha256sum --check SHA256SUMS.txt)
    ```
 
-   Package captures the exact jvid checkout, vendored Rust/native crate sources and
-   native provider sources, patches and build recipes. The source contract binds these
-   to the same commit, public verification key and final native package bytes before
-   signing. Actions supplies `GITHUB_TOKEN`; no personal access token is required. Missing or mismatched updater keys
-   prevent release metadata generation. Ordinary builds/tests need no production seed;
-   an editor built without a public key runs with update checking/installation disabled.
-3. **Complete the platform signing and clean-machine gates.** Current CI produces
-   candidates: Windows Authenticode signing and macOS Developer ID provisioning/notarization
-   are not implemented by this updater change. macOS defaults to ad hoc signing;
-   `JVID_MACOS_SIGN_IDENTITY` is a build-process environment variable used by assembly,
-   not a wired GitHub secret or complete notarization solution. If owner signing is
-   required, add its reviewed steps to the native build jobs before artifact upload,
-   metadata generation and checksums. Signing/stapling/repacking assets after metadata
-   generation invalidates their hashes. Run the remaining manual validation below before
-   approving publication; a green package smoke test is not that validation.
-4. **Prepare a bootstrap release version in a reviewed PR.** Update `workspace.package.version`
-   in `Cargo.toml`, regenerate `Cargo.lock` and notices as needed, and write the user notes
-   in `packaging/release-notes.md`. The tag must be exactly `v` plus that stable SemVer;
-   prereleases and build metadata are excluded by the updater. Run the **Package** workflow
-   manually on the merged commit and inspect all three platforms' evidence:
-
-   ```sh
-   gh workflow run package.yml --repo jarradbanks/jvid --ref main
-   gh run list --repo jarradbanks/jvid --workflow package.yml --limit 5
-   gh run watch "$RUN_ID" --repo jarradbanks/jvid --exit-status
-   gh run download "$RUN_ID" --repo jarradbanks/jvid --name release-candidate --dir candidate-packages
-   ```
-
-   The **complete release source contract** job must pass. Its `release-candidate` artifact
-   includes the five native packages, four generated source bundles with manifests,
-   `SOURCE-README.txt`, `reassemble_sources.py` and `SHA256SUMS.txt`. Review the provider
-   records and verify the checksums before approving the protected release job. Each
-   archive is split into parts of at most 1 GiB. Reconstruction verifies all parts:
+   Test the native installer/DMG/portable downloads for each platform. The app
+   downloads are separate from source manifests and `.tar.gz.partNNN` files;
+   source bundles are for license/source review and rebuilding, not installation.
+   Reconstruction verifies every part and the combined archive:
 
    ```sh
    python reassemble_sources.py jvid-VERSION-sources-rust.json workspace-sources.tar.gz
    ```
 
-   The workflow sets `JVID_UPDATE_VERSION` from the workspace version and passes the
-   repository public key to both builds. For a local Windows build, explicitly export
-   both variables, build the editor and `jvid-update-helper` for `x86_64-pc-windows-msvc`,
-   and pass `--helper` to `scripts/packaging/build.py`. Confirm the installer contains
-   `jvid-app.exe`, `jvid-update-helper.exe`, and `jvid-distribution` containing
-   `windows-installer`, without `jvid.portable`.
-5. **Enable tagged drafts and create the reviewed tag.** Run these owner commands from
-   the reviewed release commit; `0.1.0` is an example, and must equal the workspace version:
+The schema-1 plan records version, previous version, bump, develop source commit,
+previous main commit, frozen merged base and the notes SHA-256. Validation checks
+exact workspace/lock edits against that base and rejects unplanned code changes,
+changed notes and third-party lock changes. Prepare retries reuse the branch and
+PR, without adding later develop commits, and only redispatch missing/failed runs.
+If notes need deliberate editing, update their `notes_sha256` in the plan in the
+same reviewed PR change and rerun CI and Package for that new head. Prepare itself
+never overwrites a frozen candidate. Do not rebase or add feature changes to it.
 
-   ```sh
-   gh variable set JVID_RELEASE_ENABLED --repo jarradbanks/jvid --body true
-   release_version=0.1.0
-   git fetch origin
-   git switch main
-   git pull --ff-only origin main
-   git tag -a "v$release_version" -m "jvid $release_version"
-   git push origin "v$release_version"
-   gh run list --repo jarradbanks/jvid --workflow package.yml --limit 5
-   gh run watch "$TAG_RUN_ID" --repo jarradbanks/jvid --exit-status
-   ```
+### Merge, approve and publish
 
-   Approve the waiting `release` job only after reviewing that tag's build evidence.
-   `workflow_dispatch` never creates a draft, even if dispatched against a tag. The tag
-   push builds all five packages, verifies corresponding source, asserts completeness,
-   signs metadata, writes checksums, and creates a **draft**. It does not publish it.
-6. **Inspect and publish the complete stable release.** The draft must contain exactly
-   the five native packages in the table below, `jvid-update.json`, its `.sig`,
-   `SHA256SUMS.txt`, `jvid-VERSION-source-manifest.json`, the four per-bundle
-   `jvid-VERSION-sources-BUNDLE.json` files and all their `.tar.gz.partNNN` files, plus
-   the source README and reconstruction helper. Metadata must reference those exact
-   final native package bytes; the source index binds the archives to those same bytes. Review the assets and all manual gates, then publish:
+Merge the reviewed release PR into main using a **merge commit**, preserving its
+frozen base history. Keep main at the plan's recorded base until that merge; if
+main advances, replace/review the candidate instead of bypassing the stale-plan
+check. Develop can continue independently while the candidate is being tested.
 
-   ```sh
-   gh release view "v$release_version" --repo jarradbanks/jvid --json isDraft,isPrerelease,assets
-   gh release download "v$release_version" --repo jarradbanks/jvid --dir release-review
-   (cd release-review && sha256sum --check SHA256SUMS.txt)
-   gh release edit "v$release_version" --repo jarradbanks/jvid --draft=false --prerelease=false --latest
-   ```
+Main's release workflow requires an exact first-parent version increase with a
+valid plan. It creates `vVERSION` at that precise merged commit and explicitly
+dispatches Package against the tag with `release=true`; the run is named
+**Release vVERSION**. A tag created with `GITHUB_TOKEN` does not itself trigger a
+tag-push workflow. Bootstrap merges, ordinary later commits, missing plans,
+conflicting tags and already published versions cannot create a fresh release.
 
-   Drafts are invisible to the app's public release check. Do not overwrite assets after
-   publication. If an asset needs signing or another byte change, regenerate its signed
-   metadata and checksums in a reviewed protected job before publishing.
-7. **Bootstrap installed users manually, then validate a higher release.** Manually install
-   the first Windows installer compiled with the production public key, matching helper,
-   version and marker. Existing unsigned/source builds cannot acquire a trust root from
-   an update response. Publish a second, strictly higher stable version using the same
-   key and steps 4–6; open Help → Check for Updates in the bootstrap install, save/defer as
-   required, and verify that Update and Restart launches the higher installed version and
-   preserves projects/settings/components/models. An equal version reports up to date.
-   Keep #477 open until this real installed-editor path and the other acceptance gates
-   are recorded; the Inno fixture alone does not complete that acceptance.
+The tag build repeats all native smoke/source checks for the actual merged
+commit; the merge has a different source identity from the premerge candidate.
+The existing protected `release` environment then waits for its required reviewer.
+After approval, the job revalidates the exact source/native contract, signs and
+verifies updater metadata, creates/resumes a draft, and uploads final native
+packages, separate source bundles, metadata/signature and `SHA256SUMS.txt`.
+Before publishing, it verifies the exact remote names, completed upload states,
+byte sizes and GitHub SHA-256 digests, and rechecks local sources/signatures.
+It then publishes automatically as a stable latest release. No separate manual
+“Publish release” step follows approval.
+
+Manual Package dispatch defaults to `release=false`, including on tags. An
+explicit `release=true` dispatch can publish only on a matching existing version
+tag, with `JVID_RELEASE_ENABLED=true` and the same required environment approval.
+Existing human tag-push behavior remains enabled under those same protections.
+Branch/PR runs never publish. Duplicate queued tag runs skip existing drafts and
+published releases before rebuilding. Published assets/releases are never edited,
+replaced, deleted or retagged by this automation.
+
+### Release retry and hotfix procedure
+
+- If Prepare fails after pushing the branch or creating the PR, rerun it with the
+  same bump on main. It recovers the original candidate/PR and dispatches missing
+  CI/Package work. An active/successful dispatch is reused. GitHub's creation API
+  can briefly lag its run list; workflow concurrency queues duplicate tag runs,
+  and the publication gate skips the already-created release before rebuilding.
+- If main tagging/dispatch fails, rerun the original **Release merged version**
+  run. It uses the original immutable event commit even if main has advanced;
+  ordinary newer commits are never tagged. Existing matching tags are reused;
+  a tag at another commit is an error. Do not delete/move a version tag to retry.
+  Once Package is queued, monitor/rerun that original run rather than dispatching
+  a fresh build. An existing draft causes main dispatch to stop without rebuilding.
+- If signing/upload/publication fails, rerun **failed jobs** of the original
+  Package run, retaining its `release-candidate` inputs (retained for seven days).
+  Matching uploaded assets are kept; incomplete GitHub `starter` uploads are
+  removed and retried. Unexpected names or completed assets with conflicting
+  sizes/digests stop recovery without overwriting them. Full workflow reruns skip
+  an existing draft. If artifacts expired or uploaded bytes conflict, inspect the
+  draft and original run as an owner; do not bypass verification or substitute
+  newly rebuilt bytes into that frozen release. A published release is a no-op.
+- To abandon an unmerged candidate, an owner closes its PR and deletes its
+  `release/vVERSION` branch explicitly. With no tag/release for that version,
+  Prepare may then create a replacement snapshot and a new PR; it never deletes
+  or force-pushes an existing candidate itself. Fix notes/code on develop first,
+  sync main if necessary, and repeat the full candidate review. Closed candidates
+  with their branch still present are refused rather than silently rewritten.
+- For a hotfix, branch the fix from current main and merge it into develop through
+  review, then run Prepare with **patch**. It follows the same candidate tests,
+  release PR and protected approval. If develop already contains unrelated work,
+  this flow includes that work: isolate/review the desired develop snapshot first;
+  there is no hidden main-only hotfix bypass. Always publish a strictly higher
+  version for corrections to a published release.
+
+Bootstrap installed users manually with the first installer carrying the production
+public key, matching helper, version and distribution marker. Then publish a higher
+stable release through this flow and validate Help → Check for Updates, save/defer,
+Update and Restart, and data preservation on an actual installed editor. Equal
+versions report up to date. Keep #477 open until this path and the remaining manual
+platform gates are recorded; disposable fixtures do not complete that acceptance.
 
 | Native release asset (`VERSION` is the canonical workspace version) | Rust target | Distribution |
 | --- | --- | --- |

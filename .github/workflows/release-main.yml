@@ -1,0 +1,39 @@
+name: Release merged version
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.ref == 'refs/heads/main' && vars.JVID_RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Tag the merged version and explicitly dispatch its publishing build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAIN_BEFORE: ${{ github.event.before }}
+        run: |
+          args=()
+          if [[ -n "$MAIN_BEFORE" && "$MAIN_BEFORE" != 0000000000000000000000000000000000000000 ]]; then
+            args+=(--before "$MAIN_BEFORE")
+          fi
+          python scripts/release/automation.py dispatch --commit "$GITHUB_SHA" "${args[@]}"
