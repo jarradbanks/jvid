@@ -828,13 +828,25 @@ fn welcome_snapshots() {
     if !gpu() {
         return;
     }
+    // Releases change the footer's version, not its layout. Keep this metadata
+    // stable like the recent-project timestamps below; normal UI uses the build version.
+    fn snapshot_harness(size: [f32; 2], ppp: f32) -> Harness<'static, App> {
+        let mut h = welcome_harness(size, ppp);
+        let actual_version = format!("v{}", jvid_updater::VERSION);
+        assert!(h.output().shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == actual_version)
+        }));
+        h.state_mut().welcome.snapshot_version = Some("0.1.0");
+        h.run();
+        h
+    }
     let mut results = egui_kittest::SnapshotResults::new();
     for (size, ppp) in configs() {
-        let mut h = welcome_harness(size, ppp);
+        let mut h = snapshot_harness(size, ppp);
         results.add(h.try_snapshot(format!("welcome_{}x{}_{ppp}x", size[0], size[1])));
     }
     // Recent projects (no posters: their media doesn't exist) and a fixed preset picked.
-    let mut h = welcome_harness([1280.0, 720.0], 1.0);
+    let mut h = snapshot_harness([1280.0, 720.0], 1.0);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
