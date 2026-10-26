@@ -245,6 +245,7 @@ impl MediaBin {
         self.text_drawn = Some(key);
     }
 
+    #[cfg(test)]
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -252,6 +253,30 @@ impl MediaBin {
         focused: bool,
         importing: bool,
         missing: &HashSet<PathBuf>,
+    ) -> BinResponse {
+        self.show_inner(ui, project, focused, importing, missing, false)
+    }
+
+    pub(crate) fn show_docked(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        focused: bool,
+        importing: bool,
+        missing: &HashSet<PathBuf>,
+    ) -> BinResponse {
+        self.show_inner(ui, project, focused, importing, missing, true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_inner(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        focused: bool,
+        importing: bool,
+        missing: &HashSet<PathBuf>,
+        docked: bool,
     ) -> BinResponse {
         self.thumbs
             .strip_requests
@@ -272,6 +297,7 @@ impl MediaBin {
         // The new tab shows next frame; the click already repaints.
         let mut tab = self.tab;
         Panel::tabbed(&tabs(), &mut tab)
+            .embedded(docked)
             .wide(true)
             .focused(focused)
             .show(ui, |ui| match self.tab {

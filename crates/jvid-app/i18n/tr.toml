@@ -96,6 +96,7 @@ export_frame = "Kareyi Dışa Aktar"
 record = "Seslendirme Kaydet"
 
 [panel]
+drag_tab = "Panelleri gruplamak veya bölmek için sürükleyin; diğer sekmeler için kaydırın."
 media = "Medya"
 preview = "Önizleme"
 inspector = "Denetçi"
@@ -125,6 +126,7 @@ no_media = "video veya ses akışı yok"
 unsupported_codec = "desteklenmeyen kodek: {codec}"
 
 [menu]
+reset_layout = "Panel Düzenini Sıfırla"
 project_tooltip = "Yeni proje, açma ve kaydetme"
 new_project = "Yeni Proje"
 open = "Aç…"

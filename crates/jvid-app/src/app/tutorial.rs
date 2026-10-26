@@ -1105,18 +1105,36 @@ impl App {
         let panel = || row_name(step?.anchor).and(anchor_rect(ctx, Tab::Inspector.anchor()));
         let target = exact.or_else(panel);
         if let Some(s) = step {
-            let queue =
-                (s.anchor == Tab::RenderQueue.anchor()).then_some(App::show_queue as fn(&mut App));
-            let reveal = s.reveal.or(queue).filter(|_| exact.is_none());
+            let reveal = s.reveal.filter(|_| exact.is_none());
+            let tab = [
+                Tab::Media,
+                Tab::Preview,
+                Tab::Inspector,
+                Tab::Timeline,
+                Tab::Transcript,
+                Tab::RenderQueue,
+            ]
+            .into_iter()
+            .find(|tab| {
+                s.anchor == tab.anchor() || (*tab == Tab::Inspector && row_name(s.anchor).is_some())
+            })
+            .filter(|_| exact.is_none());
             // A hidden Inspector row the step names: its tab shows, and it scrolls into view.
             let mut names = std::iter::once(s.anchor).chain(s.also.iter().copied());
             let row = names.find(|a| row_name(a).is_some() && anchor_rect(ctx, a).is_none());
-            if !run.revealed && (reveal.is_some() || row.is_some()) {
+            let first = !run.revealed;
+            let pending = ctx.data(|d| d.get_temp::<&'static str>(Id::new(SCROLL)));
+            // Adding controls can move a previously revealed row below the viewport again.
+            let scroll = row.filter(|row| pending != Some(*row));
+            if (first && (reveal.is_some() || tab.is_some())) || scroll.is_some() {
                 run.revealed = true;
-                if let Some(reveal) = reveal {
+                if first && let Some(tab) = tab {
+                    self.show_panel(tab);
+                }
+                if first && let Some(reveal) = reveal {
                     reveal(self);
                 }
-                if let Some(row) = row {
+                if let Some(row) = scroll {
                     crate::inspector::choose(ctx, pane_of(row_name(row).unwrap_or_default()));
                     ctx.data_mut(|d| d.insert_temp(Id::new(SCROLL), row));
                 }
@@ -2209,6 +2227,32 @@ mod tests {
         assert!(!warned(&h));
         click(&mut h, tr!("tutorial.skip_step"));
         assert!(warned(&h), "the missing `nowhere` anchor is logged");
+    }
+
+    #[test]
+    fn a_lesson_activates_an_existing_inactive_dock_tab() {
+        let mut h = harness();
+        let app = h.state_mut();
+        app.show_queue();
+        let queue = app.dock.find_tab(&Tab::RenderQueue).unwrap();
+        let timeline = app.dock.find_tab(&Tab::Timeline).unwrap().node_path();
+        app.dock
+            .move_tab(queue, (timeline, egui_dock::TabInsert::Append));
+        app.focus_panel(Tab::Timeline);
+        app.start_lesson(&PREPARED);
+        settle(&mut h);
+        assert!(drawn(&h, "render_queue").is_some());
+        let dock = &h.state().dock;
+        assert_eq!(
+            dock.iter_all_tabs()
+                .filter(|(_, t)| **t == Tab::RenderQueue)
+                .count(),
+            1
+        );
+        assert_eq!(
+            dock.find_tab(&Tab::RenderQueue).unwrap().node_path(),
+            dock.find_tab(&Tab::Timeline).unwrap().node_path(),
+        );
     }
 
     #[test]
