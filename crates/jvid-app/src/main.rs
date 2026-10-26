@@ -1,5 +1,7 @@
 //! The jvid desktop video editor, built with eframe and suite-ui.
 
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use jvid_app::{app, settings_file};
 
 fn main() -> eframe::Result {
