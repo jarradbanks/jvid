@@ -44,7 +44,8 @@ original recognized words unless Recognize Again is selected.
 - `jvid_transcribe::store::Store` owns persistence, compatibility, interval subtraction and
   source identity. `Settings::version` must change when recognition/timing behavior changes.
 - `Subtitles::store` and `TranscriptPanel::cache.store` must share the same `Shared` instance;
-  `App::new` wires them using the existing configured transcript-cache directory.
+  `App::set_recognition_cache` replaces them together, using the existing configured
+  transcript-cache directory at startup and an isolated store in tutorial tests.
 - Before drawing Transcript, the app synchronizes `Cache::set_settings` with
   `Subtitles::transcript_settings()`. Recognition choices retain their existing dialog lifetime;
   after an application restart, selecting matching choices can reuse previously saved entries.

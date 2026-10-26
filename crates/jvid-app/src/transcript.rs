@@ -293,6 +293,7 @@ impl TranscriptPanel {
         (from < to).then_some(from..to)
     }
 
+    #[cfg(test)]
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -300,6 +301,30 @@ impl TranscriptPanel {
         selected: &HashSet<ClipId>,
         playhead: Time,
         focused: bool,
+    ) -> Output {
+        self.show_inner(ui, project, selected, playhead, focused, false)
+    }
+
+    pub(crate) fn show_docked(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        selected: &HashSet<ClipId>,
+        playhead: Time,
+        focused: bool,
+    ) -> Output {
+        self.show_inner(ui, project, selected, playhead, focused, true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_inner(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        selected: &HashSet<ClipId>,
+        playhead: Time,
+        focused: bool,
+        docked: bool,
     ) -> Output {
         if self.cache.jobs.as_ref().is_some_and(|p| !p.is_idle()) {
             ui.ctx()
@@ -321,88 +346,88 @@ impl TranscriptPanel {
             .as_ref()
             .map(|_| covered_hits(words, languages, missing, project, &selected));
         let close = [(icon::X, tr!("transcript.close"))];
-        let r = Panel::titled(tr!("panel.transcript"))
-            .actions(&close)
-            .focused(focused)
-            .show(ui, |ui| {
-                if self
-                    .sources
-                    .show(ui, project.sequence(), selected_input, false)
-                {
-                    self.selection = None;
-                    self.unticked = None;
-                    ui.ctx().request_repaint();
-                    return;
-                }
-                let bar = egui::Frame::NONE
-                    .inner_margin(Margin::symmetric(space::INSET as i8, space::S8 as i8));
-                bar.show(ui, |ui| {
-                    // Right to left, so Find takes what Transcribe leaves.
-                    let rtl = egui::Layout::right_to_left(egui::Align::Center);
-                    let row = vec2(ui.available_width(), size::CONTROL);
-                    ui.allocate_ui_with_layout(row, rtl, |ui| {
-                        ui.spacing_mut().item_spacing.x = space::S8;
-                        let listing = self.unticked.is_some();
-                        let button = Button::secondary(tr!("transcript.fillers")).on(listing);
-                        if ui.add(button).clicked() {
-                            self.unticked = (!listing).then(HashSet::new);
+        let panel = if docked {
+            Panel::body().embedded(true)
+        } else {
+            Panel::titled(tr!("panel.transcript")).actions(&close)
+        };
+        let r = panel.focused(focused).show(ui, |ui| {
+            if self
+                .sources
+                .show(ui, project.sequence(), selected_input, false)
+            {
+                self.selection = None;
+                self.unticked = None;
+                ui.ctx().request_repaint();
+                return;
+            }
+            let bar = egui::Frame::NONE
+                .inner_margin(Margin::symmetric(space::INSET as i8, space::S8 as i8));
+            bar.show(ui, |ui| {
+                // Right to left, so Find takes what Transcribe leaves.
+                let rtl = egui::Layout::right_to_left(egui::Align::Center);
+                let row = vec2(ui.available_width(), size::CONTROL);
+                ui.allocate_ui_with_layout(row, rtl, |ui| {
+                    ui.spacing_mut().item_spacing.x = space::S8;
+                    let listing = self.unticked.is_some();
+                    let button = Button::secondary(tr!("transcript.fillers")).on(listing);
+                    if ui.add(button).clicked() {
+                        self.unticked = (!listing).then(HashSet::new);
+                    }
+                    let button = Button::secondary(tr!("transcript.transcribe"));
+                    if ui.add(button).clicked() {
+                        out.transcribe = Some(
+                            targets(project, &selected, true)
+                                .into_iter()
+                                .map(|t| t.source)
+                                .collect(),
+                        );
+                    }
+                    if let Some(unticked) = &self.unticked {
+                        let hits = hits.as_deref().unwrap_or_default();
+                        let ready = match hits.is_empty() {
+                            true => State::Disabled,
+                            false => State::Live,
+                        };
+                        let remove = Button::primary(tr!("transcript.remove"));
+                        let remove = ui.add(remove.state(ready));
+                        let all = Button::secondary(tr!("transcript.remove_all"));
+                        let all = ui.add(all.state(ready));
+                        if all.clicked() {
+                            out.command = fillers::cut(hits, &HashSet::new());
+                        } else if remove.clicked() {
+                            out.command = fillers::cut(hits, unticked);
                         }
-                        let button = Button::secondary(tr!("transcript.transcribe"));
-                        if ui.add(button).clicked() {
-                            out.transcribe = Some(
-                                targets(project, &selected, true)
-                                    .into_iter()
-                                    .map(|t| t.source)
-                                    .collect(),
-                            );
+                        if remove.clicked() || all.clicked() {
+                            self.unticked = None;
                         }
-                        if let Some(unticked) = &self.unticked {
-                            let hits = hits.as_deref().unwrap_or_default();
-                            let ready = match hits.is_empty() {
-                                true => State::Disabled,
-                                false => State::Live,
-                            };
-                            let remove = Button::primary(tr!("transcript.remove"));
-                            let remove = ui.add(remove.state(ready));
-                            let all = Button::secondary(tr!("transcript.remove_all"));
-                            let all = ui.add(all.state(ready));
-                            if all.clicked() {
-                                out.command = fillers::cut(hits, &HashSet::new());
-                            } else if remove.clicked() {
-                                out.command = fillers::cut(hits, unticked);
-                            }
-                            if remove.clicked() || all.clicked() {
-                                self.unticked = None;
-                            }
-                            return;
-                        }
-                        let find = TextInput::search(&mut self.query).hint(tr!("transcript.find"));
-                        let find = ui.add(find.width(ui.available_width()));
-                        if find.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                            self.find_next(words, playhead, &mut out);
-                            // Keeps typing in Find, so Enter goes on to the next match.
-                            find.request_focus();
-                        }
+                        return;
+                    }
+                    let find = TextInput::search(&mut self.query).hint(tr!("transcript.find"));
+                    let find = ui.add(find.width(ui.available_width()));
+                    if find.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                        self.find_next(words, playhead, &mut out);
+                        // Keeps typing in Find, so Enter goes on to the next match.
+                        find.request_focus();
+                    }
+                });
+            });
+            if !missing.is_empty() {
+                ui.label(egui::RichText::new(tr!("transcript.partial")).color(color::ink_3()));
+            } else if words.is_empty() {
+                ui.label(egui::RichText::new(tr!("subtitles.no_speech")).color(color::ink_3()));
+            }
+            egui::ScrollArea::vertical()
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    let frame = egui::Frame::NONE
+                        .inner_margin(Margin::symmetric(space::INSET as i8, space::S4 as i8));
+                    frame.show(ui, |ui| match self.unticked.is_some() {
+                        true => self.hits(ui, words, hits.as_deref().unwrap_or_default(), &mut out),
+                        false => self.text(ui, words, playhead, &mut out),
                     });
                 });
-                if !missing.is_empty() {
-                    ui.label(egui::RichText::new(tr!("transcript.partial")).color(color::ink_3()));
-                } else if words.is_empty() {
-                    ui.label(egui::RichText::new(tr!("subtitles.no_speech")).color(color::ink_3()));
-                }
-                egui::ScrollArea::vertical()
-                    .auto_shrink(false)
-                    .show(ui, |ui| {
-                        let frame = egui::Frame::NONE
-                            .inner_margin(Margin::symmetric(space::INSET as i8, space::S4 as i8));
-                        frame.show(ui, |ui| match self.unticked.is_some() {
-                            true => {
-                                self.hits(ui, words, hits.as_deref().unwrap_or_default(), &mut out)
-                            }
-                            false => self.text(ui, words, playhead, &mut out),
-                        });
-                    });
-            });
+        });
         out.close = r.action == Some(0);
         if focused && !typing && !ui.ctx().text_edit_focused() {
             let delete = ui.input(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace));

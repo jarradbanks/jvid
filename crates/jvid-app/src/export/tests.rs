@@ -1733,7 +1733,16 @@ fn queue_reports_cancelled_waiting_job() {
         "cancelled jobs must still prevent an update while unwinding"
     );
     go.send(()).unwrap();
-    while !h.iter().all(|h| h.is_finished()) {
+    // A skipped job marks its handle finished just before dropping its result sender.
+    // Poll until both results arrive, as the app does, rather than racing that final drop.
+    let start = std::time::Instant::now();
+    let mut actual = Vec::new();
+    while q.unsettled() {
+        assert!(
+            start.elapsed().as_secs() < 10,
+            "cancelled jobs never settled"
+        );
+        actual.extend(q.poll());
         std::thread::yield_now();
     }
     let cancelled = Err(Error::Cancelled);
@@ -1741,7 +1750,8 @@ fn queue_reports_cancelled_waiting_job() {
         ("a.mp4".into(), cancelled.clone()),
         ("b.mp4".into(), cancelled),
     ];
-    assert_eq!(q.poll(), ended);
+    actual.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(actual, ended);
     assert!(!q.unsettled());
 }
 

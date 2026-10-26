@@ -14,6 +14,10 @@ use crate::widgets::{Button, fit_text, focus_ring, hover_full, paint_fit};
 
 /// What a panel's header shows.
 pub enum Header<'a> {
+    /// Content only; the enclosing dock supplies the title strip.
+    None,
+    /// A row reserved for panel tools, below the dock's title strip.
+    Toolbar,
     /// A single view: its title sits 12px in.
     Title(&'a str),
     /// Several views as equal-width tabs; clicking one sets `active`.
@@ -39,9 +43,18 @@ pub struct Panel<'a> {
     on: &'a [bool],
     focused: bool,
     wide: bool,
+    embedded: bool,
 }
 
 impl<'a> Panel<'a> {
+    pub fn body() -> Self {
+        Self::new(Header::None)
+    }
+
+    pub fn toolbar() -> Self {
+        Self::new(Header::Toolbar)
+    }
+
     pub fn titled(title: &'a str) -> Self {
         Self::new(Header::Title(title))
     }
@@ -57,6 +70,7 @@ impl<'a> Panel<'a> {
             on: &[],
             focused: false,
             wide: false,
+            embedded: false,
         }
     }
 
@@ -84,6 +98,12 @@ impl<'a> Panel<'a> {
         self
     }
 
+    /// The dock paints the surrounding surface and focus border.
+    pub fn embedded(mut self, embedded: bool) -> Self {
+        self.embedded = embedded;
+        self
+    }
+
     pub fn show<R>(self, ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> PanelResponse<R> {
         let ppp = ui.pixels_per_point();
         // Round inward, so the border stays inside a clip rect on fractional pixels.
@@ -97,15 +117,24 @@ impl<'a> Panel<'a> {
         let response = ui.allocate_rect(rect, Sense::hover());
         let corner = CornerRadius::same(radius::PANEL);
         let painter = ui.painter().clone();
-        painter.rect_filled(rect, corner, color::panel());
+        if !self.embedded {
+            painter.rect_filled(rect, corner, color::panel());
+        }
 
-        let header = Rect::from_min_size(rect.min, vec2(rect.width(), size::HEADER));
+        let height = if matches!(self.header, Header::None) {
+            0.0
+        } else {
+            size::HEADER
+        };
+        let header = Rect::from_min_size(rect.min, vec2(rect.width(), height));
         let line = 1.0 / ppp;
-        painter.rect_filled(
-            Rect::from_x_y_ranges(rect.x_range(), header.bottom() - line..=header.bottom()),
-            0.0,
-            color::border(),
-        );
+        if height > 0.0 {
+            painter.rect_filled(
+                Rect::from_x_y_ranges(rect.x_range(), header.bottom() - line..=header.bottom()),
+                0.0,
+                color::border(),
+            );
+        }
 
         let mut action = None;
         let mut right = header.right() - space::S8;
@@ -126,6 +155,7 @@ impl<'a> Panel<'a> {
         }
 
         match self.header {
+            Header::None | Header::Toolbar => {}
             Header::Title(title) => {
                 let left = header.left() + space::INSET;
                 let galley = fit_text(ui, title, theme::body_strong(), color::ink(), right - left);
@@ -166,7 +196,9 @@ impl<'a> Panel<'a> {
         } else {
             color::border()
         };
-        painter.rect_stroke(rect, corner, hairline(ui.ctx(), border), StrokeKind::Inside);
+        if !self.embedded {
+            painter.rect_stroke(rect, corner, hairline(ui.ctx(), border), StrokeKind::Inside);
+        }
         PanelResponse {
             inner,
             action,

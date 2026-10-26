@@ -94,6 +94,7 @@ export_frame = "Exportovat snímek"
 record = "Nahrát komentář"
 
 [panel]
+drag_tab = "Přetažením seskupíte nebo rozdělíte panely; posunutím zobrazíte další karty."
 media = "Média"
 preview = "Náhled"
 inspector = "Inspektor"
@@ -123,6 +124,7 @@ no_media = "žádný video ani zvukový stream"
 unsupported_codec = "nepodporovaný kodek: {codec}"
 
 [menu]
+reset_layout = "Obnovit rozložení panelů"
 project_tooltip = "Vytvořit, otevřít a uložit"
 new_project = "Nový projekt"
 open = "Otevřít…"

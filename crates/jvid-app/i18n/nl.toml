@@ -94,6 +94,7 @@ export_frame = "Frame exporteren"
 record = "Voice-over opnemen"
 
 [panel]
+drag_tab = "Sleep om panelen te groeperen of te splitsen; scrol voor meer tabbladen."
 media = "Media"
 preview = "Voorvertoning"
 inspector = "Inspector"
@@ -126,6 +127,7 @@ no_media = "geen video- of audiostreams"
 unsupported_codec = "niet-ondersteunde codec: {codec}"
 
 [menu]
+reset_layout = "Paneelindeling herstellen"
 project_tooltip = "Nieuw, openen en opslaan"
 new_project = "Nieuw project"
 open = "Openen…"
