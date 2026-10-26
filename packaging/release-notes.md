@@ -1,13 +1,6 @@
-Changes in 0.2.0
+Changes in 0.2.1
 
-- Keep release snapshots and path fixtures stable across versions and platforms
-- Wait for asynchronous bin fixture decoding before requiring idle UI
-- Update grouped transcript snapshots for copy and export controls
-- Update shortcut dialog snapshot for subtitle export action
-- Add transcript copy and UTF-8 text export
-- Reuse persistent recognition between subtitles and Transcript
-- feat(app): enable draggable dock tabs and layout reset (#482)
-- Add standalone subtitle SRT export (#485)
+- Fix Windows updater when the editor has already exited
 
 Choose the download for your system:
 
