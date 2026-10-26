@@ -383,13 +383,16 @@ fn bin_harness() -> Harness<'static, App> {
     }
     // The program's decodes of the (missing) clip are async; wait until they've failed.
     for _ in 0..500 {
-        h.run();
+        // Rendering one frame lets the worker finish without requiring an idle UI
+        // within Harness::run's four-frame limit on a busy CI machine.
+        h.step();
         if h.state().preview.settled() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert!(h.state().preview.settled(), "preview decode never finished");
+    h.run();
     h
 }
 
