@@ -54,7 +54,10 @@ pub fn probe(path: &Path) -> Result<ProbeInfo, ProbeError> {
     // Stills report no duration.
     let micros = input.duration().max(0);
     let padding = match audio.first() {
-        Some(a) if input.format().name() == "mp3" => mp3_padding(&mut input, micros, a.sample_rate),
+        // FFmpeg 8 (libavformat 62) already removes the LAME delay and padding from duration.
+        Some(a) if input.format().name() == "mp3" && format::version() < (62 << 16) => {
+            mp3_padding(&mut input, micros, a.sample_rate)
+        }
         _ => Time(0),
     };
     Ok(ProbeInfo {

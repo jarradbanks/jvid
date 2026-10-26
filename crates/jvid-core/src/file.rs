@@ -54,11 +54,22 @@ impl From<serde_json::Error> for FileError {
 
 /// Serializes `project` for a file in `project_dir`.
 pub fn to_json(project: &Project, project_dir: &Path) -> Result<String, FileError> {
+    to_json_with_paths(project, project_dir, Path::to_path_buf)
+}
+
+/// Like [`to_json`], resolving paths only for relative-link calculation. The caller can
+/// resolve filesystem aliases (such as Windows short names) without changing stored paths.
+pub fn to_json_with_paths(
+    project: &Project,
+    project_dir: &Path,
+    resolve: impl Fn(&Path) -> PathBuf,
+) -> Result<String, FileError> {
+    let project_dir = resolve(project_dir);
     let mut p = serde_json::to_value(project)?;
     for a in assets(&mut p) {
         let rel = a["path"]
             .as_str()
-            .and_then(|s| relativize(Path::new(s), project_dir));
+            .and_then(|s| relativize(&resolve(Path::new(s)), &project_dir));
         // `/` separators so a project saved on Windows also opens on Unix.
         let rel = rel.and_then(|r| {
             let parts: Option<Vec<_>> = r.iter().map(|c| c.to_str()).collect();
@@ -269,6 +280,33 @@ mod tests {
         ] {
             assert_eq!(relativize(Path::new(source), Path::new(directory)), None);
         }
+    }
+
+    #[test]
+    fn relative_links_resolve_directory_and_media_aliases_without_rewriting_paths() {
+        let mut p = Project::default();
+        let source = abs("/media-alias/proj/media/a.mkv");
+        p.add_asset(source.clone());
+        let dir = abs("/dir-alias/proj");
+        let physical = abs("/physical");
+        let s = to_json_with_paths(&p, &dir, |path| {
+            for alias in [abs("/media-alias"), abs("/dir-alias")] {
+                if let Ok(rest) = path.strip_prefix(alias) {
+                    return physical.join(rest);
+                }
+            }
+            path.to_path_buf()
+        })
+        .unwrap();
+        assert!(s.contains(r#""relative_path": "media/a.mkv""#), "{s}");
+        let value: Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(
+            value["project"]["assets"][0]["path"],
+            source.to_str().unwrap()
+        );
+        let moved = abs("/moved");
+        let loaded = from_json(&s, &moved, |_| true).unwrap();
+        assert_eq!(loaded.assets()[0].path, moved.join("media/a.mkv"));
     }
 
     #[test]

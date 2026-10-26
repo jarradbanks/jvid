@@ -4,7 +4,7 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
 
-use jvid_core::file::{FileError, from_json, to_json};
+use jvid_core::file::{FileError, from_json, to_json_with_paths};
 use jvid_core::model::{MAX_NEST_DEPTH, Project};
 
 use crate::i18n::tr;
@@ -33,9 +33,12 @@ fn describe(e: &FileError) -> String {
 /// temp file from a crashed save is truncated and reused.
 pub fn save(project: &Project, path: &Path) -> io::Result<()> {
     let dir = dir_of(path);
-    // Keep the lexical project directory; core path comparison also understands the verbatim
-    // Windows prefixes produced by canonicalizing imported media.
-    let s = to_json(project, &std::path::absolute(dir)?).map_err(io::Error::other)?;
+    // Compare physical paths: Windows temp directories can use short names while imported
+    // media is canonicalized. Resolve both sides, retaining lexical paths for offline media.
+    let s = to_json_with_paths(project, &std::path::absolute(dir)?, |path| {
+        fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    })
+    .map_err(io::Error::other)?;
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".tmp");
     let tmp = dir.join(name);

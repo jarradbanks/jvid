@@ -372,7 +372,9 @@ fn out(name: &str) -> PathBuf {
 }
 
 fn run_now(p: &Project, req: &Request, cancel: bool) -> Result<ProbeInfo, Error> {
-    let (device, queue) = device().expect("checked by caller");
+    let gpu = req
+        .needs_gpu()
+        .then(|| device().expect("checked by caller"));
     let pool = Pool::new(1);
     let (tx, rx) = channel();
     let started = Arc::new(AtomicBool::new(false));
@@ -382,7 +384,12 @@ fn run_now(p: &Project, req: &Request, cancel: bool) -> Result<ProbeInfo, Error>
         while cancel && !ctx.is_cancelled() {
             std::thread::yield_now();
         }
-        let _ = tx.send(run(&p, &req, &device, &queue, ctx));
+        let _ = tx.send(run_with_gpu(
+            &p,
+            &req,
+            gpu.as_ref().map(|(device, queue)| (device, queue)),
+            ctx,
+        ));
     });
     if cancel {
         while !started.load(Ordering::SeqCst) {
