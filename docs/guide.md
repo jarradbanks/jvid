@@ -94,12 +94,21 @@ parameter is a keyframeable slider. Effects run top to bottom: drag a block's he
 drops out of the Program monitor and exports until you turn it back on. To write your own, see
 [Writing effects](effects.md).
 
+## Subtitles
+
+Use **File > Import Subtitles** for an existing SRT, or **Timeline > Generate Subtitles** to turn speech into editable captions. Edit a caption's text in the Inspector and trim or move its timeline clip to adjust timing.
+
+To save captions without exporting video, choose **Timeline > Export Subtitles (.srt)…**, **File > Export Subtitles (.srt)…**, or right-click a subtitle track header or caption clip and choose **Export Subtitles (.srt)…**. Choose **Entire Timeline** for the whole current sequence, or explicitly choose **In to Out**, then **Save SRT…** to open the native save dialog. One missing mark means the sequence start or end. Captions crossing the range edges are clipped, and times start at zero at the range's In point.
+
+The SRT contains the current edited text (including Unicode and line breaks), ordered by time, from visible subtitle tracks in the current sequence and its placed nested sequences. Hidden tracks, tracks excluded by video solo, and disabled clips are omitted, just as in video sidecar export. Ordinary titles, unplaced sequences and source transcripts are not captions and are excluded. This export does not render, transcribe, download a speech model or need a GPU. An empty range explains that there are no subtitles to export; cancelling the save dialog writes nothing. Existing SRT destinations use the native replacement confirmation, and project/source files are protected.
+
 ## Export
 
 Click **Export** in the header. The dialog opens on In to Out when you've marked a range, otherwise the whole timeline.
 
 - **Presets:** Highlight 1080p60, Highlight 1440p60, Screen Recording (Sharp Text), YouTube 1080p, YouTube 4K, Shorts/Reels 9:16 and ProRes Master. jvid warns when a preset's aspect ratio doesn't match the project.
 - Pick the video and audio codecs, loudness target and output file, and check the estimated size.
+- With visible captions, the **Subtitles** row offers **Burn In** to draw them into the video, or **Sidecar .srt** to render the video and save a separate SRT beside it. Both use the chosen video range; for an SRT alone, use **Timeline > Export Subtitles (.srt)…**.
 - Exports run in the **Render Queue** while you keep editing. The menu beside **Export** shows the running export and the last few results; **Show Render Queue** opens the full list as a panel beside the Timeline, with **Cancel**, **Reveal**, **Cancel All** and **Clear Finished**.
 
 **Export frame** (`Ctrl+Shift+E`) saves the current Program frame as a PNG.

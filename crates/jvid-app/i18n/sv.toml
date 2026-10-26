@@ -3,6 +3,7 @@
 # items use the imperative (Spara, Lägg till markör). Terms follow docs/i18n/sv.md.
 
 [action]
+export_subtitles = "Exportera undertexter (.srt)…"
 new_project = "Nytt projekt"
 open_project = "Öppna projekt"
 save = "Spara"
@@ -1003,3 +1004,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Alla synliga undertextspår i den aktuella sekvensen, inklusive placerade nästlade sekvenser. Källtranskriptioner utesluts."
+save = "Spara SRT…"
+empty = "Inga undertexter i det här intervallet."
+extension = "Välj en destination med filändelsen .srt."
+project_collision = "Välj en annan destination: den här filen är projektet."
+saved = "Undertexter sparade i {path}"
+video_help = "Inbränning ritar undertexter i videon; en separat SRT-fil sparas bredvid. Endast SRT: Tidslinje > Exportera undertexter."

@@ -3,6 +3,7 @@
 
 # Keyboard actions, by keymap.toml id: menus, the shortcut editor and docs/shortcuts.md.
 [action]
+export_subtitles = "Export Subtitles (.srt)…"
 new_project = "New Project"
 open_project = "Open Project"
 save = "Save"
@@ -1109,3 +1110,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "All visible subtitle tracks in the current sequence, including placed nested sequences. Source transcripts are excluded."
+save = "Save SRT…"
+empty = "No subtitles in this range."
+extension = "Choose a destination with the .srt extension."
+project_collision = "Choose a different destination: this file is the project."
+saved = "Subtitles saved to {path}"
+video_help = "Burn In draws captions into video; Sidecar saves an SRT beside it. For SRT alone: Timeline > Export Subtitles."

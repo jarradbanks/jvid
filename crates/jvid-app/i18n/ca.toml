@@ -3,6 +3,7 @@
 # imperatives (Desa, Obre) and messages address the user as vós (Seleccioneu). See docs/i18n/ca.md.
 
 [action]
+export_subtitles = "Exporta els subtítols (.srt)…"
 new_project = "Projecte nou"
 open_project = "Obre un projecte"
 save = "Desa"
@@ -1015,3 +1016,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Totes les pistes de subtítols visibles de la seqüència actual, incloses les seqüències imbricades col·locades. Les transcripcions d’origen queden excloses."
+save = "Desa l’SRT…"
+empty = "No hi ha subtítols en aquest interval."
+extension = "Tria una destinació amb l’extensió .srt."
+project_collision = "Tria una altra destinació: aquest fitxer és el projecte."
+saved = "Subtítols desats a {path}"
+video_help = "Incrustar dibuixa els subtítols al vídeo; el fitxer SRT separat es desa al costat. Només SRT: Línia de temps > Exporta els subtítols."

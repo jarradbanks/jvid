@@ -17,6 +17,7 @@ mod audit_b08;
 mod audit_b09;
 mod audit_b11;
 mod docking;
+mod subtitle_export;
 mod updates;
 
 const SIZES: [[f32; 2]; 2] = [[1280.0, 720.0], [1920.0, 1080.0]];

@@ -3,6 +3,7 @@
 # items use the infinitive (Speichern). Terms follow docs/i18n/de.md.
 
 [action]
+export_subtitles = "Untertitel exportieren (.srt)…"
 new_project = "Neues Projekt"
 open_project = "Projekt öffnen"
 save = "Speichern"
@@ -1003,3 +1004,13 @@ worker_failed = "The update worker stopped unexpectedly. Please try again."
 
 [framing]
 target = "{track} · {clip}"
+
+# Standalone subtitle export; {path} is the saved SRT destination.
+[subtitle_export]
+scope = "Alle sichtbaren Untertitelspuren der aktuellen Sequenz, einschließlich platzierter verschachtelter Sequenzen. Quelltranskripte sind ausgeschlossen."
+save = "SRT speichern…"
+empty = "Keine Untertitel in diesem Bereich."
+extension = "Wähle ein Ziel mit der Erweiterung .srt."
+project_collision = "Wähle ein anderes Ziel: Diese Datei ist das Projekt."
+saved = "Untertitel in {path} gespeichert"
+video_help = "Einbrennen zeichnet Untertitel ins Video; die separate SRT-Datei wird daneben gespeichert. Nur SRT: Zeitleiste > Untertitel exportieren."

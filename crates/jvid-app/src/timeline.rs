@@ -143,6 +143,8 @@ pub struct Timeline {
     pub hide_region: Option<ClipId>,
     /// The sequence picked in the header to show instead; the app opens it.
     pub open_sequence: Option<SequenceId>,
+    /// Subtitle context menus ask the app to open the standalone SRT dialog.
+    pub export_subtitles: bool,
     /// The sequence shown last frame, to drop a selection made in another.
     shown_sequence: SequenceId,
     /// Keyframe lanes: expanded clips, picked keys and their clipboard.
@@ -237,6 +239,7 @@ impl Default for Timeline {
             notice: None,
             hide_region: None,
             open_sequence: None,
+            export_subtitles: false,
             shown_sequence: SequenceId::default(),
             keys: keyframes::Keys::default(),
             silence: None,
@@ -2301,6 +2304,9 @@ impl Timeline {
         let same_kind: Vec<_> = tracks.iter().filter(|t| t.kind == track.kind).collect();
         let pos = same_kind.iter().position(|t| t.id == track.id).unwrap_or(0);
         body.context_menu(|ui| {
+            if track.subtitles && ui.button(tr!("action.export_subtitles")).clicked() {
+                self.export_subtitles = true;
+            }
             if ui.button(tr!("timeline.rename")).clicked() {
                 self.renaming = Some((track.id, track.name.clone()));
             }
