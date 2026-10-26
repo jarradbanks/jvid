@@ -183,8 +183,10 @@ must not be needed at runtime. macOS assembly requires `otool`,
 versions outside the supported 4.4–8.x range).
 Windows requires Inno Setup 6 and `--ffmpeg-dir`; `fetch_ffmpeg.py` downloads the
 reviewed GPL shared build and verifies `packaging/ffmpeg-windows.json`'s SHA-256.
-The upstream daily URL has finite retention: review and update the lock if it
-expires; do not replace it with an unchecked floating download. Windows Rust and
+The upstream daily binary URL and Actions source-cache artifact have finite
+retention: review and update the lock if either expires; do not replace them with
+unchecked floating downloads. Generated release source assets retain the captured
+inputs alongside that release. Windows Rust and
 whisper use the static MSVC CRT; the supported OS provides UCRT. Bundled DLL
 resolution is tested with development locations removed from PATH.
 
@@ -214,7 +216,9 @@ Package generates corresponding-source bundles alongside its native packages:
 - macOS's retained Homebrew recipes and receipts, source archives/Git revisions,
   resource inputs, patches and build support.
 - Windows's pinned FFmpeg checkout, BtbN dependency source inputs, patches and build
-  recipes, with immutable revision/checksum provenance.
+  recipes, plus linked Rust, GCC and MinGW runtime sources. Registry dependencies
+  have pinned archive checksums; the recovered rav1e build lock is explicitly
+  identified as reconstructed in its retained provenance.
 
 The `complete release source contract` job requires all four source bundles at the
 same commit/tree and version as its five native assets. It verifies every archive
