@@ -1753,12 +1753,11 @@ impl eframe::App for App {
                 self.run_action("record", true);
             }
             let input = std::mem::take(&mut self.preview.recording_input);
-            if std::mem::take(&mut self.timeline.navigated) || input.seek.is_some() {
-                if self.finalize_take()
-                    && let Some(t) = input.seek
-                {
-                    self.timeline.seek(t);
-                }
+            if (std::mem::take(&mut self.timeline.navigated) || input.seek.is_some())
+                && self.finalize_take()
+                && let Some(t) = input.seek
+            {
+                self.timeline.seek(t);
             }
             if let Some(id) = input.action {
                 self.run_action(id, true);

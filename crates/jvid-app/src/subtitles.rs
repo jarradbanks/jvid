@@ -300,7 +300,7 @@ impl AudioSources {
                 } else {
                     let names: Vec<_> = labels.iter().map(String::as_str).collect();
                     let mut pick = 0;
-                    let width = ui.available_width().min(200.0).max(24.0);
+                    let width = ui.available_width().clamp(24.0, 200.0);
                     let group_id = g.iter().map(|c| c.id.0).min();
                     ui.push_id(group_id, |ui| {
                         ui.add(Dropdown::new(&mut pick, &names).width(width));
