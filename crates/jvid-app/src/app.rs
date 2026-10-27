@@ -1166,10 +1166,9 @@ impl App {
                 }
                 self.timeline.armed = Some(take.track);
                 self.take = Some(take);
+                self.on_welcome = false;
                 self.preview_active = 1;
-                if !self.preview.playing() {
-                    self.preview.program_action("shuttle_right");
-                }
+                self.preview.record(start);
             }
             Err(e) => {
                 if txn {

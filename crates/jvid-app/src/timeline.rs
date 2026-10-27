@@ -987,7 +987,11 @@ impl Timeline {
         self.transport.rate = project.settings().frame_rate;
         // Room past the last clip, so the end of the sequence can be reached and seen.
         let tail = Time(10 * FLICKS_PER_SECOND);
-        self.transport.duration = project.sequence().duration() + tail;
+        // Keep room for the next clock tick while a take grows past the normal tail.
+        let end = self
+            .live_span()
+            .map_or(Time(0), |(_, end)| end + Time(FLICKS_PER_SECOND));
+        self.transport.duration = (project.sequence().duration() + tail).max(end);
     }
 
     pub fn new(caches: Arc<Caches>) -> Self {
