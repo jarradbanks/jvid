@@ -177,6 +177,9 @@ pub struct Preview {
     pub recording: Option<(std::time::Duration, f32)>,
     /// The Program row's Record button was clicked; the app runs the `record` action.
     pub record_clicked: bool,
+    /// Recording transport input must pass through the app's take finalizer before seeking
+    /// or stopping playback.
+    pub(crate) recording_input: TransportInput,
     pool: Arc<DecoderPool>,
     jobs: jvid_jobs::Pool,
     tx: Sender<Decoded>,
@@ -284,6 +287,7 @@ impl Preview {
             analysis: None,
             recording: None,
             record_clicked: false,
+            recording_input: TransportInput::default(),
         }
     }
 
@@ -318,6 +322,7 @@ impl Preview {
         self.analysis = None;
         self.recording = None;
         self.record_clicked = false;
+        self.recording_input = TransportInput::default();
     }
 
     /// Stores proxies in `proxies`' directory and switches timeline playback to decode through it.
@@ -710,6 +715,10 @@ impl Preview {
             Some((project.settings(), false)),
             keymap,
         );
+        if self.recording.is_some() && (input.seek.is_some() || input.action.is_some()) {
+            self.recording_input = input;
+            return follow;
+        }
         if let Some(time) = input.seek {
             return Some(time);
         }
@@ -1538,9 +1547,9 @@ pub fn viewer_rect(ui: &Ui) -> Rect {
 
 /// One UI pass coalesces pointer movement to its latest selected position.
 #[derive(Default)]
-struct TransportInput {
-    action: Option<&'static str>,
-    seek: Option<Time>,
+pub(crate) struct TransportInput {
+    pub(crate) action: Option<&'static str>,
+    pub(crate) seek: Option<Time>,
 }
 
 const SEEK_HEIGHT: f32 = 16.0;

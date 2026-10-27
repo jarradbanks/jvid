@@ -1007,6 +1007,30 @@ impl App {
             self.end_take();
             return;
         }
+        if self.take.is_some()
+            && matches!(
+                id,
+                "go_to_start"
+                    | "go_to_end"
+                    | "step_back"
+                    | "step_forward"
+                    | "step_back_second"
+                    | "step_forward_second"
+                    | "prev_edit"
+                    | "next_edit"
+                    | "prev_edit_alt"
+                    | "next_edit_alt"
+                    | "clip_start"
+                    | "clip_end"
+                    | "go_to_in"
+                    | "go_to_out"
+                    | "next_marker"
+                    | "prev_marker"
+            )
+            && !self.finalize_take()
+        {
+            return;
+        }
         match id {
             "record" => return self.start_take(),
             "undo" => {
@@ -1065,7 +1089,7 @@ impl App {
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
         let program_focused = preview_focused && self.preview_active == 1;
-        if (timeline_focused || program_focused) && PROGRAM_ACTIONS.contains(&id) {
+        if (timeline_focused || program_focused || menu) && PROGRAM_ACTIONS.contains(&id) {
             self.preview_active = 1;
             self.preview.program_action(id);
             return;
@@ -1191,7 +1215,7 @@ impl App {
         let Some(take) = &mut self.take else {
             return;
         };
-        if self.timeline.armed != Some(take.track) {
+        if self.timeline.armed != Some(take.track) || !self.preview.playing() {
             self.end_take();
             return;
         }
@@ -1727,6 +1751,17 @@ impl eframe::App for App {
             }
             if std::mem::take(&mut self.preview.record_clicked) && !self.closing {
                 self.run_action("record", true);
+            }
+            let input = std::mem::take(&mut self.preview.recording_input);
+            if std::mem::take(&mut self.timeline.navigated) || input.seek.is_some() {
+                if self.finalize_take()
+                    && let Some(t) = input.seek
+                {
+                    self.timeline.seek(t);
+                }
+            }
+            if let Some(id) = input.action {
+                self.run_action(id, true);
             }
             self.queue_action(ui.ctx(), queue);
             if let Some(msg) = self.timeline.notice.take() {
