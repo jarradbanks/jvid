@@ -93,8 +93,10 @@ fn clicked_playback_stop_finalizes_before_seek_and_preserves_pcm_and_undo() {
     let bytes = std::fs::read(&wav).unwrap();
     assert!(
         bytes[44..]
-            .chunks_exact(2)
-            .all(|p| i16::from_le_bytes([p[0], p[1]]) == 8192)
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .all(|p| i16::from_le_bytes(*p) == 8192)
     );
     // The Program seeker, after Stop, must leave the completed edit intact.
     let seeker = h.get_by_label(tr!("preview.position")).rect();

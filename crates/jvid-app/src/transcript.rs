@@ -469,7 +469,6 @@ impl TranscriptPanel {
                                 if remove.clicked() || all.clicked() {
                                     self.unticked = None;
                                 }
-                                return;
                             }
                         });
                         if self.unticked.is_none() {
