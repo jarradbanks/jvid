@@ -43,7 +43,8 @@ fn harness(list: bool) -> Harness<'static, State> {
                     return;
                 }
                 // Keep interaction timing realistic without waiting for theme/modal fades.
-                ui.ctx().style_mut(|style| style.animation_time = 0.0);
+                ui.ctx()
+                    .global_style_mut(|style| style.animation_time = 0.0);
                 ui.style_mut().animation_time = 0.0;
                 let out = state.bin.show(
                     ui,
