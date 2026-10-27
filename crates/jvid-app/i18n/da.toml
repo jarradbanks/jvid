@@ -95,6 +95,7 @@ export_frame = "Eksportér billede"
 record = "Optag speak"
 
 [panel]
+dock_bottom = "Fastgør langs bunden"
 drag_tab = "Træk for at gruppere eller opdele paneler; rul for at se flere faner."
 media = "Medier"
 preview = "Forhåndsvisning"

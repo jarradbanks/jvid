@@ -95,6 +95,7 @@ export_frame = "Exportar quadro"
 record = "Gravar narração"
 
 [panel]
+dock_bottom = "Encaixar em toda a parte inferior"
 drag_tab = "Arraste para agrupar ou dividir painéis; role para ver mais abas."
 media = "Mídia"
 preview = "Visualização"

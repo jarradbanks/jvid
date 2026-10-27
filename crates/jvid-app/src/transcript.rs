@@ -27,7 +27,7 @@ use jvid_transcribe::store::{Settings, Shared, Store};
 use jvid_transcribe::{Source, Word};
 use suite_ui::panel::Panel;
 use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, size, space};
+use suite_ui::tokens::{color, space};
 use suite_ui::widgets::{Button, Checkbox, State, TextInput};
 
 use crate::i18n::tr;
@@ -403,85 +403,91 @@ impl TranscriptPanel {
             Panel::titled(tr!("panel.transcript")).actions(&close)
         };
         let r = panel.focused(focused).show(ui, |ui| {
-            if self
-                .sources
-                .show(ui, project.sequence(), selected_input, false)
-            {
-                self.selection = None;
-                self.unticked = None;
-                ui.ctx().request_repaint();
-                return;
-            }
-            let bar = egui::Frame::NONE
-                .inner_margin(Margin::symmetric(space::INSET as i8, space::S8 as i8));
-            bar.show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| self.text_actions(ui, words, &mut out));
-                let scope = if selected_input.is_empty() {
-                    tr!("export.entire")
-                } else {
-                    tr!("export.selected")
-                };
-                ui.label(
-                    egui::RichText::new(tr!("transcript.scope", scope = scope))
-                        .color(color::ink_3()),
-                );
-                if !missing.is_empty() {
-                    ui.label(egui::RichText::new(tr!("transcript.partial")).color(color::ink_3()));
-                }
-                // Right to left, so Find takes what Transcribe leaves.
-                let rtl = egui::Layout::right_to_left(egui::Align::Center);
-                let row = vec2(ui.available_width(), size::CONTROL);
-                ui.allocate_ui_with_layout(row, rtl, |ui| {
-                    ui.spacing_mut().item_spacing.x = space::S8;
-                    let listing = self.unticked.is_some();
-                    let button = Button::secondary(tr!("transcript.fillers")).on(listing);
-                    if ui.add(button).clicked() {
-                        self.unticked = (!listing).then(HashSet::new);
-                    }
-                    let button = Button::secondary(tr!("transcript.transcribe"));
-                    if ui.add(button).clicked() {
-                        out.transcribe = Some(
-                            targets(project, &selected, true)
-                                .into_iter()
-                                .map(|t| t.source)
-                                .collect(),
-                        );
-                    }
-                    if let Some(unticked) = &self.unticked {
-                        let hits = hits.as_deref().unwrap_or_default();
-                        let ready = match hits.is_empty() {
-                            true => State::Disabled,
-                            false => State::Live,
-                        };
-                        let remove = Button::primary(tr!("transcript.remove"));
-                        let remove = ui.add(remove.state(ready));
-                        let all = Button::secondary(tr!("transcript.remove_all"));
-                        let all = ui.add(all.state(ready));
-                        if all.clicked() {
-                            out.command = fillers::cut(hits, &HashSet::new());
-                        } else if remove.clicked() {
-                            out.command = fillers::cut(hits, unticked);
-                        }
-                        if remove.clicked() || all.clicked() {
-                            self.unticked = None;
-                        }
-                        return;
-                    }
-                    let find = TextInput::search(&mut self.query).hint(tr!("transcript.find"));
-                    let find = ui.add(find.width(ui.available_width()));
-                    if find.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        self.find_next(words, playhead, &mut out);
-                        // Keeps typing in Find, so Enter goes on to the next match.
-                        find.request_focus();
-                    }
-                });
-            });
-            if missing.is_empty() && words.is_empty() {
-                ui.label(egui::RichText::new(tr!("subtitles.no_speech")).color(color::ink_3()));
-            }
             egui::ScrollArea::vertical()
+                .id_salt("transcript_body")
                 .auto_shrink(false)
                 .show(ui, |ui| {
+                    if self
+                        .sources
+                        .show_compact(ui, project.sequence(), selected_input)
+                    {
+                        self.selection = None;
+                        self.unticked = None;
+                        ui.ctx().request_repaint();
+                        return;
+                    }
+                    let bar = egui::Frame::NONE
+                        .inner_margin(Margin::symmetric(space::INSET as i8, space::S8 as i8));
+                    bar.show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| self.text_actions(ui, words, &mut out));
+                        let scope = if selected_input.is_empty() {
+                            tr!("export.entire")
+                        } else {
+                            tr!("export.selected")
+                        };
+                        ui.label(
+                            egui::RichText::new(tr!("transcript.scope", scope = scope))
+                                .color(color::ink_3()),
+                        );
+                        if !missing.is_empty() {
+                            ui.label(
+                                egui::RichText::new(tr!("transcript.partial"))
+                                    .color(color::ink_3()),
+                            );
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = space::S8;
+                            let listing = self.unticked.is_some();
+                            let button = Button::secondary(tr!("transcript.fillers")).on(listing);
+                            if ui.add(button).clicked() {
+                                self.unticked = (!listing).then(HashSet::new);
+                            }
+                            let button = Button::secondary(tr!("transcript.transcribe"));
+                            if ui.add(button).clicked() {
+                                out.transcribe = Some(
+                                    targets(project, &selected, true)
+                                        .into_iter()
+                                        .map(|t| t.source)
+                                        .collect(),
+                                );
+                            }
+                            if let Some(unticked) = &self.unticked {
+                                let hits = hits.as_deref().unwrap_or_default();
+                                let ready = match hits.is_empty() {
+                                    true => State::Disabled,
+                                    false => State::Live,
+                                };
+                                let remove = Button::primary(tr!("transcript.remove"));
+                                let remove = ui.add(remove.state(ready));
+                                let all = Button::secondary(tr!("transcript.remove_all"));
+                                let all = ui.add(all.state(ready));
+                                if all.clicked() {
+                                    out.command = fillers::cut(hits, &HashSet::new());
+                                } else if remove.clicked() {
+                                    out.command = fillers::cut(hits, unticked);
+                                }
+                                if remove.clicked() || all.clicked() {
+                                    self.unticked = None;
+                                }
+                                return;
+                            }
+                        });
+                        if self.unticked.is_none() {
+                            let find =
+                                TextInput::search(&mut self.query).hint(tr!("transcript.find"));
+                            let find = ui.add(find.width(ui.available_width()));
+                            if find.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                                self.find_next(words, playhead, &mut out);
+                                // Keeps typing in Find, so Enter goes on to the next match.
+                                find.request_focus();
+                            }
+                        }
+                    });
+                    if missing.is_empty() && words.is_empty() {
+                        ui.label(
+                            egui::RichText::new(tr!("subtitles.no_speech")).color(color::ink_3()),
+                        );
+                    }
                     let frame = egui::Frame::NONE
                         .inner_margin(Margin::symmetric(space::INSET as i8, space::S4 as i8));
                     frame.show(ui, |ui| match self.unticked.is_some() {
@@ -1180,6 +1186,182 @@ mod tests {
 #[cfg(test)]
 mod coverage_tests {
     use super::*;
+
+    #[test]
+    fn many_filler_cuts_keep_transcript_and_independent_stream_pickers_accessible() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        use jvid_core::history::History;
+        use jvid_core::model::TrackKind;
+
+        for size in [[240.0, 180.0], [320.0, 220.0]] {
+            let (project, _mic, game) = crate::subtitles::test_support::two_streams(false);
+            let mut panel = TranscriptPanel::default();
+            for nth in 0..2 {
+                let words = (0..32)
+                    .map(|i| {
+                        let start = Time(S + i * S / 8);
+                        Word {
+                            text: if i % 2 == 1 {
+                                "um".into()
+                            } else {
+                                format!("stream{nth}word{i}")
+                            },
+                            start,
+                            end: start + Time(S / 16),
+                            confidence: 1.0,
+                        }
+                    })
+                    .collect();
+                panel.cache.insert(
+                    &Source {
+                        path: project.assets()[0].path.clone(),
+                        nth,
+                        range: 0..i64::MAX,
+                    },
+                    Transcript {
+                        language: Some("en".into()),
+                        words,
+                    },
+                );
+            }
+            let mut fresh = true;
+            let mut h = Harness::builder().with_size([900.0, 600.0]).build_ui_state(
+                move |ui,
+                      (history, panel, selected, requested): &mut (
+                    History,
+                    TranscriptPanel,
+                    HashSet<ClipId>,
+                    Vec<Source>,
+                )| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    let out = panel.show_docked(ui, history.project(), selected, Time(0), true);
+                    if let Some(command) = out.command {
+                        history.apply(command).unwrap();
+                    }
+                    if let Some(sources) = out.transcribe {
+                        *requested = sources;
+                    }
+                },
+                (
+                    History::new(project),
+                    panel,
+                    HashSet::from([game]),
+                    Vec::new(),
+                ),
+            );
+            h.run();
+            h.get_by_label(tr!("transcript.fillers")).click();
+            h.run();
+            h.get_by_label(tr!("transcript.remove_all")).click();
+            h.run();
+            h.state_mut().2.clear();
+            h.set_size(vec2(size[0], size[1]));
+            h.run();
+            let count = h
+                .state()
+                .1
+                .sources
+                .clips(h.state().0.project().sequence(), &HashSet::new(), false)
+                .len();
+            assert!(
+                count >= 16,
+                "Remove Fillers must create many independent groups"
+            );
+            let source_label = format!("{} · {count}", tr!("analysis.audio_source"));
+            let source_rect = h.get_by_label(&source_label).rect();
+            assert!(
+                source_rect.height() <= 24.1 && source_rect.bottom() <= size[1],
+                "sources occupy only one visible compact row: {source_rect:?}"
+            );
+            let copy = h.get_by_label(tr!("transcript.copy_all")).rect();
+            assert!(copy.right() <= size[0] && copy.bottom() <= size[1]);
+
+            // Open the real popup and choose Mic for the first cut only.
+            h.get_by_label(&source_label).click();
+            h.run();
+            let pickers: Vec<_> = h.get_all_by_label("Game · Stream 1").collect();
+            assert!(!pickers.is_empty());
+            assert!(pickers.iter().all(|n| n.rect().right() <= size[0] + 1.0));
+            pickers[0].click();
+            h.run();
+            h.get_by_label("Mic · Stream 2").click();
+            h.run();
+            h.key_press(Key::Escape);
+            h.run();
+            let (history, panel, selected, _) = h.state_mut();
+            let seq = history.project().sequence();
+            let chosen = panel.sources.clips(seq, selected, false);
+            assert_eq!(chosen.len(), count);
+            assert_eq!(chosen.iter().filter(|c| c.stream == Some(1)).count(), 1);
+            let first_game = seq
+                .linked(chosen[0].id)
+                .iter()
+                .find(|(track, c)| {
+                    seq.track(*track).unwrap().kind == TrackKind::Audio && c.stream == Some(0)
+                })
+                .unwrap()
+                .1
+                .id;
+            assert_eq!(
+                panel
+                    .sources
+                    .clips(seq, &HashSet::from([first_game]), false)[0]
+                    .id,
+                first_game
+            );
+            let scope = panel.sources.selection(seq, selected);
+            let placed = panel.cache.placed(history.project(), &scope);
+            assert_eq!(
+                placed.0.len(),
+                16,
+                "one recognized stream per cut, without duplicate speech"
+            );
+            assert!(
+                placed.1.is_empty(),
+                "both source streams stay cached after cuts and source changes"
+            );
+            let label = text::plain(&placed.0);
+            let before = h.get_by_label(&label).rect().top();
+            h.hover_at(egui::pos2(size[0] / 2.0, size[1] - 20.0));
+            h.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                phase: egui::TouchPhase::Move,
+                delta: vec2(0.0, -80.0),
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run();
+            let text = h.get_by_label(&label).rect();
+            assert!(
+                text.top() < before && text.top() < size[1],
+                "scrolling reaches the transcript: {text:?}"
+            );
+
+            // Find/Transcribe also stay reachable without widening the dock.
+            h.hover_at(egui::pos2(size[0] / 2.0, size[1] - 20.0));
+            h.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                phase: egui::TouchPhase::Move,
+                delta: vec2(0.0, 40.0),
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run();
+            h.get_by_label(tr!("transcript.transcribe")).click();
+            h.run();
+            let requested = &h.state().3;
+            assert_eq!(
+                requested.iter().map(|s| s.nth).collect::<HashSet<_>>(),
+                HashSet::from([0, 1])
+            );
+            assert!(
+                requested
+                    .windows(2)
+                    .all(|s| s[0].nth != s[1].nth || s[0].range.end <= s[1].range.start)
+            );
+        }
+    }
 
     #[test]
     fn partial_cached_words_can_be_copied_and_exported_without_transcribing_gaps() {

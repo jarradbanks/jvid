@@ -95,6 +95,7 @@ export_frame = "Esporta fotogramma"
 record = "Registra voce fuori campo"
 
 [panel]
+dock_bottom = "Aggancia lungo il bordo inferiore"
 drag_tab = "Trascina per raggruppare o dividere i pannelli; scorri per vedere altre schede."
 media = "Media"
 preview = "Anteprima"

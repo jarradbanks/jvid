@@ -95,6 +95,7 @@ export_frame = "Exporta el fotograma"
 record = "Enregistra una veu en off"
 
 [panel]
+dock_bottom = "Acobla a tota la part inferior"
 drag_tab = "Arrossega per agrupar o dividir plafons; desplaça per veure més pestanyes."
 media = "Mitjans"
 preview = "Previsualització"

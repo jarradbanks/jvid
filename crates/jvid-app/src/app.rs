@@ -1699,6 +1699,7 @@ impl eframe::App for App {
                 viewer.tab_rects,
             );
             paint_dock_frames(ui, &self.dock);
+            dock_bottom_target(ui, &mut self.dock);
             if let Some(tab) = self.reveal_panel.take()
                 && let Some(path) = self.dock.find_tab(&tab)
                 && let Ok(leaf) = self.dock.leaf_mut(path.node_path())
@@ -1936,6 +1937,82 @@ fn visible_dock(mut dock: DockState<Tab>) -> DockState<Tab> {
     dock
 }
 
+/// egui_dock's edge targets split a leaf, so offer a separate root-level destination.
+/// Track only tab gestures: timeline tools and clip drags must never move a panel.
+fn dock_bottom_target(ui: &Ui, dock: &mut DockState<Tab>) {
+    let drag_id = egui::Id::new("dock_tab_drag");
+    let drag = ui.ctx().data_mut(|d| d.get_temp::<(Tab, bool)>(drag_id));
+    let Some((tab, mut active)) = drag else {
+        return;
+    };
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        ui.ctx().data_mut(|d| d.remove::<(Tab, bool)>(drag_id));
+        return;
+    }
+    let released = ui.input(|i| i.pointer.primary_released());
+    let down = ui.input(|i| i.pointer.primary_down());
+    active |= ui.input(|i| i.pointer.is_decidedly_dragging());
+    if down {
+        ui.ctx().data_mut(|d| d.insert_temp(drag_id, (tab, active)));
+    }
+    if active && (down || released) {
+        let root = dock.main_surface()[NodeIndex::root()].rect().unwrap();
+        let target = egui::Rect::from_min_max(
+            egui::pos2(root.left(), root.bottom() - size::HEADER),
+            root.max,
+        );
+        let hovered = ui
+            .ctx()
+            .pointer_hover_pos()
+            .is_some_and(|p| target.contains(p));
+        let painter = ui
+            .ctx()
+            .layer_painter(egui::LayerId::new(egui::Order::Tooltip, drag_id));
+        if hovered {
+            let preview = egui::Rect::from_min_max(
+                egui::pos2(root.left(), root.bottom() - root.height() * 0.38),
+                root.max,
+            );
+            painter.rect_filled(preview, 0.0, color::light_blue().gamma_multiply(0.3));
+        }
+        painter.rect_filled(target, suite_ui::tokens::radius::CONTROL, color::raised());
+        painter.rect_stroke(
+            target,
+            suite_ui::tokens::radius::CONTROL,
+            Stroke::new(1.0, color::light_blue()),
+            egui::StrokeKind::Inside,
+        );
+        let label = tr!("panel.dock_bottom");
+        ui.interact(target, drag_id.with("target"), egui::Sense::hover())
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
+        painter.text(
+            target.center(),
+            Align2::CENTER_CENTER,
+            label,
+            theme::body(),
+            color::ink(),
+        );
+        if released
+            && hovered
+            && let Some(path) = dock.find_tab(&tab)
+        {
+            // Resolve after the library's leaf drop, then prune the old leaf before splitting
+            // the root. Existing groups, open panels and their order stay in the tree.
+            dock.remove_tab(path);
+            dock.main_surface_mut()
+                .split_below(NodeIndex::root(), 0.62, vec![tab]);
+            if let Some(path) = dock.find_tab(&tab) {
+                dock.set_active_tab(path).ok();
+                dock.set_focused_node_and_surface(path.node_path());
+            }
+            ui.ctx().request_repaint();
+        }
+    }
+    if !down {
+        ui.ctx().data_mut(|d| d.remove::<(Tab, bool)>(drag_id));
+    }
+}
+
 /// Dock strips use the same tokens as panel controls. Overflow scrolls horizontally.
 fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     let mut s = egui_dock::Style::from_egui(egui_style);
@@ -2105,6 +2182,15 @@ impl TabViewer for Viewer<'_> {
 
     fn on_tab_button(&mut self, tab: &mut Tab, response: &egui::Response) {
         self.tab_rects.push((*tab, response.rect));
+        // egui_dock replaces the response id once the tab is floating under the pointer.
+        // Remember the title pressed before that replacement, excluding its close button.
+        if response.is_pointer_button_down_on()
+            && response.ctx.input(|i| i.pointer.primary_pressed())
+        {
+            response
+                .ctx
+                .data_mut(|d| d.insert_temp(egui::Id::new("dock_tab_drag"), (*tab, false)));
+        }
         response
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tab.title()));
         response.ctx.accesskit_node_builder(response.id, |node| {

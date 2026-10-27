@@ -95,6 +95,7 @@ export_frame = "Exportovat snímek"
 record = "Nahrát komentář"
 
 [panel]
+dock_bottom = "Ukotvit přes celou spodní část"
 drag_tab = "Přetažením seskupíte nebo rozdělíte panely; posunutím zobrazíte další karty."
 media = "Média"
 preview = "Náhled"

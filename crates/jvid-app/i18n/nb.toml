@@ -95,6 +95,7 @@ export_frame = "Eksporter bilde"
 record = "Ta opp voiceover"
 
 [panel]
+dock_bottom = "Fest langs bunnen"
 drag_tab = "Dra for å gruppere eller dele paneler; rull for å se flere faner."
 media = "Medier"
 preview = "Forhåndsvisning"

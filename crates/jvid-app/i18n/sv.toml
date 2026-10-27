@@ -95,6 +95,7 @@ export_frame = "Exportera bildruta"
 record = "Spela in speakerröst"
 
 [panel]
+dock_bottom = "Docka längs nederkanten"
 drag_tab = "Dra för att gruppera eller dela paneler; rulla för att se fler flikar."
 media = "Media"
 preview = "Förhandsvisning"

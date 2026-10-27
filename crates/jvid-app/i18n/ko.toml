@@ -97,6 +97,7 @@ export_frame = "프레임 내보내기"
 record = "보이스오버 녹음"
 
 [panel]
+dock_bottom = "하단 전체에 도킹"
 drag_tab = "드래그하여 패널을 그룹화하거나 분할하고 스크롤하여 다른 탭을 확인하세요."
 media = "미디어"
 preview = "미리 보기"

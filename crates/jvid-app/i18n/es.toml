@@ -94,6 +94,7 @@ export_frame = "Exportar fotograma"
 record = "Grabar locución"
 
 [panel]
+dock_bottom = "Acoplar a todo el borde inferior"
 drag_tab = "Arrastra para agrupar o dividir paneles; desplázate para ver más pestañas."
 media = "Medios"
 preview = "Vista previa"

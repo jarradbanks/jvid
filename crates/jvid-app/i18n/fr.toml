@@ -95,6 +95,7 @@ export_frame = "Exporter l'image"
 record = "Enregistrer une voix off"
 
 [panel]
+dock_bottom = "Ancrer sur toute la largeur en bas"
 drag_tab = "Faites glisser pour grouper ou séparer les panneaux ; faites défiler pour voir les autres onglets."
 media = "Médias"
 preview = "Aperçu"

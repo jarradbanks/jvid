@@ -95,6 +95,7 @@ export_frame = "Frame exportieren"
 record = "Voiceover aufzeichnen"
 
 [panel]
+dock_bottom = "Über die gesamte Breite unten andocken"
 drag_tab = "Ziehen, um Bereiche zu gruppieren oder zu teilen; scrollen, um weitere Tabs zu sehen."
 media = "Medien"
 preview = "Vorschau"

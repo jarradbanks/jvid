@@ -95,6 +95,7 @@ export_frame = "Eksportuj klatkę"
 record = "Nagraj lektora"
 
 [panel]
+dock_bottom = "Zadokuj na całej szerokości u dołu"
 drag_tab = "Przeciągnij, aby grupować lub dzielić panele; przewiń, aby zobaczyć więcej kart."
 media = "Multimedia"
 preview = "Podgląd"

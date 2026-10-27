@@ -95,6 +95,7 @@ export_frame = "Frame exporteren"
 record = "Voice-over opnemen"
 
 [panel]
+dock_bottom = "Onderaan over de volle breedte vastzetten"
 drag_tab = "Sleep om panelen te groeperen of te splitsen; scrol voor meer tabbladen."
 media = "Media"
 preview = "Voorvertoning"

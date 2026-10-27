@@ -97,6 +97,7 @@ export_frame = "Kareyi Dışa Aktar"
 record = "Seslendirme Kaydet"
 
 [panel]
+dock_bottom = "Alt Kenara Boydan Boya Yerleştir"
 drag_tab = "Panelleri gruplamak veya bölmek için sürükleyin; diğer sekmeler için kaydırın."
 media = "Medya"
 preview = "Önizleme"
