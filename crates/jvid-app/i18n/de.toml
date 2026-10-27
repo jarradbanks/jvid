@@ -364,6 +364,12 @@ retime.other = "Die {count} Clips behalten ihre Zeiten; Schnitte können bei der
 undo_note = "Sie können dies rückgängig machen."
 
 [bin]
+remove_selected = "Auswahl entfernen"
+remove_selected_title.one = "1 ausgewähltes Medium entfernen?"
+remove_selected_title.other = "{count} ausgewählte Medien entfernen?"
+remove_selected_body.one = "Verwendete Medien: {used}. Dabei wird auch 1 Clip aus der Zeitleiste entfernt. Dies kann rückgängig gemacht werden."
+remove_selected_body.other = "Verwendete Medien: {used}. Dabei werden auch {count} Clips aus der Zeitleiste entfernt. Dies kann rückgängig gemacht werden."
+files_retained = "Die Originaldateien auf dem Datenträger bleiben erhalten."
 sequence_open = "die geöffnete Sequenz kann nicht entfernt werden; öffnen Sie zuerst eine andere Sequenz"
 effects = "Effekte"
 text = "Text"

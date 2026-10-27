@@ -598,6 +598,7 @@ impl Command {
                     let asset = p.add_asset(PathBuf::new());
                     let a = p.asset_mut(asset).expect("just added");
                     (a.name, a.text) = (Some(text.content.replace('\n', " ")), Some(text));
+                    a.generated_caption = true;
                     let clip = NewClip {
                         asset,
                         source_in: Time(0),

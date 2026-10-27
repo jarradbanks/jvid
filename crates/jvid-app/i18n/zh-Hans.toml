@@ -377,6 +377,12 @@ retime.other = "{count} 个片段保持原有时间；在新帧率下，编辑�
 undo_note = "此操作可以撤销。"
 
 [bin]
+remove_selected = "移除所选"
+remove_selected_title.one = "移除 1 个所选素材？"
+remove_selected_title.other = "移除 {count} 个所选素材？"
+remove_selected_body.one = "正在使用的素材：{used}。移除所选素材还会移除时间线上的 1 个片段。可以撤销此操作。"
+remove_selected_body.other = "正在使用的素材：{used}。移除所选素材还会移除时间线上的 {count} 个片段。可以撤销此操作。"
+files_retained = "磁盘上的原始文件将被保留。"
 # Toast when removing the sequence the Timeline shows.
 sequence_open = "无法移除已打开的序列；请先打开另一个序列"
 effects = "效果"

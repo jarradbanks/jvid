@@ -366,6 +366,12 @@ retime.other = "{count} klip zamanlamasını korur; kesimler yeni kare hızında
 undo_note = "Bunu geri alabilirsiniz."
 
 [bin]
+remove_selected = "Seçilenleri Kaldır"
+remove_selected_title.one = "Seçilen 1 varlık kaldırılsın mı?"
+remove_selected_title.other = "Seçilen {count} varlık kaldırılsın mı?"
+remove_selected_body.one = "Kullanılan varlıklar: {used}. Seçimi kaldırmak zaman çizelgesinden 1 klibi de kaldırır. Bu işlemi geri alabilirsiniz."
+remove_selected_body.other = "Kullanılan varlıklar: {used}. Seçimi kaldırmak zaman çizelgesinden {count} klibi de kaldırır. Bu işlemi geri alabilirsiniz."
+files_retained = "Diskteki özgün dosyalar korunur."
 sequence_open = "açık sekans kaldırılamaz; önce başka bir sekans açın"
 effects = "Efektler"
 text = "Metin"

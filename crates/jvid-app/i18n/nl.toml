@@ -369,6 +369,12 @@ retime.other = "De {count} clips behouden hun tijden; montagepunten kunnen bij d
 undo_note = "Je kunt dit ongedaan maken."
 
 [bin]
+remove_selected = "Selectie verwijderen"
+remove_selected_title.one = "1 geselecteerd medium verwijderen?"
+remove_selected_title.other = "{count} geselecteerde media verwijderen?"
+remove_selected_body.one = "Media in gebruik: {used}. De selectie verwijderen verwijdert ook 1 clip uit de tijdlijn. Dit kun je ongedaan maken."
+remove_selected_body.other = "Media in gebruik: {used}. De selectie verwijderen verwijdert ook {count} clips uit de tijdlijn. Dit kun je ongedaan maken."
+files_retained = "De oorspronkelijke bestanden op schijf blijven behouden."
 sequence_open = "de geopende sequentie kan niet worden verwijderd; open eerst een andere sequentie"
 effects = "Effecten"
 text = "Tekst"

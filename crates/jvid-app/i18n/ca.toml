@@ -371,6 +371,12 @@ retime.other = "Els {count} clips conserven els seus temps; les edicions poden q
 undo_note = "Ho podeu desfer."
 
 [bin]
+remove_selected = "Elimina els seleccionats"
+remove_selected_title.one = "Voleu eliminar 1 recurs seleccionat?"
+remove_selected_title.other = "Voleu eliminar {count} recursos seleccionats?"
+remove_selected_body.one = "Recursos en ús: {used}. Eliminar la selecció també elimina 1 clip de la línia de temps. Ho podeu desfer."
+remove_selected_body.other = "Recursos en ús: {used}. Eliminar la selecció també elimina {count} clips de la línia de temps. Ho podeu desfer."
+files_retained = "Es conserven els fitxers originals al disc."
 sequence_open = "la seqüència oberta no es pot eliminar; primer obriu-ne una altra"
 effects = "Efectes"
 text = "Text"

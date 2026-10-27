@@ -366,6 +366,12 @@ retime.other = "클립 {count}개는 시간이 그대로 유지됩니다. 새 �
 undo_note = "이 작업은 실행 취소할 수 있습니다."
 
 [bin]
+remove_selected = "선택 항목 제거"
+remove_selected_title.one = "선택한 에셋 1개를 제거할까요?"
+remove_selected_title.other = "선택한 에셋 {count}개를 제거할까요?"
+remove_selected_body.one = "사용 중인 에셋: {used}개. 선택 항목을 제거하면 타임라인 클립 1개도 제거됩니다. 실행 취소할 수 있습니다."
+remove_selected_body.other = "사용 중인 에셋: {used}개. 선택 항목을 제거하면 타임라인 클립 {count}개도 제거됩니다. 실행 취소할 수 있습니다."
+files_retained = "디스크의 원본 파일은 유지됩니다."
 sequence_open = "열려 있는 시퀀스는 제거할 수 없습니다. 먼저 다른 시퀀스를 여세요"
 effects = "효과"
 text = "텍스트"

@@ -4251,6 +4251,7 @@ mod tests {
             out_point: None,
             solid: None,
             text: text.then(Text::default),
+            generated_caption: false,
             sequence: None,
         }
     }
