@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "app": "Fixture",
+  "kind": "replay",
+  "started_at_unix_ms": 1761000000000,
+  "duration_ms": 4000,
+  "encoder": "libx264",
+  "codec": "h264",
+  "audio_tracks": ["Game", "Mic"],
+  "markers": [
+    {"t": 0, "kind": "custom", "label": "Start"},
+    {"t": 1250, "kind": "kill", "label": "First kill", "game": "cs2"},
+    {"t": 3750, "kind": "round_win", "label": "Round won"}
+  ]
+}
