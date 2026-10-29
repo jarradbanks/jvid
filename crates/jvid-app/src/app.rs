@@ -87,6 +87,7 @@ fn view_title(id: &str) -> &'static str {
 }
 
 pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
+    let startup_path = std::env::args_os().nth(1).map(PathBuf::from);
     // Here rather than in App::new, so tests and embedders pick their own language.
     suite_ui::i18n::set_language(suite_ui::i18n::resolve(&settings.language));
     let options = eframe::NativeOptions {
@@ -108,6 +109,7 @@ pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
         options,
         Box::new(move |cc| {
             let mut app = App::new(cc, &settings);
+            app.open_startup(startup_path);
             app.components.offer();
             app.updates
                 .init(settings.automatic_update_checks, app.settings_path.clone());
@@ -401,6 +403,15 @@ impl App {
             let _ = history.apply(Command::SetSettings(s));
         }
         self.replace_project(history.project().clone(), None, match_source);
+    }
+
+    fn open_startup(&mut self, path: Option<PathBuf>) {
+        if let Some(path) = path {
+            // An explicit project takes precedence over the untitled recovery offer.
+            self.prompts
+                .retain(|p| !matches!(p, Prompt::Restore { path: None, .. }));
+            self.open(path);
+        }
     }
 
     fn open(&mut self, path: PathBuf) {
