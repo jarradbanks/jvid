@@ -34,6 +34,11 @@ pub struct AudioDecoder {
     pos: Option<i64>,
     /// Output before this sample frame is dropped (sample-accurate seek).
     target: i64,
+    /// Expected next input frame timestamp, in source-rate samples. This is independent
+    /// of `pos`, which trails it by the resampler delay.
+    next_input: Option<i64>,
+    /// A discontinuity flushes the old resampler before this frame starts a new segment.
+    pending: Option<frame::Audio>,
     eof: bool,
     done: bool,
 }
@@ -60,6 +65,8 @@ impl AudioDecoder {
             mono: false,
             pos: None,
             target: 0,
+            next_input: None,
+            pending: None,
             eof: false,
             done: false,
         })
@@ -73,6 +80,8 @@ impl AudioDecoder {
         self.resampler = None;
         self.pos = None;
         self.target = sample;
+        self.next_input = None;
+        self.pending = None;
         self.eof = false;
         self.done = false;
         Ok(())
@@ -82,7 +91,25 @@ impl AudioDecoder {
     pub fn next_chunk(&mut self) -> Result<Option<Chunk>, Error> {
         let mut frame = frame::Audio::empty();
         loop {
-            if self.decoder.receive_frame(&mut frame).is_ok() {
+            let received = if let Some(pending) = self.pending.take() {
+                frame = pending;
+                true
+            } else {
+                self.decoder.receive_frame(&mut frame).is_ok()
+            };
+            if received {
+                if self.discontinuous(&frame) {
+                    // Keep the previous segment tail at its old timestamp. Resampling
+                    // across the gap would otherwise move or smear both segment edges.
+                    let tail = self.convert(None)?;
+                    self.resampler = None;
+                    self.pos = None;
+                    self.next_input = None;
+                    if let Some(tail) = tail {
+                        self.pending = Some(frame);
+                        return Ok(Some(tail));
+                    }
+                }
                 if let Some(c) = self.convert(Some(&mut frame))? {
                     return Ok(Some(c));
                 }
@@ -105,10 +132,36 @@ impl AudioDecoder {
         }
     }
 
+    fn timestamp(&self, frame: &frame::Audio) -> Option<i64> {
+        let ts = frame.timestamp().or(frame.pts())? as i128;
+        Some(
+            (ts * self.time_base.numerator() as i128 * frame.rate() as i128
+                / self.time_base.denominator() as i128) as i64,
+        )
+    }
+
+    fn discontinuous(&self, frame: &frame::Audio) -> bool {
+        if self.resampler.is_none() {
+            return false;
+        }
+        let (Some(expected), Some(actual)) = (self.next_input, self.timestamp(frame)) else {
+            return false;
+        };
+        // Containers such as Matroska round each timestamp to a millisecond. Allow
+        // one tick plus sample-rate conversion rounding, without accumulating drift.
+        let denominator = i64::from(self.time_base.denominator());
+        let tick = (i64::from(self.time_base.numerator()) * i64::from(frame.rate()) + denominator
+            - 1)
+            / denominator;
+        expected.abs_diff(actual) > (tick + 1).max(2) as u64
+    }
+
     /// Resamples `frame` (or flushes the resampler on `None`) and trims output before `target`.
     fn convert(&mut self, mut frame: Option<&mut frame::Audio>) -> Result<Option<Chunk>, Error> {
         let mut cap = 0;
         if let Some(f) = frame.as_deref_mut() {
+            let input_start = self.next_input.or_else(|| self.timestamp(f)).unwrap_or(0);
+            self.next_input = Some(input_start + f.samples() as i64);
             if self.pos.is_none() {
                 let ts = f.timestamp().or(f.pts()).unwrap_or(0) as i128;
                 let (tb, rate) = (self.time_base, f.rate() as i128);

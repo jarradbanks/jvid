@@ -14,7 +14,10 @@ use crate::thumbnails::{evict, key};
 /// Sample frames per finest-level peak; each level above doubles it.
 pub const BUCKET: i64 = 256;
 /// Bump when the peak format changes so old entries miss.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
+/// At most 128 MiB of finest peaks (under 256 MiB including the pyramid).
+/// Reject corrupt/extreme timestamps rather than allocating an unbounded silent gap.
+const MAX_PEAKS: usize = 16 * 1024 * 1024;
 /// How often a scan in progress hands out what it has so far.
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 
@@ -187,12 +190,22 @@ impl Cache {
 
 fn scan(path: &Path, nth: usize, progress: &mut dyn FnMut(&[Peak])) -> Result<Vec<Peak>, String> {
     let mut d = AudioDecoder::open(path, nth).map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
+    let mut out: Vec<Peak> = Vec::new();
     while let Some(c) = d.next_chunk().map_err(|e| e.to_string())? {
         for (i, f) in c.samples.as_chunks::<2>().0.iter().enumerate() {
-            let b = ((c.start + i as i64) / BUCKET) as usize;
+            let sample = c
+                .start
+                .checked_add(i as i64)
+                .ok_or("waveform timestamp overflow")?;
+            if sample < 0 {
+                continue;
+            }
+            let b = usize::try_from(sample / BUCKET).map_err(|_| "waveform timestamp overflow")?;
+            if b >= MAX_PEAKS {
+                return Err("waveform exceeds the 256 MiB peak memory limit".into());
+            }
             if b >= out.len() {
-                out.resize(b + 1, [f32::MAX, f32::MIN]);
+                out.resize(b + 1, [0.0; 2]);
             }
             let p = &mut out[b];
             *p = [p[0].min(f[0]).min(f[1]), p[1].max(f[0]).max(f[1])];
@@ -400,3 +413,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod timing_tests;
