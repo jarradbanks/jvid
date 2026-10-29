@@ -334,6 +334,11 @@ fn to_i420(f: &frame::Video, hdr: bool) -> Result<Frame, Error> {
         // shortcut: a scaler per frame (it isn't Send, so can't live in the pooled decoder);
         // cache one per decode call if non-4:2:0 sources (ProRes) show up hot in profiles.
         let mut sws = scaling::Context::get(f.format(), w, h, want, w, h, scaling::Flags::POINT)?;
+        if hdr.is_none() {
+            // The normalized samples must use the matrix/range exported in Frame,
+            // including RGB sources and full-range formats converted to limited I420.
+            crate::color::colorspace(&mut sws, bt709, f.color_range() == Range::JPEG, full_range)?;
+        }
         let mut out = frame::Video::empty();
         sws.run(f, &mut out)?;
         converted = out;
@@ -598,6 +603,42 @@ mod tests {
         }
         drop((decoder, reference));
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rgb_conversion_samples_match_exported_matrix_and_range() {
+        use ffmpeg_next::color::{Range, Space};
+        for (space, full, expected) in [
+            (Space::SMPTE170M, false, [81, 90, 240]),
+            (Space::BT709, false, [63, 102, 240]),
+            (Space::SMPTE170M, true, [76, 85, 255]),
+            (Space::BT709, true, [54, 99, 255]),
+        ] {
+            let mut source = frame::Video::new(Pixel::RGB24, 1280, 720);
+            source.set_color_space(space);
+            source.set_color_range(if full { Range::JPEG } else { Range::MPEG });
+            let stride = source.stride(0);
+            for row in 0..720 {
+                for pixel in source.data_mut(0)[row * stride..][..1280 * 3]
+                    .as_chunks_mut::<3>()
+                    .0
+                {
+                    pixel.copy_from_slice(&[255, 0, 0]);
+                }
+            }
+            let output = to_i420(&source, false).unwrap();
+            assert_eq!(
+                (output.bt709, output.full_range),
+                (space == Space::BT709, full)
+            );
+            for (plane, expected) in output.planes.iter().zip(expected) {
+                assert!(
+                    plane[plane.len() / 2].abs_diff(expected) <= 1,
+                    "{space:?} full={full}: got {} expected {expected}",
+                    plane[plane.len() / 2]
+                );
+            }
+        }
     }
 
     #[test]

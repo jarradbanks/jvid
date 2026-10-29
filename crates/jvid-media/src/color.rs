@@ -15,19 +15,29 @@ pub fn scale_flags(source: (u32, u32), output: (u32, u32)) -> scaling::Flags {
 }
 
 /// Apply the decoded SDR frame's matrix and range to a live RGB output scaler.
-#[allow(unsafe_code)]
 pub fn rgb_colorspace(scaler: &mut scaling::Context, bt709: bool, full: bool) -> Result<(), Error> {
+    colorspace(scaler, bt709, full, true)
+}
+
+/// Preserve the chosen SDR matrix and ranges when normalizing decoded formats to I420.
+#[allow(unsafe_code)]
+pub(crate) fn colorspace(
+    scaler: &mut scaling::Context,
+    bt709: bool,
+    input_full: bool,
+    output_full: bool,
+) -> Result<(), Error> {
     use ffmpeg_next::ffi::*;
     // SAFETY: the scaler owns the live context, and FFmpeg owns the static coefficient table.
-    // Full-range RGB output uses neutral brightness, contrast and saturation.
+    // The conversion uses neutral brightness, contrast and saturation.
     let result = unsafe {
         let table = sws_getCoefficients(if bt709 { SWS_CS_ITU709 } else { SWS_CS_ITU601 });
         sws_setColorspaceDetails(
             scaler.as_mut_ptr(),
             table,
-            i32::from(full),
+            i32::from(input_full),
             table,
-            1,
+            i32::from(output_full),
             0,
             1 << 16,
             1 << 16,
