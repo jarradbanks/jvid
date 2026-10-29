@@ -1,6 +1,7 @@
 //! FFmpeg probe, decode and encode, thumbnails, waveforms, silence detection and proxies.
 
 pub mod audio;
+pub mod color;
 pub mod decode;
 pub mod encode;
 pub mod ffmpeg;

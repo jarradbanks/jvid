@@ -19,7 +19,7 @@ pub const WIDTH: u32 = 160;
 /// Most filmstrip frames per asset; short clips get one per second.
 pub const STRIP_MAX: i64 = 100;
 /// Bump when the thumbnail format changes so old entries miss.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 /// Filmstrip steps at least this long sample the keyframe before each step rather than the exact
 /// frame: a whole GOP decode per thumbnail makes a long recording's strip take minutes, and a GOP
@@ -258,28 +258,44 @@ fn grab(pool: &DecoderPool, path: &Path, t: Time, exact: bool) -> Result<RgbaIma
         pool.keyframe_at(path, t)
     };
     let f = f.map_err(|e| e.to_string())?;
-    Ok(to_rgba(&f, WIDTH))
+    to_rgba(&f, WIDTH).map_err(|e| e.to_string())
 }
 
-/// Nearest-neighbour scale to `w` wide and BT.601 limited-range YUV to RGB.
-// shortcut: assumes BT.601 limited range; use the frame's colour info once Frame carries it (#23).
-fn to_rgba(f: &Frame, w: u32) -> RgbaImage {
+/// Metadata-aware conversion with antialiased minification, shared with playback's scaler policy.
+fn to_rgba(f: &Frame, w: u32) -> Result<RgbaImage, ffmpeg_next::Error> {
+    use ffmpeg_next::{format::Pixel, frame, software::scaling};
+    let w = w.max(1);
     let h = (w as u64 * f.height as u64 / f.width.max(1) as u64).max(1) as u32;
-    let (fw, cw) = (f.width as usize, f.width.div_ceil(2) as usize);
-    RgbaImage::from_fn(w, h, |x, y| {
-        let sx = (x as u64 * f.width as u64 / w as u64) as usize;
-        let sy = (y as u64 * f.height as u64 / h as u64) as usize;
-        let c = 298 * (f.planes[0][sy * fw + sx] as i32 - 16);
-        let d = f.planes[1][sy / 2 * cw + sx / 2] as i32 - 128;
-        let e = f.planes[2][sy / 2 * cw + sx / 2] as i32 - 128;
-        let px = |v: i32| ((v + 128) >> 8).clamp(0, 255) as u8;
-        image::Rgba([
-            px(c + 409 * e),
-            px(c - 100 * d - 208 * e),
-            px(c + 516 * d),
-            255,
-        ])
-    })
+    let mut source = frame::Video::new(Pixel::YUV420P, f.width, f.height);
+    for plane in 0..3 {
+        let (pw, ph) = if plane == 0 {
+            (f.width, f.height)
+        } else {
+            (f.width.div_ceil(2), f.height.div_ceil(2))
+        };
+        let stride = source.stride(plane);
+        for row in 0..ph as usize {
+            source.data_mut(plane)[row * stride..][..pw as usize]
+                .copy_from_slice(&f.planes[plane][row * pw as usize..][..pw as usize]);
+        }
+    }
+    let mut scaler = scaling::Context::get(
+        Pixel::YUV420P,
+        f.width,
+        f.height,
+        Pixel::RGBA,
+        w,
+        h,
+        crate::color::scale_flags((f.width, f.height), (w, h)),
+    )?;
+    crate::color::rgb_colorspace(&mut scaler, f.bt709, f.full_range)?;
+    let mut output = frame::Video::empty();
+    scaler.run(&source, &mut output)?;
+    let mut image = RgbaImage::new(w, h);
+    for (row, dest) in image.as_mut().chunks_exact_mut(w as usize * 4).enumerate() {
+        dest.copy_from_slice(&output.data(0)[row * output.stride(0)..][..dest.len()]);
+    }
+    Ok(image)
 }
 
 #[cfg(test)]
@@ -392,6 +408,97 @@ mod tests {
     }
 
     #[test]
+    fn legacy_colour_cache_regenerates_posters_and_budgeted_strips() {
+        let dir = tmp("legacy-colour");
+        let path = dir.join("clip.mp4");
+        fs::write(&path, b"source").unwrap();
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let metadata = fs::metadata(&path).unwrap();
+        let mut hash = DefaultHasher::new();
+        (1u32, &path, metadata.len(), metadata.modified().ok()).hash(&mut hash);
+        let old_key = format!("{:016x}", hash.finish());
+        for kind in ["poster".to_string(), format!("strip-d{}-n10", SECS.0)] {
+            RgbaImage::from_pixel(WIDTH, 90, image::Rgba([231, 0, 1, 255]))
+                .save(cache_dir.join(format!("{old_key}.{kind}.png")))
+                .unwrap();
+        }
+        let (cache, calls) = counting(cache_dir, u64::MAX);
+        cache.poster(&path, SECS).unwrap();
+        assert_eq!(cache.filmstrip(&path, SECS).unwrap().len(), 10);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            11,
+            "old matrix/range entries must miss"
+        );
+        cache.poster(&path, SECS).unwrap();
+        cache.filmstrip(&path, SECS).unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            11,
+            "corrected entries remain cacheable"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn colour_metadata_and_antialiasing() {
+        // Independently calculated red samples in each YUV matrix/range (8-bit rounding).
+        for (bt709, full_range, yuv) in [
+            (false, false, [81, 90, 240]),
+            (true, false, [63, 102, 240]),
+            (false, true, [76, 85, 255]),
+            (true, true, [54, 99, 255]),
+        ] {
+            let f = Frame {
+                pts: Time(0),
+                width: 640,
+                height: 360,
+                planes: [
+                    vec![yuv[0]; 640 * 360],
+                    vec![yuv[1]; 320 * 180],
+                    vec![yuv[2]; 320 * 180],
+                ],
+                bt709,
+                full_range,
+                hdr: None,
+            };
+            let img = to_rgba(&f, 160).unwrap();
+            let pixel = img.get_pixel(80, 45).0;
+            assert!(
+                pixel[0] >= 250 && pixel[1] <= 3 && pixel[2] <= 3,
+                "bt709={bt709} full={full_range}: {pixel:?}"
+            );
+        }
+        let f = Frame {
+            pts: Time(0),
+            width: 640,
+            height: 360,
+            planes: [
+                (0..640 * 360)
+                    .map(|i| {
+                        if (i % 640 + i / 640) % 2 == 0 {
+                            16
+                        } else {
+                            235
+                        }
+                    })
+                    .collect(),
+                vec![128; 320 * 180],
+                vec![128; 320 * 180],
+            ],
+            bt709: true,
+            full_range: false,
+            hdr: None,
+        };
+        let img = to_rgba(&f, 160).unwrap();
+        assert!(
+            img.pixels().all(|p| (125..=130).contains(&p[0])),
+            "checkerboard must average to gray"
+        );
+    }
+
+    #[test]
     fn white_and_black_convert() {
         let f = Frame {
             pts: Time(0),
@@ -406,7 +513,7 @@ mod tests {
             full_range: false,
             hdr: None,
         };
-        let img = to_rgba(&f, 4);
+        let img = to_rgba(&f, 4).unwrap();
         assert_eq!(img.get_pixel(0, 0).0, [255, 255, 255, 255]);
         assert_eq!(img.get_pixel(3, 1).0, [0, 0, 0, 255]);
     }
