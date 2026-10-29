@@ -2,8 +2,10 @@
 //! thumbnails (same key and LRU cap, see [`crate::thumbnails`]).
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use jvid_jobs::{Handle, Priority};
@@ -28,6 +30,48 @@ pub type Peak = [f32; 2];
 /// to the callback as it grows.
 pub type Scan =
     dyn Fn(&Path, usize, &mut dyn FnMut(&[Peak])) -> Result<Vec<Peak>, String> + Send + Sync;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanError {
+    Cancelled,
+    Failed(String),
+}
+
+impl std::fmt::Display for ScanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cancelled => f.write_str("waveform scan cancelled"),
+            Self::Failed(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ScanError {}
+
+impl From<String> for ScanError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+impl From<std::io::Error> for ScanError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Failed(error.to_string())
+    }
+}
+
+/// Scanner supporting cooperative cancellation between decoded chunks.
+pub type CancellableScan = dyn Fn(&Path, usize, &dyn Fn() -> bool, &mut dyn FnMut(&[Peak])) -> Result<Vec<Peak>, ScanError>
+    + Send
+    + Sync;
+
+fn check_cancelled(cancelled: &dyn Fn() -> bool) -> Result<(), ScanError> {
+    if cancelled() {
+        Err(ScanError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pyramid {
@@ -93,16 +137,26 @@ fn merge(p: &[Peak]) -> Peak {
 pub struct Cache {
     dir: PathBuf,
     cap_bytes: u64,
-    scan: Box<Scan>,
+    scan: Box<CancellableScan>,
 }
 
 impl Cache {
     /// A cache in `dir` (the thumbnail cache's) decoding through [`AudioDecoder`].
     pub fn new(dir: PathBuf, cap_bytes: u64) -> Self {
-        Self::with_scan(dir, cap_bytes, Box::new(scan))
+        Self::with_cancellable_scan(dir, cap_bytes, Box::new(scan))
     }
 
     pub fn with_scan(dir: PathBuf, cap_bytes: u64, scan: Box<Scan>) -> Self {
+        Self::with_cancellable_scan(
+            dir,
+            cap_bytes,
+            Box::new(move |path, nth, _, progress| {
+                scan(path, nth, progress).map_err(ScanError::Failed)
+            }),
+        )
+    }
+
+    pub fn with_cancellable_scan(dir: PathBuf, cap_bytes: u64, scan: Box<CancellableScan>) -> Self {
         Self {
             dir,
             cap_bytes,
@@ -121,12 +175,26 @@ impl Cache {
         &self,
         path: &Path,
         nth: usize,
-        mut progress: impl FnMut(Pyramid),
+        progress: impl FnMut(Pyramid),
     ) -> Result<Pyramid, String> {
+        self.load_cancellable(path, nth, || false, progress)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Like [`Self::load_with`], stopping cooperatively without publishing cancelled work.
+    pub fn load_cancellable(
+        &self,
+        path: &Path,
+        nth: usize,
+        cancelled: impl Fn() -> bool,
+        mut progress: impl FnMut(Pyramid),
+    ) -> Result<Pyramid, ScanError> {
+        check_cancelled(&cancelled)?;
         let file = self
             .dir
             .join(format!("{}.{nth}.v{VERSION}.peaks", key(path)?));
         if let Ok(bytes) = fs::read(&file) {
+            check_cancelled(&cancelled)?;
             // The file's mtime is its last use, for LRU eviction.
             let _ = fs::File::options()
                 .write(true)
@@ -138,19 +206,31 @@ impl Cache {
                 .iter()
                 .map(|b| f32::from_le_bytes(*b))
                 .collect();
-            return Ok(Pyramid::new(f.as_chunks::<2>().0.to_vec()));
+            check_cancelled(&cancelled)?;
+            let pyramid = Pyramid::new(f.as_chunks::<2>().0.to_vec());
+            check_cancelled(&cancelled)?;
+            return Ok(pyramid);
         }
+        check_cancelled(&cancelled)?;
         let mut last = Instant::now();
-        let finest = (self.scan)(path, nth, &mut |partial| {
-            if last.elapsed() >= PROGRESS_EVERY {
-                progress(Pyramid::new(partial.to_vec()));
+        let finest = (self.scan)(path, nth, &cancelled, &mut |partial| {
+            if !cancelled() && last.elapsed() >= PROGRESS_EVERY {
+                let pyramid = Pyramid::new(partial.to_vec());
+                if !cancelled() {
+                    progress(pyramid);
+                }
                 last = Instant::now();
             }
         })?;
-        if let Err(e) = self.store(&file, &finest) {
-            tracing::warn!("waveforms: can't write {}: {e}", file.display());
+        check_cancelled(&cancelled)?;
+        let pyramid = Pyramid::new(finest);
+        check_cancelled(&cancelled)?;
+        match self.store(&file, pyramid.finest(), &cancelled) {
+            Err(ScanError::Cancelled) => return Err(ScanError::Cancelled),
+            Err(error) => tracing::warn!("waveforms: can't write {}: {error}", file.display()),
+            Ok(()) => {}
         }
-        Ok(Pyramid::new(finest))
+        Ok(pyramid)
     }
 
     /// Loads on `jobs` at preview priority and hands the pyramid to `done` there: partial ones
@@ -172,37 +252,85 @@ impl Cache {
         })
     }
 
-    fn store(&self, file: &Path, finest: &[Peak]) -> Result<(), String> {
-        fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
+    fn store(
+        &self,
+        file: &Path,
+        finest: &[Peak],
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), ScanError> {
+        check_cancelled(cancelled)?;
+        fs::create_dir_all(&self.dir)?;
         let bytes: Vec<u8> = finest
             .iter()
             .flatten()
             .flat_map(|v| v.to_le_bytes())
             .collect();
         // Write then rename, so a crash never leaves a half-written entry.
-        let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
-        fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-        fs::rename(&tmp, file).map_err(|e| e.to_string())?;
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let tmp = file.with_extension(format!(
+            "{}.{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        check_cancelled(cancelled)?;
+        let mut output = fs::File::options()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        let tmp = Pending(tmp);
+        let written = (|| -> Result<(), ScanError> {
+            for chunk in bytes.chunks(64 * 1024) {
+                check_cancelled(cancelled)?;
+                output.write_all(chunk)?;
+            }
+            Ok(())
+        })();
+        drop(output);
+        written?;
+        check_cancelled(cancelled)?;
+        fs::rename(&tmp.0, file)?;
         evict(&self.dir, self.cap_bytes);
         Ok(())
     }
 }
 
-fn scan(path: &Path, nth: usize, progress: &mut dyn FnMut(&[Peak])) -> Result<Vec<Peak>, String> {
+/// Removes only the temporary entry owned by this write, including after cancellation.
+struct Pending(PathBuf);
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn scan(
+    path: &Path,
+    nth: usize,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(&[Peak]),
+) -> Result<Vec<Peak>, ScanError> {
+    check_cancelled(cancelled)?;
     let mut d = AudioDecoder::open(path, nth).map_err(|e| e.to_string())?;
     let mut out: Vec<Peak> = Vec::new();
-    while let Some(c) = d.next_chunk().map_err(|e| e.to_string())? {
+    loop {
+        check_cancelled(cancelled)?;
+        let Some(c) = d.next_chunk().map_err(|e| e.to_string())? else {
+            break;
+        };
         for (i, f) in c.samples.as_chunks::<2>().0.iter().enumerate() {
             let sample = c
                 .start
                 .checked_add(i as i64)
-                .ok_or("waveform timestamp overflow")?;
+                .ok_or_else(|| "waveform timestamp overflow".to_string())?;
             if sample < 0 {
                 continue;
             }
-            let b = usize::try_from(sample / BUCKET).map_err(|_| "waveform timestamp overflow")?;
+            let b = usize::try_from(sample / BUCKET)
+                .map_err(|_| "waveform timestamp overflow".to_string())?;
             if b >= MAX_PEAKS {
-                return Err("waveform exceeds the 256 MiB peak memory limit".into());
+                return Err(ScanError::Failed(
+                    "waveform exceeds the 256 MiB peak memory limit".into(),
+                ));
             }
             if b >= out.len() {
                 out.resize(b + 1, [0.0; 2]);
@@ -210,6 +338,7 @@ fn scan(path: &Path, nth: usize, progress: &mut dyn FnMut(&[Peak])) -> Result<Ve
             let p = &mut out[b];
             *p = [p[0].min(f[0]).min(f[1]), p[1].max(f[0]).max(f[1])];
         }
+        check_cancelled(cancelled)?;
         progress(&out);
     }
     Ok(out)
@@ -242,6 +371,69 @@ mod tests {
             Ok(ramp(1000))
         });
         (Cache::with_scan(dir, cap, scan), n)
+    }
+
+    #[test]
+    fn slow_scan_publishes_useful_partial_before_completion() {
+        let dir = tmp("cancel-progress");
+        let path = dir.join("clip.wav");
+        fs::write(&path, b"fixture").unwrap();
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let checked = cancel.clone();
+        let cache = Cache::with_cancellable_scan(
+            dir.join("cache"),
+            u64::MAX,
+            Box::new(move |_, _, cancelled, progress| {
+                std::thread::sleep(PROGRESS_EVERY);
+                progress(&[[0.0, 0.75]; 100]);
+                assert!(
+                    cancelled(),
+                    "partial callback can cancel before remaining decode"
+                );
+                Err(ScanError::Cancelled)
+            }),
+        );
+        let mut partials = 0;
+        let result = cache.load_cancellable(
+            &path,
+            0,
+            || checked.load(Ordering::SeqCst),
+            |p| {
+                assert_eq!(p.finest(), &[[0.0, 0.75]; 100]);
+                partials += 1;
+                cancel.store(true, Ordering::SeqCst);
+            },
+        );
+        assert_eq!(partials, 1);
+        assert_eq!(result, Err(ScanError::Cancelled));
+        assert!(!dir.join("cache").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cancellation_stops_scan_without_persisting_partial() {
+        let dir = tmp("cancel");
+        let path = dir.join("clip.wav");
+        fs::write(&path, b"fixture").unwrap();
+        let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = cancelled.clone();
+        let cache = Cache::with_cancellable_scan(
+            dir.join("cache"),
+            u64::MAX,
+            Box::new(move |_, _, check, progress| {
+                progress(&[[0.0, 0.5]]);
+                stop.store(true, Ordering::SeqCst);
+                assert!(check());
+                Err(ScanError::Cancelled)
+            }),
+        );
+        assert!(
+            cache
+                .load_cancellable(&path, 0, || cancelled.load(Ordering::SeqCst), |_| {})
+                .is_err()
+        );
+        assert!(!dir.join("cache").exists());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

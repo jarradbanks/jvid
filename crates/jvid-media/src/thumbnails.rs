@@ -72,15 +72,41 @@ impl Cache {
         &self,
         path: &Path,
         duration: Time,
+        progress: impl FnMut(&RgbaImage),
+    ) -> Result<Vec<RgbaImage>, String> {
+        self.filmstrip_budgeted(path, duration, STRIP_MAX as usize, || false, progress)
+    }
+
+    /// Budget samples before decoding. Duration and budget are part of the cache identity,
+    /// so legacy duration-blind strips cannot poison a later known-duration request.
+    /// Cancellation is checked between grabs and before publishing the completed cache.
+    pub fn filmstrip_budgeted(
+        &self,
+        path: &Path,
+        duration: Time,
+        max_frames: usize,
+        cancelled: impl Fn() -> bool,
         mut progress: impl FnMut(&RgbaImage),
     ) -> Result<Vec<RgbaImage>, String> {
-        let step = FLICKS_PER_SECOND.max(duration.0 / STRIP_MAX);
-        let n = (duration.0 / step).max(1);
+        if cancelled() {
+            return Err("filmstrip cancelled".into());
+        }
+        let n = (duration.0 / FLICKS_PER_SECOND)
+            .max(1)
+            .min(max_frames.clamp(1, STRIP_MAX as usize) as i64);
+        let step = (duration.0 / n).max(1);
         let exact = step < KEYFRAME_STEP.0;
-        let strip = self.cached(path, "strip", || {
+        let kind = format!("strip-d{}-n{n}", duration.0.max(0));
+        let strip = self.cached_until(path, &kind, &cancelled, || {
             let frames = (0..n)
                 .map(|i| {
+                    if cancelled() {
+                        return Err("filmstrip cancelled".into());
+                    }
                     let f = (self.grab)(path, Time(i * step), exact)?;
+                    if cancelled() {
+                        return Err("filmstrip cancelled".into());
+                    }
                     progress(&f);
                     Ok(f)
                 })
@@ -90,8 +116,14 @@ impl Cache {
             for (i, f) in frames.iter().enumerate() {
                 imageops::overlay(&mut strip, f, i as i64 * WIDTH as i64, 0);
             }
+            if cancelled() {
+                return Err("filmstrip cancelled".into());
+            }
             Ok(strip)
         })?;
+        if cancelled() {
+            return Err("filmstrip cancelled".into());
+        }
         Ok((0..strip.width() / WIDTH)
             .map(|i| strip.view(i * WIDTH, 0, WIDTH, strip.height()).to_image())
             .collect())
@@ -120,6 +152,19 @@ impl Cache {
         kind: &str,
         make: impl FnOnce() -> Result<RgbaImage, String>,
     ) -> Result<RgbaImage, String> {
+        self.cached_until(path, kind, &|| false, make)
+    }
+
+    fn cached_until(
+        &self,
+        path: &Path,
+        kind: &str,
+        cancelled: &impl Fn() -> bool,
+        make: impl FnOnce() -> Result<RgbaImage, String>,
+    ) -> Result<RgbaImage, String> {
+        if cancelled() {
+            return Err("filmstrip cancelled".into());
+        }
         let file = self.dir.join(format!("{}.{kind}.png", key(path)?));
         if let Ok(img) = image::open(&file) {
             // The file's mtime is its last use, for LRU eviction.
@@ -130,18 +175,33 @@ impl Cache {
             return Ok(img.into_rgba8());
         }
         let img = make()?;
-        if let Err(e) = self.store(&file, &img) {
+        if cancelled() {
+            return Err("filmstrip cancelled".into());
+        }
+        if let Err(e) = self.store(&file, &img, cancelled) {
+            if cancelled() {
+                return Err(e);
+            }
             tracing::warn!("thumbnails: can't write {}: {e}", file.display());
         }
         Ok(img)
     }
 
-    fn store(&self, file: &Path, img: &RgbaImage) -> Result<(), String> {
+    fn store(
+        &self,
+        file: &Path,
+        img: &RgbaImage,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), String> {
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         // Write then rename, so a crash never leaves a half-written entry.
         let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
         img.save_with_format(&tmp, ImageFormat::Png)
             .map_err(|e| e.to_string())?;
+        if cancelled() {
+            let _ = fs::remove_file(&tmp);
+            return Err("filmstrip cancelled".into());
+        }
         fs::rename(&tmp, file).map_err(|e| e.to_string())?;
         evict(&self.dir, self.cap_bytes);
         Ok(())
@@ -378,6 +438,49 @@ mod tests {
         assert_eq!(strip.len(), 10);
         // Cached: all at once, nothing to report.
         c.filmstrip_with(&p, SECS, |_| panic!("cached")).unwrap();
+    }
+
+    #[test]
+    fn budget_repairs_legacy_strip_and_cancels_without_caching() {
+        let dir = tmp("budget-cancel");
+        let path = dir.join("clip.mp4");
+        fs::write(&path, b"fixture").unwrap();
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        RgbaImage::new(WIDTH, 90)
+            .save(cache_dir.join(format!("{}.strip.png", key(&path).unwrap())))
+            .unwrap();
+        let (cache, calls) = counting(cache_dir, u64::MAX);
+        let duration = Time(120 * FLICKS_PER_SECOND);
+        let frames = cache
+            .filmstrip_budgeted(&path, duration, 51, || false, |_| {})
+            .unwrap();
+        assert_eq!(frames.len(), 51);
+        assert_eq!(calls.load(Ordering::SeqCst), 51);
+        assert!(frames.last().unwrap().get_pixel(0, 0)[0] >= 117);
+        cache
+            .filmstrip_budgeted(&path, duration, 51, || false, |_| panic!("cached"))
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 51);
+        let cancel = std::cell::Cell::new(false);
+        assert!(
+            cache
+                .filmstrip_budgeted(&path, duration, 50, || cancel.get(), |_| cancel.set(true))
+                .is_err()
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 52);
+        cache
+            .filmstrip_budgeted(&path, duration, 50, || false, |_| {})
+            .unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            102,
+            "cancelled partial must not be cached"
+        );
+        let zero = cache.filmstrip(&path, Time(0)).unwrap();
+        assert_eq!(zero.len(), 1);
+        assert_eq!(cache.filmstrip(&path, duration).unwrap().len(), 100);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
