@@ -44,6 +44,8 @@ pub struct VideoDecoder {
     cur: Option<frame::Video>,
     next: Option<frame::Video>,
     eof_sent: bool,
+    #[cfg(test)]
+    seeks: usize,
 }
 
 impl VideoDecoder {
@@ -101,6 +103,8 @@ impl VideoDecoder {
             cur: None,
             next: None,
             eof_sent: false,
+            #[cfg(test)]
+            seeks: 0,
         })
     }
 
@@ -129,7 +133,12 @@ impl VideoDecoder {
     /// The first frame after `t`, for stepping through a file in order.
     pub fn frame_after(&mut self, t: Time) -> Result<Frame, Error> {
         self.or_software(|d| {
-            d.land(d.to_ticks(t))?;
+            // Exported PTS floors to flicks. Converting it back can land one native
+            // tick before cur and re-seek the GOP on every sequential step. When
+            // the caller returns cur's exported PTS, it is already the right anchor.
+            if !d.cur.as_ref().is_some_and(|c| d.to_time(pts(c)) == t) {
+                d.land(d.to_ticks(t))?;
+            }
             // Ticks floor, so the landed frame can sit exactly at `t`: step past it.
             while d.cur.as_ref().is_none_or(|c| d.to_time(pts(c)) <= t) {
                 if d.next.is_none() {
@@ -216,6 +225,10 @@ impl VideoDecoder {
 
     /// Lands on a keyframe at or before `target`, backing off when the container's index is coarse.
     fn seek(&mut self, target: i64) -> Result<(), Error> {
+        #[cfg(test)]
+        {
+            self.seeks += 1;
+        }
         let mut back = self.to_ticks(Time(FLICKS_PER_SECOND));
         let mut ts = target;
         loop {
@@ -513,6 +526,79 @@ impl DecoderPool {
 mod tests {
     use super::*;
     use crate::test_media::{corpus, frame_index};
+
+    #[test]
+    fn frame_after_fractional_pts_steps_without_reseeking() {
+        crate::ffmpeg::init().unwrap();
+        let path =
+            std::env::temp_dir().join(format!("jvid-fractional-step-{}.mp4", std::process::id()));
+        let output = std::process::Command::new("ffmpeg")
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=64x48:rate=60:duration=1",
+                "-c:v",
+                "mpeg4",
+                "-threads",
+                "1",
+                "-g",
+                "30",
+                "-bf",
+                "2",
+                "-video_track_timescale",
+                "90001",
+                "-y",
+            ])
+            .arg(&path)
+            .output()
+            .expect("FFmpeg generates fractional-timebase fixture");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut reference = VideoDecoder::open_with(&path, false).unwrap();
+        let mut timestamps = Vec::new();
+        while let Some(frame) = reference.decode_one().unwrap() {
+            timestamps.push(reference.to_time(pts(&frame)));
+        }
+        assert_eq!(timestamps.len(), 60);
+        let mut decoder = VideoDecoder::open_with(&path, false).unwrap();
+        let mut frame = decoder.frame_at(Time(0)).unwrap();
+        let initial_seeks = decoder.seeks;
+        let mut fractional = false;
+        for expected in &timestamps[1..] {
+            let ticks = pts(decoder.cur.as_ref().unwrap());
+            fractional |= decoder.to_ticks(frame.pts) < ticks;
+            frame = decoder.frame_after(frame.pts).unwrap();
+            assert_eq!(frame.pts, *expected);
+            assert_eq!(
+                decoder.seeks, initial_seeks,
+                "sequential step must not seek at fractional PTS"
+            );
+        }
+        assert!(
+            fractional,
+            "fixture must exercise a lossy ticks/flicks round trip"
+        );
+        assert!(matches!(decoder.frame_after(frame.pts), Err(Error::Eof)));
+        // Arbitrary forward and backward targets still select the first frame after t.
+        for target in [
+            Time(-FLICKS_PER_SECOND),
+            timestamps[40],
+            timestamps[3],
+            Time(timestamps[20].0 - 1),
+            timestamps[50],
+        ] {
+            let next = timestamps.iter().find(|&&pts| pts > target).unwrap();
+            assert_eq!(decoder.frame_after(target).unwrap().pts, *next);
+        }
+        drop((decoder, reference));
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn to_i420_drops_row_padding() {
