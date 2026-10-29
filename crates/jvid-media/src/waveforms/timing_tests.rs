@@ -81,6 +81,7 @@ fn timestamp_gaps_keep_silence_and_pulse_positions() {
             (first_pulse.unwrap() - pulse).abs() < if codec == "aac" { 0.012 } else { 0.002 },
             "{name}: {first_pulse:?}"
         );
+        drop(decoder); // Windows keeps the fixture open until the decoder is released.
         let cache = Cache::new(root.join("cache"), 1024 * 1024);
         for _ in 0..2 {
             let pyramid = cache.load(&path, 0).unwrap();
