@@ -393,10 +393,27 @@ impl Command {
                 s.remove_clip(id)?;
                 Created::Nothing
             }
-            Self::Place(placement) => match s.place(placement)?.first() {
-                Some(c) => Created::Clip(*c),
-                None => Created::Nothing,
-            },
+            Self::Place(placement) => {
+                let (start, source_in, source_out) =
+                    (placement.start, placement.source_in, placement.source_out);
+                let markers = p
+                    .assets
+                    .iter()
+                    .find(|a| a.id == placement.asset)
+                    .and_then(|a| a.probe.as_ref())
+                    .into_iter()
+                    .flat_map(|probe| &probe.markers)
+                    .filter(|m| source_in <= m.time && m.time < source_out);
+                match s.place(placement)?.first() {
+                    Some(c) => {
+                        for m in markers {
+                            s.add_marker(start + (m.time - source_in), Time(0), &m.name);
+                        }
+                        Created::Clip(*c)
+                    }
+                    None => Created::Nothing,
+                }
+            }
             Self::DragClip { id, track, start } => {
                 s.drag_clip(id, track, start)?;
                 Created::Nothing

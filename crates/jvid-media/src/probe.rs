@@ -5,8 +5,9 @@ use std::path::Path;
 use ffmpeg_next::codec::{self, packet::side_data};
 use ffmpeg_next::format::{self, Pixel, stream::Stream};
 use ffmpeg_next::{Rational, media};
-use jvid_core::model::{AudioInfo, ProbeInfo, StreamInfo, VideoInfo};
+use jvid_core::model::{AudioInfo, ProbeInfo, SourceMarker, StreamInfo, VideoInfo};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time};
+use serde::Deserialize;
 
 #[derive(Debug)]
 pub enum ProbeError {
@@ -78,7 +79,58 @@ pub fn probe(path: &Path) -> Result<ProbeInfo, ProbeError> {
         container: input.format().name().to_owned(),
         streams,
         file_size: std::fs::metadata(path).ok().map(|m| m.len()),
+        markers: jplay_markers(path),
     })
+}
+
+/// jplay's v1 sidecar replaces the media extension; marker offsets are milliseconds.
+fn jplay_markers(media: &Path) -> Vec<SourceMarker> {
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct Sidecar {
+        version: Option<u32>,
+        markers: Vec<SidecarMarker>,
+    }
+
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct SidecarMarker {
+        t: u64,
+        kind: String,
+        label: String,
+    }
+
+    let path = media.with_extension("jplay.json");
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(path = %path.display(), "could not read jplay sidecar: {e}");
+            }
+            return Vec::new();
+        }
+    };
+    let sidecar: Sidecar = match serde_json::from_slice(&bytes) {
+        Ok(sidecar) => sidecar,
+        Err(e) => {
+            tracing::warn!(path = %path.display(), "invalid jplay sidecar: {e}");
+            return Vec::new();
+        }
+    };
+    if sidecar.version.is_some_and(|v| v > 1) {
+        tracing::warn!(path = %path.display(), "newer jplay sidecar version");
+    }
+    sidecar
+        .markers
+        .into_iter()
+        .filter_map(|m| {
+            let flicks = i128::from(m.t) * i128::from(FLICKS_PER_SECOND) / 1000;
+            Some(SourceMarker {
+                time: Time(i64::try_from(flicks).ok()?),
+                name: if m.label.is_empty() { m.kind } else { m.label },
+            })
+        })
+        .collect()
 }
 
 /// The encoder delay and trailing padding an MP3's duration counts in whole 1152-sample frames.
