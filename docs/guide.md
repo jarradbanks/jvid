@@ -58,6 +58,8 @@ Groups, tab order, split sizes and active tabs are saved automatically across re
 
 **Markers.** `M` adds one at the playhead, `Alt+M` turns In/Out into a ranged marker, `Shift+M` and `Ctrl+Shift+M` jump between them. Right-click a marker flag to name it, color it or add a note.
 
+jplay recordings import markers from the adjacent `<name>.jplay.json` file. Placing the media adds the markers within its source In/Out range to the timeline at their corresponding times. They then behave like other timeline markers. Separate audio streams get their own lanes, named from the sidecar when available.
+
 **Solids and text.** **New solid** in the Media panel adds a color solid. The Text tab has title presets; add one to the bin, put it on a track above your footage, and edit its words, font, size, outline, shadow and box in the Inspector.
 
 **Audio.** Drag the square in either top corner of a clip inward to fade it; double-click the handle to switch between linear and equal-power. The line across an audio clip's waveform is its volume: drag it, or Ctrl+click it to add a point. `Shift+S` toggles audio while scrubbing.

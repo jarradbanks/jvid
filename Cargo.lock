@@ -2402,6 +2402,9 @@ dependencies = [
  "jvid-core",
  "jvid-jobs",
  "jvid-media",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tracing",
 ]
 
