@@ -95,6 +95,7 @@ export_frame = "Exporter l'image"
 record = "Enregistrer une voix off"
 
 [panel]
+dock_bottom = "Ancrer sur toute la largeur en bas"
 drag_tab = "Faites glisser pour grouper ou séparer les panneaux ; faites défiler pour voir les autres onglets."
 media = "Médias"
 preview = "Aperçu"
@@ -370,6 +371,12 @@ retime.other = "Les {count} plans gardent leurs temps ; des points de montage p
 undo_note = "Vous pouvez annuler cette opération."
 
 [bin]
+remove_selected = "Retirer la sélection"
+remove_selected_title.one = "Retirer 1 média sélectionné ?"
+remove_selected_title.other = "Retirer {count} médias sélectionnés ?"
+remove_selected_body.one = "Médias utilisés : {used}. Retirer la sélection retire aussi 1 clip de la timeline. Cette action est annulable."
+remove_selected_body.other = "Médias utilisés : {used}. Retirer la sélection retire aussi {count} clips de la timeline. Cette action est annulable."
+files_retained = "Les fichiers originaux sur le disque sont conservés."
 sequence_open = "Impossible de supprimer la séquence ouverte ; ouvrez d'abord une autre séquence"
 effects = "Effets"
 text = "Texte"

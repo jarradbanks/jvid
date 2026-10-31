@@ -95,6 +95,7 @@ export_frame = "Exportera bildruta"
 record = "Spela in speakerröst"
 
 [panel]
+dock_bottom = "Docka längs nederkanten"
 drag_tab = "Dra för att gruppera eller dela paneler; rulla för att se fler flikar."
 media = "Media"
 preview = "Förhandsvisning"
@@ -363,6 +364,12 @@ retime.other = "De {count} klippen behåller sina tider; redigeringar kan hamna 
 undo_note = "Du kan ångra detta."
 
 [bin]
+remove_selected = "Ta bort markerade"
+remove_selected_title.one = "Ta bort 1 markerad tillgång?"
+remove_selected_title.other = "Ta bort {count} markerade tillgångar?"
+remove_selected_body.one = "Tillgångar som används: {used}. Borttagningen tar även bort 1 klipp från tidslinjen. Du kan ångra detta."
+remove_selected_body.other = "Tillgångar som används: {used}. Borttagningen tar även bort {count} klipp från tidslinjen. Du kan ångra detta."
+files_retained = "Originalfilerna på disken behålls."
 sequence_open = "den öppna sekvensen kan inte tas bort; öppna en annan sekvens först"
 effects = "Effekter"
 text = "Text"

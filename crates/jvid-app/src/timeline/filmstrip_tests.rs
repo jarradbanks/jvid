@@ -81,6 +81,7 @@ impl Fixture {
                 out_point: None,
                 solid: None,
                 text: None,
+                generated_caption: false,
                 sequence: None,
             },
             ctx: egui::Context::default(),

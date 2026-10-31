@@ -95,6 +95,7 @@ export_frame = "Eksportér billede"
 record = "Optag speak"
 
 [panel]
+dock_bottom = "Fastgør langs bunden"
 drag_tab = "Træk for at gruppere eller opdele paneler; rul for at se flere faner."
 media = "Medier"
 preview = "Forhåndsvisning"
@@ -363,6 +364,12 @@ retime.other = "De {count} klip beholder deres tider; klippepunkter kan lande me
 undo_note = "Du kan fortryde dette."
 
 [bin]
+remove_selected = "Fjern markerede"
+remove_selected_title.one = "Fjern 1 markeret medie?"
+remove_selected_title.other = "Fjern {count} markerede medier?"
+remove_selected_body.one = "Medier i brug: {used}. Fjernelse af markeringen fjerner også 1 klip fra tidslinjen. Du kan fortryde dette."
+remove_selected_body.other = "Medier i brug: {used}. Fjernelse af markeringen fjerner også {count} klip fra tidslinjen. Du kan fortryde dette."
+files_retained = "De originale filer på disken bevares."
 sequence_open = "den åbne sekvens kan ikke fjernes; åbn en anden sekvens først"
 effects = "Effekter"
 text = "Tekst"

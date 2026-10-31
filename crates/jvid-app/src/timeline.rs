@@ -36,6 +36,8 @@ use crate::transport::{SeekGesture, Transport};
 
 mod fades;
 #[cfg(test)]
+mod feedback_tests;
+#[cfg(test)]
 mod filmstrip_tests;
 mod graph;
 mod highlights;
@@ -68,6 +70,8 @@ const MAJOR_PX: f64 = 90.0;
 const MINOR_PX: f64 = 8.0;
 /// Name strip at the top of a clip.
 const NAME_STRIP: f32 = 16.0;
+/// Scrollbar hit area; the thumb itself is painted 4pt thick.
+const SCROLLBAR: f32 = 10.0;
 
 pub struct Timeline {
     /// The sequence playhead; #32 gives it a clock, until then it only seeks.
@@ -159,6 +163,9 @@ pub struct Timeline {
     pub level: Option<f32>,
     /// The take recording onto `armed`, drawn as a clip; the app keeps it up to date.
     pub live: Option<Live>,
+    /// A pointer scrub or marker click moved the playhead; the app finishes a take before
+    /// the next frame can synchronize playback to that navigation.
+    pub(crate) navigated: bool,
 }
 
 /// A voiceover take while it records: drawn on the armed track, not in the project.
@@ -247,6 +254,7 @@ impl Default for Timeline {
             armed: None,
             level: None,
             live: None,
+            navigated: false,
         }
     }
 }
@@ -354,10 +362,17 @@ impl Timeline {
         self.transport.position(0)
     }
 
-    /// The recording take and where it ends: at the playhead, which plays on as it records.
+    /// The recording take and where it ends. Captured audio remains visible even if a seek
+    /// moves the playhead behind the start before the app finalizes this frame.
     fn live_span(&self) -> Option<(&Live, Time)> {
         let live = self.live.as_ref().filter(|_| self.armed.is_some())?;
-        Some((live, self.playhead().max(live.start)))
+        let captured = Time(
+            (live.peaks.len().saturating_sub(1) as i128
+                * BUCKET as i128
+                * FLICKS_PER_SECOND as i128
+                / live.rate.max(1) as i128) as i64,
+        );
+        Some((live, self.playhead().max(live.start + captured)))
     }
 
     /// The waveform a finished take showed, kept for its clip at `path` instead of a rescan.
@@ -972,7 +987,11 @@ impl Timeline {
         self.transport.rate = project.settings().frame_rate;
         // Room past the last clip, so the end of the sequence can be reached and seen.
         let tail = Time(10 * FLICKS_PER_SECOND);
-        self.transport.duration = project.sequence().duration() + tail;
+        // Keep room for the next clock tick while a take grows past the normal tail.
+        let end = self
+            .live_span()
+            .map_or(Time(0), |(_, end)| end + Time(FLICKS_PER_SECOND));
+        self.transport.duration = (project.sequence().duration() + tail).max(end);
     }
 
     pub fn new(caches: Arc<Caches>) -> Self {
@@ -1044,7 +1063,7 @@ impl Timeline {
             return edit.or(self.graph(ui, ui.max_rect(), project.sequence()));
         }
         let rate = self.transport.rate;
-        let area = ui.max_rect();
+        let area = ui.max_rect().intersect(ui.clip_rect());
         let ppp = ui.pixels_per_point();
         let line = 1.0 / ppp;
         let lanes_left = area.left() + size::TRACK_HEADER;
@@ -1058,6 +1077,13 @@ impl Timeline {
         );
         let lanes =
             Rect::from_x_y_ranges(lanes_left..=area.right(), ruler.bottom()..=area.bottom());
+        // At sequence start, accept a few points over the header seam as time zero. The
+        // ghost, slot and release share this hit area, so the boundary cannot flicker.
+        let drop_area = if self.scroll == 0.0 {
+            lanes.with_min_x(lanes.left() - SNAP_PX as f32)
+        } else {
+            lanes
+        };
         let headers = Rect::from_x_y_ranges(area.left()..=lanes_left, lanes.y_range());
         self.width = lanes.width();
         // Playback must not move the time under a held seek pointer. Scrubs still scroll
@@ -1136,6 +1162,12 @@ impl Timeline {
         }
         let tracks = project.sequence().tracks();
         let content_h: f32 = tracks.iter().map(|t| t.height + self.keys.extra(t)).sum();
+        // On an overflowing stack, let the last lane scroll clear of the horizontal bar.
+        let viewport_h = if content_h > lanes.height() {
+            (lanes.height() - SCROLLBAR).max(1.0)
+        } else {
+            lanes.height()
+        };
         // Not `hovered()`: clips, the marquee and buttons sit on top of the body.
         if ui.rect_contains_pointer(area)
             && let Some(p) = ui.input(|i| i.pointer.hover_pos())
@@ -1172,7 +1204,14 @@ impl Timeline {
         let scrubbing = scrub.is_pointer_button_down_on() || drag.dragged();
         let refused = self.holding.is_some_and(|c| locked(seq, c))
             || self.drag_selection.iter().any(|id| locked(seq, *id));
+        // Scrollbars already control their own offsets. Treating their drags as clip
+        // drags would also pan time at the right edge and fight the vertical thumb.
+        let scrolling = ui
+            .ctx()
+            .dragged_id()
+            .is_some_and(|dragged| dragged == id.with("vbar") || dragged == id.with("hbar"));
         let ours = !refused
+            && !scrolling
             && ui.ctx().dragged_id().is_some()
             && ui
                 .input(|i| i.pointer.press_origin())
@@ -1185,14 +1224,12 @@ impl Timeline {
         {
             let v = edge_speed(p.y, lanes.top(), lanes.bottom()) * dt;
             let (dx, dy) = (edge_speed(p.x, lanes.left(), lanes.right()) * dt, v);
-            let dy = if content_h > lanes.height() { dy } else { 0.0 };
+            let dy = if content_h > viewport_h { dy } else { 0.0 };
             if dx != 0.0 || dy != 0.0 {
                 let was = (self.scroll, self.vscroll);
                 self.scroll += dx as f64 / self.zoom;
                 self.vscroll += dy;
-                self.vscroll = self
-                    .vscroll
-                    .clamp(0.0, (content_h - lanes.height()).max(0.0));
+                self.vscroll = self.vscroll.clamp(0.0, (content_h - viewport_h).max(0.0));
                 self.clamp_scroll();
                 // Only while it moves, so a drag held at a clamped edge can idle.
                 if (self.scroll, self.vscroll) != was {
@@ -1200,9 +1237,7 @@ impl Timeline {
                 }
             }
         }
-        self.vscroll = self
-            .vscroll
-            .clamp(0.0, (content_h - lanes.height()).max(0.0));
+        self.vscroll = self.vscroll.clamp(0.0, (content_h - viewport_h).max(0.0));
         self.clamp_scroll();
         let view = self.view(lanes_left);
         let (start, end) = (view.time(lanes.left()), view.time(lanes.right()));
@@ -1236,7 +1271,7 @@ impl Timeline {
             && !tracks.is_empty()
             && ui
                 .input(|i| i.pointer.interact_pos())
-                .is_some_and(|p| lanes.contains(p) && p.y < top_y + self.slot + SLOT_PX);
+                .is_some_and(|p| drop_area.contains(p) && p.y < top_y + self.slot + SLOT_PX);
         // Reduce Motion zeroes the style's animation time; the slot then snaps.
         let t = match () {
             _ if ui.style().animation_time == 0.0 => 0.0,
@@ -1486,7 +1521,7 @@ impl Timeline {
             ui,
             project,
             view,
-            lanes,
+            drop_area,
             &lane_rects,
             held,
             &mut edit,
@@ -1814,6 +1849,7 @@ impl Timeline {
             .clamp(Time(0), self.transport.duration);
         if let Some(target) = self.scrub_seek.update(Some(target)) {
             self.seek(target);
+            self.navigated = true;
         }
         // Scrubbing scrolls itself; don't page as well.
         self.followed = self.playhead();
@@ -1828,7 +1864,8 @@ impl Timeline {
         content_h: f32,
         id: egui::Id,
     ) {
-        let thick = 10.0;
+        let thick = SCROLLBAR;
+        let height = (lanes.height() - thick).max(1.0);
         let tall = content_h > lanes.height();
         let right = if tall {
             lanes.right() - thick
@@ -1852,8 +1889,9 @@ impl Timeline {
             true,
         );
         if tall {
-            let bar = Rect::from_x_y_ranges(right..=lanes.right(), lanes.y_range());
-            let (h, v) = (lanes.height() as f64, self.vscroll as f64);
+            let bar =
+                Rect::from_x_y_ranges(right..=lanes.right(), lanes.top()..=lanes.top() + height);
+            let (h, v) = (height as f64, self.vscroll as f64);
             self.vscroll = scrollbar(
                 ui,
                 painter,
@@ -1889,7 +1927,9 @@ impl Timeline {
             return Vec::new();
         };
         let lane_at = |kind: Option<TrackKind>| {
-            let hit = lanes.iter().find(|l| l.2.contains(p));
+            let hit = lanes
+                .iter()
+                .find(|l| l.2.with_min_x(area.left()).contains(p));
             hit.filter(|l| kind.is_none_or(|k| k == l.1)).map(|l| l.0)
         };
         if let Some(fx) = egui::DragAndDrop::payload::<crate::effects::Drag>(ui.ctx()) {
@@ -2521,8 +2561,19 @@ fn scrollbar(
     if travel <= 0.0 {
         return 0.0;
     }
-    let r = ui.interact(thumb, id, Sense::drag());
-    let offset = (offset + along(r.drag_delta()) * travel / room).clamp(0.0, travel);
+    let r = ui.interact(bar, id, Sense::click_and_drag());
+    let previous = offset;
+    let offset = if (r.clicked() || r.drag_started())
+        && let Some(p) = r.interact_pointer_pos()
+        && !thumb.contains(p)
+    {
+        ((along(p - bar.min) - thumb_len / 2.0) * travel / room).clamp(0.0, travel)
+    } else {
+        (offset + along(r.drag_delta()) * travel / room).clamp(0.0, travel)
+    };
+    if offset != previous {
+        ui.ctx().request_repaint();
+    }
     // Painted 4px thick, fully rounded, per DESIGN.md.
     let paint = if horizontal {
         Rect::from_center_size(thumb.center(), vec2(thumb.width() - 4.0, 4.0))

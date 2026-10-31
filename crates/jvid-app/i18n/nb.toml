@@ -95,6 +95,7 @@ export_frame = "Eksporter bilde"
 record = "Ta opp voiceover"
 
 [panel]
+dock_bottom = "Fest langs bunnen"
 drag_tab = "Dra for å gruppere eller dele paneler; rull for å se flere faner."
 media = "Medier"
 preview = "Forhåndsvisning"
@@ -363,6 +364,12 @@ retime.other = "De {count} klippene beholder tidene sine; klippunkter kan havne 
 undo_note = "Du kan angre dette."
 
 [bin]
+remove_selected = "Fjern valgte"
+remove_selected_title.one = "Fjerne 1 valgt ressurs?"
+remove_selected_title.other = "Fjerne {count} valgte ressurser?"
+remove_selected_body.one = "Ressurser i bruk: {used}. Fjerning av utvalget fjerner også 1 klipp fra tidslinjen. Du kan angre dette."
+remove_selected_body.other = "Ressurser i bruk: {used}. Fjerning av utvalget fjerner også {count} klipp fra tidslinjen. Du kan angre dette."
+files_retained = "Originalfilene på disken beholdes."
 sequence_open = "den åpne sekvensen kan ikke fjernes; åpne en annen sekvens først"
 effects = "Effekter"
 text = "Tekst"
