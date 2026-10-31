@@ -301,8 +301,10 @@ fn cleanup_export_retains_tail_and_duration_from_inside_clip() {
                 .map(|(i, (a, b))| (i, (a - b).abs()))
                 .max_by(|a, b| a.1.total_cmp(&b.1))
                 .unwrap();
+            // Two 16-bit steps: FFmpeg builds round float-to-s16 differently (Ubuntu 26.04's
+            // amd64v3 FFmpeg 8.0 lands 1.009 steps off where Windows 8.1 stays under one).
             assert!(
-                max <= 1.0 / 32768.0 + 1e-7,
+                max <= 2.0 / 32768.0 + 1e-7,
                 "playback/export mismatch: clip {clip} track {track} first {first}, sample {}, error {max}, got {} want {}",
                 index / 2,
                 got[index],
