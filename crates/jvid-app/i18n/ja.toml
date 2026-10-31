@@ -97,6 +97,7 @@ export_frame = "フレームを書き出し"
 record = "ボイスオーバーを録音"
 
 [panel]
+dock_bottom = "下部全体にドッキング"
 drag_tab = "ドラッグしてパネルをまとめたり分割したりできます。スクロールすると他のタブが表示されます。"
 media = "メディア"
 preview = "プレビュー"
@@ -365,6 +366,12 @@ retime.other = "{count} 個のクリップの時間は変わりません。新�
 undo_note = "この操作は元に戻せます。"
 
 [bin]
+remove_selected = "選択項目を削除"
+remove_selected_title.one = "選択した素材を1件削除しますか？"
+remove_selected_title.other = "選択した素材を{count}件削除しますか？"
+remove_selected_body.one = "使用中の素材：{used}件。削除するとタイムラインのクリップも1件削除されます。元に戻せます。"
+remove_selected_body.other = "使用中の素材：{used}件。削除するとタイムラインのクリップも{count}件削除されます。元に戻せます。"
+files_retained = "ディスク上の元ファイルは保持されます。"
 sequence_open = "開いているシーケンスは削除できません。先に別のシーケンスを開いてください"
 effects = "エフェクト"
 text = "テキスト"

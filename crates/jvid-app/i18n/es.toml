@@ -94,6 +94,7 @@ export_frame = "Exportar fotograma"
 record = "Grabar locución"
 
 [panel]
+dock_bottom = "Acoplar a todo el borde inferior"
 drag_tab = "Arrastra para agrupar o dividir paneles; desplázate para ver más pestañas."
 media = "Medios"
 preview = "Vista previa"
@@ -366,6 +367,12 @@ retime.other = "Los {count} clips conservan sus tiempos; las ediciones pueden qu
 undo_note = "Puedes deshacerlo."
 
 [bin]
+remove_selected = "Eliminar seleccionados"
+remove_selected_title.one = "¿Eliminar 1 recurso seleccionado?"
+remove_selected_title.other = "¿Eliminar {count} recursos seleccionados?"
+remove_selected_body.one = "Recursos en uso: {used}. Eliminar la selección también elimina 1 clip de la línea de tiempo. Puedes deshacerlo."
+remove_selected_body.other = "Recursos en uso: {used}. Eliminar la selección también elimina {count} clips de la línea de tiempo. Puedes deshacerlo."
+files_retained = "Se conservan los archivos originales en el disco."
 sequence_open = "No se puede quitar la secuencia abierta; abre otra secuencia primero"
 effects = "Efectos"
 text = "Texto"

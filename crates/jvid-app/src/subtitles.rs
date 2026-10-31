@@ -146,6 +146,7 @@ impl Target {
 #[derive(Default)]
 pub(crate) struct AudioSources {
     preferred: HashSet<ClipId>,
+    open: bool,
 }
 
 impl AudioSources {
@@ -222,6 +223,41 @@ impl AudioSources {
         }
     }
 
+    /// Keep repeated cut groups out of the transcript's reading area. The popup scrolls;
+    /// each group's picker still edits only that group's preference and clip identity.
+    pub(crate) fn show_compact(
+        &mut self,
+        ui: &mut Ui,
+        seq: &Sequence,
+        selected: &HashSet<ClipId>,
+    ) -> bool {
+        let count = self.groups(seq, selected, false).len();
+        if count == 0 {
+            return false;
+        }
+        let label = format!("{} · {count}", tr!("analysis.audio_source"));
+        let button = ui.add(Button::secondary(&label));
+        self.open ^= button.clicked();
+        let mut open = self.open;
+        let mut changed = false;
+        egui::Popup::menu(&button)
+            // Dropdown uses egui's shared popup memory. Keep the enclosing picker open
+            // independently so opening a stream menu cannot replace its own parent.
+            .open_bool(&mut open)
+            .width(ui.available_width().min(360.0))
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("transcript_sources")
+                    .max_height((ui.ctx().content_rect().height() * 0.5).min(240.0))
+                    .show(ui, |ui| {
+                        changed = self.show(ui, seq, selected, false);
+                    });
+            });
+        self.open = open;
+        changed
+    }
+
     /// Shows the analyzed stream even when there is only one; ambiguous groups get a picker.
     /// Returns true when an old preview must be discarded.
     pub(crate) fn show(
@@ -248,6 +284,15 @@ impl AudioSources {
                     )
                 })
                 .collect();
+            // Cut groups can share identical track/stream names: show their timeline time.
+            if selected.is_empty() {
+                let seconds = g[0].start.0 as f64 / S as f64;
+                ui.label(format!(
+                    "{:02}:{:06.3}",
+                    seconds as u64 / 60,
+                    seconds % 60.0
+                ));
+            }
             ui.horizontal(|ui| {
                 ui.label(tr!("analysis.audio_source"));
                 if g.len() == 1 {
@@ -255,8 +300,10 @@ impl AudioSources {
                 } else {
                     let names: Vec<_> = labels.iter().map(String::as_str).collect();
                     let mut pick = 0;
-                    ui.push_id(g[0].link, |ui| {
-                        ui.add(Dropdown::new(&mut pick, &names).width(200.0));
+                    let width = ui.available_width().clamp(24.0, 200.0);
+                    let group_id = g.iter().map(|c| c.id.0).min();
+                    ui.push_id(group_id, |ui| {
+                        ui.add(Dropdown::new(&mut pick, &names).width(width));
                     });
                     if pick != 0 {
                         for c in &g {

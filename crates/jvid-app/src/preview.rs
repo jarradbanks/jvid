@@ -177,6 +177,9 @@ pub struct Preview {
     pub recording: Option<(std::time::Duration, f32)>,
     /// The Program row's Record button was clicked; the app runs the `record` action.
     pub record_clicked: bool,
+    /// Recording transport input must pass through the app's take finalizer before seeking
+    /// or stopping playback.
+    pub(crate) recording_input: TransportInput,
     pool: Arc<DecoderPool>,
     jobs: jvid_jobs::Pool,
     tx: Sender<Decoded>,
@@ -284,6 +287,7 @@ impl Preview {
             analysis: None,
             recording: None,
             record_clicked: false,
+            recording_input: TransportInput::default(),
         }
     }
 
@@ -318,6 +322,7 @@ impl Preview {
         self.analysis = None;
         self.recording = None;
         self.record_clicked = false;
+        self.recording_input = TransportInput::default();
     }
 
     /// Stores proxies in `proxies`' directory and switches timeline playback to decode through it.
@@ -588,6 +593,17 @@ impl Preview {
         }
     }
 
+    /// Anchors recording to the timeline, independent of media duration or Source playback.
+    pub(crate) fn record(&mut self, start: Time) {
+        let out = self
+            .output
+            .get_or_insert_with(|| Output::new(Box::new(CpalBackend::default()), None));
+        out.flush();
+        self.program.transport.record(start, out.clock());
+        self.program_head = start;
+        self.program.refresh();
+    }
+
     /// Docking can cover Preview. Keep transport/audio and the timeline playhead running
     /// without drawing a hidden viewer or its controls.
     pub(crate) fn hidden(
@@ -626,9 +642,6 @@ impl Preview {
             p.transport
                 .stop(self.output.as_ref().map_or(0, Output::clock));
         }
-        if project.sequence().duration() == Time(0) {
-            return None;
-        }
         self.proxy_sources(project);
         let notify = ctx.clone();
         self.program
@@ -659,17 +672,13 @@ impl Preview {
             p.transport
                 .stop(self.output.as_ref().map_or(0, Output::clock));
         }
-        // An empty sequence leaves the viewer empty, like a Source tab with nothing open.
+        // Empty projects still need the Program transport and Record controls.
         let empty = project.sequence().duration() == Time(0);
-        if trim.is_some() || empty {
+        if trim.is_some() {
             // A trim is a drag. A new frame lands as this one draws: one more pass shows it in
             // the thumbnails drawn on it.
             if self.update_thumb(empty, trim.is_some()) {
                 ui.ctx().request_repaint();
-            }
-            if empty {
-                scopes::clear(ui.ctx());
-                self.analysis = None;
             }
             self.show(ui, trim, offline, None, None, keymap);
             return None;
@@ -680,10 +689,15 @@ impl Preview {
         self.program
             .set_decode_notify(Arc::new(move || ctx.request_repaint()));
         let follow = self.sync_program(project, playhead, dragging);
-        if self.update_thumb(false, dragging) {
+        if self.update_thumb(empty, dragging) {
             ui.ctx().request_repaint();
         }
-        self.update_scopes(ui.ctx(), dragging);
+        if empty {
+            scopes::clear(ui.ctx());
+            self.analysis = None;
+        } else {
+            self.update_scopes(ui.ctx(), dragging);
+        }
         if self.program.transport.speed() != 0 {
             ui.ctx().request_repaint();
         }
@@ -710,6 +724,10 @@ impl Preview {
             Some((project.settings(), false)),
             keymap,
         );
+        if self.recording.is_some() && (input.seek.is_some() || input.action.is_some()) {
+            self.recording_input = input;
+            return follow;
+        }
         if let Some(time) = input.seek {
             return Some(time);
         }
@@ -1538,9 +1556,9 @@ pub fn viewer_rect(ui: &Ui) -> Rect {
 
 /// One UI pass coalesces pointer movement to its latest selected position.
 #[derive(Default)]
-struct TransportInput {
-    action: Option<&'static str>,
-    seek: Option<Time>,
+pub(crate) struct TransportInput {
+    pub(crate) action: Option<&'static str>,
+    pub(crate) seek: Option<Time>,
 }
 
 const SEEK_HEIGHT: f32 = 16.0;

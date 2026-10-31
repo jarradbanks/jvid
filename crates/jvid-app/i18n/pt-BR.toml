@@ -95,6 +95,7 @@ export_frame = "Exportar quadro"
 record = "Gravar narração"
 
 [panel]
+dock_bottom = "Encaixar em toda a parte inferior"
 drag_tab = "Arraste para agrupar ou dividir painéis; role para ver mais abas."
 media = "Mídia"
 preview = "Visualização"
@@ -371,6 +372,12 @@ retime.other = "Os {count} clipes mantêm seus tempos; as edições podem cair e
 undo_note = "Você pode desfazer isso."
 
 [bin]
+remove_selected = "Remover selecionados"
+remove_selected_title.one = "Remover 1 recurso selecionado?"
+remove_selected_title.other = "Remover {count} recursos selecionados?"
+remove_selected_body.one = "Recursos em uso: {used}. Remover a seleção também remove 1 clipe da linha do tempo. Você pode desfazer isso."
+remove_selected_body.other = "Recursos em uso: {used}. Remover a seleção também remove {count} clipes da linha do tempo. Você pode desfazer isso."
+files_retained = "Os arquivos originais no disco são mantidos."
 sequence_open = "não é possível remover a sequência aberta; abra outra sequência primeiro"
 effects = "Efeitos"
 text = "Texto"

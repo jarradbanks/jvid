@@ -95,6 +95,7 @@ export_frame = "Esporta fotogramma"
 record = "Registra voce fuori campo"
 
 [panel]
+dock_bottom = "Aggancia lungo il bordo inferiore"
 drag_tab = "Trascina per raggruppare o dividere i pannelli; scorri per vedere altre schede."
 media = "Media"
 preview = "Anteprima"
@@ -370,6 +371,12 @@ retime.other = "Le {count} clip mantengono i loro tempi; i tagli potrebbero cade
 undo_note = "Puoi annullare questa operazione."
 
 [bin]
+remove_selected = "Rimuovi selezionati"
+remove_selected_title.one = "Rimuovere 1 risorsa selezionata?"
+remove_selected_title.other = "Rimuovere {count} risorse selezionate?"
+remove_selected_body.one = "Risorse in uso: {used}. La rimozione elimina anche 1 clip dalla timeline. Puoi annullare questa azione."
+remove_selected_body.other = "Risorse in uso: {used}. La rimozione elimina anche {count} clip dalla timeline. Puoi annullare questa azione."
+files_retained = "I file originali sul disco vengono conservati."
 sequence_open = "la sequenza aperta non può essere rimossa; apri prima un'altra sequenza"
 effects = "Effetti"
 text = "Testo"

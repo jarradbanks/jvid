@@ -221,6 +221,10 @@ pub struct MediaAsset {
     /// with a `color` keyframe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<Text>,
+    /// A dedicated caption made by subtitle import/generation, rather than a reusable title.
+    /// Older projects have no provenance and retain their existing Media entries.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub generated_caption: bool,
     /// A nested sequence instead of a file; `path` is empty. Its clips play that sequence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence: Option<SequenceId>,
@@ -2788,6 +2792,7 @@ impl Project {
             out_point: None,
             solid: None,
             text: None,
+            generated_caption: false,
             sequence: None,
         });
         id

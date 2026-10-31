@@ -49,6 +49,25 @@ pub(super) const LANE: f32 = space::S16;
 /// Pointer reach of a flag or a range end either side of its x.
 const GRIP: f32 = 5.0;
 
+fn paint(painter: &egui::Painter, view: View, lane: Rect, time: Time, duration: Time, c: Color32) {
+    let (x, end) = (view.x(time), view.x(time + duration));
+    let top = lane.top() + 1.0;
+    if duration > Time(0) {
+        let band = Rect::from_x_y_ranges(x..=end, top..=lane.bottom());
+        painter.rect_filled(band, 0.0, c.gamma_multiply(0.3));
+        painter.line_segment(
+            [pos2(end, top), pos2(end, lane.bottom())],
+            Stroke::new(1.0, c),
+        );
+    }
+    painter.add(Shape::convex_polygon(
+        vec![pos2(x - 5.0, top), pos2(x + 5.0, top), pos2(x, top + 8.0)],
+        c,
+        Stroke::NONE,
+    ));
+    painter.line_segment([pos2(x, top), pos2(x, lane.bottom())], Stroke::new(1.0, c));
+}
+
 /// What a marker drag moves: the whole marker, or one end of a range.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Grip {
@@ -223,21 +242,7 @@ impl Timeline {
             };
             let (x, c) = (view.x(shown.time), swatch(m.color));
             let end = view.x(shown.time + shown.duration);
-            let top = lane.top() + 1.0;
-            if shown.duration > Time(0) {
-                let band = Rect::from_x_y_ranges(x..=end, top..=lane.bottom());
-                painter.rect_filled(band, 0.0, c.gamma_multiply(0.3));
-                painter.line_segment(
-                    [pos2(end, top), pos2(end, lane.bottom())],
-                    Stroke::new(1.0, c),
-                );
-            }
-            painter.add(Shape::convex_polygon(
-                vec![pos2(x - 5.0, top), pos2(x + 5.0, top), pos2(x, top + 8.0)],
-                c,
-                Stroke::NONE,
-            ));
-            painter.line_segment([pos2(x, top), pos2(x, lane.bottom())], Stroke::new(1.0, c));
+            paint(&painter, view, lane, shown.time, shown.duration, c);
             let flag = Rect::from_x_y_ranges(x - GRIP..=x + GRIP, lane.y_range());
             let hit = Rect::from_x_y_ranges(x - GRIP..=end + GRIP, lane.y_range());
             let r = ui.interact(hit, id.with(("marker", m.id.0)), Sense::click_and_drag());
@@ -289,6 +294,7 @@ impl Timeline {
             }
             if r.clicked() {
                 self.seek(m.time);
+                self.navigated = true;
             }
             let tip = match (m.name.is_empty(), m.note.is_empty()) {
                 (true, true) => tr!("timeline.marker").to_owned(),
@@ -305,6 +311,18 @@ impl Timeline {
                         edit = Some(e);
                     }
                 });
+        }
+        if let Some(start) = self.marker_hold {
+            let here = self.playhead();
+            let time = start.min(here);
+            paint(
+                &painter,
+                view,
+                lane,
+                time,
+                start.max(here) - time,
+                swatch(0),
+            );
         }
         edit
     }
