@@ -24,6 +24,42 @@ mod updates;
 const SIZES: [[f32; 2]; 2] = [[1280.0, 720.0], [1920.0, 1080.0]];
 const SCALES: [f32; 2] = [1.0, 1.5];
 
+#[test]
+fn startup_project_opens_its_timeline_and_takes_precedence_over_untitled_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("試合 highlights.jvid");
+    let mut history = History::new(Project::default());
+    history
+        .apply(Command::AddSolid {
+            name: "Event".into(),
+            color: [1.0; 4],
+        })
+        .unwrap();
+    let asset = history.project().assets()[0].id;
+    let placement = history
+        .project()
+        .placement(asset, Time(0), false, None, false)
+        .unwrap();
+    history.apply(Command::Place(placement)).unwrap();
+    crate::project_file::save(history.project(), &path).unwrap();
+    let mut app = App::restore(None);
+    app.open_startup(None);
+    assert!(app.on_welcome);
+    app.prompts.push(Prompt::Restore {
+        path: None,
+        auto: dir.path().join("untitled.jvid"),
+    });
+    app.open_startup(Some(path.clone()));
+    assert_eq!(app.path, Some(path));
+    assert!(!app.on_welcome);
+    assert!(app.prompts.is_empty());
+    assert_eq!(app.history.project(), history.project());
+    assert_eq!(
+        app.history.project().sequence().tracks()[0].clips().len(),
+        1
+    );
+}
+
 fn configs() -> impl Iterator<Item = ([f32; 2], f32)> {
     SIZES
         .into_iter()
