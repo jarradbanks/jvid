@@ -66,13 +66,6 @@ impl Default for ProjectSettings {
     }
 }
 
-/// A source-relative point of interest, copied to the sequence when the asset is placed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SourceMarker {
-    pub time: Time,
-    pub name: String,
-}
-
 /// What probing found in a media file.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProbeInfo {
@@ -91,9 +84,16 @@ pub struct ProbeInfo {
     /// Bytes on disk when probed; relink uses it to tell same-named files apart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_size: Option<u64>,
-    /// Imported sidecar markers, in source time.
+    /// Imported points of interest in source time, retained when the sidecar is unavailable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<SourceMarker>,
+}
+
+/// A point of interest relative to the start of a media file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceMarker {
+    pub time: Time,
+    pub name: String,
 }
 
 impl ProbeInfo {

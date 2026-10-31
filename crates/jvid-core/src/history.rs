@@ -394,22 +394,28 @@ impl Command {
                 Created::Nothing
             }
             Self::Place(placement) => {
-                let (start, source_in, source_out) =
-                    (placement.start, placement.source_in, placement.source_out);
-                let markers = p
+                let markers: Vec<_> = p
                     .assets
                     .iter()
                     .find(|a| a.id == placement.asset)
                     .and_then(|a| a.probe.as_ref())
                     .into_iter()
                     .flat_map(|probe| &probe.markers)
-                    .filter(|m| source_in <= m.time && m.time < source_out);
+                    .filter(|m| placement.source_in <= m.time && m.time < placement.source_out)
+                    .map(|m| {
+                        (
+                            placement.start + (m.time - placement.source_in),
+                            m.name.clone(),
+                        )
+                    })
+                    .collect();
                 match s.place(placement)?.first() {
                     Some(c) => {
-                        for m in markers {
-                            s.add_marker(start + (m.time - source_in), Time(0), &m.name);
+                        let id = *c;
+                        for (time, name) in markers {
+                            s.add_marker(time, Time(0), name);
                         }
-                        Created::Clip(*c)
+                        Created::Clip(id)
                     }
                     None => Created::Nothing,
                 }

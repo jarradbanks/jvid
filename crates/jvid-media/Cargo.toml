@@ -15,9 +15,9 @@ image.workspace = true
 jvid-core.workspace = true
 jvid-jobs.workspace = true
 ffmpeg-next.workspace = true
+tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tracing.workspace = true
 
 [features]
 # Link a GPL FFmpeg (x264/x265); the default expects LGPL. See docs/adr/0001-ffmpeg-binding.md.
@@ -27,3 +27,4 @@ test-support = []
 
 [dev-dependencies]
 jvid-media = { path = ".", features = ["test-support"] }
+tempfile.workspace = true

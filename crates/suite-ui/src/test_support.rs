@@ -3,7 +3,10 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
-const LAVAPIPE: &str = "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json";
+const LAVAPIPE: [&str; 2] = [
+    "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json",
+    "/usr/share/vulkan/icd.d/lvp_icd.json",
+];
 
 /// Call first in every rendering test; `false` means skip it.
 ///
@@ -15,11 +18,13 @@ pub fn gpu() -> bool {
     static READY: OnceLock<bool> = OnceLock::new();
     *READY.get_or_init(|| {
         let required = std::env::var("JVID_GPU_TESTS").is_ok_and(|v| v == "required");
-        if std::env::var_os("VK_ICD_FILENAMES").is_none() && Path::new(LAVAPIPE).exists() {
+        if std::env::var_os("VK_ICD_FILENAMES").is_none()
+            && let Some(lavapipe) = LAVAPIPE.into_iter().find(|p| Path::new(p).exists())
+        {
             // SAFETY: runs once, before any wgpu init; other tests wait on this OnceLock.
             #[allow(unsafe_code)]
             unsafe {
-                std::env::set_var("VK_ICD_FILENAMES", LAVAPIPE);
+                std::env::set_var("VK_ICD_FILENAMES", lavapipe);
                 std::env::set_var("WGPU_BACKEND", "vulkan");
             }
             return true;
@@ -28,7 +33,7 @@ pub fn gpu() -> bool {
             return true;
         }
         eprintln!(
-            "skipping GPU tests: Mesa lavapipe not found at {LAVAPIPE}. Install mesa-vulkan-drivers, \
+            "skipping GPU tests: Mesa lavapipe not found at {LAVAPIPE:?}. Install mesa-vulkan-drivers, \
              or set VK_ICD_FILENAMES, or JVID_GPU_TESTS=required to use the default driver."
         );
         false
