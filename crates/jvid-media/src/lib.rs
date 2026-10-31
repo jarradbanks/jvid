@@ -7,6 +7,7 @@ pub mod ffmpeg;
 pub mod highlights;
 pub mod hwdec;
 pub mod hwenc;
+mod jplay;
 pub mod probe;
 pub mod proxy;
 pub mod remux;
