@@ -85,6 +85,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # ImageOS (e.g. ubuntu26) keys the cache by runner image: a new image ships a new
+          # system FFmpeg, and a cached ffmpeg-sys build from the old one fails to link.
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST ImageOS
       - run: cargo fmt --all --check
       # FFmpeg libraries and CLI: runtime fixtures need the executable even on media-cache hits.
       # See docs/adr/0001-ffmpeg-binding.md. bindgen's libclang ships on all runners.
