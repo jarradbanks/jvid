@@ -3,6 +3,7 @@
 # imperatives (Desa, Obre) and messages address the user as vós (Seleccioneu). See docs/i18n/ca.md.
 
 [action]
+text_tool = "Eina de text"
 export_subtitles = "Exporta els subtítols (.srt)…"
 new_project = "Projecte nou"
 open_project = "Obre un projecte"
@@ -372,6 +373,7 @@ undo_note = "Ho podeu desfer."
 
 [bin]
 scopes_loading = "Mesurant el fotograma…"
+text_presets_hint = "Fes clic en un estil per afegir-lo al capçal. Arrossega per situar-lo."
 remove_selected = "Elimina els seleccionats"
 remove_selected_title.one = "Voleu eliminar 1 recurs seleccionat?"
 remove_selected_title.other = "Voleu eliminar {count} recursos seleccionats?"
@@ -444,6 +446,8 @@ hold = "Mantingut"
 bezier = "Bézier"
 
 [timeline]
+text_tool_hint = "Fes clic a Programa per afegir text editable."
+marker_lane = "Marcadors · doble clic per afegir"
 hide_keyframes = "Amaga els fotogrames clau"
 show_keyframes = "Mostra els fotogrames clau"
 open_graph = "Obre l'editor de corbes"

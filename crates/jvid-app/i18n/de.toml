@@ -3,6 +3,7 @@
 # items use the infinitive (Speichern). Terms follow docs/i18n/de.md.
 
 [action]
+text_tool = "Textwerkzeug"
 export_subtitles = "Untertitel exportieren (.srt)…"
 new_project = "Neues Projekt"
 open_project = "Projekt öffnen"
@@ -365,6 +366,7 @@ undo_note = "Sie können dies rückgängig machen."
 
 [bin]
 scopes_loading = "Bild wird gemessen…"
+text_presets_hint = "Vorlage anklicken, um sie am Abspielkopf einzufügen. Zum Platzieren ziehen."
 remove_selected = "Auswahl entfernen"
 remove_selected_title.one = "1 ausgewähltes Medium entfernen?"
 remove_selected_title.other = "{count} ausgewählte Medien entfernen?"
@@ -436,6 +438,8 @@ hold = "Halten"
 bezier = "Bézier"
 
 [timeline]
+text_tool_hint = "Im Programm klicken, um bearbeitbaren Text hinzuzufügen."
+marker_lane = "Marker · Doppelklick zum Hinzufügen"
 hide_keyframes = "Keyframes ausblenden"
 show_keyframes = "Keyframes einblenden"
 open_graph = "Kurveneditor öffnen"

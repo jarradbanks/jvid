@@ -3,6 +3,7 @@
 # docs/i18n/fr.md. The spaces before : ; ? ! and inside « » are no-break spaces (U+00A0).
 
 [action]
+text_tool = "Outil Texte"
 export_subtitles = "Exporter les sous-titres (.srt)…"
 new_project = "Nouveau projet"
 open_project = "Ouvrir un projet"
@@ -372,6 +373,7 @@ undo_note = "Vous pouvez annuler cette opération."
 
 [bin]
 scopes_loading = "Mesure de l’image…"
+text_presets_hint = "Cliquez sur un modèle pour l’ajouter à la tête de lecture. Glissez pour le placer."
 remove_selected = "Retirer la sélection"
 remove_selected_title.one = "Retirer 1 média sélectionné ?"
 remove_selected_title.other = "Retirer {count} médias sélectionnés ?"
@@ -444,6 +446,8 @@ hold = "Maintien"
 bezier = "Bézier"
 
 [timeline]
+text_tool_hint = "Cliquez dans Programme pour ajouter du texte modifiable."
+marker_lane = "Marqueurs · double-cliquez pour ajouter"
 hide_keyframes = "Masquer les images clés"
 show_keyframes = "Afficher les images clés"
 # The curve graph editor, opened from the keyframe lanes. Parts name a point's or colour's

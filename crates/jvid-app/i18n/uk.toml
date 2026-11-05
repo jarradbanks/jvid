@@ -3,6 +3,7 @@
 # items use the infinitive. Terms follow docs/i18n/uk.md.
 
 [action]
+text_tool = "Інструмент тексту"
 export_subtitles = "Експорт субтитрів (.srt)…"
 new_project = "Новий проєкт"
 open_project = "Відкрити проєкт"
@@ -379,6 +380,7 @@ undo_note = "Це можна скасувати."
 
 [bin]
 scopes_loading = "Вимірювання кадру…"
+text_presets_hint = "Натисніть стиль, щоб додати його біля курсора. Перетягніть для розміщення."
 remove_selected = "Видалити вибрані"
 remove_selected_title.one = "Видалити {count} вибраний ресурс?"
 remove_selected_title.few = "Видалити вибрані ресурси: {count}?"
@@ -456,6 +458,8 @@ hold = "Утримання"
 bezier = "Безьє"
 
 [timeline]
+text_tool_hint = "Натисніть у вікні програми, щоб додати редагований текст."
+marker_lane = "Маркери · подвійне клацання для додавання"
 hide_keyframes = "Сховати ключові кадри"
 show_keyframes = "Показати ключові кадри"
 open_graph = "Відкрити редактор кривих"

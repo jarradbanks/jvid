@@ -2,6 +2,7 @@
 # Spanish labels use sentence case (Guardar como), not English Title Case.
 
 [action]
+text_tool = "Herramienta de texto"
 export_subtitles = "Exportar subtítulos (.srt)…"
 new_project = "Nuevo proyecto"
 open_project = "Abrir proyecto"
@@ -368,6 +369,7 @@ undo_note = "Puedes deshacerlo."
 
 [bin]
 scopes_loading = "Midiendo fotograma…"
+text_presets_hint = "Haz clic en un estilo para añadirlo en el cabezal. Arrastra para colocarlo."
 remove_selected = "Eliminar seleccionados"
 remove_selected_title.one = "¿Eliminar 1 recurso seleccionado?"
 remove_selected_title.other = "¿Eliminar {count} recursos seleccionados?"
@@ -440,6 +442,8 @@ hold = "Mantener"
 bezier = "Bézier"
 
 [timeline]
+text_tool_hint = "Haz clic en Programa para añadir texto editable."
+marker_lane = "Marcadores · doble clic para añadir"
 hide_keyframes = "Ocultar fotogramas clave"
 show_keyframes = "Mostrar fotogramas clave"
 # The curve graph editor, opened from the keyframe lanes. Parts name a point's or colour's

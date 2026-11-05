@@ -5,6 +5,7 @@
 # every English key.
 
 [action]
+text_tool = "텍스트 도구"
 export_subtitles = "자막 내보내기 (.srt)…"
 new_project = "새 프로젝트"
 open_project = "프로젝트 열기"
@@ -367,6 +368,7 @@ undo_note = "이 작업은 실행 취소할 수 있습니다."
 
 [bin]
 scopes_loading = "프레임 측정 중…"
+text_presets_hint = "프리셋을 클릭하여 재생 헤드에 추가합니다. 드래그하여 배치합니다."
 remove_selected = "선택 항목 제거"
 remove_selected_title.one = "선택한 에셋 1개를 제거할까요?"
 remove_selected_title.other = "선택한 에셋 {count}개를 제거할까요?"
@@ -438,6 +440,8 @@ hold = "정지"
 bezier = "베지어"
 
 [timeline]
+text_tool_hint = "프로그램 화면을 클릭하여 편집 가능한 텍스트를 추가합니다."
+marker_lane = "마커 · 두 번 클릭하여 추가"
 hide_keyframes = "키프레임 숨기기"
 show_keyframes = "키프레임 표시"
 open_graph = "그래프 편집기 열기"

@@ -5,6 +5,7 @@
 # {placeholder}: vowel harmony can't follow it. Terms follow docs/i18n/tr.md.
 
 [action]
+text_tool = "Metin aracı"
 export_subtitles = "Altyazıları dışa aktar (.srt)…"
 new_project = "Yeni Proje"
 open_project = "Proje Aç"
@@ -367,6 +368,7 @@ undo_note = "Bunu geri alabilirsiniz."
 
 [bin]
 scopes_loading = "Kare Ölçülüyor…"
+text_presets_hint = "Oynatma kafasına eklemek için bir hazır ayara tıklayın. Yerleştirmek için sürükleyin."
 remove_selected = "Seçilenleri Kaldır"
 remove_selected_title.one = "Seçilen 1 varlık kaldırılsın mı?"
 remove_selected_title.other = "Seçilen {count} varlık kaldırılsın mı?"
@@ -438,6 +440,8 @@ hold = "Sabit"
 bezier = "Bezier"
 
 [timeline]
+text_tool_hint = "Düzenlenebilir metin eklemek için Program’a tıklayın."
+marker_lane = "İşaretçiler · eklemek için çift tıklayın"
 hide_keyframes = "Anahtar Kareleri Gizle"
 show_keyframes = "Anahtar Kareleri Göster"
 open_graph = "Eğri Düzenleyiciyi Aç"

@@ -3,6 +3,7 @@
 # Terms follow docs/i18n/pt-BR.md.
 
 [action]
+text_tool = "Ferramenta de texto"
 export_subtitles = "Exportar legendas (.srt)…"
 new_project = "Novo projeto"
 open_project = "Abrir projeto"
@@ -373,6 +374,7 @@ undo_note = "Você pode desfazer isso."
 
 [bin]
 scopes_loading = "Medindo quadro…"
+text_presets_hint = "Clique em um modelo para adicioná-lo no indicador. Arraste para posicionar."
 remove_selected = "Remover selecionados"
 remove_selected_title.one = "Remover 1 recurso selecionado?"
 remove_selected_title.other = "Remover {count} recursos selecionados?"
@@ -445,6 +447,8 @@ hold = "Manter"
 bezier = "Bézier"
 
 [timeline]
+text_tool_hint = "Clique em Programa para adicionar texto editável."
+marker_lane = "Marcadores · clique duas vezes para adicionar"
 hide_keyframes = "Ocultar quadros-chave"
 show_keyframes = "Mostrar quadros-chave"
 open_graph = "Abrir editor de curvas"

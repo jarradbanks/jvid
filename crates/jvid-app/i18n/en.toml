@@ -3,6 +3,7 @@
 
 # Keyboard actions, by keymap.toml id: menus, the shortcut editor and docs/shortcuts.md.
 [action]
+text_tool = "Text Tool"
 export_subtitles = "Export Subtitles (.srt)…"
 new_project = "New Project"
 open_project = "Open Project"
@@ -393,6 +394,7 @@ undo_note = "You can undo this."
 # The media bin: its Media, Effects, Text and Scopes tabs.
 [bin]
 scopes_loading = "Measuring Frame…"
+text_presets_hint = "Click a preset to add it at the playhead. Drag to place it."
 remove_selected = "Remove Selected"
 remove_selected_title.one = "Remove 1 selected asset?"
 remove_selected_title.other = "Remove {count} selected assets?"
@@ -473,6 +475,8 @@ bezier = "Bezier"
 
 # The timeline: clips, tracks, markers and their menus.
 [timeline]
+text_tool_hint = "Click in Program to add editable text."
+marker_lane = "Markers · double-click to add"
 hide_keyframes = "Hide Keyframes"
 show_keyframes = "Show Keyframes"
 # The curve graph editor, opened from the keyframe lanes. Parts name a point's or colour's

@@ -3,6 +3,7 @@
 # items use the imperative (Lagre). Terms follow docs/i18n/nb.md.
 
 [action]
+text_tool = "Tekstverktøy"
 export_subtitles = "Eksporter undertekster (.srt)…"
 new_project = "Nytt prosjekt"
 open_project = "Åpne prosjekt"
@@ -365,6 +366,7 @@ undo_note = "Du kan angre dette."
 
 [bin]
 scopes_loading = "Måler bilderamme…"
+text_presets_hint = "Klikk på en forhåndsinnstilling for å legge til ved spillehodet. Dra for å plassere."
 remove_selected = "Fjern valgte"
 remove_selected_title.one = "Fjerne 1 valgt ressurs?"
 remove_selected_title.other = "Fjerne {count} valgte ressurser?"
@@ -436,6 +438,8 @@ hold = "Hold"
 bezier = "Bezier"
 
 [timeline]
+text_tool_hint = "Klikk i Program for å legge til redigerbar tekst."
+marker_lane = "Markører · dobbeltklikk for å legge til"
 hide_keyframes = "Skjul nøkkelbilder"
 show_keyframes = "Vis nøkkelbilder"
 open_graph = "Åpne kurveredigering"

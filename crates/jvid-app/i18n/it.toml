@@ -3,6 +3,7 @@
 # imperatives, as on Windows and macOS. Terms follow docs/i18n/it.md.
 
 [action]
+text_tool = "Strumento testo"
 export_subtitles = "Esporta sottotitoli (.srt)…"
 new_project = "Nuovo progetto"
 open_project = "Apri progetto"
@@ -372,6 +373,7 @@ undo_note = "Puoi annullare questa operazione."
 
 [bin]
 scopes_loading = "Misurazione del fotogramma…"
+text_presets_hint = "Fai clic su uno stile per aggiungerlo alla testina. Trascinalo per posizionarlo."
 remove_selected = "Rimuovi selezionati"
 remove_selected_title.one = "Rimuovere 1 risorsa selezionata?"
 remove_selected_title.other = "Rimuovere {count} risorse selezionate?"
@@ -444,6 +446,8 @@ hold = "Mantieni"
 bezier = "Bézier"
 
 [timeline]
+text_tool_hint = "Fai clic in Programma per aggiungere testo modificabile."
+marker_lane = "Marcatori · doppio clic per aggiungere"
 hide_keyframes = "Nascondi fotogrammi chiave"
 show_keyframes = "Mostra fotogrammi chiave"
 open_graph = "Apri editor grafico"

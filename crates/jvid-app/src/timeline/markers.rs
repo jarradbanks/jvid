@@ -234,6 +234,36 @@ impl Timeline {
         let painter = ui.painter().with_clip_rect(lane);
         let rate = self.transport.rate;
         let mut edit = None;
+        let lane_response = ui.interact(lane, id.with("marker lane"), Sense::click());
+        lane_response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("timeline.marker_lane"))
+        });
+        if seq.markers().is_empty() && self.marker_hold.is_none() {
+            painter.text(
+                lane.left_center() + vec2(space::S8, 0.0),
+                egui::Align2::LEFT_CENTER,
+                tr!("timeline.marker_lane"),
+                suite_ui::theme::small(),
+                color::ink_3(),
+            );
+        }
+        if lane_response.double_clicked()
+            || (lane_response.clicked() && lane_response.interact_pointer_pos().is_none())
+        {
+            let at = lane_response
+                .interact_pointer_pos()
+                .map_or(self.playhead(), |p| view.time(p.x));
+            let time = rate.time_floor(rate.index_nearest(at)).max(Time(0));
+            edit = Some((
+                Command::AddMarker {
+                    time,
+                    duration: Time(0),
+                    name: String::new(),
+                },
+                None,
+            ));
+        }
+        lane_response.on_hover_text(tr!("timeline.marker_lane"));
         let mut anchored = false;
         for m in seq.markers() {
             let shown = match &self.marker_drag {

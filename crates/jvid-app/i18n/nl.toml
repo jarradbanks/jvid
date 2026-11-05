@@ -3,6 +3,7 @@
 # infinitive, as in Dutch Windows. Terms follow docs/i18n/nl.md.
 
 [action]
+text_tool = "Tekstgereedschap"
 export_subtitles = "Ondertitels exporteren (.srt)…"
 new_project = "Nieuw project"
 open_project = "Project openen"
@@ -370,6 +371,7 @@ undo_note = "Je kunt dit ongedaan maken."
 
 [bin]
 scopes_loading = "Frame meten…"
+text_presets_hint = "Klik op een voorinstelling om die bij de afspeelkop toe te voegen. Sleep om te plaatsen."
 remove_selected = "Selectie verwijderen"
 remove_selected_title.one = "1 geselecteerd medium verwijderen?"
 remove_selected_title.other = "{count} geselecteerde media verwijderen?"
@@ -443,6 +445,8 @@ hold = "Vasthouden"
 bezier = "Bézier"
 
 [timeline]
+text_tool_hint = "Klik in Programma om bewerkbare tekst toe te voegen."
+marker_lane = "Markeringen · dubbelklik om toe te voegen"
 hide_keyframes = "Keyframes verbergen"
 show_keyframes = "Keyframes tonen"
 open_graph = "Grafiekeditor openen"

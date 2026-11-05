@@ -3,6 +3,7 @@
 # use the imperative (Gem). Terms follow docs/i18n/da.md.
 
 [action]
+text_tool = "Tekstværktøj"
 export_subtitles = "Eksportér undertekster (.srt)…"
 new_project = "Nyt projekt"
 open_project = "Åbn projekt"
@@ -365,6 +366,7 @@ undo_note = "Du kan fortryde dette."
 
 [bin]
 scopes_loading = "Måler billedramme…"
+text_presets_hint = "Klik på en forudindstilling for at tilføje ved afspilningshovedet. Træk for at placere."
 remove_selected = "Fjern markerede"
 remove_selected_title.one = "Fjern 1 markeret medie?"
 remove_selected_title.other = "Fjern {count} markerede medier?"
@@ -436,6 +438,8 @@ hold = "Fasthold"
 bezier = "Bezier"
 
 [timeline]
+text_tool_hint = "Klik i Program for at tilføje redigerbar tekst."
+marker_lane = "Markører · dobbeltklik for at tilføje"
 hide_keyframes = "Skjul keyframes"
 show_keyframes = "Vis keyframes"
 open_graph = "Åbn kurveeditor"
