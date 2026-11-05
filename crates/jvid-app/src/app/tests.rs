@@ -19,6 +19,7 @@ mod audit_b11;
 mod docking;
 mod subtitle_export;
 mod timeline_recording;
+mod timeline_tools;
 mod updates;
 
 const SIZES: [[f32; 2]; 2] = [[1280.0, 720.0], [1920.0, 1080.0]];
@@ -276,7 +277,7 @@ fn hairlines_are_one_physical_pixel() {
         for &(t, r) in &s.panels {
             let down = s.column(r);
             let ctx = format!("{}: {t:?} down {down:?}", s.ctx);
-            let lines = if matches!(t, Tab::Media | Tab::Preview | Tab::Timeline) {
+            let lines = if matches!(t, Tab::Media | Tab::Preview) {
                 4
             } else {
                 3
@@ -1373,7 +1374,7 @@ fn dragging_a_title_preset_onto_v2_places_a_text_clip() {
 }
 
 #[test]
-fn clicking_a_preset_shows_its_asset_in_the_media_tab() {
+fn clicking_a_preset_keeps_the_browser_and_selects_its_timeline_clip() {
     if !gpu() {
         return;
     }
@@ -1385,7 +1386,8 @@ fn clicking_a_preset_shows_its_asset_in_the_media_tab() {
     h.run();
     let id = h.state().history.project().assets().last().map(|a| a.id);
     assert!(id.is_some());
-    assert_eq!((h.state().bin.tab, h.state().bin.selected), (0, id));
+    assert_eq!((h.state().bin.tab, h.state().bin.selected), (2, id));
+    assert_eq!(h.state().timeline.selected().len(), 1);
 }
 
 #[test]

@@ -5,6 +5,7 @@
 # every English key.
 
 [action]
+text_tool = "文字工具"
 export_subtitles = "导出字幕 (.srt)…"
 new_project = "新建项目"
 open_project = "打开项目"
@@ -377,6 +378,7 @@ retime.other = "{count} 个片段保持原有时间；在新帧率下，编辑�
 undo_note = "此操作可以撤销。"
 
 [bin]
+text_presets_hint = "点击预设可在播放头处添加。拖动可放置。"
 remove_selected = "移除所选"
 remove_selected_title.one = "移除 1 个所选素材？"
 remove_selected_title.other = "移除 {count} 个所选素材？"
@@ -452,6 +454,8 @@ hold = "定格"
 bezier = "贝塞尔"
 
 [timeline]
+text_tool_hint = "在节目预览中点击可添加可编辑文字。"
+marker_lane = "标记 · 双击添加"
 hide_keyframes = "隐藏关键帧"
 show_keyframes = "显示关键帧"
 open_graph = "打开图表编辑器"

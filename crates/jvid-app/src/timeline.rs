@@ -109,8 +109,7 @@ pub struct Timeline {
     seek_after: Option<Time>,
     /// Copy or cut ran since the last `show`.
     copied: bool,
-    /// The razor tool (C) is on instead of selection (V).
-    razor: bool,
+    tool: Tool,
     /// The clip edge being dragged.
     trim: Option<Trim>,
     /// The clip being moved or trimmed, kept interactive after it scrolls out of view.
@@ -206,6 +205,15 @@ struct Trim {
 /// An edit made in the timeline, and the gesture it coalesces under, if any.
 pub type Edit = (Command, Option<GestureKey>);
 
+/// Shared by the timeline rail, keyboard shortcuts and Program canvas.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tool {
+    #[default]
+    Selection,
+    Razor,
+    Text,
+}
+
 impl Default for Timeline {
     fn default() -> Self {
         Self {
@@ -232,7 +240,7 @@ impl Default for Timeline {
             jumped: false,
             seek_after: None,
             copied: false,
-            razor: false,
+            tool: Tool::Selection,
             trim: None,
             gap: None,
             width: 800.0,
@@ -388,6 +396,32 @@ impl Timeline {
             .and_then(Option::as_deref)
     }
 
+    pub fn tool(&self) -> Tool {
+        self.tool
+    }
+
+    /// The rail occupies its own column, so track headers and all timeline hit regions
+    /// keep the same origin. Its buttons never enter the dock's draggable tab strip.
+    pub fn show_with_tools(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        missing: &HashSet<PathBuf>,
+        keymap: &Keymap,
+    ) -> Option<Edit> {
+        let area = ui.max_rect().intersect(ui.clip_rect());
+        let rail = area.with_max_x((area.left() + menus::RAIL_WIDTH).min(area.right()));
+        self.tool_rail(ui, rail, project, keymap);
+        let content = area.with_min_x(rail.right());
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("timeline content")
+                .max_rect(content),
+        );
+        child.set_clip_rect(content);
+        self.show(&mut child, project, missing, keymap)
+    }
+
     pub fn selected(&self) -> &HashSet<ClipId> {
         &self.selected
     }
@@ -509,7 +543,9 @@ impl Timeline {
             _ if self.key_action(id, project.sequence()) => {}
             "linked_selection" => self.linked_selection = !self.linked_selection,
             "snapping" => self.snapping = !self.snapping,
-            "razor_tool" | "selection_tool" => self.razor = id == "razor_tool",
+            "razor_tool" => self.tool = Tool::Razor,
+            "selection_tool" => self.tool = Tool::Selection,
+            "text_tool" => self.tool = Tool::Text,
             "select_all" => {
                 let clips = project.sequence().tracks().iter().flat_map(|t| t.clips());
                 self.selected = clips.map(|c| c.id).collect();
@@ -791,7 +827,7 @@ impl Timeline {
         clip: &Clip,
         r: Rect,
     ) -> Option<Edit> {
-        if self.razor || locked(project.sequence(), clip.id) {
+        if self.tool != Tool::Selection || locked(project.sequence(), clip.id) {
             return None;
         }
         let w = 6.0f32.min(r.width() / 3.0);
@@ -1358,7 +1394,7 @@ impl Timeline {
                     painter.rect_stroke(r, corner, stroke, egui::StrokeKind::Inside);
                 }
                 let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::click_and_drag());
-                if self.razor && cr.hovered() {
+                if self.tool == Tool::Razor && cr.hovered() {
                     ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
                 }
                 let band = (track.kind == TrackKind::Audio && !offline).then(|| {
@@ -1369,7 +1405,7 @@ impl Timeline {
                 if let Some(e) = band.flatten() {
                     edit = Some(e);
                 } else if cr.clicked()
-                    && self.razor
+                    && self.tool == Tool::Razor
                     && let Some(p) = cr.interact_pointer_pos()
                 {
                     edit = Some(self.razor_cut(seq, view, clip.id, p.x));

@@ -5,6 +5,7 @@
 # every English key.
 
 [action]
+text_tool = "テキストツール"
 export_subtitles = "字幕を書き出す (.srt)…"
 new_project = "新規プロジェクト"
 open_project = "プロジェクトを開く"
@@ -366,6 +367,7 @@ retime.other = "{count} 個のクリップの時間は変わりません。新�
 undo_note = "この操作は元に戻せます。"
 
 [bin]
+text_presets_hint = "プリセットをクリックして再生ヘッドに追加します。ドラッグして配置できます。"
 remove_selected = "選択項目を削除"
 remove_selected_title.one = "選択した素材を1件削除しますか？"
 remove_selected_title.other = "選択した素材を{count}件削除しますか？"
@@ -437,6 +439,8 @@ hold = "停止"
 bezier = "ベジェ"
 
 [timeline]
+text_tool_hint = "プログラム画面をクリックして編集可能なテキストを追加します。"
+marker_lane = "マーカー · ダブルクリックで追加"
 hide_keyframes = "キーフレームを隠す"
 show_keyframes = "キーフレームを表示"
 open_graph = "グラフエディターを開く"

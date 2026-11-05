@@ -34,6 +34,7 @@ use eframe::egui_wgpu::wgpu;
 mod reel;
 #[cfg(test)]
 mod tests;
+mod text_tools;
 pub(crate) mod tutorial;
 
 const DOCK_KEY: &str = "dock";
@@ -1106,7 +1107,9 @@ impl App {
             return;
         }
         let marking = program_focused && MARK_ACTIONS.contains(&id);
-        if (timeline_focused || menu || marking) && self.timeline.action(id, self.history.project())
+        let tool = matches!(id, "selection_tool" | "razor_tool" | "text_tool");
+        if (timeline_focused || menu || marking || (program_focused && tool))
+            && self.timeline.action(id, self.history.project())
         {
             return;
         }
@@ -1703,6 +1706,7 @@ impl eframe::App for App {
                 import_clicked: false,
                 command,
                 gesture: None,
+                text_clip: None,
                 open: None,
                 preview: &mut self.preview,
                 timeline: &mut self.timeline,
@@ -1722,10 +1726,11 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            let (import, command, gesture, relink, open, queue, transcript, tab_rects) = (
+            let (import, command, gesture, text_clip, relink, open, queue, transcript, tab_rects) = (
                 viewer.import_clicked,
                 viewer.command,
                 viewer.gesture,
+                viewer.text_clip,
                 viewer.relink,
                 viewer.open,
                 viewer.queue_action,
@@ -1800,6 +1805,11 @@ impl eframe::App for App {
             };
             if let Some(r) = &applied {
                 self.timeline.applied(r.is_ok());
+            }
+            if let Some(creation) = text_clip
+                && let Err(e) = self.create_text(ui.ctx(), creation)
+            {
+                tracing::warn!("create text: {e}");
             }
             let hide = self.timeline.hide_region.take();
             if let Some(id) = hide.or(crate::hide_region::requested(ui.ctx()))
@@ -2192,6 +2202,7 @@ struct Viewer<'a> {
     command: Option<Command>,
     /// Set when `command` continues a drag, so the drag is one undo step.
     gesture: Option<jvid_core::history::GestureKey>,
+    text_clip: Option<text_tools::Creation>,
     open: Option<jvid_core::model::AssetId>,
     preview: &'a mut Preview,
     timeline: &'a mut Timeline,
@@ -2295,6 +2306,13 @@ impl TabViewer for Viewer<'_> {
             self.import_clicked |= r.import;
             // The Source tab may have set one this frame too.
             self.command = r.command.or(self.command.take());
+            if let Some((name, text)) = r.text_clip {
+                self.text_clip = Some(text_tools::Creation {
+                    name,
+                    text,
+                    at: None,
+                });
+            }
             if let Some(stem) = r.apply_effect {
                 let selected = self.timeline.selected();
                 let add = crate::inspector::add_effect(self.project, selected, &stem);
@@ -2328,7 +2346,7 @@ impl TabViewer for Viewer<'_> {
         let panel = match (*tab, views.as_slice()) {
             (Tab::Preview, [one]) => Panel::titled(one),
             (Tab::Preview, views) => Panel::tabbed(views, self.preview_active),
-            (Tab::Timeline, _) => Panel::toolbar(),
+            (Tab::Timeline, _) => Panel::body(),
             _ => Panel::titled(tab.title()),
         };
         let panel = panel.focused(focused).embedded(true);
@@ -2367,13 +2385,22 @@ impl TabViewer for Viewer<'_> {
                 if let Some(t) = shown {
                     self.timeline.seek(t);
                 }
-                let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
+                let t = self.timeline.playhead();
                 if crate::handles::editing(ui.ctx()) {
                     if let Some((c, g)) = crate::handles::edit_text(ui, self.project, t, frame) {
                         (self.command, self.gesture) = (Some(c), g);
                     }
                     return;
                 }
+                if self.timeline.tool() == crate::timeline::Tool::Text {
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        self.timeline.action("selection_tool", self.project);
+                    } else {
+                        self.text_clip = text_tools::canvas(ui, frame).or(self.text_clip.take());
+                        return;
+                    }
+                }
+                let selected = self.timeline.selected();
                 if let Some((c, g)) =
                     crate::handles::show(ui, self.project, selected, t, frame, &|c| {
                         let a = self.project.asset(c.asset)?;
@@ -2410,21 +2437,14 @@ impl TabViewer for Viewer<'_> {
             return;
         }
         if *tab == Tab::Timeline {
-            let r = panel.show(ui, |ui| {
-                let edit = self
-                    .timeline
-                    .show(ui, self.project, self.missing, self.keymap);
+            panel.show(ui, |ui| {
+                let edit =
+                    self.timeline
+                        .show_with_tools(ui, self.project, self.missing, self.keymap);
                 if let Some((c, g)) = edit {
                     (self.command, self.gesture) = (Some(c), g);
                 }
             });
-            let header = r
-                .response
-                .rect
-                .with_max_y(r.response.rect.top() + size::HEADER);
-            let left = header.left() + space::INSET;
-            let (project, keymap) = (self.project, self.keymap);
-            self.timeline.toolbar(ui, header, left, project, keymap);
             return;
         }
         if *tab == Tab::Inspector {

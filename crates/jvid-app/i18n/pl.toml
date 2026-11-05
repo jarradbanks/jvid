@@ -3,6 +3,7 @@
 # docs/i18n/pl.md.
 
 [action]
+text_tool = "Narzędzie tekstowe"
 export_subtitles = "Eksportuj napisy (.srt)…"
 new_project = "Nowy projekt"
 open_project = "Otwórz projekt"
@@ -378,6 +379,7 @@ retime.other = "{count} klipów zachowuje położenie w czasie; cięcia mogą wy
 undo_note = "Możesz to cofnąć."
 
 [bin]
+text_presets_hint = "Kliknij styl, aby dodać go przy głowicy. Przeciągnij, aby umieścić."
 remove_selected = "Usuń zaznaczone"
 remove_selected_title.one = "Usunąć 1 zaznaczony zasób?"
 remove_selected_title.few = "Usunąć zaznaczone zasoby: {count}?"
@@ -455,6 +457,8 @@ hold = "Zatrzymanie"
 bezier = "Bézier"
 
 [timeline]
+text_tool_hint = "Kliknij w podglądzie programu, aby dodać edytowalny tekst."
+marker_lane = "Znaczniki · kliknij dwukrotnie, aby dodać"
 hide_keyframes = "Ukryj klatki kluczowe"
 show_keyframes = "Pokaż klatki kluczowe"
 open_graph = "Otwórz edytor krzywych"

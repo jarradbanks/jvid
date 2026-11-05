@@ -3,6 +3,7 @@
 # items use the imperative (Spara, Lägg till markör). Terms follow docs/i18n/sv.md.
 
 [action]
+text_tool = "Textverktyg"
 export_subtitles = "Exportera undertexter (.srt)…"
 new_project = "Nytt projekt"
 open_project = "Öppna projekt"
@@ -364,6 +365,7 @@ retime.other = "De {count} klippen behåller sina tider; redigeringar kan hamna 
 undo_note = "Du kan ångra detta."
 
 [bin]
+text_presets_hint = "Klicka på en förinställning för att lägga till vid spelhuvudet. Dra för att placera."
 remove_selected = "Ta bort markerade"
 remove_selected_title.one = "Ta bort 1 markerad tillgång?"
 remove_selected_title.other = "Ta bort {count} markerade tillgångar?"
@@ -435,6 +437,8 @@ hold = "Håll"
 bezier = "Bezier"
 
 [timeline]
+text_tool_hint = "Klicka i Program för att lägga till redigerbar text."
+marker_lane = "Markörer · dubbelklicka för att lägga till"
 hide_keyframes = "Dölj nyckelbildrutor"
 show_keyframes = "Visa nyckelbildrutor"
 open_graph = "Öppna kurvredigeraren"

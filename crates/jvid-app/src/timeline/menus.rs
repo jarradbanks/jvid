@@ -5,10 +5,10 @@
 use egui::{Rect, Ui, Vec2, pos2};
 use jvid_core::model::{ClipId, Project, Sequence};
 use suite_ui::theme::icon;
-use suite_ui::tokens::{size, space};
-use suite_ui::widgets::{Button, Dropdown, State};
+use suite_ui::tokens::{color, size, space};
+use suite_ui::widgets::{Button, State};
 
-use super::{Edit, Timeline, add_menu};
+use super::{Edit, Timeline, Tool, add_menu};
 use crate::i18n::tr;
 use crate::keymap::Keymap;
 
@@ -90,10 +90,14 @@ const CLIP: &[&str] = &[
     "dip_to_white",
 ];
 
-/// Panel toolbar, left to right (separate from the dock tab strip).
+/// A separate 32pt column below the dock strip.
+pub const RAIL_WIDTH: f32 = 32.0;
+
+/// Editing tools, snap/link toggles, then zoom controls.
 const TOOLBAR: &[(&str, &str)] = &[
     ("selection_tool", icon::POINTER),
     ("razor_tool", icon::SCISSORS),
+    ("text_tool", ""),
     ("add_edit", icon::SPLIT),
     ("snapping", icon::MAGNET),
     ("linked_selection", icon::LINK),
@@ -206,32 +210,44 @@ impl Timeline {
         add_menu(ui, edit);
     }
 
-    /// Tool, snapping, linking, split and zoom buttons left-aligned in the panel `header`,
-    /// starting at `left` (just past the title).
-    pub fn toolbar(
-        &mut self,
-        ui: &mut Ui,
-        header: Rect,
-        left: f32,
-        project: &Project,
-        keymap: &Keymap,
-    ) {
-        let mut left = left;
-        let available = (header.right() - space::S8 - left).max(0.0);
-        let full = TOOLBAR.len() as f32 * (size::CONTROL + space::S4) - space::S4;
-        let shown = if full <= available {
+    /// Compact rail, with an overflow menu when the panel is too short for every tool.
+    pub fn tool_rail(&mut self, ui: &mut Ui, rail: Rect, project: &Project, keymap: &Keymap) {
+        let line = 1.0 / ui.pixels_per_point();
+        ui.painter().rect_filled(rail, 0.0, color::panel());
+        ui.painter()
+            .rect_filled(rail.with_min_x(rail.right() - line), 0.0, color::border());
+        let step = size::CONTROL + space::S4;
+        let sequences = project.sequences().len() > 1;
+        let extra = if sequences { step } else { 0.0 };
+        let full = TOOLBAR.len() as f32 * step + 2.0 * space::S8 + extra;
+        let shown = if full <= rail.height() {
             TOOLBAR.len()
         } else {
-            ((available - size::CONTROL - space::S4).max(0.0) / (size::CONTROL + space::S4))
-                as usize
-        };
-        for &(id, glyph) in &TOOLBAR[..shown] {
-            let y = header.center().y - size::CONTROL / 2.0;
-            let r = Rect::from_min_size(pos2(left, y), Vec2::splat(size::CONTROL));
-            left = r.right() + space::S4;
+            ((rail.height() - step - space::S4).max(0.0) / step) as usize
+        }
+        .min(TOOLBAR.len());
+        let mut top = rail.top() + space::S4;
+        for (i, &(id, glyph)) in TOOLBAR[..shown].iter().enumerate() {
+            if shown == TOOLBAR.len() && matches!(i, 4 | 6) {
+                top += space::S8;
+                if i == 6 {
+                    top = top.max(rail.bottom() - 3.0 * step - extra);
+                }
+                ui.painter().hline(
+                    rail.left() + space::S4..=rail.right() - space::S4,
+                    top - space::S4,
+                    egui::Stroke::new(line, color::border()),
+                );
+            }
+            let r = Rect::from_min_size(
+                pos2(rail.left() + space::S4, top),
+                Vec2::splat(size::CONTROL),
+            );
+            top += step;
             let on = match id {
-                "selection_tool" => !self.razor,
-                "razor_tool" => self.razor,
+                "selection_tool" => self.tool == Tool::Selection,
+                "razor_tool" => self.tool == Tool::Razor,
+                "text_tool" => self.tool == Tool::Text,
                 "snapping" => self.snapping,
                 "linked_selection" => self.linked_selection,
                 _ => false,
@@ -242,26 +258,46 @@ impl Timeline {
                 State::Disabled
             };
             let (name, shortcut) = keymap.label(id);
-            let tip = if shortcut.is_empty() {
+            let mut tip = if shortcut.is_empty() {
                 name.to_owned()
             } else {
                 format!("{name} ({shortcut})")
             };
-            let b = Button::icon(glyph, name).on(on).state(state);
-            if ui
-                .put(r, b)
+            if id == "text_tool" {
+                tip.push_str(&format!("\n{}", tr!("timeline.text_tool_hint")));
+            }
+            let b = Button::icon(if id == "text_tool" { "" } else { glyph }, name)
+                .on(on)
+                .state(state);
+            let response = ui.put(r, b);
+            if id == "text_tool" {
+                ui.painter().text(
+                    response.rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    crate::i18n::verbatim("T"),
+                    suite_ui::theme::body_strong(),
+                    if on || response.hovered() {
+                        color::ink()
+                    } else {
+                        color::ink_2()
+                    },
+                );
+            }
+            if response
                 .on_hover_text(&tip)
                 .on_disabled_hover_text(tip)
                 .clicked()
             {
-                // The edit, if any, goes out with the next `show`.
                 self.action(id, project);
                 ui.ctx().request_repaint();
             }
         }
-        if shown < TOOLBAR.len() {
-            let y = header.center().y - size::CONTROL / 2.0;
-            let r = Rect::from_min_size(pos2(left, y), Vec2::splat(size::CONTROL));
+        if (shown < TOOLBAR.len() || sequences) && rail.height() >= size::CONTROL {
+            let top = (rail.bottom() - step).max(rail.top());
+            let r = Rect::from_min_size(
+                pos2(rail.left() + space::S4, top),
+                Vec2::splat(size::CONTROL),
+            );
             let overflow = ui.put(r, Button::icon(icon::ELLIPSIS, tr!("preview.more")));
             egui::Popup::menu(&overflow).show(|ui| {
                 for &(id, _) in &TOOLBAR[shown..] {
@@ -270,34 +306,24 @@ impl Timeline {
                         self.action(id, project);
                     }
                 }
+                if sequences {
+                    ui.separator();
+                    ui.label(tr!("timeline.open_sequence"));
+                    for seq in project.sequences() {
+                        let name = project
+                            .sequence_asset(seq.id())
+                            .map(|a| a.display_name())
+                            .unwrap_or_else(|| tr!("timeline.main_sequence").to_owned());
+                        if ui
+                            .selectable_label(seq.id() == project.sequence().id(), name)
+                            .clicked()
+                        {
+                            self.open_sequence = Some(seq.id());
+                            ui.close();
+                        }
+                    }
+                }
             });
-            left = r.right() + space::S4;
-        }
-        // Which sequence the timeline shows, once Nest has made a second.
-        let seqs = project.sequences();
-        if seqs.len() > 1 {
-            let names: Vec<String> = seqs
-                .iter()
-                .map(|s| match project.sequence_asset(s.id()) {
-                    Some(a) => a.display_name(),
-                    None => tr!("timeline.main_sequence").to_owned(),
-                })
-                .collect();
-            let names: Vec<&str> = names.iter().map(String::as_str).collect();
-            let open = project.sequence().id();
-            let mut i = seqs.iter().position(|s| s.id() == open).unwrap_or(0);
-            // Up to the header's end, and left out where too little of it is left.
-            let w = f32::min(160.0, header.right() - space::S8 - (left + space::S8));
-            let y = header.center().y - size::CONTROL / 2.0;
-            let r = Rect::from_min_size(pos2(left + space::S8, y), Vec2::new(w, size::CONTROL));
-            if w >= 3.0 * size::CONTROL
-                && ui
-                    .put(r, Dropdown::new(&mut i, &names).width(w))
-                    .on_hover_text(tr!("timeline.open_sequence"))
-                    .changed()
-            {
-                self.open_sequence = Some(seqs[i].id());
-            }
         }
     }
 }
@@ -323,7 +349,7 @@ mod tests {
             .chain(TOOLBAR.iter().map(|(id, _)| *id))
             .chain(crate::framing::ACTIONS)
             .collect();
-        let tools = ["undo", "redo", "razor_tool", "selection_tool"];
+        let tools = ["undo", "redo", "razor_tool", "selection_tool", "text_tool"];
         for a in ACTIONS {
             let ours = a.context == Context::Timeline || tools.contains(&a.id);
             // Lift and Extract are stubs until in/out lands on the timeline.

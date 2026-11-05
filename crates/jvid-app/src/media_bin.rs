@@ -109,9 +109,9 @@ pub struct MediaBin {
     pub confirm_remove: Option<AssetId>,
     /// The whole selection captured when the aggregate warning opened.
     pending_remove: Vec<AssetId>,
-    /// A Text preset was clicked (false) or dragged (true) when the project had this many
-    /// assets; the next one added is its asset.
-    new_text: Option<(usize, bool)>,
+    /// A Text preset was dragged when the project had this many assets; the next asset
+    /// continues that drag into the timeline.
+    new_text: Option<usize>,
     /// Scroll the Media tab to this asset next time it draws.
     reveal: Option<AssetId>,
     /// The Effects tab's search text.
@@ -136,6 +136,8 @@ pub struct MediaBin {
 pub struct BinResponse {
     pub import: bool,
     pub command: Option<Command>,
+    /// A clicked preset creates a clip at the playhead; dragging still creates a bin asset.
+    pub text_clip: Option<(String, Text)>,
     /// The offline asset the user asked to relink.
     pub relink: Option<AssetId>,
     /// Double-clicked: open in the Source tab.
@@ -290,17 +292,13 @@ impl MediaBin {
             .strip_requests
             .on_focus(ui.ctx(), self.thumbs.cache.as_deref());
         let mut out = BinResponse::default();
-        if let Some((n, dragged)) = self.new_text
+        if let Some(n) = self.new_text
             && let Some(a) = project.assets().get(n)
         {
             self.new_text = None;
             self.select_only(a.id);
-            if dragged {
-                // Hand the drag over to the new asset so the timeline places it on drop.
-                egui::DragAndDrop::set_payload(ui.ctx(), a.id);
-            } else {
-                (self.tab, self.reveal, self.query) = (0, Some(a.id), String::new());
-            }
+            // Hand the drag over to the new asset so the timeline places it on drop.
+            egui::DragAndDrop::set_payload(ui.ctx(), a.id);
         }
         // The new tab shows next frame; the click already repaints.
         let mut tab = self.tab;
@@ -313,8 +311,8 @@ impl MediaBin {
                 1 => self.effects_tab(ui, &mut out),
                 2 => {
                     crate::app::tutorial::anchor(ui.ctx(), "bin.titles", ui.max_rect());
-                    if let Some(dragged) = text_presets(ui, &self.text_tiles, &mut out) {
-                        self.new_text = Some((project.assets().len(), dragged));
+                    if text_presets(ui, &self.text_tiles, &mut out) {
+                        self.new_text = Some(project.assets().len());
                     }
                 }
                 _ => crate::scopes::show(ui),
@@ -1131,13 +1129,10 @@ pub(crate) fn presets() -> [(&'static str, &'static str, Text); 3] {
 
 /// The Text tab: two columns of tiles, each its preset drawn on the thumbnail frame (`tiles`,
 /// black until drawn) over its name and what it makes, adding a text asset to the bin when
-/// clicked or dragged out. Returns whether the press was a drag, when one was.
-fn text_presets(
-    ui: &mut Ui,
-    tiles: &[Option<egui::TextureId>; 3],
-    out: &mut BinResponse,
-) -> Option<bool> {
-    let mut added = None;
+/// clicked or dragged out. Returns whether a preset drag needs a new asset payload.
+fn text_presets(ui: &mut Ui, tiles: &[Option<egui::TextureId>; 3], out: &mut BinResponse) -> bool {
+    ui.add(egui::Label::new(tr!("bin.text_presets_hint")).wrap());
+    let mut added = false;
     let w = ((ui.available_width() - space::S8) / 2.0).floor();
     let inner = w - 2.0 * space::S4;
     let thumb_h = inner * 9.0 / 16.0;
@@ -1199,11 +1194,15 @@ fn text_presets(
                         }
                         let dragged = r.drag_started();
                         if dragged || r.clicked() {
-                            out.command = Some(Command::AddText {
-                                name: (*name).into(),
-                                text: text.clone(),
-                            });
-                            added = Some(dragged);
+                            if dragged {
+                                out.command = Some(Command::AddText {
+                                    name: (*name).into(),
+                                    text: text.clone(),
+                                });
+                            } else {
+                                out.text_clip = Some(((*name).into(), text.clone()));
+                            }
+                            added |= dragged;
                         }
                     }
                 });

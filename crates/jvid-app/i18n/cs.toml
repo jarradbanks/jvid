@@ -3,6 +3,7 @@
 # instructions imperatives with vykání. Terms follow docs/i18n/cs.md.
 
 [action]
+text_tool = "Textový nástroj"
 export_subtitles = "Exportovat titulky (.srt)…"
 new_project = "Nový projekt"
 open_project = "Otevřít projekt"
@@ -371,6 +372,7 @@ retime.other = "{count} klipů si zachová své časy; střihy mohou při nové 
 undo_note = "Tuto akci můžete vrátit zpět."
 
 [bin]
+text_presets_hint = "Kliknutím přidáte předvolbu na pozici přehrávání. Přetažením ji umístíte."
 remove_selected = "Odebrat vybrané"
 remove_selected_title.one = "Odebrat 1 vybraný zdroj?"
 remove_selected_title.few = "Odebrat vybrané zdroje: {count}?"
@@ -445,6 +447,8 @@ hold = "Podržet"
 bezier = "Bézier"
 
 [timeline]
+text_tool_hint = "Kliknutím v Programu přidáte upravitelný text."
+marker_lane = "Značky · přidáte dvojklikem"
 hide_keyframes = "Skrýt klíčové snímky"
 show_keyframes = "Zobrazit klíčové snímky"
 open_graph = "Otevřít editor křivek"
