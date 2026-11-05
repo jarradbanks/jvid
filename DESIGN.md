@@ -176,6 +176,17 @@ These specs are for the first `suite-ui` build. The next `/impeccable document` 
 - **Disabled:** Raised fill, Ink 4 text, no hover. **Loading:** the label stays, the button keeps its width, and a 12px spinner replaces the icon.
 - **Destructive:** secondary styling with Red text, only in confirmation dialogs.
 
+### Empty states
+- **Shared treatment:** Quiet Centre (Option A): an unframed, muted outline icon above a Title heading and one sentence of Body help. Centre the whole group horizontally and vertically within the visible panel body, excluding headers, transport controls and footers.
+- **Actions:** show one existing, useful action when the panel can perform it. An empty Media bin offers Import Media; an Inspector awaiting selection explains how to select a clip. Keep action availability consistent with the command's actual prerequisites.
+- **Small panels:** wrap the copy and let the content scroll when it cannot fit. Use the finite visible body bounds, including when a parent permits unbounded scroll content. Preserve the panel's existing drop and editing targets.
+- **States:** loading, recognition with no speech, errors and offline media retain their own messages. Preview empty states keep the neutral black viewer and readable ink in every theme.
+
+### Dialog action footers
+- Dialogs and popups with action footers use the shared content-sized footer. Place secondary and cancellation actions first in reading and keyboard order, with the primary action last at the bottom right.
+- Wrap action rows and long translated labels when necessary, keeping keyboard focus stable as the layout changes. Footer layout never claims spare vertical space between the body and its actions.
+- Model download controls and ordinary menu rows keep their own row alignment; the footer rule applies to the surface's closing or confirming actions.
+
 ### Inputs
 - **Style:** 24px tall, 6px radius, Field fill, 1px Border, 8px side padding. An optional inline prefix (X, Y, W, H) in Ink 3, then the value in Ink.
 - **States:** hover swaps in Border Strong. Focus uses a Blue border plus the Light Blue focus ring. An error uses a Red border, with the message in Red Body under the row. Disabled drops the border and shows Ink 4 text.
