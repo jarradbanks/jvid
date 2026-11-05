@@ -267,9 +267,21 @@ impl Queue {
     }
 
     /// The Render Queue dock panel.
-    pub(crate) fn panel_docked(&mut self, ui: &mut Ui, focused: bool) -> Option<Action> {
+    pub(crate) fn panel_docked(
+        &mut self,
+        ui: &mut Ui,
+        focused: bool,
+        can_export: bool,
+    ) -> Option<Action> {
         self.failed_unseen = false;
-        let a = panel_inner(ui, &self.rows(), self.confirm_all, focused, true);
+        let a = panel_inner(
+            ui,
+            &self.rows(),
+            self.confirm_all,
+            focused,
+            true,
+            can_export,
+        );
         a.inspect(|a| self.apply(*a))
     }
 
@@ -537,7 +549,7 @@ const NARROW: f32 = 640.0;
 
 /// The Render Queue panel: Cancel All and Clear Finished in its header, then one row per job.
 pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<Action> {
-    panel_inner(ui, rows, confirm, focused, false)
+    panel_inner(ui, rows, confirm, focused, false, true)
 }
 
 fn panel_inner(
@@ -546,6 +558,7 @@ fn panel_inner(
     confirm: bool,
     focused: bool,
     docked: bool,
+    can_export: bool,
 ) -> Option<Action> {
     let mut action = None;
     let close = [(icon::X, tr!("export.close_queue"))];
@@ -556,16 +569,17 @@ fn panel_inner(
     };
     let r = panel.focused(focused).show(ui, |ui| {
         if rows.is_empty() {
-            if suite_ui::empty_state::EmptyState::new(
+            let empty = suite_ui::empty_state::EmptyState::new(
                 icon::LIST,
                 tr!("export.empty_title"),
                 tr!("empty.queue_help"),
-            )
-            .action(tr!("export.new"))
-            .show(ui)
-            .action
-            .is_some_and(|r| r.clicked())
-            {
+            );
+            let empty = if can_export {
+                empty.action(tr!("export.new"))
+            } else {
+                empty
+            };
+            if empty.show(ui).action.is_some_and(|r| r.clicked()) {
                 action = Some(Action::New);
             }
             return;
