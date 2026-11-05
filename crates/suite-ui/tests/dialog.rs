@@ -187,3 +187,37 @@ fn footer_keyboard_order_and_confirm_default_are_preserved() {
     h.run();
     assert_eq!(*h.state(), Some(2));
 }
+
+#[test]
+fn wrapping_a_footer_preserves_keyboard_focus() {
+    use suite_ui::dialog::action_footer;
+    use suite_ui::widgets::Button;
+    let mut fresh = true;
+    let mut h = Harness::builder().build_ui_state(
+        move |ui, (width, ids): &mut (f32, Vec<egui::Id>)| {
+            if common::install_theme(ui, &mut fresh) {
+                return;
+            }
+            ui.set_width(*width);
+            *ids = action_footer(
+                ui,
+                [
+                    Button::secondary("Cancel"),
+                    Button::secondary("Save a Copy"),
+                    Button::primary("Done"),
+                ],
+            )
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        },
+        (460.0, Vec::new()),
+    );
+    h.run();
+    let before = h.state().1.clone();
+    h.ctx.memory_mut(|m| m.request_focus(before[2]));
+    h.state_mut().0 = 160.0;
+    h.run();
+    assert_eq!(h.state().1, before);
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(before[2]));
+}
