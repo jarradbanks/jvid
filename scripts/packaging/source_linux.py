@@ -20,9 +20,14 @@ _NAME = re.compile(r"[a-z0-9][a-z0-9+.-]*\Z")
 _BINARY = re.compile(r"[a-z0-9][a-z0-9+.-]*(?::[a-z0-9][a-z0-9-]*)?\Z")
 _VERSION = re.compile(r"[0-9][A-Za-z0-9.+:~\-]*\Z")
 _FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+_~\-]*\Z")
+_SOURCE_RELEASE = re.compile(
+    r"https://github\.com/jarradbanks/jvid/releases/tag/sources-v"
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z"
+)
 _PREAMBLE = {
     "Corresponding source and build scripts for a published release are provided as",
     "the versioned corresponding-source archive alongside its binary downloads.",
+    "a separate source release at:",
     "CI candidates are not approved release distributions. Publication is gated on",
     "that archive and its reviewed SHA-256; see docs/packaging.md.",
     "jvid source: https://github.com/jarradbanks/jvid",
@@ -60,7 +65,7 @@ def parse_providers(stage: Path) -> list[dict]:
     for number, line in enumerate(info.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
-        if not started and line in _PREAMBLE:
+        if not started and (line in _PREAMBLE or _SOURCE_RELEASE.fullmatch(line)):
             continue
         columns = line.split()
         if (len(columns) != 4 or not _BINARY.fullmatch(columns[0])
