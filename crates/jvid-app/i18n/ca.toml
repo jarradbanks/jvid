@@ -371,6 +371,7 @@ retime.other = "Els {count} clips conserven els seus temps; les edicions poden q
 undo_note = "Ho podeu desfer."
 
 [bin]
+scopes_loading = "Mesurant el fotograma…"
 remove_selected = "Elimina els seleccionats"
 remove_selected_title.one = "Voleu eliminar 1 recurs seleccionat?"
 remove_selected_title.other = "Voleu eliminar {count} recursos seleccionats?"
@@ -1044,3 +1045,24 @@ extension = "Tria una destinació amb l’extensió .srt."
 project_collision = "Tria una altra destinació: aquest fitxer és el projecte."
 saved = "Subtítols desats a {path}"
 video_help = "Incrustar dibuixa els subtítols al vídeo; el fitxer SRT separat es desa al costat. Només SRT: Línia de temps > Exporta els subtítols."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Selecciona un clip"
+media = "Encara no hi ha mitjans"
+import_media = "Importa mitjans…"
+source = "Obre un clip"
+preview = "Res per previsualitzar"
+preview_help = "Afegeix un clip de vídeo a la línia de temps per veure’l aquí."
+scopes = "Cap fotograma per mesurar"
+timeline = "Comença el muntatge"
+effects = "Encara no hi ha efectes"
+search_media = "Cap mitjà coincident"
+search_effects = "Cap efecte coincident"
+search_help = "Prova una altra cerca o esborra la cerca."
+clear_search = "Esborra la cerca"
+queue_help = "Les exportacions en cua i acabades apareixeran aquí."
+transcript = "Encara no hi ha transcripció"
+transcript_help = "Transcriu la parla dels clips per editar amb text."
+no_audio = "Cap àudio per transcriure"
+no_audio_help = "Afegeix un clip amb àudio a la línia de temps per iniciar una transcripció."

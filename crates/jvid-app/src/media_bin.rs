@@ -383,12 +383,32 @@ impl MediaBin {
             let ids: Vec<_> = assets.iter().map(|a| a.id).collect();
             self.retain_visible(&ids);
             if assets.is_empty() {
-                let msg = match (importing, project.assets().is_empty()) {
-                    (true, _) => tr!("bin.importing"),
-                    (false, true) => tr!("bin.empty"),
-                    (false, false) => tr!("bin.no_match"),
-                };
-                ui.label(egui::RichText::new(msg).color(color::ink_3()));
+                if importing {
+                    ui.label(egui::RichText::new(tr!("bin.importing")).color(color::ink_3()));
+                } else if !self.query.trim().is_empty() {
+                    if suite_ui::empty_state::EmptyState::new(
+                        icon::SEARCH,
+                        tr!("empty.search_media"),
+                        tr!("empty.search_help"),
+                    )
+                    .action(tr!("empty.clear_search"))
+                    .show(ui)
+                    .action
+                    .is_some_and(|r| r.clicked())
+                    {
+                        self.query.clear();
+                    }
+                } else {
+                    out.import |= suite_ui::empty_state::EmptyState::new(
+                        icon::FOLDER,
+                        tr!("empty.media"),
+                        tr!("bin.empty"),
+                    )
+                    .primary_action(tr!("empty.import_media"))
+                    .show(ui)
+                    .action
+                    .is_some_and(|r| r.clicked());
+                }
                 return;
             }
             egui::ScrollArea::vertical()
@@ -1302,12 +1322,25 @@ impl MediaBin {
                 self.fx_grid = !list;
             });
             if rows.is_empty() {
-                let hint = if empty_folder {
-                    tr!("bin.fx_empty")
-                } else {
-                    tr!("bin.fx_no_match")
-                };
-                ui.label(egui::RichText::new(hint).color(color::ink_3()));
+                if empty_folder && self.fx_query.trim().is_empty() {
+                    suite_ui::empty_state::EmptyState::new(
+                        icon::SLIDERS,
+                        tr!("empty.effects"),
+                        tr!("bin.fx_empty"),
+                    )
+                    .show(ui);
+                } else if suite_ui::empty_state::EmptyState::new(
+                    icon::SEARCH,
+                    tr!("empty.search_effects"),
+                    tr!("empty.search_help"),
+                )
+                .action(tr!("empty.clear_search"))
+                .show(ui)
+                .action
+                .is_some_and(|r| r.clicked())
+                {
+                    self.fx_query.clear();
+                }
                 return;
             }
             let (bundled, mine): (Vec<_>, Vec<_>) = rows.iter().partition(|r| r.bundled);

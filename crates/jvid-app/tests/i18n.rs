@@ -72,7 +72,10 @@ fn editor_menus_inspector_and_dialogs_show_spanish() {
     h.run();
     assert!(has(&h, "Selecciona un clip para ver sus propiedades"));
     assert!(has(&h, "Vista de lista") && has(&h, "Vista de cuadrícula"));
-    assert!(!has(&h, "Select a clip to see its properties"));
+    assert!(!has(
+        &h,
+        "Select a clip in the timeline to edit its properties."
+    ));
 
     h.get_by_label("Archivo").click();
     h.run();
@@ -101,7 +104,9 @@ fn editor_menus_inspector_and_dialogs_show_spanish() {
 
     i18n::set_language("en");
     h.run();
-    assert!(has(&h, "Select a clip to see its properties") && has(&h, "List View"));
+    assert!(
+        has(&h, "Select a clip in the timeline to edit its properties.") && has(&h, "List View")
+    );
     assert!(has(&h, "File") && has(&h, "Untitled") && !has(&h, "Archivo"));
 }
 
@@ -211,7 +216,7 @@ fn selected_clip_inspector_switches_live() {
     i18n::set_language("en");
     h.run();
     assert!(
-        !has(&h, "Select a clip to see its properties"),
+        !has(&h, "Select a clip in the timeline to edit its properties."),
         "selection lost"
     );
     assert_eq!(content(&h).as_deref(), Some("Título, toma 3"));

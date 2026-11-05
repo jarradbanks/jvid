@@ -369,6 +369,7 @@ retime.other = "De {count} clips behouden hun tijden; montagepunten kunnen bij d
 undo_note = "Je kunt dit ongedaan maken."
 
 [bin]
+scopes_loading = "Frame meten…"
 remove_selected = "Selectie verwijderen"
 remove_selected_title.one = "1 geselecteerd medium verwijderen?"
 remove_selected_title.other = "{count} geselecteerde media verwijderen?"
@@ -1047,3 +1048,24 @@ extension = "Kies een bestemming met de extensie .srt."
 project_collision = "Kies een andere bestemming: dit bestand is het project."
 saved = "Ondertitels opgeslagen in {path}"
 video_help = "Inbranden tekent ondertitels in de video; een apart SRT-bestand wordt ernaast opgeslagen. Alleen SRT: Tijdlijn > Ondertitels exporteren."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Selecteer een clip"
+media = "Nog geen media"
+import_media = "Media importeren…"
+source = "Open een clip"
+preview = "Niets om te bekijken"
+preview_help = "Voeg een videoclip toe aan de tijdlijn om deze hier te zien."
+scopes = "Geen frame om te meten"
+timeline = "Begin je montage"
+effects = "Nog geen effecten"
+search_media = "Geen overeenkomende media"
+search_effects = "Geen overeenkomende effecten"
+search_help = "Probeer een andere zoekopdracht of wis de zoekopdracht."
+clear_search = "Zoekopdracht wissen"
+queue_help = "Je exports in de wachtrij en voltooide exports verschijnen hier."
+transcript = "Nog geen transcript"
+transcript_help = "Transcribeer spraak uit je clips om met tekst te monteren."
+no_audio = "Geen audio om te transcriberen"
+no_audio_help = "Voeg een clip met audio toe aan de tijdlijn om een transcript te starten."

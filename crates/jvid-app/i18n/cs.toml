@@ -371,6 +371,7 @@ retime.other = "{count} klipů si zachová své časy; střihy mohou při nové 
 undo_note = "Tuto akci můžete vrátit zpět."
 
 [bin]
+scopes_loading = "Měření snímku…"
 remove_selected = "Odebrat vybrané"
 remove_selected_title.one = "Odebrat 1 vybraný zdroj?"
 remove_selected_title.few = "Odebrat vybrané zdroje: {count}?"
@@ -1051,3 +1052,24 @@ extension = "Vyberte cíl s příponou .srt."
 project_collision = "Vyberte jiný cíl: tento soubor je projekt."
 saved = "Titulky uloženy do {path}"
 video_help = "Vypálení vykreslí titulky do videa; samostatný soubor SRT se uloží vedle něj. Pouze SRT: Časová osa > Exportovat titulky."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Vyberte klip"
+media = "Zatím žádná média"
+import_media = "Importovat média…"
+source = "Otevřít klip"
+preview = "Není co zobrazit"
+preview_help = "Přidejte videoklip na časovou osu, aby se zde zobrazil."
+scopes = "Žádný snímek k měření"
+timeline = "Začněte střih"
+effects = "Zatím žádné efekty"
+search_media = "Žádná odpovídající média"
+search_effects = "Žádné odpovídající efekty"
+search_help = "Zkuste jiné hledání nebo hledání vymažte."
+clear_search = "Vymazat hledání"
+queue_help = "Zde se zobrazí čekající a dokončené exporty."
+transcript = "Zatím žádný přepis"
+transcript_help = "Přepište řeč z klipů a stříhejte pomocí textu."
+no_audio = "Žádný zvuk k přepisu"
+no_audio_help = "Přidejte klip se zvukem na časovou osu a začněte přepis."

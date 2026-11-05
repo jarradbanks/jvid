@@ -403,6 +403,42 @@ impl TranscriptPanel {
             Panel::titled(tr!("panel.transcript")).actions(&close)
         };
         let r = panel.focused(focused).show(ui, |ui| {
+            let available_sources = targets(project, &selected, true);
+            let recognizing = self.cache.jobs.as_ref().is_some_and(|p| !p.is_idle());
+            if words.is_empty()
+                && self.unticked.is_none()
+                && !recognizing
+                && (!missing.is_empty() || available_sources.is_empty())
+            {
+                if self
+                    .sources
+                    .show_compact(ui, project.sequence(), selected_input)
+                {
+                    self.selection = None;
+                    self.unticked = None;
+                    ui.ctx().request_repaint();
+                    return;
+                }
+                let empty = if available_sources.is_empty() {
+                    suite_ui::empty_state::EmptyState::new(
+                        icon::MIC,
+                        tr!("empty.no_audio"),
+                        tr!("empty.no_audio_help"),
+                    )
+                } else {
+                    suite_ui::empty_state::EmptyState::new(
+                        icon::MIC,
+                        tr!("empty.transcript"),
+                        tr!("empty.transcript_help"),
+                    )
+                    .action(tr!("transcript.transcribe"))
+                };
+                if empty.show(ui).action.is_some_and(|r| r.clicked()) {
+                    out.transcribe =
+                        Some(available_sources.into_iter().map(|t| t.source).collect());
+                }
+                return;
+            }
             egui::ScrollArea::vertical()
                 .id_salt("transcript_body")
                 .auto_shrink(false)

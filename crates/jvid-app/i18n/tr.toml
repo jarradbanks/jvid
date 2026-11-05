@@ -366,6 +366,7 @@ retime.other = "{count} klip zamanlamasını korur; kesimler yeni kare hızında
 undo_note = "Bunu geri alabilirsiniz."
 
 [bin]
+scopes_loading = "Kare Ölçülüyor…"
 remove_selected = "Seçilenleri Kaldır"
 remove_selected_title.one = "Seçilen 1 varlık kaldırılsın mı?"
 remove_selected_title.other = "Seçilen {count} varlık kaldırılsın mı?"
@@ -1035,3 +1036,24 @@ extension = ".srt uzantılı bir hedef seçin."
 project_collision = "Başka bir hedef seçin: bu dosya projedir."
 saved = "Altyazılar {path} konumuna kaydedildi"
 video_help = "Videoya gömme altyazıları videoya çizer; ayrı SRT dosyası yanına kaydedilir. Yalnızca SRT için: Zaman çizelgesi > Altyazıları dışa aktar."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Bir Klip Seçin"
+media = "Henüz Medya Yok"
+import_media = "Medya İçe Aktar…"
+source = "Bir Klip Açın"
+preview = "Önizlenecek Bir Şey Yok"
+preview_help = "Burada görmek için zaman çizelgesine bir video klibi ekleyin."
+scopes = "Ölçülecek Kare Yok"
+timeline = "Düzenlemeye Başlayın"
+effects = "Henüz Efekt Yok"
+search_media = "Eşleşen Medya Yok"
+search_effects = "Eşleşen Efekt Yok"
+search_help = "Farklı bir arama deneyin veya aramayı temizleyin."
+clear_search = "Aramayı Temizle"
+queue_help = "Sıradaki ve tamamlanan dışa aktarmalarınız burada görünür."
+transcript = "Henüz Döküm Yok"
+transcript_help = "Metinle düzenlemek için kliplerinizdeki konuşmayı yazıya dökün."
+no_audio = "Yazıya Dökülecek Ses Yok"
+no_audio_help = "Döküm başlatmak için zaman çizelgesine ses içeren bir klip ekleyin."

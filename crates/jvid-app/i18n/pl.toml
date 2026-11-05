@@ -378,6 +378,7 @@ retime.other = "{count} klipów zachowuje położenie w czasie; cięcia mogą wy
 undo_note = "Możesz to cofnąć."
 
 [bin]
+scopes_loading = "Pomiar klatki…"
 remove_selected = "Usuń zaznaczone"
 remove_selected_title.one = "Usunąć 1 zaznaczony zasób?"
 remove_selected_title.few = "Usunąć zaznaczone zasoby: {count}?"
@@ -1060,3 +1061,24 @@ extension = "Wybierz miejsce docelowe z rozszerzeniem .srt."
 project_collision = "Wybierz inne miejsce docelowe: ten plik jest projektem."
 saved = "Napisy zapisano w {path}"
 video_help = "Wypalanie rysuje napisy w filmie; osobny plik SRT jest zapisywany obok. Sam SRT: Oś czasu > Eksportuj napisy."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Wybierz klip"
+media = "Brak multimediów"
+import_media = "Importuj multimedia…"
+source = "Otwórz klip"
+preview = "Brak podglądu"
+preview_help = "Dodaj klip wideo do osi czasu, aby zobaczyć go tutaj."
+scopes = "Brak klatki do pomiaru"
+timeline = "Rozpocznij montaż"
+effects = "Brak efektów"
+search_media = "Brak pasujących multimediów"
+search_effects = "Brak pasujących efektów"
+search_help = "Spróbuj innego wyszukiwania lub wyczyść wyszukiwanie."
+clear_search = "Wyczyść wyszukiwanie"
+queue_help = "Tutaj pojawią się eksporty oczekujące i zakończone."
+transcript = "Brak transkrypcji"
+transcript_help = "Transkrybuj mowę z klipów, aby montować za pomocą tekstu."
+no_audio = "Brak dźwięku do transkrypcji"
+no_audio_help = "Dodaj klip z dźwiękiem do osi czasu, aby rozpocząć transkrypcję."

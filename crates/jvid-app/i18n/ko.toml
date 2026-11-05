@@ -366,6 +366,7 @@ retime.other = "클립 {count}개는 시간이 그대로 유지됩니다. 새 �
 undo_note = "이 작업은 실행 취소할 수 있습니다."
 
 [bin]
+scopes_loading = "프레임 측정 중…"
 remove_selected = "선택 항목 제거"
 remove_selected_title.one = "선택한 에셋 1개를 제거할까요?"
 remove_selected_title.other = "선택한 에셋 {count}개를 제거할까요?"
@@ -1034,3 +1035,24 @@ extension = ".srt 확장자를 사용하는 저장 위치를 선택하세요."
 project_collision = "다른 저장 위치를 선택하세요. 이 파일은 프로젝트입니다."
 saved = "자막을 {path}에 저장했습니다"
 video_help = "번인은 자막을 영상에 그리며 별도 SRT는 영상 옆에 저장합니다. SRT만 저장하려면: 타임라인 > 자막 내보내기."
+
+# Shared panel empty states.
+[empty]
+select_clip = "클립 선택"
+media = "아직 미디어가 없습니다"
+import_media = "미디어 가져오기…"
+source = "클립 열기"
+preview = "미리 볼 항목이 없습니다"
+preview_help = "타임라인에 비디오 클립을 추가하면 여기에 표시됩니다."
+scopes = "측정할 프레임이 없습니다"
+timeline = "편집 시작"
+effects = "아직 효과가 없습니다"
+search_media = "일치하는 미디어가 없습니다"
+search_effects = "일치하는 효과가 없습니다"
+search_help = "다른 검색어를 입력하거나 검색을 지우세요."
+clear_search = "검색 지우기"
+queue_help = "대기 중이거나 완료된 내보내기가 여기에 표시됩니다."
+transcript = "아직 전사문이 없습니다"
+transcript_help = "클립의 음성을 전사하여 텍스트로 편집하세요."
+no_audio = "전사할 오디오가 없습니다"
+no_audio_help = "오디오가 있는 클립을 타임라인에 추가하여 전사를 시작하세요."

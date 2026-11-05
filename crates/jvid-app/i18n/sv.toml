@@ -364,6 +364,7 @@ retime.other = "De {count} klippen behåller sina tider; redigeringar kan hamna 
 undo_note = "Du kan ångra detta."
 
 [bin]
+scopes_loading = "Mäter bildruta…"
 remove_selected = "Ta bort markerade"
 remove_selected_title.one = "Ta bort 1 markerad tillgång?"
 remove_selected_title.other = "Ta bort {count} markerade tillgångar?"
@@ -1032,3 +1033,24 @@ extension = "Välj en destination med filändelsen .srt."
 project_collision = "Välj en annan destination: den här filen är projektet."
 saved = "Undertexter sparade i {path}"
 video_help = "Inbränning ritar undertexter i videon; en separat SRT-fil sparas bredvid. Endast SRT: Tidslinje > Exportera undertexter."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Välj ett klipp"
+media = "Inga medier ännu"
+import_media = "Importera medier…"
+source = "Öppna ett klipp"
+preview = "Inget att förhandsvisa"
+preview_help = "Lägg till ett videoklipp på tidslinjen för att se det här."
+scopes = "Ingen bildruta att mäta"
+timeline = "Börja redigera"
+effects = "Inga effekter ännu"
+search_media = "Inga matchande medier"
+search_effects = "Inga matchande effekter"
+search_help = "Prova en annan sökning eller rensa sökningen."
+clear_search = "Rensa sökning"
+queue_help = "Dina köade och slutförda exporter visas här."
+transcript = "Ingen transkription ännu"
+transcript_help = "Transkribera talet i dina klipp för att redigera med text."
+no_audio = "Inget ljud att transkribera"
+no_audio_help = "Lägg till ett klipp med ljud på tidslinjen för att börja transkribera."

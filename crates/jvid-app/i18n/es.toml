@@ -367,6 +367,7 @@ retime.other = "Los {count} clips conservan sus tiempos; las ediciones pueden qu
 undo_note = "Puedes deshacerlo."
 
 [bin]
+scopes_loading = "Midiendo fotograma…"
 remove_selected = "Eliminar seleccionados"
 remove_selected_title.one = "¿Eliminar 1 recurso seleccionado?"
 remove_selected_title.other = "¿Eliminar {count} recursos seleccionados?"
@@ -1046,3 +1047,24 @@ extension = "Elige un destino con la extensión .srt."
 project_collision = "Elige otro destino: este archivo es el proyecto."
 saved = "Subtítulos guardados en {path}"
 video_help = "Incrustar dibuja los subtítulos en el vídeo; Archivo .srt aparte los guarda junto a él. Para guardar solo el SRT: Línea de tiempo > Exportar subtítulos."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Selecciona un clip"
+media = "Aún no hay medios"
+import_media = "Importar medios…"
+source = "Abre un clip"
+preview = "Nada que previsualizar"
+preview_help = "Añade un clip de vídeo a la línea de tiempo para verlo aquí."
+scopes = "Sin fotograma que medir"
+timeline = "Empieza tu edición"
+effects = "Aún no hay efectos"
+search_media = "Sin medios coincidentes"
+search_effects = "Sin efectos coincidentes"
+search_help = "Prueba otra búsqueda o borra la búsqueda."
+clear_search = "Borrar búsqueda"
+queue_help = "Tus exportaciones en cola y terminadas aparecerán aquí."
+transcript = "Aún no hay transcripción"
+transcript_help = "Transcribe el habla de tus clips para editar con texto."
+no_audio = "Sin audio para transcribir"
+no_audio_help = "Añade un clip con audio a la línea de tiempo para iniciar una transcripción."
