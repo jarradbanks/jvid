@@ -917,6 +917,14 @@ pixelate_about = "Affiche l'image en carrés de `block` pixels en gardant l'alph
 pixelate_block = "Bloc"
 
 [tutorial]
+import_sample = "Importer un exemple"
+silence_select = "Sélectionnez la capture d’écran dans la timeline."
+silence_open = "Ouvrez Détecter les silences avec {key}."
+silence_cut = "Réglez le seuil pour repérer le silence, puis cliquez sur Couper."
+export_settings = "Choisissez les réglages et la destination de sortie, puis ajoutez la vidéo à la file."
+speech_running = "Attendez la fin de la reconnaissance vocale."
+speech_settings = "Choisissez un modèle vocal et une langue, puis cliquez sur {action}."
+
 minutes = "{count} min"
 step = "Étape {n} sur {total}"
 show_me = "Montrez-moi"

@@ -155,6 +155,8 @@ pub struct Timeline {
     keys: keyframes::Keys,
     /// The Detect Silence dialog, while open.
     silence: Option<silence::Silence>,
+    /// A Cut response waiting for the app's successful history apply.
+    silence_cut: bool,
     /// The Find Highlights dialog, while open.
     highlights: Option<highlights::Highlights>,
     /// The audio track a voiceover records onto; disarming it ends a take.
@@ -250,6 +252,7 @@ impl Default for Timeline {
             shown_sequence: SequenceId::default(),
             keys: keyframes::Keys::default(),
             silence: None,
+            silence_cut: false,
             highlights: None,
             armed: None,
             level: None,
@@ -1007,6 +1010,22 @@ impl Timeline {
         t
     }
 
+    /// Floating task dialogs consume Escape before tutorial navigation does.
+    pub(crate) fn dialog_open(&self) -> bool {
+        self.silence.is_some() || self.highlights.is_some()
+    }
+
+    pub(crate) fn take_silence_cut(&mut self) -> bool {
+        std::mem::take(&mut self.silence_cut)
+    }
+
+    /// Tutorial navigation dismisses its task dialog without touching selection or history.
+    pub(crate) fn dismiss_dialogs(&mut self) {
+        self.silence = None;
+        self.silence_cut = false;
+        self.highlights = None;
+    }
+
     /// Drop selections, clip/key clipboards, dialogs and deferred edits across projects.
     pub fn reset_session(&mut self) {
         *self = self.sibling();
@@ -1722,6 +1741,8 @@ impl Timeline {
         if let Some(s) = &mut self.silence {
             let at = pos2(area.right() - space::S16, area.top() - space::S8);
             let (cmd, open) = s.show(ui, at, seq, spans.as_deref());
+            self.silence_cut =
+                edit.is_none() && matches!(&cmd, Some(Command::CutSpans { speed: None, .. }));
             if !open {
                 self.silence = None;
             }

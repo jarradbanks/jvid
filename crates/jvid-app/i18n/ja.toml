@@ -896,6 +896,14 @@ pixelate_about = "画像を `block` ピクセルの正方形で表示し、ア�
 pixelate_block = "ブロック"
 
 [tutorial]
+import_sample = "サンプルを読み込む"
+silence_select = "タイムラインで画面録画を選択します。"
+silence_open = "{key} で無音検出を開きます。"
+silence_cut = "しきい値を調整して無音部分を示し、「カット」をクリックします。"
+export_settings = "出力設定と保存先を選び、動画をキューに追加します。"
+speech_running = "音声認識の完了を待ちます。"
+speech_settings = "音声モデルと言語を選び、{action} をクリックします。"
+
 minutes = "{count}分"
 step = "ステップ {n}/{total}"
 show_me = "お手本を見る"

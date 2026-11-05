@@ -909,6 +909,14 @@ pixelate_about = "Toont het beeld in vierkanten van `block` pixels en behoudt al
 pixelate_block = "Blok"
 
 [tutorial]
+import_sample = "Voorbeeld importeren"
+silence_select = "Selecteer de schermopname op de tijdlijn."
+silence_open = "Open Stilte detecteren met {key}."
+silence_cut = "Pas de drempel aan om de stilte te markeren en klik op Knippen."
+export_settings = "Kies de uitvoerinstellingen en bestemming en voeg de video aan de wachtrij toe."
+speech_running = "Wacht tot de spraakherkenning klaar is."
+speech_settings = "Kies een spraakmodel en taal en klik op {action}."
+
 minutes = "{count} min"
 step = "Stap {n} van {total}"
 show_me = "Laat zien"

@@ -927,6 +927,14 @@ pixelate_about = "以 `block` 像素的方块显示图像并保留 Alpha，因�
 pixelate_block = "块大小"
 
 [tutorial]
+import_sample = "导入示例"
+silence_select = "在时间线上选择屏幕录制。"
+silence_open = "按 {key} 打开静音检测。"
+silence_cut = "调整阈值以标记安静片段，然后点击剪切。"
+export_settings = "选择输出设置和保存位置，然后将视频添加到队列。"
+speech_running = "等待语音识别完成。"
+speech_settings = "选择语音模型和语言，然后点击{action}。"
+
 minutes = "{count} 分钟"
 step = "第 {n} 步，共 {total} 步"
 show_me = "演示一遍"

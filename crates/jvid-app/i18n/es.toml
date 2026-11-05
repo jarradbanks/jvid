@@ -908,6 +908,14 @@ pixelate_about = "Muestra la imagen en cuadros de `block` píxeles y conserva el
 pixelate_block = "Bloque"
 
 [tutorial]
+import_sample = "Importar muestra"
+silence_select = "Selecciona la grabación de pantalla en la línea de tiempo."
+silence_open = "Abre Detectar silencio con {key}."
+silence_cut = "Ajusta el umbral para marcar la sección silenciosa y haz clic en Cortar."
+export_settings = "Elige los ajustes y el destino de salida y añade el vídeo a la cola."
+speech_running = "Espera a que termine el reconocimiento de voz."
+speech_settings = "Elige un modelo de voz y un idioma y haz clic en {action}."
+
 minutes = "{count} min"
 step = "Paso {n} de {total}"
 show_me = "Muéstrame"

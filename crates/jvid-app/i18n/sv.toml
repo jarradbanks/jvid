@@ -894,6 +894,14 @@ pixelate_about = "Visar bilden i rutor om `block` pixlar och behåller alfa, så
 pixelate_block = "Block"
 
 [tutorial]
+import_sample = "Importera exempel"
+silence_select = "Välj skärminspelningen på tidslinjen."
+silence_open = "Öppna Upptäck tystnad med {key}."
+silence_cut = "Justera tröskeln för att markera det tysta avsnittet och klicka på Klipp."
+export_settings = "Välj utdatainställningar och mål och lägg sedan till videon i kön."
+speech_running = "Vänta tills taligenkänningen är klar."
+speech_settings = "Välj en talmodell och ett språk och klicka på {action}."
+
 minutes = "{count} min"
 step = "Steg {n} av {total}"
 show_me = "Visa mig"

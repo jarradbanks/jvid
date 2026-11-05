@@ -894,6 +894,14 @@ pixelate_about = "Viser billedet i firkanter på `block` pixels og bevarer alfa,
 pixelate_block = "Blok"
 
 [tutorial]
+import_sample = "Importér eksempel"
+silence_select = "Vælg skærmoptagelsen på tidslinjen."
+silence_open = "Åbn Registrer stilhed med {key}."
+silence_cut = "Juster tærsklen for at markere det stille afsnit, og klik på Klip."
+export_settings = "Vælg outputindstillinger og destination, og føj videoen til køen."
+speech_running = "Vent på, at talegenkendelsen bliver færdig."
+speech_settings = "Vælg en talemodel og et sprog, og klik på {action}."
+
 minutes = "{count} min."
 step = "Trin {n} af {total}"
 show_me = "Vis mig"

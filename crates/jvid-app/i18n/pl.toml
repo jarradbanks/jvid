@@ -922,6 +922,14 @@ pixelate_about = "Pokazuje obraz w kwadratach po `block` pikseli i zachowuje alf
 pixelate_block = "Blok"
 
 [tutorial]
+import_sample = "Importuj przykład"
+silence_select = "Zaznacz nagranie ekranu na osi czasu."
+silence_open = "Otwórz wykrywanie ciszy skrótem {key}."
+silence_cut = "Dostosuj próg, aby zaznaczyć cichy fragment, a następnie kliknij Wytnij."
+export_settings = "Wybierz ustawienia i miejsce zapisu, a następnie dodaj film do kolejki."
+speech_running = "Poczekaj na zakończenie rozpoznawania mowy."
+speech_settings = "Wybierz model mowy i język, a następnie kliknij {action}."
+
 minutes = "{count} min"
 step = "Krok {n} z {total}"
 show_me = "Pokaż mi"

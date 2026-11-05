@@ -913,6 +913,14 @@ pixelate_about = "Zobrazí obraz ve čtvercích o `block` pixelech a zachová al
 pixelate_block = "Blok"
 
 [tutorial]
+import_sample = "Importovat ukázku"
+silence_select = "Vyberte záznam obrazovky na časové ose."
+silence_open = "Otevřete detekci ticha pomocí {key}."
+silence_cut = "Upravte práh pro označení tiché části a klikněte na Vyříznout."
+export_settings = "Vyberte nastavení a cíl výstupu a přidejte video do fronty."
+speech_running = "Počkejte na dokončení rozpoznávání řeči."
+speech_settings = "Vyberte model řeči a jazyk a klikněte na {action}."
+
 minutes = "{count} min"
 step = "Krok {n} z {total}"
 show_me = "Ukázat"

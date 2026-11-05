@@ -910,6 +910,14 @@ pixelate_about = "Mostra a imagem em quadrados de `block` pixels e mantém o alf
 pixelate_block = "Bloco"
 
 [tutorial]
+import_sample = "Importar exemplo"
+silence_select = "Selecione a gravação de tela na linha do tempo."
+silence_open = "Abra Detectar silêncio com {key}."
+silence_cut = "Ajuste o limiar para marcar a parte silenciosa e clique em Cortar."
+export_settings = "Escolha as configurações e o destino de saída e adicione o vídeo à fila."
+speech_running = "Aguarde o reconhecimento de voz terminar."
+speech_settings = "Escolha um modelo de voz e um idioma e clique em {action}."
+
 minutes = "{count} min"
 step = "Passo {n} de {total}"
 show_me = "Mostre-me"

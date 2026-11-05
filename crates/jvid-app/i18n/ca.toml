@@ -906,6 +906,14 @@ pixelate_about = "Mostra la imatge en quadres de `block` píxels i conserva l'al
 pixelate_block = "Bloc"
 
 [tutorial]
+import_sample = "Importa una mostra"
+silence_select = "Selecciona la gravació de pantalla a la línia de temps."
+silence_open = "Obre Detecta el silenci amb {key}."
+silence_cut = "Ajusta el llindar per marcar la secció silenciosa i fes clic a Retalla."
+export_settings = "Tria els paràmetres i la destinació de sortida i afegeix el vídeo a la cua."
+speech_running = "Espera que acabi el reconeixement de veu."
+speech_settings = "Tria un model de veu i un idioma i fes clic a {action}."
+
 minutes = "{count} min"
 step = "Pas {n} de {total}"
 show_me = "Mostra-m'ho"

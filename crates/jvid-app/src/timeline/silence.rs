@@ -242,7 +242,7 @@ impl Silence {
         let settings = self.settings();
         let mut command = None;
         let mut open = !ui.input(|i| i.key_pressed(Key::Escape));
-        egui::Window::new(tr!("silence.title"))
+        let window = egui::Window::new(tr!("silence.title"))
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
@@ -306,7 +306,7 @@ impl Silence {
                         ];
                         for (label, v, suffix, range, decimals, speed) in rows {
                             ui.label(label);
-                            ui.add(
+                            let response = ui.add(
                                 DragField::new(v)
                                     .suffix(suffix)
                                     .range(range)
@@ -314,6 +314,13 @@ impl Silence {
                                     .speed(speed)
                                     .width(96.0),
                             );
+                            if label == tr!("silence.threshold") {
+                                crate::app::tutorial::anchor(
+                                    ui.ctx(),
+                                    "silence.threshold",
+                                    response.rect,
+                                );
+                            }
                             ui.end_row();
                         }
                     });
@@ -338,7 +345,11 @@ impl Silence {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = space::S8;
                     let mut pick = |ui: &mut Ui, b: Button, tip: &str, speed: Option<f64>| {
-                        if ui.add(b.state(state)).on_hover_text(tip).clicked() {
+                        let response = ui.add(b.state(state)).on_hover_text(tip);
+                        if speed.is_none() {
+                            crate::app::tutorial::anchor(ui.ctx(), "silence.cut", response.rect);
+                        }
+                        if response.clicked() {
                             let spans = spans.unwrap_or_default().to_vec();
                             command = Some(Command::CutSpans { spans, speed });
                             open = false;
@@ -362,6 +373,9 @@ impl Silence {
                     }
                 });
             });
+        if let Some(window) = window {
+            crate::app::tutorial::anchor(ui.ctx(), "silence.dialog", window.response.rect);
+        }
         (command, open)
     }
 }
