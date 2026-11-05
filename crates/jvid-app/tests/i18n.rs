@@ -364,7 +364,7 @@ fn bundled_effects_and_keyframe_lanes_switch_live() {
     }
     assert!(has(&h, "Strength") && has(&h, "Softness") && has(&h, "Animate Softness"));
     // The query is the user's, kept as typed; it searches what the rows now say.
-    assert!(has(&h, "No effects match the search"));
+    assert!(has(&h, "No Matching Effects"));
     search(&mut h, "esquinas", "esquinas".len(), "corners");
     let shown = painted(&h);
     assert!(
