@@ -1,14 +1,13 @@
 //! Interactive lessons in Help > Tutorials. A lesson is a list of steps, each pointing at an
-//! [`anchor`] the editor draws, checked against the project or UI state, and able to do itself
-//! (Show Me) through the normal undoable edits. It runs in a sandbox project; the user's
+//! [`anchor`] the editor draws and advancing when its task changes the project or UI state.
+//! Guidance leaves the editor usable. It runs in a sandbox project; the user's
 //! project, undo history and path wait in a [`Stash`] until the lesson ends.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use egui::{
-    Align, Align2, CornerRadius, Id, Key, LayerId, Layout, Modifiers, Order, Rect, Stroke, pos2,
-    vec2,
+    Align, Align2, CornerRadius, Id, Key, LayerId, Modifiers, Order, Rect, Stroke, pos2, vec2,
 };
 use jvid_core::history::{Command, History};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
@@ -16,7 +15,7 @@ use jvid_core::model::{Project, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use suite_ui::theme;
 use suite_ui::tokens::{color, radius, space};
-use suite_ui::widgets::{Button, State};
+use suite_ui::widgets::Button;
 
 use super::{App, Tab};
 use crate::i18n::{tr, verbatim};
@@ -47,18 +46,19 @@ pub struct Step {
     /// The instruction, one or two short sentences. Shortcuts come from `app.keymap`, so a
     /// remapped key reads right.
     pub text: fn(&App) -> String,
-    /// Whether the step's goal holds in the project or UI. Checked every frame; while it passes,
-    /// the card shows the step done and Next moves on.
+    /// Whether the task is complete. A newly satisfied goal advances automatically; a goal
+    /// already satisfied on entry (including Back) waits for Next.
     pub done: fn(&App) -> bool,
-    /// Does the step the way the user would.
-    pub show_me: fn(&mut App),
+    /// A reproducible edit for the lesson regression tests, through the normal commands.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub example: fn(&mut App),
     /// Brings the anchor into view when it isn't drawn, such as by switching tabs. The Render
     /// Queue reveals itself.
     pub reveal: Option<fn(&mut App)>,
     /// A target ellipse, its centre and size in project pixels from the frame's centre,
     /// drawn dashed on the Program view while the step shows.
     pub ghost: Option<[[f64; 2]; 2]>,
-    /// More anchors left undimmed beside `anchor`, such as a scope to read while editing in
+    /// More controls highlighted beside `anchor`, such as a scope to read while editing in
     /// the Inspector.
     pub also: &'static [&'static str],
 }
@@ -97,7 +97,7 @@ const TOUR: Lesson = Lesson {
                 )
             },
             done: |a| clip_named(a, TOUR_CLIP).is_some(),
-            show_me: |a| match sample(TOUR_CLIP) {
+            example: |a| match sample(TOUR_CLIP) {
                 Ok(path) => a.import([path]),
                 Err(e) => a.error(tr!(
                     "app.open_failed",
@@ -113,7 +113,7 @@ const TOUR: Lesson = Lesson {
             anchor: "timeline",
             text: |_| tr!("tutorial.tour_place", file = verbatim(TOUR_CLIP)),
             done: |a| first_clip(a).is_some(),
-            show_me: |a| {
+            example: |a| {
                 let project = a.history.project();
                 let Some(asset) = clip_named(a, TOUR_CLIP) else {
                     return;
@@ -141,7 +141,7 @@ const TOUR: Lesson = Lesson {
                 )
             },
             done: |a| a.timeline.playhead() > Time(0),
-            show_me: |a| {
+            example: |a| {
                 let length = a.history.project().sequence().duration();
                 a.timeline.seek(Time(length.0 / 3));
             },
@@ -164,7 +164,7 @@ const TOUR: Lesson = Lesson {
                 let seq = a.history.project().sequence();
                 matches!((seq.in_point(), seq.out_point()), (Some(i), Some(o)) if o > i)
             },
-            show_me: mark,
+            example: mark,
             reveal: None,
             ghost: None,
             also: &[],
@@ -173,7 +173,7 @@ const TOUR: Lesson = Lesson {
             anchor: "timeline",
             text: |a| tr!("tutorial.tour_cut", key = a.keymap.shortcut("extract")),
             done: |a| shortened(a, TOUR_CLIP),
-            show_me: |a| {
+            example: |a| {
                 let seq = a.history.project().sequence();
                 if seq.in_point().is_none() || seq.out_point().is_none() {
                     mark(a);
@@ -188,7 +188,7 @@ const TOUR: Lesson = Lesson {
             anchor: "bin.titles",
             text: |_| tr!("tutorial.tour_title").into(),
             done: has_title,
-            show_me: add_title,
+            example: add_title,
             reveal: Some(|a| a.bin.tab = 2),
             ghost: None,
             also: &["timeline"],
@@ -197,7 +197,7 @@ const TOUR: Lesson = Lesson {
             anchor: "export",
             text: |_| tr!("tutorial.tour_export").into(),
             done: |a| queued(a).next().is_some(),
-            show_me: |a| {
+            example: |a| {
                 let Some(gpu) = a.preview.gpu() else {
                     return;
                 };
@@ -247,8 +247,8 @@ const SCREEN: Lesson = Lesson {
                     key = a.keymap.shortcut("detect_silence")
                 )
             },
-            done: |a| shortened(a, SCREEN_CLIP),
-            show_me: |a| {
+            done: |a| shortened(a, SCREEN_CLIP) && a.lesson.as_ref().is_some_and(|r| r.silence_cut),
+            example: |a| {
                 let Some(asset) = clip_named(a, SCREEN_CLIP).map(|x| x.id) else {
                     return;
                 };
@@ -273,7 +273,7 @@ const SCREEN: Lesson = Lesson {
             anchor: "inspector.scale",
             text: |_| tr!("tutorial.screen_zoom").into(),
             done: zoomed,
-            show_me: |a| {
+            example: |a| {
                 let Some(asset) = clip_named(a, SCREEN_CLIP).map(|x| x.id) else {
                     return;
                 };
@@ -312,7 +312,7 @@ const SCREEN: Lesson = Lesson {
             anchor: "bin.titles",
             text: |_| tr!("tutorial.screen_callout").into(),
             done: has_title,
-            show_me: add_title,
+            example: add_title,
             reveal: Some(|a| a.bin.tab = 2),
             ghost: None,
             also: &["timeline"],
@@ -381,7 +381,7 @@ const GREEN_SCREEN: Lesson = Lesson {
                         && t.clips().iter().any(|c| c.asset == bg.id)
                 })
             },
-            show_me: |a| {
+            example: |a| {
                 let (Some((at, _)), Some(bg)) = (keyed_clip(a), clip_named(a, BACKGROUND)) else {
                     return;
                 };
@@ -405,7 +405,7 @@ const GREEN_SCREEN: Lesson = Lesson {
             anchor: "inspector.add_effect",
             text: |_| tr!("tutorial.green_screen_key").into(),
             done: |a| key_index(a).is_some(),
-            show_me: |a| {
+            example: |a| {
                 if let Some((_, id)) = keyed_clip(a) {
                     a.timeline.select_clip(a.history.project().sequence(), id);
                 }
@@ -437,7 +437,7 @@ const GREEN_SCREEN: Lesson = Lesson {
                     .into_iter()
                     .all(tuned)
             },
-            show_me: |a| {
+            example: |a| {
                 if key_index(a).is_none() {
                     add_key(a);
                 }
@@ -467,7 +467,7 @@ const GREEN_SCREEN: Lesson = Lesson {
                 seq.clip(id)
                     .is_some_and(|(_, c)| c.transform.masks.iter().any(|m| m.enabled))
             },
-            show_me: |a| {
+            example: |a| {
                 use jvid_core::model::{Mask, MaskShape};
                 // Keeps the left 65% of the frame, which ends just before the board.
                 edit_keyed(a, |[w, h], x| {
@@ -648,7 +648,7 @@ const KEYFRAMES: Lesson = Lesson {
                     n("position") >= 2 && n("opacity") >= 2
                 })
             },
-            show_me: |a| {
+            example: |a| {
                 let Some(c) = title(a) else { return };
                 let (start, second) = (c.source_at(c.start), c.source_at(c.start + SECOND));
                 let x = &c.transform;
@@ -686,7 +686,7 @@ const KEYFRAMES: Lesson = Lesson {
             anchor: "inspector.position",
             text: |_| tr!("tutorial.keys_previous").into(),
             done: |a| first_key(a).is_some_and(|t| a.timeline.playhead() == t),
-            show_me: |a| {
+            example: |a| {
                 if let Some(t) = first_key(a) {
                     a.timeline.seek(t);
                 }
@@ -702,7 +702,7 @@ const KEYFRAMES: Lesson = Lesson {
                 let eased = |e| e != Easing::Linear;
                 title_keys(a).any(|k| eased(k.easing))
             },
-            show_me: |a| ease_first(a, Easing::EaseOut),
+            example: |a| ease_first(a, Easing::EaseOut),
             reveal: None,
             ghost: None,
             also: &[],
@@ -714,7 +714,7 @@ const KEYFRAMES: Lesson = Lesson {
                 let custom = |e| matches!(e, Easing::Bezier(_));
                 a.timeline.graph_open() && title_keys(a).any(|k| custom(k.easing))
             },
-            show_me: |a| {
+            example: |a| {
                 if let Some(id) = first_clip(a) {
                     a.timeline.open_graph(id);
                 }
@@ -729,7 +729,7 @@ const KEYFRAMES: Lesson = Lesson {
             anchor: "preview",
             text: |a| tr!("tutorial.keys_play", key = a.keymap.shortcut("play_stop")),
             done: |a| a.preview.playing(),
-            show_me: |a| {
+            example: |a| {
                 if let Some(t) = first_key(a) {
                     a.timeline.seek(t);
                 }
@@ -790,9 +790,27 @@ fn queued(app: &App) -> impl Iterator<Item = Time> + '_ {
 }
 
 fn apply(app: &mut App, c: Command) {
-    if let Err(e) = app.history.apply(c) {
-        tracing::warn!("lesson edit failed: {e}");
+    let cut = silence_cut(&c, app.history.project());
+    match app.history.apply(c) {
+        Ok(_) => app.lesson_silence_cut(cut),
+        Err(e) => tracing::warn!("lesson edit failed: {e}"),
     }
+}
+
+/// Observe the successful semantic edit, rather than guessing from a shorter timeline.
+/// Cut must affect this lesson's recording; Speed Up and unrelated cuts do not count.
+pub(super) fn silence_cut(command: &Command, project: &Project) -> bool {
+    let Command::CutSpans { spans, speed: None } = command else {
+        return false;
+    };
+    spans.iter().any(|(id, start, end)| {
+        start < end
+            && project
+                .sequence()
+                .clip(*id)
+                .and_then(|(_, c)| project.asset(c.asset))
+                .is_some_and(|a| a.path.ends_with(SCREEN_CLIP))
+    })
 }
 
 fn first_clip(app: &App) -> Option<jvid_core::model::ClipId> {
@@ -912,8 +930,12 @@ pub struct Run {
     pub lesson: &'static Lesson,
     /// The current step; `steps.len()` once finished.
     pub step: usize,
-    /// The current step's check passed last frame, so Next shows and Enter presses it.
+    /// The current step's goal, measured on entry and after each frame.
     done: bool,
+    /// The goal has been false during this visit, so satisfying it can advance.
+    armed: bool,
+    /// A successful Detect Silence Cut of the lesson sample, never a trim or deletion.
+    silence_cut: bool,
     /// The lesson's `setup` ran; the steps wait for it.
     set_up: bool,
     /// The current step's reveal ran. Once per visit, so a missing anchor can't repaint every
@@ -938,6 +960,7 @@ impl Run {
     fn go(&mut self, step: usize) {
         self.step = step.min(self.lesson.steps.len());
         (self.revealed, self.warned, self.done) = (false, false, false);
+        self.armed = false;
     }
 }
 
@@ -957,13 +980,23 @@ struct Stash {
 enum Click {
     Next,
     Back,
-    ShowMe,
+    ImportSample,
     Skip,
     Keep,
     Exit,
 }
 
 impl App {
+    pub(super) fn lesson_silence_cut(&mut self, cut: bool) {
+        if cut
+            && let Some(run) = &mut self.lesson
+            && run.lesson.id == SCREEN.id
+            && run.step == 0
+        {
+            run.silence_cut = true;
+        }
+    }
+
     /// Opens `lesson` in a sandbox project built from its media, setting the user's aside.
     /// Shows an error and starts nothing if a clip can't be written out.
     pub(super) fn start_lesson(&mut self, lesson: &'static Lesson) {
@@ -999,6 +1032,8 @@ impl App {
             lesson,
             step: 0,
             done: false,
+            armed: false,
+            silence_cut: false,
             set_up: false,
             revealed: false,
             warned: false,
@@ -1041,7 +1076,8 @@ impl App {
             return;
         }
         let free = ctx.memory(|m| m.top_modal_layer().is_none() && m.focused().is_none())
-            && !egui::Popup::is_any_open(ctx);
+            && !egui::Popup::is_any_open(ctx)
+            && !self.timeline.dialog_open();
         if free && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             return self.end_lesson();
         }
@@ -1055,7 +1091,7 @@ impl App {
     }
 
     /// Runs the lesson a frame, after the panels drew their anchors: checks the step, reveals a
-    /// hidden anchor, and draws the overlay and step card.
+    /// hidden anchor, and draws contextual highlights and the task card.
     pub(super) fn lesson_frame(&mut self, ctx: &egui::Context) {
         let recorded = running(ctx);
         if recorded != self.lesson.is_some() {
@@ -1080,15 +1116,12 @@ impl App {
             run.set_up = true;
         }
         let steps = run.lesson.steps;
-        if let Some(step) = steps.get(run.step) {
-            // Back on `self` for the check, which reads the baseline.
-            self.lesson = Some(run);
-            let done = (step.done)(self);
-            run = self.lesson.take().expect("the check can't end the lesson");
-            if done != run.done {
-                run.done = done;
-                ctx.request_repaint();
-            }
+        run = self.check_lesson_step(run);
+        // Let drags finish before switching guidance; keep their undo gesture intact.
+        if run.armed && run.done && !ctx.input(|i| i.pointer.any_down()) {
+            self.next_step(&mut run);
+            run = self.check_lesson_step(run);
+            ctx.request_repaint();
         }
         let step = steps.get(run.step);
         let ghost = step.and_then(|s| s.ghost);
@@ -1101,10 +1134,12 @@ impl App {
             });
             ctx.request_repaint();
         }
-        let exact = step.and_then(|s| anchor_rect(ctx, s.anchor));
-        let panel = || row_name(step?.anchor).and(anchor_rect(ctx, Tab::Inspector.anchor()));
+        let guidance = step.map(|s| self.lesson_guidance(ctx, &run, s));
+        let anchor = guidance.as_ref().map(|g| g.anchor);
+        let exact = anchor.and_then(|a| anchor_rect(ctx, a));
+        let panel = || row_name(anchor?).and(anchor_rect(ctx, Tab::Inspector.anchor()));
         let target = exact.or_else(panel);
-        if let Some(s) = step {
+        if let Some(s) = step.filter(|_| !self.modal_owns_input(ctx)) {
             let reveal = s.reveal.filter(|_| exact.is_none());
             let tab = [
                 Tab::Media,
@@ -1145,27 +1180,50 @@ impl App {
                 tracing::warn!("lesson {id} step {n}: anchor `{anchor}` isn't drawn");
             }
         }
-        if let Some(t) = target {
-            let also = step.map_or(&[][..], |s| s.also);
-            let more = also.iter().filter_map(|a| anchor_rect(ctx, a));
-            dim(ctx, &[t].into_iter().chain(more).collect::<Vec<_>>());
+        let dialogs = dialog_rects(ctx);
+        let mut targets = Vec::new();
+        // A dialog supersedes its launcher. Unrelated dialogs suppress editor highlights.
+        if dialogs.is_empty()
+            || anchor.is_some_and(|a| {
+                matches!(
+                    a,
+                    "silence.threshold" | "export.action" | "subtitles.dialog" | "subtitles.action"
+                )
+            }) && exact.is_some()
+        {
+            targets.extend(target);
+            if dialogs.is_empty()
+                && let Some(s) = step
+            {
+                targets.extend(s.also.iter().filter_map(|a| anchor_rect(ctx, a)));
+            }
         }
-        let text = step.map_or_else(|| tr!("tutorial.complete").into(), |s| (s.text)(self));
-        let modal = ctx.memory(|m| m.top_modal_layer().is_some());
-        let Some(click) = card(ctx, &run, &text, target, !modal) else {
+        if anchor == Some("silence.threshold") {
+            targets.extend(anchor_rect(ctx, "silence.cut"));
+        }
+        highlight(ctx, &targets);
+        let text = guidance.map_or_else(|| tr!("tutorial.complete").into(), |g| g.text);
+        let Some(click) = card(ctx, &run, &text, &targets, &dialogs) else {
             self.lesson = Some(run);
             return;
         };
         ctx.request_repaint();
         match click {
             Click::Next => self.next_step(&mut run),
-            Click::Back => run.go(run.step.saturating_sub(1)),
-            Click::ShowMe => {
-                if let Some(s) = step {
-                    (s.show_me)(self);
-                }
+            Click::Back => {
+                self.dismiss_lesson_dialog(&run);
+                run.go(run.step.saturating_sub(1));
             }
+            Click::ImportSample => match sample(TOUR_CLIP) {
+                Ok(path) => self.import([path]),
+                Err(e) => self.error(tr!(
+                    "app.open_failed",
+                    path = verbatim(TOUR_CLIP),
+                    error = e
+                )),
+            },
             Click::Skip => {
+                self.dismiss_lesson_dialog(&run);
                 run.done = false;
                 self.next_step(&mut run);
             }
@@ -1178,6 +1236,97 @@ impl App {
             }
         }
         self.lesson = Some(run);
+    }
+
+    fn lesson_guidance(&self, ctx: &egui::Context, run: &Run, step: &Step) -> Guidance {
+        let guide = |anchor, text| Guidance { anchor, text };
+        if run.lesson.id == SCREEN.id && run.step == 0 {
+            if anchor_rect(ctx, "silence.dialog").is_some() {
+                return guide("silence.threshold", tr!("tutorial.silence_cut").into());
+            }
+            let selected = self.timeline.selected();
+            let sample_selected = self
+                .history
+                .project()
+                .sequence()
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips())
+                .any(|c| {
+                    selected.contains(&c.id)
+                        && self
+                            .history
+                            .project()
+                            .asset(c.asset)
+                            .is_some_and(|a| a.path.ends_with(SCREEN_CLIP))
+                });
+            if !sample_selected {
+                return guide("timeline", tr!("tutorial.silence_select").into());
+            }
+            return guide(
+                "menu.edit",
+                tr!(
+                    "tutorial.silence_open",
+                    key = self.keymap.shortcut("detect_silence")
+                ),
+            );
+        }
+        if step.anchor == "export" && self.export_dialog.is_open() {
+            return guide("export.action", tr!("tutorial.export_settings").into());
+        }
+        if run.lesson.id == subtitles::SUBTITLES.id && self.subtitles.is_open() {
+            let text = if self.subtitles.is_running() {
+                tr!("tutorial.speech_running").into()
+            } else {
+                let action = if step.anchor == "transcript" {
+                    tr!("transcript.transcribe")
+                } else {
+                    tr!("subtitles.generate")
+                };
+                tr!("tutorial.speech_settings", action = action)
+            };
+            return guide(
+                if self.subtitles.is_running() {
+                    "subtitles.dialog"
+                } else {
+                    "subtitles.action"
+                },
+                text,
+            );
+        }
+        guide(step.anchor, (step.text)(self))
+    }
+
+    /// Establish a fresh baseline on each visit. Back and a prior action satisfying a later
+    /// goal must not cascade through lessons, while newly completed tasks need no Next click.
+    fn check_lesson_step(&mut self, mut run: Run) -> Run {
+        if run.lesson.id == SCREEN.id && run.step == 0 && !shortened(self, SCREEN_CLIP) {
+            run.silence_cut = false;
+        }
+        let Some(step) = run.lesson.steps.get(run.step) else {
+            return run;
+        };
+        self.lesson = Some(run);
+        let done = (step.done)(self);
+        let mut run = self.lesson.take().expect("the check cannot end the lesson");
+        run.done = done;
+        run.armed |= !done;
+        run
+    }
+
+    fn dismiss_lesson_dialog(&mut self, run: &Run) {
+        let Some(step) = run.lesson.steps.get(run.step) else {
+            return;
+        };
+        if run.lesson.id == SCREEN.id && run.step == 0 {
+            self.timeline.dismiss_dialogs();
+        }
+        if run.lesson.id == subtitles::SUBTITLES.id {
+            self.subtitles.close();
+        }
+        if step.anchor == "export" {
+            self.export_dialog.close();
+        }
     }
 
     /// Next, or Skip Step once `run.done` is cleared: only a step done counts as completed.
@@ -1240,30 +1389,40 @@ impl App {
     }
 }
 
-/// Over the panels, under windows, menus and the step card.
-const DIM: Order = Order::Background;
+struct Guidance {
+    anchor: &'static str,
+    text: String,
+}
 
-/// Dims the window around `target`, outlined in Light Blue. Painted only, so every click
-/// still reaches the editor.
-fn dim(ctx: &egui::Context, targets: &[Rect]) {
-    let screen = ctx.content_rect();
-    let holes: Vec<Rect> = targets
-        .iter()
-        .map(|t| t.expand(space::S4).intersect(screen))
-        .collect();
-    let painter = ctx.layer_painter(LayerId::new(DIM, Id::new("lesson_dim")));
-    let shade = color::ground().gamma_multiply(0.8);
-    for r in shaded(screen, &holes) {
-        painter.rect_filled(r, 0, shade);
-    }
-    for &hole in &holes {
+/// Paint only outlines; there is no backdrop and no input-capturing tutorial layer.
+fn highlight(ctx: &egui::Context, targets: &[Rect]) {
+    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("lesson_highlight")));
+    for &target in targets {
         painter.rect_stroke(
-            hole,
-            CornerRadius::same(radius::PANEL),
+            target.expand(2.0).intersect(ctx.content_rect()),
+            CornerRadius::same(radius::CONTROL),
             Stroke::new(2.0, color::light_blue()),
             egui::StrokeKind::Inside,
         );
     }
+}
+
+/// Current-frame dialog bounds, including dialogs unrelated to this lesson. The card must
+/// leave their controls and footers clear even when a dialog is moved or resized.
+fn dialog_rects(ctx: &egui::Context) -> Vec<Rect> {
+    let mut rects: Vec<_> = ["silence.dialog", "export.dialog", "subtitles.dialog"]
+        .into_iter()
+        .filter_map(|a| anchor_rect(ctx, a))
+        .collect();
+    rects.extend(ctx.memory(|m| {
+        m.areas().visible_layer_ids().into_iter()
+        .filter(|l| l.order == Order::Middle || Some(*l) == m.top_modal_layer())
+        .filter_map(|l| m.area_rect(l.id))
+        // The dock and modal backdrops may cover the whole viewport.
+        .filter(|r| r.width() < ctx.content_rect().width() * 0.95)
+        .collect::<Vec<_>>()
+    }));
+    rects
 }
 
 /// `screen` less `holes`, as rects: in each band between hole edges, the gaps between the
@@ -1295,110 +1454,153 @@ pub(crate) fn shaded(screen: Rect, holes: &[Rect]) -> Vec<Rect> {
     out
 }
 
-const CARD_W: f32 = 320.0;
-/// Roughly a card's height, to tell whether it fits above or below the target.
-const CARD_H: f32 = 140.0;
+const CARD_W: f32 = 296.0;
+const CARD_ID: &str = "lesson_card";
 
-/// The step card beside `target`, or centred when there is none: the lesson and step, the
-/// instruction `text` and the buttons. Returns the button clicked, never while not `live`.
+/// Choose a stable corner clear of the active controls, focused widget and whole dialogs.
+/// Try narrower cards beside dialogs before allowing any overlap at small window sizes.
+fn card_rect(screen: Rect, size: egui::Vec2, avoid: &[Rect], previous: Option<Rect>) -> Rect {
+    let screen = screen.shrink(space::S8);
+    let fits = |r: Rect| {
+        screen.contains_rect(r) && avoid.iter().all(|a| !r.intersects(a.expand(space::S8)))
+    };
+    if let Some(r) = previous.map(|r| Rect::from_min_size(r.min, size))
+        && fits(r)
+    {
+        return r;
+    }
+    let mut candidates = Vec::new();
+    for width in [size.x, 208.0_f32.min(size.x)] {
+        // Account for extra text and footer wrapping in a narrow card.
+        let height = (size.y * size.x / width).min(screen.height());
+        let size = vec2(width, height);
+        for align in [
+            Align2::LEFT_TOP,
+            Align2::RIGHT_TOP,
+            Align2::LEFT_BOTTOM,
+            Align2::RIGHT_BOTTOM,
+        ] {
+            let r = align.align_size_within_rect(size, screen);
+            if fits(r) {
+                return r;
+            }
+            candidates.push(r);
+        }
+    }
+    candidates
+        .into_iter()
+        .min_by(|a, b| {
+            let overlap = |r: Rect| {
+                avoid
+                    .iter()
+                    .filter(|a| r.intersects(a.expand(space::S8)))
+                    .map(|a| r.intersect(a.expand(space::S8)).area())
+                    .sum::<f32>()
+            };
+            overlap(*a).total_cmp(&overlap(*b))
+        })
+        .unwrap_or(screen)
+}
+
+/// A compact, non-modal task card. Buttons retain normal Tab/Enter/Space behavior and let
+/// go of focus after activation so subsequent editor shortcuts still reach their panel.
 fn card(
     ctx: &egui::Context,
     run: &Run,
     text: &str,
-    target: Option<Rect>,
-    live: bool,
+    targets: &[Rect],
+    dialogs: &[Rect],
 ) -> Option<Click> {
-    let screen = ctx.content_rect().shrink(space::S16);
-    let gap = space::S12;
-    let (at, pivot) = match target {
-        Some(t) if t.right() + gap + CARD_W <= screen.right() => {
-            (pos2(t.right() + gap, t.top()), Align2::LEFT_TOP)
-        }
-        Some(t) if t.left() - gap - CARD_W >= screen.left() => {
-            (pos2(t.left() - gap, t.top()), Align2::RIGHT_TOP)
-        }
-        Some(t) if t.top() - gap - CARD_H >= screen.top() => {
-            (pos2(t.center().x, t.top() - gap), Align2::CENTER_BOTTOM)
-        }
-        Some(t) if t.bottom() + gap + CARD_H <= screen.bottom() => {
-            (pos2(t.center().x, t.bottom() + gap), Align2::CENTER_TOP)
-        }
-        _ => (screen.center(), Align2::CENTER_CENTER),
-    };
+    let id = Id::new(CARD_ID);
+    let previous = ctx.memory(|m| m.area_rect(id));
+    let size = previous.map_or(vec2(CARD_W, 160.0), |r| vec2(CARD_W, r.height()));
+    let mut avoid = dialogs.to_vec();
+    avoid.extend_from_slice(targets);
+    let focused = ctx
+        .memory(|m| m.focused())
+        .and_then(|id| ctx.read_response(id));
+    if let Some(r) = focused
+        && r.layer_id.id != id
+    {
+        avoid.push(r.rect);
+    }
+    let rect = card_rect(ctx.content_rect(), size, &avoid, previous);
     let steps = run.lesson.steps;
     let step = steps.get(run.step);
     let mut click = None;
-    egui::Area::new(Id::new("lesson_card"))
+    let layer = LayerId::new(Order::Foreground, id);
+    // Keep Skip and Exit reachable above a modal's backdrop without becoming a modal.
+    ctx.move_to_top(layer);
+    egui::Area::new(id)
         .order(Order::Foreground)
-        .interactable(live)
-        .fixed_pos(at.max(screen.min))
-        .pivot(pivot)
+        .sense(egui::Sense::hover())
+        .movable(false)
+        .fixed_pos(rect.min)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style())
                 .fill(color::raised())
                 .inner_margin(space::S12)
                 .show(ui, |ui| {
-                    ui.set_width(CARD_W);
-                    ui.horizontal(|ui| {
-                        let title = egui::RichText::new((run.lesson.title)())
+                    ui.set_width((rect.width() - 2.0 * space::S12).max(120.0));
+                    ui.label(
+                        egui::RichText::new((run.lesson.title)())
                             .font(theme::body_strong())
-                            .color(color::ink());
-                        ui.label(title);
-                        if step.is_some() {
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if run.done {
-                                    let mark = egui::RichText::new(theme::icon::CIRCLE_CHECK)
-                                        .font(theme::icon_font())
-                                        .color(color::green());
-                                    ui.label(mark);
-                                }
-                                let n = tr!("tutorial.step", n = run.step + 1, total = steps.len());
-                                let n = egui::RichText::new(n)
-                                    .font(theme::small())
-                                    .color(color::ink_3());
-                                ui.label(n);
-                            });
-                        }
-                    });
+                            .color(color::ink()),
+                    );
+                    if step.is_some() {
+                        ui.label(
+                            egui::RichText::new(tr!(
+                                "tutorial.step",
+                                n = run.step + 1,
+                                total = steps.len()
+                            ))
+                            .font(theme::small())
+                            .color(color::ink_3()),
+                        );
+                    }
+                    ui.add_space(space::S4);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(text)
+                                .font(theme::body())
+                                .color(color::ink()),
+                        )
+                        .wrap(),
+                    );
                     ui.add_space(space::S8);
-                    let text = egui::RichText::new(text)
-                        .font(theme::body())
-                        .color(color::ink());
-                    ui.add(egui::Label::new(text).wrap());
-                    ui.add_space(space::S12);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = vec2(space::S4, space::S4);
-                        // A clicked button lets go of focus, so Space or Delete reach the editor.
-                        let mut button = |b: Button<'_>, c: Click| {
-                            let r = ui.add(b);
-                            if r.clicked() {
-                                r.surrender_focus();
-                                click = Some(c);
-                            }
-                        };
-                        if step.is_some() && run.done {
-                            let next = match run.step + 1 == steps.len() {
-                                true => tr!("tutorial.finish"),
-                                false => tr!("tutorial.next"),
-                            };
-                            button(Button::primary(next), Click::Next);
+                    let mut buttons = Vec::new();
+                    if run.step > 0 {
+                        buttons.push((Button::ghost(tr!("tutorial.back")), Click::Back));
+                    }
+                    buttons.push((Button::ghost(tr!("tutorial.exit")), Click::Exit));
+                    if step.is_some() {
+                        buttons.push((Button::ghost(tr!("tutorial.skip_step")), Click::Skip));
+                        if run.lesson.id == TOUR.id && run.step == 0 && !run.done {
+                            buttons.push((
+                                Button::secondary(tr!("tutorial.import_sample")),
+                                Click::ImportSample,
+                            ));
                         }
-                        if step.is_some() {
-                            button(Button::secondary(tr!("tutorial.show_me")), Click::ShowMe);
-                            let back = if run.step == 0 {
-                                State::Disabled
+                        if run.done {
+                            let next = if run.step + 1 == steps.len() {
+                                tr!("tutorial.finish")
                             } else {
-                                State::Live
+                                tr!("tutorial.next")
                             };
-                            button(Button::ghost(tr!("tutorial.back")).state(back), Click::Back);
-                            if !run.done {
-                                button(Button::ghost(tr!("tutorial.skip_step")), Click::Skip);
-                            }
-                        } else {
-                            button(Button::secondary(tr!("tutorial.keep_project")), Click::Keep);
+                            buttons.push((Button::secondary(next), Click::Next));
                         }
-                        button(Button::ghost(tr!("tutorial.exit")), Click::Exit);
-                    });
+                    } else {
+                        buttons
+                            .push((Button::secondary(tr!("tutorial.keep_project")), Click::Keep));
+                    }
+                    let (buttons, actions): (Vec<_>, Vec<_>) = buttons.into_iter().unzip();
+                    let responses = suite_ui::dialog::action_footer(ui, buttons);
+                    for (response, action) in responses.into_iter().zip(actions) {
+                        if response.clicked() {
+                            response.surrender_focus();
+                            click = Some(action);
+                        }
+                    }
                 });
         });
     click
@@ -1460,7 +1662,7 @@ mod tests {
                         .iter()
                         .any(|a| a.text.is_some())
                 },
-                show_me: |a| {
+                example: |a| {
                     let [(name, _, text), ..] = crate::media_bin::presets();
                     let name = name.into();
                     apply(a, Command::AddText { name, text });
@@ -1476,7 +1678,7 @@ mod tests {
                 anchor: "timeline",
                 text: |_| String::new(),
                 done: |a| first_clip(a).is_some(),
-                show_me: |a| {
+                example: |a| {
                     let project = a.history.project();
                     let Some(asset) = project.assets().iter().find(|a| a.text.is_some()) else {
                         return;
@@ -1493,7 +1695,7 @@ mod tests {
                 anchor: "timeline",
                 text: |_| String::new(),
                 done: |a| !a.timeline.selected().is_empty(),
-                show_me: |a| {
+                example: |a| {
                     if let Some(id) = first_clip(a) {
                         a.timeline.select_clip(a.history.project().sequence(), id);
                     }
@@ -1512,7 +1714,7 @@ mod tests {
                         .filter_map(|a| a.text.as_ref())
                         .any(|t| t.content != *preset)
                 },
-                show_me: |a| {
+                example: |a| {
                     let project = a.history.project();
                     let Some(asset) = project.assets().iter().find(|a| a.text.is_some()) else {
                         return;
@@ -1545,7 +1747,7 @@ mod tests {
                 anchor: "render_queue",
                 text: |_| String::new(),
                 done: |_| false,
-                show_me: |_| {},
+                example: |_| {},
                 reveal: None,
                 ghost: None,
                 also: &[],
@@ -1554,7 +1756,7 @@ mod tests {
                 anchor: "nowhere",
                 text: |_| String::new(),
                 done: |_| false,
-                show_me: |_| {},
+                example: |_| {},
                 reveal: None,
                 ghost: None,
                 also: &[],
@@ -1600,96 +1802,70 @@ mod tests {
         click(h, label);
     }
 
-    /// Show Me, then Next once it passes.
-    fn show_me(h: &mut Harness<'_, App>) {
-        click(h, tr!("tutorial.show_me"));
-        next(h);
+    /// Exercise a lesson's reference edit, allowing an already satisfied goal to be read.
+    fn perform(h: &mut Harness<'_, App>) {
+        let run = h.state().lesson.as_ref().unwrap();
+        let at = run.step;
+        let example = run.lesson.steps[at].example;
+        example(h.state_mut());
+        settle(h);
+        if step(h) == Some(at) && h.state().lesson.as_ref().unwrap().done {
+            next(h);
+        }
     }
 
-    /// Exports need a GPU, so the tour's last step does too.
+    /// Reference edits exercise all existing lessons, including async scopes and recognition.
     #[test]
-    fn every_lesson_runs_by_show_me_and_draws_each_steps_anchor() {
+    fn every_lesson_advances_on_its_reference_actions_and_reveals_anchors() {
         if !suite_ui::test_support::gpu() {
             return;
         }
-        let dir = tmp("show-me");
+        let dir = tmp("actions");
         for lesson in LESSONS.iter().chain([&BASICS]) {
             let mut h = harness_with(Harness::builder().wgpu(), &Default::default());
-            // Transcripts stay in memory, not in the user's cache.
             h.state_mut().set_recognition_cache(Default::default());
-            // Where Show Me's export lands.
             h.state_mut().export_dialog.set_path(dir.join("x.mp4"));
             h.state_mut().start_lesson(lesson);
-            for (i, step) in lesson.steps.iter().enumerate() {
+            for (i, task) in lesson.steps.iter().enumerate() {
                 settle(&mut h);
-                assert_eq!(
-                    h.state().lesson.as_ref().map(|r| r.step),
-                    Some(i),
-                    "{}: on step {i}",
-                    lesson.id
-                );
-                // A renamed or removed control fails here instead of in the lesson.
-                // A row waiting on a selection lights the whole Inspector meanwhile.
-                for anchor in [step.anchor].iter().chain(step.also) {
-                    let row = row_name(anchor).is_some();
+                assert_eq!(step(&h), Some(i), "{}: on task {i}", lesson.id);
+                for anchor in [task.anchor].iter().chain(task.also) {
                     assert!(
-                        drawn(&h, anchor).is_some() || row && drawn(&h, "inspector").is_some(),
-                        "{} step {i}: `{anchor}` never drawn",
-                        lesson.id,
+                        drawn(&h, anchor).is_some()
+                            || row_name(anchor).is_some() && drawn(&h, "inspector").is_some(),
+                        "{} task {i}: `{anchor}` never drawn",
+                        lesson.id
                     );
                 }
-                // A take needs a microphone, so the run skips it.
-                if step.anchor == "record" {
+                if task.anchor == "record" {
                     click(&mut h, tr!("tutorial.skip_step"));
                     continue;
                 }
-                // Generating frees the model when done, so it's put back each time.
                 h.state_mut().subtitles.engine = Some(fake());
-                h.get_by_label(tr!("tutorial.show_me")).click();
-                // Each frame renders, as in the app: the scopes count a rendered frame, so a
-                // step reading them passes a few frames on.
-                for _ in 0..100 {
+                (task.example)(h.state_mut());
+                for _ in 0..300 {
                     h.step();
                     h.render().unwrap();
-                    if (step.done)(h.state()) {
+                    if step(&h) != Some(i) {
+                        break;
+                    }
+                    if h.state().lesson.as_ref().unwrap().done {
+                        next(&mut h);
                         break;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(5));
                 }
-                assert!(
-                    (step.done)(h.state()),
-                    "{} step {i}: Show Me didn't pass",
-                    lesson.id
-                );
-                settle(&mut h);
                 assert_eq!(
-                    h.state().lesson.as_ref().map(|r| r.step),
-                    Some(i),
-                    "{} step {i}: moved on",
+                    step(&h),
+                    Some(i + 1),
+                    "{}: task {i} did not advance",
                     lesson.id
                 );
-                // A step about one Inspector control lights that row, not the panel.
-                let rows = [step.anchor].into_iter().chain(step.also.iter().copied());
-                for anchor in rows.filter(|a| row_name(a).is_some()) {
-                    let (row, panel) = (drawn(&h, anchor), drawn(&h, "inspector"));
-                    let Some(row) = row else {
-                        panic!("{} step {i}: `{anchor}` never drawn", lesson.id);
-                    };
-                    let panel = panel.unwrap();
-                    assert!(
-                        panel.contains_rect(row) && row.area() < panel.area() / 2.0,
-                        "{} step {i}: `{anchor}` {row:?} in the Inspector {panel:?}",
-                        lesson.id,
-                    );
-                }
-                next(&mut h);
             }
-            let at = h.state().lesson.as_ref().map(|r| r.step);
-            assert_eq!(at, Some(lesson.steps.len()), "{}: finished", lesson.id);
             assert!(h.state().tutorials_done.iter().any(|d| d == lesson.id));
             click(&mut h, tr!("tutorial.exit"));
             assert!(h.state().lesson.is_none());
-            assert!(!h.state().preview.playing(), "{}: still playing", lesson.id);
+            assert!(!h.state().preview.playing());
         }
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1759,7 +1935,7 @@ mod tests {
             anchor: "render_queue",
             text: |_| String::new(),
             done: |a| queued(a).next().is_some(),
-            show_me: |a| fake_export(a),
+            example: |a| fake_export(a),
             reveal: None,
             ghost: None,
             also: &[],
@@ -1787,8 +1963,14 @@ mod tests {
             h.query_by_label(tr!("tutorial.finish")).is_none(),
             "the old export passed"
         );
-        click(&mut h, tr!("tutorial.show_me"));
-        click(&mut h, tr!("tutorial.finish"));
+        {
+            let example = {
+                let run = h.state().lesson.as_ref().unwrap();
+                run.lesson.steps[run.step].example
+            };
+            example(h.state_mut());
+            settle(&mut h);
+        }
         assert_eq!(step(&h), Some(1));
     }
 
@@ -1809,19 +1991,18 @@ mod tests {
         let mut h = harness();
         h.state_mut().start_lesson(&KEYFRAMES);
         settle(&mut h);
-        show_me(&mut h);
-        show_me(&mut h);
+        perform(&mut h);
+        perform(&mut h);
         // Custom in the diamond's easing menu passes the easing step but not the graph step.
         ease_first(h.state_mut(), Easing::Bezier([0.1, 0.0, 0.3, 1.0]));
         settle(&mut h);
-        next(&mut h);
         let done = |h: &Harness<'_, App>| h.state().lesson.as_ref().is_some_and(|r| r.done);
         assert_eq!(step(&h), Some(3));
         assert!(!done(&h));
         let id = first_clip(h.state()).unwrap();
         h.state_mut().timeline.open_graph(id);
         settle(&mut h);
-        assert!(done(&h));
+        assert_eq!(step(&h), Some(4));
     }
 
     #[test]
@@ -1847,7 +2028,7 @@ mod tests {
 
         state.start_lesson(&BASICS);
         settle(&mut h);
-        show_me(&mut h);
+        perform(&mut h);
         assert_eq!(h.state().lesson.as_ref().map(|r| r.step), Some(1));
         assert_ne!(h.state().history.project(), &before);
         click(&mut h, tr!("tutorial.exit"));
@@ -1870,73 +2051,64 @@ mod tests {
         let mut h = harness();
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
-        show_me(&mut h);
+        perform(&mut h);
         assert_eq!(step(&h), Some(1));
         click(&mut h, tr!("tutorial.back"));
         assert_eq!(step(&h), Some(0), "a done step waits after Back");
-        assert!(h.query_by_label(tr!("tutorial.skip_step")).is_none());
+        assert!(h.query_by_label(tr!("tutorial.skip_step")).is_some());
         next(&mut h);
         click(&mut h, tr!("tutorial.skip_step"));
         assert_eq!(step(&h), Some(2));
     }
 
     #[test]
-    fn a_passing_check_waits_for_next_or_enter() {
+    fn actual_editor_action_advances_without_next_and_unrelated_actions_do_not() {
         let mut h = harness();
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
+        assert!(h.query_by_label(tr!("tutorial.show_me")).is_none());
         assert!(h.query_by_label(tr!("tutorial.next")).is_none());
-        click(&mut h, tr!("tutorial.show_me"));
-        for _ in 0..10 {
-            h.run_ok();
-        }
-        assert_eq!(step(&h), Some(0), "Show Me waits for Next");
-        assert!(h.query_by_label(tr!("tutorial.next")).is_some());
-        h.key_press(Key::Enter);
-        h.run_ok();
-        assert_eq!(step(&h), Some(1), "Enter presses Next");
-        // Not done yet, so Enter does nothing.
-        h.key_press(Key::Enter);
-        h.run_ok();
+        h.state_mut().timeline.seek(SECOND);
+        apply(
+            h.state_mut(),
+            Command::AddTrack {
+                kind: TrackKind::Audio,
+                name: String::new(),
+            },
+        );
+        settle(&mut h);
+        assert_eq!(step(&h), Some(0), "unrelated seek/track edit advanced");
+        // Click the real title preset while guidance stays visible.
+        click(&mut h, crate::media_bin::presets()[0].0);
         assert_eq!(step(&h), Some(1));
-        for _ in 1..BASICS.steps.len() {
-            show_me(&mut h);
-        }
-        assert_eq!(step(&h), Some(BASICS.steps.len()), "Finish ends the lesson");
-        assert!(h.state().tutorials_done.iter().any(|d| d == BASICS.id));
+        assert!(h.state().history.can_undo());
+        h.key_press(Key::Enter);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(1), "Enter skipped an unfinished task");
     }
 
     #[test]
-    fn space_after_show_me_plays_instead_of_pressing_it_again() {
+    fn keyboard_navigation_and_editor_shortcuts_still_work() {
         let mut h = harness();
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
-        show_me(&mut h);
-        click(&mut h, tr!("tutorial.show_me"));
-        let clips = |h: &Harness<'_, App>| {
-            let seq = h.state().history.project().sequence();
-            seq.tracks().iter().map(|t| t.clips().len()).sum::<usize>()
-        };
-        assert_eq!(clips(&h), 1);
-        assert!(
-            h.ctx.memory(|m| m.focused()).is_none(),
-            "Show Me kept focus"
-        );
-        let playing = h.state().preview.playing();
-        // Where the user's click on the timeline leaves focus.
-        let state = h.state_mut();
-        if let Some(path) = state.dock.find_tab(&Tab::Timeline) {
-            state.dock.set_focused_node_and_surface(path.node_path());
-        }
+        perform(&mut h);
+        click(&mut h, tr!("tutorial.back"));
+        assert_eq!(step(&h), Some(0));
+        assert!(h.ctx.memory(|m| m.focused()).is_none());
+        h.key_press(Key::Enter);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(1), "Enter acknowledges an already done task");
+        // Keyboard activation returns focus to the editor too.
+        h.get_by_label(tr!("tutorial.skip_step")).focus();
+        settle(&mut h);
         h.key_press(Key::Space);
-        h.run_ok();
-        assert_eq!(clips(&h), 1, "Space pressed Show Me again");
-        assert_ne!(
-            h.state().preview.playing(),
-            playing,
-            "Space didn't reach playback"
-        );
-        h.state_mut().end_lesson();
+        settle(&mut h);
+        assert_eq!(step(&h), Some(2));
+        assert!(h.ctx.memory(|m| m.focused()).is_none());
+        h.key_press(Key::Escape);
+        settle(&mut h);
+        assert!(h.state().lesson.is_none());
     }
 
     #[test]
@@ -1969,7 +2141,7 @@ mod tests {
             Some(LESSONS[0].id)
         );
         settle(&mut h);
-        show_me(&mut h);
+        perform(&mut h);
         for _ in &LESSONS[0].steps[1..] {
             click(&mut h, tr!("tutorial.skip_step"));
         }
@@ -2000,7 +2172,14 @@ mod tests {
         h.state_mut().untitled = Some(untitled);
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
-        click(&mut h, tr!("tutorial.show_me"));
+        {
+            let example = {
+                let run = h.state().lesson.as_ref().unwrap();
+                run.lesson.steps[run.step].example
+            };
+            example(h.state_mut());
+            settle(&mut h);
+        }
         // Where Keep Project and Ctrl+S both land once the save dialog picks a file.
         assert!(h.state_mut().save_to(dir.join("kept.jvid")));
         assert!(auto.exists(), "Keep Project deleted the untitled autosave");
@@ -2037,7 +2216,7 @@ mod tests {
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         for _ in 0..3 {
-            show_me(&mut h);
+            perform(&mut h);
         }
         assert!(!h.state().timeline.selected().is_empty());
         assert!(h.state().bin.selected.is_some());
@@ -2047,11 +2226,18 @@ mod tests {
     }
 
     #[test]
-    fn show_me_selects_the_new_title_like_a_click() {
+    fn reference_edit_selects_the_new_title_like_a_click() {
         let mut h = harness();
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
-        click(&mut h, tr!("tutorial.show_me"));
+        {
+            let example = {
+                let run = h.state().lesson.as_ref().unwrap();
+                run.lesson.steps[run.step].example
+            };
+            example(h.state_mut());
+            settle(&mut h);
+        }
         let state = h.state();
         let title = state
             .history
@@ -2070,7 +2256,7 @@ mod tests {
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
         assert_eq!(h.state().bin.tab, 2);
-        show_me(&mut h);
+        perform(&mut h);
         assert_eq!(step(&h), Some(1));
         h.state_mut().bin.tab = 3;
         click(&mut h, tr!("tutorial.back"));
@@ -2147,10 +2333,10 @@ mod tests {
         )
     }
 
-    /// Acceptance: Show Me runs the whole lesson on a fake transcriber, without a GPU, a model
+    /// Acceptance: reference actions run the whole lesson on a fake transcriber, without a GPU, a model
     /// or the network.
     #[test]
-    fn the_subtitles_lesson_runs_by_show_me_with_a_fake_transcriber() {
+    fn the_subtitles_lesson_advances_with_a_fake_transcriber() {
         use subtitles::{SUBTITLES, cut};
         let fake = std::sync::Arc::new(crate::app::tests::FakeTranscriber {
             slow: false,
@@ -2164,21 +2350,24 @@ mod tests {
         assert!(!cut(h.state()), "the whole voice plays at the start");
         for (i, s) in SUBTITLES.steps.iter().enumerate() {
             assert_eq!(step(&h), Some(i));
-            assert!(!(s.done)(h.state()), "step {i} done before Show Me");
+            assert!(!(s.done)(h.state()), "step {i} done before the action");
             h.state_mut().subtitles.engine =
                 Some((jvid_transcribe::models::Model::Base, fake.clone()));
-            h.get_by_label(tr!("tutorial.show_me")).click();
+            (s.example)(h.state_mut());
             let start = std::time::Instant::now();
             while !(s.done)(h.state()) {
                 assert!(
                     start.elapsed().as_secs() < 30,
-                    "step {i}: Show Me didn't pass"
+                    "step {i}: action did not pass"
                 );
                 std::thread::sleep(std::time::Duration::from_millis(5));
                 h.step();
             }
             settle(&mut h);
-            next(&mut h);
+            if step(&h) == Some(i) {
+                next(&mut h);
+            }
+            assert_eq!(step(&h), Some(i + 1));
         }
         assert_eq!(step(&h), Some(SUBTITLES.steps.len()));
         assert!(h.state().tutorials_done.iter().any(|d| d == SUBTITLES.id));
@@ -2197,7 +2386,7 @@ mod tests {
         );
     }
 
-    /// Without a model, Show Me opens Generate Subtitles on its download choice and starts
+    /// Without a model, the action opens Generate Subtitles on its download choice and starts
     /// nothing; Cancel and Skip Step move on offline.
     #[test]
     fn without_a_model_the_subtitles_lesson_waits_on_the_download_choice() {
@@ -2210,7 +2399,14 @@ mod tests {
         h.state_mut().set_recognition_cache(Default::default());
         h.state_mut().start_lesson(&subtitles::SUBTITLES);
         settle(&mut h);
-        click(&mut h, tr!("tutorial.show_me"));
+        {
+            let example = {
+                let run = h.state().lesson.as_ref().unwrap();
+                run.lesson.steps[run.step].example
+            };
+            example(h.state_mut());
+            settle(&mut h);
+        }
         assert!(h.state().subtitles.is_open());
         let size = (Model::Base.size() as f64 / 1e6).round().to_string();
         let fast = tr!(
@@ -2285,7 +2481,7 @@ mod tests {
             .placement(bg, Time(0), false, Some(top), false);
         apply(a, Command::Place(p.unwrap()));
         assert!(!under(a), "a background above the key passed");
-        (GREEN_SCREEN.steps[0].show_me)(a);
+        (GREEN_SCREEN.steps[0].example)(a);
         assert!(under(a));
     }
 
@@ -2345,7 +2541,7 @@ mod tests {
                 anchor: "preview",
                 text: |_| String::new(),
                 done: |_| false,
-                show_me: |_| {},
+                example: |_| {},
                 reveal: None,
                 ghost: Some([[10.0, 20.0], [300.0, 400.0]]),
                 also: &[],
@@ -2374,7 +2570,7 @@ mod tests {
         assert!(h.ctx.data(|d| d.get_temp::<Anchors>(Id::NULL)).is_none());
     }
 
-    /// Show Me cuts `DEAD_AIR` without waiting on peaks, so it has to be what Detect Silence
+    /// The reference edit cuts `DEAD_AIR` without waiting on peaks, so it has to be what Detect Silence
     /// finds in the sample at its defaults.
     #[test]
     fn dead_air_is_what_detect_silence_finds_in_the_sample() {
@@ -2396,13 +2592,314 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[test]
-    fn the_dim_stays_under_windows() {
-        assert!(DIM < Order::Middle);
+    fn card_bounds(h: &Harness<'_, App>) -> Rect {
+        h.ctx.memory(|m| m.area_rect(Id::new(CARD_ID))).unwrap()
+    }
+
+    fn screen_lesson() -> Harness<'static, App> {
+        let mut h = harness();
+        h.set_size(vec2(960.0, 600.0));
+        h.state_mut().start_lesson(&SCREEN);
+        settle(&mut h);
+        h
+    }
+
+    fn select_screen(h: &mut Harness<'_, App>) {
+        let a = h.state_mut();
+        let id = first_clip(a).unwrap();
+        a.timeline.select_clip(a.history.project().sequence(), id);
+        settle(h);
+    }
+
+    fn open_silence(h: &mut Harness<'_, App>) {
+        select_screen(h);
+        h.state_mut().run_action("detect_silence", true);
+        settle(h);
+        assert!(drawn(h, "silence.dialog").is_some());
     }
 
     #[test]
-    fn the_dim_shades_everything_but_each_hole() {
+    fn guidance_highlights_automatically_without_dimming_or_blocking_the_editor() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&BASICS);
+        settle(&mut h);
+        let target = drawn(&h, "bin.titles")
+            .unwrap()
+            .expand(2.0)
+            .intersect(h.ctx.content_rect());
+        assert!(h.output().shapes.iter().any(|s| matches!(&s.shape,
+            egui::Shape::Rect(r) if r.rect == target && r.fill == egui::Color32::TRANSPARENT
+                && r.stroke == Stroke::new(2.0, color::light_blue()))));
+        assert!(!h.output().shapes.iter().any(|s| matches!(&s.shape,
+            egui::Shape::Rect(r) if r.fill == color::ground().gamma_multiply(0.8))));
+        let before = card_bounds(&h);
+        h.run_ok();
+        assert_eq!(card_bounds(&h), before, "idle guidance moved");
+        click(&mut h, crate::media_bin::presets()[0].0);
+        assert_eq!(
+            step(&h),
+            Some(1),
+            "guidance blocked the actual title button"
+        );
+    }
+
+    #[test]
+    fn silence_guidance_tracks_selection_dialog_and_dismissal_at_960_by_600() {
+        let mut h = screen_lesson();
+        assert!(h.query_by_label(tr!("tutorial.silence_select")).is_some());
+        select_screen(&mut h);
+        let open_text = tr!(
+            "tutorial.silence_open",
+            key = h.state().keymap.shortcut("detect_silence")
+        );
+        assert!(h.query_by_label(&open_text).is_some());
+        open_silence(&mut h);
+        assert!(h.query_by_label(tr!("tutorial.silence_cut")).is_some());
+        assert!(h.query_by_label(&open_text).is_none());
+        let dialog = drawn(&h, "silence.dialog").unwrap();
+        let card = card_bounds(&h);
+        assert!(
+            h.ctx.content_rect().contains_rect(card),
+            "card outside viewport: {card:?}"
+        );
+        assert!(
+            !card.intersects(dialog),
+            "card {card:?} covers dialog {dialog:?}"
+        );
+        assert!(!card.intersects(drawn(&h, "silence.cut").unwrap()));
+        assert_eq!(step(&h), Some(0), "opening the dialog completed a cut");
+        h.key_press(Key::Escape);
+        settle(&mut h);
+        assert_eq!(
+            step(&h),
+            Some(0),
+            "Escape exited rather than dismissing the dialog"
+        );
+        assert!(!h.state().timeline.dialog_open());
+        assert!(h.query_by_label(&open_text).is_some());
+        open_silence(&mut h);
+        click(&mut h, tr!("prompt.cancel"));
+        assert_eq!(step(&h), Some(0));
+        assert!(h.query_by_label(&open_text).is_some());
+    }
+
+    #[test]
+    fn silence_progress_requires_the_successful_cut_action() {
+        let mut h = screen_lesson();
+        let a = h.state_mut();
+        let id = first_clip(a).unwrap();
+        a.history
+            .apply(Command::SetClipSpeed {
+                id,
+                speed: 2.0,
+                reverse: false,
+                ripple: true,
+            })
+            .unwrap();
+        settle(&mut h);
+        assert!(shortened(h.state(), SCREEN_CLIP));
+        assert_eq!(
+            step(&h),
+            Some(0),
+            "an unrelated speed change completed Detect Silence"
+        );
+        h.state_mut().history.undo();
+        open_silence(&mut h);
+        let started = std::time::Instant::now();
+        while h.query_by_label(tr!("silence.reading")).is_some() {
+            assert!(
+                started.elapsed().as_secs() < 15,
+                "sample peaks never loaded"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            h.step();
+        }
+        click(&mut h, tr!("silence.cut"));
+        assert_eq!(step(&h), Some(1), "Cut did not automatically advance");
+        assert!(shortened(h.state(), SCREEN_CLIP));
+        assert!(
+            h.state_mut().history.undo(),
+            "the actual cut remains undoable"
+        );
+        assert!(!shortened(h.state(), SCREEN_CLIP));
+        assert!(h.state_mut().history.redo());
+    }
+
+    #[test]
+    fn skip_back_and_exit_remain_available_with_the_task_dialog_open() {
+        let mut h = screen_lesson();
+        open_silence(&mut h);
+        click(&mut h, tr!("tutorial.skip_step"));
+        assert_eq!(step(&h), Some(1));
+        assert!(
+            !h.state().timeline.dialog_open(),
+            "Skip left stale task controls open"
+        );
+        click(&mut h, tr!("tutorial.back"));
+        assert_eq!(step(&h), Some(0));
+        open_silence(&mut h);
+        click(&mut h, tr!("tutorial.exit"));
+        assert!(h.state().lesson.is_none());
+        assert!(!h.state().timeline.dialog_open());
+        assert!(h.state().tutorials_done.is_empty());
+    }
+
+    #[test]
+    fn modal_guidance_leaves_export_footer_clear_and_skip_is_reachable() {
+        let mut h = harness();
+        h.set_size(vec2(960.0, 600.0));
+        h.state_mut().start_lesson(&KEYFRAMES);
+        settle(&mut h);
+        // The export lesson uses the title prepared above, without requiring a GPU.
+        h.state_mut().lesson.as_mut().unwrap().go(0);
+        let seq = h.state().history.project().sequence().clone();
+        h.state_mut().export_dialog.open(&seq, "tutorial");
+        settle(&mut h);
+        let dialog = drawn(&h, "export.dialog").unwrap();
+        let card = card_bounds(&h);
+        assert!(h.ctx.content_rect().contains_rect(card));
+        assert!(
+            !card.intersects(dialog),
+            "card {card:?} covers modal {dialog:?}"
+        );
+        click(&mut h, tr!("tutorial.skip_step"));
+        assert_eq!(step(&h), Some(1), "modal blocked Skip");
+        // An unrelated dialog is dismissed by Escape, with the lesson still running.
+        h.key_press(Key::Escape);
+        settle(&mut h);
+        assert!(h.state().lesson.is_some());
+        assert!(!h.state().export_dialog.is_open());
+    }
+
+    #[test]
+    fn subtitle_dialog_updates_guidance_and_keyboard_exit_works_above_the_modal() {
+        let mut h = harness();
+        h.set_size(vec2(960.0, 600.0));
+        h.state_mut().start_lesson(&subtitles::SUBTITLES);
+        settle(&mut h);
+        h.state_mut().run_action("generate_subtitles", true);
+        settle(&mut h);
+        let text = tr!(
+            "tutorial.speech_settings",
+            action = tr!("subtitles.generate")
+        );
+        assert!(h.query_by_label(&text).is_some());
+        assert_eq!(
+            step(&h),
+            Some(0),
+            "opening a model choice completed generation"
+        );
+        assert!(!card_bounds(&h).intersects(drawn(&h, "subtitles.dialog").unwrap()));
+        h.get_by_label(tr!("tutorial.exit")).focus();
+        settle(&mut h);
+        h.key_press(Key::Enter);
+        settle(&mut h);
+        assert!(
+            h.state().lesson.is_none(),
+            "keyboard Exit was trapped behind the modal"
+        );
+        assert!(!h.state().subtitles.is_open());
+    }
+
+    #[test]
+    fn minimum_layout_renders_guidance_beside_the_open_task_dialog() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = harness_with(Harness::builder().wgpu(), &Default::default());
+        h.set_size(vec2(960.0, 600.0));
+        h.state_mut().start_lesson(&SCREEN);
+        settle(&mut h);
+        open_silence(&mut h);
+        let dialog = drawn(&h, "silence.dialog").unwrap();
+        assert!(!card_bounds(&h).intersects(dialog));
+        let image = h.render().unwrap();
+        assert_eq!(image.dimensions(), (960, 600));
+        if let Some(dir) = std::env::var_os("JVID_TUTORIAL_CAPTURE") {
+            std::fs::create_dir_all(&dir).unwrap();
+            image
+                .save(PathBuf::from(dir).join("tutorial-silence-960x600.png"))
+                .unwrap();
+        }
+        click(&mut h, tr!("tutorial.exit"));
+    }
+
+    #[test]
+    fn already_satisfied_and_no_action_steps_remain_readable() {
+        const READ: Lesson = Lesson {
+            steps: &[
+                Step {
+                    anchor: "timeline",
+                    text: |_| String::new(),
+                    done: |_| true,
+                    example: |_| {},
+                    reveal: None,
+                    ghost: None,
+                    also: &[],
+                },
+                Step {
+                    anchor: "preview",
+                    text: |_| String::new(),
+                    done: |_| false,
+                    example: |_| {},
+                    reveal: None,
+                    ghost: None,
+                    also: &[],
+                },
+            ],
+            ..PREPARED
+        };
+        let mut h = harness();
+        h.state_mut().start_lesson(&READ);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(0));
+        h.key_press(Key::Enter);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(1));
+        h.state_mut().timeline.seek(SECOND);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(1));
+        click(&mut h, tr!("tutorial.skip_step"));
+        assert_eq!(step(&h), Some(2));
+    }
+
+    #[test]
+    fn restarting_a_completed_lesson_resets_the_sandbox_and_step_baseline() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&BASICS);
+        settle(&mut h);
+        for _ in BASICS.steps {
+            perform(&mut h);
+        }
+        assert!(h.state().tutorials_done.iter().any(|d| d == BASICS.id));
+        h.state_mut().start_lesson(&BASICS);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(0));
+        assert!(h.state().history.project().assets().is_empty());
+        assert!(h.query_by_label(tr!("tutorial.next")).is_none());
+        perform(&mut h);
+        assert_eq!(step(&h), Some(1));
+    }
+
+    #[test]
+    fn card_placement_avoids_controls_dialogs_and_focused_fields() {
+        for size in [vec2(960.0, 600.0), vec2(1280.0, 720.0)] {
+            let screen = Rect::from_min_size(pos2(0.0, 0.0), size);
+            let dialog = Align2::CENTER_CENTER.align_size_within_rect(vec2(480.0, 530.0), screen);
+            let control = Rect::from_min_size(pos2(10.0, 12.0), vec2(160.0, 24.0));
+            let card = card_rect(screen, vec2(CARD_W, 160.0), &[dialog, control], None);
+            assert!(screen.contains_rect(card));
+            assert!(!card.intersects(dialog));
+            assert!(!card.intersects(control));
+            assert_eq!(
+                card_rect(screen, card.size(), &[dialog, control], Some(card)),
+                card
+            );
+        }
+    }
+
+    #[test]
+    fn viewer_shading_excludes_each_hole() {
         let screen = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0));
         let a = Rect::from_min_max(pos2(10.0, 10.0), pos2(30.0, 60.0));
         let b = Rect::from_min_max(pos2(50.0, 40.0), pos2(90.0, 80.0));

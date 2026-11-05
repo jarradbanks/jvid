@@ -558,6 +558,10 @@ impl Subtitles {
         self.open
     }
 
+    pub(crate) fn is_running(&self) -> bool {
+        self.run.is_some()
+    }
+
     /// Cancels anything running and frees the model.
     pub(crate) fn close(&mut self) {
         self.open = false;
@@ -985,8 +989,10 @@ impl Subtitles {
                     ],
                 );
                 close = actions[0].clicked();
+                crate::app::tutorial::anchor(ui.ctx(), "subtitles.action", actions[1].rect);
                 start = actions[1].clicked();
             });
+        crate::app::tutorial::anchor(ui.ctx(), "subtitles.dialog", modal.response.rect);
         if close || modal.should_close() {
             self.close();
         } else if start {

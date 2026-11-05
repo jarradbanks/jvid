@@ -969,6 +969,14 @@ pixelate_block = "Block"
 
 # The lesson step card and Help > Tutorials.
 [tutorial]
+import_sample = "Import Sample"
+silence_select = "Select the screen recording on the Timeline."
+silence_open = "Open Detect Silence with {key}."
+silence_cut = "Adjust Threshold to mark the quiet section, then click Cut."
+export_settings = "Choose the output settings and destination, then add the video to the queue."
+speech_running = "Wait for speech recognition to finish."
+speech_settings = "Choose a speech model and language, then click {action}."
+
 # Help > Tutorials: a lesson's length; {count} is minutes.
 minutes = "{count} min"
 # The step card: {n} is the step shown, {total} the lesson's steps.

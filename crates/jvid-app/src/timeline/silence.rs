@@ -243,7 +243,7 @@ impl Silence {
         let settings = self.settings();
         let mut command = None;
         let mut open = !ui.input(|i| i.key_pressed(Key::Escape));
-        egui::Window::new(tr!("silence.title"))
+        let window = egui::Window::new(tr!("silence.title"))
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
@@ -328,7 +328,7 @@ impl Silence {
                                         [label_width, 24.0],
                                         egui::Label::new(label).wrap().halign(egui::Align::Min),
                                     );
-                                    ui.add(
+                                    let response = ui.add(
                                         DragField::new(v)
                                             .suffix(suffix)
                                             .range(range)
@@ -336,6 +336,13 @@ impl Silence {
                                             .speed(speed)
                                             .width(96.0),
                                     );
+                                    if label == tr!("silence.threshold") {
+                                        crate::app::tutorial::anchor(
+                                            ui.ctx(),
+                                            "silence.threshold",
+                                            response.rect,
+                                        );
+                                    }
                                     ui.end_row();
                                 }
                             });
@@ -390,6 +397,7 @@ impl Silence {
                         Button::primary(tr!("silence.cut")).state(state),
                     ],
                 );
+                crate::app::tutorial::anchor(ui.ctx(), "silence.cut", actions[2].rect);
                 if actions[0].clicked() {
                     open = false;
                 }
@@ -406,6 +414,9 @@ impl Silence {
                     }
                 }
             });
+        if let Some(window) = window {
+            crate::app::tutorial::anchor(ui.ctx(), "silence.dialog", window.response.rect);
+        }
         (command, open)
     }
 }

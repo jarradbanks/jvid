@@ -895,6 +895,14 @@ pixelate_about = "Viser bildet i ruter på `block` piksler og beholder alfa, så
 pixelate_block = "Blokk"
 
 [tutorial]
+import_sample = "Importer eksempel"
+silence_select = "Velg skjermopptaket på tidslinjen."
+silence_open = "Åpne Finn stillhet med {key}."
+silence_cut = "Juster terskelen for å markere den stille delen, og klikk på Klipp."
+export_settings = "Velg utdatainnstillinger og mål, og legg videoen til i køen."
+speech_running = "Vent til talegjenkjenningen er ferdig."
+speech_settings = "Velg en talemodell og et språk, og klikk på {action}."
+
 minutes = "{count} min"
 step = "Trinn {n} av {total}"
 show_me = "Vis meg"

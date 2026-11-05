@@ -36,7 +36,7 @@ pub const SUBTITLES: Lesson = Lesson {
                 tr!("tutorial.subtitles_generate", key = key)
             },
             done: |a| cues(a).next().is_some(),
-            show_me: |a| {
+            example: |a| {
                 select_voice(a);
                 a.run_action("generate_subtitles", true);
                 a.subtitles
@@ -53,7 +53,7 @@ pub const SUBTITLES: Lesson = Lesson {
             done: |a| {
                 cues(a).any(|(_, x, t)| x.name.as_deref() != Some(&t.content.replace('\n', " ")))
             },
-            show_me: |a| {
+            example: |a| {
                 edit_first_cue(a, |t| {
                     // Flips the first letter's case, as retyping a word would change it.
                     let mut c = t.content.chars();
@@ -81,7 +81,7 @@ pub const SUBTITLES: Lesson = Lesson {
                     }
                 })
             },
-            show_me: |a| edit_first_cue(a, |t| t.color = YELLOW),
+            example: |a| edit_first_cue(a, |t| t.color = YELLOW),
             reveal: None,
             ghost: None,
             also: &["timeline"],
@@ -98,7 +98,7 @@ pub const SUBTITLES: Lesson = Lesson {
                 })
             },
             // As clicking Transcribe does.
-            show_me: |a| {
+            example: |a| {
                 select_voice(a);
                 let missing = (a.transcript).missing(a.history.project(), a.timeline.selected());
                 if !missing.is_empty() {
@@ -116,7 +116,7 @@ pub const SUBTITLES: Lesson = Lesson {
             text: |_| tr!("tutorial.subtitles_cut", key = verbatim("Delete")),
             done: cut,
             // As picking the second and third words and pressing Delete does.
-            show_me: |a| {
+            example: |a| {
                 select_voice(a);
                 let (project, selected) = (a.history.project(), a.timeline.selected());
                 if let Some(c) = a.transcript.cut(project, selected, 1..3) {

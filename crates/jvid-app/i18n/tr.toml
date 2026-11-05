@@ -898,6 +898,14 @@ pixelate_about = "Görüntüyü `block` piksellik karelerle gösterir ve alfayı
 pixelate_block = "Blok"
 
 [tutorial]
+import_sample = "Örneği İçe Aktar"
+silence_select = "Zaman çizelgesinde ekran kaydını seçin."
+silence_open = "Sessizliği Algıla penceresini {key} ile açın."
+silence_cut = "Sessiz bölümü işaretlemek için eşiği ayarlayın, ardından Kes’e tıklayın."
+export_settings = "Çıktı ayarlarını ve hedefi seçin, ardından videoyu kuyruğa ekleyin."
+speech_running = "Konuşma tanımanın bitmesini bekleyin."
+speech_settings = "Bir konuşma modeli ve dil seçin, ardından {action} düğmesine tıklayın."
+
 minutes = "{count} dk"
 step = "Adım {n} / {total}"
 show_me = "Bana Göster"

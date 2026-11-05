@@ -594,6 +594,7 @@ impl App {
     /// Returns its right edge.
     fn edit_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
         let button = menu_button(ui, tr!("menu.edit"), left);
+        tutorial::anchor(ui.ctx(), "menu.edit", button.rect);
         let mut picked = None;
         egui::Popup::menu(&button).show(|ui| {
             for &id in menus::EDIT {
@@ -1793,6 +1794,10 @@ impl eframe::App for App {
                     self.run_action("focus_source", false);
                 }
             }
+            let silence_cut = self.timeline.take_silence_cut()
+                && command
+                    .as_ref()
+                    .is_some_and(|c| tutorial::silence_cut(c, self.history.project()));
             let applied = match (command, gesture) {
                 (Some(c), Some(k)) => Some(self.history.apply_coalesced(k, c)),
                 (Some(c), None) => Some(self.history.apply(c)),
@@ -1800,6 +1805,9 @@ impl eframe::App for App {
             };
             if let Some(r) = &applied {
                 self.timeline.applied(r.is_ok());
+                if r.is_ok() {
+                    self.lesson_silence_cut(silence_cut);
+                }
             }
             let hide = self.timeline.hide_region.take();
             if let Some(id) = hide.or(crate::hide_region::requested(ui.ctx()))

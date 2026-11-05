@@ -40,7 +40,7 @@ pub const MASKS: Lesson = Lesson {
             anchor: "timeline",
             text: |_| tr!("tutorial.masks_select").into(),
             done: |a| lower(a).is_some_and(|c| a.timeline.selected().contains(&c.id)),
-            show_me: |a| {
+            example: |a| {
                 if let Some(id) = lower(a).map(|c| c.id) {
                     a.timeline.select_clip(a.history.project().sequence(), id);
                 }
@@ -58,7 +58,7 @@ pub const MASKS: Lesson = Lesson {
                 )
             },
             done: |a| top(a).is_some(),
-            show_me: |a| {
+            example: |a| {
                 let seq = a.history.project().sequence();
                 let Some(c) = lower(a) else { return };
                 let Some((track, _)) = seq.clip(c.id) else {
@@ -83,7 +83,7 @@ pub const MASKS: Lesson = Lesson {
             anchor: "inspector.exposure",
             text: |_| tr!("tutorial.masks_darken").into(),
             done: |a| lower(a).is_some_and(|c| c.transform.exposure <= DARK),
-            show_me: |a| {
+            example: |a| {
                 let Some(c) = lower(a) else { return };
                 let (mut x, keys) = (c.transform.clone(), c.keyframes.clone());
                 x.exposure = DARK * 1.5;
@@ -103,7 +103,7 @@ pub const MASKS: Lesson = Lesson {
                     matches!(c.transform.masks.as_slice(), [m] if m.shape == MaskShape::Ellipse)
                 })
             },
-            show_me: |a| {
+            example: |a| {
                 let Some(c) = top(a) else { return };
                 let [w, h] = crate::masks::fitted(a.history.project(), c);
                 // As Add Mask > Ellipse makes it: centred, half the image's size.
@@ -120,7 +120,7 @@ pub const MASKS: Lesson = Lesson {
             anchor: "preview",
             text: |_| tr!("tutorial.masks_place").into(),
             done: |a| mask(a).is_some_and(|m| covers(&m, START)),
-            show_me: |a| edit_mask(a, |m| m.points = START.to_vec()),
+            example: |a| edit_mask(a, |m| m.points = START.to_vec()),
             reveal: None,
             ghost: Some(START),
             also: &[],
@@ -129,7 +129,7 @@ pub const MASKS: Lesson = Lesson {
             anchor: "inspector.feather",
             text: |_| tr!("tutorial.masks_feather").into(),
             done: |a| mask(a).is_some_and(|m| m.feather >= SOFT),
-            show_me: |a| edit_mask(a, |m| m.feather = SOFT * 2.0),
+            example: |a| edit_mask(a, |m| m.feather = SOFT * 2.0),
             reveal: None,
             ghost: None,
             also: &[],
@@ -140,7 +140,7 @@ pub const MASKS: Lesson = Lesson {
             // On one mask, Subtract cuts it out as Invert does, so both together spotlight
             // the subject again.
             done: |a| mask(a).is_some_and(|m| m.invert && m.mode == MaskMode::Subtract),
-            show_me: |a| {
+            example: |a| {
                 edit_mask(a, |m| {
                     (m.invert, m.mode) = (true, MaskMode::Subtract);
                 })
@@ -153,7 +153,7 @@ pub const MASKS: Lesson = Lesson {
             anchor: "inspector.mask_position",
             text: |_| tr!("tutorial.masks_key").into(),
             done: |a| !key_times(a).is_empty(),
-            show_me: |a| {
+            example: |a| {
                 let Some(c) = top(a) else { return };
                 let name = Mask::point(0, 0);
                 let t = a.timeline.playhead();
@@ -174,7 +174,7 @@ pub const MASKS: Lesson = Lesson {
                 let here = c.source_at(a.timeline.playhead());
                 !keys.is_empty() && keys.iter().all(|k| (k.0 - here.0).abs() >= SECOND.0)
             },
-            show_me: |a| {
+            example: |a| {
                 if let Some(c) = top(a) {
                     a.timeline.seek(Time(c.start.0 + 4 * SECOND.0).min(c.end()));
                 }
@@ -187,7 +187,7 @@ pub const MASKS: Lesson = Lesson {
             anchor: "preview",
             text: |_| tr!("tutorial.masks_follow").into(),
             done: |a| key_times(a).len() >= 2,
-            show_me: |a| {
+            example: |a| {
                 let Some(c) = top(a) else { return };
                 let t = a.timeline.playhead();
                 let mut x = c.transform_at(t);
@@ -207,7 +207,7 @@ pub const MASKS: Lesson = Lesson {
             anchor: "preview",
             text: |a| tr!("tutorial.masks_play", key = a.keymap.shortcut("play_stop")),
             done: |a| a.preview.playing(),
-            show_me: |a| {
+            example: |a| {
                 if let Some(c) = top(a) {
                     a.timeline.seek(c.start);
                 }

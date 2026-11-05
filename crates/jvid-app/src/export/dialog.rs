@@ -89,6 +89,11 @@ impl ExportDialog {
         self.range.is_some()
     }
 
+    /// Dismiss tutorial-owned export guidance without changing the chosen output settings.
+    pub(crate) fn close(&mut self) {
+        self.range = None;
+    }
+
     /// Sets the output file, whose folder the next `open` keeps; for tests that need a fixed path.
     #[doc(hidden)]
     pub fn set_path(&mut self, path: PathBuf) {
@@ -477,6 +482,7 @@ impl ExportDialog {
                                 Button::primary(tr!("export.export")).state(state),
                             ],
                         );
+                        crate::app::tutorial::anchor(ui.ctx(), "export.action", actions[2].rect);
                         let export = actions[2].clicked();
                         let queue = actions[1].clicked();
                         if (export || queue)
@@ -524,6 +530,7 @@ impl ExportDialog {
                     }
                 });
             });
+        crate::app::tutorial::anchor(ui.ctx(), "export.dialog", modal.response.rect);
         if modal.should_close() {
             self.range = None;
         }

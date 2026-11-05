@@ -907,6 +907,14 @@ pixelate_about = "Mostra l'immagine in quadrati di `block` pixel mantenendo l'al
 pixelate_block = "Blocco"
 
 [tutorial]
+import_sample = "Importa esempio"
+silence_select = "Seleziona la registrazione dello schermo nella timeline."
+silence_open = "Apri Rileva silenzi con {key}."
+silence_cut = "Regola la soglia per evidenziare il silenzio, poi fai clic su Taglia."
+export_settings = "Scegli le impostazioni e la destinazione di uscita, poi aggiungi il video alla coda."
+speech_running = "Attendi il completamento del riconoscimento vocale."
+speech_settings = "Scegli un modello vocale e una lingua, poi fai clic su {action}."
+
 minutes = "{count} min"
 step = "Passo {n} di {total}"
 show_me = "Mostrami"
