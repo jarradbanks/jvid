@@ -2367,7 +2367,20 @@ impl TabViewer for Viewer<'_> {
                 if let Some(t) = shown {
                     self.timeline.seek(t);
                 }
-                let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
+                let t = self.timeline.playhead();
+                if egui::DragAndDrop::has_payload_of_type::<crate::effects::Drag>(ui.ctx()) {
+                    if let Some(c) = crate::effects::drag::program_drop(
+                        ui,
+                        self.project,
+                        self.timeline.selected(),
+                        t,
+                        frame,
+                    ) {
+                        (self.command, self.gesture) = (Some(c), None);
+                    }
+                    return;
+                }
+                let selected = self.timeline.selected();
                 if crate::handles::editing(ui.ctx()) {
                     if let Some((c, g)) = crate::handles::edit_text(ui, self.project, t, frame) {
                         (self.command, self.gesture) = (Some(c), g);

@@ -900,13 +900,8 @@ impl Preview {
 
     /// Where the project frame sits in the viewer `ui` draws into, at the current zoom.
     pub fn project_rect(&self, ui: &Ui, settings: &ProjectSettings) -> Rect {
-        let rect = ui.max_rect();
-        let view = [
-            rect.left(),
-            rect.top(),
-            rect.width(),
-            rect.height() - size::HEADER,
-        ];
+        let rect = viewer_rect(ui);
+        let view = [rect.left(), rect.top(), rect.width(), rect.height()];
         let zoom = ZOOMS[self.zoom].1.map(|z| z / ui.pixels_per_point());
         let size = [settings.width as f32, settings.height as f32];
         let [x, y, w, h] = render::place(size, view, zoom);
@@ -1132,8 +1127,10 @@ impl Preview {
             }
         }
 
-        let bar =
-            Rect::from_x_y_ranges(rect.x_range(), rect.bottom() - size::HEADER..=rect.bottom());
+        let bar = Rect::from_x_y_ranges(
+            rect.x_range(),
+            rect.bottom() - transport_height(rect.width())..=rect.bottom(),
+        );
         let strip = Rect::from_x_y_ranges(rect.x_range(), viewer.bottom()..=bar.top());
         let mut action = None;
         let mut seek = None;
@@ -1142,11 +1139,7 @@ impl Preview {
             let inner = bar.shrink2(vec2(space::INSET, 0.0));
             let time_width = ui
                 .painter()
-                .layout_no_wrap(
-                    format_timecode(r.frame as u64, r.rate),
-                    theme::timecode(),
-                    color::ink(),
-                )
+                .layout_no_wrap(r.timecodes(), theme::timecode(), color::ink())
                 .size()
                 .x;
             let record_extra = if records { 32.0 } else { 0.0 };
@@ -1175,12 +1168,11 @@ impl Preview {
                     seek,
                 };
             }
-            let timecode = ui.painter().text(
-                inner.left_center(),
-                Align2::LEFT_CENTER,
-                format_timecode(r.frame as u64, r.rate),
-                theme::timecode(),
-                color::ink(),
+            let timecode = Rect::from_min_size(inner.left_top(), vec2(time_width, inner.height()));
+            ui.put(
+                timecode,
+                egui::Label::new(egui::RichText::new(r.timecodes()).font(theme::timecode()))
+                    .selectable(false),
             );
             let records = records.then_some(self.recording);
             // Five buttons, then Record after a wider gap; a take adds its time and meter.
@@ -1194,20 +1186,6 @@ impl Preview {
             let right = ui.scope_builder(UiBuilder::new().max_rect(inner).layout(rtl), |ui| {
                 ui.spacing_mut().item_spacing.x = space::S8;
                 self.dropdowns(ui);
-                let text = egui::RichText::new(format_timecode(r.end as u64, r.rate))
-                    .font(theme::body())
-                    .color(color::ink_2());
-                let galley = ui.painter().layout_no_wrap(
-                    text.text().to_string(),
-                    theme::body(),
-                    color::ink_2(),
-                );
-                let room =
-                    ui.available_width() - timecode.width() - width - extra - 4.0 * space::S8;
-                if galley.size().x <= room {
-                    ui.add(egui::Label::new(text).selectable(false))
-                        .on_hover_text(tr!("bin.sort_duration"));
-                }
                 ui.min_rect().left()
             });
             let x = bar
@@ -1299,41 +1277,93 @@ impl Preview {
         records: bool,
         keymap: &Keymap,
     ) -> Option<&'static str> {
-        let timecode = format_timecode(row.frame as u64, row.rate);
-        let time_width = ui
+        let stacked = inner.height() > size::HEADER;
+        let timecode = row.timecodes();
+        let desired = ui
             .painter()
             .layout_no_wrap(timecode.clone(), theme::timecode(), color::ink())
             .size()
             .x;
-        let navigation =
-            inner.width() >= time_width + 5.0 * 28.0 + if records { 32.0 } else { 0.0 } + 48.0;
-        let buttons_width =
-            if navigation { 5.0 * 28.0 } else { 24.0 } + if records { 32.0 } else { 0.0 };
-        let controls_width = buttons_width + space::S8 + size::CONTROL;
-        let info = inner.with_max_x(inner.right() - controls_width - space::S8);
+        let font = if stacked && desired <= inner.width() {
+            theme::timecode()
+        } else {
+            theme::body()
+        };
+        let time_width = ui
+            .painter()
+            .layout_no_wrap(timecode.clone(), font.clone(), color::ink())
+            .size()
+            .x;
+        let row_rect = inner.with_min_y(inner.bottom() - size::HEADER);
+        if stacked {
+            let info = inner.with_max_y(row_rect.top());
+            ui.put(
+                info.with_max_x((info.left() + time_width).min(info.right())),
+                egui::Label::new(egui::RichText::new(&timecode).font(font.clone()))
+                    .selectable(false)
+                    .truncate(),
+            )
+            .on_hover_text(&timecode);
+        }
         let take = records.then_some(self.recording).flatten();
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(info)
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| {
-                ui.spacing_mut().item_spacing.x = space::S8;
-                let show_timecode =
-                    take.is_none() || info.width() >= time_width + TAKE_WIDTH + space::S8;
-                if show_timecode {
-                    ui.add_sized(
-                        vec2(time_width.min(info.width()), size::CONTROL),
-                        egui::Label::new(egui::RichText::new(&timecode).font(theme::timecode()))
-                            .truncate(),
-                    );
-                }
-                if let Some(take) = take {
-                    let width = ui.available_width().max(0.0);
-                    take_readout(ui, take, width);
-                }
-            },
+        let time_budget = if stacked { 0.0 } else { time_width };
+        let take_budget = take.map_or(0.0, |t| take_width(ui, t.0).min(TAKE_WIDTH));
+        let left_budget = if stacked { take_budget } else { time_budget };
+        let right_budget = size::CONTROL
+            + space::S8
+            + if !stacked && take.is_some() {
+                take_budget + space::S8
+            } else {
+                0.0
+            };
+        let record_width = if records { 32.0 } else { 0.0 };
+        let navigation = row_rect.width()
+            >= 140.0 + record_width + 2.0 * (left_budget.max(right_budget) + space::S8);
+        let buttons_width = if navigation { 140.0 } else { size::CONTROL } + record_width;
+        let more_rect = row_rect.with_min_x(row_rect.right() - size::CONTROL);
+        let min_x = row_rect.left()
+            + if stacked {
+                0.0
+            } else {
+                time_budget + space::S8
+            };
+        let max_x = row_rect.right() - right_budget - space::S8 - buttons_width;
+        let left = (row_rect.center().x - buttons_width / 2.0).clamp(min_x, max_x.max(min_x));
+        let controls = Rect::from_min_size(
+            pos2(left, row_rect.top()),
+            vec2(buttons_width, size::HEADER),
         );
-        let controls = inner.with_min_x(inner.right() - controls_width);
+        if !stacked {
+            let info = row_rect.with_max_x(row_rect.left() + time_width);
+            ui.put(
+                info,
+                egui::Label::new(egui::RichText::new(&timecode).font(font))
+                    .selectable(false)
+                    .truncate(),
+            )
+            .on_hover_text(&timecode);
+        }
+        if let Some(take) = take {
+            let info = if stacked {
+                row_rect
+                    .with_max_x((controls.left() - space::S8).min(row_rect.left() + take_budget))
+            } else {
+                row_rect
+                    .with_min_x(controls.right() + space::S8)
+                    .with_max_x(
+                        (controls.right() + space::S8 + take_budget)
+                            .min(more_rect.left() - space::S8),
+                    )
+            };
+            ui.scope_builder(
+                UiBuilder::new()
+                    .max_rect(info)
+                    .layout(Layout::left_to_right(Align::Center)),
+                |ui| {
+                    take_readout(ui, take, info.width().max(0.0));
+                },
+            );
+        }
         let mut action = None;
         ui.scope_builder(
             UiBuilder::new()
@@ -1358,7 +1388,13 @@ impl Preview {
                     ui.add_space(space::S4);
                     self.record_clicked |= record_button(ui, self.recording, false, keymap);
                 }
-                ui.add_space(space::S4);
+            },
+        );
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(more_rect)
+                .layout(Layout::left_to_right(Align::Center)),
+            |ui| {
                 let more = ui
                     .add(Button::icon(icon::ELLIPSIS, tr!("preview.more")))
                     .on_hover_text(tr!("preview.more"));
@@ -1548,10 +1584,22 @@ fn record_button(
     b.clicked()
 }
 
+/// At the minimum panel width the full current / total pair gets its own row.
+fn transport_height(width: f32) -> f32 {
+    if width < 600.0 {
+        2.0 * size::HEADER
+    } else {
+        size::HEADER
+    }
+}
+
 /// The video area of a viewer `ui`: its rect above the transport row.
 pub fn viewer_rect(ui: &Ui) -> Rect {
     let rect = ui.max_rect();
-    Rect::from_min_max(rect.min, rect.max - vec2(0.0, size::HEADER + SEEK_HEIGHT))
+    Rect::from_min_max(
+        rect.min,
+        rect.max - vec2(0.0, transport_height(rect.width()) + SEEK_HEIGHT),
+    )
 }
 
 /// One UI pass coalesces pointer movement to its latest selected position.
@@ -1577,6 +1625,15 @@ struct SourceRow {
 }
 
 impl SourceRow {
+    /// Current frame and sequence duration, always together and at frame precision.
+    fn timecodes(&self) -> String {
+        format!(
+            "{} / {}",
+            format_timecode(self.frame.max(0) as u64, self.rate),
+            format_timecode(self.end.max(0) as u64, self.rate)
+        )
+    }
+
     /// The picture and transform handles end above this dedicated scrub hit area.
     fn marks(&self, ui: &Ui, hit: Rect) -> Option<Time> {
         if self.duration.0 <= 0 || hit.width() <= 0.0 {
@@ -2534,7 +2591,7 @@ mod audit_transport_tests {
 
     #[test]
     fn audit_454_transport_hit_bounds_fit_without_intersections() {
-        for width in [240.0, 480.0, 640.0, 800.0] {
+        for width in [240.0, 320.0, 480.0, 599.0, 600.0, 640.0, 800.0, 960.0] {
             for scale in [1.0, 1.5] {
                 for program in [false, true] {
                     for (playing, take) in [
@@ -2568,6 +2625,19 @@ mod audit_transport_tests {
                                     "{width}@{scale} program={program} take={take:?}: {a:?} overlaps {b:?}"
                                 );
                             }
+                        }
+                        let pair = h.get_by_label("00:06:51:15 / 00:30:00:00").rect();
+                        assert!(h.state().bounds.contains_rect(pair));
+                        assert!(
+                            (pair.left() - h.state().bounds.left() - space::INSET).abs() <= 1.0
+                        );
+                        assert!(h.query_by_label("00:30:00:00").is_none());
+                        for control in &controls {
+                            let overlap = pair.intersect(*control);
+                            assert!(
+                                overlap.width() <= 0.01 || overlap.height() <= 0.01,
+                                "{width}@{scale}: grouped timecodes overlap {control:?}"
+                            );
                         }
                         let play = tr!(
                             "preview.with_key",
@@ -2612,6 +2682,48 @@ mod audit_transport_tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn grouped_timecodes_preserve_frames_at_fractional_and_high_rates() {
+        use jvid_core::time::Rate;
+        for rate in [
+            Rate::new(24, 1),
+            Rate::new(30000, 1001),
+            Rate::new(60, 1),
+            Rate::new(144, 1),
+        ] {
+            let fps = rate.timecode_base() as i64;
+            let row = SourceRow {
+                frame: fps * 3661 + 5,
+                end: fps * 7200 + 11,
+                rate,
+                playing: false,
+                in_point: None,
+                out_point: None,
+                duration: rate.time_floor(fps * 7200 + 11),
+                position: Time(0),
+            };
+            assert_eq!(row.timecodes(), "01:01:01:05 / 02:00:00:11");
+        }
+    }
+
+    #[test]
+    fn wide_playback_controls_are_centered_between_grouped_time_and_display_options() {
+        for scale in [1.0, 1.5] {
+            let h = row_harness(1280.0, scale, false, false, None);
+            let mut buttons = Rect::NOTHING;
+            for (_, name, id) in transport_actions(false) {
+                buttons = buttons.union(
+                    h.get_by_label(&transport_hint(&h.ctx, &h.state().keymap, id, name))
+                        .rect(),
+                );
+            }
+            assert!((buttons.center().x - h.state().bounds.center().x).abs() <= 2.0);
+            let pair = h.get_by_label("00:06:51:15 / 00:30:00:00").rect();
+            assert!(pair.right() < buttons.left());
+            assert!(h.get_by_label(tr!("preview.proxies")).rect().left() > buttons.right());
         }
     }
 

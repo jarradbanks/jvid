@@ -10,6 +10,8 @@ use jvid_render::effect::{self, Shader};
 
 use crate::i18n::{CATALOG, tr};
 
+pub mod drag;
+
 /// An effect file by stem: its parsed shader, or why it doesn't load.
 pub type Entry = Result<Arc<Shader>, String>;
 
@@ -227,7 +229,7 @@ fn offer_bundled(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// What a timeline drop of an Effects tab row carries: the effect's file stem.
+/// What a timeline or Program drop of an Effects tab row carries: the effect's file stem.
 #[derive(Clone)]
 pub struct Drag(pub String);
 
