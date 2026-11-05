@@ -28,6 +28,27 @@ The start screen offers **New project** (pick a frame size preset, or **Match so
 - **Missing media:** if a source file has moved, the clip shows as offline. Right-click it in the bin and choose **Relink…**; other missing files in the same folder are found too.
 - **Panels:** Media, Source, Program, Timeline, Inspector and Effects. `Shift+1` to `Shift+7` focus them.
 
+## Updating jvid
+
+Open **Help → Check for Updates**. Automatic startup checks can be turned off in that
+window; checking never downloads or installs an update without your click.
+
+For an installed Windows copy, choose **Download Update**. The window shows download
+progress, then verification, then **Ready to install**. Choose **Install and restart**
+to close jvid, run the installer and reopen it. Unsaved projects offer **Save, install
+and restart**; cancelling the save or a save error keeps the editor open and the
+verified download available. Finish recording, exports, model work and tutorials
+before installing.
+
+Choose **Later** to keep working. A download continues in the background, and a verified
+download stays ready for the rest of the session. **Help → Check for Updates** reopens
+that download without replacing it. **Cancel Download** stops the download and allows
+a fresh attempt. Closing jvid without installing removes the temporary download.
+
+Portable copies, macOS, Linux and externally managed builds use **Release Notes and
+Downloads** for their manual update route. See the [updating reference](updating.md)
+for platform details and recovery.
+
 ## Arranging panels
 
 Every editor panel has a draggable tab strip. Open **Timeline → Transcript** or **Export → Show Render Queue** to place that optional panel beside Timeline. Drag its tab onto Timeline's strip to share one full-width panel; click a tab to switch views. All three can share a group. Drag a tab along the strip to reorder it, or into another panel's body and choose a highlighted edge to create a separate split. Drop feedback shows the destination before you release. Panels stay inside the editor window.

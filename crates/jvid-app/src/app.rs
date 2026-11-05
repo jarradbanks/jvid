@@ -1406,12 +1406,19 @@ impl App {
     }
 
     fn install_update(&mut self, ctx: &egui::Context) {
+        self.install_update_with(ctx, |app| app.save(false));
+    }
+
+    fn install_update_with(&mut self, ctx: &egui::Context, save: impl FnOnce(&mut Self) -> bool) {
+        if !matches!(self.updates.state, jvid_updater::state::State::Ready(_)) {
+            return;
+        }
         let mut work = self.update_work();
         work.unsaved = false;
         if !work.can_install() {
             return;
         }
-        if self.history.is_dirty() && !self.save(false) {
+        if self.history.is_dirty() && !save(self) {
             if !self.prompts.is_empty() {
                 self.updates.open = false;
             }

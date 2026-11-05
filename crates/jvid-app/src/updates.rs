@@ -68,7 +68,8 @@ impl Updates {
 
     pub fn check(&mut self, manual: bool) {
         self.open |= manual;
-        if self.state.busy() {
+        // Reopening/checking must keep the verified payload available for this session.
+        if self.state.busy() || matches!(self.state, State::Ready(_)) {
             return;
         }
         let key = match jvid_updater::public_key() {
@@ -252,6 +253,11 @@ impl Updates {
                     State::Available(update) | State::Downloading { update, .. } => {
                         release(ui, update);
                         if let State::Downloading { received, .. } = &self.state {
+                            ui.label(if *received == update.asset.size {
+                                tr!("updates.verifying")
+                            } else {
+                                tr!("updates.downloading")
+                            });
                             ui.add(
                                 egui::ProgressBar::new(*received as f32 / update.asset.size as f32)
                                     .show_percentage(),
@@ -261,6 +267,7 @@ impl Updates {
                                 received = received,
                                 total = update.asset.size
                             ));
+                            ui.label(tr!("updates.download_later"));
                         } else if !jvid_updater::metadata::self_update(TARGET, &self.distribution) {
                             ui.hyperlink_to(tr!("updates.release_page"), update.release_url());
                         }
@@ -268,6 +275,7 @@ impl Updates {
                     State::Ready(d) => {
                         release(ui, &d.update);
                         ui.label(tr!("updates.verified"));
+                        ui.label(tr!("updates.ready_later"));
                         let mut allowed = work;
                         allowed.unsaved = false;
                         if !allowed.can_install() {
@@ -281,7 +289,7 @@ impl Updates {
                     });
                 }
                 ui.separator();
-                let check_state = if self.state.busy() {
+                let check_state = if self.state.busy() || matches!(self.state, State::Ready(_)) {
                     suite_ui::widgets::State::Disabled
                 } else {
                     suite_ui::widgets::State::Live
@@ -370,6 +378,8 @@ fn release(ui: &mut egui::Ui, update: &Available) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::{NodeT, Queryable};
 
     fn available() -> Available {
         Available {
@@ -385,6 +395,45 @@ mod tests {
             tag: "v1.2.0".into(),
             manifest: vec![],
             signature: vec![],
+        }
+    }
+
+    struct Window {
+        updates: Updates,
+        work: Work,
+        install: bool,
+    }
+
+    fn window(state: State, work: Work) -> Harness<'static, Window> {
+        let mut fresh = true;
+        let mut updates = Updates::default();
+        updates.open = true;
+        updates.state = state;
+        Harness::builder().with_size([800.0, 640.0]).build_ui_state(
+            move |ui, state: &mut Window| {
+                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                state.updates.poll(ui.ctx());
+                state.install |= state.updates.show(ui, state.work, None);
+            },
+            Window {
+                updates,
+                work,
+                install: false,
+            },
+        )
+    }
+
+    fn capture(h: &mut Harness<'_, Window>, name: &str) {
+        if let Some(dir) = std::env::var_os("JVID_UPDATE_SCREENSHOTS") {
+            assert!(suite_ui::test_support::gpu());
+            let dir = PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            h.render()
+                .unwrap()
+                .save(dir.join(format!("{name}.png")))
+                .unwrap();
         }
     }
 
@@ -483,48 +532,168 @@ mod tests {
 
     #[test]
     fn update_window_blocks_restart_for_work_and_retains_a_download_when_deferred() {
-        use egui_kittest::kittest::{NodeT, Queryable};
-        struct Test {
-            updates: Updates,
-            work: Work,
-            install: bool,
-        }
         let dir = tempfile::tempdir().unwrap();
         let stage = dir.path().to_owned();
-        let mut updates = Updates::default();
-        updates.open = true;
-        updates.state = State::Ready(Download {
-            update: available(),
-            dir,
-        });
-        let mut fresh = true;
-        let mut h = egui_kittest::Harness::new_ui_state(
-            move |ui, state: &mut Test| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
-                    return;
-                }
-                state.install |= state.updates.show(ui, state.work, None);
-            },
-            Test {
-                updates,
-                work: Work {
-                    recording: true,
-                    ..Work::default()
-                },
-                install: false,
-            },
+        let mut h = window(
+            State::Ready(Download {
+                update: available(),
+                dir,
+            }),
+            Work::default(),
         );
-        h.run();
-        assert!(
-            h.get_by_label(tr!("updates.restart"))
-                .accesskit_node()
-                .is_disabled()
-        );
-        assert!(!h.state().install);
+        for work in [
+            Work {
+                recording: true,
+                ..Work::default()
+            },
+            Work {
+                exporting: true,
+                ..Work::default()
+            },
+            Work {
+                other_job: true,
+                ..Work::default()
+            },
+            Work {
+                unsaved: true,
+                other_job: true,
+                ..Work::default()
+            },
+        ] {
+            h.state_mut().work = work;
+            h.run();
+            h.get_by_label(tr!("updates.busy"));
+            let label = if work.unsaved {
+                tr!("updates.save_restart")
+            } else {
+                tr!("updates.restart")
+            };
+            assert!(h.get_by_label(label).accesskit_node().is_disabled());
+            assert!(!h.state().install);
+        }
         h.get_by_label(tr!("updates.later")).click();
         h.run();
         assert!(!h.state().updates.open && stage.exists());
+
+        // Both reopening and a direct check keep the same verified download.
+        h.state_mut().updates.check(true);
+        h.state_mut().work = Work {
+            unsaved: true,
+            ..Work::default()
+        };
+        h.run();
+        assert!(
+            h.get_by_label(tr!("updates.check"))
+                .accesskit_node()
+                .is_disabled()
+        );
+        assert!(matches!(h.state().updates.state, State::Ready(_)) && stage.exists());
+        let install = h.get_by_label(tr!("updates.save_restart"));
+        assert!(!install.accesskit_node().is_disabled());
+        let install_rect = install.rect();
+        let later = h.get_by_label(tr!("updates.later")).rect();
+        let check = h.get_by_label(tr!("updates.check")).rect();
+        assert!(later.right() <= check.left() && check.right() <= install_rect.left());
+        let modal = h
+            .ctx
+            .memory(|m| m.area_rect(egui::Id::new("updates")))
+            .unwrap();
+        assert!((modal.right() - space::S16 - install_rect.right()).abs() <= 1.0);
+        capture(&mut h, "updates-save-install-restart");
+        h.get_by_label(tr!("updates.save_restart")).click();
+        h.run();
+        assert!(h.state().install && stage.exists());
         drop(h);
         assert!(!stage.exists());
+    }
+
+    #[test]
+    fn download_can_continue_when_deferred_and_only_verified_completion_offers_install() {
+        let mut h = window(
+            State::Downloading {
+                update: available(),
+                received: 30,
+            },
+            Work::default(),
+        );
+        let (tx, rx) = mpsc::channel();
+        h.state_mut().updates.receiver = Some(rx);
+        h.run_steps(4);
+        h.get_by_label(tr!("updates.downloading"));
+        h.get_by_label(&tr!("updates.progress", received = 30, total = 100));
+        h.get_by_label(tr!("updates.download_later"));
+        assert!(h.query_by_label(tr!("updates.restart")).is_none());
+        assert!(
+            h.get_by_label(tr!("updates.check"))
+                .accesskit_node()
+                .is_disabled()
+        );
+        capture(&mut h, "updates-downloading");
+        tx.send(Event::Progress(100)).unwrap();
+        h.run_steps(4);
+        h.get_by_label(tr!("updates.verifying"));
+        assert!(h.query_by_label(tr!("updates.restart")).is_none());
+        capture(&mut h, "updates-verifying");
+
+        h.get_by_label(tr!("updates.later")).click();
+        h.run_steps(4);
+        assert!(!h.state().updates.open && h.state().updates.receiver.is_some());
+        assert!(!h.state().updates.cancel.load(Ordering::Relaxed));
+        let dir = tempfile::tempdir().unwrap();
+        let stage = dir.path().to_owned();
+        tx.send(Event::Downloaded(Ok(Download {
+            update: available(),
+            dir,
+        })))
+        .unwrap();
+        h.run();
+        assert!(!h.state().updates.open && matches!(h.state().updates.state, State::Ready(_)));
+        assert!(h.state().updates.receiver.is_none() && stage.exists());
+        h.state_mut().updates.check(true);
+        h.run();
+        h.get_by_label(tr!("updates.verified"));
+        h.get_by_label(tr!("updates.ready_later"));
+        capture(&mut h, "updates-install-restart");
+        h.get_by_label(tr!("updates.restart")).click();
+        h.run();
+        assert!(h.state().install);
+    }
+
+    #[test]
+    fn cancelling_download_rejects_late_results_and_failure_leaves_retry_available() {
+        let mut h = window(
+            State::Downloading {
+                update: available(),
+                received: 30,
+            },
+            Work::default(),
+        );
+        let (tx, rx) = mpsc::channel();
+        h.state_mut().updates.receiver = Some(rx);
+        h.run_steps(4);
+        h.get_by_label(tr!("updates.cancel")).click();
+        h.run();
+        assert!(matches!(h.state().updates.state, State::Available(_)));
+        assert!(h.state().updates.cancel.load(Ordering::Relaxed));
+        let dir = tempfile::tempdir().unwrap();
+        let stage = dir.path().to_owned();
+        let late = tx.send(Event::Downloaded(Ok(Download {
+            update: available(),
+            dir,
+        })));
+        assert!(late.is_err());
+        drop(late);
+        assert!(!stage.exists());
+        assert!(!h.state().install && h.query_by_label(tr!("updates.restart")).is_none());
+
+        h.state_mut().updates.state = State::Failed("disk full".into());
+        h.run();
+        h.get_by_label(&tr!("updates.failed", error = "disk full"));
+        assert!(
+            !h.get_by_label(tr!("updates.check"))
+                .accesskit_node()
+                .is_disabled()
+        );
+        assert!(h.query_by_label(tr!("updates.restart")).is_none());
     }
 }
