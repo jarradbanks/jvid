@@ -35,10 +35,30 @@ The CPU baseline is inherited from the repository's `GGML_NATIVE=OFF` configurat
 these x86_64 packages require AVX2, FMA and F16C. Intel macOS, ARM Windows and ARM
 Linux are not claimed by this initial matrix.
 
+The supplied artwork is in `assets/jvid.png`; `assets/jvid.ico` contains Windows
+icon sizes from 16 through 256 pixels. The app uses the PNG for its window icon,
+and the Windows build embeds the ICO into the executable. Setup uses that same
+ICO, so Explorer, shortcuts and the installer share the artwork.
+
 ## Optional components
 
-On first launch, **Optional Components** explains local transcription and subtitles,
-shows all three models and their download sizes, and permits skipping with **Done**
+The Windows installer offers an **Optional speech models** page with all models
+unchecked. Selected models download before installation, using the same pinned
+Hugging Face revision and SHA-256 identities as the app. Existing verified models
+are reused. The download page shows transferred size, speed and estimated remaining
+time. Each completed download is retained by its SHA-256 under
+`%LOCALAPPDATA%\jvid\cache\model-downloads` for reuse after cancellation or a later
+installer session. Complete cached files are verified again before use; partial
+files are downloaded again. Only one model is needed for transcription.
+Cancel returns to setup so the selection can be changed; a download failure
+offers to continue with completed models and add the others later. Unattended installs and
+in-app upgrades never download models. Installer-added models live at the normal
+Windows model path below and survive upgrades and uninstall. Interactive setup
+records that it has offered models, so the app does not repeat the first-run offer.
+
+For portable copies and other platforms, on first launch **Optional Components**
+explains local transcription and subtitles, shows all three models and their
+download sizes, and permits skipping with **Done**
 or Escape. Open **Help > Optional Components** later to add models without
 reinstalling. Generate Subtitles and Transcribe also retain their existing download
 flow. Normal import, editing, playback and export require no model.
@@ -251,10 +271,19 @@ an existing output. Extract the resulting tarball with an archive utility. Provi
 archives remain intact with their reconstruction/build recipes. Toolchains and OS
 SDKs described by those recipes remain external build prerequisites.
 
-Native app downloads and corresponding-source bundles are separate release
-assets. Users install the five native formats listed above; they do not install
-source manifests or multipart source archives. Keep all source parts with their
-bundle manifest when reviewing or rebuilding source.
+Published app releases (`vVERSION`) contain only the five native packages,
+updater metadata/signature and their `SHA256SUMS.txt`. Corresponding-source bundles,
+manifests, reconstruction helper and their own `SHA256SUMS.txt` are in the separate
+`sources-vVERSION` release, linked from the app notes and each package's
+`SOURCE-INFO.txt`. Both tags identify the exact same commit. The source release
+is verified and published first, with `make_latest=false`; its tag does not
+trigger the `v*` package workflow or qualify as an app version in the updater.
+Retries reuse verified, published sources without changing them. Keep all source
+parts with their bundle manifest when reviewing or rebuilding source.
+
+The combined `release-candidate` Actions artifact still contains both app and
+source files with a combined checksum list, for testing before publication.
+Published checksum lists each describe only that release's own attachments.
 
 Publication requires `JVID_RELEASE_ENABLED=true`, a matching immutable `vVERSION`
 tag, and the existing `release` environment's required reviewer and `v*` tag policy.
@@ -306,6 +335,10 @@ Before #476/#62 are closed, record on clean supported OS/VM accounts:
 - [ ] Linux tarball launch on a clean supported desktop; edit, audio and export.
 - [ ] Real Whisper model download from setup to the reported path; transcription,
   cancellation, failed network retry, skip and later addition on all platforms.
+- [ ] Windows installer: all models initially unchecked; offline install with none
+  selected; selected model verified and visible in the app; cancellation and failed
+  download followed by skip; verified existing models reused; silent upgrade makes
+  no model downloads; models survive uninstall.
 - [ ] Reviewed complete corresponding source and final download/metadata hashes.
 
 CI results and actual local validation are recorded in the PR. Unchecked items

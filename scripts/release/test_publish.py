@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import automation as a
 import publish as p
 
 REAL_UPLOAD = p.upload
@@ -34,7 +35,11 @@ class PublicationTests(unittest.TestCase):
         self.revision = {'commit': self.commit, 'tree': 'b' * 40}
         self.repo = 'jarradbanks/jvid'
         self.release = None
+        self.source_release = None
         self.remote = {}
+        self.source_remote = {}
+        self.tags = {self.tag: self.commit}
+        self.uploaded_bytes = {}
         self.calls = []
         self.uploads = []
         self.fail_upload = False
@@ -108,38 +113,53 @@ class PublicationTests(unittest.TestCase):
             raise AssertionError(path)
         path = path[len(prefix):]
         if path.startswith('git/ref/tags/'):
-            return {'object': {'type': 'commit', 'sha': self.commit}}
+            commit = self.tags.get(path.removeprefix('git/ref/tags/'))
+            return {'object': {'type': 'commit', 'sha': commit}} if commit else None
+        if path == 'git/refs' and method == 'POST':
+            self.tags[body['ref'].removeprefix('refs/tags/')] = body['sha']
+            return {}
         if path.startswith('releases/tags/'):
-            return dict(self.release) if self.release else None
+            release = self.release if path.removeprefix('releases/tags/') == self.tag else self.source_release
+            return dict(release) if release else None
         if path.startswith('releases?'):
-            return [dict(self.release)] if self.release else []
+            return [dict(r) for r in (self.release, self.source_release) if r]
         if path == 'releases' and method == 'POST':
-            self.release = {'id': 1, **body}
-            return dict(self.release)
-        if path == 'releases/1':
-            if method == 'PATCH':
-                self.release.update(body)
-            return dict(self.release)
-        if path.startswith('releases/1/assets?'):
-            return list(self.remote.values())
+            if body['tag_name'] == self.tag:
+                self.release = {'id': 1, **body}
+                return dict(self.release)
+            self.source_release = {'id': 2, **body}
+            return dict(self.source_release)
+        for release_id, release, remote in ((1, self.release, self.remote),
+                                            (2, self.source_release, self.source_remote)):
+            if path == f'releases/{release_id}':
+                if method == 'PATCH':
+                    release.update(body)
+                return dict(release)
+            if path.startswith(f'releases/{release_id}/assets?'):
+                return list(remote.values())
         if path.startswith('releases/assets/') and method == 'DELETE':
             asset_id = int(path.split('/')[-1])
-            self.remote = {n: a for n, a in self.remote.items() if a['id'] != asset_id}
+            for remote in (self.remote, self.source_remote):
+                for name in list(remote):
+                    if remote[name]['id'] == asset_id:
+                        del remote[name]
             return None
         raise AssertionError((path, method, body))
 
     def upload(self, repository, release_id, path):
         self.uploads.append(path.name)
+        remote = self.remote if release_id == 1 else self.source_remote
         if self.fail_upload or len(self.uploads) == self.fail_upload_at:
             self.fail_upload = False
-            self.remote[path.name] = {'id': 1000, 'name': path.name, 'state': 'starter', 'size': 0, 'digest': None}
+            remote[path.name] = {'id': 1000, 'name': path.name, 'state': 'starter', 'size': 0, 'digest': None}
             raise RuntimeError('upload interrupted')
-        self.remote[path.name] = {'id': len(self.remote) + 1, 'name': path.name, 'state': 'uploaded',
-                                 'size': path.stat().st_size, 'digest': 'sha256:' + p.digest(path)}
+        remote[path.name] = {'id': release_id * 100 + len(remote) + 1, 'name': path.name, 'state': 'uploaded',
+                            'size': path.stat().st_size, 'digest': 'sha256:' + p.digest(path)}
+        self.uploaded_bytes[release_id, path.name] = path.read_bytes()
         if self.bad_upload:
-            self.remote[path.name]['digest'] = 'sha256:' + '0' * 64
+            remote[path.name]['digest'] = 'sha256:' + '0' * 64
         if self.publish_during_upload:
-            self.release['draft'] = False
+            (self.release if release_id == 1 else self.source_release)['draft'] = False
 
     def publish(self):
         p.publish(self.root, self.assets, self.repo, self.commit, self.tag, self.public)
@@ -166,10 +186,37 @@ class PublicationTests(unittest.TestCase):
         records = p.validate_assets(self.root, self.assets, self.public)
         self.publish()
         self.assertFalse(self.release['draft'])
-        self.assertEqual(set(self.remote), set(records))
-        self.assertEqual(len(self.uploads), len(records))
-        self.assertEqual(self.mutations()[-1][2]['draft'], False)
-        self.assertTrue(all(p.matches(self.remote[n], r) for n, r in records.items()))
+        self.assertFalse(self.source_release['draft'])
+        self.assertEqual(set(self.remote), {*self.packages, 'jvid-update.json', 'jvid-update.json.sig', 'SHA256SUMS.txt'})
+        self.assertEqual(set(self.remote) | set(self.source_remote), set(records))
+        self.assertEqual(set(self.remote) & set(self.source_remote), {'SHA256SUMS.txt'})
+        for release_id, remote in ((1, self.remote), (2, self.source_remote)):
+            sums = self.uploaded_bytes[release_id, 'SHA256SUMS.txt'].decode().splitlines()
+            self.assertEqual({line.split('  ')[1] for line in sums}, set(remote) - {'SHA256SUMS.txt'})
+            for line in sums:
+                digest, name = line.split('  ')
+                self.assertEqual(remote[name]['digest'], 'sha256:' + digest)
+        published = [c for c in self.mutations() if c[1] == 'PATCH']
+        self.assertEqual([c[0].split('/')[-1] for c in published], ['2', '1'])
+        self.assertEqual([c[2]['make_latest'] for c in published], ['false', 'true'])
+        self.assertTrue(all(c[2]['make_latest'] == 'false' for c in self.mutations()
+                            if c[1] == 'POST' and c[0].endswith('/releases')))
+        self.assertIn('/releases/tag/sources-' + self.tag, self.release['body'])
+        self.assertEqual(self.tags['sources-' + self.tag], self.commit)
+        # A source-only download must retain every part, manifest and executable
+        # reconstruction instruction, without needing any app attachments.
+        downloaded = self.root / 'source-download'
+        downloaded.mkdir()
+        for name in self.source_remote:
+            (downloaded / name).write_bytes(self.uploaded_bytes[2, name])
+        manifests = sorted(downloaded.glob('jvid-*-sources-*.json'))
+        self.assertEqual(len(manifests), len(sources.BUNDLES))
+        for manifest in manifests:
+            data = json.loads(manifest.read_text())
+            archive = downloaded / (data['bundle'] + '.tar.gz')
+            subprocess.run([sys.executable, str(downloaded / 'reassemble_sources.py'),
+                            str(manifest), str(archive)], check=True, capture_output=True)
+            self.assertEqual(p.digest(archive), data['archive_sha256'])
 
     def test_published_release_is_immutable_on_retry(self):
         self.publish()
@@ -183,14 +230,62 @@ class PublicationTests(unittest.TestCase):
         self.fail_upload_at = 3
         with self.assertRaisesRegex(RuntimeError, 'interrupted'):
             self.publish()
-        self.assertTrue(self.release['draft'])
-        retained = dict(self.remote)
+        self.assertTrue(self.source_release['draft'])
+        self.assertIsNone(self.release)
+        retained = dict(self.source_remote)
         self.publish()
         for name in list(retained)[:2]:
-            self.assertEqual(self.uploads.count(name), 1)
+            self.assertEqual(self.uploads.count(name), 2 if name == 'SHA256SUMS.txt' else 1)
         self.assertFalse(self.release['draft'])
         self.assertTrue(any(c[1] == 'DELETE' for c in self.calls))
-        self.assertEqual(len(self.uploads), len(self.remote) + 1)
+        self.assertEqual(len(self.uploads), len(self.remote) + len(self.source_remote) + 1)
+
+    def test_publication_during_starter_delete_prevents_the_retry_upload(self):
+        self.fail_upload = True
+        with self.assertRaises(RuntimeError):
+            self.publish()
+        original = self.api
+        def api(path, method='GET', body=None):
+            result = original(path, method, body)
+            if method == 'DELETE':
+                self.source_release['draft'] = False
+            return result
+        self.uploads.clear()
+        with patch.object(p, 'github', side_effect=api):
+            with self.assertRaisesRegex(ValueError, 'published'):
+                self.publish()
+        self.assertEqual(self.uploads, [])
+        self.assertIsNone(self.release)
+
+    def test_starter_that_finishes_during_inspection_is_retained(self):
+        self.fail_upload = True
+        original_upload = self.upload
+        frozen = {}
+        def upload(repository, release_id, path):
+            frozen[path.name] = path.read_bytes()
+            original_upload(repository, release_id, path)
+        with patch.object(p, 'upload', side_effect=upload):
+            with self.assertRaises(RuntimeError):
+                self.publish()
+        filename, contents = next(iter(frozen.items()))
+        original_api = self.api
+        inspections = 0
+        def api(path, method='GET', body=None):
+            nonlocal inspections
+            if '/releases/2/assets?' in path:
+                inspections += 1
+                if inspections == 3:
+                    self.source_remote[filename].update(state='uploaded', size=len(contents),
+                        digest='sha256:' + p.hashlib.sha256(contents).hexdigest())
+                    self.uploaded_bytes[2, filename] = contents
+            return original_api(path, method, body)
+        self.calls.clear()
+        self.uploads.clear()
+        with patch.object(p, 'github', side_effect=api):
+            self.publish()
+        self.assertFalse(self.release['draft'])
+        self.assertFalse(any(c[1] == 'DELETE' for c in self.calls))
+        self.assertEqual(self.uploads.count(filename), 1)  # Only the app checksum.
 
     def test_lost_create_response_resumes_existing_draft(self):
         original = self.api
@@ -203,14 +298,68 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'lost create'):
                 self.publish()
         self.publish()
-        self.assertEqual(sum(c[1] == 'POST' and c[0].endswith('/releases') for c in self.calls), 1)
+        self.assertEqual(sum(c[1] == 'POST' and c[0].endswith('/releases') for c in self.calls), 2)
         self.assertFalse(self.release['draft'])
+
+    def test_retry_rejects_changed_valid_candidate_even_before_first_upload(self):
+        with patch.object(p, 'upload', side_effect=RuntimeError('interrupted before upload')):
+            with self.assertRaises(RuntimeError):
+                self.publish()
+        self.assertTrue(self.source_release['draft'])
+        self.assertEqual(self.source_remote, {})
+        # Different, still valid signed metadata must not be substituted on retry.
+        (self.assets / 'jvid-update.json').write_text(json.dumps(self.metadata, indent=2))
+        key = self.root / 'fixture.der'
+        key.write_bytes(bytes.fromhex('302e020100300506032b657004220420') + bytes(range(32)))
+        subprocess.run(['openssl', 'pkeyutl', '-sign', '-keyform', 'DER', '-inkey', str(key),
+                        '-rawin', '-in', str(self.assets / 'jvid-update.json'),
+                        '-out', str(self.assets / 'jvid-update.json.sig')], check=True)
+        key.unlink()
+        self.checksums()
+        p.validate_assets(self.root, self.assets, self.public)
+        self.calls.clear()
+        with self.assertRaisesRegex(ValueError, 'fingerprint.*frozen'):
+            self.publish()
+        self.assertEqual(self.mutations(), [])
+
+    def test_lost_source_tag_create_response_reuses_existing_tag(self):
+        original = self.api
+        def api(path, method='GET', body=None):
+            result = original(path, method, body)
+            if method == 'POST' and path.endswith('/git/refs'):
+                raise RuntimeError('lost tag response')
+            return result
+        with patch.object(p, 'github', side_effect=api):
+            with self.assertRaisesRegex(RuntimeError, 'lost tag response'):
+                self.publish()
+        self.assertIsNone(self.source_release)
+        self.calls.clear()
+        self.publish()
+        self.assertFalse(any(c[1] != 'GET' and '/git/' in c[0] for c in self.calls))
+
+    def test_lost_source_publication_response_never_republishes_sources(self):
+        original = self.api
+        def api(path, method='GET', body=None):
+            result = original(path, method, body)
+            if method == 'PATCH' and path.endswith('/releases/2'):
+                raise RuntimeError('lost publication response')
+            return result
+        with patch.object(p, 'github', side_effect=api):
+            with self.assertRaisesRegex(RuntimeError, 'lost publication response'):
+                self.publish()
+        self.assertFalse(self.source_release['draft'])
+        self.assertIsNone(self.release)
+        self.calls.clear()
+        self.publish()
+        self.assertFalse(self.release['draft'])
+        self.assertFalse(any(c[1] != 'GET' and '/releases/2' in c[0] for c in self.calls))
 
     def test_remote_digest_mismatch_keeps_draft(self):
         self.bad_upload = True
-        with self.assertRaisesRegex(ValueError, 'failed verification'):
+        with self.assertRaisesRegex(ValueError, 'conflicting|failed verification'):
             self.publish()
-        self.assertTrue(self.release['draft'])
+        self.assertTrue(self.source_release['draft'])
+        self.assertIsNone(self.release)
         self.assertFalse(any(c[1] == 'PATCH' for c in self.calls))
 
     def test_conflicting_uploaded_asset_never_overwritten(self):
@@ -288,6 +437,103 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'exact commit'):
                 self.publish()
         self.assertEqual(self.mutations(), [])
+
+    def test_source_tag_conflict_prevents_any_mutation(self):
+        self.tags['sources-' + self.tag] = 'f' * 40
+        with self.assertRaisesRegex(ValueError, 'different commit'):
+            self.publish()
+        self.assertEqual(self.mutations(), [])
+
+    def test_app_upload_retry_reuses_published_sources(self):
+        original = self.upload
+        fail = True
+        def upload(repository, release_id, path):
+            nonlocal fail
+            if release_id == 1 and fail:
+                fail = False
+                raise RuntimeError('app upload interrupted')
+            original(repository, release_id, path)
+        with patch.object(p, 'upload', side_effect=upload):
+            with self.assertRaisesRegex(RuntimeError, 'app upload interrupted'):
+                self.publish()
+            self.assertFalse(self.source_release['draft'])
+            self.assertTrue(self.release['draft'])
+            retained = dict(self.source_remote)
+            self.calls.clear()
+            self.publish()
+        self.assertEqual(self.source_remote, retained)
+        self.assertFalse(self.release['draft'])
+        self.assertFalse(any(c[0].endswith('/releases/2') and c[1] == 'PATCH' for c in self.calls))
+
+    def test_changed_published_sources_block_app_retry(self):
+        original = self.upload
+        def upload(repository, release_id, path):
+            if release_id == 1:
+                raise RuntimeError('app interrupted')
+            original(repository, release_id, path)
+        with patch.object(p, 'upload', side_effect=upload):
+            with self.assertRaises(RuntimeError):
+                self.publish()
+        original_remote = {n: dict(asset) for n, asset in self.source_remote.items()}
+        name = next(n for n in self.source_remote if n != 'SHA256SUMS.txt')
+        for change in ('missing', 'size', 'digest', 'state', 'extra'):
+            with self.subTest(change=change):
+                self.source_remote = {n: dict(asset) for n, asset in original_remote.items()}
+                if change == 'missing':
+                    del self.source_remote[name]
+                elif change == 'extra':
+                    self.source_remote['unexpected.txt'] = {'name': 'unexpected.txt'}
+                else:
+                    self.source_remote[name][change] = {'size': 0, 'digest': 'sha256:bad', 'state': 'starter'}[change]
+                self.calls.clear()
+                with self.assertRaises(ValueError):
+                    self.publish()
+                self.assertEqual(self.mutations(), [])
+
+    def test_source_publication_must_still_be_public_before_app_publication(self):
+        original = self.upload
+        def upload(repository, release_id, path):
+            original(repository, release_id, path)
+            if release_id == 1:
+                self.source_release['draft'] = True
+        with patch.object(p, 'upload', side_effect=upload):
+            with self.assertRaisesRegex(ValueError, 'source must be published'):
+                self.publish()
+        self.assertTrue(self.release['draft'])
+        self.assertFalse(any(c[1] == 'PATCH' and c[0].endswith('/releases/1') for c in self.calls))
+
+    def test_status_skips_source_tag_or_release_without_app_to_preserve_frozen_bytes(self):
+        for source_state in ('tag', 'draft', 'published'):
+            with self.subTest(source_state=source_state):
+                self.tags = {self.tag: self.commit}
+                self.source_release = None
+                if source_state == 'tag':
+                    self.tags['sources-' + self.tag] = self.commit
+                else:
+                    self.source_release = {'id': 2, 'tag_name': 'sources-' + self.tag,
+                                           'draft': source_state == 'draft'}
+                environment = {'GITHUB_EVENT_NAME': 'workflow_dispatch', 'GITHUB_REF': 'refs/tags/' + self.tag,
+                               'GITHUB_REF_NAME': self.tag, 'GITHUB_SHA': self.commit,
+                               'GITHUB_REPOSITORY': self.repo, 'INPUT_RELEASE': 'true', 'JVID_RELEASE_ENABLED': 'true'}
+                with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['publish.py', 'status', '--root', str(self.root)]), patch.object(p, 'output') as output:
+                    p.main()
+                    output.assert_called_once_with(build='false', publish='false')
+        self.assertEqual(self.mutations(), [])
+
+    def test_dispatch_does_not_rebuild_a_source_only_publication(self):
+        (self.root / a.PLAN).parent.mkdir()
+        (self.root / a.PLAN).write_text('{}')
+        plan = {'main_commit': 'b' * 40, 'previous_version': '0.0.0'}
+        for source_state in ('tag', 'release'):
+            with self.subTest(source_state=source_state):
+                self.tags = {'sources-' + self.tag: self.commit} if source_state == 'tag' else {}
+                self.source_release = {'tag_name': 'sources-' + self.tag} if source_state == 'release' else None
+                self.calls.clear()
+                with patch.object(a, 'github', side_effect=self.api), patch.object(a, 'read_plan', return_value=plan), patch.object(a, 'version_at', return_value='0.0.0'), patch.object(a, 'run', side_effect=[self.commit, 'b' * 40]), patch.object(a, 'output') as output:
+                    a.dispatch(self.root, self.repo, self.commit, 'b' * 40)
+                    self.assertEqual(output.call_args.kwargs['release'], 'false')
+                    self.assertIn('original Package', output.call_args.kwargs['reason'])
+                self.assertEqual(self.mutations(), [])
 
     def test_status_skips_existing_draft_and_published_even_for_manual_opt_out(self):
         for draft in (True, False):

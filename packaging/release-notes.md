@@ -1,15 +1,21 @@
-- Add a text tool and title presets, with timeline tools in a vertical rail.
-- Link transform scale axes and drag effects onto the Program preview.
-- Make tutorials contextual, improve empty states, and tidy editing dialogs.
-- Open media or project files passed at startup, and import jplay markers.
-- Clarify Windows update downloads and installation, keeping deferred downloads ready.
+Changes in 0.2.1
 
-**Windows users on 0.2.0 or earlier:** run the installer manually once to replace the older update helper. Keep the same installation folder to preserve your settings, projects and models.
+- Fix Windows updater when the editor has already exited
 
-### Downloads
+**Windows users updating from 0.2.0 or earlier:** download and run the `jvid-0.2.1-windows-x86_64-setup.exe` installer manually once. Older installed update helpers can incorrectly report “Editor did not exit” before starting the installer. Install into the same directory to replace that helper and keep your settings, projects and models. Future in-app updates will use the repaired helper.
 
-- **Windows:** [Installer](https://github.com/jarradbanks/jvid/releases/download/v1.0.0/jvid-1.0.0-windows-x86_64-setup.exe) · [Portable](https://github.com/jarradbanks/jvid/releases/download/v1.0.0/jvid-1.0.0-windows-x86_64-portable.zip)
-- **macOS (Apple Silicon):** [DMG](https://github.com/jarradbanks/jvid/releases/download/v1.0.0/jvid-1.0.0-macos-aarch64.dmg) · [Portable](https://github.com/jarradbanks/jvid/releases/download/v1.0.0/jvid-1.0.0-macos-aarch64-portable.zip)
-- **Linux (x86_64):** [Portable](https://github.com/jarradbanks/jvid/releases/download/v1.0.0/jvid-1.0.0-linux-x86_64-portable.tar.gz)
+Choose the download for your system:
 
-[Installation help](https://github.com/jarradbanks/jvid/blob/main/docs/packaging.md) · [Source archives and reconstruction](https://github.com/jarradbanks/jvid/releases/download/v1.0.0/SOURCE-README.txt)
+- Windows x86_64: **setup.exe** installs for your user with shortcuts and an uninstaller; **portable.zip** runs after extraction.
+- macOS Apple Silicon: **.dmg** contains the app to drag into Applications; **portable.zip** keeps data beside its app.
+- Linux x86_64 (Ubuntu 22.04 or newer): extract **portable.tar.gz** and run AppRun on a desktop with a Vulkan driver.
+
+Required FFmpeg playback/export libraries and the integrated speech engine are included. Whisper **models are optional downloads** offered at first launch and later under Help > Optional Components. Editing and export work without them.
+
+Keep the entire portable folder together. Portable settings and models live in `jvid-data` at the package root; macOS keeps it beside the .app. Preserve that folder when replacing program files. See the [installation and packaging guide](https://github.com/jarradbanks/jvid/blob/main/docs/packaging.md) for paths, upgrade instructions, supported systems, source/licensing details and validation limits.
+
+Download the app packages above to install jvid. The separate `sources-*.json`, `.tar.gz.partNNN`, source manifest and reconstruction files provide corresponding source for review/rebuilding; they are not app installers. Verify downloaded files using `SHA256SUMS.txt`.
+
+Release candidates are tested before merge; the final main tag build is published automatically after the maintainer approves the protected release job.
+
+Platform acceptance and signing/notarization status are documented in the installation and packaging guide.

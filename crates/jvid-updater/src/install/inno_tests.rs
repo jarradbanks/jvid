@@ -34,8 +34,21 @@ fn fixture_script() -> String {
             script.push_str("DefaultDirName={#OutputDir}\\fixture install\n");
         } else if line.starts_with("SetupMutex=") {
             script.push_str("SetupMutex=jvid-updater-isolated-inno-fixture\n");
+        } else if line.starts_with("SetupIconFile=") {
+            script.push_str("SetupIconFile={#OutputDir}\\fixture-icon.ico\n");
         } else {
-            script.push_str(line);
+            // Map only the reviewed jvid data roots; any new profile constant must
+            // still fail the isolation assertions below instead of escaping silently.
+            let line = line
+                .replace(
+                    "{localappdata}\\jvid\\",
+                    "{#OutputDir}\\profile-local\\jvid\\",
+                )
+                .replace(
+                    "{userappdata}\\jvid\\",
+                    "{#OutputDir}\\profile-roaming\\jvid\\",
+                );
+            script.push_str(&line);
             script.push('\n');
         }
         if line == "[Setup]" {
@@ -45,8 +58,20 @@ fn fixture_script() -> String {
     }
     assert!(script.contains("PrivilegesRequired=lowest"));
     assert!(!script.contains("{localappdata}") && !script.contains("{userprograms}"));
+    assert!(!script.contains("{userappdata}") && !script.contains("{userdesktop}"));
     assert!(!script.contains("[Registry]") && !script.contains("[UninstallRun]"));
+    assert!(script.contains("#include \"whisper-models.iss\""));
+    assert!(script.contains("SetupIconFile={#OutputDir}\\fixture-icon.ico"));
     script
+}
+
+#[test]
+fn inno_fixture_keeps_model_paths_and_include_isolated() {
+    let script = fixture_script();
+    assert!(script.contains("{#OutputDir}\\profile-local\\jvid\\data\\models"));
+    assert!(script.contains("{#OutputDir}\\profile-local\\jvid\\cache\\model-downloads"));
+    assert!(script.contains("{#OutputDir}\\profile-roaming\\jvid\\config"));
+    assert!(script.contains("if WizardSilent then Exit;"));
 }
 
 fn compile_setup(iscc: &Path, script: &Path, stage: &Path, out: &Path, version: &str) -> PathBuf {
@@ -103,6 +128,16 @@ fn inno_upgrade(already_exited: bool) {
     }
     let script = dir.path().join("fixture.iss");
     fs::write(&script, fixture_script()).unwrap();
+    fs::write(
+        out.join("fixture-icon.ico"),
+        include_bytes!("../../../../assets/jvid.ico"),
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("whisper-models.iss"),
+        include_str!("../../../../packaging/whisper-models.iss"),
+    )
+    .unwrap();
     fs::write(
         payload.join("DISTRIBUTION-LICENSE.txt"),
         b"Disposable fixture",
@@ -168,6 +203,19 @@ fn inno_upgrade(already_exited: bool) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, format!("preserve:{relative}")).unwrap();
     }
+    // Exercise the exact profile paths used by the optional-model installer code,
+    // with every byte still inside this fixture's disposable output directory.
+    let profile_sentinels = [
+        "profile-local/jvid/data/models/ggml-base.bin",
+        "profile-local/jvid/cache/model-downloads/completed-model.bin",
+        "profile-roaming/jvid/config/settings.toml",
+        "profile-roaming/jvid/config/components-offered",
+    ];
+    for relative in profile_sentinels {
+        let path = out.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, format!("preserve:{relative}")).unwrap();
+    }
     // The upgrade is always newer than this build; version bumps cannot stale the test.
     let mut next = semver::Version::parse(VERSION).unwrap();
     next.major += 1;
@@ -210,6 +258,12 @@ fn inno_upgrade(already_exited: bool) {
     for relative in sentinels {
         assert_eq!(
             fs::read_to_string(root.join(relative)).unwrap(),
+            format!("preserve:{relative}")
+        );
+    }
+    for relative in profile_sentinels {
+        assert_eq!(
+            fs::read_to_string(out.join(relative)).unwrap(),
             format!("preserve:{relative}")
         );
     }

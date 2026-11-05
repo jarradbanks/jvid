@@ -12,6 +12,9 @@ on:
       - 'crates/jvid-updater/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'assets/**'
+      - 'crates/jvid-app/build.rs'
+      - 'crates/jvid-app/Cargo.toml'
       - 'crates/jvid-app/src/components.rs'
       - 'crates/jvid-app/src/package_smoke.rs'
   workflow_dispatch:

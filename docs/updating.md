@@ -50,9 +50,8 @@ The detached signature is 64 raw bytes, not hex/base64.
 
 ### Release prerequisites
 
-The automation bootstrap changes workflows, tests and documentation only. It keeps
-`workspace.package.version` at `0.1.0` and adds no `.github/release-plan.json`;
-merging it cannot release. The normal flow is **develop → temporary
+Packaging and release-note preparation do not require changing the workspace
+version or publishing. The normal flow is **develop → temporary
 release/vVERSION → main → immutable vVERSION tag → protected approval → publish**.
 
 Retain the existing `release` environment, its required reviewer `jarradbanks`,
@@ -99,14 +98,19 @@ manual acceptance checklist in [packaging.md](packaging.md).
    (minor is the default). For example, from `0.1.0`, minor creates
    `release/v0.2.0`. The helper snapshots develop, includes current main on the
    temporary branch, changes only workspace versions in `Cargo.toml`/`Cargo.lock`,
-   generates commit-subject notes plus `packaging/release-notes-template.md`, and
+   generates draft highlights plus the minimal download footer in
+   `packaging/release-notes-template.md`, and
    opens its release PR against main. It never pushes a version bump to develop.
 3. Prepare explicitly dispatches **CI** and **Package** on that frozen branch.
    CI's manual path tests all three OSes; Package builds the five native assets,
    runs package smoke checks and verifies all four corresponding-source bundles.
    Bot-created pushes/PRs alone do not trigger recursive Actions runs, so both
    dispatches are required. These candidate runs have publication disabled.
-4. Review the PR's notes, all CI/Package results, source provider records and clean
+4. Use the `jvid-release-notes` skill in `.agents/skills/jvid-release-notes` to
+   review the draft: short user-facing changes, direct platform downloads, essential
+   upgrade instructions and a separate source link. Historical examples for
+   v0.2.0 and v0.2.1 are in `packaging/release-notes-examples/`.
+   Review the PR's notes, all CI/Package results, source provider records and clean
    supported-OS evidence. Download `release-candidate` from the exact Package run:
 
    ```sh
@@ -135,6 +139,12 @@ never overwrites a frozen candidate. Do not rebase or add feature changes to it.
 
 ### Merge, approve and publish
 
+Finish the candidate and installer/model validation before publication. Packaging
+workflow dispatches with the default `release=false` only build test artifacts.
+Removing an abandoned, unpublished tag is a separate owner action after cancelling
+its publishing run and verifying that no release exists; the publisher never
+performs that cleanup. Published releases and their tags remain immutable.
+
 Merge the reviewed release PR into main using a **merge commit**, preserving its
 frozen base history. Keep main at the plan's recorded base until that merge; if
 main advances, replace/review the candidate instead of bypassing the stale-plan
@@ -151,11 +161,17 @@ The tag build repeats all native smoke/source checks for the actual merged
 commit; the merge has a different source identity from the premerge candidate.
 The existing protected `release` environment then waits for its required reviewer.
 After approval, the job revalidates the exact source/native contract, signs and
-verifies updater metadata, creates/resumes a draft, and uploads final native
-packages, separate source bundles, metadata/signature and `SHA256SUMS.txt`.
-Before publishing, it verifies the exact remote names, completed upload states,
-byte sizes and GitHub SHA-256 digests, and rechecks local sources/signatures.
-It then publishes automatically as a stable latest release. No separate manual
+verifies updater metadata, then creates/resumes the corresponding-source release
+`sources-vVERSION`. It uploads only source archives/manifests, reconstruction files
+and a source-only checksum list, verifies their exact remote names, completed
+upload states, byte sizes and GitHub SHA-256 digests, and publishes it without
+marking it latest. The source tag identifies the same exact commit and is excluded
+from app version selection and package tag triggers.
+
+The app release `vVERSION` receives only the five native packages, updater
+metadata/signature and an app-only checksum list. Its notes link to the published
+sources. The publisher rechecks local sources/signatures and remote source
+availability before publishing the app as a stable latest release. No separate manual
 “Publish release” step follows approval.
 
 Manual Package dispatch defaults to `release=false`, including on tags. An
@@ -181,11 +197,17 @@ replaced, deleted or retagged by this automation.
   a fresh build. An existing draft causes main dispatch to stop without rebuilding.
 - If signing/upload/publication fails, rerun **failed jobs** of the original
   Package run, retaining its `release-candidate` inputs (retained for seven days).
+  A completed source release is verified and reused if the app upload failed.
+  A source tag or source draft also marks publication as started, even when no
+  app draft exists yet: new dispatches must not rebuild it. The source draft
+  records a fingerprint of the complete signed candidate before its first upload;
+  changed bytes are rejected on recovery, including after an interrupted empty
+  draft. Resume failed jobs from the original run and retain its exact artifact.
   Matching uploaded assets are kept; incomplete GitHub `starter` uploads are
   removed and retried. Unexpected names or completed assets with conflicting
   sizes/digests stop recovery without overwriting them. Full workflow reruns skip
   an existing draft. If artifacts expired or uploaded bytes conflict, inspect the
-  draft and original run as an owner; do not bypass verification or substitute
+  drafts and original run as an owner; do not bypass verification or substitute
   newly rebuilt bytes into that frozen release. A published release is a no-op.
 - To abandon an unmerged candidate, an owner closes its PR and deletes its
   `release/vVERSION` branch explicitly. With no tag/release for that version,
