@@ -986,6 +986,52 @@ fn dropping_media_on_welcome_matches_the_first_clip() {
 }
 
 #[test]
+fn media_opened_at_startup_lands_on_the_timeline() {
+    let mut h = plain_harness();
+    h.state_mut().importer = Importer::new(jvid_jobs::Pool::new(1), |p| {
+        Ok(jvid_core::model::ProbeInfo {
+            duration: Time(jvid_core::time::FLICKS_PER_SECOND * 42),
+            audio_streams: 2,
+            sample_rate: Some(48_000),
+            ..fake_probe(p)?
+        })
+    });
+    let clip = PathBuf::from("/m/screen-1440p60.mp4");
+    h.state_mut().open_startup(Some(clip.clone()));
+    assert!(!h.state().on_welcome && h.state().path.is_none());
+    while h.state().importer.is_busy() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    let project = h.state().history.project();
+    assert_eq!(project.assets()[0].path, clip);
+    assert_eq!(project.settings().width, 2560, "Match Source fits the clip");
+    let placed: usize = project
+        .sequence()
+        .tracks()
+        .iter()
+        .map(|t| t.clips().len())
+        .sum();
+    assert!(placed >= 2, "video and audio on the timeline, got {placed}");
+    // Later imports only go to the media bin.
+    h.state_mut().import([PathBuf::from("/m/phone.mp4")]);
+    while h.state().importer.is_busy() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    let after: usize = h
+        .state()
+        .history
+        .project()
+        .sequence()
+        .tracks()
+        .iter()
+        .map(|t| t.clips().len())
+        .sum();
+    assert_eq!(after, placed);
+}
+
+#[test]
 fn new_project_uses_the_chosen_preset() {
     let mut h = plain_harness();
     assert_eq!(h.state().welcome.preset, 0, "Match Source is the default");
