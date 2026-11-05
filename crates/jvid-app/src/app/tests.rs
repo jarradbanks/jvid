@@ -1477,7 +1477,15 @@ fn effect_rows_show_each_effect_and_hover_only_fills() {
     let apply: Vec<_> = h.get_all_by_label("Apply to Selected Clips").collect();
     assert_eq!(apply.len(), names.len());
     assert!(apply.iter().all(|n| n.accesskit_node().is_disabled()));
-    assert_eq!(h.get_all_by_label("More").count(), names.len());
+    let media = h.state().dock.find_tab(&Tab::Media).unwrap().node_path();
+    let media = h.state().dock.leaf(media).unwrap().rect;
+    // Preview and the vertical timeline rail have their own overflow menus.
+    assert_eq!(
+        h.get_all_by_label("More")
+            .filter(|node| media.contains_rect(node.rect()))
+            .count(),
+        names.len()
+    );
     h.get_by_label("Vignette").hover();
     h.run();
     assert_eq!(nodes(&h), before, "hover moved or added something");
@@ -1591,6 +1599,22 @@ fn title_harness_sized(
     let app = h.state_mut();
     app.timeline
         .select_clip(app.history.project().sequence(), id);
+    // A repaint can settle before the background media jobs deliver their wakeup.
+    // Wait for the actual title frame and its filmstrip before capturing the fixture.
+    for _ in 0..500 {
+        h.step();
+        if h.state().preview.has_program_frame()
+            && h.state().preview.program_caught_up()
+            && h.state().timeline.jobs_idle()
+            && h.try_run().is_ok()
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(h.state().preview.has_program_frame());
+    assert!(h.state().preview.program_caught_up());
+    assert!(h.state().timeline.jobs_idle());
     h.run();
     let shot = Shot::take(&mut h, "title".into());
     let r = shot.panel(Tab::Preview);
