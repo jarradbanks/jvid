@@ -1673,6 +1673,7 @@ impl Timeline {
 
         // Ruler.
         painter.rect_filled(ruler, 0.0, color::panel());
+        let ruler_painter = painter.with_clip_rect(ruler);
         let (major, minor) = tick_steps(self.zoom, rate);
         let first = rate.index_floor(start).max(0) / minor * minor;
         let last = rate.index_floor(end) + 1;
@@ -1681,19 +1682,22 @@ impl Timeline {
             let x = (view.x(rate.time_floor(f)) * ppp).round() / ppp;
             let is_major = f % major == 0;
             let h = if is_major { 8.0 } else { 4.0 };
-            painter.rect_filled(
+            ruler_painter.rect_filled(
                 Rect::from_x_y_ranges(x..=x + line, ruler.bottom() - h..=ruler.bottom()),
                 0.0,
                 color::border_strong(),
             );
             if is_major {
-                painter.text(
-                    pos2(x + 3.0, ruler.top() + 2.0),
-                    Align2::LEFT_TOP,
+                let pos = pos2(x + 3.0, ruler.top() + 2.0);
+                let label = ruler_painter.layout_no_wrap(
                     format_timecode(f as u64, rate),
                     theme::small(),
                     color::ink_3(),
                 );
+                // Edge ticks still mark time, but their labels must fit in full.
+                if ruler.contains_rect(label.mesh_bounds.translate(pos.to_vec2())) {
+                    ruler_painter.galley(pos, label, color::ink_3());
+                }
             }
             f += minor;
         }
@@ -1702,7 +1706,6 @@ impl Timeline {
             0.0,
             color::border(),
         );
-        let ruler_painter = painter.with_clip_rect(ruler);
         if let Some(r) = range {
             let band = Rect::from_x_y_ranges(r.x_range(), ruler.y_range());
             ruler_painter.rect_filled(band, 0.0, color::light_blue().gamma_multiply(0.25));
@@ -3052,6 +3055,62 @@ mod tests {
                 let (major, minor) = tick_steps(z, r);
                 assert!(major as f64 * r.den as f64 / r.num as f64 * z >= MAJOR_PX);
                 assert_eq!(major % minor, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn ruler_labels_fit_at_both_edges_after_scrolling_and_resizing() {
+        use egui_kittest::kittest::Queryable;
+
+        for scale in [1.0, 1.5, 2.0] {
+            let mut fresh = true;
+            let project = project(200);
+            let mut h = egui_kittest::Harness::builder()
+                .with_size([1280.0, 200.0])
+                .with_pixels_per_point(scale)
+                .build_ui_state(
+                    move |ui, timeline: &mut Timeline| {
+                        if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                            timeline.show_with_tools(
+                                ui,
+                                &project,
+                                &HashSet::new(),
+                                &Keymap::default(),
+                            );
+                        }
+                    },
+                    Timeline::default(),
+                );
+            for width in [480.0, 640.0, 1280.0] {
+                h.set_size(vec2(width, 200.0));
+                for scroll in [0.0, 0.35, 43.3] {
+                    h.state_mut().scroll = scroll;
+                    h.run();
+                    let marker = h.get_by_label(tr!("timeline.marker_lane")).rect();
+                    let ruler = Rect::from_min_size(
+                        marker.left_bottom(),
+                        vec2(marker.width(), size::RULER),
+                    );
+                    let labels: Vec<_> = h
+                        .output()
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if shape.clip_rect == ruler => Some(text),
+                            _ => None,
+                        })
+                        .collect();
+                    assert!(!labels.is_empty(), "{width} @ {scale}, scroll {scroll}");
+                    for label in labels {
+                        let ink = label.galley.mesh_bounds.translate(label.pos.to_vec2());
+                        assert!(
+                            ruler.contains_rect(ink),
+                            "{}: {ink:?} outside {ruler:?}",
+                            label.galley.text()
+                        );
+                    }
+                }
             }
         }
     }

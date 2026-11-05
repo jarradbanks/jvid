@@ -1296,9 +1296,10 @@ fn about_opens_the_third_party_notices() {
         h.query_by_label_contains("jvid Third-Party Notices")
             .is_some()
     );
-    // A move-and-click in one frame misses here, so hover first as a real pointer does.
+    let settled = h.get_by_label("OK").rect();
     h.get_by_label("OK").hover();
     h.run();
+    assert_eq!(h.get_by_label("OK").rect(), settled);
     h.get_by_label("OK").click();
     h.run();
     assert!(h.state().prompts.is_empty());

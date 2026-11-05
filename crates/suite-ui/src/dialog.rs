@@ -91,7 +91,9 @@ impl Dialog<'_> {
     /// Draws the dialog; the index of the button picked this frame, if any.
     pub fn show(&self, ctx: &Context) -> Option<usize> {
         let mut picked = None;
-        let modal = egui::Modal::new(Id::new("suite_ui_dialog"))
+        let id = Id::new("suite_ui_dialog");
+        let previous_rect = ctx.memory(|m| m.area_rect(id));
+        let modal = egui::Modal::new(id)
             .frame(
                 Frame::popup(&ctx.global_style())
                     .corner_radius(radius::DIALOG)
@@ -105,8 +107,10 @@ impl Dialog<'_> {
                 ui.label(RichText::new(self.title).font(theme::headline()));
                 ui.add_space(space::S8);
                 if self.long {
+                    let height = ctx.content_rect().height() * 0.6;
                     egui::ScrollArea::vertical()
-                        .max_height(ctx.content_rect().height() * 0.6)
+                        .min_scrolled_height(height)
+                        .max_height(height)
                         .show(ui, |ui| ui.label(self.body));
                 } else {
                     ui.label(self.body);
@@ -127,6 +131,11 @@ impl Dialog<'_> {
                     }
                 }
             });
+        // The shared Area centres using its previous size. Repaint after a content
+        // change so the footer reaches its final position before the next input.
+        if previous_rect.is_some_and(|r| r.size() != modal.response.rect.size()) {
+            ctx.request_repaint();
+        }
         if picked.is_none() && modal.should_close() {
             picked = Some(self.cancel);
         }
