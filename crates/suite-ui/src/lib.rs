@@ -4,6 +4,7 @@
 //! controls from [`widgets`]. Every colour, size and radius comes from [`tokens`].
 
 pub mod dialog;
+pub mod empty_state;
 pub mod i18n;
 pub mod panel;
 #[cfg(feature = "test-support")]

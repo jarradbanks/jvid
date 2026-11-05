@@ -34,6 +34,8 @@ use crate::keymap::Keymap;
 use crate::media_bin::{Caches, filmstrips::FilmstripRequests};
 use crate::transport::{SeekGesture, Transport};
 
+#[cfg(test)]
+mod effect_drop_tests;
 mod fades;
 #[cfg(test)]
 mod feedback_tests;
@@ -109,8 +111,7 @@ pub struct Timeline {
     seek_after: Option<Time>,
     /// Copy or cut ran since the last `show`.
     copied: bool,
-    /// The razor tool (C) is on instead of selection (V).
-    razor: bool,
+    tool: Tool,
     /// The clip edge being dragged.
     trim: Option<Trim>,
     /// The clip being moved or trimmed, kept interactive after it scrolls out of view.
@@ -155,6 +156,8 @@ pub struct Timeline {
     keys: keyframes::Keys,
     /// The Detect Silence dialog, while open.
     silence: Option<silence::Silence>,
+    /// A Cut response waiting for the app's successful history apply.
+    silence_cut: bool,
     /// The Find Highlights dialog, while open.
     highlights: Option<highlights::Highlights>,
     /// The audio track a voiceover records onto; disarming it ends a take.
@@ -206,6 +209,15 @@ struct Trim {
 /// An edit made in the timeline, and the gesture it coalesces under, if any.
 pub type Edit = (Command, Option<GestureKey>);
 
+/// Shared by the timeline rail, keyboard shortcuts and Program canvas.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tool {
+    #[default]
+    Selection,
+    Razor,
+    Text,
+}
+
 impl Default for Timeline {
     fn default() -> Self {
         Self {
@@ -232,7 +244,7 @@ impl Default for Timeline {
             jumped: false,
             seek_after: None,
             copied: false,
-            razor: false,
+            tool: Tool::Selection,
             trim: None,
             gap: None,
             width: 800.0,
@@ -250,6 +262,7 @@ impl Default for Timeline {
             shown_sequence: SequenceId::default(),
             keys: keyframes::Keys::default(),
             silence: None,
+            silence_cut: false,
             highlights: None,
             armed: None,
             level: None,
@@ -388,6 +401,32 @@ impl Timeline {
             .and_then(Option::as_deref)
     }
 
+    pub fn tool(&self) -> Tool {
+        self.tool
+    }
+
+    /// The rail occupies its own column, so track headers and all timeline hit regions
+    /// keep the same origin. Its buttons never enter the dock's draggable tab strip.
+    pub fn show_with_tools(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        missing: &HashSet<PathBuf>,
+        keymap: &Keymap,
+    ) -> Option<Edit> {
+        let area = ui.max_rect().intersect(ui.clip_rect());
+        let rail = area.with_max_x((area.left() + menus::RAIL_WIDTH).min(area.right()));
+        self.tool_rail(ui, rail, project, keymap);
+        let content = area.with_min_x(rail.right());
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("timeline content")
+                .max_rect(content),
+        );
+        child.set_clip_rect(content);
+        self.show(&mut child, project, missing, keymap)
+    }
+
     pub fn selected(&self) -> &HashSet<ClipId> {
         &self.selected
     }
@@ -509,7 +548,9 @@ impl Timeline {
             _ if self.key_action(id, project.sequence()) => {}
             "linked_selection" => self.linked_selection = !self.linked_selection,
             "snapping" => self.snapping = !self.snapping,
-            "razor_tool" | "selection_tool" => self.razor = id == "razor_tool",
+            "razor_tool" => self.tool = Tool::Razor,
+            "selection_tool" => self.tool = Tool::Selection,
+            "text_tool" => self.tool = Tool::Text,
             "select_all" => {
                 let clips = project.sequence().tracks().iter().flat_map(|t| t.clips());
                 self.selected = clips.map(|c| c.id).collect();
@@ -791,7 +832,7 @@ impl Timeline {
         clip: &Clip,
         r: Rect,
     ) -> Option<Edit> {
-        if self.razor || locked(project.sequence(), clip.id) {
+        if self.tool != Tool::Selection || locked(project.sequence(), clip.id) {
             return None;
         }
         let w = 6.0f32.min(r.width() / 3.0);
@@ -1005,6 +1046,22 @@ impl Timeline {
         let mut t = Self::default();
         t.media.caches = self.media.caches.clone();
         t
+    }
+
+    /// Floating task dialogs consume Escape before tutorial navigation does.
+    pub(crate) fn dialog_open(&self) -> bool {
+        self.silence.is_some() || self.highlights.is_some()
+    }
+
+    pub(crate) fn take_silence_cut(&mut self) -> bool {
+        std::mem::take(&mut self.silence_cut)
+    }
+
+    /// Tutorial navigation dismisses its task dialog without touching selection or history.
+    pub(crate) fn dismiss_dialogs(&mut self) {
+        self.silence = None;
+        self.silence_cut = false;
+        self.highlights = None;
     }
 
     /// Drop selections, clip/key clipboards, dialogs and deferred edits across projects.
@@ -1358,7 +1415,7 @@ impl Timeline {
                     painter.rect_stroke(r, corner, stroke, egui::StrokeKind::Inside);
                 }
                 let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::click_and_drag());
-                if self.razor && cr.hovered() {
+                if self.tool == Tool::Razor && cr.hovered() {
                     ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
                 }
                 let band = (track.kind == TrackKind::Audio && !offline).then(|| {
@@ -1369,7 +1426,7 @@ impl Timeline {
                 if let Some(e) = band.flatten() {
                     edit = Some(e);
                 } else if cr.clicked()
-                    && self.razor
+                    && self.tool == Tool::Razor
                     && let Some(p) = cr.interact_pointer_pos()
                 {
                     edit = Some(self.razor_cut(seq, view, clip.id, p.x));
@@ -1601,18 +1658,22 @@ impl Timeline {
             let r = Rect::from_x_y_ranges(x - 0.5..=x + 0.5, lanes.y_range());
             clip_painter.rect_filled(r, 0.0, color::light_blue());
         }
-        if tracks.is_empty() {
-            painter.text(
-                lanes.center(),
-                Align2::CENTER_CENTER,
-                tr!("timeline.empty"),
-                theme::body(),
-                color::ink_3(),
-            );
+        if seq.tracks().iter().all(|track| track.clips().is_empty())
+            && !egui::DragAndDrop::has_any_payload(ui.ctx())
+        {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(lanes), |ui| {
+                suite_ui::empty_state::EmptyState::new(
+                    icon::LIST,
+                    tr!("empty.timeline"),
+                    tr!("timeline.empty"),
+                )
+                .show(ui);
+            });
         }
 
         // Ruler.
         painter.rect_filled(ruler, 0.0, color::panel());
+        let ruler_painter = painter.with_clip_rect(ruler);
         let (major, minor) = tick_steps(self.zoom, rate);
         let first = rate.index_floor(start).max(0) / minor * minor;
         let last = rate.index_floor(end) + 1;
@@ -1621,19 +1682,22 @@ impl Timeline {
             let x = (view.x(rate.time_floor(f)) * ppp).round() / ppp;
             let is_major = f % major == 0;
             let h = if is_major { 8.0 } else { 4.0 };
-            painter.rect_filled(
+            ruler_painter.rect_filled(
                 Rect::from_x_y_ranges(x..=x + line, ruler.bottom() - h..=ruler.bottom()),
                 0.0,
                 color::border_strong(),
             );
             if is_major {
-                painter.text(
-                    pos2(x + 3.0, ruler.top() + 2.0),
-                    Align2::LEFT_TOP,
+                let pos = pos2(x + 3.0, ruler.top() + 2.0);
+                let label = ruler_painter.layout_no_wrap(
                     format_timecode(f as u64, rate),
                     theme::small(),
                     color::ink_3(),
                 );
+                // Edge ticks still mark time, but their labels must fit in full.
+                if ruler.contains_rect(label.mesh_bounds.translate(pos.to_vec2())) {
+                    ruler_painter.galley(pos, label, color::ink_3());
+                }
             }
             f += minor;
         }
@@ -1642,7 +1706,6 @@ impl Timeline {
             0.0,
             color::border(),
         );
-        let ruler_painter = painter.with_clip_rect(ruler);
         if let Some(r) = range {
             let band = Rect::from_x_y_ranges(r.x_range(), ruler.y_range());
             ruler_painter.rect_filled(band, 0.0, color::light_blue().gamma_multiply(0.25));
@@ -1722,6 +1785,8 @@ impl Timeline {
         if let Some(s) = &mut self.silence {
             let at = pos2(area.right() - space::S16, area.top() - space::S8);
             let (cmd, open) = s.show(ui, at, seq, spans.as_deref());
+            self.silence_cut =
+                edit.is_none() && matches!(&cmd, Some(Command::CutSpans { speed: None, .. }));
             if !open {
                 self.silence = None;
             }
@@ -1933,16 +1998,43 @@ impl Timeline {
             hit.filter(|l| kind.is_none_or(|k| k == l.1)).map(|l| l.0)
         };
         if let Some(fx) = egui::DragAndDrop::payload::<crate::effects::Drag>(ui.ctx()) {
-            let t = view.time(p.x);
-            let clip = lane_at(Some(TrackKind::Video))
-                .and_then(|id| project.sequence().track(id))
-                .and_then(|tr| tr.clips().iter().find(|c| c.start <= t && t < c.end()));
-            if area.contains(p)
-                && ui.input(|i| i.pointer.any_released())
-                && let Some(c) = clip
-                && let Some(cmd) = crate::inspector::add_effect(project, &[c.id].into(), &fx.0)
-            {
-                *edit = Some((cmd, None));
+            let over = ui.rect_contains_pointer(area);
+            let target = over
+                .then(|| lane_at(Some(TrackKind::Video)))
+                .flatten()
+                .and_then(|id| crate::effects::drag::timeline_target(project, id, view.time(p.x)))
+                .filter(|_| crate::effects::drag::usable(&fx.0))
+                .and_then(|id| {
+                    let (track, clip) = project.sequence().clip(id)?;
+                    let (_, _, lane) = lanes.iter().find(|l| l.0 == track)?;
+                    let height = project.sequence().track(track)?.height;
+                    let rect = Rect::from_x_y_ranges(
+                        view.x(clip.start)..=view.x(clip.end()),
+                        lane.top()..=lane.top() + height,
+                    )
+                    .shrink2(vec2(1.0, 2.0));
+                    rect.contains(p).then_some((id, rect))
+                });
+            if over {
+                ui.ctx().set_cursor_icon(if target.is_some() {
+                    CursorIcon::Copy
+                } else {
+                    CursorIcon::NotAllowed
+                });
+            }
+            if let Some((id, rect)) = target {
+                let painter = ui.painter().with_clip_rect(area);
+                painter.rect_filled(rect, radius::SMALL, color::blue().gamma_multiply(0.2));
+                painter.rect_stroke(
+                    rect,
+                    radius::SMALL,
+                    Stroke::new(3.0, color::light_blue()),
+                    egui::StrokeKind::Inside,
+                );
+                if ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
+                    *edit = crate::effects::drag::command(project, id, &fx.0).map(|c| (c, None));
+                    egui::DragAndDrop::clear_payload(ui.ctx());
+                }
             }
             return Vec::new();
         }
@@ -2963,6 +3055,62 @@ mod tests {
                 let (major, minor) = tick_steps(z, r);
                 assert!(major as f64 * r.den as f64 / r.num as f64 * z >= MAJOR_PX);
                 assert_eq!(major % minor, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn ruler_labels_fit_at_both_edges_after_scrolling_and_resizing() {
+        use egui_kittest::kittest::Queryable;
+
+        for scale in [1.0, 1.5, 2.0] {
+            let mut fresh = true;
+            let project = project(200);
+            let mut h = egui_kittest::Harness::builder()
+                .with_size([1280.0, 200.0])
+                .with_pixels_per_point(scale)
+                .build_ui_state(
+                    move |ui, timeline: &mut Timeline| {
+                        if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                            timeline.show_with_tools(
+                                ui,
+                                &project,
+                                &HashSet::new(),
+                                &Keymap::default(),
+                            );
+                        }
+                    },
+                    Timeline::default(),
+                );
+            for width in [480.0, 640.0, 1280.0] {
+                h.set_size(vec2(width, 200.0));
+                for scroll in [0.0, 0.35, 43.3] {
+                    h.state_mut().scroll = scroll;
+                    h.run();
+                    let marker = h.get_by_label(tr!("timeline.marker_lane")).rect();
+                    let ruler = Rect::from_min_size(
+                        marker.left_bottom(),
+                        vec2(marker.width(), size::RULER),
+                    );
+                    let labels: Vec<_> = h
+                        .output()
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if shape.clip_rect == ruler => Some(text),
+                            _ => None,
+                        })
+                        .collect();
+                    assert!(!labels.is_empty(), "{width} @ {scale}, scroll {scroll}");
+                    for label in labels {
+                        let ink = label.galley.mesh_bounds.translate(label.pos.to_vec2());
+                        assert!(
+                            ruler.contains_rect(ink),
+                            "{}: {ink:?} outside {ruler:?}",
+                            label.galley.text()
+                        );
+                    }
+                }
             }
         }
     }

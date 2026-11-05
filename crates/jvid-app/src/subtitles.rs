@@ -558,6 +558,10 @@ impl Subtitles {
         self.open
     }
 
+    pub(crate) fn is_running(&self) -> bool {
+        self.run.is_some()
+    }
+
     /// Cancels anything running and frees the model.
     pub(crate) fn close(&mut self) {
         self.open = false;
@@ -970,20 +974,25 @@ impl Subtitles {
                     ui.label(RichText::new(e).color(color::red()));
                 }
                 ui.add_space(space::S16);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = space::S8;
-                    let ready = if can && self.run.is_none() {
-                        State::Live
-                    } else {
-                        State::Disabled
-                    };
-                    let generate = Button::primary(action)
-                        .loading(self.run.is_some())
-                        .state(ready);
-                    start = ui.add(generate).clicked();
-                    close = ui.add(Button::secondary(tr!("prompt.cancel"))).clicked();
-                });
+                let ready = if can && self.run.is_none() {
+                    State::Live
+                } else {
+                    State::Disabled
+                };
+                let actions = suite_ui::dialog::action_footer(
+                    ui,
+                    [
+                        Button::secondary(tr!("prompt.cancel")),
+                        Button::primary(action)
+                            .loading(self.run.is_some())
+                            .state(ready),
+                    ],
+                );
+                close = actions[0].clicked();
+                crate::app::tutorial::anchor(ui.ctx(), "subtitles.action", actions[1].rect);
+                start = actions[1].clicked();
             });
+        crate::app::tutorial::anchor(ui.ctx(), "subtitles.dialog", modal.response.rect);
         if close || modal.should_close() {
             self.close();
         } else if start {

@@ -5,6 +5,8 @@ mod autosave;
 mod components;
 mod easing;
 mod effects;
+#[cfg(test)]
+mod empty_state_tests;
 pub mod export;
 mod framing;
 mod handles;

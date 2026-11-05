@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use egui::{Align, Layout, RichText, Ui};
+use egui::{RichText, Ui};
 use jvid_core::model::Project;
 use jvid_core::srt;
 use rfd::FileDialog;
@@ -75,15 +75,19 @@ impl SubtitleExport {
                     ui.label(RichText::new(error).color(color::red()));
                 }
                 ui.add_space(space::S16);
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    save = ui
-                        .add_enabled(
-                            content.is_ok(),
-                            Button::primary(tr!("subtitle_export.save")),
-                        )
-                        .clicked();
-                    close = ui.add(Button::secondary(tr!("prompt.cancel"))).clicked();
-                });
+                let actions = suite_ui::dialog::action_footer(
+                    ui,
+                    [
+                        Button::secondary(tr!("prompt.cancel")),
+                        Button::primary(tr!("subtitle_export.save")).state(if content.is_ok() {
+                            suite_ui::widgets::State::Live
+                        } else {
+                            suite_ui::widgets::State::Disabled
+                        }),
+                    ],
+                );
+                close = actions[0].clicked();
+                save = actions[1].clicked();
             });
         if close || modal.should_close() {
             self.open = false;

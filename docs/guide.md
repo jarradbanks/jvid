@@ -28,11 +28,32 @@ The start screen offers **New project** (pick a frame size preset, or **Match so
 - **Missing media:** if a source file has moved, the clip shows as offline. Right-click it in the bin and choose **Relink…**; other missing files in the same folder are found too.
 - **Panels:** Media, Source, Program, Timeline, Inspector and Effects. `Shift+1` to `Shift+7` focus them.
 
+## Updating jvid
+
+Open **Help → Check for Updates**. Automatic startup checks can be turned off in that
+window; checking never downloads or installs an update without your click.
+
+For an installed Windows copy, choose **Download Update**. The window shows download
+progress, then verification, then **Ready to install**. Choose **Install and restart**
+to close jvid, run the installer and reopen it. Unsaved projects offer **Save, install
+and restart**; cancelling the save or a save error keeps the editor open and the
+verified download available. Finish recording, exports, model work and tutorials
+before installing.
+
+Choose **Later** to keep working. A download continues in the background, and a verified
+download stays ready for the rest of the session. **Help → Check for Updates** reopens
+that download without replacing it. **Cancel Download** stops the download and allows
+a fresh attempt. Closing jvid without installing removes the temporary download.
+
+Portable copies, macOS, Linux and externally managed builds use **Release Notes and
+Downloads** for their manual update route. See the [updating reference](updating.md)
+for platform details and recovery.
+
 ## Arranging panels
 
 Every editor panel has a draggable tab strip. Open **Timeline → Transcript** or **Export → Show Render Queue** to place that optional panel beside Timeline. Drag its tab onto Timeline's strip to share one full-width panel; click a tab to switch views. All three can share a group. Drag a tab along the strip to reorder it, or into another panel's body and choose a highlighted edge to create a separate split. Drop feedback shows the destination before you release. Panels stay inside the editor window.
 
-Timeline's editing actions sit in a separate toolbar below its tab strip. Drag the tab to move the panel; use the toolbar to edit. At narrow widths the tab strip scrolls horizontally with the mouse wheel or its scrollbar, and long labels have an ellipsis and show their full name on hover.
+Timeline's editing tools sit in a compact left rail beside the track headers. Selection (`V`), Razor (`C`) and Text (`T`) are at the top, with snapping, linking and zoom below; short panels keep the remaining controls in the More menu. Drag the Timeline tab to move the panel. At narrow widths the tab strip scrolls horizontally with the mouse wheel or its scrollbar, and long labels have an ellipsis and show their full name on hover.
 
 Close Transcript or Render Queue with the **×** on its tab (or middle-click the tab). Showing an already-open panel activates its existing tab wherever you moved it. Reopening a closed optional panel creates a split immediately to Timeline's right. Closing Render Queue leaves exports running; closing Transcript keeps its cached recognition.
 
@@ -56,11 +77,11 @@ Groups, tab order, split sizes and active tabs are saved automatically across re
 - `Shift+Delete` ripple deletes. To close a gap, click it and press `Shift+Delete`, or right-click it and choose **Close gap**.
 - With In and Out set on the timeline, `;` lifts the range (leaving a gap) and `'` extracts it (closing the gap). `X` marks the clip under the playhead.
 
-**Markers.** `M` adds one at the playhead, `Alt+M` turns In/Out into a ranged marker, `Shift+M` and `Ctrl+Shift+M` jump between them. Right-click a marker flag to name it, color it or add a note.
+**Markers.** The fixed 16px lane above the ruler holds markers; double-click an empty part of the lane to add one there. `M` adds one at the playhead, `Alt+M` turns In/Out into a ranged marker, `Shift+M` and `Ctrl+Shift+M` jump between them. Right-click a marker flag to name it, color it or add a note.
 
 jplay recordings import markers from the adjacent `<name>.jplay.json` file. Placing the media adds the markers within its source In/Out range to the timeline at their corresponding times. They then behave like other timeline markers. Separate audio streams get their own lanes, named from the sidecar when available.
 
-**Solids and text.** **New solid** in the Media panel adds a color solid. The Text tab has title presets; add one to the bin, put it on a track above your footage, and edit its words, font, size, outline, shadow and box in the Inspector.
+**Solids and text.** **New solid** in the Media panel adds a color solid. Select Text (`T`) in the timeline rail and click in Program to create a title at the playhead and start typing. **Media > Text** offers Title, Lower Third and Caption presets; click to add one at the playhead, or drag it onto a track. Each creates editable text; change its words, font, size, outline, shadow and box in the Inspector. New titles use a free top video track or a new overlay track to preserve your footage.
 
 **Audio.** Drag the square in either top corner of a clip inward to fade it; double-click the handle to switch between linear and equal-power. The line across an audio clip's waveform is its volume: drag it, or Ctrl+click it to add a point. `Shift+S` toggles audio while scrubbing.
 
