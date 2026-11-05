@@ -1169,11 +1169,7 @@ impl Preview {
                 };
             }
             let timecode = Rect::from_min_size(inner.left_top(), vec2(time_width, inner.height()));
-            ui.put(
-                timecode,
-                egui::Label::new(egui::RichText::new(r.timecodes()).font(theme::timecode()))
-                    .selectable(false),
-            );
+            timecode_label(ui, timecode, &r.timecodes(), theme::timecode());
             let records = records.then_some(self.recording);
             // Five buttons, then Record after a wider gap; a take adds its time and meter.
             let width = 5.0 * 28.0 + records.map_or(0.0, |_| 28.0 + space::S4);
@@ -1297,13 +1293,12 @@ impl Preview {
         let row_rect = inner.with_min_y(inner.bottom() - size::HEADER);
         if stacked {
             let info = inner.with_max_y(row_rect.top());
-            ui.put(
+            timecode_label(
+                ui,
                 info.with_max_x((info.left() + time_width).min(info.right())),
-                egui::Label::new(egui::RichText::new(&timecode).font(font.clone()))
-                    .selectable(false)
-                    .truncate(),
-            )
-            .on_hover_text(&timecode);
+                &timecode,
+                font.clone(),
+            );
         }
         let take = records.then_some(self.recording).flatten();
         let time_budget = if stacked { 0.0 } else { time_width };
@@ -1335,13 +1330,7 @@ impl Preview {
         );
         if !stacked {
             let info = row_rect.with_max_x(row_rect.left() + time_width);
-            ui.put(
-                info,
-                egui::Label::new(egui::RichText::new(&timecode).font(font))
-                    .selectable(false)
-                    .truncate(),
-            )
-            .on_hover_text(&timecode);
+            timecode_label(ui, info, &timecode, font);
         }
         if let Some(take) = take {
             let info = if stacked {
@@ -1582,6 +1571,27 @@ fn record_button(
     let (bar, _) = ui.allocate_exact_size(vec2(32.0, 4.0), egui::Sense::hover());
     crate::timeline::meter(ui.painter(), bar, level);
     b.clicked()
+}
+
+/// Keep Inter's descending slash and the tabular digits optically centred together.
+fn timecode_label(ui: &mut Ui, rect: Rect, text: &str, font: egui::FontId) {
+    ui.put(rect, |ui: &mut Ui| {
+        let (pos, galley, response) = egui::Label::new(egui::RichText::new(text).font(font))
+            .selectable(false)
+            .truncate()
+            .layout_in_ui(ui);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), galley.text())
+        });
+        // Adjust only the ink: accessibility and hover bounds stay within the row.
+        ui.painter().galley(
+            pos - vec2(0.0, 1.0 / ui.pixels_per_point()),
+            galley,
+            color::ink(),
+        );
+        response
+    })
+    .on_hover_text(text);
 }
 
 /// At the minimum panel width the full current / total pair gets its own row.
@@ -2172,7 +2182,7 @@ mod program_tests {
     }
 
     /// DESIGN.md Layout > Checks, for the Program transport row: every item's ink (timecodes,
-    /// buttons, Record, the end time, the dropdowns, the Preview checkbox, the guides menu) is centred
+    /// separator, total time, buttons, Record, dropdowns, proxy checkbox and guides) is centred
     /// within 1 physical pixel of the row's centre, at 100% and 150% scale.
     #[test]
     fn transport_items_share_the_rows_centre_line() {
@@ -2181,13 +2191,13 @@ mod program_tests {
         }
         for ppp in [1.0, 1.5] {
             let (centre, items) = transport_ink([960.0, 360.0], ppp, None);
-            // Timecode, 5 buttons, Record, end time, guides, checkbox box and label, 2
-            // dropdowns.
-            assert_eq!(items.len(), 13, "@{ppp}x: {items:?}");
+            // Current time, separator and total; 5 buttons, Record, guides, checkbox box
+            // and label, and 2 dropdowns.
+            assert_eq!(items.len(), 14, "@{ppp}x: {items:?}");
             // While recording: Stop, its elapsed time and meter join the row.
             let take = Some((std::time::Duration::from_secs(72), 0.5));
             let (_, recording) = transport_ink([960.0, 360.0], ppp, take);
-            assert_eq!(recording.len(), 15, "@{ppp}x: {recording:?}");
+            assert_eq!(recording.len(), 16, "@{ppp}x: {recording:?}");
             for i in items.iter().chain(&recording) {
                 assert!(
                     (i.1 - centre).abs() <= 1.0,

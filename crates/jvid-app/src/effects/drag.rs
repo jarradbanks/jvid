@@ -196,8 +196,8 @@ mod tests {
         )]))
         .unwrap();
         for (kind, name) in [
-            (TrackKind::Video, "Top"),
             (TrackKind::Video, "Lower"),
+            (TrackKind::Video, "Top"),
             (TrackKind::Audio, "Audio"),
         ] {
             h.apply(Command::AddTrack {
