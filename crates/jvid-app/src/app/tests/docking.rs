@@ -53,6 +53,132 @@ fn save(app: &mut App) -> Memory {
 }
 
 #[test]
+fn root_bottom_target_requires_a_tab_drag_and_escape_dismisses_it() {
+    let mut h = ui_harness([1280.0, 720.0], 1.0);
+    let label = tr!("panel.dock_bottom");
+    h.get_all_by_role(Role::Tab)
+        .find(|n| n.accesskit_node().label().as_deref() == Some(Tab::Media.title()))
+        .unwrap()
+        .click();
+    h.run();
+    assert!(
+        h.query_by_label(label).is_none(),
+        "clicking a tab never opens a drop target"
+    );
+    let before = node(h.state(), Tab::Media);
+    let from = tab_rect(&h, Tab::Media).center();
+    h.hover_at(from);
+    h.run_steps(2);
+    h.drag_at(from);
+    h.run_steps(2);
+    h.hover_at(from + vec2(0.0, 60.0));
+    h.run_steps(2);
+    assert!(h.query_by_label(label).is_some());
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(
+        h.query_by_label(label).is_none(),
+        "Escape dismisses the root destination"
+    );
+    h.drop_at(from);
+    h.run();
+    assert_eq!(node(h.state(), Tab::Media), before);
+    assert_eq!(h.state().dock.iter_all_tabs().count(), 4);
+}
+
+#[test]
+fn drag_middle_column_timeline_to_root_bottom_and_preserve_open_panels() {
+    let mut snapshots = egui_kittest::SnapshotResults::new();
+    for scale in SCALES {
+        let mut h = ui_harness([1280.0, 720.0], scale);
+        crate::playback::tests::add_solid(
+            &mut h.state_mut().history,
+            [0.2, 0.3, 0.4, 1.0],
+            Time(0),
+        );
+        h.state_mut().show_panel(Tab::Transcript);
+        h.state_mut().show_queue();
+        group(h.state_mut(), Tab::Transcript, Tab::Media, 1);
+        group(h.state_mut(), Tab::RenderQueue, Tab::Inspector, 1);
+        h.run();
+        let project = h.state().history.project().clone();
+        let preview = h
+            .state()
+            .dock
+            .leaf(node(h.state(), Tab::Preview))
+            .unwrap()
+            .rect;
+        let from = tab_rect(&h, Tab::Timeline).center();
+        drag(
+            &mut h,
+            from,
+            egui::pos2(preview.center().x, preview.bottom() - 20.0),
+        );
+        let timeline = h
+            .state()
+            .dock
+            .leaf(node(h.state(), Tab::Timeline))
+            .unwrap()
+            .rect;
+        assert!(
+            timeline.width() < 1000.0,
+            "reproduce Timeline below Preview only"
+        );
+        let root = h.state().dock.main_surface()[NodeIndex::root()]
+            .rect()
+            .unwrap();
+        let from = tab_rect(&h, Tab::Timeline).center();
+        h.hover_at(from);
+        h.run_steps(2);
+        h.drag_at(from);
+        h.run_steps(2);
+        h.hover_at(from + vec2(0.0, 40.0));
+        h.run_steps(2);
+        let target = h.get_by_label(tr!("panel.dock_bottom")).rect();
+        assert!((target.width() - root.width()).abs() < 2.0);
+        h.hover_at(target.center());
+        h.run_steps(2);
+        if gpu() {
+            snapshots.add(h.try_snapshot(format!("dock_timeline_root_bottom_{scale}x")));
+        }
+        h.drop_at(target.center());
+        h.run();
+        let timeline = h
+            .state()
+            .dock
+            .leaf(node(h.state(), Tab::Timeline))
+            .unwrap()
+            .rect;
+        assert!(
+            (timeline.width() - root.width()).abs() < 2.0,
+            "{timeline:?} vs {root:?}"
+        );
+        assert_eq!(
+            node(h.state(), Tab::Transcript),
+            node(h.state(), Tab::Media)
+        );
+        assert_eq!(
+            node(h.state(), Tab::RenderQueue),
+            node(h.state(), Tab::Inspector)
+        );
+        assert_eq!(h.state().dock.iter_all_tabs().count(), 6);
+        assert_eq!(h.state().history.project(), &project);
+        let saved = save(h.state_mut());
+        let restored = App::restore(Some(&saved));
+        let mut actual = Memory::default();
+        eframe::set_value(&mut actual, DOCK_KEY, &restored.dock);
+        assert_eq!(actual.0[DOCK_KEY], saved.0[DOCK_KEY]);
+        h.state_mut().reset_layout();
+        assert_eq!(h.state().dock.iter_all_tabs().count(), 6);
+        assert_eq!(h.state().history.project(), &project);
+        assert_eq!(
+            h.state_mut().dock.find_active_focused().map(|(_, t)| *t),
+            Some(Tab::Timeline)
+        );
+    }
+}
+
+#[test]
 fn drag_optional_tabs_into_timeline_reorder_and_split_out() {
     for scale in SCALES {
         let mut h = ui_harness([1280.0, 720.0], scale);

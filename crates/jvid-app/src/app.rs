@@ -34,6 +34,7 @@ use eframe::egui_wgpu::wgpu;
 mod reel;
 #[cfg(test)]
 mod tests;
+mod text_tools;
 pub(crate) mod tutorial;
 
 const DOCK_KEY: &str = "dock";
@@ -87,6 +88,7 @@ fn view_title(id: &str) -> &'static str {
 }
 
 pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
+    let startup_path = std::env::args_os().nth(1).map(PathBuf::from);
     // Here rather than in App::new, so tests and embedders pick their own language.
     suite_ui::i18n::set_language(suite_ui::i18n::resolve(&settings.language));
     let options = eframe::NativeOptions {
@@ -108,6 +110,7 @@ pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
         options,
         Box::new(move |cc| {
             let mut app = App::new(cc, &settings);
+            app.open_startup(startup_path);
             app.components.offer();
             app.updates
                 .init(settings.automatic_update_checks, app.settings_path.clone());
@@ -155,6 +158,8 @@ pub struct App {
     on_welcome: bool,
     /// Match source: the next imported video sets the project's size and frame rate.
     match_source: bool,
+    /// The next import also goes on the timeline: a media file opened at startup.
+    place_import: bool,
     settings_dialog: crate::project_settings::SettingsDialog,
     components: crate::components::Components,
     preferences: crate::preferences::Preferences,
@@ -312,6 +317,7 @@ impl App {
             ),
             on_welcome: true,
             match_source: false,
+            place_import: false,
             settings_dialog: Default::default(),
             components: Default::default(),
             preferences: Default::default(),
@@ -389,6 +395,7 @@ impl App {
         self.history = History::new(project);
         self.path = path;
         self.match_source = match_source;
+        self.place_import = false;
         self.on_welcome = false;
         true
     }
@@ -401,6 +408,25 @@ impl App {
             let _ = history.apply(Command::SetSettings(s));
         }
         self.replace_project(history.project().clone(), None, match_source);
+    }
+
+    fn open_startup(&mut self, path: Option<PathBuf>) {
+        if let Some(path) = path {
+            // An explicit project takes precedence over the untitled recovery offer.
+            self.prompts
+                .retain(|p| !matches!(p, Prompt::Restore { path: None, .. }));
+            if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("jvid"))
+            {
+                self.open(path);
+            } else {
+                // A media file (jplay's Open in jvid): a Match Source project with it on the timeline.
+                self.new_project(None);
+                self.place_import = true;
+                self.import([path]);
+            }
+        }
     }
 
     fn open(&mut self, path: PathBuf) {
@@ -454,6 +480,7 @@ impl App {
 
     fn app_bar(&mut self, ui: &mut Ui) {
         let rect = ui.max_rect();
+        tutorial::anchor(ui.ctx(), "appbar", rect);
         let logo = ui.painter().text(
             rect.left_center() + vec2(space::GUTTER + space::INSET, 0.0),
             Align2::LEFT_CENTER,
@@ -583,6 +610,7 @@ impl App {
     /// Returns its right edge.
     fn edit_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
         let button = menu_button(ui, tr!("menu.edit"), left);
+        tutorial::anchor(ui.ctx(), "menu.edit", button.rect);
         let mut picked = None;
         egui::Popup::menu(&button).show(|ui| {
             for &id in menus::EDIT {
@@ -1007,6 +1035,30 @@ impl App {
             self.end_take();
             return;
         }
+        if self.take.is_some()
+            && matches!(
+                id,
+                "go_to_start"
+                    | "go_to_end"
+                    | "step_back"
+                    | "step_forward"
+                    | "step_back_second"
+                    | "step_forward_second"
+                    | "prev_edit"
+                    | "next_edit"
+                    | "prev_edit_alt"
+                    | "next_edit_alt"
+                    | "clip_start"
+                    | "clip_end"
+                    | "go_to_in"
+                    | "go_to_out"
+                    | "next_marker"
+                    | "prev_marker"
+            )
+            && !self.finalize_take()
+        {
+            return;
+        }
         match id {
             "record" => return self.start_take(),
             "undo" => {
@@ -1065,13 +1117,15 @@ impl App {
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
         let program_focused = preview_focused && self.preview_active == 1;
-        if (timeline_focused || program_focused) && PROGRAM_ACTIONS.contains(&id) {
+        if (timeline_focused || program_focused || menu) && PROGRAM_ACTIONS.contains(&id) {
             self.preview_active = 1;
             self.preview.program_action(id);
             return;
         }
         let marking = program_focused && MARK_ACTIONS.contains(&id);
-        if (timeline_focused || menu || marking) && self.timeline.action(id, self.history.project())
+        let tool = matches!(id, "selection_tool" | "razor_tool" | "text_tool");
+        if (timeline_focused || menu || marking || (program_focused && tool))
+            && self.timeline.action(id, self.history.project())
         {
             return;
         }
@@ -1142,10 +1196,9 @@ impl App {
                 }
                 self.timeline.armed = Some(take.track);
                 self.take = Some(take);
+                self.on_welcome = false;
                 self.preview_active = 1;
-                if !self.preview.playing() {
-                    self.preview.program_action("shuttle_right");
-                }
+                self.preview.record(start);
             }
             Err(e) => {
                 if txn {
@@ -1191,7 +1244,7 @@ impl App {
         let Some(take) = &mut self.take else {
             return;
         };
-        if self.timeline.armed != Some(take.track) {
+        if self.timeline.armed != Some(take.track) || !self.preview.playing() {
             self.end_take();
             return;
         }
@@ -1276,6 +1329,7 @@ impl App {
                 .match_source
                 .then(|| welcome::match_source(&batch))
                 .flatten();
+            let paths: Vec<_> = batch.iter().map(|(p, _)| p.clone()).collect();
             let _ = self.history.apply(Command::Import(batch));
             if let Some((width, height, frame_rate)) = fit {
                 let settings = ProjectSettings {
@@ -1287,10 +1341,33 @@ impl App {
                 let _ = self.history.apply(Command::SetSettings(settings));
                 self.match_source = false;
             }
+            if std::mem::take(&mut self.place_import) {
+                self.place_imported(&paths);
+            }
         }
         self.toasts
             .extend(polled.errors.into_iter().map(|e| (e, now + TOAST_SECS)));
         self.toasts.retain(|(_, until)| *until > now);
+    }
+
+    /// Places the imported `paths` end to end from the timeline's start.
+    fn place_imported(&mut self, paths: &[PathBuf]) {
+        let mut at = Time(0);
+        for path in paths {
+            let project = self.history.project();
+            let Some(p) = project
+                .assets()
+                .iter()
+                .find(|a| &a.path == path)
+                .and_then(|a| project.placement(a.id, at, false, None, false))
+            else {
+                continue;
+            };
+            at = p.start + (p.source_out - p.source_in);
+            if let Err(e) = self.history.apply(Command::Place(p)) {
+                tracing::warn!("place failed: {e}");
+            }
+        }
     }
 
     /// Asks where an offline asset went, then relinks it and the others found beside it.
@@ -1367,12 +1444,19 @@ impl App {
     }
 
     fn install_update(&mut self, ctx: &egui::Context) {
+        self.install_update_with(ctx, |app| app.save(false));
+    }
+
+    fn install_update_with(&mut self, ctx: &egui::Context, save: impl FnOnce(&mut Self) -> bool) {
+        if !matches!(self.updates.state, jvid_updater::state::State::Ready(_)) {
+            return;
+        }
         let mut work = self.update_work();
         work.unsaved = false;
         if !work.can_install() {
             return;
         }
-        if self.history.is_dirty() && !self.save(false) {
+        if self.history.is_dirty() && !save(self) {
             if !self.prompts.is_empty() {
                 self.updates.open = false;
             }
@@ -1669,6 +1753,7 @@ impl eframe::App for App {
                 import_clicked: false,
                 command,
                 gesture: None,
+                text_clip: None,
                 open: None,
                 preview: &mut self.preview,
                 timeline: &mut self.timeline,
@@ -1688,10 +1773,11 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            let (import, command, gesture, relink, open, queue, transcript, tab_rects) = (
+            let (import, command, gesture, text_clip, relink, open, queue, transcript, tab_rects) = (
                 viewer.import_clicked,
                 viewer.command,
                 viewer.gesture,
+                viewer.text_clip,
                 viewer.relink,
                 viewer.open,
                 viewer.queue_action,
@@ -1699,6 +1785,7 @@ impl eframe::App for App {
                 viewer.tab_rects,
             );
             paint_dock_frames(ui, &self.dock);
+            dock_bottom_target(ui, &mut self.dock);
             if let Some(tab) = self.reveal_panel.take()
                 && let Some(path) = self.dock.find_tab(&tab)
                 && let Ok(leaf) = self.dock.leaf_mut(path.node_path())
@@ -1727,6 +1814,16 @@ impl eframe::App for App {
             if std::mem::take(&mut self.preview.record_clicked) && !self.closing {
                 self.run_action("record", true);
             }
+            let input = std::mem::take(&mut self.preview.recording_input);
+            if (std::mem::take(&mut self.timeline.navigated) || input.seek.is_some())
+                && self.finalize_take()
+                && let Some(t) = input.seek
+            {
+                self.timeline.seek(t);
+            }
+            if let Some(id) = input.action {
+                self.run_action(id, true);
+            }
             self.queue_action(ui.ctx(), queue);
             if let Some(msg) = self.timeline.notice.take() {
                 self.toasts.push((msg, now + TOAST_SECS));
@@ -1748,6 +1845,10 @@ impl eframe::App for App {
                     self.run_action("focus_source", false);
                 }
             }
+            let silence_cut = self.timeline.take_silence_cut()
+                && command
+                    .as_ref()
+                    .is_some_and(|c| tutorial::silence_cut(c, self.history.project()));
             let applied = match (command, gesture) {
                 (Some(c), Some(k)) => Some(self.history.apply_coalesced(k, c)),
                 (Some(c), None) => Some(self.history.apply(c)),
@@ -1755,6 +1856,14 @@ impl eframe::App for App {
             };
             if let Some(r) = &applied {
                 self.timeline.applied(r.is_ok());
+                if r.is_ok() {
+                    self.lesson_silence_cut(silence_cut);
+                }
+            }
+            if let Some(creation) = text_clip
+                && let Err(e) = self.create_text(ui.ctx(), creation)
+            {
+                tracing::warn!("create text: {e}");
             }
             let hide = self.timeline.hide_region.take();
             if let Some(id) = hide.or(crate::hide_region::requested(ui.ctx()))
@@ -1936,6 +2045,82 @@ fn visible_dock(mut dock: DockState<Tab>) -> DockState<Tab> {
     dock
 }
 
+/// egui_dock's edge targets split a leaf, so offer a separate root-level destination.
+/// Track only tab gestures: timeline tools and clip drags must never move a panel.
+fn dock_bottom_target(ui: &Ui, dock: &mut DockState<Tab>) {
+    let drag_id = egui::Id::new("dock_tab_drag");
+    let drag = ui.ctx().data_mut(|d| d.get_temp::<(Tab, bool)>(drag_id));
+    let Some((tab, mut active)) = drag else {
+        return;
+    };
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        ui.ctx().data_mut(|d| d.remove::<(Tab, bool)>(drag_id));
+        return;
+    }
+    let released = ui.input(|i| i.pointer.primary_released());
+    let down = ui.input(|i| i.pointer.primary_down());
+    active |= ui.input(|i| i.pointer.is_decidedly_dragging());
+    if down {
+        ui.ctx().data_mut(|d| d.insert_temp(drag_id, (tab, active)));
+    }
+    if active && (down || released) {
+        let root = dock.main_surface()[NodeIndex::root()].rect().unwrap();
+        let target = egui::Rect::from_min_max(
+            egui::pos2(root.left(), root.bottom() - size::HEADER),
+            root.max,
+        );
+        let hovered = ui
+            .ctx()
+            .pointer_hover_pos()
+            .is_some_and(|p| target.contains(p));
+        let painter = ui
+            .ctx()
+            .layer_painter(egui::LayerId::new(egui::Order::Tooltip, drag_id));
+        if hovered {
+            let preview = egui::Rect::from_min_max(
+                egui::pos2(root.left(), root.bottom() - root.height() * 0.38),
+                root.max,
+            );
+            painter.rect_filled(preview, 0.0, color::light_blue().gamma_multiply(0.3));
+        }
+        painter.rect_filled(target, suite_ui::tokens::radius::CONTROL, color::raised());
+        painter.rect_stroke(
+            target,
+            suite_ui::tokens::radius::CONTROL,
+            Stroke::new(1.0, color::light_blue()),
+            egui::StrokeKind::Inside,
+        );
+        let label = tr!("panel.dock_bottom");
+        ui.interact(target, drag_id.with("target"), egui::Sense::hover())
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
+        painter.text(
+            target.center(),
+            Align2::CENTER_CENTER,
+            label,
+            theme::body(),
+            color::ink(),
+        );
+        if released
+            && hovered
+            && let Some(path) = dock.find_tab(&tab)
+        {
+            // Resolve after the library's leaf drop, then prune the old leaf before splitting
+            // the root. Existing groups, open panels and their order stay in the tree.
+            dock.remove_tab(path);
+            dock.main_surface_mut()
+                .split_below(NodeIndex::root(), 0.62, vec![tab]);
+            if let Some(path) = dock.find_tab(&tab) {
+                dock.set_active_tab(path).ok();
+                dock.set_focused_node_and_surface(path.node_path());
+            }
+            ui.ctx().request_repaint();
+        }
+    }
+    if !down {
+        ui.ctx().data_mut(|d| d.remove::<(Tab, bool)>(drag_id));
+    }
+}
+
 /// Dock strips use the same tokens as panel controls. Overflow scrolls horizontally.
 fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     let mut s = egui_dock::Style::from_egui(egui_style);
@@ -2071,6 +2256,7 @@ struct Viewer<'a> {
     command: Option<Command>,
     /// Set when `command` continues a drag, so the drag is one undo step.
     gesture: Option<jvid_core::history::GestureKey>,
+    text_clip: Option<text_tools::Creation>,
     open: Option<jvid_core::model::AssetId>,
     preview: &'a mut Preview,
     timeline: &'a mut Timeline,
@@ -2105,6 +2291,15 @@ impl TabViewer for Viewer<'_> {
 
     fn on_tab_button(&mut self, tab: &mut Tab, response: &egui::Response) {
         self.tab_rects.push((*tab, response.rect));
+        // egui_dock replaces the response id once the tab is floating under the pointer.
+        // Remember the title pressed before that replacement, excluding its close button.
+        if response.is_pointer_button_down_on()
+            && response.ctx.input(|i| i.pointer.primary_pressed())
+        {
+            response
+                .ctx
+                .data_mut(|d| d.insert_temp(egui::Id::new("dock_tab_drag"), (*tab, false)));
+        }
         response
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tab.title()));
         response.ctx.accesskit_node_builder(response.id, |node| {
@@ -2165,6 +2360,13 @@ impl TabViewer for Viewer<'_> {
             self.import_clicked |= r.import;
             // The Source tab may have set one this frame too.
             self.command = r.command.or(self.command.take());
+            if let Some((name, text)) = r.text_clip {
+                self.text_clip = Some(text_tools::Creation {
+                    name,
+                    text,
+                    at: None,
+                });
+            }
             if let Some(stem) = r.apply_effect {
                 let selected = self.timeline.selected();
                 let add = crate::inspector::add_effect(self.project, selected, &stem);
@@ -2178,7 +2380,9 @@ impl TabViewer for Viewer<'_> {
             return;
         }
         if *tab == Tab::RenderQueue {
-            self.queue_action = self.queue.panel_docked(ui, focused);
+            let can_export =
+                self.project.sequence().duration() > Time(0) && self.preview.gpu().is_some();
+            self.queue_action = self.queue.panel_docked(ui, focused, can_export);
             return;
         }
         if *tab == Tab::Transcript {
@@ -2198,7 +2402,7 @@ impl TabViewer for Viewer<'_> {
         let panel = match (*tab, views.as_slice()) {
             (Tab::Preview, [one]) => Panel::titled(one),
             (Tab::Preview, views) => Panel::tabbed(views, self.preview_active),
-            (Tab::Timeline, _) => Panel::toolbar(),
+            (Tab::Timeline, _) => Panel::body(),
             _ => Panel::titled(tab.title()),
         };
         let panel = panel.focused(focused).embedded(true);
@@ -2237,13 +2441,34 @@ impl TabViewer for Viewer<'_> {
                 if let Some(t) = shown {
                     self.timeline.seek(t);
                 }
-                let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
+                let t = self.timeline.playhead();
+                if egui::DragAndDrop::has_payload_of_type::<crate::effects::Drag>(ui.ctx()) {
+                    if let Some(c) = crate::effects::drag::program_drop(
+                        ui,
+                        self.project,
+                        self.timeline.selected(),
+                        t,
+                        frame,
+                    ) {
+                        (self.command, self.gesture) = (Some(c), None);
+                    }
+                    return;
+                }
                 if crate::handles::editing(ui.ctx()) {
                     if let Some((c, g)) = crate::handles::edit_text(ui, self.project, t, frame) {
                         (self.command, self.gesture) = (Some(c), g);
                     }
                     return;
                 }
+                if self.timeline.tool() == crate::timeline::Tool::Text {
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        self.timeline.action("selection_tool", self.project);
+                    } else {
+                        self.text_clip = text_tools::canvas(ui, frame).or(self.text_clip.take());
+                        return;
+                    }
+                }
+                let selected = self.timeline.selected();
                 if let Some((c, g)) =
                     crate::handles::show(ui, self.project, selected, t, frame, &|c| {
                         let a = self.project.asset(c.asset)?;
@@ -2280,21 +2505,14 @@ impl TabViewer for Viewer<'_> {
             return;
         }
         if *tab == Tab::Timeline {
-            let r = panel.show(ui, |ui| {
-                let edit = self
-                    .timeline
-                    .show(ui, self.project, self.missing, self.keymap);
+            panel.show(ui, |ui| {
+                let edit =
+                    self.timeline
+                        .show_with_tools(ui, self.project, self.missing, self.keymap);
                 if let Some((c, g)) = edit {
                     (self.command, self.gesture) = (Some(c), g);
                 }
             });
-            let header = r
-                .response
-                .rect
-                .with_max_y(r.response.rect.top() + size::HEADER);
-            let left = header.left() + space::INSET;
-            let (project, keymap) = (self.project, self.keymap);
-            self.timeline.toolbar(ui, header, left, project, keymap);
             return;
         }
         if *tab == Tab::Inspector {
@@ -2315,10 +2533,14 @@ impl TabViewer for Viewer<'_> {
             panel.focused(focused).embedded(true).show(ui, |ui| {
                 let t = self.timeline.playhead();
                 let pane = panes.get(shown).copied();
-                let (edit, seek) = egui::ScrollArea::vertical()
-                    .auto_shrink(false)
-                    .show(ui, |ui| crate::inspector::show(ui, &sel, pane, t))
-                    .inner;
+                let (edit, seek) = if pane.is_none() {
+                    crate::inspector::show(ui, &sel, pane, t)
+                } else {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .show(ui, |ui| crate::inspector::show(ui, &sel, pane, t))
+                        .inner
+                };
                 if let Some((c, g)) = edit {
                     (self.command, self.gesture) = (Some(c), g);
                 }

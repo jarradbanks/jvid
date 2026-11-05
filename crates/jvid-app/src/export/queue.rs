@@ -267,9 +267,21 @@ impl Queue {
     }
 
     /// The Render Queue dock panel.
-    pub(crate) fn panel_docked(&mut self, ui: &mut Ui, focused: bool) -> Option<Action> {
+    pub(crate) fn panel_docked(
+        &mut self,
+        ui: &mut Ui,
+        focused: bool,
+        can_export: bool,
+    ) -> Option<Action> {
         self.failed_unseen = false;
-        let a = panel_inner(ui, &self.rows(), self.confirm_all, focused, true);
+        let a = panel_inner(
+            ui,
+            &self.rows(),
+            self.confirm_all,
+            focused,
+            true,
+            can_export,
+        );
         a.inspect(|a| self.apply(*a))
     }
 
@@ -329,26 +341,21 @@ pub fn menu(ui: &mut Ui, rows: &[Row], confirm: bool, shortcut: &str) -> Option<
     separator(ui);
     let live = rows.iter().filter(|r| r.status.live()).count();
     if confirm {
-        ui.horizontal(|ui| {
-            ui.set_height(size::CONTROL);
-            ui.add_space(space::S8);
-            ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::ink()));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = space::S4;
-                if ui
-                    .add(Button::destructive(tr!("export.cancel_all")))
-                    .clicked()
-                {
-                    action = Some(Action::ConfirmCancelAll);
-                }
-                if ui
-                    .add(Button::ghost(tr!("export.keep_exporting")))
-                    .clicked()
-                {
-                    action = Some(Action::KeepExporting);
-                }
-            });
-        });
+        ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::ink()));
+        ui.add_space(space::S8);
+        let actions = suite_ui::dialog::action_footer(
+            ui,
+            [
+                Button::secondary(tr!("export.keep_exporting")),
+                Button::destructive(tr!("export.cancel_all")),
+            ],
+        );
+        if actions[0].clicked() {
+            action = Some(Action::KeepExporting);
+        }
+        if actions[1].clicked() {
+            action = Some(Action::ConfirmCancelAll);
+        }
         return action;
     }
     let finished = rows.len() > live;
@@ -537,7 +544,7 @@ const NARROW: f32 = 640.0;
 
 /// The Render Queue panel: Cancel All and Clear Finished in its header, then one row per job.
 pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<Action> {
-    panel_inner(ui, rows, confirm, focused, false)
+    panel_inner(ui, rows, confirm, focused, false, true)
 }
 
 fn panel_inner(
@@ -546,6 +553,7 @@ fn panel_inner(
     confirm: bool,
     focused: bool,
     docked: bool,
+    can_export: bool,
 ) -> Option<Action> {
     let mut action = None;
     let close = [(icon::X, tr!("export.close_queue"))];
@@ -556,13 +564,19 @@ fn panel_inner(
     };
     let r = panel.focused(focused).show(ui, |ui| {
         if rows.is_empty() {
-            ui.vertical_centered(|ui| {
-                ui.add_space(space::S32);
-                let t = RichText::new(tr!("export.empty_title")).font(theme::title());
-                ui.label(t.color(color::ink()));
-                ui.add_space(space::S4);
-                ui.label(RichText::new(tr!("export.empty_help")).color(color::ink_3()));
-            });
+            let empty = suite_ui::empty_state::EmptyState::new(
+                icon::LIST,
+                tr!("export.empty_title"),
+                tr!("empty.queue_help"),
+            );
+            let empty = if can_export {
+                empty.action(tr!("export.new"))
+            } else {
+                empty
+            };
+            if empty.show(ui).action.is_some_and(|r| r.clicked()) {
+                action = Some(Action::New);
+            }
             return;
         }
         let wide = ui.available_width() >= NARROW;
