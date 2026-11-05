@@ -2924,13 +2924,11 @@ fn prop_rows_link<R>(
         ui.set_min_width(size::INSPECTOR_LABEL);
         let label = egui::Label::new(egui::RichText::new(label).color(color::ink_2())).truncate();
         if link_scale {
-            ui.add_sized(
-                vec2(
-                    size::INSPECTOR_LABEL - size::SMALL_CONTROL - space::S4,
-                    size::CONTROL,
-                ),
-                label.halign(Align::Min),
-            );
+            let width = size::INSPECTOR_LABEL - size::SMALL_CONTROL - space::S4;
+            ui.allocate_ui_with_layout(vec2(width, size::CONTROL), layout, |ui| {
+                ui.set_width(width);
+                ui.add(label);
+            });
             let mut linked = scale_linked(ui.ctx());
             let name = tr!("inspector.link_scale");
             let r = ui.add(Button::icon(icon::LINK, name).small().on(linked));
@@ -4540,6 +4538,12 @@ mod tests {
         assert_eq!(toggle.accesskit_node().toggled(), Some(Toggled::True));
         let link = toggle.rect();
         assert!(link.width() >= size::SMALL_CONTROL && link.height() >= size::SMALL_CONTROL);
+        assert_eq!(
+            h.get_by_role_and_label(Role::Label, "Scale").rect().left(),
+            h.get_by_role_and_label(Role::Label, "Position")
+                .rect()
+                .left(),
+        );
         let axes: Vec<_> = h
             .get_all_by_role(Role::SpinButton)
             .skip(2)
@@ -4584,6 +4588,8 @@ mod tests {
         h.run();
         h.snapshot("inspector_scale_linked_240");
         h.get_by_label("Link Scale Axes").click();
+        h.run();
+        h.event(egui::Event::PointerGone);
         h.run();
         h.snapshot("inspector_scale_unlinked_240");
     }
