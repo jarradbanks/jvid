@@ -2626,28 +2626,18 @@ impl App {
     }
 }
 
-/// shortcut: a placeholder drawn in code (play mark on Blue); replace with a real icon.
+/// The same supplied artwork used for the Windows executable and installer.
 fn app_icon() -> egui::IconData {
-    const N: u32 = 64;
-    const R: f32 = 14.0;
-    let mut rgba = Vec::with_capacity((N * N * 4) as usize);
-    for y in 0..N {
-        for x in 0..N {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            let (cx, cy) = (fx.clamp(R, N as f32 - R), fy.clamp(R, N as f32 - R));
-            let in_square = (fx - cx).hypot(fy - cy) <= R;
-            let in_play = fx >= 24.0 && (fy - 32.0).abs() <= 12.0 * (44.0 - fx) / 20.0;
-            let c = match (in_square, in_play) {
-                (false, _) => egui::Color32::TRANSPARENT,
-                (true, true) => color::WHITE,
-                (true, false) => color::blue(),
-            };
-            rgba.extend_from_slice(&c.to_array());
-        }
-    }
+    let image = image::load_from_memory_with_format(
+        include_bytes!("../../../assets/jvid.png"),
+        image::ImageFormat::Png,
+    )
+    .expect("the bundled jvid icon must be a valid PNG")
+    .resize(256, 256, image::imageops::FilterType::Lanczos3)
+    .into_rgba8();
     egui::IconData {
-        rgba,
-        width: N,
-        height: N,
+        width: image.width(),
+        height: image.height(),
+        rgba: image.into_raw(),
     }
 }
