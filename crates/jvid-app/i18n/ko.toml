@@ -991,7 +991,7 @@ source_stream = "{name} · 스트림 {number}"
 
 [components]
 title = "선택 구성 요소"
-purpose = "Whisper 모델로 로컬 음성 전사와 자막을 만들 수 있습니다. 모델 없이도 편집과 내보내기가 가능하며 나중에 도움말에서 추가할 수 있습니다. 건너뛰려면 완료를 선택하세요."
+purpose = "Whisper 모델로 로컬 음성 전사와 자막을 만들 수 있습니다. 모델 없이도 편집과 내보내기가 가능하며 나중에 도움말에서 추가할 수 있습니다."
 download = "다운로드"
 installed = "설치됨"
 location = "모델: {path}"

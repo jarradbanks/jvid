@@ -1001,7 +1001,7 @@ source_stream = "{name} · Pista {number}"
 
 [components]
 title = "Components opcionals"
-purpose = "Els models Whisper permeten transcripció de veu i subtítols locals. Són opcionals: pots editar i exportar sense ells i afegir-los després des d’Ajuda. Tria Fet per ometre."
+purpose = "Els models Whisper permeten transcripció de veu i subtítols locals. Són opcionals: pots editar i exportar sense ells i afegir-los després des d’Ajuda."
 download = "Baixa"
 installed = "Instal·lat"
 location = "Models: {path}"

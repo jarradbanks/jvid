@@ -1008,7 +1008,7 @@ source_stream = "{name} · Stopa {number}"
 
 [components]
 title = "Volitelné součásti"
-purpose = "Modely Whisper umožňují místní přepis řeči a titulky. Jsou volitelné: upravovat a exportovat lze i bez nich. Později je přidáte v Nápovědě. Tlačítkem Hotovo tento krok přeskočíte."
+purpose = "Modely Whisper umožňují místní přepis řeči a titulky. Jsou volitelné: upravovat a exportovat lze i bez nich. Později je přidáte v Nápovědě."
 download = "Stáhnout"
 installed = "Nainstalováno"
 location = "Modely: {path}"

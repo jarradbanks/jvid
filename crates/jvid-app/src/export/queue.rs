@@ -329,26 +329,21 @@ pub fn menu(ui: &mut Ui, rows: &[Row], confirm: bool, shortcut: &str) -> Option<
     separator(ui);
     let live = rows.iter().filter(|r| r.status.live()).count();
     if confirm {
-        ui.horizontal(|ui| {
-            ui.set_height(size::CONTROL);
-            ui.add_space(space::S8);
-            ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::ink()));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = space::S4;
-                if ui
-                    .add(Button::destructive(tr!("export.cancel_all")))
-                    .clicked()
-                {
-                    action = Some(Action::ConfirmCancelAll);
-                }
-                if ui
-                    .add(Button::ghost(tr!("export.keep_exporting")))
-                    .clicked()
-                {
-                    action = Some(Action::KeepExporting);
-                }
-            });
-        });
+        ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::ink()));
+        ui.add_space(space::S8);
+        let actions = suite_ui::dialog::action_footer(
+            ui,
+            [
+                Button::secondary(tr!("export.keep_exporting")),
+                Button::destructive(tr!("export.cancel_all")),
+            ],
+        );
+        if actions[0].clicked() {
+            action = Some(Action::KeepExporting);
+        }
+        if actions[1].clicked() {
+            action = Some(Action::ConfirmCancelAll);
+        }
         return action;
     }
     let finished = rows.len() > live;

@@ -989,7 +989,7 @@ source_stream = "{name} · Stream {number}"
 
 [components]
 title = "Optionale Komponenten"
-purpose = "Whisper-Modelle ermöglichen lokale Spracherkennung und Untertitel. Sie sind optional. Bearbeiten und Exportieren ist auch ohne sie möglich. Modelle lassen sich später über Hilfe hinzufügen. Mit Fertig überspringen."
+purpose = "Whisper-Modelle ermöglichen lokale Spracherkennung und Untertitel. Sie sind optional. Bearbeiten und Exportieren ist auch ohne sie möglich. Modelle lassen sich später über Hilfe hinzufügen."
 download = "Herunterladen"
 installed = "Installiert"
 location = "Modelle: {path}"

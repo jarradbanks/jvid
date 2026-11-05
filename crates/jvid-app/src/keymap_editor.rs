@@ -4,7 +4,7 @@
 use egui::{Event, Key, KeyboardShortcut, Ui};
 use rfd::FileDialog;
 use suite_ui::theme;
-use suite_ui::tokens::{radius, size, space};
+use suite_ui::tokens::{radius, space};
 use suite_ui::widgets::{Button, TextInput};
 
 use crate::i18n::tr;
@@ -209,51 +209,25 @@ fn footer(ui: &mut Ui, error: Option<&str>, measure: bool) -> Option<Footer> {
         tr!("keymap.reset_all"),
         tr!("settings.done"),
     ];
-    let widths = labels.map(|label| {
-        let galley = ui.painter().layout_no_wrap(
-            label.to_owned(),
-            theme::body_strong(),
-            ui.visuals().text_color(),
-        );
-        (galley.size().x + 2.0 * space::S12).ceil()
-    });
-    let total = widths.iter().sum::<f32>() + 3.0 * space::S8;
-    let one_row = total <= ui.available_width();
-    let button = |ui: &mut Ui, i: usize, primary: bool| {
-        if measure {
-            ui.allocate_space(egui::vec2(widths[i], size::CONTROL));
-            false
+    // The sizing child uses the same geometry without receiving input.
+    let buttons = labels.into_iter().enumerate().map(|(i, label)| {
+        if i == 3 {
+            Button::primary(label)
         } else {
-            ui.add(if primary {
-                Button::primary(labels[i])
-            } else {
-                Button::secondary(labels[i])
-            })
-            .clicked()
+            Button::secondary(label)
         }
-    };
+    });
+    let actions = suite_ui::dialog::action_footer(ui, buttons);
     let mut action = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = space::S8;
-        for (i, value) in [Footer::Import, Footer::Export, Footer::Reset]
+    for (response, value) in
+        actions
             .into_iter()
-            .enumerate()
-        {
-            if button(ui, i, false) {
-                action = Some(value);
-            }
+            .zip([Footer::Import, Footer::Export, Footer::Reset, Footer::Done])
+    {
+        if response.clicked() {
+            action = Some(value);
         }
-        let mut done = |ui: &mut Ui| {
-            if button(ui, 3, true) {
-                action = Some(Footer::Done);
-            }
-        };
-        if one_row {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), done);
-        } else {
-            done(ui);
-        }
-    });
+    }
     action
 }
 

@@ -1012,7 +1012,7 @@ source_stream = "{name} · Piste {number}"
 
 [components]
 title = "Composants facultatifs"
-purpose = "Les modèles Whisper permettent la transcription et les sous-titres en local. Ils sont facultatifs ; vous pouvez monter et exporter sans eux, puis les ajouter depuis Aide. Choisissez Terminé pour passer."
+purpose = "Les modèles Whisper permettent la transcription et les sous-titres en local. Ils sont facultatifs ; vous pouvez monter et exporter sans eux, puis les ajouter depuis Aide."
 download = "Télécharger"
 installed = "Installé"
 location = "Modèles : {path}"

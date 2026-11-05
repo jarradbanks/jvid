@@ -261,12 +261,7 @@ impl Updates {
                                 received = received,
                                 total = update.asset.size
                             ));
-                            cancel = ui.add(Button::secondary(tr!("updates.cancel"))).clicked();
-                        } else if jvid_updater::metadata::self_update(TARGET, &self.distribution) {
-                            if ui.add(Button::primary(tr!("updates.download"))).clicked() {
-                                download = Some(update.clone());
-                            }
-                        } else {
+                        } else if !jvid_updater::metadata::self_update(TARGET, &self.distribution) {
                             ui.hyperlink_to(tr!("updates.release_page"), update.release_url());
                         }
                     }
@@ -278,14 +273,6 @@ impl Updates {
                         if !allowed.can_install() {
                             ui.label(tr!("updates.busy"));
                         }
-                        let label = if work.unsaved {
-                            tr!("updates.save_restart")
-                        } else {
-                            tr!("updates.restart")
-                        };
-                        install = ui
-                            .add_enabled(allowed.can_install(), Button::primary(label))
-                            .clicked();
                     }
                 }
                 if let Some(previous) = &self.previous {
@@ -294,14 +281,54 @@ impl Updates {
                     });
                 }
                 ui.separator();
-                ui.horizontal(|ui| {
-                    check = ui
-                        .add_enabled(!self.state.busy(), Button::secondary(tr!("updates.check")))
-                        .clicked();
-                    if ui.add(Button::secondary(tr!("updates.later"))).clicked() {
-                        ui.close();
+                let check_state = if self.state.busy() {
+                    suite_ui::widgets::State::Disabled
+                } else {
+                    suite_ui::widgets::State::Live
+                };
+                let mut buttons = vec![
+                    Button::secondary(tr!("updates.later")),
+                    Button::secondary(tr!("updates.check")).state(check_state),
+                ];
+                let mut allowed = work;
+                allowed.unsaved = false;
+                let primary = match &self.state {
+                    State::Available(_)
+                        if jvid_updater::metadata::self_update(TARGET, &self.distribution) =>
+                    {
+                        Some(Button::primary(tr!("updates.download")))
                     }
-                });
+                    State::Downloading { .. } => Some(Button::secondary(tr!("updates.cancel"))),
+                    State::Ready(_) => Some(
+                        Button::primary(if work.unsaved {
+                            tr!("updates.save_restart")
+                        } else {
+                            tr!("updates.restart")
+                        })
+                        .state(if allowed.can_install() {
+                            suite_ui::widgets::State::Live
+                        } else {
+                            suite_ui::widgets::State::Disabled
+                        }),
+                    ),
+                    _ => None,
+                };
+                if let Some(primary) = primary {
+                    buttons.push(primary);
+                }
+                let actions = suite_ui::dialog::action_footer(ui, buttons);
+                if actions[0].clicked() {
+                    ui.close();
+                }
+                check = actions[1].clicked();
+                if actions.get(2).is_some_and(|r| r.clicked()) {
+                    match &self.state {
+                        State::Available(update) => download = Some(update.clone()),
+                        State::Downloading { .. } => cancel = true,
+                        State::Ready(_) => install = true,
+                        _ => {}
+                    }
+                }
             });
         if modal.should_close() {
             self.open = false;

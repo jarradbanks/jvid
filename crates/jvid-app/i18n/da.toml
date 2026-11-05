@@ -989,7 +989,7 @@ source_stream = "{name} · Strøm {number}"
 
 [components]
 title = "Valgfrie komponenter"
-purpose = "Whisper-modeller giver lokal talegenkendelse og undertekster. De er valgfrie: du kan redigere og eksportere uden dem og tilføje dem senere via Hjælp. Vælg Færdig for at springe over."
+purpose = "Whisper-modeller giver lokal talegenkendelse og undertekster. De er valgfrie: du kan redigere og eksportere uden dem og tilføje dem senere via Hjælp."
 download = "Hent"
 installed = "Installeret"
 location = "Modeller: {path}"

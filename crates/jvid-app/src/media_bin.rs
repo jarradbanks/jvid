@@ -924,19 +924,20 @@ impl MediaBin {
                     ui.label(trn!("bin.remove_body", n));
                 }
                 ui.add_space(space::S16);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = space::S8;
-                    if ui
-                        .add(Button::destructive(tr!("bin.remove_button")))
-                        .clicked()
-                    {
-                        command = self.removal_command(ids.clone());
-                        ui.close();
-                    }
-                    if ui.add(Button::secondary(tr!("prompt.cancel"))).clicked() {
-                        ui.close();
-                    }
-                });
+                let actions = suite_ui::dialog::action_footer(
+                    ui,
+                    [
+                        Button::secondary(tr!("prompt.cancel")),
+                        Button::destructive(tr!("bin.remove_button")),
+                    ],
+                );
+                if actions[1].clicked() {
+                    command = self.removal_command(ids.clone());
+                    ui.close();
+                }
+                if actions[0].clicked() {
+                    ui.close();
+                }
             });
         if modal.should_close() {
             self.confirm_remove = None;
