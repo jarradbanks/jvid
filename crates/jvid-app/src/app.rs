@@ -465,6 +465,7 @@ impl App {
 
     fn app_bar(&mut self, ui: &mut Ui) {
         let rect = ui.max_rect();
+        tutorial::anchor(ui.ctx(), "appbar", rect);
         let logo = ui.painter().text(
             rect.left_center() + vec2(space::GUTTER + space::INSET, 0.0),
             Align2::LEFT_CENTER,

@@ -1421,7 +1421,8 @@ fn dialog_rects(ctx: &egui::Context) -> Vec<Rect> {
         .collect();
     rects.extend(ctx.memory(|m| {
         m.areas().visible_layer_ids().into_iter()
-        .filter(|l| l.order == Order::Middle || Some(*l) == m.top_modal_layer())
+        .filter(|l| matches!(l.order, Order::Middle | Order::Foreground)
+            && l.id != Id::new(CARD_ID))
         .filter_map(|l| m.area_rect(l.id))
         // The dock and modal backdrops may cover the whole viewport.
         .filter(|r| r.width() < max_width)
@@ -1529,7 +1530,11 @@ fn card(
     {
         avoid.push(r.rect);
     }
-    let rect = card_rect(ctx.content_rect(), size, &avoid, previous);
+    let mut bounds = ctx.content_rect();
+    if let Some(bar) = anchor_rect(ctx, "appbar") {
+        bounds.min.y = bounds.min.y.max(bar.bottom());
+    }
+    let rect = card_rect(bounds, size, &avoid, previous);
     let steps = run.lesson.steps;
     let step = steps.get(run.step);
     let mut click = None;
@@ -2665,6 +2670,10 @@ mod tests {
         let dialog = drawn(&h, "silence.dialog").unwrap();
         let card = card_bounds(&h);
         assert!(
+            !card.intersects(drawn(&h, "appbar").unwrap()),
+            "guidance covers app menus"
+        );
+        assert!(
             h.ctx.content_rect().contains_rect(card),
             "card outside viewport: {card:?}"
         );
@@ -2805,6 +2814,21 @@ mod tests {
             "keyboard Exit was trapped behind the modal"
         );
         assert!(!h.state().subtitles.is_open());
+    }
+
+    #[test]
+    fn task_card_leaves_app_menus_and_their_keyboard_dismissal_usable() {
+        let mut h = harness();
+        h.set_size(vec2(960.0, 600.0));
+        h.state_mut().start_lesson(&BASICS);
+        settle(&mut h);
+        assert!(!card_bounds(&h).intersects(drawn(&h, "appbar").unwrap()));
+        click(&mut h, tr!("menu.file"));
+        assert!(egui::Popup::is_any_open(&h.ctx));
+        h.key_press(Key::Escape);
+        settle(&mut h);
+        assert!(h.state().lesson.is_some(), "menu Escape exited the lesson");
+        assert!(!egui::Popup::is_any_open(&h.ctx));
     }
 
     #[test]
