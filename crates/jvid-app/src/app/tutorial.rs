@@ -1228,7 +1228,11 @@ impl App {
                 self.next_step(&mut run);
             }
             Click::Keep => {
+                // Save must still see the sandbox, so it preserves the user's untitled
+                // autosave and applies the lesson's normal save behavior.
+                self.lesson = Some(run);
                 self.save(true);
+                run = self.lesson.take().expect("saving keeps the lesson running");
             }
             Click::Exit => {
                 self.lesson = Some(run);
@@ -1410,6 +1414,7 @@ fn highlight(ctx: &egui::Context, targets: &[Rect]) {
 /// Current-frame dialog bounds, including dialogs unrelated to this lesson. The card must
 /// leave their controls and footers clear even when a dialog is moved or resized.
 fn dialog_rects(ctx: &egui::Context) -> Vec<Rect> {
+    let max_width = ctx.content_rect().width() * 0.95;
     let mut rects: Vec<_> = ["silence.dialog", "export.dialog", "subtitles.dialog"]
         .into_iter()
         .filter_map(|a| anchor_rect(ctx, a))
@@ -1419,7 +1424,7 @@ fn dialog_rects(ctx: &egui::Context) -> Vec<Rect> {
         .filter(|l| l.order == Order::Middle || Some(*l) == m.top_modal_layer())
         .filter_map(|l| m.area_rect(l.id))
         // The dock and modal backdrops may cover the whole viewport.
-        .filter(|r| r.width() < ctx.content_rect().width() * 0.95)
+        .filter(|r| r.width() < max_width)
         .collect::<Vec<_>>()
     }));
     rects
@@ -2078,13 +2083,14 @@ mod tests {
         );
         settle(&mut h);
         assert_eq!(step(&h), Some(0), "unrelated seek/track edit advanced");
-        // Click the real title preset while guidance stays visible.
+        h.key_press(Key::Enter);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(0), "Enter skipped an unfinished task");
+        // Click the real title preset while guidance stays visible. It may also place a
+        // title, in which case that already satisfied next task remains readable.
         click(&mut h, crate::media_bin::presets()[0].0);
         assert_eq!(step(&h), Some(1));
         assert!(h.state().history.can_undo());
-        h.key_press(Key::Enter);
-        settle(&mut h);
-        assert_eq!(step(&h), Some(1), "Enter skipped an unfinished task");
     }
 
     #[test]
