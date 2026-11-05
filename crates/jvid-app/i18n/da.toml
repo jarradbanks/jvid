@@ -364,6 +364,7 @@ retime.other = "De {count} klip beholder deres tider; klippepunkter kan lande me
 undo_note = "Du kan fortryde dette."
 
 [bin]
+scopes_loading = "Måler billedramme…"
 remove_selected = "Fjern markerede"
 remove_selected_title.one = "Fjern 1 markeret medie?"
 remove_selected_title.other = "Fjern {count} markerede medier?"
@@ -1032,3 +1033,24 @@ extension = "Vælg en destination med filtypen .srt."
 project_collision = "Vælg en anden destination: denne fil er projektet."
 saved = "Undertekster gemt i {path}"
 video_help = "Indbrænding tegner undertekster i videoen; en separat SRT-fil gemmes ved siden af. Kun SRT: Tidslinje > Eksportér undertekster."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Vælg et klip"
+media = "Ingen medier endnu"
+import_media = "Importér medier…"
+source = "Åbn et klip"
+preview = "Intet at forhåndsvise"
+preview_help = "Tilføj et videoklip til tidslinjen for at se det her."
+scopes = "Ingen billedramme at måle"
+timeline = "Start din redigering"
+effects = "Ingen effekter endnu"
+search_media = "Ingen matchende medier"
+search_effects = "Ingen matchende effekter"
+search_help = "Prøv en anden søgning, eller ryd søgningen."
+clear_search = "Ryd søgning"
+queue_help = "Dine eksporter i kø og færdige eksporter vises her."
+transcript = "Ingen transskription endnu"
+transcript_help = "Transskriber talen i dine klip for at redigere med tekst."
+no_audio = "Ingen lyd at transskribere"
+no_audio_help = "Tilføj et klip med lyd til tidslinjen for at starte en transskription."

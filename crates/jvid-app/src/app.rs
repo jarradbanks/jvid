@@ -2445,10 +2445,14 @@ impl TabViewer for Viewer<'_> {
             panel.focused(focused).embedded(true).show(ui, |ui| {
                 let t = self.timeline.playhead();
                 let pane = panes.get(shown).copied();
-                let (edit, seek) = egui::ScrollArea::vertical()
-                    .auto_shrink(false)
-                    .show(ui, |ui| crate::inspector::show(ui, &sel, pane, t))
-                    .inner;
+                let (edit, seek) = if pane.is_none() {
+                    crate::inspector::show(ui, &sel, pane, t)
+                } else {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .show(ui, |ui| crate::inspector::show(ui, &sel, pane, t))
+                        .inner
+                };
                 if let Some((c, g)) = edit {
                     (self.command, self.gesture) = (Some(c), g);
                 }

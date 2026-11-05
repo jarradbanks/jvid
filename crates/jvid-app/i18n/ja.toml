@@ -366,6 +366,7 @@ retime.other = "{count} 個のクリップの時間は変わりません。新�
 undo_note = "この操作は元に戻せます。"
 
 [bin]
+scopes_loading = "フレームを測定中…"
 remove_selected = "選択項目を削除"
 remove_selected_title.one = "選択した素材を1件削除しますか？"
 remove_selected_title.other = "選択した素材を{count}件削除しますか？"
@@ -1034,3 +1035,24 @@ extension = "拡張子が.srtの保存先を選択してください。"
 project_collision = "別の保存先を選択してください。このファイルはプロジェクトです。"
 saved = "字幕を{path}に保存しました"
 video_help = "焼き込みは字幕を映像に描画し、サイドカーは動画の隣にSRTを保存します。SRTのみの場合：タイムライン > 字幕を書き出す。"
+
+# Shared panel empty states.
+[empty]
+select_clip = "クリップを選択"
+media = "メディアがありません"
+import_media = "メディアを読み込む…"
+source = "クリップを開く"
+preview = "プレビューするものがありません"
+preview_help = "タイムラインに動画クリップを追加すると、ここに表示されます。"
+scopes = "測定するフレームがありません"
+timeline = "編集を始める"
+effects = "エフェクトがありません"
+search_media = "一致するメディアがありません"
+search_effects = "一致するエフェクトがありません"
+search_help = "別の語句で検索するか、検索をクリアしてください。"
+clear_search = "検索をクリア"
+queue_help = "待機中と完了した書き出しがここに表示されます。"
+transcript = "文字起こしがありません"
+transcript_help = "クリップの音声を文字に起こして、テキストで編集できます。"
+no_audio = "文字起こしする音声がありません"
+no_audio_help = "音声のあるクリップをタイムラインに追加して文字起こしを始めてください。"

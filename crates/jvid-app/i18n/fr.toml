@@ -371,6 +371,7 @@ retime.other = "Les {count} plans gardent leurs temps ; des points de montage p
 undo_note = "Vous pouvez annuler cette opération."
 
 [bin]
+scopes_loading = "Mesure de l’image…"
 remove_selected = "Retirer la sélection"
 remove_selected_title.one = "Retirer 1 média sélectionné ?"
 remove_selected_title.other = "Retirer {count} médias sélectionnés ?"
@@ -1055,3 +1056,24 @@ extension = "Choisissez une destination avec l’extension .srt."
 project_collision = "Choisissez une autre destination : ce fichier est le projet."
 saved = "Sous-titres enregistrés dans {path}"
 video_help = "Incruster dessine les sous-titres dans la vidéo ; le fichier .srt séparé les enregistre à côté. Pour le SRT seul : Montage > Exporter les sous-titres."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Sélectionner un clip"
+media = "Aucun média pour le moment"
+import_media = "Importer des médias…"
+source = "Ouvrir un clip"
+preview = "Rien à prévisualiser"
+preview_help = "Ajoutez un clip vidéo à la timeline pour le voir ici."
+scopes = "Aucune image à mesurer"
+timeline = "Commencer le montage"
+effects = "Aucun effet pour le moment"
+search_media = "Aucun média correspondant"
+search_effects = "Aucun effet correspondant"
+search_help = "Essayez une autre recherche ou effacez la recherche."
+clear_search = "Effacer la recherche"
+queue_help = "Vos exports en attente et terminés apparaîtront ici."
+transcript = "Aucune transcription"
+transcript_help = "Transcrivez la parole de vos clips pour monter avec du texte."
+no_audio = "Aucun audio à transcrire"
+no_audio_help = "Ajoutez un clip avec du son à la timeline pour commencer une transcription."

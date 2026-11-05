@@ -751,13 +751,18 @@ pub fn show(
     pane: Option<Pane>,
     t: Time,
 ) -> (Option<Edit>, Option<Time>) {
+    let Some(pane) = pane else {
+        suite_ui::empty_state::EmptyState::new(
+            icon::POINTER,
+            tr!("empty.select_clip"),
+            tr!("inspector.empty"),
+        )
+        .show(ui);
+        return (None, None);
+    };
     // A gutter keeps the row buttons clear of the scroll bar.
     let gutter = ui.spacing().scroll.allocated_width() + space::S4;
     ui.set_max_width(ui.available_width() - gutter);
-    let Some(pane) = pane else {
-        ui.label(egui::RichText::new(tr!("inspector.empty")).color(color::ink_3()));
-        return (None, None);
-    };
     let (clips, audio, shared, same) = (&sel.clips, &sel.audio, sel.shared, sel.same);
     let (mut edit, mut seek) = (None, None);
     let mut index = 0u64;

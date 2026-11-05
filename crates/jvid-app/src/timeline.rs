@@ -1601,14 +1601,17 @@ impl Timeline {
             let r = Rect::from_x_y_ranges(x - 0.5..=x + 0.5, lanes.y_range());
             clip_painter.rect_filled(r, 0.0, color::light_blue());
         }
-        if tracks.is_empty() {
-            painter.text(
-                lanes.center(),
-                Align2::CENTER_CENTER,
-                tr!("timeline.empty"),
-                theme::body(),
-                color::ink_3(),
-            );
+        if seq.tracks().iter().all(|track| track.clips().is_empty())
+            && !egui::DragAndDrop::has_any_payload(ui.ctx())
+        {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(lanes), |ui| {
+                suite_ui::empty_state::EmptyState::new(
+                    icon::LIST,
+                    tr!("empty.timeline"),
+                    tr!("timeline.empty"),
+                )
+                .show(ui);
+            });
         }
 
         // Ruler.

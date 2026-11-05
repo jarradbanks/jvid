@@ -372,6 +372,7 @@ retime.other = "Os {count} clipes mantêm seus tempos; as edições podem cair e
 undo_note = "Você pode desfazer isso."
 
 [bin]
+scopes_loading = "Medindo quadro…"
 remove_selected = "Remover selecionados"
 remove_selected_title.one = "Remover 1 recurso selecionado?"
 remove_selected_title.other = "Remover {count} recursos selecionados?"
@@ -1048,3 +1049,24 @@ extension = "Escolha um destino com a extensão .srt."
 project_collision = "Escolha outro destino: este arquivo é o projeto."
 saved = "Legendas salvas em {path}"
 video_help = "Gravar no vídeo desenha as legendas no vídeo; o arquivo .srt separado é salvo ao lado. Para salvar só o SRT: Linha do tempo > Exportar legendas."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Selecione um clipe"
+media = "Nenhuma mídia ainda"
+import_media = "Importar mídia…"
+source = "Abra um clipe"
+preview = "Nada para visualizar"
+preview_help = "Adicione um clipe de vídeo à linha do tempo para vê-lo aqui."
+scopes = "Nenhum quadro para medir"
+timeline = "Comece sua edição"
+effects = "Nenhum efeito ainda"
+search_media = "Nenhuma mídia correspondente"
+search_effects = "Nenhum efeito correspondente"
+search_help = "Tente outra busca ou limpe a busca."
+clear_search = "Limpar busca"
+queue_help = "Suas exportações na fila e concluídas aparecerão aqui."
+transcript = "Nenhuma transcrição ainda"
+transcript_help = "Transcreva a fala dos clipes para editar com texto."
+no_audio = "Nenhum áudio para transcrever"
+no_audio_help = "Adicione um clipe com áudio à linha do tempo para iniciar uma transcrição."

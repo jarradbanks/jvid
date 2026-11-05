@@ -377,6 +377,7 @@ retime.other = "{count} 个片段保持原有时间；在新帧率下，编辑�
 undo_note = "此操作可以撤销。"
 
 [bin]
+scopes_loading = "正在测量帧…"
 remove_selected = "移除所选"
 remove_selected_title.one = "移除 1 个所选素材？"
 remove_selected_title.other = "移除 {count} 个所选素材？"
@@ -1065,3 +1066,24 @@ extension = "请选择扩展名为 .srt 的目标文件。"
 project_collision = "请选择其他目标：此文件是项目文件。"
 saved = "字幕已保存到 {path}"
 video_help = "烧录会将字幕绘制到视频中；独立 SRT 会保存在视频旁边。仅导出 SRT：时间线 > 导出字幕。"
+
+# Shared panel empty states.
+[empty]
+select_clip = "选择片段"
+media = "尚无媒体"
+import_media = "导入媒体…"
+source = "打开片段"
+preview = "暂无可预览的内容"
+preview_help = "将视频片段添加到时间线即可在此预览。"
+scopes = "没有可测量的帧"
+timeline = "开始剪辑"
+effects = "尚无效果"
+search_media = "没有匹配的媒体"
+search_effects = "没有匹配的效果"
+search_help = "请尝试其他搜索词或清除搜索。"
+clear_search = "清除搜索"
+queue_help = "排队中和已完成的导出将显示在此处。"
+transcript = "尚无转录文本"
+transcript_help = "转录片段中的语音，即可通过文本进行剪辑。"
+no_audio = "没有可转录的音频"
+no_audio_help = "将带有音频的片段添加到时间线以开始转录。"

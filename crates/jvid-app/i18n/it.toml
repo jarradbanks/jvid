@@ -371,6 +371,7 @@ retime.other = "Le {count} clip mantengono i loro tempi; i tagli potrebbero cade
 undo_note = "Puoi annullare questa operazione."
 
 [bin]
+scopes_loading = "Misurazione del fotogramma…"
 remove_selected = "Rimuovi selezionati"
 remove_selected_title.one = "Rimuovere 1 risorsa selezionata?"
 remove_selected_title.other = "Rimuovere {count} risorse selezionate?"
@@ -1044,3 +1045,24 @@ extension = "Scegli una destinazione con estensione .srt."
 project_collision = "Scegli un’altra destinazione: questo file è il progetto."
 saved = "Sottotitoli salvati in {path}"
 video_help = "Incorpora disegna i sottotitoli nel video; il file .srt separato viene salvato accanto. Per il solo SRT: Timeline > Esporta sottotitoli."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Seleziona una clip"
+media = "Nessun file multimediale"
+import_media = "Importa media…"
+source = "Apri una clip"
+preview = "Niente da visualizzare"
+preview_help = "Aggiungi una clip video alla timeline per vederla qui."
+scopes = "Nessun fotogramma da misurare"
+timeline = "Inizia il montaggio"
+effects = "Nessun effetto"
+search_media = "Nessun media corrispondente"
+search_effects = "Nessun effetto corrispondente"
+search_help = "Prova una ricerca diversa o cancella la ricerca."
+clear_search = "Cancella ricerca"
+queue_help = "Le esportazioni in coda e completate appariranno qui."
+transcript = "Nessuna trascrizione"
+transcript_help = "Trascrivi il parlato delle clip per montare con il testo."
+no_audio = "Nessun audio da trascrivere"
+no_audio_help = "Aggiungi una clip con audio alla timeline per avviare una trascrizione."

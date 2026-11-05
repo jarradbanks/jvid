@@ -556,13 +556,18 @@ fn panel_inner(
     };
     let r = panel.focused(focused).show(ui, |ui| {
         if rows.is_empty() {
-            ui.vertical_centered(|ui| {
-                ui.add_space(space::S32);
-                let t = RichText::new(tr!("export.empty_title")).font(theme::title());
-                ui.label(t.color(color::ink()));
-                ui.add_space(space::S4);
-                ui.label(RichText::new(tr!("export.empty_help")).color(color::ink_3()));
-            });
+            if suite_ui::empty_state::EmptyState::new(
+                icon::LIST,
+                tr!("export.empty_title"),
+                tr!("empty.queue_help"),
+            )
+            .action(tr!("export.new"))
+            .show(ui)
+            .action
+            .is_some_and(|r| r.clicked())
+            {
+                action = Some(Action::New);
+            }
             return;
         }
         let wide = ui.available_width() >= NARROW;

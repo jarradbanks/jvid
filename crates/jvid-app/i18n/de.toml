@@ -364,6 +364,7 @@ retime.other = "Die {count} Clips behalten ihre Zeiten; Schnitte können bei der
 undo_note = "Sie können dies rückgängig machen."
 
 [bin]
+scopes_loading = "Bild wird gemessen…"
 remove_selected = "Auswahl entfernen"
 remove_selected_title.one = "1 ausgewähltes Medium entfernen?"
 remove_selected_title.other = "{count} ausgewählte Medien entfernen?"
@@ -1032,3 +1033,24 @@ extension = "Wähle ein Ziel mit der Erweiterung .srt."
 project_collision = "Wähle ein anderes Ziel: Diese Datei ist das Projekt."
 saved = "Untertitel in {path} gespeichert"
 video_help = "Einbrennen zeichnet Untertitel ins Video; die separate SRT-Datei wird daneben gespeichert. Nur SRT: Zeitleiste > Untertitel exportieren."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Clip auswählen"
+media = "Noch keine Medien"
+import_media = "Medien importieren…"
+source = "Clip öffnen"
+preview = "Keine Vorschau verfügbar"
+preview_help = "Füge einen Videoclip zur Timeline hinzu, um ihn hier zu sehen."
+scopes = "Kein Bild zum Messen"
+timeline = "Schnitt beginnen"
+effects = "Noch keine Effekte"
+search_media = "Keine passenden Medien"
+search_effects = "Keine passenden Effekte"
+search_help = "Versuche eine andere Suche oder lösche die Suche."
+clear_search = "Suche löschen"
+queue_help = "Deine wartenden und fertigen Exporte erscheinen hier."
+transcript = "Noch kein Transkript"
+transcript_help = "Transkribiere die Sprache deiner Clips, um mit Text zu schneiden."
+no_audio = "Kein Audio zum Transkribieren"
+no_audio_help = "Füge einen Clip mit Audio zur Timeline hinzu, um ein Transkript zu erstellen."

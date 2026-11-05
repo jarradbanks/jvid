@@ -477,13 +477,17 @@ impl Preview {
         }
         let Some(p) = &mut self.player else {
             self.show(ui, None, false, None, None, keymap);
-            ui.painter().text(
-                ui.max_rect().center(),
-                Align2::CENTER_CENTER,
-                tr!("preview.source_empty"),
-                theme::body(),
-                color::ink_3(),
-            );
+            let viewer = viewer_rect(ui);
+            ui.painter().rect_filled(viewer, 0.0, color::VIEWER);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(viewer), |ui| {
+                suite_ui::empty_state::EmptyState::new(
+                    icon::PLAY,
+                    tr!("empty.source"),
+                    tr!("preview.source_empty"),
+                )
+                .viewer()
+                .show(ui);
+            });
             return None;
         };
         if let Some(out) = &mut self.output {
@@ -724,6 +728,18 @@ impl Preview {
             Some((project.settings(), false)),
             keymap,
         );
+        if empty {
+            let viewer = viewer_rect(ui);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(viewer), |ui| {
+                suite_ui::empty_state::EmptyState::new(
+                    icon::PLAY,
+                    tr!("empty.preview"),
+                    tr!("empty.preview_help"),
+                )
+                .viewer()
+                .show(ui);
+            });
+        }
         if self.recording.is_some() && (input.seek.is_some() || input.action.is_some()) {
             self.recording_input = input;
             return follow;
@@ -831,7 +847,20 @@ impl Preview {
     /// Shows scopes that have landed, then picks whether the Program frame drawn next is
     /// copied for them; see [`scopes::State::due`]. Never waits on the GPU.
     fn update_scopes(&mut self, ctx: &egui::Context, dragging: bool) {
-        if !self.scopes.open || self.program_shown.is_none() {
+        if !self.scopes.open {
+            return;
+        }
+        if self
+            .program_shown
+            .as_ref()
+            .is_some_and(|s| s.exact && s.layers.is_empty())
+        {
+            scopes::clear(ctx);
+            self.analysis = None;
+            return;
+        }
+        scopes::pending(ctx, true);
+        if self.program_shown.is_none() {
             return;
         }
         let polled = self.with_scopes(|s, d| (s.poll(d), s.busy()));
