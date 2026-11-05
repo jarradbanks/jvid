@@ -158,6 +158,8 @@ pub struct App {
     on_welcome: bool,
     /// Match source: the next imported video sets the project's size and frame rate.
     match_source: bool,
+    /// The next import also goes on the timeline: a media file opened at startup.
+    place_import: bool,
     settings_dialog: crate::project_settings::SettingsDialog,
     components: crate::components::Components,
     preferences: crate::preferences::Preferences,
@@ -315,6 +317,7 @@ impl App {
             ),
             on_welcome: true,
             match_source: false,
+            place_import: false,
             settings_dialog: Default::default(),
             components: Default::default(),
             preferences: Default::default(),
@@ -392,6 +395,7 @@ impl App {
         self.history = History::new(project);
         self.path = path;
         self.match_source = match_source;
+        self.place_import = false;
         self.on_welcome = false;
         true
     }
@@ -411,7 +415,17 @@ impl App {
             // An explicit project takes precedence over the untitled recovery offer.
             self.prompts
                 .retain(|p| !matches!(p, Prompt::Restore { path: None, .. }));
-            self.open(path);
+            if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("jvid"))
+            {
+                self.open(path);
+            } else {
+                // A media file (jplay's Open in jvid): a Match Source project with it on the timeline.
+                self.new_project(None);
+                self.place_import = true;
+                self.import([path]);
+            }
         }
     }
 
@@ -1315,6 +1329,7 @@ impl App {
                 .match_source
                 .then(|| welcome::match_source(&batch))
                 .flatten();
+            let paths: Vec<_> = batch.iter().map(|(p, _)| p.clone()).collect();
             let _ = self.history.apply(Command::Import(batch));
             if let Some((width, height, frame_rate)) = fit {
                 let settings = ProjectSettings {
@@ -1326,10 +1341,33 @@ impl App {
                 let _ = self.history.apply(Command::SetSettings(settings));
                 self.match_source = false;
             }
+            if std::mem::take(&mut self.place_import) {
+                self.place_imported(&paths);
+            }
         }
         self.toasts
             .extend(polled.errors.into_iter().map(|e| (e, now + TOAST_SECS)));
         self.toasts.retain(|(_, until)| *until > now);
+    }
+
+    /// Places the imported `paths` end to end from the timeline's start.
+    fn place_imported(&mut self, paths: &[PathBuf]) {
+        let mut at = Time(0);
+        for path in paths {
+            let project = self.history.project();
+            let Some(p) = project
+                .assets()
+                .iter()
+                .find(|a| &a.path == path)
+                .and_then(|a| project.placement(a.id, at, false, None, false))
+            else {
+                continue;
+            };
+            at = p.start + (p.source_out - p.source_in);
+            if let Err(e) = self.history.apply(Command::Place(p)) {
+                tracing::warn!("place failed: {e}");
+            }
+        }
     }
 
     /// Asks where an offline asset went, then relinks it and the others found beside it.
