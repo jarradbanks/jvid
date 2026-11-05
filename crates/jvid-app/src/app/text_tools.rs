@@ -2,7 +2,8 @@
 
 use egui::{Pos2, Rect, Sense, Ui};
 use jvid_core::history::Created;
-use jvid_core::model::{ClipId, Text};
+use jvid_core::model::{ClipId, Placement, Text};
+use jvid_core::time::FLICKS_PER_SECOND;
 
 use super::*;
 
@@ -55,10 +56,22 @@ impl App {
             unreachable!()
         };
         let head = self.timeline.playhead();
-        let mut place = trial
-            .project()
-            .placement(asset, head, false, None, false)
-            .expect("text has a standard duration");
+        // Generic source placement refuses an all-locked video stack. Text creation can
+        // always add an overlay, so start with a fresh video-only placement instead.
+        let mut place = Placement {
+            asset,
+            source_in: Time(0),
+            source_out: Time(
+                i64::from(jvid_core::settings::DEFAULT_STILL_SECS) * FLICKS_PER_SECOND,
+            ),
+            start: head,
+            video: None,
+            audio: None,
+            streams: Vec::new(),
+            add_video: true,
+            add_audio: false,
+            insert: false,
+        };
         let end = head + place.source_out - place.source_in;
         let seq = trial.project().sequence();
         let solo = seq
