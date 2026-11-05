@@ -1096,7 +1096,7 @@ source_stream = "{name} · Stream {number}"
 
 [components]
 title = "Optional Components"
-purpose = "Whisper models enable local speech-to-text and subtitles. Downloads are optional; you can edit and export without them, and add them later from Help. Choose Done to skip."
+purpose = "Optional Whisper models add local speech-to-text and subtitles. Add them anytime from Help."
 download = "Download"
 installed = "Installed"
 location = "Models: {path}"

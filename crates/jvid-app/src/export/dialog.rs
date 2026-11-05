@@ -443,12 +443,11 @@ impl ExportDialog {
                     bottom: 16,
                 };
                 egui::Frame::NONE.inner_margin(foot).show(ui, |ui| {
+                    let preset = &self.presets[self.preset];
+                    let sizable = matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
+                    let span = span(*range, seq, selected, pad).filter(|(a, b)| b > a);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = space::S8;
-                        let preset = &self.presets[self.preset];
-                        let sizable =
-                            matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
-                        let span = span(*range, seq, selected, pad).filter(|(a, b)| b > a);
                         let size = match (span, self.target.filter(|_| sizable)) {
                             (None, _) => verbatim("–").to_owned(),
                             (Some(_), Some(mb)) => tr!("export.under_mb", mb = mb),
@@ -462,65 +461,67 @@ impl ExportDialog {
                         ui.label(RichText::new(tr!("export.estimated_size")).color(color::ink_3()));
                         let size = RichText::new(size).font(theme::body_strong());
                         ui.label(size.color(color::ink()));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let chosen = chosen(seq, &self.skipped);
-                            let kind = *range;
-                            let ok = span.is_some()
-                                && path.file_name().is_some()
-                                && (kind != Range::Highlights || !chosen.is_empty());
-                            let state = if ok { State::Live } else { State::Disabled };
-                            let export = Button::primary(tr!("export.export"));
-                            let export = ui.add(export.state(state).height(FOOT_BUTTON)).clicked();
-                            let queue = Button::secondary(tr!("export.add_to_queue"));
-                            let queue = ui.add(queue.state(state).height(FOOT_BUTTON)).clicked();
-                            if (export || queue)
-                                && let Some(range) = span
-                            {
-                                let mut preset = preset.clone();
-                                if let Some(mb) = self.target.filter(|_| sizable) {
-                                    preset
-                                        .options
-                                        .insert("target_size".into(), (mb * MB).to_string());
-                                }
-                                let req = |path: PathBuf, range| Request {
-                                    path,
-                                    range,
-                                    preset: preset.clone(),
-                                    loudness: self.loudness,
-                                    lossless: self
-                                        .lossless
-                                        .filter(|_| lossless::check(project, range).is_ok()),
-                                    sidecar: self.sidecar,
-                                };
-                                let reqs = if kind == Range::Highlights {
-                                    let ext =
-                                        path.extension().unwrap_or_default().to_string_lossy();
-                                    let dir = path.parent().unwrap_or(std::path::Path::new(""));
-                                    chosen
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(i, m)| {
-                                            let name =
-                                                file_name(&self.template, &self.name, m, i + 1);
-                                            req(
-                                                dir.join(format!("{name}.{ext}")),
-                                                highlight(m, pad, seq.duration()),
-                                            )
-                                        })
-                                        .collect()
-                                } else {
-                                    vec![req(path.clone(), range)]
-                                };
-                                request = Some((reqs, export));
-                                ui.close();
-                            }
-                            let cancel =
-                                Button::secondary(tr!("prompt.cancel")).height(FOOT_BUTTON);
-                            if ui.add(cancel).clicked() {
-                                ui.close();
-                            }
-                        });
                     });
+                    {
+                        let chosen = chosen(seq, &self.skipped);
+                        let kind = *range;
+                        let ok = span.is_some()
+                            && path.file_name().is_some()
+                            && (kind != Range::Highlights || !chosen.is_empty());
+                        let state = if ok { State::Live } else { State::Disabled };
+                        let actions = suite_ui::dialog::action_footer(
+                            ui,
+                            [
+                                Button::secondary(tr!("prompt.cancel")),
+                                Button::secondary(tr!("export.add_to_queue")).state(state),
+                                Button::primary(tr!("export.export")).state(state),
+                            ],
+                        );
+                        let export = actions[2].clicked();
+                        let queue = actions[1].clicked();
+                        if (export || queue)
+                            && let Some(range) = span
+                        {
+                            let mut preset = preset.clone();
+                            if let Some(mb) = self.target.filter(|_| sizable) {
+                                preset
+                                    .options
+                                    .insert("target_size".into(), (mb * MB).to_string());
+                            }
+                            let req = |path: PathBuf, range| Request {
+                                path,
+                                range,
+                                preset: preset.clone(),
+                                loudness: self.loudness,
+                                lossless: self
+                                    .lossless
+                                    .filter(|_| lossless::check(project, range).is_ok()),
+                                sidecar: self.sidecar,
+                            };
+                            let reqs = if kind == Range::Highlights {
+                                let ext = path.extension().unwrap_or_default().to_string_lossy();
+                                let dir = path.parent().unwrap_or(std::path::Path::new(""));
+                                chosen
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, m)| {
+                                        let name = file_name(&self.template, &self.name, m, i + 1);
+                                        req(
+                                            dir.join(format!("{name}.{ext}")),
+                                            highlight(m, pad, seq.duration()),
+                                        )
+                                    })
+                                    .collect()
+                            } else {
+                                vec![req(path.clone(), range)]
+                            };
+                            request = Some((reqs, export));
+                            ui.close();
+                        }
+                        if actions[0].clicked() {
+                            ui.close();
+                        }
+                    }
                 });
             });
         if modal.should_close() {
@@ -533,8 +534,7 @@ impl ExportDialog {
 /// The dialog's width; its head and footer heights, which the body scrolls between.
 const WIDTH: f32 = 480.0;
 const HEAD: f32 = 46.0;
-const FOOT: f32 = 57.0;
-const FOOT_BUTTON: f32 = 28.0;
+const FOOT: f32 = 85.0;
 /// The rows' label column.
 const LABEL: f32 = 96.0;
 /// The Range options, in their segmented control's order.

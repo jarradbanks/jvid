@@ -1018,7 +1018,7 @@ source_stream = "{name} · Strumień {number}"
 
 [components]
 title = "Składniki opcjonalne"
-purpose = "Modele Whisper umożliwiają lokalną transkrypcję i napisy. Są opcjonalne: można edytować i eksportować bez nich oraz dodać je później w menu Pomoc. Wybierz Gotowe, aby pominąć."
+purpose = "Modele Whisper umożliwiają lokalną transkrypcję i napisy. Są opcjonalne: można edytować i eksportować bez nich oraz dodać je później w menu Pomoc."
 download = "Pobierz"
 installed = "Zainstalowano"
 location = "Modele: {path}"

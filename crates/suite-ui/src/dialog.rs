@@ -16,6 +16,7 @@ pub fn action_footer<'a>(
     ui: &mut Ui,
     buttons: impl IntoIterator<Item = Button<'a>>,
 ) -> Vec<Response> {
+    let id = ui.make_persistent_id("action_footer");
     let width = ui.available_width().max(1.0);
     let buttons: Vec<_> = buttons
         .into_iter()
@@ -52,8 +53,15 @@ pub fn action_footer<'a>(
                 Layout::left_to_right(Align::Center),
                 |ui| {
                     ui.add_space((width - row_width).max(0.0));
-                    for _ in row {
-                        responses.push(ui.add(buttons.next().expect("footer button")));
+                    for i in row {
+                        let button = buttons.next().expect("footer button");
+                        // Resizing may move an action to another row; keep keyboard focus.
+                        responses.push(
+                            ui.scope_builder(egui::UiBuilder::new().id(id.with(i)), |ui| {
+                                ui.add(button)
+                            })
+                            .inner,
+                        );
                     }
                 },
             );
@@ -86,7 +94,10 @@ impl Dialog<'_> {
                     .inner_margin(space::S16),
             )
             .show(ctx, |ui| {
-                ui.set_width(if self.long { 640.0 } else { 360.0 });
+                ui.set_width(
+                    (if self.long { 640.0_f32 } else { 360.0_f32 })
+                        .min((ctx.content_rect().width() - 48.0).max(1.0)),
+                );
                 ui.label(RichText::new(self.title).font(theme::headline()));
                 ui.add_space(space::S8);
                 if self.long {

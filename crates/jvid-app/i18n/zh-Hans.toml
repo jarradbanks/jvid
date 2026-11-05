@@ -1023,7 +1023,7 @@ source_stream = "{name} · 音轨 {number}"
 
 [components]
 title = "可选组件"
-purpose = "Whisper 模型可在本地进行语音转录并生成字幕。模型是可选的，不影响编辑和导出，也可以稍后在帮助菜单中添加。选择完成即可跳过。"
+purpose = "Whisper 模型可在本地进行语音转录并生成字幕。模型是可选的，不影响编辑和导出，也可以稍后在帮助菜单中添加。"
 download = "下载"
 installed = "已安装"
 location = "模型：{path}"

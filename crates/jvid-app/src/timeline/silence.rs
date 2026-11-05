@@ -14,6 +14,7 @@ use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::audio::SAMPLE_RATE;
 use jvid_media::waveforms::{BUCKET, Peak, Pyramid};
+use suite_ui::dialog::action_footer;
 use suite_ui::theme;
 use suite_ui::tokens::{radius, space};
 use suite_ui::widgets::{Button, DragField, State};
@@ -246,6 +247,7 @@ impl Silence {
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
+            .auto_sized()
             .pivot(Align2::RIGHT_BOTTOM)
             .default_pos(at)
             .frame(
@@ -254,71 +256,116 @@ impl Silence {
                     .inner_margin(space::S16),
             )
             .show(ui.ctx(), |ui| {
-                ui.set_width(280.0);
+                ui.set_width(320.0_f32.min(ui.ctx().content_rect().width() - 48.0));
                 ui.label(egui::RichText::new(tr!("silence.title")).font(theme::headline()));
                 ui.add_space(space::S8);
-                let changed = self.sources.show(ui, seq, &self.selected, true);
-                if changed {
-                    self.clips = self
-                        .sources
-                        .clips(seq, &self.selected, true)
-                        .iter()
-                        .map(|c| c.id)
-                        .collect();
-                }
-                let spans = if changed { None } else { spans };
-                egui::Grid::new("silence_grid")
-                    .spacing([space::S8, space::S8])
+                let mut changed = false;
+                egui::ScrollArea::vertical()
+                    .max_height((ui.ctx().content_rect().height() - 160.0).max(0.0))
+                    .min_scrolled_height(0.0)
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        let rows = [
-                            (
-                                tr!("silence.threshold"),
-                                &mut self.threshold,
-                                tr!("silence.db_suffix"),
-                                -80.0..=-10.0,
-                                0,
-                                0.25,
-                            ),
-                            (
-                                tr!("silence.min_len"),
-                                &mut self.min_len,
-                                tr!("silence.seconds_suffix"),
-                                0.1..=30.0,
-                                2,
-                                0.02,
-                            ),
-                            (
-                                tr!("silence.padding"),
-                                &mut self.pad,
-                                tr!("silence.seconds_suffix"),
-                                0.0..=2.0,
-                                2,
-                                0.01,
-                            ),
-                            (
-                                tr!("silence.speed"),
-                                &mut self.speed,
-                                "%",
-                                110.0..=10000.0,
-                                0,
-                                5.0,
-                            ),
-                        ];
-                        for (label, v, suffix, range, decimals, speed) in rows {
-                            ui.label(label);
-                            ui.add(
-                                DragField::new(v)
-                                    .suffix(suffix)
-                                    .range(range)
-                                    .decimals(decimals)
-                                    .speed(speed)
-                                    .width(96.0),
-                            );
-                            ui.end_row();
+                        changed = self.sources.show(ui, seq, &self.selected, true);
+                        if changed {
+                            self.clips = self
+                                .sources
+                                .clips(seq, &self.selected, true)
+                                .iter()
+                                .map(|c| c.id)
+                                .collect();
                         }
+                        let label_width = [
+                            tr!("silence.threshold"),
+                            tr!("silence.min_len"),
+                            tr!("silence.padding"),
+                            tr!("silence.speed"),
+                        ]
+                        .map(|label| {
+                            ui.painter()
+                                .layout_no_wrap(
+                                    label.to_owned(),
+                                    theme::body(),
+                                    ui.visuals().text_color(),
+                                )
+                                .size()
+                                .x
+                        })
+                        .into_iter()
+                        .fold(0.0_f32, f32::max)
+                        .min((ui.available_width() - 108.0).max(40.0));
+                        egui::Grid::new("silence_grid")
+                            .min_col_width(0.0)
+                            .spacing([space::S12, space::S4])
+                            .show(ui, |ui| {
+                                let rows = [
+                                    (
+                                        tr!("silence.threshold"),
+                                        &mut self.threshold,
+                                        tr!("silence.db_suffix"),
+                                        -80.0..=-10.0,
+                                        0,
+                                        0.25,
+                                    ),
+                                    (
+                                        tr!("silence.min_len"),
+                                        &mut self.min_len,
+                                        tr!("silence.seconds_suffix"),
+                                        0.1..=30.0,
+                                        2,
+                                        0.02,
+                                    ),
+                                    (
+                                        tr!("silence.padding"),
+                                        &mut self.pad,
+                                        tr!("silence.seconds_suffix"),
+                                        0.0..=2.0,
+                                        2,
+                                        0.01,
+                                    ),
+                                ];
+                                for (label, v, suffix, range, decimals, speed) in rows {
+                                    ui.add_sized(
+                                        [label_width, 24.0],
+                                        egui::Label::new(label).wrap().halign(egui::Align::Min),
+                                    );
+                                    ui.add(
+                                        DragField::new(v)
+                                            .suffix(suffix)
+                                            .range(range)
+                                            .decimals(decimals)
+                                            .speed(speed)
+                                            .width(96.0),
+                                    );
+                                    ui.end_row();
+                                }
+                            });
+                        ui.add_space(space::S8);
+                        ui.label(
+                            egui::RichText::new(tr!("silence.speed_up")).font(theme::body_strong()),
+                        );
+                        egui::Grid::new("silence_speed")
+                            .min_col_width(0.0)
+                            .spacing([space::S12, space::S4])
+                            .show(ui, |ui| {
+                                ui.add_sized(
+                                    [label_width, 24.0],
+                                    egui::Label::new(tr!("silence.speed"))
+                                        .wrap()
+                                        .halign(egui::Align::Min),
+                                );
+                                ui.add(
+                                    DragField::new(&mut self.speed)
+                                        .suffix("%")
+                                        .range(110.0..=10000.0)
+                                        .decimals(0)
+                                        .speed(5.0)
+                                        .width(96.0),
+                                );
+                                ui.end_row();
+                            });
                     });
                 ui.add_space(space::S8);
-                let spans = if settings == self.settings() {
+                let spans = if !changed && settings == self.settings() {
                     spans
                 } else {
                     None
@@ -335,32 +382,29 @@ impl Silence {
                 ui.add_space(space::S16);
                 let any = spans.is_some_and(|s| !s.is_empty());
                 let state = if any { State::Live } else { State::Disabled };
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = space::S8;
-                    let mut pick = |ui: &mut Ui, b: Button, tip: &str, speed: Option<f64>| {
-                        if ui.add(b.state(state)).on_hover_text(tip).clicked() {
-                            let spans = spans.unwrap_or_default().to_vec();
-                            command = Some(Command::CutSpans { spans, speed });
-                            open = false;
-                        }
-                    };
-                    pick(
-                        ui,
-                        Button::primary(tr!("silence.cut")),
-                        tr!("silence.cut_tooltip"),
-                        None,
-                    );
-                    let speed = Some(self.speed / 100.0);
-                    pick(
-                        ui,
-                        Button::secondary(tr!("silence.speed_up")),
-                        tr!("silence.speed_up_tooltip"),
-                        speed,
-                    );
-                    if ui.add(Button::ghost(tr!("prompt.cancel"))).clicked() {
+                let actions = action_footer(
+                    ui,
+                    [
+                        Button::secondary(tr!("prompt.cancel")),
+                        Button::secondary(tr!("silence.speed_up")).state(state),
+                        Button::primary(tr!("silence.cut")).state(state),
+                    ],
+                );
+                if actions[0].clicked() {
+                    open = false;
+                }
+                for (i, tip, speed) in [
+                    (1, tr!("silence.speed_up_tooltip"), Some(self.speed / 100.0)),
+                    (2, tr!("silence.cut_tooltip"), None),
+                ] {
+                    if actions[i].clone().on_hover_text(tip).clicked() {
+                        command = Some(Command::CutSpans {
+                            spans: spans.unwrap_or_default().to_vec(),
+                            speed,
+                        });
                         open = false;
                     }
-                });
+                }
             });
         (command, open)
     }
@@ -832,5 +876,100 @@ mod tests {
         assert!((clips.last().unwrap().end().0 - (2 * S - saved)).abs() <= 1);
         assert!(h.undo());
         assert_eq!(h.project(), &p);
+    }
+    #[test]
+    fn compact_dialog_preserves_cut_and_speed_routes_at_narrow_sizes() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        for scale in [1.0, 1.5, 2.0] {
+            for size in [[384.0, 420.0], [1280.0, 1080.0]] {
+                for speed_up in [false, true] {
+                    let p = project(2);
+                    let audio = p.sequence().tracks()[1].clips()[0].id;
+                    let mut silence = Silence::open(p.sequence(), &HashSet::from([audio])).unwrap();
+                    silence.speed = 800.0;
+                    let spans = vec![(audio, Time(S / 2), Time(3 * S / 2))];
+                    let expected = spans.clone();
+                    let mut fresh = true;
+                    let mut h = Harness::builder()
+                        .with_size(size)
+                        .with_pixels_per_point(scale)
+                        .build_ui_state(
+                            move |ui, (s, command, open)| {
+                                if !suite_ui::test_support::install_theme(ui, &mut fresh) && *open {
+                                    let at = ui.ctx().content_rect().max - egui::vec2(12.0, 12.0);
+                                    let result = s.show(ui, at, p.sequence(), Some(&spans));
+                                    if result.0.is_some() {
+                                        *command = result.0;
+                                    }
+                                    *open = result.1;
+                                }
+                            },
+                            (silence, None, true),
+                        );
+                    h.run();
+                    let viewport = h.ctx.content_rect();
+                    let title = h.get_by_label(tr!("silence.title")).rect();
+                    let result = h
+                        .get_by_label(&trn!("silence.found", 1, seconds = "1.0"))
+                        .rect();
+                    let cut = h.get_by_label(tr!("silence.cut")).rect();
+                    let cancel = h.get_by_label(tr!("prompt.cancel")).rect();
+                    let speed = h
+                        .get_all_by_label(tr!("silence.speed_up"))
+                        .last()
+                        .unwrap()
+                        .rect();
+                    for rect in [title, result, cut, cancel, speed] {
+                        assert!(
+                            viewport.contains_rect(rect),
+                            "{size:?} at {scale}: {rect:?}"
+                        );
+                    }
+                    assert!(
+                        cut.bottom() - title.top() < 360.0,
+                        "dialog claims spare height"
+                    );
+                    assert!(
+                        cancel.top() - result.bottom() < 36.0,
+                        "result must immediately precede actions"
+                    );
+                    assert!(cancel.right() <= speed.left() && speed.right() <= cut.left());
+                    if speed_up {
+                        h.get_all_by_label(tr!("silence.speed_up"))
+                            .last()
+                            .unwrap()
+                            .click();
+                    } else {
+                        h.get_by_label(tr!("silence.cut")).click();
+                    }
+                    h.run();
+                    let Some(Command::CutSpans { spans, speed }) = &h.state().1 else {
+                        panic!("missing edit")
+                    };
+                    assert_eq!(spans, &expected);
+                    assert_eq!(*speed, speed_up.then_some(8.0));
+                    assert!(!h.state().2);
+                }
+            }
+        }
+    }
+    #[test]
+    #[ignore = "changes global locale; run this test in isolation"]
+    fn translated_silence_fits_minimum_viewports() {
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                suite_ui::i18n::set_pseudo(false);
+                suite_ui::i18n::set_language("en");
+            }
+        }
+        let _restore = Restore;
+        for language in ["de", "fr", "ja", "en"] {
+            suite_ui::i18n::set_language(language);
+            suite_ui::i18n::set_pseudo(language == "en");
+            compact_dialog_preserves_cut_and_speed_routes_at_narrow_sizes();
+        }
     }
 }

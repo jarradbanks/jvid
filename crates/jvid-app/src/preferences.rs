@@ -135,19 +135,14 @@ impl Preferences {
                     egui::pos2(done.left(), done.top() + space::S12),
                     egui::pos2(done.right(), done.bottom() - space::S16),
                 );
-                ui.scope_builder(
-                    egui::UiBuilder::new()
-                        .max_rect(done)
-                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
-                    |ui| {
-                        if ui
-                            .add(Button::primary(tr!("settings.done")).height(28.0))
-                            .clicked()
-                        {
-                            ui.close();
-                        }
-                    },
-                );
+                ui.scope_builder(egui::UiBuilder::new().max_rect(done), |ui| {
+                    if suite_ui::dialog::action_footer(ui, [Button::primary(tr!("settings.done"))])
+                        [0]
+                    .clicked()
+                    {
+                        ui.close();
+                    }
+                });
             });
         if modal.should_close() {
             self.open = false;

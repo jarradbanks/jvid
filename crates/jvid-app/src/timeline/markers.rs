@@ -138,8 +138,8 @@ fn popup(ui: &mut Ui, m: &Marker, id: Id) -> Option<Edit> {
         ui.add(TextInput::new(&mut e.note).width(field).rows(4))
             .changed()
     });
-    if ui
-        .add(Button::destructive(tr!("timeline.delete_marker")).width(POPUP_WIDTH))
+    ui.add_space(space::S8);
+    if suite_ui::dialog::action_footer(ui, [Button::destructive(tr!("timeline.delete_marker"))])[0]
         .clicked()
     {
         ui.close();
