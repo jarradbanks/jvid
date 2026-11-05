@@ -266,9 +266,7 @@ impl Timeline {
             if id == "text_tool" {
                 tip.push_str(&format!("\n{}", tr!("timeline.text_tool_hint")));
             }
-            let b = Button::icon(if id == "text_tool" { "" } else { glyph }, name)
-                .on(on)
-                .state(state);
+            let b = Button::icon(glyph, name).on(on).state(state);
             let response = ui.put(r, b);
             if id == "text_tool" {
                 ui.painter().text(
