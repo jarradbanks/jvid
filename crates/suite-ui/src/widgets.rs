@@ -141,6 +141,7 @@ pub struct Button<'a> {
     state: State,
     min_width: f32,
     min_height: f32,
+    wrap_width: f32,
     small: bool,
     ink: Option<Color32>,
 }
@@ -157,6 +158,7 @@ impl<'a> Button<'a> {
             state: State::Live,
             min_width: 0.0,
             min_height: 0.0,
+            wrap_width: f32::INFINITY,
             small: false,
             ink: None,
         }
@@ -230,37 +232,70 @@ impl<'a> Button<'a> {
         self.min_height = height;
         self
     }
-}
 
-impl Widget for Button<'_> {
-    fn ui(self, ui: &mut Ui) -> Response {
-        let font = theme::body_strong();
-        let has_label = !self.icon_only;
-        let has_icon = self.icon.is_some() || self.loading;
-        let width = if has_label {
-            let icon_w = if has_icon {
-                size::ICON + space::S4
-            } else {
-                0.0
-            };
-            2.0 * space::S12 + icon_w + text_width(ui, self.label, &font)
-        } else if self.small {
-            size::SMALL_CONTROL
+    /// Keeps translated footer labels inside the available width.
+    pub(crate) fn wrap_at(mut self, width: f32) -> Self {
+        self.wrap_width = width;
+        self
+    }
+
+    fn label_galley(&self, ui: &Ui) -> Arc<Galley> {
+        let icon = if self.icon.is_some() || self.loading {
+            size::ICON + space::S4
         } else {
-            size::CONTROL
+            0.0
         };
+        ui.painter().layout(
+            self.label.to_owned(),
+            theme::body_strong(),
+            Color32::WHITE,
+            (self.wrap_width - 2.0 * space::S12 - icon).max(1.0),
+        )
+    }
+
+    pub(crate) fn desired_size(&self, ui: &Ui) -> Vec2 {
         let side = if self.small {
             size::SMALL_CONTROL
         } else {
             size::CONTROL
         };
-        let pad = (self.min_width - width).max(0.0) / 2.0;
-        let (rect, response) = allocate(
-            ui,
-            vec2((width + 2.0 * pad).ceil(), side.max(self.min_height)),
-            self.state,
-            Sense::click(),
-        );
+        let label = self.label_galley(ui);
+        let icon = if self.icon.is_some() || self.loading {
+            size::ICON + space::S4
+        } else {
+            0.0
+        };
+        let width = if self.icon_only {
+            side
+        } else {
+            2.0 * space::S12 + icon + label.size().x
+        };
+        let height = if self.icon_only {
+            side
+        } else {
+            side.max(label.size().y + space::S8)
+        };
+        vec2(
+            width.max(self.min_width).ceil(),
+            height.max(self.min_height),
+        )
+    }
+}
+
+impl Widget for Button<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let has_label = !self.icon_only;
+        let has_icon = self.icon.is_some() || self.loading;
+        let galley = self.label_galley(ui);
+        let desired = self.desired_size(ui);
+        let content_width = galley.size().x
+            + if has_icon {
+                size::ICON + space::S4
+            } else {
+                0.0
+            };
+        let pad = ((desired.x - 2.0 * space::S12 - content_width).floor() / 2.0).max(0.0);
+        let (rect, response) = allocate(ui, desired, self.state, Sense::click());
         response.widget_info(|| {
             WidgetInfo::labeled(
                 WidgetType::Button,
@@ -357,11 +392,9 @@ impl Widget for Button<'_> {
             x += size::ICON + space::S4;
         }
         if has_label {
-            ui.painter().text(
-                pos2(x, rect.center().y),
-                Align2::LEFT_CENTER,
-                self.label,
-                font,
+            ui.painter().galley_with_override_text_color(
+                pos2(x, rect.center().y - galley.size().y / 2.0),
+                galley,
                 ink,
             );
         }
