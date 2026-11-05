@@ -324,10 +324,7 @@ impl Silence {
                                     ),
                                 ];
                                 for (label, v, suffix, range, decimals, speed) in rows {
-                                    ui.add_sized(
-                                        [label_width, 24.0],
-                                        egui::Label::new(label).wrap().halign(egui::Align::Min),
-                                    );
+                                    field_label(ui, label_width, label);
                                     ui.add(
                                         DragField::new(v)
                                             .suffix(suffix)
@@ -347,12 +344,7 @@ impl Silence {
                             .min_col_width(0.0)
                             .spacing([space::S12, space::S4])
                             .show(ui, |ui| {
-                                ui.add_sized(
-                                    [label_width, 24.0],
-                                    egui::Label::new(tr!("silence.speed"))
-                                        .wrap()
-                                        .halign(egui::Align::Min),
-                                );
+                                field_label(ui, label_width, tr!("silence.speed"));
                                 ui.add(
                                     DragField::new(&mut self.speed)
                                         .suffix("%")
@@ -408,6 +400,17 @@ impl Silence {
             });
         (command, open)
     }
+}
+
+fn field_label(ui: &mut Ui, width: f32, text: &str) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, 24.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(width);
+            ui.add(egui::Label::new(text).wrap());
+        },
+    );
 }
 
 impl Drop for Silence {
@@ -910,7 +913,11 @@ mod tests {
                         );
                     h.run();
                     let viewport = h.ctx.content_rect();
-                    let title = h.get_by_label(tr!("silence.title")).rect();
+                    let title = h
+                        .get_all_by_label(tr!("silence.title"))
+                        .last()
+                        .unwrap()
+                        .rect();
                     let result = h
                         .get_by_label(&trn!("silence.found", 1, seconds = "1.0"))
                         .rect();
@@ -955,6 +962,29 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn detect_silence_compact_snapshot() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let p = project(2);
+        let audio = p.sequence().tracks()[1].clips()[0].id;
+        let mut silence = Silence::open(p.sequence(), &HashSet::from([audio])).unwrap();
+        let spans = vec![(audio, Time(S / 2), Time(3 * S / 2))];
+        let mut fresh = true;
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([384.0, 420.0])
+            .wgpu()
+            .build_ui(move |ui| {
+                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    let at = ui.ctx().content_rect().max - egui::vec2(16.0, 16.0);
+                    silence.show(ui, at, p.sequence(), Some(&spans));
+                }
+            });
+        h.run();
+        h.snapshot("detect_silence_compact");
+    }
+
     #[test]
     #[ignore = "changes global locale; run this test in isolation"]
     fn translated_silence_fits_minimum_viewports() {

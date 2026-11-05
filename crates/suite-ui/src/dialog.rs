@@ -58,7 +58,11 @@ pub fn action_footer<'a>(
                         // Resizing may move an action to another row; keep keyboard focus.
                         responses.push(
                             ui.scope_builder(egui::UiBuilder::new().id(id.with(i)), |ui| {
-                                ui.add(button)
+                                if ui.is_sizing_pass() {
+                                    ui.allocate_exact_size(sizes[i], egui::Sense::hover()).1
+                                } else {
+                                    ui.add(button)
+                                }
                             })
                             .inner,
                         );
@@ -115,7 +119,7 @@ impl Dialog<'_> {
                     .map(|&(label, kind)| Button::new(kind, label));
                 let responses = action_footer(ui, buttons);
                 for (i, r) in responses.into_iter().rev().enumerate() {
-                    if i == 0 && ui.memory(|m| m.focused().is_none()) {
+                    if i == 0 && !ui.is_sizing_pass() && ui.memory(|m| m.focused().is_none()) {
                         r.request_focus();
                     }
                     if r.clicked() {
