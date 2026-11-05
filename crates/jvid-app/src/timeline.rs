@@ -34,6 +34,8 @@ use crate::keymap::Keymap;
 use crate::media_bin::{Caches, filmstrips::FilmstripRequests};
 use crate::transport::{SeekGesture, Transport};
 
+#[cfg(test)]
+mod effect_drop_tests;
 mod fades;
 #[cfg(test)]
 mod feedback_tests;
@@ -1936,16 +1938,43 @@ impl Timeline {
             hit.filter(|l| kind.is_none_or(|k| k == l.1)).map(|l| l.0)
         };
         if let Some(fx) = egui::DragAndDrop::payload::<crate::effects::Drag>(ui.ctx()) {
-            let t = view.time(p.x);
-            let clip = lane_at(Some(TrackKind::Video))
-                .and_then(|id| project.sequence().track(id))
-                .and_then(|tr| tr.clips().iter().find(|c| c.start <= t && t < c.end()));
-            if area.contains(p)
-                && ui.input(|i| i.pointer.any_released())
-                && let Some(c) = clip
-                && let Some(cmd) = crate::inspector::add_effect(project, &[c.id].into(), &fx.0)
-            {
-                *edit = Some((cmd, None));
+            let over = ui.rect_contains_pointer(area);
+            let target = over
+                .then(|| lane_at(Some(TrackKind::Video)))
+                .flatten()
+                .and_then(|id| crate::effects::drag::timeline_target(project, id, view.time(p.x)))
+                .filter(|_| crate::effects::drag::usable(&fx.0))
+                .and_then(|id| {
+                    let (track, clip) = project.sequence().clip(id)?;
+                    let (_, _, lane) = lanes.iter().find(|l| l.0 == track)?;
+                    let height = project.sequence().track(track)?.height;
+                    let rect = Rect::from_x_y_ranges(
+                        view.x(clip.start)..=view.x(clip.end()),
+                        lane.top()..=lane.top() + height,
+                    )
+                    .shrink2(vec2(1.0, 2.0));
+                    rect.contains(p).then_some((id, rect))
+                });
+            if over {
+                ui.ctx().set_cursor_icon(if target.is_some() {
+                    CursorIcon::Copy
+                } else {
+                    CursorIcon::NotAllowed
+                });
+            }
+            if let Some((id, rect)) = target {
+                let painter = ui.painter().with_clip_rect(area);
+                painter.rect_filled(rect, radius::SMALL, color::blue().gamma_multiply(0.2));
+                painter.rect_stroke(
+                    rect,
+                    radius::SMALL,
+                    Stroke::new(3.0, color::light_blue()),
+                    egui::StrokeKind::Inside,
+                );
+                if ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
+                    *edit = crate::effects::drag::command(project, id, &fx.0).map(|c| (c, None));
+                    egui::DragAndDrop::clear_payload(ui.ctx());
+                }
             }
             return Vec::new();
         }

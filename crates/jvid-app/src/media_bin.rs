@@ -1383,6 +1383,7 @@ impl MediaBin {
                     );
                 });
         });
+        crate::effects::drag::ghost(ui);
     }
 
     /// A list row in fixed columns: thumbnail, name over two lines of description, then Apply
@@ -1572,11 +1573,11 @@ impl MediaBin {
         if r.clicked() {
             self.fx_selected = Some(row.stem.clone());
         }
-        if row.error.is_none() {
+        if row.error.is_none() && !row.disabled {
             if r.double_clicked() {
                 out.apply_effect = Some(row.stem.clone());
             }
-            // The timeline adds it to the clip it's dropped on.
+            // Timeline and Program resolve the recipient under the pointer.
             r.dnd_set_drag_payload(crate::effects::Drag(row.stem.clone()));
         }
         r.context_menu(|ui| self.fx_menu(ui, row, dir, out));

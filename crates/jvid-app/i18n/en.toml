@@ -430,7 +430,7 @@ remove_body.one = "It's used by 1 clip in the timeline. Removing it removes that
 remove_body.other = "It's used by {count} clips in the timeline. Removing it removes them too. You can undo this."
 remove_button = "Remove"
 # What an Effects tab row says about how to use it.
-fx_hint = "Drag onto a clip, or double-click to add to the selected clips"
+fx_hint = "Drag onto a clip or the Program preview, or double-click to add to the selected clips"
 new_effect = "New Effect"
 open_effects = "Open Effects Folder"
 fx_empty = "Drop .wgsl files in the effects folder or click New Effect, then drag one onto a clip"
