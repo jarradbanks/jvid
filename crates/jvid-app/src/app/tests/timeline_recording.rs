@@ -281,8 +281,18 @@ fn short_docked_timeline_wheel_reaches_the_last_track() {
         h.run();
         let path = h.state().dock.find_tab(&Tab::Timeline).unwrap();
         let viewport = h.state().dock.leaf(path.node_path()).unwrap().viewport;
+        let marker = h.get_by_label(tr!("timeline.marker_lane")).rect();
         let at = egui::pos2(
-            viewport.left() + if header { 24.0 } else { 250.0 },
+            if header {
+                h.get_all_by_label(tr!("timeline.lock"))
+                    .next()
+                    .unwrap()
+                    .rect()
+                    .center()
+                    .x
+            } else {
+                marker.left() + 10.0
+            },
             viewport.bottom() - 40.0,
         );
         h.hover_at(at);
@@ -378,11 +388,10 @@ fn seeking_during_capture_finalizes_the_take_at_its_original_start() {
             let seeker = h.get_by_label(tr!("preview.position")).rect();
             egui::pos2(seeker.left() + 1.0, seeker.center().y)
         } else {
-            let path = h.state().dock.find_tab(&Tab::Timeline).unwrap();
-            let viewport = h.state().dock.leaf(path.node_path()).unwrap().viewport;
+            let marker = h.get_by_label(tr!("timeline.marker_lane")).rect();
             egui::pos2(
-                viewport.left() + 12.0 + suite_ui::tokens::size::TRACK_HEADER + 10.0,
-                viewport.top() + suite_ui::tokens::size::HEADER + 8.0 + 16.0 + 12.0,
+                marker.left() + 10.0,
+                marker.bottom() + suite_ui::tokens::size::RULER / 2.0,
             )
         };
         h.hover_at(at);

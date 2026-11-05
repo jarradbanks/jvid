@@ -1225,7 +1225,8 @@ impl Preview {
             );
             ui.scope_builder(
                 UiBuilder::new()
-                    .id_salt("transport_controls")
+                    // Take readouts and compact layouts change allocation order.
+                    .id(ui.id().with("transport_controls"))
                     .max_rect(buttons)
                     .layout(Layout::left_to_right(Align::Center)),
                 |ui| {
@@ -1233,7 +1234,10 @@ impl Preview {
                     for (glyph, name, id) in transport_actions(r.playing) {
                         let name = transport_hint(ui.ctx(), keymap, id, name);
                         if ui
-                            .add(Button::icon(glyph, &name))
+                            .scope_builder(UiBuilder::new().id(ui.id().with(id)), |ui| {
+                                ui.add(Button::icon(glyph, &name))
+                            })
+                            .inner
                             .on_hover_text(&name)
                             .clicked()
                         {
@@ -1385,7 +1389,7 @@ impl Preview {
         let mut action = None;
         ui.scope_builder(
             UiBuilder::new()
-                .id_salt("transport_controls")
+                .id(ui.id().with("transport_controls"))
                 .max_rect(controls)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
@@ -1394,7 +1398,10 @@ impl Preview {
                     if navigation || id == "play_stop" {
                         let hint = transport_hint(ui.ctx(), keymap, id, name);
                         if ui
-                            .add(Button::icon(glyph, &hint))
+                            .scope_builder(UiBuilder::new().id(ui.id().with(id)), |ui| {
+                                ui.add(Button::icon(glyph, &hint))
+                            })
+                            .inner
                             .on_hover_text(&hint)
                             .clicked()
                         {
@@ -1574,7 +1581,12 @@ fn record_button(
         None => tr!("action.record"),
     };
     let name = transport_hint(ui.ctx(), keymap, "record", name);
-    let b = ui.add(Button::icon("", &name)).on_hover_text(&name);
+    let b = ui
+        .scope_builder(UiBuilder::new().id(ui.id().with("record")), |ui| {
+            ui.add(Button::icon("", &name))
+        })
+        .inner
+        .on_hover_text(&name);
     crate::app::tutorial::anchor(ui.ctx(), "record", b.rect);
     let c = b.rect.center();
     let Some((elapsed, level)) = take else {
@@ -2626,6 +2638,41 @@ mod audit_transport_tests {
             );
         h.run_steps(4);
         h
+    }
+
+    #[test]
+    fn transport_focus_survives_recording_and_responsive_layout_changes() {
+        for record in [false, true] {
+            for width in [240.0, 480.0, 640.0, 960.0] {
+                let mut h = row_harness(width, 1.0, true, false, None);
+                let label = if record {
+                    "Record Voiceover (Shift+R)"
+                } else {
+                    "Play (Space)"
+                };
+                h.get_by_label(label).focus();
+                h.run();
+                assert!(h.get_by_label(label).is_focused());
+                let focused = h.ctx.memory(|m| m.focused());
+                for width in [960.0, 800.0, 640.0, 599.0, 480.0, 320.0, 240.0, 960.0] {
+                    h.set_size(vec2(width, 300.0));
+                    for recording in [true, false] {
+                        h.state_mut().preview.recording =
+                            recording.then_some((std::time::Duration::from_secs(72), 0.5));
+                        h.state_mut().playing = recording;
+                        h.run();
+                        let label = match (record, recording) {
+                            (true, true) => "Stop Recording (Shift+R)",
+                            (true, false) => "Record Voiceover (Shift+R)",
+                            (false, true) => "Stop (Space)",
+                            (false, false) => "Play (Space)",
+                        };
+                        assert!(h.get_by_label(label).is_focused(), "{label} at {width}");
+                        assert_eq!(h.ctx.memory(|m| m.focused()), focused);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

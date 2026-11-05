@@ -53,6 +53,63 @@ fn short_dialog_hugs_content() {
 }
 
 #[test]
+fn switching_to_a_long_dialog_settles_the_footer_and_preserves_dismissal() {
+    for key in [
+        None,
+        Some(egui::Key::Enter),
+        Some(egui::Key::Space),
+        Some(egui::Key::Escape),
+    ] {
+        let mut fresh = true;
+        let notices = "Third-party licence text.\n".repeat(200);
+        let mut h = Harness::builder()
+            .with_size([1280.0, 720.0])
+            .build_ui_state(
+                move |ui, stage: &mut usize| {
+                    if common::install_theme(ui, &mut fresh) || *stage == 2 {
+                        return;
+                    }
+                    let long = *stage == 1;
+                    let picked = Dialog {
+                        title: if long { "Notices" } else { "About" },
+                        body: if long { &notices } else { "Version 1" },
+                        buttons: if long {
+                            &[("OK", ButtonKind::Primary)]
+                        } else {
+                            &[
+                                ("OK", ButtonKind::Primary),
+                                ("Third-Party Notices", ButtonKind::Secondary),
+                            ]
+                        },
+                        cancel: 0,
+                        long,
+                    }
+                    .show(ui.ctx());
+                    if picked.is_some() {
+                        *stage += 1;
+                    }
+                },
+                0,
+            );
+        h.run();
+        h.get_by_label("Third-Party Notices").click();
+        h.run();
+        assert_eq!(*h.state(), 1);
+        let settled = h.get_by_label("OK").rect();
+        h.get_by_label("OK").hover();
+        h.run();
+        assert_eq!(h.get_by_label("OK").rect(), settled);
+        if let Some(key) = key {
+            h.key_press(key);
+        } else {
+            h.get_by_label("OK").click();
+        }
+        h.run();
+        assert_eq!(*h.state(), 2, "dismissal with {key:?}");
+    }
+}
+
+#[test]
 fn footer_fits_content_aligns_right_and_wraps_in_reading_order() {
     use suite_ui::dialog::action_footer;
     use suite_ui::widgets::Button;
