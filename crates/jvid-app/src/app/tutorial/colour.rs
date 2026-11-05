@@ -46,7 +46,7 @@ pub const COLOUR: Lesson = Lesson {
             anchor: "scope.waveform",
             text: |_| tr!("tutorial.color_exposure").into(),
             done: |a| a.preview.analysis.as_ref().is_some_and(exposed),
-            show_me: |a| grade(a, |x| x.exposure = 1.0),
+            example: |a| grade(a, |x| x.exposure = 1.0),
             reveal: Some(open_scopes),
             ghost: None,
             also: &["inspector.exposure"],
@@ -55,7 +55,7 @@ pub const COLOUR: Lesson = Lesson {
             anchor: "scope.vectorscope",
             text: |_| tr!("tutorial.color_balance").into(),
             done: |a| a.preview.analysis.as_ref().is_some_and(centred),
-            show_me: |a| grade(a, |x| (x.temperature, x.tint) = (-0.4, 0.0)),
+            example: |a| grade(a, |x| (x.temperature, x.tint) = (-0.4, 0.0)),
             reveal: Some(open_scopes),
             ghost: None,
             also: &["inspector.temperature", "inspector.tint"],
@@ -64,7 +64,7 @@ pub const COLOUR: Lesson = Lesson {
             anchor: "scope.histogram",
             text: |_| tr!("tutorial.color_histogram").into(),
             done: |a| a.preview.analysis.as_ref().is_some_and(lined_up),
-            show_me: |a| grade(a, |x| (x.temperature, x.tint) = (-0.7, -0.25)),
+            example: |a| grade(a, |x| (x.temperature, x.tint) = (-0.7, -0.25)),
             reveal: Some(open_scopes),
             ghost: None,
             also: &["inspector.temperature", "inspector.tint"],
@@ -79,7 +79,7 @@ pub const COLOUR: Lesson = Lesson {
                 clip(a)
                     .is_some_and(|c| c.transform.lut.is_some() && c.transform.lut_intensity < 1.0)
             },
-            show_me: |a| match sample(LOOK) {
+            example: |a| match sample(LOOK) {
                 Ok(path) => grade(a, |x| {
                     x.lut = Some(path.to_string_lossy().into());
                     x.lut_intensity = 0.5;

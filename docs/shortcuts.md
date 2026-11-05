@@ -46,6 +46,7 @@ Work in any panel except while typing in a text field.
 | Generate Subtitles… | `Ctrl+Alt+G` |
 | Razor Tool | `C` |
 | Selection Tool | `V` |
+| Text Tool | `T` |
 | Step Back One Frame | `Left` |
 | Step Forward One Frame | `Right` |
 | Step Back One Second | `Shift+Left` |

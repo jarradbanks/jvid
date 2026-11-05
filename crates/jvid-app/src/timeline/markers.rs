@@ -49,6 +49,25 @@ pub(super) const LANE: f32 = space::S16;
 /// Pointer reach of a flag or a range end either side of its x.
 const GRIP: f32 = 5.0;
 
+fn paint(painter: &egui::Painter, view: View, lane: Rect, time: Time, duration: Time, c: Color32) {
+    let (x, end) = (view.x(time), view.x(time + duration));
+    let top = lane.top() + 1.0;
+    if duration > Time(0) {
+        let band = Rect::from_x_y_ranges(x..=end, top..=lane.bottom());
+        painter.rect_filled(band, 0.0, c.gamma_multiply(0.3));
+        painter.line_segment(
+            [pos2(end, top), pos2(end, lane.bottom())],
+            Stroke::new(1.0, c),
+        );
+    }
+    painter.add(Shape::convex_polygon(
+        vec![pos2(x - 5.0, top), pos2(x + 5.0, top), pos2(x, top + 8.0)],
+        c,
+        Stroke::NONE,
+    ));
+    painter.line_segment([pos2(x, top), pos2(x, lane.bottom())], Stroke::new(1.0, c));
+}
+
 /// What a marker drag moves: the whole marker, or one end of a range.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Grip {
@@ -119,8 +138,8 @@ fn popup(ui: &mut Ui, m: &Marker, id: Id) -> Option<Edit> {
         ui.add(TextInput::new(&mut e.note).width(field).rows(4))
             .changed()
     });
-    if ui
-        .add(Button::destructive(tr!("timeline.delete_marker")).width(POPUP_WIDTH))
+    ui.add_space(space::S8);
+    if suite_ui::dialog::action_footer(ui, [Button::destructive(tr!("timeline.delete_marker"))])[0]
         .clicked()
     {
         ui.close();
@@ -215,6 +234,36 @@ impl Timeline {
         let painter = ui.painter().with_clip_rect(lane);
         let rate = self.transport.rate;
         let mut edit = None;
+        let lane_response = ui.interact(lane, id.with("marker lane"), Sense::click());
+        lane_response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("timeline.marker_lane"))
+        });
+        if seq.markers().is_empty() && self.marker_hold.is_none() {
+            painter.text(
+                lane.left_center() + vec2(space::S8, 0.0),
+                egui::Align2::LEFT_CENTER,
+                tr!("timeline.marker_lane"),
+                suite_ui::theme::small(),
+                color::ink_3(),
+            );
+        }
+        if lane_response.double_clicked()
+            || (lane_response.clicked() && lane_response.interact_pointer_pos().is_none())
+        {
+            let at = lane_response
+                .interact_pointer_pos()
+                .map_or(self.playhead(), |p| view.time(p.x));
+            let time = rate.time_floor(rate.index_nearest(at)).max(Time(0));
+            edit = Some((
+                Command::AddMarker {
+                    time,
+                    duration: Time(0),
+                    name: String::new(),
+                },
+                None,
+            ));
+        }
+        lane_response.on_hover_text(tr!("timeline.marker_lane"));
         let mut anchored = false;
         for m in seq.markers() {
             let shown = match &self.marker_drag {
@@ -223,21 +272,7 @@ impl Timeline {
             };
             let (x, c) = (view.x(shown.time), swatch(m.color));
             let end = view.x(shown.time + shown.duration);
-            let top = lane.top() + 1.0;
-            if shown.duration > Time(0) {
-                let band = Rect::from_x_y_ranges(x..=end, top..=lane.bottom());
-                painter.rect_filled(band, 0.0, c.gamma_multiply(0.3));
-                painter.line_segment(
-                    [pos2(end, top), pos2(end, lane.bottom())],
-                    Stroke::new(1.0, c),
-                );
-            }
-            painter.add(Shape::convex_polygon(
-                vec![pos2(x - 5.0, top), pos2(x + 5.0, top), pos2(x, top + 8.0)],
-                c,
-                Stroke::NONE,
-            ));
-            painter.line_segment([pos2(x, top), pos2(x, lane.bottom())], Stroke::new(1.0, c));
+            paint(&painter, view, lane, shown.time, shown.duration, c);
             let flag = Rect::from_x_y_ranges(x - GRIP..=x + GRIP, lane.y_range());
             let hit = Rect::from_x_y_ranges(x - GRIP..=end + GRIP, lane.y_range());
             let r = ui.interact(hit, id.with(("marker", m.id.0)), Sense::click_and_drag());
@@ -289,6 +324,7 @@ impl Timeline {
             }
             if r.clicked() {
                 self.seek(m.time);
+                self.navigated = true;
             }
             let tip = match (m.name.is_empty(), m.note.is_empty()) {
                 (true, true) => tr!("timeline.marker").to_owned(),
@@ -305,6 +341,18 @@ impl Timeline {
                         edit = Some(e);
                     }
                 });
+        }
+        if let Some(start) = self.marker_hold {
+            let here = self.playhead();
+            let time = start.min(here);
+            paint(
+                &painter,
+                view,
+                lane,
+                time,
+                start.max(here) - time,
+                swatch(0),
+            );
         }
         edit
     }

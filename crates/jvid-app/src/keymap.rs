@@ -114,6 +114,7 @@ pub const ACTIONS: &[Action] = &[
     t("snapping", "S"),
     a("razor_tool", "C"),
     a("selection_tool", "V"),
+    a("text_tool", "T"),
     t("add_edit", "Ctrl+K"),
     a("step_back", "Left"),
     a("step_forward", "Right"),

@@ -6,6 +6,10 @@ on:
       - '.github/workflows/updater.yml'
       - 'crates/jvid-updater/**'
       - 'packaging/windows.iss'
+      - 'packaging/whisper-models.iss'
+      - 'scripts/packaging/installer_models.py'
+      - 'scripts/packaging/test_installer_*.py'
+      - 'assets/jvid.ico'
       - 'Cargo.toml'
       - 'Cargo.lock'
   workflow_dispatch:
@@ -19,6 +23,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: Swatinem/rust-cache@v2
         with:
           key: updater-native-inno
@@ -30,6 +37,10 @@ jobs:
             choco install innosetup --yes --no-progress
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+      - name: Model downloads and preservation in isolated installers
+        run: python -m unittest discover -s scripts/packaging -p 'test_installer_*.py'
+        env:
+          JVID_TEST_ISCC: 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
       - run: cargo test --locked -p jvid-updater
       - name: Real Inno upgrade in an isolated temporary tree
         run: cargo test --locked -p jvid-updater --lib native_inno_upgrade -- --ignored --nocapture
