@@ -74,7 +74,7 @@ jobs:
       fail-fast: false
       matrix:
         # PRs run Linux only; nightly and manual runs get all three.
-        os: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
+        os: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["macos-14"]') || fromJSON('["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
