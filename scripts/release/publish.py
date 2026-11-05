@@ -13,7 +13,7 @@ import sys
 import tempfile
 import urllib.parse
 
-from automation import output, run, stable, version
+from automation import output, run, source_publication_started, stable, version
 from github_api import github, pages, release_for_tag, tag_commit
 
 SUFFIXES = (
@@ -126,68 +126,144 @@ def matches(asset, record):
             and asset.get('digest') == 'sha256:' + record['sha256'])
 
 
+def release_assets(repository, release, commit, tag, records, *, published=False, body=None):
+    """Inspect a draft or the already-published source companion without modifying it."""
+    path = f'repos/{repository}/releases/{release["id"]}'
+    current = github(path)
+    if (not current or (not published and not current['draft'])
+            or (current['draft'] and current.get('immutable'))
+            or current['tag_name'] != tag or current['target_commitish'] != commit
+            or tag_commit(repository, tag, api=github) != commit):
+        raise ValueError('Release changed or was published; refusing to modify it')
+    if body is not None and current.get('body') != body:
+        raise ValueError('Source notes or asset fingerprint differ from the frozen publication')
+    observed = {}
+    for asset in pages(path + '/assets', api=github):
+        name = asset['name']
+        if name not in records or name in observed:
+            raise ValueError('Unexpected or duplicate asset already in release')
+        if asset['state'] != 'starter' and not matches(asset, records[name]):
+            raise ValueError('Existing release asset has conflicting size/digest/state: ' + name)
+        observed[name] = asset
+    if not current['draft'] and (set(observed) != set(records)
+            or any(not matches(observed[n], r) for n, r in records.items())):
+        raise ValueError('Published source assets failed verification')
+    return current, observed
+
+
+def split_assets(assets, records, temporary, current):
+    """Separate upload sets; retain the combined candidate for complete verification.
+
+    Only the tiny checksum files are written. Multi-GiB source archives stay in place.
+    Each release's checksum list describes exactly its own attachments.
+    """
+    app = {'jvid-' + current + '-' + suffix for _, _, suffix in SUFFIXES}
+    app.update({'jvid-update.json', 'jvid-update.json.sig'})
+    scopes = []
+    for label, names in (('app', app), ('sources', set(records) - app - {'SHA256SUMS.txt'})):
+        paths = {name: assets / name for name in names}
+        sums = temporary / label / 'SHA256SUMS.txt'
+        sums.parent.mkdir()
+        sums.write_text(''.join(records[n]['sha256'] + '  ' + n + '\n' for n in sorted(names)))
+        paths[sums.name] = sums
+        scoped = {n: records[n] for n in names}
+        scoped[sums.name] = {'size': sums.stat().st_size, 'sha256': digest(sums)}
+        scopes.append((scoped, paths))
+    return scopes
+
+
+def publish_one(repository, commit, tag, name, notes, records, paths, release, revalidate, *, latest):
+    if release is None:
+        release = github(f'repos/{repository}/releases', 'POST', {'tag_name': tag,
+            'target_commitish': commit, 'name': name, 'body': notes,
+            'draft': True, 'prerelease': False, 'make_latest': 'false'})
+    source_body = notes if not latest else None
+    current, observed = release_assets(repository, release, commit, tag, records,
+                                       published=not latest, body=source_body)
+    if not current['draft']:
+        return release  # A verified published source release is reusable on an app retry.
+    for filename, record in sorted(records.items()):
+        asset = observed.get(filename)
+        if asset and matches(asset, record):
+            continue
+        _, refreshed = release_assets(repository, release, commit, tag, records, body=source_body)
+        asset = refreshed.get(filename)
+        if asset and matches(asset, record):
+            continue  # An earlier starter may have completed since inspection.
+        if asset:
+            github(f'repos/{repository}/releases/assets/{asset["id"]}', 'DELETE')
+            release_assets(repository, release, commit, tag, records, body=source_body)
+        upload(repository, release['id'], paths[filename])
+    _, observed = release_assets(repository, release, commit, tag, records, body=source_body)
+    if set(observed) != set(records) or any(not matches(observed[n], r) for n, r in records.items()):
+        raise ValueError('Uploaded release asset names/sizes/digests failed verification')
+    revalidate()
+    _, observed = release_assets(repository, release, commit, tag, records, body=source_body)
+    if set(observed) != set(records) or any(not matches(observed[n], r) for n, r in records.items()):
+        raise ValueError('Remote release assets changed before publication')
+    result = github(f'repos/{repository}/releases/{release["id"]}', 'PATCH',
+        {'name': name, 'body': notes, 'draft': False, 'prerelease': False,
+         'make_latest': 'true' if latest else 'false'})
+    if (result['draft'] or result['tag_name'] != tag or result['target_commitish'] != commit
+            or result['prerelease']):
+        raise RuntimeError('GitHub did not confirm publication; inspect and retry the original job')
+    return result
+
+
 def publish(root, assets, repository, commit, tag, public_key):
     release = preflight(root, repository, commit, tag)
     if release and not release['draft']:
         output(published='false', reason='Published release is immutable; no changes made')
         return
     records = validate_assets(root, assets, public_key)
-    notes = (root / 'packaging/release-notes.md').read_text()
-    if release is None:
-        release = github(f'repos/{repository}/releases', 'POST', {'tag_name': tag,
-            'target_commitish': commit, 'name': 'jvid ' + tag, 'body': notes,
-            'draft': True, 'prerelease': False})
-    release_id = release['id']
-    release_path = f'repos/{repository}/releases/{release_id}'
+    source_tag = 'sources-' + tag  # Avoid v* package triggers and app updater version selection.
+    source_commit = tag_commit(repository, source_tag, api=github)
+    if source_commit is not None and source_commit != commit:
+        raise ValueError('Source release tag belongs to a different commit; refusing to retag')
+    source_release = release_for_tag(repository, source_tag, api=github)
+    source_url = f'https://github.com/{repository}/releases/tag/{source_tag}'
+    notes = (root / 'packaging/release-notes.md').read_text().rstrip() + '\n'
+    if source_url not in notes:
+        notes += '\n[Source code](' + source_url + ')\n'
+    source_notes = (f'Corresponding source and build scripts for [jvid {tag}]'
+                    f'(https://github.com/{repository}/releases/tag/{tag}).\n\n'
+                    'Download SOURCE-README.txt for verification and reconstruction instructions.\n')
+    # Freeze the entire signed candidate before the first upload. A draft whose
+    # create response or first upload was lost must reject freshly rebuilt bytes,
+    # including valid but different metadata/signatures or source archives.
+    fingerprint = hashlib.sha256(json.dumps(records, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    source_notes += '\n<!-- jvid-release-assets-sha256: ' + fingerprint + ' -->\n'
 
-    def assert_draft():
-        current = github(release_path)
-        if (not current or not current['draft'] or current.get('immutable')
-                or current['tag_name'] != tag or current['target_commitish'] != commit
-                or tag_commit(repository, tag, api=github) != commit):
-            raise ValueError('Release changed or was published; refusing to modify it')
-        return current
+    def revalidate():
+        if validate_assets(root, assets, public_key) != records:
+            raise ValueError('Local assets changed while uploading')
 
-    def remote_assets():
-        observed = {}
-        for asset in pages(release_path + '/assets', api=github):
-            name = asset['name']
-            if name not in records or name in observed:
-                raise ValueError('Unexpected or duplicate asset already in draft')
-            observed[name] = asset
-        return observed
+    with tempfile.TemporaryDirectory() as directory:
+        (app_records, app_paths), (source_records, source_paths) = split_assets(
+            assets, records, Path(directory), version(root))
+        # Detect existing conflicts in either release before creating tags or uploading anything.
+        if release:
+            release_assets(repository, release, commit, tag, app_records)
+        if source_release:
+            release_assets(repository, source_release, commit, source_tag, source_records,
+                           published=True, body=source_notes)
+        if source_commit is None:
+            github(f'repos/{repository}/git/refs', 'POST',
+                   {'ref': 'refs/tags/' + source_tag, 'sha': commit})
+        source_release = publish_one(repository, commit, source_tag, 'jvid ' + tag + ' sources',
+            source_notes, source_records, source_paths, source_release, revalidate, latest=False)
 
-    assert_draft()
-    observed = remote_assets()
-    # Never replace successfully uploaded but conflicting bytes, even in a draft.
-    # Only GitHub's incomplete starter objects may be removed for a safe retry.
-    for name, asset in observed.items():
-        if asset['state'] != 'starter' and not matches(asset, records[name]):
-            raise ValueError('Existing draft asset has conflicting size/digest/state: ' + name)
-    for name, record in sorted(records.items()):
-        asset = observed.get(name)
-        if asset and matches(asset, record):
-            continue
-        assert_draft()
-        if asset:
-            github(f'repos/{repository}/releases/assets/{asset["id"]}', 'DELETE')
-        upload(repository, release_id, assets / name)
-    assert_draft()
-    observed = remote_assets()
-    if set(observed) != set(records) or any(not matches(observed[n], r) for n, r in records.items()):
-        raise ValueError('Uploaded release asset names/sizes/digests failed verification')
-    # Recheck local bytes and signatures too, immediately before publication.
-    if validate_assets(root, assets, public_key) != records:
-        raise ValueError('Local assets changed while uploading')
-    assert_draft()
-    observed = remote_assets()
-    if set(observed) != set(records) or any(not matches(observed[n], r) for n, r in records.items()):
-        raise ValueError('Remote release assets changed before publication')
-    result = github(release_path, 'PATCH', {'name': 'jvid ' + tag, 'body': notes,
-                    'draft': False, 'prerelease': False, 'make_latest': 'true'})
-    if result['draft'] or result['tag_name'] != tag:
-        raise RuntimeError('GitHub did not confirm publication; inspect and retry the original job')
-    output(published='true', tag=tag)
+        def before_app_publication():
+            revalidate()
+            current, _ = release_assets(repository, source_release, commit, source_tag,
+                                        source_records, published=True, body=source_notes)
+            if current['draft']:
+                raise ValueError('Corresponding source must be published before the app')
+
+        before_app_publication()
+        publish_one(repository, commit, tag, 'jvid ' + tag, notes,
+                    app_records, app_paths, release, before_app_publication, latest=True)
+    output(published='true', tag=tag, sources=source_tag)
 
 
 def main():
@@ -201,12 +277,14 @@ def main():
                                       env.get('INPUT_RELEASE', 'false'), env.get('JVID_RELEASE_ENABLED', ''))
     root = args.root.resolve()
     if args.command == 'status':
-        release = None
+        started = False
         if env['GITHUB_REF'].startswith('refs/tags/'):
             release = preflight(root, env['GITHUB_REPOSITORY'], env['GITHUB_SHA'], env['GITHUB_REF_NAME'])
+            started = release is not None or source_publication_started(
+                env['GITHUB_REPOSITORY'], env['GITHUB_REF_NAME'], api=github)
         # Duplicate queued runs must not rebuild an existing draft or published
         # release. Recover a draft with the original run's failed jobs instead.
-        output(build=str(release is None).lower(), publish=str(requested and release is None).lower())
+        output(build=str(not started).lower(), publish=str(requested and not started).lower())
         return
     if not requested:
         raise ValueError('Publication requires an enabled tag push or explicit tag release dispatch')

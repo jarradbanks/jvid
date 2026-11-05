@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 import source_linux as linux
+import build as packager
 
 
 HEADER = "jvid source: https://github.com/jarradbanks/jvid\n\n"
@@ -153,6 +154,26 @@ class LinuxSourceTests(unittest.TestCase):
     def test_binary_receipt_duplicates_are_deduplicated(self):
         self.write_stage(PROVIDERS + PROVIDERS)
         self.assertEqual(len(self.collect()[0]["binary_packages"]), 2)
+
+    def test_actual_package_notices_feed_exact_source_collection(self):
+        with patch.object(packager, "version", return_value="1.0.0"):
+            packager.notices(self.stage, PROVIDERS)
+        record = self.collect()[0]
+        self.assertEqual(record["source"], "example")
+        self.assertEqual(len(record["binary_packages"]), 2)
+
+    def test_source_release_preamble_remains_strict(self):
+        url = "https://github.com/jarradbanks/jvid/releases/tag/sources-v1.0.0"
+        for text in (
+            HEADER + url.replace("github.com", "example.invalid") + "\n" + "\n".join(PROVIDERS),
+            HEADER + url.replace("v1.0.0", "v01.0.0") + "\n" + "\n".join(PROVIDERS),
+            HEADER + url + "?download=1\n" + "\n".join(PROVIDERS),
+            HEADER + "\n".join(PROVIDERS) + "\n" + url,
+        ):
+            with self.subTest(text=text):
+                (self.stage / "SOURCE-INFO.txt").write_text(text)
+                with self.assertRaisesRegex(RuntimeError, "invalid Debian provider"):
+                    linux.parse_providers(self.stage)
 
     def test_missing_provider_receipt_fails_closed(self):
         (self.stage / "SOURCE-INFO.txt").write_text(HEADER + PROVIDERS[0] + "\n")

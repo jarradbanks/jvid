@@ -153,18 +153,22 @@ impl SettingsDialog {
                     ui.label(w);
                 }
                 ui.add_space(space::S16);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = space::S8;
-                    if ui.add(Button::primary(tr!("project.apply"))).clicked() {
-                        if draft != old {
-                            command = Some(Command::SetSettings(draft.clone()));
-                        }
-                        ui.close();
+                let actions = suite_ui::dialog::action_footer(
+                    ui,
+                    [
+                        Button::secondary(tr!("prompt.cancel")),
+                        Button::primary(tr!("project.apply")),
+                    ],
+                );
+                if actions[1].clicked() {
+                    if draft != old {
+                        command = Some(Command::SetSettings(draft.clone()));
                     }
-                    if ui.add(Button::secondary(tr!("prompt.cancel"))).clicked() {
-                        ui.close();
-                    }
-                });
+                    ui.close();
+                }
+                if actions[0].clicked() {
+                    ui.close();
+                }
             });
         if modal.should_close() {
             self.draft = None;

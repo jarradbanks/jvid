@@ -38,7 +38,7 @@ pub const MARKERS: Lesson = Lesson {
                 tr!("tutorial.markers_tap", play = play, key = key)
             },
             done: |a| markers(a).any(|m| m.duration == Time(0)),
-            show_me: |a| {
+            example: |a| {
                 for s in [2, 5] {
                     add_marker(a, secs(s), Time(0));
                 }
@@ -57,7 +57,7 @@ pub const MARKERS: Lesson = Lesson {
             },
             done: |a| markers(a).any(|m| m.duration > Time(0)),
             // Held from 8 s to 11 s while playing, leaving the playhead where M went up.
-            show_me: |a| {
+            example: |a| {
                 add_marker(a, secs(8), secs(3));
                 a.timeline.seek(secs(11));
             },
@@ -75,7 +75,7 @@ pub const MARKERS: Lesson = Lesson {
                 tr!("tutorial.markers_jump", next = next, prev = prev)
             },
             done: |a| a.timeline.jumped,
-            show_me: |a| {
+            example: |a| {
                 a.timeline.action("prev_marker", a.history.project());
             },
             reveal: None,
@@ -86,7 +86,7 @@ pub const MARKERS: Lesson = Lesson {
             anchor: "marker",
             text: |_| tr!("tutorial.markers_edit").into(),
             done: |a| markers(a).any(|m| !m.name.is_empty() && m.color != 0),
-            show_me: |a| {
+            example: |a| {
                 let Some(m) = markers(a).next() else {
                     return;
                 };
@@ -120,7 +120,7 @@ pub const MARKERS: Lesson = Lesson {
                     .collect();
                 super::queued(a).any(|d| lengths.contains(&d))
             },
-            show_me: |a| {
+            example: |a| {
                 let Some(gpu) = a.preview.gpu() else {
                     return;
                 };

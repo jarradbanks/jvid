@@ -34,7 +34,11 @@ use crate::keymap::Keymap;
 use crate::media_bin::{Caches, filmstrips::FilmstripRequests};
 use crate::transport::{SeekGesture, Transport};
 
+#[cfg(test)]
+mod effect_drop_tests;
 mod fades;
+#[cfg(test)]
+mod feedback_tests;
 #[cfg(test)]
 mod filmstrip_tests;
 mod graph;
@@ -68,6 +72,8 @@ const MAJOR_PX: f64 = 90.0;
 const MINOR_PX: f64 = 8.0;
 /// Name strip at the top of a clip.
 const NAME_STRIP: f32 = 16.0;
+/// Scrollbar hit area; the thumb itself is painted 4pt thick.
+const SCROLLBAR: f32 = 10.0;
 
 pub struct Timeline {
     /// The sequence playhead; #32 gives it a clock, until then it only seeks.
@@ -105,8 +111,7 @@ pub struct Timeline {
     seek_after: Option<Time>,
     /// Copy or cut ran since the last `show`.
     copied: bool,
-    /// The razor tool (C) is on instead of selection (V).
-    razor: bool,
+    tool: Tool,
     /// The clip edge being dragged.
     trim: Option<Trim>,
     /// The clip being moved or trimmed, kept interactive after it scrolls out of view.
@@ -151,6 +156,8 @@ pub struct Timeline {
     keys: keyframes::Keys,
     /// The Detect Silence dialog, while open.
     silence: Option<silence::Silence>,
+    /// A Cut response waiting for the app's successful history apply.
+    silence_cut: bool,
     /// The Find Highlights dialog, while open.
     highlights: Option<highlights::Highlights>,
     /// The audio track a voiceover records onto; disarming it ends a take.
@@ -159,6 +166,9 @@ pub struct Timeline {
     pub level: Option<f32>,
     /// The take recording onto `armed`, drawn as a clip; the app keeps it up to date.
     pub live: Option<Live>,
+    /// A pointer scrub or marker click moved the playhead; the app finishes a take before
+    /// the next frame can synchronize playback to that navigation.
+    pub(crate) navigated: bool,
 }
 
 /// A voiceover take while it records: drawn on the armed track, not in the project.
@@ -199,6 +209,15 @@ struct Trim {
 /// An edit made in the timeline, and the gesture it coalesces under, if any.
 pub type Edit = (Command, Option<GestureKey>);
 
+/// Shared by the timeline rail, keyboard shortcuts and Program canvas.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tool {
+    #[default]
+    Selection,
+    Razor,
+    Text,
+}
+
 impl Default for Timeline {
     fn default() -> Self {
         Self {
@@ -225,7 +244,7 @@ impl Default for Timeline {
             jumped: false,
             seek_after: None,
             copied: false,
-            razor: false,
+            tool: Tool::Selection,
             trim: None,
             gap: None,
             width: 800.0,
@@ -243,10 +262,12 @@ impl Default for Timeline {
             shown_sequence: SequenceId::default(),
             keys: keyframes::Keys::default(),
             silence: None,
+            silence_cut: false,
             highlights: None,
             armed: None,
             level: None,
             live: None,
+            navigated: false,
         }
     }
 }
@@ -354,10 +375,17 @@ impl Timeline {
         self.transport.position(0)
     }
 
-    /// The recording take and where it ends: at the playhead, which plays on as it records.
+    /// The recording take and where it ends. Captured audio remains visible even if a seek
+    /// moves the playhead behind the start before the app finalizes this frame.
     fn live_span(&self) -> Option<(&Live, Time)> {
         let live = self.live.as_ref().filter(|_| self.armed.is_some())?;
-        Some((live, self.playhead().max(live.start)))
+        let captured = Time(
+            (live.peaks.len().saturating_sub(1) as i128
+                * BUCKET as i128
+                * FLICKS_PER_SECOND as i128
+                / live.rate.max(1) as i128) as i64,
+        );
+        Some((live, self.playhead().max(live.start + captured)))
     }
 
     /// The waveform a finished take showed, kept for its clip at `path` instead of a rescan.
@@ -371,6 +399,32 @@ impl Timeline {
             .peaks
             .get(&(path.to_owned(), 0))
             .and_then(Option::as_deref)
+    }
+
+    pub fn tool(&self) -> Tool {
+        self.tool
+    }
+
+    /// The rail occupies its own column, so track headers and all timeline hit regions
+    /// keep the same origin. Its buttons never enter the dock's draggable tab strip.
+    pub fn show_with_tools(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        missing: &HashSet<PathBuf>,
+        keymap: &Keymap,
+    ) -> Option<Edit> {
+        let area = ui.max_rect().intersect(ui.clip_rect());
+        let rail = area.with_max_x((area.left() + menus::RAIL_WIDTH).min(area.right()));
+        self.tool_rail(ui, rail, project, keymap);
+        let content = area.with_min_x(rail.right());
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("timeline content")
+                .max_rect(content),
+        );
+        child.set_clip_rect(content);
+        self.show(&mut child, project, missing, keymap)
     }
 
     pub fn selected(&self) -> &HashSet<ClipId> {
@@ -494,7 +548,9 @@ impl Timeline {
             _ if self.key_action(id, project.sequence()) => {}
             "linked_selection" => self.linked_selection = !self.linked_selection,
             "snapping" => self.snapping = !self.snapping,
-            "razor_tool" | "selection_tool" => self.razor = id == "razor_tool",
+            "razor_tool" => self.tool = Tool::Razor,
+            "selection_tool" => self.tool = Tool::Selection,
+            "text_tool" => self.tool = Tool::Text,
             "select_all" => {
                 let clips = project.sequence().tracks().iter().flat_map(|t| t.clips());
                 self.selected = clips.map(|c| c.id).collect();
@@ -776,7 +832,7 @@ impl Timeline {
         clip: &Clip,
         r: Rect,
     ) -> Option<Edit> {
-        if self.razor || locked(project.sequence(), clip.id) {
+        if self.tool != Tool::Selection || locked(project.sequence(), clip.id) {
             return None;
         }
         let w = 6.0f32.min(r.width() / 3.0);
@@ -972,7 +1028,11 @@ impl Timeline {
         self.transport.rate = project.settings().frame_rate;
         // Room past the last clip, so the end of the sequence can be reached and seen.
         let tail = Time(10 * FLICKS_PER_SECOND);
-        self.transport.duration = project.sequence().duration() + tail;
+        // Keep room for the next clock tick while a take grows past the normal tail.
+        let end = self
+            .live_span()
+            .map_or(Time(0), |(_, end)| end + Time(FLICKS_PER_SECOND));
+        self.transport.duration = (project.sequence().duration() + tail).max(end);
     }
 
     pub fn new(caches: Arc<Caches>) -> Self {
@@ -986,6 +1046,22 @@ impl Timeline {
         let mut t = Self::default();
         t.media.caches = self.media.caches.clone();
         t
+    }
+
+    /// Floating task dialogs consume Escape before tutorial navigation does.
+    pub(crate) fn dialog_open(&self) -> bool {
+        self.silence.is_some() || self.highlights.is_some()
+    }
+
+    pub(crate) fn take_silence_cut(&mut self) -> bool {
+        std::mem::take(&mut self.silence_cut)
+    }
+
+    /// Tutorial navigation dismisses its task dialog without touching selection or history.
+    pub(crate) fn dismiss_dialogs(&mut self) {
+        self.silence = None;
+        self.silence_cut = false;
+        self.highlights = None;
     }
 
     /// Drop selections, clip/key clipboards, dialogs and deferred edits across projects.
@@ -1044,7 +1120,7 @@ impl Timeline {
             return edit.or(self.graph(ui, ui.max_rect(), project.sequence()));
         }
         let rate = self.transport.rate;
-        let area = ui.max_rect();
+        let area = ui.max_rect().intersect(ui.clip_rect());
         let ppp = ui.pixels_per_point();
         let line = 1.0 / ppp;
         let lanes_left = area.left() + size::TRACK_HEADER;
@@ -1058,6 +1134,13 @@ impl Timeline {
         );
         let lanes =
             Rect::from_x_y_ranges(lanes_left..=area.right(), ruler.bottom()..=area.bottom());
+        // At sequence start, accept a few points over the header seam as time zero. The
+        // ghost, slot and release share this hit area, so the boundary cannot flicker.
+        let drop_area = if self.scroll == 0.0 {
+            lanes.with_min_x(lanes.left() - SNAP_PX as f32)
+        } else {
+            lanes
+        };
         let headers = Rect::from_x_y_ranges(area.left()..=lanes_left, lanes.y_range());
         self.width = lanes.width();
         // Playback must not move the time under a held seek pointer. Scrubs still scroll
@@ -1136,6 +1219,12 @@ impl Timeline {
         }
         let tracks = project.sequence().tracks();
         let content_h: f32 = tracks.iter().map(|t| t.height + self.keys.extra(t)).sum();
+        // On an overflowing stack, let the last lane scroll clear of the horizontal bar.
+        let viewport_h = if content_h > lanes.height() {
+            (lanes.height() - SCROLLBAR).max(1.0)
+        } else {
+            lanes.height()
+        };
         // Not `hovered()`: clips, the marquee and buttons sit on top of the body.
         if ui.rect_contains_pointer(area)
             && let Some(p) = ui.input(|i| i.pointer.hover_pos())
@@ -1172,7 +1261,14 @@ impl Timeline {
         let scrubbing = scrub.is_pointer_button_down_on() || drag.dragged();
         let refused = self.holding.is_some_and(|c| locked(seq, c))
             || self.drag_selection.iter().any(|id| locked(seq, *id));
+        // Scrollbars already control their own offsets. Treating their drags as clip
+        // drags would also pan time at the right edge and fight the vertical thumb.
+        let scrolling = ui
+            .ctx()
+            .dragged_id()
+            .is_some_and(|dragged| dragged == id.with("vbar") || dragged == id.with("hbar"));
         let ours = !refused
+            && !scrolling
             && ui.ctx().dragged_id().is_some()
             && ui
                 .input(|i| i.pointer.press_origin())
@@ -1185,14 +1281,12 @@ impl Timeline {
         {
             let v = edge_speed(p.y, lanes.top(), lanes.bottom()) * dt;
             let (dx, dy) = (edge_speed(p.x, lanes.left(), lanes.right()) * dt, v);
-            let dy = if content_h > lanes.height() { dy } else { 0.0 };
+            let dy = if content_h > viewport_h { dy } else { 0.0 };
             if dx != 0.0 || dy != 0.0 {
                 let was = (self.scroll, self.vscroll);
                 self.scroll += dx as f64 / self.zoom;
                 self.vscroll += dy;
-                self.vscroll = self
-                    .vscroll
-                    .clamp(0.0, (content_h - lanes.height()).max(0.0));
+                self.vscroll = self.vscroll.clamp(0.0, (content_h - viewport_h).max(0.0));
                 self.clamp_scroll();
                 // Only while it moves, so a drag held at a clamped edge can idle.
                 if (self.scroll, self.vscroll) != was {
@@ -1200,9 +1294,7 @@ impl Timeline {
                 }
             }
         }
-        self.vscroll = self
-            .vscroll
-            .clamp(0.0, (content_h - lanes.height()).max(0.0));
+        self.vscroll = self.vscroll.clamp(0.0, (content_h - viewport_h).max(0.0));
         self.clamp_scroll();
         let view = self.view(lanes_left);
         let (start, end) = (view.time(lanes.left()), view.time(lanes.right()));
@@ -1236,7 +1328,7 @@ impl Timeline {
             && !tracks.is_empty()
             && ui
                 .input(|i| i.pointer.interact_pos())
-                .is_some_and(|p| lanes.contains(p) && p.y < top_y + self.slot + SLOT_PX);
+                .is_some_and(|p| drop_area.contains(p) && p.y < top_y + self.slot + SLOT_PX);
         // Reduce Motion zeroes the style's animation time; the slot then snaps.
         let t = match () {
             _ if ui.style().animation_time == 0.0 => 0.0,
@@ -1323,7 +1415,7 @@ impl Timeline {
                     painter.rect_stroke(r, corner, stroke, egui::StrokeKind::Inside);
                 }
                 let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::click_and_drag());
-                if self.razor && cr.hovered() {
+                if self.tool == Tool::Razor && cr.hovered() {
                     ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
                 }
                 let band = (track.kind == TrackKind::Audio && !offline).then(|| {
@@ -1334,7 +1426,7 @@ impl Timeline {
                 if let Some(e) = band.flatten() {
                     edit = Some(e);
                 } else if cr.clicked()
-                    && self.razor
+                    && self.tool == Tool::Razor
                     && let Some(p) = cr.interact_pointer_pos()
                 {
                     edit = Some(self.razor_cut(seq, view, clip.id, p.x));
@@ -1486,7 +1578,7 @@ impl Timeline {
             ui,
             project,
             view,
-            lanes,
+            drop_area,
             &lane_rects,
             held,
             &mut edit,
@@ -1566,18 +1658,22 @@ impl Timeline {
             let r = Rect::from_x_y_ranges(x - 0.5..=x + 0.5, lanes.y_range());
             clip_painter.rect_filled(r, 0.0, color::light_blue());
         }
-        if tracks.is_empty() {
-            painter.text(
-                lanes.center(),
-                Align2::CENTER_CENTER,
-                tr!("timeline.empty"),
-                theme::body(),
-                color::ink_3(),
-            );
+        if seq.tracks().iter().all(|track| track.clips().is_empty())
+            && !egui::DragAndDrop::has_any_payload(ui.ctx())
+        {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(lanes), |ui| {
+                suite_ui::empty_state::EmptyState::new(
+                    icon::LIST,
+                    tr!("empty.timeline"),
+                    tr!("timeline.empty"),
+                )
+                .show(ui);
+            });
         }
 
         // Ruler.
         painter.rect_filled(ruler, 0.0, color::panel());
+        let ruler_painter = painter.with_clip_rect(ruler);
         let (major, minor) = tick_steps(self.zoom, rate);
         let first = rate.index_floor(start).max(0) / minor * minor;
         let last = rate.index_floor(end) + 1;
@@ -1586,19 +1682,22 @@ impl Timeline {
             let x = (view.x(rate.time_floor(f)) * ppp).round() / ppp;
             let is_major = f % major == 0;
             let h = if is_major { 8.0 } else { 4.0 };
-            painter.rect_filled(
+            ruler_painter.rect_filled(
                 Rect::from_x_y_ranges(x..=x + line, ruler.bottom() - h..=ruler.bottom()),
                 0.0,
                 color::border_strong(),
             );
             if is_major {
-                painter.text(
-                    pos2(x + 3.0, ruler.top() + 2.0),
-                    Align2::LEFT_TOP,
+                let pos = pos2(x + 3.0, ruler.top() + 2.0);
+                let label = ruler_painter.layout_no_wrap(
                     format_timecode(f as u64, rate),
                     theme::small(),
                     color::ink_3(),
                 );
+                // Edge ticks still mark time, but their labels must fit in full.
+                if ruler.contains_rect(label.mesh_bounds.translate(pos.to_vec2())) {
+                    ruler_painter.galley(pos, label, color::ink_3());
+                }
             }
             f += minor;
         }
@@ -1607,7 +1706,6 @@ impl Timeline {
             0.0,
             color::border(),
         );
-        let ruler_painter = painter.with_clip_rect(ruler);
         if let Some(r) = range {
             let band = Rect::from_x_y_ranges(r.x_range(), ruler.y_range());
             ruler_painter.rect_filled(band, 0.0, color::light_blue().gamma_multiply(0.25));
@@ -1687,6 +1785,8 @@ impl Timeline {
         if let Some(s) = &mut self.silence {
             let at = pos2(area.right() - space::S16, area.top() - space::S8);
             let (cmd, open) = s.show(ui, at, seq, spans.as_deref());
+            self.silence_cut =
+                edit.is_none() && matches!(&cmd, Some(Command::CutSpans { speed: None, .. }));
             if !open {
                 self.silence = None;
             }
@@ -1814,6 +1914,7 @@ impl Timeline {
             .clamp(Time(0), self.transport.duration);
         if let Some(target) = self.scrub_seek.update(Some(target)) {
             self.seek(target);
+            self.navigated = true;
         }
         // Scrubbing scrolls itself; don't page as well.
         self.followed = self.playhead();
@@ -1828,7 +1929,8 @@ impl Timeline {
         content_h: f32,
         id: egui::Id,
     ) {
-        let thick = 10.0;
+        let thick = SCROLLBAR;
+        let height = (lanes.height() - thick).max(1.0);
         let tall = content_h > lanes.height();
         let right = if tall {
             lanes.right() - thick
@@ -1852,8 +1954,9 @@ impl Timeline {
             true,
         );
         if tall {
-            let bar = Rect::from_x_y_ranges(right..=lanes.right(), lanes.y_range());
-            let (h, v) = (lanes.height() as f64, self.vscroll as f64);
+            let bar =
+                Rect::from_x_y_ranges(right..=lanes.right(), lanes.top()..=lanes.top() + height);
+            let (h, v) = (height as f64, self.vscroll as f64);
             self.vscroll = scrollbar(
                 ui,
                 painter,
@@ -1889,20 +1992,49 @@ impl Timeline {
             return Vec::new();
         };
         let lane_at = |kind: Option<TrackKind>| {
-            let hit = lanes.iter().find(|l| l.2.contains(p));
+            let hit = lanes
+                .iter()
+                .find(|l| l.2.with_min_x(area.left()).contains(p));
             hit.filter(|l| kind.is_none_or(|k| k == l.1)).map(|l| l.0)
         };
         if let Some(fx) = egui::DragAndDrop::payload::<crate::effects::Drag>(ui.ctx()) {
-            let t = view.time(p.x);
-            let clip = lane_at(Some(TrackKind::Video))
-                .and_then(|id| project.sequence().track(id))
-                .and_then(|tr| tr.clips().iter().find(|c| c.start <= t && t < c.end()));
-            if area.contains(p)
-                && ui.input(|i| i.pointer.any_released())
-                && let Some(c) = clip
-                && let Some(cmd) = crate::inspector::add_effect(project, &[c.id].into(), &fx.0)
-            {
-                *edit = Some((cmd, None));
+            let over = ui.rect_contains_pointer(area);
+            let target = over
+                .then(|| lane_at(Some(TrackKind::Video)))
+                .flatten()
+                .and_then(|id| crate::effects::drag::timeline_target(project, id, view.time(p.x)))
+                .filter(|_| crate::effects::drag::usable(&fx.0))
+                .and_then(|id| {
+                    let (track, clip) = project.sequence().clip(id)?;
+                    let (_, _, lane) = lanes.iter().find(|l| l.0 == track)?;
+                    let height = project.sequence().track(track)?.height;
+                    let rect = Rect::from_x_y_ranges(
+                        view.x(clip.start)..=view.x(clip.end()),
+                        lane.top()..=lane.top() + height,
+                    )
+                    .shrink2(vec2(1.0, 2.0));
+                    rect.contains(p).then_some((id, rect))
+                });
+            if over {
+                ui.ctx().set_cursor_icon(if target.is_some() {
+                    CursorIcon::Copy
+                } else {
+                    CursorIcon::NotAllowed
+                });
+            }
+            if let Some((id, rect)) = target {
+                let painter = ui.painter().with_clip_rect(area);
+                painter.rect_filled(rect, radius::SMALL, color::blue().gamma_multiply(0.2));
+                painter.rect_stroke(
+                    rect,
+                    radius::SMALL,
+                    Stroke::new(3.0, color::light_blue()),
+                    egui::StrokeKind::Inside,
+                );
+                if ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
+                    *edit = crate::effects::drag::command(project, id, &fx.0).map(|c| (c, None));
+                    egui::DragAndDrop::clear_payload(ui.ctx());
+                }
             }
             return Vec::new();
         }
@@ -2521,8 +2653,19 @@ fn scrollbar(
     if travel <= 0.0 {
         return 0.0;
     }
-    let r = ui.interact(thumb, id, Sense::drag());
-    let offset = (offset + along(r.drag_delta()) * travel / room).clamp(0.0, travel);
+    let r = ui.interact(bar, id, Sense::click_and_drag());
+    let previous = offset;
+    let offset = if (r.clicked() || r.drag_started())
+        && let Some(p) = r.interact_pointer_pos()
+        && !thumb.contains(p)
+    {
+        ((along(p - bar.min) - thumb_len / 2.0) * travel / room).clamp(0.0, travel)
+    } else {
+        (offset + along(r.drag_delta()) * travel / room).clamp(0.0, travel)
+    };
+    if offset != previous {
+        ui.ctx().request_repaint();
+    }
     // Painted 4px thick, fully rounded, per DESIGN.md.
     let paint = if horizontal {
         Rect::from_center_size(thumb.center(), vec2(thumb.width() - 4.0, 4.0))
@@ -2912,6 +3055,62 @@ mod tests {
                 let (major, minor) = tick_steps(z, r);
                 assert!(major as f64 * r.den as f64 / r.num as f64 * z >= MAJOR_PX);
                 assert_eq!(major % minor, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn ruler_labels_fit_at_both_edges_after_scrolling_and_resizing() {
+        use egui_kittest::kittest::Queryable;
+
+        for scale in [1.0, 1.5, 2.0] {
+            let mut fresh = true;
+            let project = project(200);
+            let mut h = egui_kittest::Harness::builder()
+                .with_size([1280.0, 200.0])
+                .with_pixels_per_point(scale)
+                .build_ui_state(
+                    move |ui, timeline: &mut Timeline| {
+                        if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                            timeline.show_with_tools(
+                                ui,
+                                &project,
+                                &HashSet::new(),
+                                &Keymap::default(),
+                            );
+                        }
+                    },
+                    Timeline::default(),
+                );
+            for width in [480.0, 640.0, 1280.0] {
+                h.set_size(vec2(width, 200.0));
+                for scroll in [0.0, 0.35, 43.3] {
+                    h.state_mut().scroll = scroll;
+                    h.run();
+                    let marker = h.get_by_label(tr!("timeline.marker_lane")).rect();
+                    let ruler = Rect::from_min_size(
+                        marker.left_bottom(),
+                        vec2(marker.width(), size::RULER),
+                    );
+                    let labels: Vec<_> = h
+                        .output()
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if shape.clip_rect == ruler => Some(text),
+                            _ => None,
+                        })
+                        .collect();
+                    assert!(!labels.is_empty(), "{width} @ {scale}, scroll {scroll}");
+                    for label in labels {
+                        let ink = label.galley.mesh_bounds.translate(label.pos.to_vec2());
+                        assert!(
+                            ruler.contains_rect(ink),
+                            "{}: {ink:?} outside {ruler:?}",
+                            label.galley.text()
+                        );
+                    }
+                }
             }
         }
     }

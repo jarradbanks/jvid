@@ -121,7 +121,7 @@ Panels sit in the standard editor layout: media bin on the left, preview in the 
 | Panel minimum | 240px | Narrowest a docked panel may get |
 
 ### Named Rules
-**The One Header Line Rule.** Every dock group starts with a 32px tab strip and a 1px Border divider. Panels side by side start at the same y, so their strips, dividers and title baselines line up. Even a single panel keeps its dock tab visible and draggable. Editing controls never share the dock drag target: Timeline's tools and Render Queue's actions sit in a separate 32px toolbar inside their panel, below the strip. Media, Preview and Inspector keep their view selectors inside the panel as well; an empty Inspector and Transcript need no second title row. Search and filters stay in the content. Standalone panels outside the editor dock retain their title or view header.
+**The One Header Line Rule.** Every dock group starts with a 32px tab strip and a 1px Border divider. Panels side by side start at the same y, so their strips, dividers and title baselines line up. Even a single panel keeps its dock tab visible and draggable. Editing controls never share the dock drag target: Timeline's tools sit in a 32px left rail below the strip, beside the track headers, and Render Queue's actions sit in a separate 32px toolbar inside its panel. The rail groups selection, razor and text tools above snapping and linking, with zoom controls below; short panels put the remaining actions in an overflow menu. Media, Preview and Inspector keep their view selectors inside the panel as well; an empty Inspector and Transcript need no second title row. Search and filters stay in the content. Standalone panels outside the editor dock retain their title or view header.
 
 **The Rows Face Each Other Rule.** Rows that sit side by side line up. The timeline ruler and its corner cell are one 24px row. Each track header is exactly as tall as its lane and starts at the same y. Inspector section heads use the 32px header height, so a fully collapsed inspector reads as a stack of headers.
 
@@ -175,6 +175,17 @@ These specs are for the first `suite-ui` build. The next `/impeccable document` 
 - **Focus-visible:** a 2px Light Blue ring 1px outside the shape, at 60%.
 - **Disabled:** Raised fill, Ink 4 text, no hover. **Loading:** the label stays, the button keeps its width, and a 12px spinner replaces the icon.
 - **Destructive:** secondary styling with Red text, only in confirmation dialogs.
+
+### Empty states
+- **Shared treatment:** Quiet Centre (Option A): an unframed, muted outline icon above a Title heading and one sentence of Body help. Centre the whole group horizontally and vertically within the visible panel body, excluding headers, transport controls and footers.
+- **Actions:** show one existing, useful action when the panel can perform it. An empty Media bin offers Import Media; an Inspector awaiting selection explains how to select a clip. Keep action availability consistent with the command's actual prerequisites.
+- **Small panels:** wrap the copy and let the content scroll when it cannot fit. Use the finite visible body bounds, including when a parent permits unbounded scroll content. Preserve the panel's existing drop and editing targets.
+- **States:** loading, recognition with no speech, errors and offline media retain their own messages. Preview empty states keep the neutral black viewer and readable ink in every theme.
+
+### Dialog action footers
+- Dialogs and popups with action footers use the shared content-sized footer. Place secondary and cancellation actions first in reading and keyboard order, with the primary action last at the bottom right.
+- Wrap action rows and long translated labels when necessary, keeping keyboard focus stable as the layout changes. Footer layout never claims spare vertical space between the body and its actions.
+- Model download controls and ordinary menu rows keep their own row alignment; the footer rule applies to the surface's closing or confirming actions.
 
 ### Inputs
 - **Style:** 24px tall, 6px radius, Field fill, 1px Border, 8px side padding. An optional inline prefix (X, Y, W, H) in Ink 3, then the value in Ink.

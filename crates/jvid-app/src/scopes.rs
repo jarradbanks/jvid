@@ -69,6 +69,7 @@ impl State {
 
 /// Shows `a` in the Scopes tab from now on.
 pub fn set(ctx: &egui::Context, a: &Analysis) {
+    pending(ctx, false);
     let images = images(a);
     let opts = TextureOptions::LINEAR;
     match ctx.data(|d| d.get_temp::<[TextureHandle; 3]>(id())) {
@@ -92,6 +93,12 @@ pub fn set(ctx: &egui::Context, a: &Analysis) {
 /// Nothing to measure: the tab shows its empty state.
 pub fn clear(ctx: &egui::Context) {
     ctx.data_mut(|d| d.remove::<[TextureHandle; 3]>(id()));
+    pending(ctx, false);
+}
+
+/// A frame is available (or decoding), but its first measurement has not landed yet.
+pub fn pending(ctx: &egui::Context, pending: bool) {
+    ctx.data_mut(|d| d.insert_temp(id().with("pending"), pending));
 }
 
 /// `count` of `full` as a trace brightness: square root, so sparse values still show.
@@ -155,14 +162,22 @@ pub fn show(ui: &mut Ui) {
         for name in ANCHORS {
             crate::app::tutorial::anchor(ui.ctx(), name, rect);
         }
-        let empty = tr!("bin.scopes_empty");
-        p.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            empty,
-            theme::body(),
-            color::ink_3(),
-        );
+        if ui
+            .data(|d| d.get_temp::<bool>(id().with("pending")))
+            .unwrap_or(false)
+        {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(egui::RichText::new(tr!("bin.scopes_loading")).color(color::ink_3()));
+            });
+            return;
+        }
+        suite_ui::empty_state::EmptyState::new(
+            theme::icon::SLIDERS,
+            tr!("empty.scopes"),
+            tr!("bin.scopes_empty"),
+        )
+        .show(ui);
         return;
     };
     let gap = space::S8;

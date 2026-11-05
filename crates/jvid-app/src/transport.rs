@@ -51,6 +51,8 @@ pub struct Transport {
     pub rate: Rate,
     /// Forward play jumps from the end of this range back to its start.
     pub loop_range: Option<(Time, Time)>,
+    /// A take advances beyond existing content without wrapping the playback loop.
+    recording: bool,
 }
 
 impl Transport {
@@ -64,6 +66,7 @@ impl Transport {
             duration,
             rate,
             loop_range: None,
+            recording: false,
         }
     }
 
@@ -71,19 +74,27 @@ impl Transport {
         self.speed
     }
 
-    /// The playhead at master-clock frame `clock`, clamped to the clip.
+    fn limit(&self) -> i64 {
+        if self.recording {
+            i64::MAX
+        } else {
+            self.duration.0
+        }
+    }
+
+    /// The playhead at master-clock frame `clock`, bounded by content unless recording.
     pub fn position(&self, clock: u64) -> Time {
         if self.speed == 0 || clock <= self.anchor {
             return self.pos;
         }
         let dt = (clock - self.anchor) as i128 * FLICKS_PER_SECOND as i128 * self.speed as i128
             / SAMPLE_RATE as i128;
-        Time((self.pos.0 as i128 + dt).clamp(0, self.duration.0 as i128) as i64)
+        Time((self.pos.0 as i128 + dt).clamp(0, self.limit() as i128) as i64)
     }
 
     /// The frame index the playhead is in; at the very end, the last frame.
     pub fn frame(&self, clock: u64) -> i64 {
-        let last = self.rate.index_floor(Time(self.duration.0 - 1)).max(0);
+        let last = self.rate.index_floor(Time(self.limit() - 1)).max(0);
         self.rate.index_floor(self.position(clock)).min(last)
     }
 
@@ -91,7 +102,7 @@ impl Transport {
     /// queued plays on.
     fn set(&mut self, speed: i32, pos: Time, clock: u64) {
         self.queued = clock;
-        self.pos = Time(pos.0.clamp(0, self.duration.0));
+        self.pos = Time(pos.0.clamp(0, self.limit()));
         self.anchor = self.queued;
         self.speed = speed;
         self.next_sample =
@@ -106,7 +117,7 @@ impl Transport {
     pub fn toggle(&mut self, clock: u64) {
         let pos = self.position(clock);
         match self.speed {
-            0 if pos >= self.duration => self.set(1, Time(0), clock),
+            0 if !self.recording && pos >= self.duration => self.set(1, Time(0), clock),
             0 => self.set(1, pos, clock),
             _ => self.set(0, pos, clock),
         }
@@ -123,9 +134,16 @@ impl Transport {
         self.set(speed, self.position(clock), clock);
     }
 
-    /// K.
+    /// Starts a take at its original playhead, including beyond the current content end.
+    pub fn record(&mut self, start: Time, clock: u64) {
+        self.recording = true;
+        self.set(1, start, clock);
+    }
+
+    /// K; subsequent playback uses the content bounds and loop again.
     pub fn stop(&mut self, clock: u64) {
         self.set(0, self.position(clock), clock);
+        self.recording = false;
     }
 
     /// ←/→: stops and moves `n` frames.
@@ -139,6 +157,7 @@ impl Transport {
     pub fn tick(&mut self, out: &mut Output, audio: &mut dyn FnMut(i64, &mut [f32])) {
         let clock = out.clock();
         if let Some((start, end)) = self.loop_range
+            && !self.recording
             && self.speed > 0
             && self.position(clock) >= end
         {
@@ -146,7 +165,9 @@ impl Transport {
             self.set(self.speed, start, clock);
         }
         let pos = self.position(clock);
-        if (self.speed > 0 && pos >= self.duration) || (self.speed < 0 && pos.0 <= 0) {
+        if (self.speed > 0 && !self.recording && pos >= self.duration)
+            || (self.speed < 0 && pos.0 <= 0)
+        {
             out.flush();
             self.set(0, pos, clock);
         }
@@ -633,6 +654,35 @@ pub(crate) mod tests {
         assert_eq!(t.frame(0), 59, "End shows the last frame");
         t.toggle(0);
         assert_eq!((t.speed(), t.position(0)), (1, Time(0)));
+    }
+
+    #[test]
+    fn recording_passes_empty_content_end_and_loop_then_restores_playback_bounds() {
+        for duration in [Time(0), secs(2)] {
+            let fake = Fake::default();
+            let mut out = Output::new(Box::new(fake.clone()), None);
+            let mut t = Transport::new(duration, FPS30);
+            t.loop_range = Some((Time(0), duration));
+            t.record(secs(3), out.clock());
+            for _ in 0..10 {
+                t.tick(&mut out, &mut |_, _| {});
+                fake.pull(2_400);
+            }
+            assert_eq!(t.speed(), 1);
+            assert_eq!(t.position(out.clock()), Time(FLICKS_PER_SECOND * 7 / 2));
+            assert_eq!(t.frame(out.clock()), 105);
+            t.stop(out.clock());
+            assert_eq!(t.speed(), 0);
+            t.loop_range = None;
+            t.seek(Time(0), out.clock());
+            t.toggle(out.clock());
+            for _ in 0..50 {
+                t.tick(&mut out, &mut |_, _| {});
+                fake.pull(2_400);
+            }
+            assert_eq!(t.speed(), 0, "normal playback must stop at content end");
+            assert_eq!(t.position(out.clock()), duration);
+        }
     }
 
     /// Forward play wraps from the loop's end to its start, flushing what was queued past it.

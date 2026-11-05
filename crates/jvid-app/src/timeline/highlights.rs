@@ -231,6 +231,7 @@ impl Highlights {
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
+            .auto_sized()
             .pivot(Align2::RIGHT_BOTTOM)
             .default_pos(at)
             .frame(
@@ -349,17 +350,20 @@ impl Highlights {
                 ui.add_space(space::S16);
                 let any = ranges.is_some_and(|r| !r.is_empty()) && self.scanning().is_none();
                 let state = if any { State::Live } else { State::Disabled };
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = space::S8;
-                    let add = Button::primary(tr!("highlights.add")).state(state);
-                    if ui.add(add).clicked() {
-                        command = Some(markers(ranges.unwrap_or_default()));
-                        open = false;
-                    }
-                    if ui.add(Button::ghost(tr!("prompt.cancel"))).clicked() {
-                        open = false;
-                    }
-                });
+                let actions = suite_ui::dialog::action_footer(
+                    ui,
+                    [
+                        Button::secondary(tr!("prompt.cancel")),
+                        Button::primary(tr!("highlights.add")).state(state),
+                    ],
+                );
+                if actions[1].clicked() {
+                    command = Some(markers(ranges.unwrap_or_default()));
+                    open = false;
+                }
+                if actions[0].clicked() {
+                    open = false;
+                }
             });
         (command, open)
     }

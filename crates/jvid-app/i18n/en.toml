@@ -3,6 +3,7 @@
 
 # Keyboard actions, by keymap.toml id: menus, the shortcut editor and docs/shortcuts.md.
 [action]
+text_tool = "Text Tool"
 export_subtitles = "Export Subtitles (.srt)…"
 new_project = "New Project"
 open_project = "Open Project"
@@ -96,6 +97,7 @@ record = "Record Voiceover"
 
 # Dock panel titles.
 [panel]
+dock_bottom = "Dock Across Bottom"
 drag_tab = "Drag to group or split panels; scroll to see more tabs."
 media = "Media"
 preview = "Preview"
@@ -391,6 +393,14 @@ undo_note = "You can undo this."
 
 # The media bin: its Media, Effects, Text and Scopes tabs.
 [bin]
+scopes_loading = "Measuring Frame…"
+text_presets_hint = "Click a preset to add it at the playhead. Drag to place it."
+remove_selected = "Remove Selected"
+remove_selected_title.one = "Remove 1 selected asset?"
+remove_selected_title.other = "Remove {count} selected assets?"
+remove_selected_body.one = "In-use assets: {used}. Removing the selection also removes 1 timeline clip. You can undo this."
+remove_selected_body.other = "In-use assets: {used}. Removing the selection also removes {count} timeline clips. You can undo this."
+files_retained = "Original files on disk are kept."
 # Toast when removing the sequence the Timeline shows.
 sequence_open = "the open sequence can't be removed; open another sequence first"
 effects = "Effects"
@@ -399,7 +409,7 @@ scopes = "Scopes"
 scope_waveform = "Waveform"
 scope_vectorscope = "Vectorscope"
 scope_histogram = "Histogram"
-scopes_empty = "Scopes measure the Program frame"
+scopes_empty = "Move the playhead over a video clip to see its scopes."
 # Sort orders.
 sort_added = "Added"
 sort_name = "Name"
@@ -410,7 +420,7 @@ solid_name = "Solid"
 grid_view = "Grid View"
 list_view = "List View"
 importing = "Importing…"
-empty = "Drop media here or click Import"
+empty = "Import video, audio, or images to start editing."
 no_match = "No media matches the search"
 offline = "Media Offline"
 remove = "Remove from Project"
@@ -422,7 +432,7 @@ remove_body.one = "It's used by 1 clip in the timeline. Removing it removes that
 remove_body.other = "It's used by {count} clips in the timeline. Removing it removes them too. You can undo this."
 remove_button = "Remove"
 # What an Effects tab row says about how to use it.
-fx_hint = "Drag onto a clip, or double-click to add to the selected clips"
+fx_hint = "Drag onto a clip or the Program preview, or double-click to add to the selected clips"
 new_effect = "New Effect"
 open_effects = "Open Effects Folder"
 fx_empty = "Drop .wgsl files in the effects folder or click New Effect, then drag one onto a clip"
@@ -465,6 +475,8 @@ bezier = "Bezier"
 
 # The timeline: clips, tracks, markers and their menus.
 [timeline]
+text_tool_hint = "Click in Program to add editable text."
+marker_lane = "Markers · double-click to add"
 hide_keyframes = "Hide Keyframes"
 show_keyframes = "Show Keyframes"
 # The curve graph editor, opened from the keyframe lanes. Parts name a point's or colour's
@@ -516,7 +528,7 @@ track = "Track"
 new_track = "New Track"
 # Tooltip while dragging a clip that sits on, or is linked to one on, a locked track.
 track_locked = "Track Locked"
-empty = "Drag clips here to start editing"
+empty = "Drag media here to add your first clip."
 zoom_tooltip = "Zoom (= and -)"
 target = "Target"
 target_on = "Target for Insert and Overwrite"
@@ -633,7 +645,7 @@ bad_sequence = "project file has mismatched sequence ids"
 
 # The Inspector. Section and property names are keyed by their ids.
 [inspector]
-empty = "Select a clip to see its properties"
+empty = "Select a clip in the timeline to edit its properties."
 transform = "Transform"
 opacity = "Opacity"
 crop = "Crop"
@@ -645,6 +657,9 @@ speed = "Speed"
 text = "Text"
 position = "Position"
 scale = "Scale"
+link_scale = "Link Scale Axes"
+scale_linked_hint = "Scale axes are linked. Click to edit them independently."
+scale_unlinked_hint = "Scale axes are independent. Click to preserve their current proportions."
 rotation = "Rotation"
 anchor = "Anchor"
 crop_left = "Left"
@@ -961,6 +976,14 @@ pixelate_block = "Block"
 
 # The lesson step card and Help > Tutorials.
 [tutorial]
+import_sample = "Import Sample"
+silence_select = "Select the screen recording on the Timeline."
+silence_open = "Open Detect Silence with {key}."
+silence_cut = "Adjust Threshold to mark the quiet section, then click Cut."
+export_settings = "Choose the output settings and destination, then add the video to the queue."
+speech_running = "Wait for speech recognition to finish."
+speech_settings = "Choose a speech model and language, then click {action}."
+
 # Help > Tutorials: a lesson's length; {count} is minutes.
 minutes = "{count} min"
 # The step card: {n} is the step shown, {total} the lesson's steps.
@@ -1088,7 +1111,7 @@ source_stream = "{name} · Stream {number}"
 
 [components]
 title = "Optional Components"
-purpose = "Whisper models enable local speech-to-text and subtitles. Downloads are optional; you can edit and export without them, and add them later from Help. Choose Done to skip."
+purpose = "Optional Whisper models add local speech-to-text and subtitles. Add them anytime from Help."
 download = "Download"
 installed = "Installed"
 location = "Models: {path}"
@@ -1111,13 +1134,17 @@ download = "Download Update"
 external = "This build is managed externally. Update it with its package manager or rebuild from source."
 manual = "This package requires a manual update. Quit jvid and follow the release installation instructions. Keep your jvid-data folder when replacing a portable copy."
 release_page = "Release Notes and Downloads"
-verified = "The download matches the signed release metadata."
+verified = "Ready to install. The download matches the signed release metadata."
 busy = "Finish recording, exports, model downloads, transcription, and tutorials before updating."
-save_restart = "Save, Update and Restart"
-restart = "Update and Restart"
+save_restart = "Save, install and restart"
+restart = "Install and restart"
 previous = "Previous Update Result"
 later = "Later"
 worker_failed = "The update worker stopped unexpectedly. Please try again."
+downloading = "Downloading update…"
+verifying = "Verifying download…"
+download_later = "You can keep editing while this downloads."
+ready_later = "This download stays ready until you close jvid."
 
 [framing]
 target = "{track} · {clip}"
@@ -1131,3 +1158,24 @@ extension = "Choose a destination with the .srt extension."
 project_collision = "Choose a different destination: this file is the project."
 saved = "Subtitles saved to {path}"
 video_help = "Burn In draws captions into video; Sidecar saves an SRT beside it. For SRT alone: Timeline > Export Subtitles."
+
+# Shared panel empty states.
+[empty]
+select_clip = "Select a Clip"
+media = "No Media Yet"
+import_media = "Import Media…"
+source = "Open a Clip"
+preview = "Nothing to Preview"
+preview_help = "Add a video clip to the timeline to see it here."
+scopes = "No Frame to Measure"
+timeline = "Start Your Edit"
+effects = "No Effects Yet"
+search_media = "No Matching Media"
+search_effects = "No Matching Effects"
+search_help = "Try a different search or clear your search."
+clear_search = "Clear Search"
+queue_help = "Your queued and finished exports will appear here."
+transcript = "No Transcript Yet"
+transcript_help = "Transcribe speech from your clips to edit with text."
+no_audio = "No Audio to Transcribe"
+no_audio_help = "Add a clip with audio to the timeline to start a transcript."

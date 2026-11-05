@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>jvid — Empty States</title>
+  <style>
+    @font-face { font-family: Inter; src: url('../../crates/suite-ui/assets/Inter-Regular.ttf'); font-weight: 400; font-display: swap; }
+    @font-face { font-family: Inter; src: url('../../crates/suite-ui/assets/Inter-Medium.ttf'); font-weight: 500; font-display: swap; }
+    @font-face { font-family: Inter; src: url('../../crates/suite-ui/assets/Inter-SemiBold.ttf'); font-weight: 600; font-display: swap; }
+    :root {
+      color-scheme: dark;
+      --ground: #0a0b0d; --panel: #121416; --raised: #1c1e21; --field: #0d0e11;
+      --border: #232529; --border-strong: #36383c; --ink: #edeef1; --ink-2: #adb1b8;
+      --ink-3: #82868e; --ink-4: #5a5e63; --blue: #2368c9; --light-blue: #7aacf6;
+      --panel-width: 320px; --panel-height: 360px;
+    }
+    [data-theme="light"] {
+      color-scheme: light;
+      --ground: #e6e7ea; --panel: #f6f7f8; --raised: #fff; --field: #fff;
+      --border: #d9dbdf; --border-strong: #b4b7bd; --ink: #16181b; --ink-2: #3f434a;
+      --ink-3: #5e6269; --ink-4: #9a9ea5; --light-blue: #1d5bb5;
+    }
+    [data-theme="contrast"] {
+      --ground: #000; --panel: #000; --raised: #141414; --field: #000;
+      --border: #8a8a8a; --border-strong: #fff; --ink: #fff; --ink-2: #e0e0e0;
+      --ink-3: #c8c8c8; --ink-4: #8a8a8a; --light-blue: #9cc4ff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--ground); color: var(--ink); font: 400 12px/1.5 Inter, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    button, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button, select { border: 1px solid var(--border); border-radius: 6px; background: var(--raised); }
+    button:hover, select:hover { border-color: var(--border-strong); }
+    :focus-visible { outline: 2px solid var(--light-blue); outline-offset: 3px; }
+    button { min-height: 24px; padding: 3px 10px; font-weight: 500; }
+    select { height: 30px; padding: 0 28px 0 10px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 28px; line-height: 1.25; font-weight: 600; letter-spacing: -.025em; }
+    h2 { font-size: 16px; font-weight: 600; }
+    h3 { font-size: 14px; font-weight: 500; }
+    svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+    .symbols { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .page { max-width: 1440px; margin: auto; padding: 0 40px 64px; }
+    .masthead { height: 64px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); }
+    .wordmark { font-size: 18px; font-weight: 600; letter-spacing: -.8px; }
+    .crumb { color: var(--ink-3); }
+    .masthead .crumb:last-child { margin-left: auto; }
+    .intro { padding: 40px 0 28px; display: flex; justify-content: space-between; gap: 24px; align-items: flex-end; }
+    .intro p { max-width: 590px; margin-top: 12px; font-size: 13px; color: var(--ink-2); }
+    .issue { color: var(--ink-3); white-space: nowrap; padding-bottom: 2px; }
+    .controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 24px; padding: 16px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .control { display: flex; align-items: center; gap: 10px; }
+    .control > span { color: var(--ink-3); }
+    .control:last-child { margin-left: auto; }
+    .segmented { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; }
+    .segmented button { background: transparent; border-color: transparent; color: var(--ink-3); min-height: 24px; padding: 2px 9px; border-radius: 4px; }
+    .segmented button[aria-pressed="true"] { background: var(--raised); color: var(--ink); }
+    .segmented button:hover { color: var(--ink); }
+    .comparison { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; padding-top: 28px; }
+    .option { min-width: 0; }
+    .option-title { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+    .letter { width: 22px; height: 22px; border: 1px solid var(--border-strong); border-radius: 4px; display: grid; place-items: center; color: var(--ink-2); font-size: 10px; }
+    .badge { font-size: 10px; font-weight: 400; color: var(--ink-2); padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; margin-left: auto; }
+    .stage { display: flex; justify-content: center; margin-top: 14px; padding: 20px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--field); }
+    .option[data-selected="true"] .stage { border-color: var(--blue); }
+    .panel { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; min-width: 0; }
+    .demo-panel { width: var(--panel-width); max-width: 100%; height: var(--panel-height); }
+    .panel-header { height: 32px; flex-shrink: 0; display: flex; align-items: center; padding: 0 4px; border-bottom: 1px solid var(--border); gap: 4px; }
+    .panel-header .panel-tab { background: var(--raised); font-size: 12px; font-weight: 500; padding: 3px 8px; border-radius: 6px; }
+    .panel-menu { margin-left: auto; color: var(--ink-3); padding: 0 7px; line-height: 1; }
+    .panel-body { flex: 1; min-height: 0; overflow: auto; display: flex; }
+    .empty { width: 100%; margin: auto 0; padding: 24px; text-align: center; }
+    .empty-content { max-width: 240px; margin: auto; }
+    .empty-mark { width: 40px; height: 40px; display: grid; place-items: center; margin: 0 auto 12px; color: var(--ink-3); }
+    .empty-mark svg { width: 32px; height: 32px; stroke-width: 1.25; }
+    .empty h3 { font-size: 14px; line-height: 20px; font-weight: 500; color: var(--ink); }
+    .empty p { margin: 6px auto 0; font-size: 12px; line-height: 18px; max-width: 230px; color: var(--ink-3); }
+    .empty .action { margin-top: 16px; display: inline-flex; justify-content: center; align-items: center; gap: 6px; }
+    .empty .action.primary { background: var(--blue); border-color: var(--blue); color: white; }
+    .empty .action.primary:hover { background: #2c70d3; }
+    .empty[data-style="tile"] .empty-mark { width: 48px; height: 48px; border: 1px solid var(--border); background: var(--raised); border-radius: 8px; margin-bottom: 16px; color: var(--ink-2); }
+    .empty[data-style="tile"] .empty-mark svg { width: 24px; height: 24px; stroke-width: 1.5; }
+    .empty[data-style="inline"] .empty-content { display: flex; gap: 12px; text-align: left; align-items: flex-start; max-width: 264px; }
+    .empty[data-style="inline"] .empty-mark { width: 24px; height: 24px; margin: 0; flex-shrink: 0; }
+    .empty[data-style="inline"] .empty-mark svg { width: 24px; height: 24px; stroke-width: 1.5; }
+    .empty[data-style="inline"] p { max-width: none; }
+    .option-caption { color: var(--ink-3); margin: 12px 0; min-height: 36px; max-width: 37ch; }
+    .choose { width: 100%; min-height: 30px; display: flex; align-items: center; justify-content: center; gap: 8px; background: transparent; color: var(--ink-2); }
+    .choose svg { width: 14px; height: 14px; }
+    .choose[aria-pressed="true"] { background: var(--raised); color: var(--ink); }
+    .comparison-note { margin-top: 16px; color: var(--ink-3); display: flex; gap: 6px; align-items: center; }
+    .context { margin-top: 48px; }
+    .section-heading { display: flex; align-items: baseline; gap: 16px; margin-bottom: 16px; }
+    .section-heading p { color: var(--ink-3); }
+    .editor-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+    .editor { min-width: 820px; padding: 0 4px 4px; }
+    .appbar { height: 36px; display: flex; align-items: center; gap: 20px; padding: 0 8px; font-size: 11px; color: var(--ink-2); }
+    .appbar .wordmark { font-size: 14px; color: var(--ink); }
+    .project-name { margin-left: auto; color: var(--ink-3); }
+    .appbar .export { margin-left: auto; background: var(--raised); border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; color: var(--ink-2); }
+    .editor-panels { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(340px, 2fr) minmax(240px, 1fr); gap: 4px; }
+    .editor-panel { height: 312px; }
+    .viewer-panel .panel-body { background: #040404; }
+    .viewer-panel .empty { --ink: #edeef1; --ink-2: #adb1b8; --ink-3: #82868e; --raised: #1c1e21; --border: #232529; }
+    .viewer-panel .empty-mark { background: none; }
+    .transport { height: 32px; display: flex; align-items: center; padding: 0 12px; border-top: 1px solid var(--border); color: var(--ink-3); gap: 4px; }
+    .transport .times { font-size: 10px; }
+    .transport .transport-buttons { display: flex; gap: 14px; margin: auto; }
+    .transport svg { width: 12px; height: 12px; }
+    .transport .fit { font-size: 10px; }
+    .timeline-panel { margin-top: 4px; height: 180px; }
+    .timeline-panel .empty { padding: 16px; }
+    .timeline-panel .empty-mark { margin-bottom: 8px; height: 28px; }
+    .timeline-panel .empty-mark svg { width: 24px; height: 24px; }
+    .timeline-panel .empty[data-style="tile"] .empty-mark { width: 36px; height: 36px; }
+    .timeline-panel .empty[data-style="inline"] .empty-mark { width: 24px; margin: 0; }
+    .timeline-panel .empty p { max-width: 300px; }
+    .timeline-panel .empty .action { margin-top: 8px; }
+    .notes { margin-top: 28px; border-top: 1px solid var(--border); padding-top: 20px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+    .notes h3 { font-size: 12px; margin-bottom: 5px; }
+    .notes p { color: var(--ink-3); max-width: 40ch; }
+    .sample { width: 100%; padding: 12px; font-size: 12px; }
+    .sample-row { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); padding: 12px 0; color: var(--ink-2); }
+    .sample-row svg { color: var(--ink-3); }
+    .sample-copy { flex: 1; min-width: 0; }
+    .sample-copy strong { display: block; font-weight: 500; color: var(--ink); }
+    .sample-copy small { color: var(--ink-3); font-size: 10px; }
+    .reset { display: block; margin: 16px 0 0 auto; font-size: 11px; color: var(--ink-2); }
+    .status { height: 18px; margin-top: 12px; color: var(--ink-3); }
+    @media (max-width: 1150px) { .page { padding-inline: 24px; } .control:last-child { margin-left: 0; } .stage { padding: 12px 6px; } .empty { padding-inline: 16px; } .badge { display: none; } }
+    @media (max-width: 850px) { .comparison { grid-template-columns: 1fr; gap: 28px; } .option-title, .option-caption, .choose { max-width: 440px; margin-left: auto; margin-right: auto; } .stage { padding: 20px; } .badge { display: inline; } .option-caption { min-height: 0; } .intro { align-items: flex-start; } .notes { grid-template-columns: 1fr; gap: 16px; } .section-heading { display: block; } .section-heading p { margin-top: 4px; } }
+    @media (max-width: 480px) { .page { padding-inline: 16px; } .intro { padding-top: 28px; } h1 { font-size: 24px; } .issue { display: none; } .controls { gap: 14px; } .control { flex-wrap: wrap; } .control > span { min-width: 42px; } .masthead .crumb:last-child { display: none; } }
+  </style>
+</head>
+<body>
+  <svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <symbol id="i-select" viewBox="0 0 24 24"><path d="m5 3 15 8-7 2-3 7Z"/><path d="m13 13 4 7"/></symbol>
+      <symbol id="i-media" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 8h4M3 16h4M17 8h4M17 16h4"/><path d="m10 9 4 3-4 3Z"/></symbol>
+      <symbol id="i-preview" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="14" rx="2"/><path d="M8 21h8M12 18v3m-2-13 5 3-5 3Z"/></symbol>
+      <symbol id="i-timeline" viewBox="0 0 24 24"><path d="M4 3v18M8 4h12M8 20h12"/><rect x="8" y="7" width="12" height="4" rx="1"/><rect x="8" y="13" width="8" height="4" rx="1"/></symbol>
+      <symbol id="i-scopes" viewBox="0 0 24 24"><path d="M3 3v18h18M6 14l3-5 4 7 3-9 3 5"/></symbol>
+      <symbol id="i-transcript" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h7M7 16h9"/></symbol>
+      <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V3m-4 4 4-4 4 4M4 13v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 10.5h5"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M5 5v14m14-14L8 12l11 7Z"/></symbol>
+      <symbol id="i-next" viewBox="0 0 24 24"><path d="M19 5v14M5 5l11 7-11 7Z"/></symbol>
+    </defs>
+  </svg>
+  <main class="page">
+    <header class="masthead"><span class="wordmark">jvid</span><span class="crumb">/</span><span class="crumb">Design Studies</span><span class="crumb">November 2026 · Local Prototype</span></header>
+    <div class="intro">
+      <div><h1>A shared empty state.</h1><p>A centred icon, a clear next step, and room to breathe. Compare three layouts, then see the same treatment across the editor.</p></div>
+      <span class="issue">Issue 07 · Option A Selected</span>
+    </div>
+    <div class="controls" aria-label="Preview settings">
+      <label class="control"><span>Panel</span><select id="scenario" aria-label="Panel scenario">
+        <option value="inspector">Inspector · No Selection</option><option value="media">Media · Empty Bin</option><option value="preview">Program · No Video</option><option value="timeline">Timeline · No Clips</option><option value="scopes">Scopes · No Frame</option><option value="transcript">Transcript · Not Transcribed</option><option value="queue">Render Queue · No Exports</option><option value="search">Effects · No Search Results</option>
+      </select></label>
+      <div class="control"><span id="width-label">Width</span><div class="segmented" role="group" aria-labelledby="width-label"><button type="button" data-width="240" aria-pressed="false">240</button><button type="button" data-width="320" aria-pressed="true">320</button><button type="button" data-width="440" aria-pressed="false">440</button></div></div>
+      <label class="control"><span>Height</span><select id="height" aria-label="Panel height"><option value="220">Compact</option><option value="360" selected>Standard</option><option value="560">Tall</option></select></label>
+      <label class="control"><span>Theme</span><select id="theme" aria-label="Colour theme"><option value="dark">Dark</option><option value="light">Light</option><option value="contrast">High Contrast</option></select></label>
+    </div>
+    <section class="comparison" aria-label="Compare empty-state layouts">
+      <article class="option" data-option="quiet" data-selected="true">
+        <div class="option-title"><span class="letter">A</span><h2>Quiet Centre</h2><span class="badge">Selected</span></div>
+        <div class="stage"><section class="panel demo-panel" aria-label="Quiet Centre preview"><div class="panel-header"><span class="panel-tab scenario-title">Inspector</span><span class="panel-menu" aria-hidden="true">···</span></div><div class="panel-body scenario-body" data-style="quiet"></div></section></div>
+        <p class="option-caption">A simple outline icon. Minimal chrome; the message does the work.</p>
+        <button type="button" class="choose" data-choose="quiet" aria-pressed="true"><svg aria-hidden="true"><use href="#i-check"/></svg><span>Shown in Editor</span></button>
+      </article>
+      <article class="option" data-option="tile" data-selected="false">
+        <div class="option-title"><span class="letter">B</span><h2>Icon Tile</h2></div>
+        <div class="stage"><section class="panel demo-panel" aria-label="Icon Tile preview"><div class="panel-header"><span class="panel-tab scenario-title">Inspector</span><span class="panel-menu" aria-hidden="true">···</span></div><div class="panel-body scenario-body" data-style="tile"></div></section></div>
+        <p class="option-caption">A contained icon adds a little structure to a large, empty panel.</p>
+        <button type="button" class="choose" data-choose="tile" aria-pressed="false"><span>Show in Editor</span></button>
+      </article>
+      <article class="option" data-option="inline" data-selected="false">
+        <div class="option-title"><span class="letter">C</span><h2>Compact Row</h2></div>
+        <div class="stage"><section class="panel demo-panel" aria-label="Compact Row preview"><div class="panel-header"><span class="panel-tab scenario-title">Inspector</span><span class="panel-menu" aria-hidden="true">···</span></div><div class="panel-body scenario-body" data-style="inline"></div></section></div>
+        <p class="option-caption">Icon and left-aligned copy, centred as a group. Useful in shallow panels.</p>
+        <button type="button" class="choose" data-choose="inline" aria-pressed="false"><span>Show in Editor</span></button>
+      </article>
+    </section>
+    <p class="comparison-note"><svg aria-hidden="true"><use href="#i-select"/></svg>Buttons in the examples reveal sample content. Panel size is in CSS pixels, without scaling.</p>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+    <section class="context" aria-labelledby="context-title">
+      <div class="section-heading"><h2 id="context-title">Across the Editor</h2><p id="context-caption">Quiet Centre · The same layout, with guidance specific to each panel.</p></div>
+      <div class="editor-scroll"><div class="editor">
+        <div class="appbar" aria-hidden="true"><span class="wordmark">jvid</span><span>File</span><span>Edit</span><span>Timeline</span><span>Help</span><span class="project-name">Untitled</span><span class="export">Export</span></div>
+        <div class="editor-panels">
+          <section class="panel editor-panel" aria-label="Media in editor"><div class="panel-header"><span class="panel-tab">Media</span></div><div class="panel-body editor-body" data-context="media"></div></section>
+          <section class="panel editor-panel viewer-panel" aria-label="Program in editor"><div class="panel-header"><span class="panel-tab">Program</span></div><div class="panel-body editor-body" data-context="preview"></div><div class="transport" aria-hidden="true"><span class="times">00:00:00:00 / 00:00:00:00</span><span class="transport-buttons"><svg><use href="#i-back"/></svg><svg><use href="#i-play"/></svg><svg><use href="#i-next"/></svg></span><span class="fit">Fit</span></div></section>
+          <section class="panel editor-panel" aria-label="Inspector in editor"><div class="panel-header"><span class="panel-tab">Inspector</span></div><div class="panel-body editor-body" data-context="inspector"></div></section>
+        </div>
+        <section class="panel timeline-panel" aria-label="Timeline in editor"><div class="panel-header"><span class="panel-tab">Timeline</span></div><div class="panel-body editor-body" data-context="timeline"></div></section>
+      </div></div>
+    </section>
+    <footer class="notes">
+      <div><h3>Centre Within the Content</h3><p>Centre the whole group in the available panel body. Keep headers and transport controls outside that space. Scroll when a panel becomes too short.</p></div>
+      <div><h3>Give One Useful Next Step</h3><p>A short title and one sentence. Add an action when it helps: import media, start a transcript, or clear a search. No button for selecting a clip.</p></div>
+      <div><h3>Keep the Editor Quiet</h3><p>Use the panel's own surface and muted outline icons. Reserve blue for a useful primary action. Apply the shared layout to empty panels; keep errors and loading states distinct.</p></div>
+    </footer>
+  </main>
+  <script>
+    const scenarios = {
+      inspector: { panel: 'Inspector', icon: 'select', title: 'Select a Clip', text: 'Select a clip in the timeline to edit its properties.' },
+      media: { panel: 'Media', icon: 'media', title: 'No Media Yet', text: 'Import video, audio, or images to start editing.', action: 'Import Media…', primary: true },
+      preview: { panel: 'Program', icon: 'preview', title: 'Nothing to Preview', text: 'Add a video clip to the timeline to see it here.' },
+      timeline: { panel: 'Timeline', icon: 'timeline', title: 'Start Your Edit', text: 'Drag media here to add your first clip.' },
+      scopes: { panel: 'Scopes', icon: 'scopes', title: 'No Frame to Measure', text: 'Move the playhead over a video clip to see its scopes.' },
+      transcript: { panel: 'Transcript', icon: 'transcript', title: 'No Transcript Yet', text: 'Transcribe speech from your clips to edit with text.', action: 'Transcribe…' },
+      queue: { panel: 'Render Queue', icon: 'export', title: 'No Exports Yet', text: 'Your queued and finished exports will appear here.', action: 'New Export…' },
+      search: { panel: 'Effects', icon: 'search', title: 'No Matching Effects', text: 'Try a different search or clear your filters.', action: 'Clear Search' }
+    };
+    const styles = { quiet: 'Quiet Centre', tile: 'Icon Tile', inline: 'Compact Row' };
+    let selectedStyle = 'quiet';
+    const svgNS = 'http://www.w3.org/2000/svg';
+    function icon(name) {
+      const svg = document.createElementNS(svgNS, 'svg');
+      const use = document.createElementNS(svgNS, 'use');
+      use.setAttribute('href', '#i-' + name);
+      svg.setAttribute('aria-hidden', 'true');
+      svg.append(use);
+      return svg;
+    }
+    function makeEmpty(key, style) {
+      const item = scenarios[key];
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.dataset.style = style;
+      const content = document.createElement('div');
+      content.className = 'empty-content';
+      const mark = document.createElement('div');
+      mark.className = 'empty-mark';
+      mark.append(icon(item.icon));
+      const copy = document.createElement('div');
+      copy.className = 'empty-copy';
+      const title = document.createElement('h3');
+      title.textContent = item.title;
+      const hint = document.createElement('p');
+      hint.textContent = item.text;
+      copy.append(title, hint);
+      if (item.action) {
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.className = 'action' + (item.primary ? ' primary' : '');
+        if (key === 'media') action.append(icon('plus'));
+        action.append(document.createTextNode(item.action));
+        action.addEventListener('click', () => showSample(empty.parentElement, key, style));
+        copy.append(action);
+      }
+      content.append(mark, copy);
+      empty.append(content);
+      return empty;
+    }
+    function showSample(body, key, style) {
+      const samples = {
+        media: [['media', 'Screen Recording.mp4', 'Video · 1920 × 1080 · 00:42'], ['media', 'Gameplay.mp4', 'Video · 2560 × 1440 · 03:18']],
+        transcript: [['transcript', '00:02  Let’s start with the first clip.', 'Sample transcript'], ['transcript', '00:05  This is the moment to keep.', 'Sample transcript']],
+        queue: [['export', 'Untitled.mp4', 'Queued · H.264 · 1920 × 1080']],
+        search: [['media', 'Pixelate', 'Show the image in pixel squares.'], ['media', 'Vignette', 'Darken the corners of the frame.']]
+      };
+      const sample = document.createElement('div');
+      sample.className = 'sample';
+      for (const [glyph, title, subtitle] of samples[key]) {
+        const row = document.createElement('div');
+        row.className = 'sample-row';
+        const copy = document.createElement('div');
+        copy.className = 'sample-copy';
+        const strong = document.createElement('strong');
+        strong.textContent = title;
+        const small = document.createElement('small');
+        small.textContent = subtitle;
+        copy.append(strong, small);
+        row.append(icon(glyph), copy);
+        sample.append(row);
+      }
+      const reset = document.createElement('button');
+      reset.type = 'button';
+      reset.className = 'reset';
+      reset.textContent = 'Reset Example';
+      reset.addEventListener('click', () => {
+        body.replaceChildren(makeEmpty(key, style));
+        body.querySelector('button')?.focus();
+        document.querySelector('#status').textContent = 'Returned to the empty ' + scenarios[key].panel + ' example.';
+      });
+      sample.append(reset);
+      body.replaceChildren(sample);
+      reset.focus();
+      document.querySelector('#status').textContent = 'Showing sample content only. Reset Example returns to the empty state.';
+    }
+    function renderComparison() {
+      const key = document.querySelector('#scenario').value;
+      document.querySelectorAll('.scenario-title').forEach(title => title.textContent = scenarios[key].panel);
+      document.querySelectorAll('.scenario-body').forEach(body => body.replaceChildren(makeEmpty(key, body.dataset.style)));
+      document.querySelector('#status').textContent = '';
+    }
+    function renderEditor() {
+      document.querySelectorAll('.editor-body').forEach(body => body.replaceChildren(makeEmpty(body.dataset.context, selectedStyle)));
+      document.querySelector('#context-caption').textContent = styles[selectedStyle] + ' · The same layout, with guidance specific to each panel.';
+    }
+    document.querySelector('#scenario').addEventListener('change', renderComparison);
+    document.querySelector('#height').addEventListener('change', event => document.documentElement.style.setProperty('--panel-height', event.target.value + 'px'));
+    document.querySelector('#theme').addEventListener('change', event => document.documentElement.dataset.theme = event.target.value);
+    document.querySelectorAll('[data-width]').forEach(button => button.addEventListener('click', () => {
+      document.documentElement.style.setProperty('--panel-width', button.dataset.width + 'px');
+      document.querySelectorAll('[data-width]').forEach(other => other.setAttribute('aria-pressed', String(other === button)));
+    }));
+    document.querySelectorAll('[data-choose]').forEach(button => button.addEventListener('click', () => {
+      selectedStyle = button.dataset.choose;
+      document.querySelectorAll('[data-choose]').forEach(other => {
+        const active = other === button;
+        other.setAttribute('aria-pressed', String(active));
+        other.replaceChildren();
+        if (active) other.append(icon('check'));
+        const label = document.createElement('span');
+        label.textContent = active ? 'Shown in Editor' : 'Show in Editor';
+        other.append(label);
+        other.closest('.option').dataset.selected = String(active);
+      });
+      renderEditor();
+      document.querySelector('#status').textContent = styles[selectedStyle] + ' is now shown across the editor below.';
+    }));
+    renderComparison();
+    renderEditor();
+  </script>
+</body>
+</html>

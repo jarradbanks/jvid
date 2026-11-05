@@ -18,10 +18,48 @@ mod audit_b09;
 mod audit_b11;
 mod docking;
 mod subtitle_export;
+mod timeline_recording;
+mod timeline_tools;
 mod updates;
 
 const SIZES: [[f32; 2]; 2] = [[1280.0, 720.0], [1920.0, 1080.0]];
 const SCALES: [f32; 2] = [1.0, 1.5];
+
+#[test]
+fn startup_project_opens_its_timeline_and_takes_precedence_over_untitled_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("試合 highlights.jvid");
+    let mut history = History::new(Project::default());
+    history
+        .apply(Command::AddSolid {
+            name: "Event".into(),
+            color: [1.0; 4],
+        })
+        .unwrap();
+    let asset = history.project().assets()[0].id;
+    let placement = history
+        .project()
+        .placement(asset, Time(0), false, None, false)
+        .unwrap();
+    history.apply(Command::Place(placement)).unwrap();
+    crate::project_file::save(history.project(), &path).unwrap();
+    let mut app = App::restore(None);
+    app.open_startup(None);
+    assert!(app.on_welcome);
+    app.prompts.push(Prompt::Restore {
+        path: None,
+        auto: dir.path().join("untitled.jvid"),
+    });
+    app.open_startup(Some(path.clone()));
+    assert_eq!(app.path, Some(path));
+    assert!(!app.on_welcome);
+    assert!(app.prompts.is_empty());
+    assert_eq!(app.history.project(), history.project());
+    assert_eq!(
+        app.history.project().sequence().tracks()[0].clips().len(),
+        1
+    );
+}
 
 fn configs() -> impl Iterator<Item = ([f32; 2], f32)> {
     SIZES
@@ -239,7 +277,7 @@ fn hairlines_are_one_physical_pixel() {
         for &(t, r) in &s.panels {
             let down = s.column(r);
             let ctx = format!("{}: {t:?} down {down:?}", s.ctx);
-            let lines = if matches!(t, Tab::Media | Tab::Preview | Tab::Timeline) {
+            let lines = if matches!(t, Tab::Media | Tab::Preview) {
                 4
             } else {
                 3
@@ -948,6 +986,52 @@ fn dropping_media_on_welcome_matches_the_first_clip() {
 }
 
 #[test]
+fn media_opened_at_startup_lands_on_the_timeline() {
+    let mut h = plain_harness();
+    h.state_mut().importer = Importer::new(jvid_jobs::Pool::new(1), |p| {
+        Ok(jvid_core::model::ProbeInfo {
+            duration: Time(jvid_core::time::FLICKS_PER_SECOND * 42),
+            audio_streams: 2,
+            sample_rate: Some(48_000),
+            ..fake_probe(p)?
+        })
+    });
+    let clip = PathBuf::from("/m/screen-1440p60.mp4");
+    h.state_mut().open_startup(Some(clip.clone()));
+    assert!(!h.state().on_welcome && h.state().path.is_none());
+    while h.state().importer.is_busy() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    let project = h.state().history.project();
+    assert_eq!(project.assets()[0].path, clip);
+    assert_eq!(project.settings().width, 2560, "Match Source fits the clip");
+    let placed: usize = project
+        .sequence()
+        .tracks()
+        .iter()
+        .map(|t| t.clips().len())
+        .sum();
+    assert!(placed >= 2, "video and audio on the timeline, got {placed}");
+    // Later imports only go to the media bin.
+    h.state_mut().import([PathBuf::from("/m/phone.mp4")]);
+    while h.state().importer.is_busy() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    let after: usize = h
+        .state()
+        .history
+        .project()
+        .sequence()
+        .tracks()
+        .iter()
+        .map(|t| t.clips().len())
+        .sum();
+    assert_eq!(after, placed);
+}
+
+#[test]
 fn new_project_uses_the_chosen_preset() {
     let mut h = plain_harness();
     assert_eq!(h.state().welcome.preset, 0, "Match Source is the default");
@@ -1258,9 +1342,10 @@ fn about_opens_the_third_party_notices() {
         h.query_by_label_contains("jvid Third-Party Notices")
             .is_some()
     );
-    // A move-and-click in one frame misses here, so hover first as a real pointer does.
+    let settled = h.get_by_label("OK").rect();
     h.get_by_label("OK").hover();
     h.run();
+    assert_eq!(h.get_by_label("OK").rect(), settled);
     h.get_by_label("OK").click();
     h.run();
     assert!(h.state().prompts.is_empty());
@@ -1336,7 +1421,7 @@ fn dragging_a_title_preset_onto_v2_places_a_text_clip() {
 }
 
 #[test]
-fn clicking_a_preset_shows_its_asset_in_the_media_tab() {
+fn clicking_a_preset_keeps_the_browser_and_selects_its_timeline_clip() {
     if !gpu() {
         return;
     }
@@ -1348,7 +1433,8 @@ fn clicking_a_preset_shows_its_asset_in_the_media_tab() {
     h.run();
     let id = h.state().history.project().assets().last().map(|a| a.id);
     assert!(id.is_some());
-    assert_eq!((h.state().bin.tab, h.state().bin.selected), (0, id));
+    assert_eq!((h.state().bin.tab, h.state().bin.selected), (2, id));
+    assert_eq!(h.state().timeline.selected().len(), 1);
 }
 
 #[test]
@@ -1437,7 +1523,15 @@ fn effect_rows_show_each_effect_and_hover_only_fills() {
     let apply: Vec<_> = h.get_all_by_label("Apply to Selected Clips").collect();
     assert_eq!(apply.len(), names.len());
     assert!(apply.iter().all(|n| n.accesskit_node().is_disabled()));
-    assert_eq!(h.get_all_by_label("More").count(), names.len());
+    let media = h.state().dock.find_tab(&Tab::Media).unwrap().node_path();
+    let media = h.state().dock.leaf(media).unwrap().rect;
+    // Preview and the vertical timeline rail have their own overflow menus.
+    assert_eq!(
+        h.get_all_by_label("More")
+            .filter(|node| media.contains_rect(node.rect()))
+            .count(),
+        names.len()
+    );
     h.get_by_label("Vignette").hover();
     h.run();
     assert_eq!(nodes(&h), before, "hover moved or added something");
@@ -1551,6 +1645,22 @@ fn title_harness_sized(
     let app = h.state_mut();
     app.timeline
         .select_clip(app.history.project().sequence(), id);
+    // A repaint can settle before the background media jobs deliver their wakeup.
+    // Wait for the actual title frame and its filmstrip before capturing the fixture.
+    for _ in 0..500 {
+        h.step();
+        if h.state().preview.has_program_frame()
+            && h.state().preview.program_caught_up()
+            && h.state().timeline.jobs_idle()
+            && h.try_run().is_ok()
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(h.state().preview.has_program_frame());
+    assert!(h.state().preview.program_caught_up());
+    assert!(h.state().timeline.jobs_idle());
     h.run();
     let shot = Shot::take(&mut h, "title".into());
     let r = shot.panel(Tab::Preview);
