@@ -363,6 +363,30 @@ fn rail_and_text_presets_snapshots() {
         app.bin.tab = 2;
         crate::playback::tests::add_solid(&mut app.history, [0.2, 0.3, 0.4, 1.0], Time(0));
         h.run();
+        // The lower-third's semibold sample uses installed fonts, which differ across OSes.
+        // Keep the tile, controls and timeline under strict pixel comparison; its actual
+        // content is checked by each_text_tile_shows_its_preset_on_the_frame.
+        let tile = h.get_by_label("Lower Third").rect();
+        let width = tile.width() - 8.0;
+        let thumb = Rect::from_min_size(tile.min + vec2(4.0, 4.0), vec2(width, width * 9.0 / 16.0));
+        let (_, _, text) = crate::media_bin::presets().into_iter().nth(1).unwrap();
+        let columns = text
+            .content
+            .lines()
+            .map(|l| l.chars().count())
+            .max()
+            .unwrap() as f32;
+        let lines = text.content.lines().count() as f32;
+        let scale = width / h.state().history.project().settings().width as f32;
+        let block = vec2(
+            (columns + 1.0) * text.size + 2.0 * text.box_padding,
+            lines * text.size * 1.2 + 2.0 * text.box_padding,
+        ) * scale
+            + vec2(8.0, 8.0);
+        h.mask(Rect::from_center_size(
+            thumb.min + thumb.size() * vec2(text.anchor[0], text.anchor[1]),
+            block,
+        ));
         results.add(h.try_snapshot(name));
     }
     results.unwrap();
