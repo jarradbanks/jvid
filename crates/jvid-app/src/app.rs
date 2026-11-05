@@ -2334,7 +2334,9 @@ impl TabViewer for Viewer<'_> {
             return;
         }
         if *tab == Tab::RenderQueue {
-            self.queue_action = self.queue.panel_docked(ui, focused);
+            let can_export =
+                self.project.sequence().duration() > Time(0) && self.preview.gpu().is_some();
+            self.queue_action = self.queue.panel_docked(ui, focused, can_export);
             return;
         }
         if *tab == Tab::Transcript {

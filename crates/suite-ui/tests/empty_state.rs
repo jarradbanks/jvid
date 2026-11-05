@@ -1,18 +1,29 @@
 //! Quiet Centre geometry, overflow and accessible interaction independent of GPU snapshots.
 use egui::{Key, Rect, Sense, UiBuilder, pos2, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 use suite_ui::empty_state::EmptyState;
 use suite_ui::test_support::install_theme;
 use suite_ui::theme::icon;
 
-#[derive(Default)]
 struct State {
     body: Rect,
     content: Rect,
     action: Rect,
     clicks: usize,
     background_clicked: bool,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            body: Rect::NOTHING,
+            content: Rect::NOTHING,
+            action: Rect::NOTHING,
+            clicks: 0,
+            background_clicked: false,
+        }
+    }
 }
 
 fn harness(size: [f32; 2], action: &'static str) -> Harness<'static, State> {
@@ -27,7 +38,11 @@ fn harness(size: [f32; 2], action: &'static str) -> Harness<'static, State> {
             let body = Rect::from_min_max(outer.min + vec2(0.0, 32.0), outer.max - vec2(0.0, 32.0));
             state.body = body;
             state.background_clicked |= ui
-                .interact(body, ui.id().with("drop_body"), Sense::click_and_drag())
+                .interact(
+                    body,
+                    ui.id().with("drop_body"),
+                    Sense::click_and_drag() - Sense::FOCUSABLE,
+                )
                 .clicked();
             ui.scope_builder(UiBuilder::new().max_rect(body), |ui| {
                 let r = EmptyState::new(

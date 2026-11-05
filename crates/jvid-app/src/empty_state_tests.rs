@@ -1,7 +1,7 @@
 //! Empty panels keep their existing commands and distinguish no selection from work in flight.
 use crate::media_bin::MediaBin;
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::Queryable;
 use jvid_core::history::{Command, History};
 use jvid_core::model::{ProbeInfo, Project};
 use jvid_core::time::Time;
@@ -71,21 +71,28 @@ fn media_and_effect_no_results_actions_clear_the_existing_search() {
 
 #[test]
 fn empty_queue_action_opens_the_existing_export_flow() {
-    let mut fresh = true;
-    let mut h = Harness::builder().with_size([240.0, 360.0]).build_ui_state(
-        move |ui, asked: &mut bool| {
-            if install_theme(ui, &mut fresh) {
-                return;
-            }
-            *asked |= crate::export::queue::panel(ui, &[], false, true)
-                == Some(crate::export::queue::Action::New);
-        },
-        false,
-    );
-    h.run();
-    h.get_by_label("New Export…").click();
-    h.run();
-    assert!(*h.state());
+    for can_export in [false, true] {
+        let mut fresh = true;
+        let mut queue = crate::export::queue::Queue::default();
+        let mut h = Harness::builder().with_size([240.0, 360.0]).build_ui_state(
+            move |ui, asked: &mut bool| {
+                if install_theme(ui, &mut fresh) {
+                    return;
+                }
+                *asked |= queue.panel_docked(ui, true, can_export)
+                    == Some(crate::export::queue::Action::New);
+            },
+            false,
+        );
+        h.run();
+        if can_export {
+            h.get_by_label("New Export…").click();
+            h.run();
+            assert!(*h.state());
+        } else {
+            assert!(h.query_by_label("New Export…").is_none());
+        }
+    }
 }
 
 #[test]
@@ -290,7 +297,7 @@ fn scopes_waiting_for_the_first_measurement_is_not_empty() {
             crate::scopes::pending(ui.ctx(), true);
             crate::scopes::show(ui);
         });
-    h.run();
+    h.run_steps(3);
     assert!(h.query_by_label("No Frame to Measure").is_none());
     assert!(h.query_by_label("Measuring Frame…").is_some());
 }

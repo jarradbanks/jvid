@@ -156,7 +156,11 @@ impl<'a> EmptyState<'a> {
                         Button::secondary(label)
                     };
                     if action_width <= width {
-                        ui.put(rect, button)
+                        let response = ui.put(rect, button);
+                        if response.gained_focus() {
+                            response.scroll_to_me(Some(Align::Center));
+                        }
+                        response
                     } else {
                         // A long action scrolls independently: its heading and help stay centred.
                         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
@@ -165,7 +169,13 @@ impl<'a> EmptyState<'a> {
                                 .auto_shrink(false)
                                 .min_scrolled_width(0.0)
                                 .scroll_source(source)
-                                .show(ui, |ui| ui.add(button))
+                                .show(ui, |ui| {
+                                    let response = ui.add(button);
+                                    if response.gained_focus() {
+                                        response.scroll_to_me(Some(Align::Center));
+                                    }
+                                    response
+                                })
                                 .inner
                         })
                         .inner
