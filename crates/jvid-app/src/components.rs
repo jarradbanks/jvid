@@ -16,11 +16,17 @@ use suite_ui::widgets::{Button, State};
 
 use crate::i18n::{tr, verbatim};
 
+struct ModelDownload {
+    model: Model,
+    job: Handle,
+    result: Receiver<Result<PathBuf, Error>>,
+}
+
 #[derive(Default)]
 pub struct Components {
     pub open: bool,
     jobs: Option<Pool>,
-    download: Option<(Model, Handle, Receiver<Result<PathBuf, Error>>)>,
+    download: Option<ModelDownload>,
     error: Option<String>,
 }
 
@@ -37,8 +43,8 @@ impl Components {
     }
 
     fn cancel(&mut self) {
-        if let Some((_, job, _)) = self.download.take() {
-            job.cancel();
+        if let Some(download) = self.download.take() {
+            download.job.cancel();
         }
     }
 
@@ -63,7 +69,11 @@ impl Components {
             let _ = tx.send(result);
             ctx.request_repaint();
         });
-        self.download = Some((model, job, rx));
+        self.download = Some(ModelDownload {
+            model,
+            job,
+            result: rx,
+        });
     }
 
     pub fn show(&mut self, ctx: &egui::Context) {
@@ -77,8 +87,8 @@ impl Components {
         if !self.open {
             return;
         }
-        if let Some((_, _, rx)) = &self.download
-            && let Ok(result) = rx.try_recv()
+        if let Some(download) = &self.download
+            && let Ok(result) = download.result.try_recv()
         {
             self.error = result.err().map(|e| e.to_string());
             self.download = None;
@@ -148,9 +158,13 @@ impl Components {
                                             verbatim("Whisper Large v3 Turbo (Q5)"),
                                         ),
                                     ] {
-                                        ui.add_sized(
-                                            [name_width, 24.0],
-                                            egui::Label::new(name).wrap().halign(egui::Align::Min),
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(name_width, 24.0),
+                                            egui::Layout::left_to_right(egui::Align::Center),
+                                            |ui| {
+                                                ui.set_min_width(name_width);
+                                                ui.add(egui::Label::new(name).wrap());
+                                            },
                                         );
                                         let size = (model.size() as f64 / 1e6).round().to_string();
                                         ui.label(
@@ -166,14 +180,15 @@ impl Components {
                                                         RichText::new(tr!("components.installed"))
                                                             .color(color::ink_2()),
                                                     );
-                                                } else if let Some((active, job, _)) =
-                                                    &self.download
-                                                    && *active == model
+                                                } else if let Some(download) = &self.download
+                                                    && download.model == model
                                                 {
                                                     ui.add(
-                                                        egui::ProgressBar::new(job.progress())
-                                                            .desired_width(status_width)
-                                                            .show_percentage(),
+                                                        egui::ProgressBar::new(
+                                                            download.job.progress(),
+                                                        )
+                                                        .desired_width(status_width)
+                                                        .show_percentage(),
                                                     )
                                                     .on_hover_text(tr!("subtitles.downloading"));
                                                     cancel = ui
@@ -261,7 +276,11 @@ mod tests {
         let mut components = Components {
             open: false,
             jobs: Some(jobs),
-            download: Some((Model::Base, job.clone(), receiver)),
+            download: Some(ModelDownload {
+                model: Model::Base,
+                job: job.clone(),
+                result: receiver,
+            }),
             error: None,
         };
         started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -330,7 +349,9 @@ mod layout_tests {
                         },
                         Components {
                             open: true,
-                            ..Default::default()
+                            jobs: None,
+                            download: None,
+                            error: None,
                         },
                     );
                 h.run();
@@ -368,6 +389,30 @@ mod layout_tests {
                 assert!(!h.state().open && h.state().download.is_none());
             }
         }
+    }
+
+    #[test]
+    fn optional_components_narrow_snapshot() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut fresh = true;
+        let mut components = Components {
+            open: true,
+            jobs: None,
+            download: None,
+            error: None,
+        };
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([384.0, 420.0])
+            .wgpu()
+            .build_ui(move |ui| {
+                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    components.show_at(ui.ctx(), Some(PathBuf::from("models")));
+                }
+            });
+        h.run();
+        h.snapshot("optional_components_narrow");
     }
 
     #[test]
@@ -413,7 +458,11 @@ mod layout_tests {
             Components {
                 open: true,
                 jobs: Some(jobs),
-                download: Some((Model::Small, job.clone(), result_rx)),
+                download: Some(ModelDownload {
+                    model: Model::Small,
+                    job: job.clone(),
+                    result: result_rx,
+                }),
                 error: None,
             },
         );
@@ -426,7 +475,11 @@ mod layout_tests {
         h.run_steps(2);
         assert!(h.state().download.is_none() && h.state().error.is_some());
         assert_eq!(h.get_all_by_label(tr!("components.download")).count(), 3);
-        h.state_mut().download = Some((Model::Small, job.clone(), channel().1));
+        h.state_mut().download = Some(ModelDownload {
+            model: Model::Small,
+            job: job.clone(),
+            result: channel().1,
+        });
         h.run_steps(2);
         h.get_by_label(tr!("prompt.cancel")).click();
         h.run_steps(2);
@@ -439,7 +492,11 @@ mod layout_tests {
             .set_len(Model::Small.size())
             .unwrap();
         let (tx, rx) = channel();
-        h.state_mut().download = Some((Model::Small, job.clone(), rx));
+        h.state_mut().download = Some(ModelDownload {
+            model: Model::Small,
+            job: job.clone(),
+            result: rx,
+        });
         tx.send(Ok(installed)).unwrap();
         h.run_steps(2);
         assert!(h.state().download.is_none() && h.state().error.is_none());

@@ -221,3 +221,29 @@ fn wrapping_a_footer_preserves_keyboard_focus() {
     assert_eq!(h.state().1, before);
     assert_eq!(h.ctx.memory(|m| m.focused()), Some(before[2]));
 }
+
+#[test]
+fn measuring_a_footer_does_not_duplicate_accessible_actions() {
+    use suite_ui::dialog::action_footer;
+    use suite_ui::widgets::Button;
+    let mut fresh = true;
+    let mut h = Harness::builder().build_ui(move |ui| {
+        if common::install_theme(ui, &mut fresh) {
+            return;
+        }
+        let mut measure = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("measure_footer")
+                .invisible()
+                .sizing_pass(),
+        );
+        action_footer(
+            &mut measure,
+            [Button::secondary("Cancel"), Button::primary("Done")],
+        );
+        action_footer(ui, [Button::secondary("Cancel"), Button::primary("Done")]);
+    });
+    h.run();
+    h.get_by_label("Cancel");
+    h.get_by_label("Done");
+}
