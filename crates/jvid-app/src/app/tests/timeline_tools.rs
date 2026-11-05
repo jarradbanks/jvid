@@ -9,7 +9,9 @@ use super::*;
 use crate::timeline::Tool;
 
 fn editor(size: [f32; 2], scale: f32) -> Harness<'static, App> {
-    let mut h = builder(size, scale).build_eframe(|cc| App::new(cc, &Default::default()));
+    let mut h = builder(size, scale)
+        .with_step_dt(0.05)
+        .build_eframe(|cc| App::new(cc, &Default::default()));
     h.state_mut().on_welcome = false;
     h.run();
     h
@@ -250,7 +252,11 @@ fn rail_marker_ruler_and_track_bounds_stay_separate_at_minimum_and_large_sizes()
                 more.click();
                 h.run();
             }
-            assert!(h.query_all_by_label("Zoom to Fit").next().is_some());
+            assert!(h.get_all_by_role(egui::accesskit::Role::Button).any(|n| {
+                n.accesskit_node()
+                    .label()
+                    .is_some_and(|label| label.starts_with("Zoom to Fit"))
+            }));
         }
     }
 }
