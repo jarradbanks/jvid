@@ -96,6 +96,49 @@ fn text_tool_click_creates_and_edits_one_real_clip_with_separate_undo_steps() {
 }
 
 #[test]
+fn program_effect_drop_takes_priority_over_the_active_text_tool() {
+    let library = tempfile::tempdir().unwrap();
+    crate::effects::scan_for_test(library.path());
+    let mut h = editor([960.0, 600.0], 1.0);
+    let id = crate::playback::tests::add_solid(
+        &mut h.state_mut().history,
+        [0.2, 0.3, 0.4, 1.0],
+        Time(0),
+    );
+    {
+        let app = h.state_mut();
+        app.timeline
+            .select_clip(app.history.project().sequence(), id);
+        app.run_action("focus_program", false);
+    }
+    h.key_press(Key::T);
+    h.run();
+    assert_eq!(h.state().timeline.tool(), Tool::Text);
+    let at = h
+        .get_all_by_label("Text Tool")
+        .find(|node| node.rect().width() > 32.0)
+        .unwrap()
+        .rect()
+        .center();
+    let before = h.state().history.project().clone();
+    egui::DragAndDrop::set_payload(&h.ctx, crate::effects::Drag("vignette".into()));
+    h.drag_at(at);
+    h.run();
+    h.drop_at(at);
+    h.run();
+    let project = h.state().history.project();
+    assert_eq!(project.assets().len(), before.assets().len());
+    let effects = &project.sequence().clip(id).unwrap().1.transform.effects;
+    assert_eq!(effects.len(), 1);
+    assert_eq!(effects[0].shader, "vignette");
+    assert_eq!(h.state().timeline.tool(), Tool::Text);
+    assert!(!crate::handles::editing(&h.ctx));
+    assert!(!egui::DragAndDrop::has_any_payload(&h.ctx));
+    assert!(h.state_mut().history.undo());
+    assert_eq!(h.state().history.project(), &before);
+}
+
+#[test]
 fn each_preset_adds_a_selected_styled_editable_clip_at_the_playhead() {
     for (name, _, style) in crate::media_bin::presets() {
         let mut h = editor([960.0, 600.0], 1.0);
