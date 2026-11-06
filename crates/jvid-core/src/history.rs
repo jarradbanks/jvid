@@ -207,6 +207,10 @@ pub enum Command {
         id: AssetId,
         text: Text,
     },
+    AddAnnotation {
+        name: String,
+        annotation: crate::annotations::Annotation,
+    },
     /// Adds a subtitle track named `name` with a text clip in `style` per cue; a cue that
     /// overlaps the one before starts where it ends.
     ImportSubtitles {
@@ -337,6 +341,7 @@ impl Command {
             | Self::AddSolid { .. }
             | Self::SetSolidColor { .. }
             | Self::AddText { .. }
+            | Self::AddAnnotation { .. }
             | Self::SetText { .. }
             | Self::ImportSubtitles { .. }
             | Self::SetAssetProbe { .. }
@@ -597,6 +602,12 @@ impl Command {
                 let a = p.asset_mut(id).expect("just added");
                 (a.name, a.solid) = (Some(name), Some(color));
                 Created::Asset(id)
+            }
+            Self::AddAnnotation { name, annotation } => {
+                if !annotation.valid() {
+                    return Err(ModelError::BadAnnotation);
+                }
+                Created::Asset(p.add_annotation(name, annotation))
             }
             Self::AddText { name, text } => {
                 let id = p.add_asset(PathBuf::new());

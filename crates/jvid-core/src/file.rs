@@ -28,6 +28,7 @@ pub enum FileError {
     TooDeep,
     /// Sequence ids repeat, or an asset names a missing one.
     BadSequence,
+    BadAnnotation,
 }
 
 impl std::fmt::Display for FileError {
@@ -40,6 +41,9 @@ impl std::fmt::Display for FileError {
             Self::Cycle => f.write_str("project file nests a sequence inside itself"),
             Self::TooDeep => f.write_str("project file nests sequences too deep"),
             Self::BadSequence => f.write_str("project file has mismatched sequence ids"),
+            Self::BadAnnotation => {
+                f.write_str("project file has invalid annotation geometry or style")
+            }
         }
     }
 }
@@ -106,6 +110,14 @@ pub fn from_json(
         }
     }
     let project: Project = serde_json::from_value(p)?;
+    if project
+        .assets()
+        .iter()
+        .filter_map(|a| a.annotation.as_ref())
+        .any(|a| !a.valid())
+    {
+        return Err(FileError::BadAnnotation);
+    }
     let s = project.settings();
     let rates = std::iter::once(s.frame_rate).chain(
         project
