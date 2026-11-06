@@ -33,6 +33,7 @@ use jvid_render::composite::{self, Compositor};
 use jvid_render::preview::{Preview, Yuv};
 use jvid_render::{solid, text};
 
+use crate::playback_status::{Health, Observation, Picture};
 use crate::transport::{AudioSource, Transport};
 
 /// Timeline frames decoded ahead of the playhead, in the direction of play.
@@ -60,12 +61,12 @@ pub type OpenAudio = Box<dyn FnMut(&Path, usize) -> ClipAudio>;
 /// A frame of an asset at a source time.
 type Key = (AssetId, Time);
 /// A finished decode, the path it was decoded from and how long decoding took.
-type Done = (Key, PathBuf, Duration, Result<Frame, String>);
+type Done = (Key, PathBuf, Duration, Result<Frame, String>, bool);
 /// A finished still decode and the explicit media-refresh generation that owns it.
 type StillDone = (AssetId, PathBuf, u64, Result<Arc<image::RgbaImage>, String>);
 
 /// A finished keyframe stand-in and the path it was decoded from.
-type QuickDone = (Key, PathBuf, u64, Result<Frame, String>);
+type QuickDone = (Key, PathBuf, u64, Result<Frame, String>, bool);
 
 struct QuickRequest {
     path: PathBuf,
@@ -173,6 +174,7 @@ pub struct FrameCache {
     bytes: usize,
     uses: u64,
     frames: HashMap<Key, (Arc<Frame>, u64)>,
+    proxies: HashSet<Key>,
 }
 
 impl FrameCache {
@@ -182,6 +184,7 @@ impl FrameCache {
             bytes: 0,
             uses: 0,
             frames: HashMap::new(),
+            proxies: HashSet::new(),
         }
     }
 
@@ -204,6 +207,14 @@ impl FrameCache {
 
     /// Adds a frame, evicting the least recently used others while over budget.
     fn insert(&mut self, k: Key, f: Arc<Frame>) {
+        self.insert_from(k, f, false);
+    }
+
+    fn insert_from(&mut self, k: Key, f: Arc<Frame>, proxy: bool) {
+        self.proxies.remove(&k);
+        if proxy {
+            self.proxies.insert(k);
+        }
         self.uses += 1;
         self.bytes += size(&f);
         if let Some((old, _)) = self.frames.insert(k, (f, self.uses)) {
@@ -218,6 +229,7 @@ impl FrameCache {
             else {
                 break;
             };
+            self.proxies.remove(&oldest);
             let (old, _) = self.frames.remove(&oldest).unwrap();
             self.bytes -= size(&old);
         }
@@ -226,6 +238,7 @@ impl FrameCache {
     /// Drops every frame of `asset`.
     fn forget(&mut self, asset: AssetId) {
         self.frames.retain(|k, _| k.0 != asset);
+        self.proxies.retain(|k| k.0 != asset);
         self.bytes = self.frames.values().map(|(f, _)| size(f)).sum();
     }
 }
@@ -524,6 +537,11 @@ fn open_streams(open: &mut OpenAudio, asset: &MediaAsset, stream: Option<u32>) -
 
 /// The timeline playback engine. See the module docs.
 pub struct Playback {
+    pub status: Observation,
+    pub health: Health,
+    proxies: Option<Arc<Proxies>>,
+    proxy_state: (u64, bool),
+    stand_in_proxies: HashSet<Key>,
     session: u64,
     quick_handles: HashMap<Key, QuickRequest>,
     quick_generation: u64,
@@ -570,6 +588,11 @@ impl Playback {
         let (quick_tx, quick_done) = channel();
         let (still_tx, still_done) = channel();
         Self {
+            status: Observation::default(),
+            health: Health::default(),
+            proxies: None,
+            proxy_state: (0, false),
+            stand_in_proxies: HashSet::new(),
             session: 0,
             quick_handles: HashMap::new(),
             quick_generation: 0,
@@ -615,15 +638,11 @@ impl Playback {
     /// Decodes project media from files, or from their proxies while `proxies` is on.
     pub fn from_proxies(budget: usize, proxies: Arc<Proxies>) -> Self {
         let pool = Arc::new(DecoderPool::hdr());
-        let quick_proxies = proxies.clone();
         // Its own pool, so the stand-in thread always finds its file open: opening a long MP4
         // reads an index of every frame, which alone can blow the seek budget.
         let quick = DecoderPool::hdr();
         let mut pb = Self::new(
-            Arc::new(move |p, t| {
-                pool.frame_at(&proxies.resolve(p), t)
-                    .map_err(|e| e.to_string())
-            }),
+            Arc::new(move |p, t| pool.frame_at(p, t).map_err(|e| e.to_string())),
             Box::new(|p, nth| {
                 let mut src = AudioSource::stream(p, nth);
                 Box::new(move |start, out| src.fill(start, out))
@@ -631,10 +650,9 @@ impl Playback {
             budget,
         );
         pb.quick = Some(Arc::new(move |p, t| {
-            quick
-                .keyframe_at(&quick_proxies.resolve(p), t)
-                .map_err(|e| e.to_string())
+            quick.keyframe_at(p, t).map_err(|e| e.to_string())
         }));
+        pb.proxies = Some(proxies);
         pb
     }
 
@@ -654,6 +672,7 @@ impl Playback {
         self.still_generation += 1;
         self.cache = FrameCache::new(self.cache.budget);
         self.stand_ins.clear();
+        self.stand_in_proxies.clear();
         self.failed.clear();
         self.paths.clear();
         self.audio = Audio::sharing(self.audio.open.clone());
@@ -661,10 +680,13 @@ impl Playback {
         self.transport = Transport::new(Time(0), Rate::new(30, 1));
         self.latency = Duration::ZERO;
         self.shown = None;
+        self.status = Observation::default();
+        self.health.reset();
     }
 
     /// Makes the next `tick` return the frame even if the playhead hasn't moved.
     pub fn refresh(&mut self) {
+        self.health.reset();
         self.shown = None;
     }
 
@@ -682,6 +704,24 @@ impl Playback {
             keep
         });
         self.failed.retain(|(id, _), _| !is_still(*id));
+        self.refresh();
+    }
+
+    /// Abandons pixels and replies decoded through a previous proxy selection.
+    pub fn refresh_sources(&mut self) {
+        for (_, handle) in self.pending.drain() {
+            handle.cancel();
+        }
+        for (_, request) in self.quick_handles.drain() {
+            request.handle.cancel();
+        }
+        (self.done_tx, self.done) = channel();
+        (self.quick_tx, self.quick_done) = channel();
+        (self.still_tx, self.still_done) = channel();
+        self.cache = FrameCache::new(self.cache.budget);
+        self.failed.clear();
+        self.stand_ins.clear();
+        self.stand_in_proxies.clear();
         self.refresh();
     }
 
@@ -719,6 +759,13 @@ impl Playback {
     /// Follows edits to the sequence length, in/out marks and frame rate, and drops what was
     /// decoded or opened from an asset's old path after a relink.
     fn sync(&mut self, project: &Project) {
+        if let Some(proxies) = &self.proxies {
+            let state = (proxies.revision(), proxies.enabled());
+            if state != self.proxy_state {
+                self.proxy_state = state;
+                self.refresh_sources();
+            }
+        }
         let seq = project.sequence();
         let t = &mut self.transport;
         t.duration = seq.duration();
@@ -780,7 +827,7 @@ impl Playback {
                 }
             }
         }
-        while let Ok((k, path, took, r)) = self.done.try_recv() {
+        while let Ok((k, path, took, r, proxy)) = self.done.try_recv() {
             // Decoded from the asset's path before a relink: its job was already dropped (#394).
             if self.paths.get(&k.0) != Some(&path) {
                 continue;
@@ -792,7 +839,7 @@ impl Playback {
             }
             self.latency = (self.latency * 3 + took) / 4;
             match r {
-                Ok(f) => self.cache.insert(k, Arc::new(f)),
+                Ok(f) => self.cache.insert_from(k, Arc::new(f), proxy),
                 Err(e) => {
                     tracing::warn!("playback decode: {e}");
                     self.failed.insert(k, Instant::now());
@@ -878,6 +925,7 @@ impl Playback {
                     self.pending.insert(key, handle);
                     continue;
                 }
+                let proxies = self.proxies.clone();
                 let (decode, tx, path, notify) = (
                     self.decode.clone(),
                     self.done_tx.clone(),
@@ -895,9 +943,19 @@ impl Playback {
                 let handle = self.jobs.submit(job, Priority::Interactive, move |ctx| {
                     if !ctx.is_cancelled() {
                         let start = Instant::now();
-                        let r = decode(&path, key.1);
+                        let resolved = proxies
+                            .as_ref()
+                            .map_or_else(|| path.clone(), |p| p.resolve(&path));
+                        let proxy = resolved != path;
+                        let (r, proxy) = match decode(&resolved, key.1) {
+                            Err(error) if proxy => {
+                                proxies.as_ref().unwrap().reject(&path, error);
+                                (decode(&path, key.1), false)
+                            }
+                            result => (result, proxy),
+                        };
                         if !ctx.is_cancelled()
-                            && tx.send((key, path, start.elapsed(), r)).is_ok()
+                            && tx.send((key, path, start.elapsed(), r, proxy)).is_ok()
                             && let Some(notify) = notify
                         {
                             notify();
@@ -945,7 +1003,8 @@ impl Playback {
             keep
         });
         self.stand_ins.retain(|key, _| want.contains_key(key));
-        while let Ok((key, path, generation, result)) = self.quick_done.try_recv() {
+        self.stand_in_proxies.retain(|key| want.contains_key(key));
+        while let Ok((key, path, generation, result, proxy)) = self.quick_done.try_recv() {
             if !self
                 .quick_handles
                 .get(&key)
@@ -957,6 +1016,10 @@ impl Playback {
             request.handle.cancel();
             // A failed stand-in is attempted once per wanted set. Exact decode still runs,
             // and seeking away and back allows another stand-in attempt without a repaint loop.
+            self.stand_in_proxies.remove(&key);
+            if proxy {
+                self.stand_in_proxies.insert(key);
+            }
             self.stand_ins.insert(key, result.ok().map(Arc::new));
         }
         for (key, path) in want {
@@ -966,6 +1029,7 @@ impl Playback {
             self.stand_ins.insert(key, None);
             self.quick_generation += 1;
             let generation = self.quick_generation;
+            let proxies = self.proxies.clone();
             let quick = self.quick.as_ref().expect("wanted stand-in").clone();
             let tx = self.quick_tx.clone();
             let notify = self.decode_notify.clone();
@@ -983,9 +1047,19 @@ impl Playback {
                     if ctx.is_cancelled() {
                         return;
                     }
-                    let result = quick(&source, key.1);
+                    let resolved = proxies
+                        .as_ref()
+                        .map_or_else(|| source.clone(), |p| p.resolve(&source));
+                    let proxy = resolved != source;
+                    let (result, proxy) = match quick(&resolved, key.1) {
+                        Err(error) if proxy => {
+                            proxies.as_ref().unwrap().reject(&source, error);
+                            (quick(&source, key.1), false)
+                        }
+                        result => (result, proxy),
+                    };
                     if !ctx.is_cancelled()
-                        && tx.send((key, source, generation, result)).is_ok()
+                        && tx.send((key, source, generation, result, proxy)).is_ok()
                         && let Some(notify) = notify
                     {
                         notify();
@@ -1007,15 +1081,28 @@ impl Playback {
     fn show(&mut self, project: &Project, clock: u64) -> Option<Shown> {
         let index = self.transport.frame(clock);
         if self.shown == Some((index, true)) {
+            self.health.observe(
+                index,
+                self.transport.speed(),
+                self.status.originals + self.status.proxies > 0,
+                self.status.picture == Picture::Ready,
+            );
             return None;
         }
         let mut exact = true;
+        let mut observation = Observation {
+            picture: Picture::Ready,
+            ..Default::default()
+        };
+        let mut video = false;
         let time = self.transport.rate.time_floor(index);
         let (cache, failed, stand_ins, stills) =
             (&mut self.cache, &self.failed, &self.stand_ins, &self.stills);
         let layers = resolve::<(), _>(project, frame_at(project, time), &mut |asset, layer| {
             if stills::is_still(&asset.path) {
                 if failed.contains_key(&(asset.id, Time(0))) {
+                    observation.picture = Picture::Failed;
+                    exact = false;
                     return Ok(None);
                 }
                 return Ok(Some(Pixels::Still(
@@ -1023,20 +1110,54 @@ impl Playback {
                 )));
             }
             // Not decoded yet: keep what's on screen. A failed decode leaves the layer out.
+            video = true;
             let key = (layer.asset, layer.source_time);
             if failed.contains_key(&key) {
+                observation.picture = Picture::Failed;
+                exact = false;
                 return Ok(None);
             }
             let f = match cache.get(&key) {
-                Some(f) => f,
+                Some(f) => {
+                    if cache.proxies.contains(&key) {
+                        observation.proxies += 1;
+                    } else {
+                        observation.originals += 1;
+                    }
+                    f
+                }
                 None => {
                     exact = false;
+                    if self.stand_in_proxies.contains(&key) {
+                        observation.proxies += 1;
+                    } else {
+                        observation.originals += 1;
+                    }
                     stand_ins.get(&key).cloned().flatten().ok_or(())?
                 }
             };
             Ok(Some(Pixels::Frame(f)))
-        })
-        .ok()?;
+        });
+        self.health.observe(
+            index,
+            self.transport.speed(),
+            video,
+            layers.is_ok() && exact && observation.picture != Picture::Failed,
+        );
+        let layers = match layers {
+            Ok(layers) => layers,
+            Err(()) => {
+                self.status.picture = Picture::Loading;
+                return None;
+            }
+        };
+        if !exact && observation.picture != Picture::Failed {
+            observation.picture = Picture::Approximate;
+        }
+        if layers.is_empty() && observation.picture != Picture::Failed {
+            observation.picture = Picture::Idle;
+        }
+        self.status = observation;
         if self.shown == Some((index, exact)) {
             return None;
         }
