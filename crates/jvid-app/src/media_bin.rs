@@ -397,12 +397,25 @@ impl MediaBin {
                 if importing {
                     ui.label(egui::RichText::new(tr!("bin.importing")).color(color::ink_3()));
                 } else if !self.query.trim().is_empty() || self.library.active() {
+                    let organized = self.library.active();
                     if suite_ui::empty_state::EmptyState::new(
                         icon::SEARCH,
-                        tr!("bin.no_results"),
-                        tr!("bin.no_results_help"),
+                        if organized {
+                            tr!("bin.no_results")
+                        } else {
+                            tr!("empty.search_media")
+                        },
+                        if organized {
+                            tr!("bin.no_results_help")
+                        } else {
+                            tr!("empty.search_help")
+                        },
                     )
-                    .action(tr!("bin.reset_view"))
+                    .action(if organized {
+                        tr!("bin.reset_view")
+                    } else {
+                        tr!("empty.clear_search")
+                    })
                     .show(ui)
                     .action
                     .is_some_and(|r| r.clicked())

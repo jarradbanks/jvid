@@ -212,12 +212,11 @@ impl MediaBin {
                 .library_selection(project)
                 .iter()
                 .all(|id| project.media_library().entry(*id).favorite);
-        let response = ui.add_enabled(
-            available.is_enabled(),
-            egui::Button::new(name)
-                .shortcut_text(binding)
-                .selected(favorite),
-        );
+        let mut button = egui::Button::new(name).selected(favorite);
+        if !binding.is_empty() {
+            button = button.shortcut_text(binding);
+        }
+        let response = ui.add_enabled(available.is_enabled(), button);
         let response = if let Some(reason) = available.reason() {
             response.on_disabled_hover_text(reason)
         } else {
@@ -852,4 +851,3 @@ mod tests {
         }
     }
 }
-
