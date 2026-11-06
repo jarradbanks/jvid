@@ -3,6 +3,7 @@
 # infinitive, as in Dutch Windows. Terms follow docs/i18n/nl.md.
 
 [action]
+command_palette = "Opdrachtenpalet"
 text_tool = "Tekstgereedschap"
 export_subtitles = "Ondertitels exporteren (.srt)…"
 new_project = "Nieuw project"
@@ -1088,3 +1089,11 @@ transcript = "Nog geen transcript"
 transcript_help = "Transcribeer spraak uit je clips om met tekst te monteren."
 no_audio = "Geen audio om te transcriberen"
 no_audio_help = "Voeg een clip met audio toe aan de tijdlijn om een transcript te starten."
+
+[palette]
+title = "Opdrachtenpalet"
+no_results = "Geen overeenkomende opdrachten"
+focus_timeline = "Activeer de tijdlijn om deze opdracht te gebruiken"
+focus_playback = "Activeer Bron, Programma of Tijdlijn om deze opdracht te gebruiken"
+unavailable = "Deze opdracht is niet beschikbaar in de huidige context"
+no_source = "Laad eerst een clip in Bron"

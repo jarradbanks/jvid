@@ -3,6 +3,7 @@
 # items use the imperative (Lagre). Terms follow docs/i18n/nb.md.
 
 [action]
+command_palette = "Kommandopalett"
 text_tool = "Tekstverktøy"
 export_subtitles = "Eksporter undertekster (.srt)…"
 new_project = "Nytt prosjekt"
@@ -1073,3 +1074,11 @@ transcript = "Ingen transkripsjon ennå"
 transcript_help = "Transkriber talen i klippene dine for å redigere med tekst."
 no_audio = "Ingen lyd å transkribere"
 no_audio_help = "Legg til et klipp med lyd på tidslinjen for å starte en transkripsjon."
+
+[palette]
+title = "Kommandopalett"
+no_results = "Ingen samsvarende kommandoer"
+focus_timeline = "Aktiver tidslinjen for å bruke kommandoen"
+focus_playback = "Aktiver Kilde, Program eller Tidslinje for å bruke kommandoen"
+unavailable = "Kommandoen er ikke tilgjengelig i denne sammenhengen"
+no_source = "Last først inn et klipp i Kilde"

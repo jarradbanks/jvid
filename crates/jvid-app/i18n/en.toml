@@ -3,6 +3,7 @@
 
 # Keyboard actions, by keymap.toml id: menus, the shortcut editor and docs/shortcuts.md.
 [action]
+command_palette = "Command Palette"
 text_tool = "Text Tool"
 export_subtitles = "Export Subtitles (.srt)…"
 new_project = "New Project"
@@ -1179,3 +1180,11 @@ transcript = "No Transcript Yet"
 transcript_help = "Transcribe speech from your clips to edit with text."
 no_audio = "No Audio to Transcribe"
 no_audio_help = "Add a clip with audio to the timeline to start a transcript."
+
+[palette]
+title = "Command Palette"
+no_results = "No matching commands"
+focus_timeline = "Focus the timeline to use this command"
+focus_playback = "Focus Source, Program or Timeline to use this command"
+unavailable = "This command is unavailable in the current context"
+no_source = "Load a clip in Source first"

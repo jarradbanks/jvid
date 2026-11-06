@@ -5,6 +5,7 @@
 # every English key.
 
 [action]
+command_palette = "명령 팔레트"
 text_tool = "텍스트 도구"
 export_subtitles = "자막 내보내기 (.srt)…"
 new_project = "새 프로젝트"
@@ -1075,3 +1076,11 @@ transcript = "아직 전사문이 없습니다"
 transcript_help = "클립의 음성을 전사하여 텍스트로 편집하세요."
 no_audio = "전사할 오디오가 없습니다"
 no_audio_help = "오디오가 있는 클립을 타임라인에 추가하여 전사를 시작하세요."
+
+[palette]
+title = "명령 팔레트"
+no_results = "일치하는 명령이 없습니다"
+focus_timeline = "이 명령을 사용하려면 타임라인을 활성화하세요"
+focus_playback = "이 명령을 사용하려면 소스, 프로그램 또는 타임라인을 활성화하세요"
+unavailable = "현재 상황에서는 이 명령을 사용할 수 없습니다"
+no_source = "먼저 소스에 클립을 불러오세요"

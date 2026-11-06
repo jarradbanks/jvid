@@ -3,6 +3,7 @@
 # Terms follow docs/i18n/pt-BR.md.
 
 [action]
+command_palette = "Paleta de Comandos"
 text_tool = "Ferramenta de texto"
 export_subtitles = "Exportar legendas (.srt)…"
 new_project = "Novo projeto"
@@ -1089,3 +1090,11 @@ transcript = "Nenhuma transcrição ainda"
 transcript_help = "Transcreva a fala dos clipes para editar com texto."
 no_audio = "Nenhum áudio para transcrever"
 no_audio_help = "Adicione um clipe com áudio à linha do tempo para iniciar uma transcrição."
+
+[palette]
+title = "Paleta de Comandos"
+no_results = "Nenhum comando correspondente"
+focus_timeline = "Ative a linha do tempo para usar este comando"
+focus_playback = "Ative Origem, Programa ou Linha do Tempo para usar este comando"
+unavailable = "Este comando não está disponível no contexto atual"
+no_source = "Carregue primeiro um clipe em Origem"

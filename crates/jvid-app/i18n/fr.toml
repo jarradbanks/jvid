@@ -3,6 +3,7 @@
 # docs/i18n/fr.md. The spaces before : ; ? ! and inside « » are no-break spaces (U+00A0).
 
 [action]
+command_palette = "Palette de Commandes"
 text_tool = "Outil Texte"
 export_subtitles = "Exporter les sous-titres (.srt)…"
 new_project = "Nouveau projet"
@@ -1096,3 +1097,11 @@ transcript = "Aucune transcription"
 transcript_help = "Transcrivez la parole de vos clips pour monter avec du texte."
 no_audio = "Aucun audio à transcrire"
 no_audio_help = "Ajoutez un clip avec du son à la timeline pour commencer une transcription."
+
+[palette]
+title = "Palette de Commandes"
+no_results = "Aucune commande correspondante"
+focus_timeline = "Activez la timeline pour utiliser cette commande"
+focus_playback = "Activez Source, Programme ou Timeline pour utiliser cette commande"
+unavailable = "Cette commande est indisponible dans le contexte actuel"
+no_source = "Chargez d’abord un clip dans Source"

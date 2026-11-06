@@ -3,6 +3,7 @@
 # imperatives (Desa, Obre) and messages address the user as vós (Seleccioneu). See docs/i18n/ca.md.
 
 [action]
+command_palette = "Paleta d’Ordres"
 text_tool = "Eina de text"
 export_subtitles = "Exporta els subtítols (.srt)…"
 new_project = "Projecte nou"
@@ -1085,3 +1086,11 @@ transcript = "Encara no hi ha transcripció"
 transcript_help = "Transcriu la parla dels clips per editar amb text."
 no_audio = "Cap àudio per transcriure"
 no_audio_help = "Afegeix un clip amb àudio a la línia de temps per iniciar una transcripció."
+
+[palette]
+title = "Paleta d’Ordres"
+no_results = "No hi ha ordres coincidents"
+focus_timeline = "Activa la línia de temps per fer servir aquesta ordre"
+focus_playback = "Activa Origen, Programa o Línia de Temps per fer servir aquesta ordre"
+unavailable = "Aquesta ordre no està disponible en el context actual"
+no_source = "Carrega primer un clip a Origen"

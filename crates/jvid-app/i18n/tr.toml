@@ -5,6 +5,7 @@
 # {placeholder}: vowel harmony can't follow it. Terms follow docs/i18n/tr.md.
 
 [action]
+command_palette = "Komut Paleti"
 text_tool = "Metin aracı"
 export_subtitles = "Altyazıları dışa aktar (.srt)…"
 new_project = "Yeni Proje"
@@ -1076,3 +1077,11 @@ transcript = "Henüz Döküm Yok"
 transcript_help = "Metinle düzenlemek için kliplerinizdeki konuşmayı yazıya dökün."
 no_audio = "Yazıya Dökülecek Ses Yok"
 no_audio_help = "Döküm başlatmak için zaman çizelgesine ses içeren bir klip ekleyin."
+
+[palette]
+title = "Komut Paleti"
+no_results = "Eşleşen komut yok"
+focus_timeline = "Bu komutu kullanmak için zaman çizelgesini etkinleştirin"
+focus_playback = "Bu komutu kullanmak için Kaynak, Program veya Zaman Çizelgesi panelini etkinleştirin"
+unavailable = "Bu komut geçerli bağlamda kullanılamıyor"
+no_source = "Önce Kaynak paneline bir klip yükleyin"

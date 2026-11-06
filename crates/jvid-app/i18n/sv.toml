@@ -3,6 +3,7 @@
 # items use the imperative (Spara, Lägg till markör). Terms follow docs/i18n/sv.md.
 
 [action]
+command_palette = "Kommandopalett"
 text_tool = "Textverktyg"
 export_subtitles = "Exportera undertexter (.srt)…"
 new_project = "Nytt projekt"
@@ -1073,3 +1074,11 @@ transcript = "Ingen transkription ännu"
 transcript_help = "Transkribera talet i dina klipp för att redigera med text."
 no_audio = "Inget ljud att transkribera"
 no_audio_help = "Lägg till ett klipp med ljud på tidslinjen för att börja transkribera."
+
+[palette]
+title = "Kommandopalett"
+no_results = "Inga matchande kommandon"
+focus_timeline = "Aktivera tidslinjen för att använda kommandot"
+focus_playback = "Aktivera Källa, Program eller Tidslinje för att använda kommandot"
+unavailable = "Kommandot är inte tillgängligt i det aktuella sammanhanget"
+no_source = "Läs först in ett klipp i Källa"
