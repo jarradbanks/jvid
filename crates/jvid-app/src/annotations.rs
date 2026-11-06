@@ -725,6 +725,9 @@ mod tests {
 
     #[test]
     fn narrow_inspector_and_endpoint_drag_at_two_dpi_scales() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         use egui_kittest::{Harness, kittest::Queryable};
         if !suite_ui::test_support::gpu() {
             return;

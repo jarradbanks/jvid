@@ -54,6 +54,30 @@ mod zoom;
 mod test_util {
     use egui_kittest::kittest::Queryable;
 
+    /// Locale is process-global; readers outside a locale test do not take its lock.
+    /// Returns true in the parent after the exact test passed in a fresh process.
+    pub fn isolate_locale() -> bool {
+        const CHILD: &str = "JVID_LOCALE_TEST_CHILD";
+        let thread = std::thread::current();
+        let name = thread.name().expect("named test thread");
+        if std::env::var(CHILD).is_ok_and(|child| child == name) {
+            return false;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--nocapture", "--test-threads=1"])
+            .env(CHILD, name)
+            .output()
+            .expect("start isolated locale test");
+        assert!(
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"),
+            "{name} failed in isolated process: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        true
+    }
+
     /// Opens each dropdown `labels` names in turn and closes it again: its label and the
     /// rect of the menu it opened.
     pub fn menu_rects<S>(

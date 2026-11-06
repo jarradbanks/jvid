@@ -1296,12 +1296,18 @@ mod tests {
 
     #[test]
     fn inspector_named_actions_work_in_narrow_panel() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         ui_controls(1.0, Category::Audio);
         ui_controls(1.0, Category::Text);
     }
 
     #[test]
     fn inspector_named_actions_work_at_high_dpi() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         ui_controls(1.5, Category::Audio);
         ui_controls(1.5, Category::Text);
     }
