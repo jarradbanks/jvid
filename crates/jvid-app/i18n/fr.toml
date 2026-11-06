@@ -3,6 +3,9 @@
 # docs/i18n/fr.md. The spaces before : ; ? ! and inside « » are no-break spaces (U+00A0).
 
 [action]
+add_arrow = "Ajouter une flèche"
+add_rectangle = "Ajouter un rectangle"
+add_callout = "Ajouter un repère numéroté"
 text_tool = "Outil Texte"
 export_subtitles = "Exporter les sous-titres (.srt)…"
 new_project = "Nouveau projet"
@@ -867,6 +870,15 @@ split = "Avant/après partagé"
 
 # Keyframe lane captions, capitalized like the rest of the UI.
 [lane]
+annotation_a = "Point d’annotation 1"
+annotation_b = "Point d’annotation 2"
+annotation_number = "Numéro"
+annotation_width = "Épaisseur"
+annotation_arrow_head = "Pointe de flèche"
+annotation_callout_radius = "Rayon du repère"
+annotation_stroke_color = "Couleur du trait"
+annotation_fill_color = "Fond du repère"
+annotation_text_color = "Couleur du numéro"
 position = "Position"
 scale = "Échelle"
 rotation = "Rotation"
@@ -1117,3 +1129,20 @@ transcript = "Aucune transcription"
 transcript_help = "Transcrivez la parole de vos clips pour monter avec du texte."
 no_audio = "Aucun audio à transcrire"
 no_audio_help = "Ajoutez un clip avec du son à la timeline pour commencer une transcription."
+
+[annotations]
+title = "Annotation"
+endpoint = "Point d’annotation {point}"
+width = "Épaisseur"
+arrow_head = "Pointe de flèche"
+radius = "Rayon du repère"
+stroke = "Couleur du trait"
+fill = "Fond du repère"
+text_color = "Couleur du numéro"
+number = "Numéro"
+keyframe = "Ajouter une image clé"
+duration = "Durée"
+entrance = "Fondu entrant"
+exit = "Fondu sortant"
+program_only = "Choisissez Programme ou Montage pour ajouter des annotations."
+invalid = "Le projet contient une annotation non valide."

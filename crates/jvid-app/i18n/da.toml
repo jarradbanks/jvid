@@ -3,6 +3,9 @@
 # use the imperative (Gem). Terms follow docs/i18n/da.md.
 
 [action]
+add_arrow = "Tilføj pil"
+add_rectangle = "Tilføj rektangel"
+add_callout = "Tilføj nummereret markering"
 text_tool = "Tekstværktøj"
 export_subtitles = "Eksportér undertekster (.srt)…"
 new_project = "Nyt projekt"
@@ -843,6 +846,15 @@ bypass_grade = "Omgå gradering"
 split = "Delt før/efter"
 
 [lane]
+annotation_a = "Annoteringspunkt 1"
+annotation_b = "Annoteringspunkt 2"
+annotation_number = "Nummer"
+annotation_width = "Linjebredde"
+annotation_arrow_head = "Pilespids"
+annotation_callout_radius = "Cirkelradius"
+annotation_stroke_color = "Linjefarve"
+annotation_fill_color = "Cirkelfyld"
+annotation_text_color = "Nummerfarve"
 position = "Position"
 scale = "Skalering"
 rotation = "Rotation"
@@ -1094,3 +1106,20 @@ transcript_help = "Transskriber talen i dine klip for at redigere med tekst."
 no_audio = "Ingen lyd at transskribere"
 no_audio_help = "Tilføj et klip med lyd til tidslinjen for at starte en transskription."
 
+
+[annotations]
+title = "Annotering"
+endpoint = "Annoteringspunkt {point}"
+width = "Linjebredde"
+arrow_head = "Pilespids"
+radius = "Cirkelradius"
+stroke = "Linjefarve"
+fill = "Cirkelfyld"
+text_color = "Nummerfarve"
+number = "Nummer"
+keyframe = "Tilføj nøglebillede"
+duration = "Varighed"
+entrance = "Ton ind"
+exit = "Ton ud"
+program_only = "Vælg Program eller Tidslinje for at tilføje annoteringer."
+invalid = "Projektet indeholder en ugyldig annotering."

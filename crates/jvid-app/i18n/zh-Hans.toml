@@ -5,6 +5,9 @@
 # every English key.
 
 [action]
+add_arrow = "添加箭头"
+add_rectangle = "添加矩形"
+add_callout = "添加编号标注"
 text_tool = "文字工具"
 export_subtitles = "导出字幕 (.srt)…"
 new_project = "新建项目"
@@ -876,6 +879,15 @@ split = "前后对比分屏"
 
 # Keyframe lanes; an effect's lane is the effect's name, a middle dot, then its parameter caption.
 [lane]
+annotation_a = "标注点 1"
+annotation_b = "标注点 2"
+annotation_number = "编号"
+annotation_width = "线宽"
+annotation_arrow_head = "箭头大小"
+annotation_callout_radius = "圆圈半径"
+annotation_stroke_color = "线条颜色"
+annotation_fill_color = "圆圈填充"
+annotation_text_color = "编号颜色"
 position = "位置"
 scale = "缩放"
 rotation = "旋转"
@@ -1127,3 +1139,20 @@ transcript = "尚无转录文本"
 transcript_help = "转录片段中的语音，即可通过文本进行剪辑。"
 no_audio = "没有可转录的音频"
 no_audio_help = "将带有音频的片段添加到时间线以开始转录。"
+
+[annotations]
+title = "标注"
+endpoint = "标注点 {point}"
+width = "线宽"
+arrow_head = "箭头大小"
+radius = "圆圈半径"
+stroke = "线条颜色"
+fill = "圆圈填充"
+text_color = "编号颜色"
+number = "编号"
+keyframe = "添加关键帧"
+duration = "时长"
+entrance = "淡入"
+exit = "淡出"
+program_only = "请选择节目或时间线以添加标注。"
+invalid = "项目包含无效的标注。"

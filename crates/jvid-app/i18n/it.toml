@@ -3,6 +3,9 @@
 # imperatives, as on Windows and macOS. Terms follow docs/i18n/it.md.
 
 [action]
+add_arrow = "Aggiungi freccia"
+add_rectangle = "Aggiungi rettangolo"
+add_callout = "Aggiungi richiamo numerato"
 text_tool = "Strumento testo"
 export_subtitles = "Esporta sottotitoli (.srt)…"
 new_project = "Nuovo progetto"
@@ -855,6 +858,15 @@ bypass_grade = "Escludi correzione"
 split = "Prima/dopo diviso"
 
 [lane]
+annotation_a = "Punto annotazione 1"
+annotation_b = "Punto annotazione 2"
+annotation_number = "Numero"
+annotation_width = "Spessore linea"
+annotation_arrow_head = "Punta della freccia"
+annotation_callout_radius = "Raggio del cerchio"
+annotation_stroke_color = "Colore linea"
+annotation_fill_color = "Riempimento cerchio"
+annotation_text_color = "Colore numero"
 position = "Posizione"
 scale = "Scala"
 rotation = "Rotazione"
@@ -1106,3 +1118,20 @@ transcript_help = "Trascrivi il parlato delle clip per montare con il testo."
 no_audio = "Nessun audio da trascrivere"
 no_audio_help = "Aggiungi una clip con audio alla timeline per avviare una trascrizione."
 
+
+[annotations]
+title = "Annotazione"
+endpoint = "Punto annotazione {point}"
+width = "Spessore linea"
+arrow_head = "Punta della freccia"
+radius = "Raggio del cerchio"
+stroke = "Colore linea"
+fill = "Riempimento cerchio"
+text_color = "Colore numero"
+number = "Numero"
+keyframe = "Aggiungi fotogramma chiave"
+duration = "Durata"
+entrance = "Dissolvenza in entrata"
+exit = "Dissolvenza in uscita"
+program_only = "Seleziona Programma o Timeline per aggiungere annotazioni."
+invalid = "Il progetto contiene un’annotazione non valida."

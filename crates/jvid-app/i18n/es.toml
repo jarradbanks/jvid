@@ -2,6 +2,9 @@
 # Spanish labels use sentence case (Guardar como), not English Title Case.
 
 [action]
+add_arrow = "Añadir flecha"
+add_rectangle = "Añadir rectángulo"
+add_callout = "Añadir llamada numerada"
 text_tool = "Herramienta de texto"
 export_subtitles = "Exportar subtítulos (.srt)…"
 new_project = "Nuevo proyecto"
@@ -857,6 +860,15 @@ bypass_grade = "Omitir etalonaje"
 split = "Antes/después dividido"
 
 [lane]
+annotation_a = "Punto de anotación 1"
+annotation_b = "Punto de anotación 2"
+annotation_number = "Número"
+annotation_width = "Grosor de línea"
+annotation_arrow_head = "Punta de flecha"
+annotation_callout_radius = "Radio del círculo"
+annotation_stroke_color = "Color de línea"
+annotation_fill_color = "Relleno del círculo"
+annotation_text_color = "Color del número"
 position = "Posición"
 scale = "Escala"
 rotation = "Rotación"
@@ -1108,3 +1120,20 @@ transcript_help = "Transcribe el habla de tus clips para editar con texto."
 no_audio = "Sin audio para transcribir"
 no_audio_help = "Añade un clip con audio a la línea de tiempo para iniciar una transcripción."
 
+
+[annotations]
+title = "Anotación"
+endpoint = "Punto de anotación {point}"
+width = "Grosor de línea"
+arrow_head = "Punta de flecha"
+radius = "Radio del círculo"
+stroke = "Color de línea"
+fill = "Relleno del círculo"
+text_color = "Color del número"
+number = "Número"
+keyframe = "Añadir fotograma clave"
+duration = "Duración"
+entrance = "Fundido de entrada"
+exit = "Fundido de salida"
+program_only = "Selecciona Programa o Línea de tiempo para añadir anotaciones."
+invalid = "El proyecto contiene una anotación no válida."

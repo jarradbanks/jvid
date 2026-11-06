@@ -3,6 +3,9 @@
 # infinitive, as in Dutch Windows. Terms follow docs/i18n/nl.md.
 
 [action]
+add_arrow = "Pijl toevoegen"
+add_rectangle = "Rechthoek toevoegen"
+add_callout = "Genummerde markering toevoegen"
 text_tool = "Tekstgereedschap"
 export_subtitles = "Ondertitels exporteren (.srt)…"
 new_project = "Nieuw project"
@@ -858,6 +861,15 @@ split = "Voor/na gesplitst"
 
 # Keyframe lanes, starting with a capital like every other label.
 [lane]
+annotation_a = "Annotatiepunt 1"
+annotation_b = "Annotatiepunt 2"
+annotation_number = "Nummer"
+annotation_width = "Lijndikte"
+annotation_arrow_head = "Pijlpunt"
+annotation_callout_radius = "Cirkelstraal"
+annotation_stroke_color = "Lijnkleur"
+annotation_fill_color = "Cirkelvulling"
+annotation_text_color = "Nummerkleur"
 position = "Positie"
 scale = "Schaal"
 rotation = "Rotatie"
@@ -1109,3 +1121,20 @@ transcript = "Nog geen transcript"
 transcript_help = "Transcribeer spraak uit je clips om met tekst te monteren."
 no_audio = "Geen audio om te transcriberen"
 no_audio_help = "Voeg een clip met audio toe aan de tijdlijn om een transcript te starten."
+
+[annotations]
+title = "Annotatie"
+endpoint = "Annotatiepunt {point}"
+width = "Lijndikte"
+arrow_head = "Pijlpunt"
+radius = "Cirkelstraal"
+stroke = "Lijnkleur"
+fill = "Cirkelvulling"
+text_color = "Nummerkleur"
+number = "Nummer"
+keyframe = "Keyframe toevoegen"
+duration = "Duur"
+entrance = "Infaden"
+exit = "Uitfaden"
+program_only = "Kies Programma of Tijdlijn om annotaties toe te voegen."
+invalid = "Het project bevat een ongeldige annotatie."

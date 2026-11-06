@@ -5,6 +5,9 @@
 # {placeholder}: vowel harmony can't follow it. Terms follow docs/i18n/tr.md.
 
 [action]
+add_arrow = "Ok Ekle"
+add_rectangle = "Dikdörtgen Ekle"
+add_callout = "Numaralı Açıklama Ekle"
 text_tool = "Metin aracı"
 export_subtitles = "Altyazıları dışa aktar (.srt)…"
 new_project = "Yeni Proje"
@@ -846,6 +849,15 @@ bypass_grade = "Renk düzenini atla"
 split = "Önce/sonra bölünmüş"
 
 [lane]
+annotation_a = "Açıklama Noktası 1"
+annotation_b = "Açıklama Noktası 2"
+annotation_number = "Numara"
+annotation_width = "Çizgi Kalınlığı"
+annotation_arrow_head = "Ok Ucu"
+annotation_callout_radius = "Daire Yarıçapı"
+annotation_stroke_color = "Çizgi Rengi"
+annotation_fill_color = "Daire Dolgusu"
+annotation_text_color = "Numara Rengi"
 position = "Konum"
 scale = "Ölçek"
 rotation = "Döndürme"
@@ -1097,3 +1109,20 @@ transcript_help = "Metinle düzenlemek için kliplerinizdeki konuşmayı yazıya
 no_audio = "Yazıya Dökülecek Ses Yok"
 no_audio_help = "Döküm başlatmak için zaman çizelgesine ses içeren bir klip ekleyin."
 
+
+[annotations]
+title = "Açıklama"
+endpoint = "Açıklama Noktası {point}"
+width = "Çizgi Kalınlığı"
+arrow_head = "Ok Ucu"
+radius = "Daire Yarıçapı"
+stroke = "Çizgi Rengi"
+fill = "Daire Dolgusu"
+text_color = "Numara Rengi"
+number = "Numara"
+keyframe = "Anahtar Kare Ekle"
+duration = "Süre"
+entrance = "Belirme"
+exit = "Kaybolma"
+program_only = "Açıklama eklemek için Program veya Zaman Çizelgesi seçin."
+invalid = "Proje geçersiz bir açıklama içeriyor."

@@ -3,6 +3,9 @@
 # items use the infinitive (Speichern). Terms follow docs/i18n/de.md.
 
 [action]
+add_arrow = "Pfeil hinzufügen"
+add_rectangle = "Rechteck hinzufügen"
+add_callout = "Nummerierten Hinweis hinzufügen"
 text_tool = "Textwerkzeug"
 export_subtitles = "Untertitel exportieren (.srt)…"
 new_project = "Neues Projekt"
@@ -843,6 +846,15 @@ bypass_grade = "Grading umgehen"
 split = "Vorher/Nachher geteilt"
 
 [lane]
+annotation_a = "Anmerkungspunkt 1"
+annotation_b = "Anmerkungspunkt 2"
+annotation_number = "Nummer"
+annotation_width = "Linienstärke"
+annotation_arrow_head = "Pfeilspitze"
+annotation_callout_radius = "Kreisradius"
+annotation_stroke_color = "Linienfarbe"
+annotation_fill_color = "Kreisfüllung"
+annotation_text_color = "Zahlenfarbe"
 position = "Position"
 scale = "Skalierung"
 rotation = "Drehung"
@@ -1094,3 +1106,20 @@ transcript_help = "Transkribiere die Sprache deiner Clips, um mit Text zu schnei
 no_audio = "Kein Audio zum Transkribieren"
 no_audio_help = "Füge einen Clip mit Audio zur Timeline hinzu, um ein Transkript zu erstellen."
 
+
+[annotations]
+title = "Anmerkung"
+endpoint = "Anmerkungspunkt {point}"
+width = "Linienstärke"
+arrow_head = "Pfeilspitze"
+radius = "Kreisradius"
+stroke = "Linienfarbe"
+fill = "Kreisfüllung"
+text_color = "Zahlenfarbe"
+number = "Nummer"
+keyframe = "Keyframe hinzufügen"
+duration = "Dauer"
+entrance = "Einblenden"
+exit = "Ausblenden"
+program_only = "Wähle Programm oder Zeitleiste, um Anmerkungen hinzuzufügen."
+invalid = "Das Projekt enthält eine ungültige Anmerkung."

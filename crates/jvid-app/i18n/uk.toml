@@ -3,6 +3,9 @@
 # items use the infinitive. Terms follow docs/i18n/uk.md.
 
 [action]
+add_arrow = "Додати стрілку"
+add_rectangle = "Додати прямокутник"
+add_callout = "Додати нумеровану виноску"
 text_tool = "Інструмент тексту"
 export_subtitles = "Експорт субтитрів (.srt)…"
 new_project = "Новий проєкт"
@@ -871,6 +874,15 @@ bypass_grade = "Без грейдингу"
 split = "До/після: поділ"
 
 [lane]
+annotation_a = "Точка анотації 1"
+annotation_b = "Точка анотації 2"
+annotation_number = "Номер"
+annotation_width = "Товщина лінії"
+annotation_arrow_head = "Наконечник"
+annotation_callout_radius = "Радіус кола"
+annotation_stroke_color = "Колір лінії"
+annotation_fill_color = "Заливка кола"
+annotation_text_color = "Колір номера"
 position = "Положення"
 scale = "Масштаб"
 rotation = "Обертання"
@@ -1122,3 +1134,20 @@ transcript_help = "Транскрибуйте мовлення з кліпів �
 no_audio = "Немає аудіо для транскрипції"
 no_audio_help = "Додайте кліп зі звуком на часову шкалу, щоб почати транскрипцію."
 
+
+[annotations]
+title = "Анотація"
+endpoint = "Точка анотації {point}"
+width = "Товщина лінії"
+arrow_head = "Наконечник"
+radius = "Радіус кола"
+stroke = "Колір лінії"
+fill = "Заливка кола"
+text_color = "Колір номера"
+number = "Номер"
+keyframe = "Додати ключовий кадр"
+duration = "Тривалість"
+entrance = "Поява"
+exit = "Зникнення"
+program_only = "Виберіть Програму або Шкалу часу для додавання анотацій."
+invalid = "Проєкт містить недопустиму анотацію."

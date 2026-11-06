@@ -3,6 +3,9 @@
 # instructions imperatives with vykání. Terms follow docs/i18n/cs.md.
 
 [action]
+add_arrow = "Přidat šipku"
+add_rectangle = "Přidat obdélník"
+add_callout = "Přidat číslovanou značku"
 text_tool = "Textový nástroj"
 export_subtitles = "Exportovat titulky (.srt)…"
 new_project = "Nový projekt"
@@ -863,6 +866,15 @@ split = "Rozdělit před/po"
 
 # Keyframe lane captions, in sentence case like the rest of the Czech UI.
 [lane]
+annotation_a = "Bod anotace 1"
+annotation_b = "Bod anotace 2"
+annotation_number = "Číslo"
+annotation_width = "Šířka čáry"
+annotation_arrow_head = "Hrot šipky"
+annotation_callout_radius = "Poloměr kruhu"
+annotation_stroke_color = "Barva čáry"
+annotation_fill_color = "Výplň kruhu"
+annotation_text_color = "Barva čísla"
 position = "Pozice"
 scale = "Měřítko"
 rotation = "Otočení"
@@ -1113,3 +1125,20 @@ transcript = "Zatím žádný přepis"
 transcript_help = "Přepište řeč z klipů a stříhejte pomocí textu."
 no_audio = "Žádný zvuk k přepisu"
 no_audio_help = "Přidejte klip se zvukem na časovou osu a začněte přepis."
+
+[annotations]
+title = "Anotace"
+endpoint = "Bod anotace {point}"
+width = "Šířka čáry"
+arrow_head = "Hrot šipky"
+radius = "Poloměr kruhu"
+stroke = "Barva čáry"
+fill = "Výplň kruhu"
+text_color = "Barva čísla"
+number = "Číslo"
+keyframe = "Přidat klíčový snímek"
+duration = "Délka"
+entrance = "Roztmívání"
+exit = "Zatmívání"
+program_only = "Pro přidání anotací vyberte Program nebo Časovou osu."
+invalid = "Projekt obsahuje neplatnou anotaci."

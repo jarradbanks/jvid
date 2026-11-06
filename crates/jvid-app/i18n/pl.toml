@@ -3,6 +3,9 @@
 # docs/i18n/pl.md.
 
 [action]
+add_arrow = "Dodaj strzałkę"
+add_rectangle = "Dodaj prostokąt"
+add_callout = "Dodaj numerowany znacznik"
 text_tool = "Narzędzie tekstowe"
 export_subtitles = "Eksportuj napisy (.srt)…"
 new_project = "Nowy projekt"
@@ -871,6 +874,15 @@ bypass_grade = "Pomiń korekcję"
 split = "Przed/po – podział"
 
 [lane]
+annotation_a = "Punkt adnotacji 1"
+annotation_b = "Punkt adnotacji 2"
+annotation_number = "Numer"
+annotation_width = "Grubość linii"
+annotation_arrow_head = "Grot strzałki"
+annotation_callout_radius = "Promień koła"
+annotation_stroke_color = "Kolor linii"
+annotation_fill_color = "Wypełnienie koła"
+annotation_text_color = "Kolor numeru"
 position = "Pozycja"
 scale = "Skala"
 rotation = "Obrót"
@@ -1122,3 +1134,20 @@ transcript_help = "Transkrybuj mowę z klipów, aby montować za pomocą tekstu.
 no_audio = "Brak dźwięku do transkrypcji"
 no_audio_help = "Dodaj klip z dźwiękiem do osi czasu, aby rozpocząć transkrypcję."
 
+
+[annotations]
+title = "Adnotacja"
+endpoint = "Punkt adnotacji {point}"
+width = "Grubość linii"
+arrow_head = "Grot strzałki"
+radius = "Promień koła"
+stroke = "Kolor linii"
+fill = "Wypełnienie koła"
+text_color = "Kolor numeru"
+number = "Numer"
+keyframe = "Dodaj klatkę kluczową"
+duration = "Czas trwania"
+entrance = "Pojawianie"
+exit = "Zanikanie"
+program_only = "Wybierz Program lub Oś czasu, aby dodać adnotacje."
+invalid = "Projekt zawiera nieprawidłową adnotację."

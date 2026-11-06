@@ -59,6 +59,10 @@ pub const EDIT: &[&str] = &[
     "add_marker",
     "add_range_marker",
     "",
+    "add_arrow",
+    "add_rectangle",
+    "add_callout",
+    "",
     "select_all",
 ];
 

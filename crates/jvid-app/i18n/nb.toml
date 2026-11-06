@@ -3,6 +3,9 @@
 # items use the imperative (Lagre). Terms follow docs/i18n/nb.md.
 
 [action]
+add_arrow = "Legg til pil"
+add_rectangle = "Legg til rektangel"
+add_callout = "Legg til nummerert markering"
 text_tool = "Tekstverktøy"
 export_subtitles = "Eksporter undertekster (.srt)…"
 new_project = "Nytt prosjekt"
@@ -843,6 +846,15 @@ bypass_grade = "Omgå gradering"
 split = "Delt før/etter"
 
 [lane]
+annotation_a = "Merknadspunkt 1"
+annotation_b = "Merknadspunkt 2"
+annotation_number = "Nummer"
+annotation_width = "Linjebredde"
+annotation_arrow_head = "Pilspiss"
+annotation_callout_radius = "Sirkelradius"
+annotation_stroke_color = "Linjefarge"
+annotation_fill_color = "Sirkelfyll"
+annotation_text_color = "Nummerfarge"
 position = "Posisjon"
 scale = "Skala"
 rotation = "Rotasjon"
@@ -1094,3 +1106,20 @@ transcript_help = "Transkriber talen i klippene dine for å redigere med tekst."
 no_audio = "Ingen lyd å transkribere"
 no_audio_help = "Legg til et klipp med lyd på tidslinjen for å starte en transkripsjon."
 
+
+[annotations]
+title = "Merknad"
+endpoint = "Merknadspunkt {point}"
+width = "Linjebredde"
+arrow_head = "Pilspiss"
+radius = "Sirkelradius"
+stroke = "Linjefarge"
+fill = "Sirkelfyll"
+text_color = "Nummerfarge"
+number = "Nummer"
+keyframe = "Legg til nøkkelbilde"
+duration = "Varighet"
+entrance = "Ton inn"
+exit = "Ton ut"
+program_only = "Velg Program eller Tidslinje for å legge til merknader."
+invalid = "Prosjektet inneholder en ugyldig merknad."

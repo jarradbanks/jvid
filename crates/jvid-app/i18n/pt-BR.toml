@@ -3,6 +3,9 @@
 # Terms follow docs/i18n/pt-BR.md.
 
 [action]
+add_arrow = "Adicionar seta"
+add_rectangle = "Adicionar retângulo"
+add_callout = "Adicionar chamada numerada"
 text_tool = "Ferramenta de texto"
 export_subtitles = "Exportar legendas (.srt)…"
 new_project = "Novo projeto"
@@ -859,6 +862,15 @@ split = "Antes/depois dividido"
 # Keyframe lanes, sentence case. An effect's lane is the effect's name, a middle dot, then its
 # parameter caption (Granulação de filme · Quantidade).
 [lane]
+annotation_a = "Ponto de anotação 1"
+annotation_b = "Ponto de anotação 2"
+annotation_number = "Número"
+annotation_width = "Largura da linha"
+annotation_arrow_head = "Ponta da seta"
+annotation_callout_radius = "Raio do círculo"
+annotation_stroke_color = "Cor da linha"
+annotation_fill_color = "Preenchimento do círculo"
+annotation_text_color = "Cor do número"
 position = "Posição"
 scale = "Escala"
 rotation = "Rotação"
@@ -1110,3 +1122,20 @@ transcript = "Nenhuma transcrição ainda"
 transcript_help = "Transcreva a fala dos clipes para editar com texto."
 no_audio = "Nenhum áudio para transcrever"
 no_audio_help = "Adicione um clipe com áudio à linha do tempo para iniciar uma transcrição."
+
+[annotations]
+title = "Anotação"
+endpoint = "Ponto de anotação {point}"
+width = "Largura da linha"
+arrow_head = "Ponta da seta"
+radius = "Raio do círculo"
+stroke = "Cor da linha"
+fill = "Preenchimento do círculo"
+text_color = "Cor do número"
+number = "Número"
+keyframe = "Adicionar quadro-chave"
+duration = "Duração"
+entrance = "Aparecimento gradual"
+exit = "Desaparecimento gradual"
+program_only = "Escolha Programa ou Linha do tempo para adicionar anotações."
+invalid = "O projeto contém uma anotação inválida."

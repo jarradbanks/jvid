@@ -3,6 +3,9 @@
 # imperatives (Desa, Obre) and messages address the user as vós (Seleccioneu). See docs/i18n/ca.md.
 
 [action]
+add_arrow = "Afegeix una fletxa"
+add_rectangle = "Afegeix un rectangle"
+add_callout = "Afegeix una crida numerada"
 text_tool = "Eina de text"
 export_subtitles = "Exporta els subtítols (.srt)…"
 new_project = "Projecte nou"
@@ -855,6 +858,15 @@ bypass_grade = "Omet el gradat"
 split = "Abans/després dividit"
 
 [lane]
+annotation_a = "Punt d’anotació 1"
+annotation_b = "Punt d’anotació 2"
+annotation_number = "Número"
+annotation_width = "Gruix de línia"
+annotation_arrow_head = "Punta de fletxa"
+annotation_callout_radius = "Radi del cercle"
+annotation_stroke_color = "Color de línia"
+annotation_fill_color = "Farciment del cercle"
+annotation_text_color = "Color del número"
 position = "Posició"
 scale = "Escala"
 rotation = "Rotació"
@@ -1106,3 +1118,20 @@ transcript_help = "Transcriu la parla dels clips per editar amb text."
 no_audio = "Cap àudio per transcriure"
 no_audio_help = "Afegeix un clip amb àudio a la línia de temps per iniciar una transcripció."
 
+
+[annotations]
+title = "Anotació"
+endpoint = "Punt d’anotació {point}"
+width = "Gruix de línia"
+arrow_head = "Punta de fletxa"
+radius = "Radi del cercle"
+stroke = "Color de línia"
+fill = "Farciment del cercle"
+text_color = "Color del número"
+number = "Número"
+keyframe = "Afegeix un fotograma clau"
+duration = "Durada"
+entrance = "Fosa d’entrada"
+exit = "Fosa de sortida"
+program_only = "Tria Programa o Línia de temps per afegir anotacions."
+invalid = "El projecte conté una anotació no vàlida."

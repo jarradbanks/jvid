@@ -5,6 +5,9 @@
 # every English key.
 
 [action]
+add_arrow = "矢印を追加"
+add_rectangle = "長方形を追加"
+add_callout = "番号付き吹き出しを追加"
 text_tool = "テキストツール"
 export_subtitles = "字幕を書き出す (.srt)…"
 new_project = "新規プロジェクト"
@@ -845,6 +848,15 @@ bypass_grade = "グレードをバイパス"
 split = "前後を分割表示"
 
 [lane]
+annotation_a = "注釈の点 1"
+annotation_b = "注釈の点 2"
+annotation_number = "番号"
+annotation_width = "線の太さ"
+annotation_arrow_head = "矢印の先端"
+annotation_callout_radius = "円の半径"
+annotation_stroke_color = "線の色"
+annotation_fill_color = "円の塗りつぶし"
+annotation_text_color = "番号の色"
 position = "位置"
 scale = "スケール"
 rotation = "回転"
@@ -1096,3 +1108,20 @@ transcript_help = "クリップの音声を文字に起こして、テキスト�
 no_audio = "文字起こしする音声がありません"
 no_audio_help = "音声のあるクリップをタイムラインに追加して文字起こしを始めてください。"
 
+
+[annotations]
+title = "注釈"
+endpoint = "注釈の点 {point}"
+width = "線の太さ"
+arrow_head = "矢印の先端"
+radius = "円の半径"
+stroke = "線の色"
+fill = "円の塗りつぶし"
+text_color = "番号の色"
+number = "番号"
+keyframe = "キーフレームを追加"
+duration = "長さ"
+entrance = "フェードイン"
+exit = "フェードアウト"
+program_only = "注釈を追加するにはプログラムまたはタイムラインを選択してください。"
+invalid = "プロジェクトに無効な注釈が含まれています。"
