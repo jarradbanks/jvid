@@ -14,5 +14,6 @@ pub mod model;
 pub mod preset;
 pub mod reframe;
 pub mod settings;
+pub mod settings_transfer;
 pub mod srt;
 pub mod time;
