@@ -621,6 +621,9 @@ impl App {
                 let can = match id {
                     "undo" => self.history.can_undo(),
                     "redo" => self.history.can_redo(),
+                    id if crate::annotations::kind(id).is_some() => {
+                        self.annotation_applicability(true).is_enabled()
+                    }
                     _ => self.timeline.can(id, self.history.project().sequence()),
                 };
                 if menus::item(ui, &self.keymap, id, None, can) {
@@ -1029,6 +1032,15 @@ impl App {
 
     /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
     /// focus. shortcut: unimplemented actions are stubs until their features land.
+    fn annotation_applicability(&mut self, menu: bool) -> crate::keymap::Applicability {
+        let focused = self.dock.find_active_focused().map(|(_, tab)| *tab);
+        crate::keymap::Applicability::when(
+            menu || focused == Some(Tab::Timeline)
+                || (focused == Some(Tab::Preview) && self.preview_active == 1),
+            "annotations.program_only",
+        )
+    }
+
     fn run_action(&mut self, id: &str, menu: bool) {
         // Space and K stop the take along with playback, wherever focus is.
         if self.take.is_some() && matches!(id, "play_stop" | "shuttle_stop" | "record") {
@@ -1117,6 +1129,19 @@ impl App {
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
         let program_focused = preview_focused && self.preview_active == 1;
+        if let Some(kind) = crate::annotations::kind(id) {
+            if self.annotation_applicability(menu).is_enabled() {
+                match crate::annotations::create(&mut self.history, kind, self.timeline.playhead())
+                {
+                    Ok(clip) => {
+                        self.preview_active = 1;
+                        self.timeline.select_program_clip(clip);
+                    }
+                    Err(e) => tracing::warn!("annotation creation failed: {e}"),
+                }
+            }
+            return;
+        }
         if (timeline_focused || program_focused || menu) && PROGRAM_ACTIONS.contains(&id) {
             self.preview_active = 1;
             self.preview.program_action(id);
@@ -2469,11 +2494,17 @@ impl TabViewer for Viewer<'_> {
                     }
                 }
                 let selected = self.timeline.selected();
-                if let Some((c, g)) =
-                    crate::handles::show(ui, self.project, selected, t, frame, &|c| {
-                        let a = self.project.asset(c.asset)?;
-                        self.timeline.strip_frame(a, c.source_at(t))
-                    })
+                let (annotation, endpoint) =
+                    crate::annotations::show(ui, self.project, selected, t, frame);
+                if let Some((c, g)) = annotation {
+                    (self.command, self.gesture) = (Some(c), g);
+                }
+                if !endpoint
+                    && let Some((c, g)) =
+                        crate::handles::show(ui, self.project, selected, t, frame, &|c| {
+                            let a = self.project.asset(c.asset)?;
+                            self.timeline.strip_frame(a, c.source_at(t))
+                        })
                 {
                     (self.command, self.gesture) = (Some(c), g);
                 }

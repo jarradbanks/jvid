@@ -810,6 +810,11 @@ pub fn show(
     ui.set_max_width(ui.available_width() - gutter);
     let (clips, audio, shared, same) = (&sel.clips, &sel.audio, sel.shared, sel.same);
     let (mut edit, mut seek) = (None, None);
+    if pane == Pane::Video
+        && let Some(base) = shared.and_then(|a| a.annotation.as_ref())
+    {
+        edit = crate::annotations::inspector(ui, clips, base, t);
+    }
     let mut index = 0u64;
     for (id, props) in SECTIONS {
         let (clips, here) = if id == "audio" {
@@ -4810,6 +4815,7 @@ mod tests {
             out_point: None,
             solid: None,
             text: text.then(Text::default),
+            annotation: None,
             generated_caption: false,
             sequence: None,
         }

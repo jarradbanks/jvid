@@ -1,5 +1,6 @@
 //! The jvid desktop video editor's code, shared by its binary and the headless `jvid` CLI.
 
+mod annotations;
 pub mod app;
 mod autosave;
 mod components;

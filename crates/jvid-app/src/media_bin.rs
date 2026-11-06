@@ -1642,6 +1642,7 @@ mod tests {
             out_point: None,
             solid: None,
             text: None,
+            annotation: None,
             generated_caption: false,
             sequence: None,
         }
