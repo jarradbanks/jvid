@@ -15,6 +15,36 @@ pub enum Context {
     Timeline,
 }
 
+/// The single availability result shared by dispatch, menus and the command palette.
+/// Compute this against the same focused panel and target used by the action executor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Applicability {
+    Enabled,
+    /// A catalog key, resolved when displayed so an open surface follows language changes.
+    Disabled(&'static str),
+}
+
+impl Applicability {
+    pub fn when(enabled: bool, reason: &'static str) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled(reason)
+        }
+    }
+
+    pub fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+
+    pub fn reason(self) -> Option<&'static str> {
+        match self {
+            Self::Enabled => None,
+            Self::Disabled(key) => Some(CATALOG.get(key).unwrap_or(key)),
+        }
+    }
+}
+
 pub struct Action {
     pub id: &'static str,
     pub default: &'static str,
@@ -368,6 +398,16 @@ pub fn load_from(path: &Path) -> Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn applicability_shares_its_guard_and_translated_reason() {
+        let enabled = Applicability::when(true, "export.nothing");
+        assert!(enabled.is_enabled());
+        assert_eq!(enabled.reason(), None);
+        let disabled = Applicability::when(false, "export.nothing");
+        assert!(!disabled.is_enabled());
+        assert_eq!(disabled.reason(), CATALOG.get("export.nothing"));
+    }
 
     #[test]
     fn action_names_are_title_case() {
