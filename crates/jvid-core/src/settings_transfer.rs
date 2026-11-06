@@ -389,11 +389,8 @@ impl crate::personal_presets::Preset {
                         return Err(Error::MaskNeedsTransform.into());
                     }
                     if effect.shader.is_empty()
-                        || effect.shader.len() > 255
-                        || effect
-                            .shader
-                            .chars()
-                            .any(|c| c.is_control() || matches!(c, '/' | '\\'))
+                        || effect.shader.len() > 16_384
+                        || effect.shader.chars().any(char::is_control)
                     {
                         return Err(invalid());
                     }
