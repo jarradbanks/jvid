@@ -16,7 +16,8 @@ claim that every clean-machine acceptance criterion has passed.
 - **Windows portable:** extract the entire ZIP to a writable folder and launch
   `jvid-app.exe`. Do not run it inside the ZIP viewer. No installation or elevation
   is needed. Keep DLLs and marker files beside the executable.
-- **macOS 14+, Apple Silicon:** open the DMG, drag `jvid.app` to Applications,
+- **macOS 15.8.1+, Apple Silicon:** on macOS 15, install the latest point update.
+  Open the DMG, drag `jvid.app` to Applications,
   eject the image and open the app. The portable ZIP instead extracts a folder
   containing `jvid.app`; keep it in a writable location. Ad hoc CI signatures do
   not constitute Developer ID signing or Apple notarization. Public distribution
