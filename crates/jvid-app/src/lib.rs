@@ -36,6 +36,7 @@ mod timeline;
 mod transcript;
 mod transport;
 mod updates;
+mod viewer_geometry;
 mod welcome;
 mod zoom;
 
