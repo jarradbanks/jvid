@@ -801,6 +801,8 @@ reset_all = "すべてリセット"
 file_type = "キーマップ"
 
 [preview]
+view_selection = "選択範囲を表示"
+pan_hint = "中央ボタンでドラッグして移動します。「フィット」で表示をリセットします。"
 position = "再生位置"
 more = "その他"
 fit = "フィット"

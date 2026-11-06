@@ -802,6 +802,8 @@ reset_all = "Tümünü Sıfırla"
 file_type = "Tuş Haritası"
 
 [preview]
+view_selection = "Seçimi Göster"
+pan_hint = "Kaydırmak için orta düğmeyle sürükleyin; görünümü sıfırlamak için Sığdır seçin."
 position = "Oynatma Konumu"
 more = "Diğer"
 fit = "Sığdır"

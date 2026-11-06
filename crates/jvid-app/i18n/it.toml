@@ -810,6 +810,8 @@ reset_all = "Reimposta tutto"
 file_type = "Mappa tasti"
 
 [preview]
+view_selection = "Mostra Selezione"
+pan_hint = "Trascina con il pulsante centrale per spostare; scegli Adatta per ripristinare la vista."
 position = "Posizione di Riproduzione"
 more = "Altro"
 fit = "Adatta"

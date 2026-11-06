@@ -799,6 +799,8 @@ reset_all = "Nulstil alle"
 file_type = "Tastaturgenveje"
 
 [preview]
+view_selection = "Vis Markering"
+pan_hint = "Træk med den midterste museknap for at panorere; vælg Tilpas for at nulstille visningen."
 position = "Afspilningsposition"
 more = "Mere"
 fit = "Tilpas"

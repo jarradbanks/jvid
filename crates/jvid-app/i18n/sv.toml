@@ -799,6 +799,8 @@ reset_all = "Återställ alla"
 file_type = "Tangentmappning"
 
 [preview]
+view_selection = "Visa Markering"
+pan_hint = "Dra med mittenknappen för att panorera; välj Anpassa för att återställa vyn."
 position = "Uppspelningsposition"
 more = "Mer"
 fit = "Anpassa"

@@ -811,6 +811,8 @@ reset_all = "Redefinir tudo"
 file_type = "Mapa de teclas"
 
 [preview]
+view_selection = "Ver Seleção"
+pan_hint = "Arraste com o botão do meio para deslocar; escolha Ajustar para redefinir a visualização."
 position = "Posição de Reprodução"
 more = "Mais"
 fit = "Ajustar"

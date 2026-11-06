@@ -825,6 +825,8 @@ reset_all = "Resetuj wszystkie"
 file_type = "Mapa klawiszy"
 
 [preview]
+view_selection = "Pokaż Zaznaczenie"
+pan_hint = "Przeciągnij środkowym przyciskiem myszy, aby przesunąć; wybierz Dopasuj, aby przywrócić widok."
 position = "Pozycja Odtwarzania"
 more = "Więcej"
 fit = "Dopasuj"

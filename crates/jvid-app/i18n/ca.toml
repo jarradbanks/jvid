@@ -810,6 +810,8 @@ reset_all = "Restableix-ho tot"
 file_type = "Mapa de tecles"
 
 [preview]
+view_selection = "Mostra la Selecció"
+pan_hint = "Arrossega amb el botó central per desplaçar; tria Ajusta per restablir la vista."
 position = "Posició de Reproducció"
 more = "Més"
 fit = "Ajusta"

@@ -870,6 +870,8 @@ file_type = "Keymap"
 
 # The Preview panel.
 [preview]
+view_selection = "View Selection"
+pan_hint = "Middle-drag to pan; choose Fit to reset the view."
 position = "Playback Position"
 more = "More"
 fit = "Fit"
