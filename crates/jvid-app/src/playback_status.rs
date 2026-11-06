@@ -70,9 +70,9 @@ impl Health {
 
 use std::path::PathBuf;
 
-use egui::{Ui, vec2};
+use egui::Ui;
 use jvid_media::proxy::Status as ProxyStatus;
-use suite_ui::tokens::{color, size};
+use suite_ui::tokens::color;
 
 use crate::i18n::tr;
 
@@ -132,19 +132,20 @@ pub fn control(
         };
         ui.add(suite_ui::widgets::Button::icon(glyph, tr!("preview.status")).ink(ink))
     } else {
-        ui.add_sized(
-            vec2(112.0, size::CONTROL),
-            egui::Button::new(
-                egui::RichText::new(if generating {
-                    format!("{} …", observation.label())
-                } else {
-                    observation.label().into()
-                })
-                .color(ink),
-            )
-            .frame(false)
-            .truncate(),
-        )
+        let response = ui.add(suite_ui::widgets::Button::ghost("").width(112.0));
+        let caption = if generating {
+            format!("{} …", observation.label())
+        } else {
+            observation.label().into()
+        };
+        let galley =
+            suite_ui::widgets::fit_text(ui, &caption, suite_ui::theme::body_strong(), ink, 88.0);
+        ui.painter().galley(
+            response.rect.center() - galley.mesh_bounds.center().to_vec2(),
+            galley,
+            ink,
+        );
+        response
     };
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("preview.status"))

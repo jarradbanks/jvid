@@ -2446,20 +2446,55 @@ mod program_tests {
             return;
         }
         for ppp in [1.0, 1.5] {
-            let (centre, items) = transport_ink([960.0, 360.0], ppp, None);
+            let (centre, items) = transport_ink([1280.0, 360.0], ppp, None);
             // Current time, separator and total; 5 buttons, Record, guides, checkbox box
-            // and label, and 2 dropdowns.
-            assert_eq!(items.len(), 14, "@{ppp}x: {items:?}");
+            // and label, 2 dropdowns, and the playback status caption.
+            assert_eq!(items.len(), 15, "@{ppp}x: {items:?}");
             // While recording: Stop, its elapsed time and meter join the row.
             let take = Some((std::time::Duration::from_secs(72), 0.5));
-            let (_, recording) = transport_ink([960.0, 360.0], ppp, take);
-            assert_eq!(recording.len(), 16, "@{ppp}x: {recording:?}");
+            let (_, recording) = transport_ink([1280.0, 360.0], ppp, take);
+            assert_eq!(recording.len(), 17, "@{ppp}x: {recording:?}");
             for i in items.iter().chain(&recording) {
                 assert!(
                     (i.1 - centre).abs() <= 1.0,
                     "@{ppp}x: {i:?} off the centre {centre}, all {items:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn playback_status_viewer_evidence() {
+        use egui_kittest::kittest::Queryable;
+        let Some(dir) = std::env::var_os("JVID_PLAYBACK_EVIDENCE_DIR").map(PathBuf::from) else {
+            return;
+        };
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, width) in [("viewer-compact", 240.0), ("viewer-wide", 960.0)] {
+            let mut h = egui_kittest::Harness::builder()
+                .with_size([width, 540.0])
+                .wgpu()
+                .build_eframe(|cc| Program {
+                    preview: Preview::new(cc.wgpu_render_state.as_ref()),
+                    history: History::new(Project::default()),
+                    fresh: true,
+                });
+            add_solid(&mut h.state_mut().history, [0.2, 0.25, 0.3, 1.0], Time(0));
+            h.run();
+            h.render()
+                .unwrap()
+                .save(dir.join(format!("{name}-control.png")))
+                .unwrap();
+            h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status"))
+                .click();
+            h.run();
+            h.render()
+                .unwrap()
+                .save(dir.join(format!("{name}.png")))
+                .unwrap();
         }
     }
 
