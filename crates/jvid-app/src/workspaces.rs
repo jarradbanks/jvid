@@ -26,7 +26,10 @@ pub struct PanelRegistration {
 
 /// Final feature wiring adds registrations here through the shell ownership window.
 /// Unregistered IDs in saved workspaces are safely omitted when applying the layout.
-pub const OPTIONAL_PANELS: &[PanelRegistration] = &[];
+pub const OPTIONAL_PANELS: &[PanelRegistration] = &[PanelRegistration {
+    id: HIGHLIGHTS_PANEL_ID,
+    tab: Tab::Highlights,
+}];
 
 const CORE_PANELS: &[PanelRegistration] = &[
     PanelRegistration {
@@ -593,7 +596,7 @@ mod tests {
             ),
             focused: Some("captions".into()),
         };
-        let mut restored = snapshot.restore(Panels::default());
+        let mut restored = snapshot.restore(Panels(&[]));
         assert_eq!(restored.iter_all_tabs().count(), 5);
         for panel in CORE_PANELS {
             assert!(tabs(&restored).contains(&panel.tab));
@@ -608,10 +611,7 @@ mod tests {
             dock: DockState::new(vec![CAPTIONS_PANEL_ID.into()]),
             focused: None,
         };
-        assert_eq!(
-            snapshot.restore(Panels::default()).iter_all_tabs().count(),
-            4
-        );
+        assert_eq!(snapshot.restore(Panels(&[])).iter_all_tabs().count(), 4);
     }
 
     #[test]
@@ -623,7 +623,7 @@ mod tests {
             dock: raw,
             focused: Some("highlights".into()),
         }
-        .restore(Panels::default());
+        .restore(Panels(&[]));
         assert_eq!(dock.iter_all_tabs().count(), 5);
         assert_eq!(
             dock.find_active_focused().map(|(_, tab)| *tab),

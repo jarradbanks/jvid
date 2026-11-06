@@ -120,6 +120,8 @@ pub enum Tab {
     RenderQueue,
     /// Opened from Timeline > Transcript; closable.
     Transcript,
+    /// Marker-backed review; persisted name is additive to legacy tabs.
+    Highlights,
 }
 
 impl Tab {
@@ -132,6 +134,7 @@ impl Tab {
             Tab::Timeline => tr!("panel.timeline"),
             Tab::RenderQueue => tr!("export.queue"),
             Tab::Transcript => tr!("panel.transcript"),
+            Tab::Highlights => tr!("highlights.review"),
         }
     }
 
@@ -144,6 +147,7 @@ impl Tab {
             Tab::Timeline => "timeline",
             Tab::RenderQueue => "render_queue",
             Tab::Transcript => "transcript",
+            Tab::Highlights => "highlights",
         }
     }
 }
@@ -258,6 +262,7 @@ pub struct App {
     queue: crate::export::queue::Queue,
     subtitles: crate::subtitles::Subtitles,
     transcript: crate::transcript::TranscriptPanel,
+    highlight_review: crate::highlight_review::HighlightReview,
     /// Dialogs waiting to be answered, the first one showing.
     prompts: Vec<Prompt>,
     /// The user chose to quit; the next close request goes through.
@@ -311,6 +316,7 @@ impl App {
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
         app.preview.set_proxies(caches.proxies.clone());
         app.set_recognition_cache(crate::transcript::Cache::new(caches.transcripts.clone()));
+        app.highlight_review = crate::highlight_review::HighlightReview::new(caches.clone());
         app.timeline = Timeline::new(caches);
         app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
         app.theme_setting = settings.theme.clone();
@@ -402,6 +408,7 @@ impl App {
             queue: Default::default(),
             subtitles,
             transcript,
+            highlight_review: Default::default(),
             prompts: Vec::new(),
             closing: false,
             lesson: None,
@@ -420,6 +427,7 @@ impl App {
         self.preview.reset_session();
         self.bin.reset_session();
         self.transcript.reset_session();
+        self.highlight_review.reset_session();
         self.subtitles.close();
         self.settings_dialog = Default::default();
         self.export_dialog = Default::default();
@@ -785,6 +793,9 @@ impl App {
             picked = self.action_menu_item(ui, "generate_subtitles");
             export = self.action_menu_item(ui, "export_subtitles");
             transcript = ui.button(tr!("menu.transcript")).clicked();
+            if self.action_menu_item(ui, "review_highlights") {
+                self.run_action("review_highlights", true);
+            }
         });
         if picked {
             self.run_action("generate_subtitles", true);
@@ -1237,6 +1248,29 @@ impl App {
             return Applicability::Disabled("palette.unavailable");
         };
         let enabled = match id {
+            "review_highlights" => Some(!self.on_welcome),
+            "export_highlights" => {
+                let revision = crate::highlight_review::ReviewRevision::current(
+                    self.project_session,
+                    &self.history,
+                );
+                self.highlight_review
+                    .sync(revision, self.history.project().sequence());
+                if self.highlight_review.is_stale(revision) {
+                    return Applicability::Disabled("highlights.stale");
+                }
+                if self.highlight_review.selected().is_empty() {
+                    return Applicability::Disabled("highlights.no_selected");
+                }
+                if self
+                    .highlight_review
+                    .snapshot(self.project_session, &self.history)
+                    .is_err()
+                {
+                    return Applicability::Disabled("highlights.invalid_span");
+                }
+                return Applicability::when(self.can_export(), "export.nothing");
+            }
             "maximize_panel" => {
                 return Applicability::when(
                     !self.on_welcome
@@ -1389,6 +1423,24 @@ impl App {
                     }
                     Err(error) => tracing::warn!("transfer settings: {error}"),
                     Ok(None) => {}
+                }
+                return;
+            }
+            "review_highlights" => return self.show_panel(Tab::Highlights),
+            "export_highlights" => {
+                if let Ok(selection) = self
+                    .highlight_review
+                    .snapshot(self.project_session, &self.history)
+                    && selection
+                        .validate(self.project_session, &self.history)
+                        .is_ok()
+                {
+                    let _ = self.export_dialog.open_highlight_selection(
+                        &selection,
+                        self.project_session,
+                        &self.history,
+                        &self.name(),
+                    );
                 }
                 return;
             }
@@ -2094,6 +2146,7 @@ impl eframe::App for App {
             {
                 self.timeline.seek(t);
             }
+            let highlight_export = self.action_applicability("export_highlights", false);
             let mut viewer = Viewer {
                 active_tabs,
                 titles,
@@ -2118,6 +2171,13 @@ impl eframe::App for App {
                 queue_action: None,
                 transcript: &mut self.transcript,
                 transcript_out: Default::default(),
+                highlight_review: &mut self.highlight_review,
+                highlight_revision: crate::highlight_review::ReviewRevision::current(
+                    self.project_session,
+                    &self.history,
+                ),
+                highlight_out: Default::default(),
+                highlight_export,
             };
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
@@ -2129,7 +2189,18 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            let (import, command, gesture, text_clip, relink, open, queue, transcript, tab_rects) = (
+            let (
+                import,
+                command,
+                gesture,
+                text_clip,
+                relink,
+                open,
+                queue,
+                transcript,
+                highlights,
+                tab_rects,
+            ) = (
                 viewer.import_clicked,
                 viewer.command,
                 viewer.gesture,
@@ -2138,10 +2209,13 @@ impl eframe::App for App {
                 viewer.open,
                 viewer.queue_action,
                 viewer.transcript_out,
+                viewer.highlight_out,
                 viewer.tab_rects,
             );
             paint_dock_frames(ui, &self.dock);
-            if !self.workspaces.is_maximized() { dock_bottom_target(ui, &mut self.dock); }
+            if !self.workspaces.is_maximized() {
+                dock_bottom_target(ui, &mut self.dock);
+            }
             if let Some(tab) = self.reveal_panel.take()
                 && let Some(path) = self.dock.find_tab(&tab)
                 && let Ok(leaf) = self.dock.leaf_mut(path.node_path())
@@ -2205,16 +2279,57 @@ impl eframe::App for App {
                 && command
                     .as_ref()
                     .is_some_and(|c| tutorial::silence_cut(c, self.history.project()));
+            let detected_highlights = matches!(command.as_ref(), Some(Command::Batch(commands)) if !commands.is_empty() && commands.iter().all(|c| matches!(c, Command::AddMarker { .. })));
             let applied = match (command, gesture) {
                 (Some(c), Some(k)) => Some(self.history.apply_coalesced(k, c)),
                 (Some(c), None) => Some(self.history.apply(c)),
                 (None, _) => None,
             };
+            if let Some(stop) = self.highlight_review.audition_stop(
+                crate::highlight_review::ReviewRevision::current(
+                    self.project_session,
+                    &self.history,
+                ),
+                self.timeline.playhead(),
+                self.preview.playing(),
+            ) {
+                self.preview.program_action("shuttle_stop");
+                self.timeline.seek(stop);
+            }
             if let Some(r) = &applied {
                 self.timeline.applied(r.is_ok());
                 if r.is_ok() {
                     self.lesson_silence_cut(silence_cut);
+                    if detected_highlights {
+                        self.show_panel(Tab::Highlights);
+                    }
                 }
+            }
+            if highlights.export {
+                self.run_action("export_highlights", false);
+            }
+            if let Some(span) = highlights.audition
+                && !self.highlight_review.is_stale(crate::highlight_review::ReviewRevision::current(self.project_session, &self.history))
+                && self.finalize_take()
+            {
+                self.preview_active = 1;
+                self.preview.program_action("shuttle_stop");
+                self.timeline.seek(span.0);
+                self.preview.hidden(
+                    ui.ctx(),
+                    self.history.project(),
+                    self.timeline.playhead(),
+                    false,
+                );
+                self.highlight_review.begin_audition(
+                    crate::highlight_review::ReviewRevision::current(
+                        self.project_session,
+                        &self.history,
+                    ),
+                    span,
+                );
+                self.preview.program_action("play_stop");
+                ui.ctx().request_repaint();
             }
             if let Some(creation) = text_clip
                 && let Err(e) = self.create_text(ui.ctx(), creation)
@@ -2275,6 +2390,9 @@ impl eframe::App for App {
                     tr!("subtitle_export.saved", path = path.display()),
                     now + TOAST_SECS,
                 ));
+            }
+            if !self.export_dialog.review_is_current(self.project_session, &self.history) {
+                self.toasts.push((tr!("highlights.stale").to_owned(), now + TOAST_SECS));
             }
             if let Some((reqs, _)) = self
                 .export_dialog
@@ -2612,6 +2730,10 @@ struct Viewer<'a> {
     queue_action: Option<QueueAction>,
     transcript: &'a mut crate::transcript::TranscriptPanel,
     transcript_out: crate::transcript::Output,
+    highlight_review: &'a mut crate::highlight_review::HighlightReview,
+    highlight_revision: crate::highlight_review::ReviewRevision,
+    highlight_out: crate::highlight_review::Output,
+    highlight_export: Applicability,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -2629,7 +2751,7 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn is_closeable(&self, tab: &Tab) -> bool {
-        matches!(tab, Tab::Transcript | Tab::RenderQueue)
+        matches!(tab, Tab::Transcript | Tab::RenderQueue | Tab::Highlights)
     }
 
     fn allowed_in_windows(&self, _tab: &mut Tab) -> bool {
@@ -2663,6 +2785,7 @@ impl TabViewer for Viewer<'_> {
             );
             let name = match tab {
                 Tab::Transcript => tr!("transcript.close"),
+                Tab::Highlights => tr!("highlights.close"),
                 _ => tr!("export.close_queue"),
             };
             close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
@@ -2743,6 +2866,22 @@ impl TabViewer for Viewer<'_> {
             }
             self.command = out.command.take().or(self.command.take());
             self.transcript_out = out;
+            return;
+        }
+        if *tab == Tab::Highlights {
+            let mut out = self.highlight_review.show_docked(
+                ui,
+                self.project,
+                self.highlight_revision,
+                focused,
+                self.highlight_export,
+                self.keymap,
+            );
+            if let Some((command, gesture)) = out.command.take() {
+                self.command = Some(command);
+                self.gesture = gesture;
+            }
+            self.highlight_out = out;
             return;
         }
         let source_tab = self.preview_views.get(*self.preview_active) == Some(&"source");
@@ -3019,6 +3158,100 @@ mod palette_tests {
             assert_eq!(app.history.project(), &before);
             assert!(!app.history.can_undo());
         }
+    }
+
+    #[test]
+    fn highlight_review_dispatch_opens_panel_and_rejects_export_after_edit() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = Harness::builder()
+            .with_size([960.0, 600.0])
+            .wgpu()
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run_steps(3);
+        let app = h.state_mut();
+        app.on_welcome = false;
+        app.history
+            .apply(Command::AddSolid {
+                name: "Review".into(),
+                color: [0.15, 0.3, 0.6, 1.0],
+            })
+            .unwrap();
+        let asset = app.history.project().assets()[0].id;
+        let placement = app
+            .history
+            .project()
+            .placement(asset, Time(0), false, None, false)
+            .unwrap();
+        app.history.apply(Command::Place(placement)).unwrap();
+        app.history
+            .apply(Command::AddMarker {
+                time: Time(FLICKS_PER_SECOND),
+                duration: Time(FLICKS_PER_SECOND),
+                name: "Manual Highlight".into(),
+            })
+            .unwrap();
+        assert!(
+            app.action_applicability("review_highlights", false)
+                .is_enabled()
+        );
+        app.run_action("review_highlights", false);
+        let project = app.history.project().clone();
+        h.run_steps(2);
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "Audition");
+        assert_eq!(h.state().history.project(), &project);
+        assert!(h.state().dock.find_tab(&Tab::Highlights).is_some());
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/highlight-review");
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render()
+            .unwrap()
+            .save(dir.join("app_highlights_960x600.png"))
+            .unwrap();
+        let app = h.state_mut();
+        assert!(
+            app.action_applicability("export_highlights", false)
+                .is_enabled()
+        );
+        app.run_action("export_highlights", false);
+        assert!(app.export_dialog.is_open());
+        let mut marker = app.history.project().sequence().markers()[0].clone();
+        marker.time = Time(2 * FLICKS_PER_SECOND);
+        app.history.apply(Command::SetMarker(marker)).unwrap();
+        assert!(
+            !app.action_applicability("export_highlights", false)
+                .is_enabled()
+        );
+        h.run_steps(3);
+        assert!(!h.state().export_dialog.is_open());
+        h.render()
+            .unwrap()
+            .save(dir.join("app_highlights_stale.png"))
+            .unwrap();
+        assert!(h.state().highlight_review.is_stale(
+            crate::highlight_review::ReviewRevision::current(
+                h.state().project_session,
+                &h.state().history
+            )
+        ));
+        let refresh = h
+            .query_by_label("Use Current Highlights")
+            .expect("review refresh button missing; see stale artifact");
+        refresh.click();
+        h.run_steps(3);
+        assert!(
+            h.state_mut()
+                .action_applicability("export_highlights", false)
+                .is_enabled()
+        );
+        let app = h.state_mut();
+        app.close_panel(Tab::Highlights);
+        app.reset_layout();
+        assert!(app.dock.find_tab(&Tab::Highlights).is_none());
+        app.new_project(None);
+        assert!(app.highlight_review.selected().is_empty());
     }
 
     #[test]
