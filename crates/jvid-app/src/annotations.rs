@@ -160,6 +160,18 @@ pub fn hit(project: &Project, c: &Clip, t: Time, frame: Rect, pos: Pos2) -> bool
 fn property(c: &Clip, name: &str, value: Value, t: Time, animate: bool) -> Command {
     let mut keys = c.keyframes.clone();
     let list = keys.entry(name.into()).or_default();
+    // One key is a static override. Opting into animation seeds a constant curve at
+    // both visible source edges so later edits can key the playhead without ambiguity.
+    if animate && list.len() < 2 && c.source_out.0 - c.source_in.0 > 1 {
+        let held = list.first().map_or(value, |k| k.value);
+        *list = [c.source_in, Time(c.source_out.0 - 1)]
+            .map(|time| Keyframe {
+                time,
+                value: held,
+                easing: Easing::Linear,
+            })
+            .to_vec();
+    }
     let animated = animate || list.len() > 1;
     let time = if animated {
         c.source_at(t)
@@ -306,10 +318,12 @@ pub fn inspector(ui: &mut Ui, clips: &[&Clip], base: &Annotation, at: Time) -> O
         }
         ui.push_id(name, |ui| {
             ui.horizontal(|ui| {
-                let row_label = ui.add_sized(
-                    [size::INSPECTOR_LABEL, 24.0],
-                    egui::Label::new(label(name)).wrap(),
-                );
+                let row_label = ui
+                    .add_sized(
+                        [size::INSPECTOR_LABEL, 24.0],
+                        egui::Label::new(label(name)).truncate(),
+                    )
+                    .on_hover_text(label(name));
                 let mut value = shown.get(name).expect("annotation field");
                 let room = (ui.available_width() - 24.0 - space::S4).max(24.0);
                 let r = match &mut value {
@@ -379,10 +393,12 @@ pub fn inspector(ui: &mut Ui, clips: &[&Clip], base: &Annotation, at: Time) -> O
     ] {
         ui.push_id(name, |ui| {
             ui.horizontal(|ui| {
-                let row_label = ui.add_sized(
-                    [size::INSPECTOR_LABEL, 24.0],
-                    egui::Label::new(label).wrap(),
-                );
+                let row_label = ui
+                    .add_sized(
+                        [size::INSPECTOR_LABEL, 24.0],
+                        egui::Label::new(label).truncate(),
+                    )
+                    .on_hover_text(label);
                 let duration = first.end() - first.start;
                 let old = match name {
                     "entrance" => first.transform.fade_in,
@@ -558,6 +574,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn style_animation_is_opt_in_and_survives_reopen() {
+        let mut h = History::new(Project::default());
+        let id = create(&mut h, AnnotationKind::Arrow, Time(0)).unwrap();
+        let c = h.project().sequence().clip(id).unwrap().1;
+        h.apply(property(
+            c,
+            "annotation_width",
+            Value::Scalar(10.0),
+            Time(FLICKS_PER_SECOND),
+            false,
+        ))
+        .unwrap();
+        let c = h.project().sequence().clip(id).unwrap().1;
+        assert_eq!(c.keyframes["annotation_width"].len(), 1);
+        h.apply(property(
+            c,
+            "annotation_width",
+            Value::Scalar(10.0),
+            Time(0),
+            true,
+        ))
+        .unwrap();
+        let c = h.project().sequence().clip(id).unwrap().1;
+        h.apply(property(
+            c,
+            "annotation_width",
+            Value::Scalar(20.0),
+            Time(2 * FLICKS_PER_SECOND),
+            false,
+        ))
+        .unwrap();
+        let c = h.project().sequence().clip(id).unwrap().1;
+        assert_eq!(
+            c.value_at("annotation_width", Time(FLICKS_PER_SECOND)),
+            Some(Value::Scalar(15.0))
+        );
+        let json = jvid_core::file::to_json(h.project(), std::path::Path::new("/project")).unwrap();
+        assert_eq!(
+            jvid_core::file::from_json(&json, std::path::Path::new("/project"), |_| false).unwrap(),
+            *h.project()
+        );
+    }
+
     struct Editor {
         preview: crate::preview::Preview,
         history: History,
@@ -627,13 +687,24 @@ mod tests {
         if !suite_ui::test_support::gpu() {
             return;
         }
-        for dpi in [1.0, 1.5] {
+        let previous_language = suite_ui::i18n::language();
+        if let Ok(language) = std::env::var("JVID_N_UI_LANGUAGE") {
+            suite_ui::i18n::set_language(&language);
+        }
+        for (dpi, kind) in [1.0, 1.5].into_iter().flat_map(|dpi| {
+            [
+                AnnotationKind::Arrow,
+                AnnotationKind::Rectangle,
+                AnnotationKind::Callout,
+            ]
+            .map(|kind| (dpi, kind))
+        }) {
             let mut history = History::new(Project::default());
             let mut settings = history.project().settings().clone();
             settings.width = 640;
             settings.height = 360;
             history.apply(Command::SetSettings(settings)).unwrap();
-            let clip = create(&mut history, AnnotationKind::Callout, Time(0)).unwrap();
+            let clip = create(&mut history, kind, Time(0)).unwrap();
             let c = history.project().sequence().clip(clip).unwrap().1;
             let mut x = c.transform.clone();
             x.rotation = 27.0;
@@ -692,10 +763,12 @@ mod tests {
                 h.render()
                     .unwrap()
                     .save(
-                        std::path::PathBuf::from(dir).join(format!("annotation-editor-{dpi}.png")),
+                        std::path::PathBuf::from(dir)
+                            .join(format!("annotation-{kind:?}-{dpi}.png")),
                     )
                     .unwrap();
             }
         }
+        suite_ui::i18n::set_language(previous_language);
     }
 }
