@@ -429,12 +429,18 @@
       "spec": "Package T: Timeline feedback\n\nYou are an Orca worker executing one approved jvid workflow package for Run run_bdd46aa1fc52, coordinated solely by the execution orchestrator. Work only in the assigned isolated Omarchy checkout. Do not dispatch additional workers, implement other packages, merge main, change protection, or publish releases/tags. Base on the coordinator-specified commit reconciled with latest origin/main, never the repo default origin/develop; fetch/inspect before changing the base and report divergence. Read DESIGN.md and applicable AGENTS.md. The approved scope and exact acceptance for this package are included below. Preserve remappable shortcuts, translated labels, narrow panels and all three OSes. Content changes must undo, persist and match playback/export; view state must not alter renders. Keep jvid-core free of UI/media/I/O dependencies. Implement substantial logic in the owned modules. Shared-file patches require a declared coordinator ownership window and a small separate integration commit; include exact changed paths in the report. Publish a small contract commit before dependent consumers when named below. At checkpoints read the live preamble inbox; ask the coordinator with the preamble command when genuinely blocked. Follow that preamble exactly for heartbeat, Task/Dispatch IDs and one worker_done; do not invent handles or send lifecycle completion from another terminal. Commit the work and supply a report with commits, files, exact test commands/results, any skipped tests, UI artifact paths where appropriate and material limitations. Run focused meaningful tests plus formatting; do not claim manual/platform verification from unit tests. The coordinator independently reviews and integrates. Report before scope changes or any ownership collision.\n\nTarget and exclusive owned files: crates/jvid-app/src/timeline/edit_feedback.rs (new); crates/jvid-app/src/timeline/feedback_tests.rs.\n\nIntegration ownership and concrete work: Coordinate timeline.rs drag/trim/snap integration as a separate serialized patch; do not own silence/highlights/markers domain modules. Build feedback from the same validated planned edit used on commit, with snap target labels and trim delta near pointer and temporary overwrite/ripple result. Locked/linked rules and live modifier changes must agree. Test insert/overwrite/ripple, snap, autoscroll, cancellation, locks/links and narrow/high-DPI hit bounds.\n\nShared contracts:\nCoordinator serializes changes to core model.rs/history.rs/file.rs/lib.rs, app.rs/lib.rs, shared keymap wiring, i18n catalogs and guide docs. Workers may propose narrowly scoped changes in separately identified commits but must obtain a coordinator ownership window before applying shared-file changes that overlap another active task. No independent schema-version increments. Prefer backward-compatible serde defaults and preserve all legacy projects/settings.\nKeep keymap::ACTIONS and its stable string IDs authoritative, resolve translated names and actual current bindings at display time, and expose one applicability result (enabled or a translated reason) consumed by palette/menu/dispatch. Preserve Source-vs-Program and focused-panel routing and restore prior focus after palette close. Feature workers submit registration IDs and a small wiring patch to coordinator; do not maintain a second action executor.\n\n### T — Timeline feedback (#9)\n\nTarget: timeline drag/trim/snap feedback. Temporary overwrite/ripple preview, snap-target label and trim delta near the pointer. Feedback derives from the same planned edit as commit so it never promises a different result. Respect locked tracks and linked media; modifier changes update the preview. No decorative persistent clutter. Test insert/overwrite/ripple, snapping, autoscroll, cancellation and high-DPI/narrow layouts. Coordinate shared timeline integration with H and S.",
       "task_id": "task_2716eb521408",
       "dispatch_id": "ctx_0afbed99893c",
-      "implementation_status": "dispatched",
+      "implementation_status": "reviewed_and_serially_integrated_next_batch",
       "creation_request_id": "ac065d76-6ab0-42e5-bb44-91ea3875c173",
       "launch_request_id": "d7889476-d341-405e-8131-46fec4497562",
       "effective_model": "gpt-6.1-sol",
       "effective_effort": "xhigh",
-      "worktree_id": "41ac820a-a842-48f7-82fb-7df422766c74::/home/jarrad/orca/workspaces/jvid/workflow-timeline-feedback"
+      "worktree_id": "41ac820a-a842-48f7-82fb-7df422766c74::/home/jarrad/orca/workspaces/jvid/workflow-timeline-feedback",
+      "worker_head": "d4df4eef34aa6d3ce5b8ada6d3df8b2b26893197",
+      "lifecycle": "released",
+      "release_request_id": "4196e781-addb-4068-988e-8701a47f40ad",
+      "release_process_action": "closed_agent_terminal",
+      "integration_head": "eb3cc2a",
+      "report_path": "/home/jarrad/orca/workspaces/jvid/workflow-timeline-feedback/target/timeline-feedback/report.txt"
     },
     {
       "package": "E",
@@ -495,11 +501,11 @@
       "release_process_action": "closed_agent_terminal"
     }
   ],
-  "execution_state": "all14_dispatched_13_packages_serially_integrated_T_and_verifiers_active",
+  "execution_state": "all14_packages_reviewed_and_serially_integrated_pending_E_validation_I1_sweep_then_I2",
   "lifecycle_accounting": {
     "run_workers": 15,
-    "active_workers": 3,
-    "released_workers": 12,
+    "active_workers": 2,
+    "released_workers": 13,
     "reclaimable_terminals": 0,
     "temporary_fifth_worker_reason": "first wave settled; measured 12GiB available and little build pressure; integration verification isolated",
     "temporary_sixth_worker_reason": "6CPUs, load2.73 and11GiB available; one buildjob perworker, firstwave settled"
@@ -571,7 +577,8 @@
     "I1": "Reviewed font-content identity and cold glyph/face/metrics/placement comparisons, synthetic CC0 fonts, schema font stamp and relocation regressions; integrated early fixes. Full suite pending plus newly reproduced installed-fallback preemption proof before merge.",
     "S": "Reviewed immutable proposals/source stamps/union/lockedtracks/Batch/audition and actual every-sample WAV test/report; German modal viewed. Integrated3featurecommits and shared applicability adapter, preserving all other guards/modals.",
     "E": "Reviewed immutable VersionSource/VersionJob revision checks, per-variant History/reframing and per-range rendered-preview acceptance invalidation, independent queue/captions/target-size, portable collision names including busy/existing SRTs and atomic create-only publication. Composed shared App dispatch/modal/reset and ordinary-sidecar output reservation. Viewed actual vertical960x600 and narrow240x640 UI. E ProRes exact dimensions/ranges and independent cancel/fail/race tests pass on host9; real size-limit test running supported8 OpenH264. Final report/combined tests pending.",
-    "I1_goldens": "Independently viewed all8 before/after contact sheets for31 golden changes825c174; Fit screen gutter/F status/P1 settings/K action labels expected, no hidden duplicate shader row accepted.12 affected tests pass without update mode; app i18n7 and collection+Inspector2 pass. First PR518 advanced825c174, CI rerun; full8 committed-tree sweep active."
+    "I1_goldens": "Independently viewed all8 before/after contact sheets for31 golden changes825c174; Fit screen gutter/F status/P1 settings/K action labels expected, no hidden duplicate shader row accepted.12 affected tests pass without update mode; app i18n7 and collection+Inspector2 pass. First PR518 advanced825c174, CI rerun; full8 committed-tree sweep active.",
+    "T": "Reviewed core planner and consumer: preview_timeline clones only active Sequence and commit calls same planner, retaining source markers/linked ripple locks. Actual egui regressions compare planned/committed content, modifiers while stationary, snap ties/clamps, autoscroll captured trim, cancel/focus/outside release, one undo/redo/reopen, narrowHiDPI. Root caught source feedback behind drag thumbnail; worker fixed Tooltip layer and above-pointer placement, root viewed corrected image before accepted single golden.145 core/140 timeline including17feedback/2catalog/3guard pass,2 preexisting opt-in ignores. Composed C/N/B history/model and S/H timeline shared changes without dropping them."
   },
   "integration_premerge_followups": {
     "V": "F owns Alt-region/middle-pan cancellation regression and verifies monitor/source view identity.",
@@ -602,7 +609,7 @@
       "number": 518,
       "url": "https://github.com/jarradbanks/jvid/pull/518",
       "base": "main",
-      "head": "jarradbanks/jvid-workflow-orchestrator",
+      "head": "825c174921975e528afa42674d1a04fecbd22280",
       "packages": [
         "V",
         "A1",
