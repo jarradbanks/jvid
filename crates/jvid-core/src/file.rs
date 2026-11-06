@@ -66,8 +66,8 @@ pub fn to_json_with_paths(
 ) -> Result<String, FileError> {
     let project_dir = resolve(project_dir);
     let mut p = serde_json::to_value(project)?;
-    for a in assets(&mut p) {
-        let rel = a["path"]
+    visit_paths(&mut p, |a, field, relative, _| {
+        let rel = a[field]
             .as_str()
             .and_then(|s| relativize(&resolve(Path::new(s)), &project_dir));
         // `/` separators so a project saved on Windows also opens on Unix.
@@ -76,9 +76,9 @@ pub fn to_json_with_paths(
             Some(parts?.join("/"))
         });
         if let Some(rel) = rel {
-            a["relative_path"] = rel.into();
+            a[relative] = rel.into();
         }
-    }
+    });
     Ok(serde_json::to_string_pretty(
         &json!({ "schema_version": SCHEMA_VERSION, "project": p }),
     )?)
@@ -97,14 +97,14 @@ pub fn from_json(
         .ok_or(FileError::MissingVersion)?;
     migrate(&mut root, version)?;
     let mut p = root["project"].take();
-    for a in assets(&mut p) {
-        if let Some(rel) = a.as_object_mut().and_then(|o| o.remove("relative_path")) {
+    visit_paths(&mut p, |a, field, relative, _| {
+        if let Some(rel) = a.as_object_mut().and_then(|o| o.remove(relative)) {
             let candidate = rebase(Path::new(rel.as_str().unwrap_or_default()), project_dir);
             if exists(&candidate) {
-                a["path"] = candidate.to_string_lossy().into_owned().into();
+                a[field] = candidate.to_string_lossy().into_owned().into();
             }
         }
-    }
+    });
     let project: Project = serde_json::from_value(p)?;
     let s = project.settings();
     let rates = std::iter::once(s.frame_rate).chain(
@@ -140,8 +140,81 @@ fn migrate(root: &mut Value, version: u64) -> Result<(), FileError> {
     Ok(())
 }
 
-fn assets(p: &mut Value) -> impl Iterator<Item = &mut Value> {
-    p["assets"].as_array_mut().into_iter().flatten()
+/// File references stored by the project. Effects may initially name a config-folder stem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DependencyKind {
+    Media,
+    Lut,
+    Effect,
+}
+
+/// A file reference; generated layers and sequence assets have no file dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dependency {
+    pub kind: DependencyKind,
+    pub path: PathBuf,
+}
+
+/// Every original and external effect/LUT, including clips in closed nested sequences.
+/// Pure conversion: callers resolve effect stems and inspect the filesystem themselves.
+pub fn dependencies(project: &Project) -> Result<Vec<Dependency>, FileError> {
+    let mut value = serde_json::to_value(project)?;
+    let mut paths = Vec::new();
+    visit_paths(&mut value, |owner, field, _, kind| {
+        if let Some(path) = owner[field].as_str().filter(|path| !path.is_empty()) {
+            paths.push(Dependency {
+                kind,
+                path: path.into(),
+            });
+        }
+    });
+    Ok(paths)
+}
+
+/// Remaps only file references in a detached project snapshot. The source stays untouched.
+pub fn remap_paths(
+    project: &Project,
+    mut remap: impl FnMut(DependencyKind, &Path) -> PathBuf,
+) -> Result<Project, FileError> {
+    let mut value = serde_json::to_value(project)?;
+    visit_paths(&mut value, |owner, field, _, kind| {
+        if let Some(path) = owner[field].as_str().filter(|path| !path.is_empty()) {
+            owner[field] = remap(kind, Path::new(path))
+                .to_string_lossy()
+                .into_owned()
+                .into();
+        }
+    });
+    Ok(serde_json::from_value(value)?)
+}
+
+fn visit_paths(p: &mut Value, mut visit: impl FnMut(&mut Value, &str, &str, DependencyKind)) {
+    for asset in p["assets"].as_array_mut().into_iter().flatten() {
+        if asset["solid"].is_null() && asset["text"].is_null() && asset["sequence"].is_null() {
+            visit(asset, "path", "relative_path", DependencyKind::Media);
+        }
+    }
+    fn sequence(seq: &mut Value, visit: &mut impl FnMut(&mut Value, &str, &str, DependencyKind)) {
+        for track in seq["tracks"].as_array_mut().into_iter().flatten() {
+            for clip in track["clips"].as_array_mut().into_iter().flatten() {
+                if let Some(transform) = clip.get_mut("transform").filter(|t| t.is_object()) {
+                    visit(transform, "lut", "relative_lut", DependencyKind::Lut);
+                    for effect in transform["effects"].as_array_mut().into_iter().flatten() {
+                        visit(effect, "shader", "relative_shader", DependencyKind::Effect);
+                    }
+                }
+            }
+        }
+    }
+    sequence(&mut p["sequence"], &mut visit);
+    for seq in p
+        .get_mut("sequences")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        sequence(seq, &mut visit);
+    }
 }
 
 /// `path` relative to `dir`, if both are absolute and share a root.
@@ -324,6 +397,84 @@ mod tests {
         // nothing resolves relatively: keep the stored absolute paths
         let loaded = from_json(&s, moved, |_| false).unwrap();
         assert_eq!(loaded, p);
+    }
+
+    #[test]
+    fn nested_dependencies_remap_and_move_without_originals() {
+        use crate::history::{Command, Created, History};
+        use crate::model::{AssetId, NewClip, TrackKind, Transform};
+        use crate::time::Time;
+        let mut history = History::new(Project::default());
+        history
+            .apply(Command::AddAsset(abs("/original/voiceover.wav")))
+            .unwrap();
+        let Created::Track(track) = history
+            .apply(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "Video".into(),
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let Created::Clip(clip) = history
+            .apply(Command::AddClip {
+                track,
+                clip: NewClip {
+                    asset: AssetId(1),
+                    source_in: Time(0),
+                    source_out: Time(10),
+                    start: Time(0),
+                    link: None,
+                },
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let mut transform = Transform {
+            lut: Some(abs("/original/look.cube").to_string_lossy().into()),
+            ..Default::default()
+        };
+        transform.effects.push(crate::model::Effect {
+            shader: "custom".into(),
+            params: Default::default(),
+            enabled: true,
+            mask: None,
+        });
+        history
+            .apply(Command::SetClipProps(vec![(
+                clip,
+                transform,
+                Default::default(),
+            )]))
+            .unwrap();
+        history
+            .apply(Command::Nest {
+                ids: vec![clip],
+                name: "Inner".into(),
+                outer: "Main".into(),
+            })
+            .unwrap();
+        let paths = dependencies(history.project()).unwrap();
+        assert_eq!(paths.len(), 3);
+        let collected = remap_paths(history.project(), |kind, _| {
+            abs(match kind {
+                DependencyKind::Media => "/collected/media/1.wav",
+                DependencyKind::Lut => "/collected/dependencies/2.cube",
+                DependencyKind::Effect => "/collected/dependencies/3.wgsl",
+            })
+        })
+        .unwrap();
+        assert_eq!(dependencies(history.project()).unwrap(), paths);
+        let text = to_json(&collected, &abs("/collected")).unwrap();
+        assert!(text.contains("relative_lut"));
+        assert!(text.contains("relative_shader"));
+        let moved = from_json(&text, &abs("/moved"), |p| p.starts_with(abs("/moved"))).unwrap();
+        let deps = dependencies(&moved).unwrap();
+        assert_eq!(deps.len(), 3);
+        assert!(deps.iter().all(|d| d.path.starts_with(abs("/moved"))));
+        assert_eq!(moved.sequences().len(), 2);
     }
 
     #[test]
