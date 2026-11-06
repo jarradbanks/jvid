@@ -133,6 +133,9 @@ pub struct MediaBin {
     text_tiles: [Option<egui::TextureId>; 3],
     /// The thumbnail frame generation, project size and presets they were drawn from.
     text_drawn: Option<(u64, (u32, u32), [Text; 3])>,
+    /// A bundled fixture family for deterministic thumbnail pixels across test hosts.
+    #[cfg(test)]
+    pub text_snapshot_family: Option<&'static str>,
 }
 
 /// What the bin asked the app to do this frame.
@@ -253,7 +256,17 @@ impl MediaBin {
             return;
         };
         let s = project.settings();
-        let key = (generation, (s.width, s.height), presets().map(|(.., t)| t));
+        let texts = presets().map(|(.., t)| t);
+        #[cfg(test)]
+        let texts = texts.map(|mut text| {
+            if let Some(family) = self.text_snapshot_family {
+                text.family = family.into();
+                // The fixture bundles regular 400 and semibold 600 faces.
+                text.weight = text.weight.min(600);
+            }
+            text
+        });
+        let key = (generation, (s.width, s.height), texts);
         if self.text_drawn.as_ref() == Some(&key) {
             return;
         }
