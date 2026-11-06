@@ -32,6 +32,7 @@ mod relink;
 pub mod samples;
 mod scopes;
 pub mod settings_file;
+pub mod settings_transfer;
 mod subtitles;
 mod timeline;
 mod transcript;
