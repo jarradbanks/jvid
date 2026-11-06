@@ -1264,4 +1264,4 @@ confirm_delete = "Excluir esta predefinição? Os clipes existentes mantêm suas
 folder_hint = "Estilos de título, tratamentos de voz e pilhas de efeitos ficam separados das predefinições de exportação."
 open_folder = "Abrir Pasta de Predefinições"
 collected_font = "Os metadados da fonte coletada estão indisponíveis. Reabra o projeto original ou escolha uma fonte instalada antes de salvar o estilo."
-external_effect = "Restaure o arquivo de efeito {path} e escolha esta predefinição novamente para recarregar. A pilha foi mantida."
+external_effect = "Restaure o efeito ou atualize o caminho {path} no arquivo da predefinição e escolha-a novamente. A pilha foi mantida."

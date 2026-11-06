@@ -1248,4 +1248,4 @@ confirm_delete = "Gespeicherte Vorgabe löschen? Vorhandene Clips behalten ihre 
 folder_hint = "Titelstile, Sprachbearbeitung und Effektstapel werden getrennt von Exportvorgaben gespeichert."
 open_folder = "Vorgabenordner Öffnen"
 collected_font = "Metadaten der gesammelten Schrift fehlen. Quellprojekt erneut öffnen oder vor dem Speichern eine installierte Schrift wählen."
-external_effect = "Effektdatei {path} wiederherstellen und Vorgabe erneut wählen, um sie neu zu laden. Stapel bleibt erhalten."
+external_effect = "Effektdatei wiederherstellen oder Pfad {path} in der Vorgabendatei ändern, dann Vorgabe erneut wählen. Stapel bleibt erhalten."

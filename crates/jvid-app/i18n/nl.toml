@@ -1263,4 +1263,4 @@ confirm_delete = "Deze voorinstelling verwijderen? Bestaande clips behouden hun 
 folder_hint = "Titelstijlen, stembewerking en effectstapels staan los van exportvoorinstellingen."
 open_folder = "Map Voorinstellingen Openen"
 collected_font = "Metagegevens van het verzamelde lettertype ontbreken. Open het bronproject opnieuw of kies een geïnstalleerd lettertype voordat u deze stijl opslaat."
-external_effect = "Herstel effectbestand {path} en kies deze voorinstelling opnieuw om het te laden. De stapel blijft bewaard."
+external_effect = "Herstel het effect of wijzig pad {path} in het voorinstellingsbestand en kies de voorinstelling opnieuw. De stapel blijft bewaard."

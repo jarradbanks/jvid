@@ -1248,4 +1248,4 @@ confirm_delete = "Slet forudindstillingen? Eksisterende klip beholder deres inds
 folder_hint = "Titelstile, stemmebehandlinger og effektstakke gemmes adskilt fra eksportforudindstillinger."
 open_folder = "Åbn Forudindstillingsmappe"
 collected_font = "Metadata for den indsamlede skrifttype mangler. Åbn kildeprojektet igen, eller vælg en installeret skrifttype, før stilen gemmes."
-external_effect = "Gendan effektfilen {path}, og vælg forudindstillingen igen for at indlæse den. Stakken blev bevaret."
+external_effect = "Gendan effekten, eller ret stien {path} i forudindstillingsfilen, og vælg den igen. Stakken blev bevaret."

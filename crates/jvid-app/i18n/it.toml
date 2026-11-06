@@ -1260,4 +1260,4 @@ confirm_delete = "Eliminare il predefinito? Le clip esistenti mantengono le impo
 folder_hint = "Stili dei titoli, trattamenti vocali e pile di effetti sono separati dai predefiniti di esportazione."
 open_folder = "Apri Cartella dei Predefiniti"
 collected_font = "I metadati del carattere raccolto non sono disponibili. Riapri il progetto originale o scegli un carattere installato prima di salvare lo stile."
-external_effect = "Ripristina il file dell’effetto {path}, poi scegli di nuovo il predefinito per ricaricarlo. La pila è conservata."
+external_effect = "Ripristina l’effetto o aggiorna il percorso {path} nel file del predefinito, poi selezionalo di nuovo. La pila è conservata."

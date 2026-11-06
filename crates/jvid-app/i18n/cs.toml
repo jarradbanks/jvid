@@ -1267,4 +1267,4 @@ confirm_delete = "Smazat tuto předvolbu? Existující klipy si ponechají nasta
 folder_hint = "Styly titulků, úpravy hlasu a sady efektů jsou oddělené od předvoleb exportu."
 open_folder = "Otevřít Složku Předvoleb"
 collected_font = "Metadata shromážděného písma nejsou dostupná. Před uložením stylu znovu otevřete zdrojový projekt nebo vyberte nainstalované písmo."
-external_effect = "Obnovte soubor efektu {path} a znovu vyberte předvolbu, aby se načetl. Sada byla zachována."
+external_effect = "Obnovte efekt nebo změňte cestu {path} v souboru předvolby a znovu ji vyberte. Sada byla zachována."

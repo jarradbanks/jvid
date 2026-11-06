@@ -1262,4 +1262,4 @@ confirm_delete = "¿Eliminar este ajuste? Los clips existentes conservan sus pro
 folder_hint = "Aquí se guardan estilos de título, tratamientos de voz y pilas de efectos, aparte de los ajustes de exportación."
 open_folder = "Abrir Carpeta de Ajustes"
 collected_font = "Faltan los metadatos de la fuente recopilada. Reabre el proyecto de origen o elige una fuente instalada antes de guardar el estilo."
-external_effect = "Restaura el archivo de efecto {path} y vuelve a elegir este ajuste para recargarlo. Se conservó la pila."
+external_effect = "Restaura el efecto o actualiza la ruta {path} en el archivo del ajuste y vuelve a elegirlo para recargarlo. Se conservó la pila."

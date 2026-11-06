@@ -1248,4 +1248,4 @@ confirm_delete = "Slett forhåndsinnstillingen? Eksisterende klipp beholder inns
 folder_hint = "Tittelstiler, stemmebehandlinger og effektstabler lagres atskilt fra eksportforhåndsinnstillinger."
 open_folder = "Åpne Forhåndsinnstillingsmappe"
 collected_font = "Metadata for den innsamlede skrifttypen mangler. Åpne kildeprosjektet igjen eller velg en installert skrifttype før stilen lagres."
-external_effect = "Gjenopprett effektfilen {path} og velg forhåndsinnstillingen igjen for å laste den. Stabelen ble bevart."
+external_effect = "Gjenopprett effekten eller oppdater stien {path} i forhåndsinnstillingsfilen og velg den igjen. Stabelen ble bevart."

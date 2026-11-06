@@ -1276,4 +1276,4 @@ confirm_delete = "Usunąć to ustawienie? Istniejące klipy zachowają ustawieni
 folder_hint = "Style tytułów, obróbka głosu i stosy efektów są oddzielone od ustawień eksportu."
 open_folder = "Otwórz Folder Ustawień"
 collected_font = "Brak metadanych zebranej czcionki. Otwórz projekt źródłowy lub wybierz zainstalowaną czcionkę przed zapisaniem stylu."
-external_effect = "Przywróć plik efektu {path}, a następnie wybierz to ustawienie ponownie, aby go wczytać. Stos został zachowany."
+external_effect = "Przywróć efekt lub zmień ścieżkę {path} w pliku ustawienia i wybierz je ponownie. Stos został zachowany."

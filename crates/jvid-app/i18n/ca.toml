@@ -1260,4 +1260,4 @@ confirm_delete = "Vols suprimir aquest predefinit? Els clips existents conserven
 folder_hint = "Els estils de títol, tractaments de veu i piles d’efectes es desen separats dels predefinits d’exportació."
 open_folder = "Obre la Carpeta de Predefinits"
 collected_font = "Falten les metadades del tipus de lletra recopilat. Torna a obrir el projecte d’origen o tria un tipus de lletra instal·lat abans de desar l’estil."
-external_effect = "Restaura el fitxer d’efecte {path} i torna a triar el predefinit per carregar-lo. S’ha conservat la pila."
+external_effect = "Restaura l’efecte o actualitza el camí {path} al fitxer del predefinit i torna a triar-lo. S’ha conservat la pila."

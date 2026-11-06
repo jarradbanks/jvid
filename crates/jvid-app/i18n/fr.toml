@@ -1271,4 +1271,4 @@ confirm_delete = "Supprimer ce préréglage ? Les clips existants conservent leu
 folder_hint = "Les styles de titre, traitements vocaux et piles d’effets sont séparés des préréglages d’exportation."
 open_folder = "Ouvrir le Dossier des Préréglages"
 collected_font = "Les métadonnées de la police collectée sont indisponibles. Rouvrez le projet source ou choisissez une police installée avant d’enregistrer ce style."
-external_effect = "Restaurez le fichier d’effet {path}, puis sélectionnez à nouveau ce préréglage pour le recharger. La pile est conservée."
+external_effect = "Restaurez l’effet ou modifiez le chemin {path} dans le fichier du préréglage, puis sélectionnez-le à nouveau. La pile est conservée."

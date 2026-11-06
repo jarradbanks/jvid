@@ -1248,4 +1248,4 @@ confirm_delete = "Ta bort förinställningen? Befintliga klipp behåller sina in
 folder_hint = "Titelstilar, röstbehandlingar och effektstackar sparas separat från exportförinställningar."
 open_folder = "Öppna Förinställningsmappen"
 collected_font = "Metadata för det insamlade typsnittet saknas. Öppna källprojektet igen eller välj ett installerat typsnitt innan stilen sparas."
-external_effect = "Återställ effektfilen {path} och välj förinställningen igen för att läsa in den. Stacken behölls."
+external_effect = "Återställ effekten eller uppdatera sökvägen {path} i förinställningsfilen och välj den igen. Stacken behölls."
