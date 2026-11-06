@@ -17,6 +17,8 @@ use crate::time::Time;
 /// One edit to a project.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
+    /// Editable subtitle rows and scoped style operations, as one atomic undo step.
+    Caption(crate::captions::Edit),
     AddTrack {
         kind: TrackKind,
         name: String,
@@ -329,7 +331,8 @@ impl Command {
                 .iter()
                 .find(|t| t.locked && t.clips().iter().any(|c| c.asset == *a))
                 .map(|t| t.id),
-            Self::AddTrack { .. }
+            Self::Caption(_)
+            | Self::AddTrack { .. }
             | Self::SetTrack(_)
             | Self::MoveTrack { .. }
             | Self::NewLink
@@ -373,6 +376,7 @@ impl Command {
         }
         let s = &mut p.sequence;
         Ok(match self {
+            Self::Caption(edit) => edit.apply(p)?,
             Self::Batch(cmds) => {
                 let before = p.clone();
                 for c in cmds {

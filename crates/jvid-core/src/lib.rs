@@ -4,6 +4,7 @@
 //! driven by both the desktop app and the headless CLI.
 
 pub mod annotations;
+pub mod captions;
 pub mod curve;
 pub mod eval;
 pub mod file;

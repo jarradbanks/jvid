@@ -1677,6 +1677,7 @@ pub struct Marker {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelError {
+    Caption(crate::captions::Error),
     UnknownTrack(TrackId),
     UnknownClip(ClipId),
     /// The clip would overlap another clip on the same track.
@@ -1720,6 +1721,7 @@ pub enum ModelError {
 impl std::fmt::Display for ModelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Caption(error) => error.fmt(f),
             Self::UnknownTrack(id) => write!(f, "unknown track {}", id.0),
             Self::UnknownClip(id) => write!(f, "unknown clip {}", id.0),
             Self::Overlap(id) => write!(f, "clip would overlap clip {}", id.0),
