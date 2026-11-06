@@ -3925,6 +3925,9 @@ mod workspace_tests {
 
     #[test]
     fn workspace_layouts_and_save_dialog_fit_narrow_translated_windows() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         if !suite_ui::test_support::gpu() {
             return;
         }

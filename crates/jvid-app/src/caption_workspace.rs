@@ -486,6 +486,9 @@ mod tests {
 
     #[test]
     fn native_row_typing_coalesces_then_split_undo_and_disk_reopen_match_srt() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         suite_ui::i18n::set_language("en");
         let mut h = harness(240.0, 800.0, 1.0, false);
         h.run();
@@ -535,6 +538,9 @@ mod tests {
 
     #[test]
     fn repeated_shared_style_applies_follow_authoritative_reference_after_undo() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         suite_ui::i18n::set_language("en");
         let mut h = harness(600.0, 1400.0, 1.0, false);
         h.run();
@@ -572,6 +578,9 @@ mod tests {
 
     #[test]
     fn narrow_translated_panel_controls_stay_in_bounds_and_view_state_never_edits_project() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         assert!(
             suite_ui::test_support::gpu(),
             "GPU required for caption UI artifacts"
