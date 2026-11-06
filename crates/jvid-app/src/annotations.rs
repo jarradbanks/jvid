@@ -618,6 +618,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn shape_hits_pass_through_empty_canvas_and_bounds_respect_crop() {
+        let mut h = History::new(Project::default());
+        let under = crate::playback::tests::add_solid(&mut h, [0.2, 0.3, 0.4, 1.0], Time(0));
+        let top = create(&mut h, AnnotationKind::Rectangle, Time(0)).unwrap();
+        let c = h.project().sequence().clip(top).unwrap().1;
+        let mut x = c.transform.clone();
+        x.rotation = 37.0;
+        x.scale = [0.7, 1.2];
+        x.anchor = [11.0, -8.0];
+        x.position = [40.0, 25.0];
+        h.apply(Command::SetClipProps(vec![(
+            top,
+            x.clone(),
+            c.keyframes.clone(),
+        )]))
+        .unwrap();
+        let frame = Rect::from_min_size(pos2(50.0, 90.0), vec2(960.0, 540.0));
+        let g = geometry(h.project(), frame, frame);
+        let size = h.project().settings();
+        let stroke = to_screen(g, &x, [0.0, -f64::from(size.height) * 0.15]);
+        let empty = to_screen(g, &x, [0.0, 0.0]);
+        assert_eq!(
+            crate::handles::clip_at(h.project(), Time(0), frame, stroke),
+            Some(top)
+        );
+        assert_eq!(
+            crate::handles::clip_at(h.project(), Time(0), frame, empty),
+            Some(under)
+        );
+        x.crop[0] = f64::from(size.width) / 2.0;
+        let c = h.project().sequence().clip(top).unwrap().1;
+        let bounds = corners(h.project(), c, &x, frame, Time(0)).unwrap();
+        let left = from_screen(g, &x, bounds[0]).unwrap()[0];
+        assert!(
+            left.abs() < 0.001,
+            "crop starts at source centre before transform"
+        );
+        x.crop[0] = f64::from(size.width);
+        assert!(corners(h.project(), c, &x, frame, Time(0)).is_none());
+    }
+
     struct Editor {
         preview: crate::preview::Preview,
         history: History,
