@@ -16,6 +16,10 @@ Work in any panel except while typing in a text field.
 | Save As | `Ctrl+Shift+S` |
 | Collect Project | — |
 | Import | `Ctrl+I` |
+| New Bin | — |
+| Rename Bin | — |
+| Delete Bin | — |
+| Toggle Favorite | — |
 | Import Subtitles | `Ctrl+Shift+I` |
 | Export Subtitles (.srt)… | — |
 | Export Media | `Ctrl+M` |
