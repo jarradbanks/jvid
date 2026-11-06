@@ -3,6 +3,12 @@
 # imperatives, as on Windows and macOS. Terms follow docs/i18n/it.md.
 
 [action]
+workspace_editing = "Area di montaggio"
+workspace_captions = "Area sottotitoli"
+workspace_audio = "Area audio"
+workspace_save = "Salva area di lavoro…"
+reset_layout = "Ripristina disposizione pannelli"
+maximize_panel = "Massimizza/ripristina pannello"
 command_palette = "Tavolozza dei Comandi"
 collect_project = "Raccogli Progetto"
 copy_settings = "Copia impostazioni"
@@ -1149,3 +1155,15 @@ invalid_mask = "L’effetto di origine usa una maschera mancante. Correggi prima
 incompatible_target = "Le categorie selezionate non sono compatibili con le clip di destinazione."
 unavailable_resources = "Gli effetti o i file LUT richiesti non sono disponibili."
 focus_clip = "Attiva prima Timeline, Programma o Ispettore."
+
+[workspace]
+menu = "Aree di lavoro"
+rename = "Rinomina area…"
+delete = "Elimina area"
+apply = "Applica area"
+name = "Nome area"
+empty_name = "Inserisci un nome per l’area."
+duplicate_name = "Esiste già un’area con questo nome."
+missing = "Questa area non è più disponibile."
+focus_panel = "Attiva un pannello per massimizzarlo."
+save = "Salva area di lavoro…"

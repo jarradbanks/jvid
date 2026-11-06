@@ -3,6 +3,12 @@
 # items use the imperative (Spara, Lägg till markör). Terms follow docs/i18n/sv.md.
 
 [action]
+workspace_editing = "Arbetsyta för redigering"
+workspace_captions = "Arbetsyta för undertexter"
+workspace_audio = "Arbetsyta för ljud"
+workspace_save = "Spara arbetsyta…"
+reset_layout = "Återställ panellayout"
+maximize_panel = "Maximera/återställ panel"
 command_palette = "Kommandopalett"
 collect_project = "Samla Projekt"
 copy_settings = "Kopiera inställningar"
@@ -1137,3 +1143,15 @@ invalid_mask = "Källeffekten hänvisar till en saknad mask. Rätta först maskk
 incompatible_target = "Valda kategorier är inte kompatibla med målklippen."
 unavailable_resources = "Nödvändiga effekter eller LUT-filer är inte tillgängliga."
 focus_clip = "Fokusera först Tidslinje, Program eller Inspektör."
+
+[workspace]
+menu = "Arbetsytor"
+rename = "Byt namn på arbetsyta…"
+delete = "Ta bort arbetsyta"
+apply = "Använd arbetsyta"
+name = "Arbetsytans namn"
+empty_name = "Ange ett namn på arbetsytan."
+duplicate_name = "En arbetsyta med detta namn finns redan."
+missing = "Denna arbetsyta är inte längre tillgänglig."
+focus_panel = "Aktivera en panel för att maximera den."
+save = "Spara arbetsyta…"

@@ -5,6 +5,12 @@
 # every English key.
 
 [action]
+workspace_editing = "編集ワークスペース"
+workspace_captions = "字幕ワークスペース"
+workspace_audio = "オーディオワークスペース"
+workspace_save = "ワークスペースを保存…"
+reset_layout = "パネルの配置をリセット"
+maximize_panel = "パネルを最大化／復元"
 command_palette = "コマンドパレット"
 collect_project = "プロジェクトを収集"
 copy_settings = "設定をコピー"
@@ -1139,3 +1145,15 @@ invalid_mask = "元のエフェクトが存在しないマスクを参照して�
 incompatible_target = "選択したカテゴリは対象のクリップと互換性がありません。"
 unavailable_resources = "必要なエフェクトまたはLUTファイルを利用できません。"
 focus_clip = "先にタイムライン、プログラム、インスペクターのいずれかを選択してください。"
+
+[workspace]
+menu = "ワークスペース"
+rename = "ワークスペースの名前を変更…"
+delete = "ワークスペースを削除"
+apply = "ワークスペースを適用"
+name = "ワークスペース名"
+empty_name = "ワークスペース名を入力してください。"
+duplicate_name = "同じ名前のワークスペースが既にあります。"
+missing = "このワークスペースは利用できなくなりました。"
+focus_panel = "最大化するパネルを選択してください。"
+save = "ワークスペースを保存…"

@@ -3,6 +3,12 @@
 # items use the infinitive. Terms follow docs/i18n/ru.md.
 
 [action]
+workspace_editing = "Рабочая среда монтажа"
+workspace_captions = "Рабочая среда субтитров"
+workspace_audio = "Рабочая среда звука"
+workspace_save = "Сохранить рабочую среду…"
+reset_layout = "Сбросить расположение панелей"
+maximize_panel = "Развернуть/восстановить панель"
 command_palette = "Палитра Команд"
 collect_project = "Собрать Проект"
 copy_settings = "Копировать настройки"
@@ -1165,3 +1171,15 @@ invalid_mask = "Исходный эффект ссылается на отсут
 incompatible_target = "Выбранные категории несовместимы с целевыми клипами."
 unavailable_resources = "Необходимые эффекты или файлы LUT недоступны."
 focus_clip = "Сначала активируйте шкалу времени, программу или инспектор."
+
+[workspace]
+menu = "Рабочие среды"
+rename = "Переименовать среду…"
+delete = "Удалить среду"
+apply = "Применить среду"
+name = "Имя среды"
+empty_name = "Введите имя рабочей среды."
+duplicate_name = "Среда с таким именем уже существует."
+missing = "Эта среда больше недоступна."
+focus_panel = "Выберите панель для развёртывания."
+save = "Сохранить рабочую среду…"

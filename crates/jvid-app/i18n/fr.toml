@@ -3,6 +3,12 @@
 # docs/i18n/fr.md. The spaces before : ; ? ! and inside « » are no-break spaces (U+00A0).
 
 [action]
+workspace_editing = "Espace de montage"
+workspace_captions = "Espace de sous-titres"
+workspace_audio = "Espace audio"
+workspace_save = "Enregistrer l’espace de travail…"
+reset_layout = "Réinitialiser la disposition des panneaux"
+maximize_panel = "Agrandir/restaurer le panneau"
 command_palette = "Palette de Commandes"
 collect_project = "Rassembler le Projet"
 copy_settings = "Copier les réglages"
@@ -1160,3 +1166,15 @@ invalid_mask = "L’effet source référence un masque absent. Corrigez d’abor
 incompatible_target = "Les catégories choisies sont incompatibles avec les clips cibles."
 unavailable_resources = "Les effets ou fichiers LUT requis sont indisponibles."
 focus_clip = "Activez d’abord Timeline, Programme ou Inspecteur."
+
+[workspace]
+menu = "Espaces de travail"
+rename = "Renommer l’espace…"
+delete = "Supprimer l’espace"
+apply = "Appliquer l’espace"
+name = "Nom de l’espace"
+empty_name = "Saisissez un nom pour l’espace."
+duplicate_name = "Un espace porte déjà ce nom."
+missing = "Cet espace n’est plus disponible."
+focus_panel = "Activez un panneau pour l’agrandir."
+save = "Enregistrer l’espace de travail…"

@@ -3,6 +3,12 @@
 # imperatives (Desa, Obre) and messages address the user as vós (Seleccioneu). See docs/i18n/ca.md.
 
 [action]
+workspace_editing = "Espai de muntatge"
+workspace_captions = "Espai de subtítols"
+workspace_audio = "Espai d’àudio"
+workspace_save = "Desa l’espai de treball…"
+reset_layout = "Restableix la disposició dels plafons"
+maximize_panel = "Maximitza/restaura el tauler"
 command_palette = "Paleta d’Ordres"
 collect_project = "Recopila el Projecte"
 copy_settings = "Copia els ajustos"
@@ -1149,3 +1155,15 @@ invalid_mask = "L’efecte d’origen fa referència a una màscara inexistent. 
 incompatible_target = "Les categories seleccionades no són compatibles amb els clips de destinació."
 unavailable_resources = "Els efectes o fitxers LUT necessaris no estan disponibles."
 focus_clip = "Primer enfoca Línia de temps, Programa o Inspector."
+
+[workspace]
+menu = "Espais de treball"
+rename = "Canvia el nom de l’espai…"
+delete = "Suprimeix l’espai"
+apply = "Aplica l’espai"
+name = "Nom de l’espai"
+empty_name = "Introdueix un nom per a l’espai."
+duplicate_name = "Ja existeix un espai amb aquest nom."
+missing = "Aquest espai ja no està disponible."
+focus_panel = "Activa un tauler per maximitzar-lo."
+save = "Desa l’espai de treball…"

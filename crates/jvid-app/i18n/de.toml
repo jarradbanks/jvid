@@ -3,6 +3,12 @@
 # items use the infinitive (Speichern). Terms follow docs/i18n/de.md.
 
 [action]
+workspace_editing = "Arbeitsbereich Schnitt"
+workspace_captions = "Arbeitsbereich Untertitel"
+workspace_audio = "Arbeitsbereich Audio"
+workspace_save = "Arbeitsbereich speichern…"
+reset_layout = "Bereichsanordnung zurücksetzen"
+maximize_panel = "Bedienfeld maximieren/wiederherstellen"
 command_palette = "Befehlspalette"
 collect_project = "Projekt Sammeln"
 copy_settings = "Einstellungen kopieren"
@@ -1137,3 +1143,15 @@ invalid_mask = "Der Quelleffekt verweist auf eine fehlende Maske. Zuerst die Mas
 incompatible_target = "Gewählte Kategorien sind mit den Zielclips nicht kompatibel."
 unavailable_resources = "Benötigte Effekte oder LUT-Dateien sind nicht verfügbar."
 focus_clip = "Zuerst Timeline, Programm oder Inspektor fokussieren."
+
+[workspace]
+menu = "Arbeitsbereiche"
+rename = "Arbeitsbereich umbenennen…"
+delete = "Arbeitsbereich löschen"
+apply = "Arbeitsbereich anwenden"
+name = "Name des Arbeitsbereichs"
+empty_name = "Gib einen Namen für den Arbeitsbereich ein."
+duplicate_name = "Ein Arbeitsbereich mit diesem Namen ist bereits vorhanden."
+missing = "Dieser Arbeitsbereich ist nicht mehr verfügbar."
+focus_panel = "Aktiviere ein Bedienfeld zum Maximieren."
+save = "Arbeitsbereich speichern…"

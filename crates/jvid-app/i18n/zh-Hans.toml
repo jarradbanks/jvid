@@ -5,6 +5,12 @@
 # every English key.
 
 [action]
+workspace_editing = "剪辑工作区"
+workspace_captions = "字幕工作区"
+workspace_audio = "音频工作区"
+workspace_save = "保存工作区…"
+reset_layout = "重置面板布局"
+maximize_panel = "最大化/还原面板"
 command_palette = "命令面板"
 collect_project = "收集项目"
 copy_settings = "复制设置"
@@ -1170,3 +1176,15 @@ invalid_mask = "源效果引用了缺失的蒙版。请先修复蒙版绑定。"
 incompatible_target = "所选类别与目标片段不兼容。"
 unavailable_resources = "所需效果或 LUT 文件不可用。"
 focus_clip = "请先聚焦时间线、节目或检查器。"
+
+[workspace]
+menu = "工作区"
+rename = "重命名工作区…"
+delete = "删除工作区"
+apply = "应用工作区"
+name = "工作区名称"
+empty_name = "请输入工作区名称。"
+duplicate_name = "已存在同名工作区。"
+missing = "此工作区已不可用。"
+focus_panel = "请选择要最大化的面板。"
+save = "保存工作区…"

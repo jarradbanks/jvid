@@ -3,6 +3,12 @@
 
 # Keyboard actions, by keymap.toml id: menus, the shortcut editor and docs/shortcuts.md.
 [action]
+workspace_editing = "Editing Workspace"
+workspace_captions = "Captions Workspace"
+workspace_audio = "Audio Workspace"
+workspace_save = "Save Workspace…"
+reset_layout = "Reset Panel Layout"
+maximize_panel = "Maximize/Restore Panel"
 command_palette = "Command Palette"
 collect_project = "Collect Project"
 copy_settings = "Copy Settings"
@@ -1243,3 +1249,15 @@ invalid_mask = "The source effect refers to a missing mask. Repair its mask bind
 incompatible_target = "Selected categories are incompatible with the target clips."
 unavailable_resources = "Required effects or LUT files are unavailable."
 focus_clip = "Focus Timeline, Program or Inspector first."
+
+[workspace]
+menu = "Workspaces"
+rename = "Rename Workspace…"
+delete = "Delete Workspace"
+apply = "Apply Workspace"
+name = "Workspace Name"
+empty_name = "Enter a workspace name."
+duplicate_name = "A workspace with this name already exists."
+missing = "This workspace is no longer available."
+focus_panel = "Focus a panel to maximize it."
+save = "Save Workspace…"
