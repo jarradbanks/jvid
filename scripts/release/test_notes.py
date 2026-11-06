@@ -21,7 +21,7 @@ class NotesTests(unittest.TestCase):
                 draft = render(ROOT, fixture['tag'][1:], fixture['highlights'],
                                action=fixture['action'], sources_url=fixture['url'])
                 # Published examples retain their original platform label.
-                historical_draft = draft.replace('**macOS 15+ (Apple Silicon):**', '**macOS (Apple Silicon):**')
+                historical_draft = draft.replace('**macOS 15.8.1+ (Apple Silicon):**', '**macOS (Apple Silicon):**')
                 self.assertEqual(historical_draft, (ROOT / 'packaging/release-notes-examples' / (fixture['tag'] + '.md')).read_text())
                 links = re.findall(r'\]\((https://[^)]+)\)', draft)
                 downloads = {url for url in links if '/releases/download/' in url}
@@ -43,7 +43,7 @@ class NotesTests(unittest.TestCase):
 
     def test_future_release_links_match_version_and_separate_sources(self):
         draft = render(ROOT, '1.0.0', ['First stable release.'])
-        self.assertIn('**macOS 15+ (Apple Silicon):**', draft)
+        self.assertIn('**macOS 15.8.1+ (Apple Silicon):**', draft)
         self.assertIn('/releases/tag/sources-v1.0.0', draft)
         self.assertEqual(set(re.findall(r'\]\((https://[^)]+/releases/download/[^)]+)\)', draft)),
                          {'https://github.com/jarradbanks/jvid/releases/download/v1.0.0/jvid-1.0.0-' + suffix
