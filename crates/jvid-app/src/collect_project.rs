@@ -266,15 +266,13 @@ fn run(
         if dep.kind == DependencyKind::Effect
             && dep.path.components().count() == 1
             && !source.exists()
-        {
-            if let Some((_, text)) = jvid_render::effect::BUNDLED
+            && let Some((_, text)) = jvid_render::effect::BUNDLED
                 .iter()
                 .find(|(name, _)| Path::new(name).file_stem() == Some(dep.path.as_os_str()))
-            {
-                source = stage.join(format!("builtin-{}.wgsl", bundled_sources.len()));
-                write_new(&source, text.as_bytes())?;
-                bundled_sources.push(source.clone());
-            }
+        {
+            source = stage.join(format!("builtin-{}.wgsl", bundled_sources.len()));
+            write_new(&source, text.as_bytes())?;
+            bundled_sources.push(source.clone());
         }
         inputs.push(Input {
             kind: dep.kind.into(),
@@ -522,10 +520,10 @@ fn run(
             .into_iter()
             .flatten()
         {
-            if let Some(text) = asset.get_mut("text").filter(|t| t.is_object()) {
-                if text["family"].as_str() == Some(&entry.reference) {
-                    text["family"] = alias.clone().into();
-                }
+            if let Some(text) = asset.get_mut("text").filter(|t| t.is_object())
+                && text["family"].as_str() == Some(&entry.reference)
+            {
+                text["family"] = alias.clone().into();
             }
         }
         fonts.push(crate::project_file::FontLink::new(
@@ -1309,7 +1307,7 @@ mod tests {
     fn missing_required_files_report_even_when_unbundled_fonts_allowed() {
         let root = tempfile::tempdir().unwrap();
         let missing = root.path().join("missing.wav");
-        let mut req = request(project(&[missing.clone()]), root.path());
+        let mut req = request(project(std::slice::from_ref(&missing)), root.path());
         req.allow_unresolved = true;
         let failure = collect(&req, || false, |_| {}).unwrap_err();
         assert!(matches!(failure.kind, FailureKind::Unresolved));
@@ -1359,7 +1357,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source.wav");
         fs::write(&source, vec![1u8; 512 * 1024]).unwrap();
-        let req = request(project(&[source.clone()]), root.path());
+        let req = request(project(std::slice::from_ref(&source)), root.path());
         let stop = Cell::new(false);
         let failure = collect(
             &req,
@@ -1468,7 +1466,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source.wav");
         fs::write(&source, b"original").unwrap();
-        let req = request(project(&[source.clone()]), root.path());
+        let req = request(project(std::slice::from_ref(&source)), root.path());
         let injected = Cell::new(false);
         let failure = collect(
             &req,
