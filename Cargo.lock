@@ -2315,7 +2315,7 @@ dependencies = [
 
 [[package]]
 name = "jvid-app"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "eframe",
  "egui",
@@ -2348,7 +2348,7 @@ dependencies = [
 
 [[package]]
 name = "jvid-audio"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "cpal",
  "jvid-core",
@@ -2360,7 +2360,7 @@ dependencies = [
 
 [[package]]
 name = "jvid-cli"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "jvid-app",
  "jvid-core",
@@ -2372,7 +2372,7 @@ dependencies = [
 
 [[package]]
 name = "jvid-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "criterion",
  "proptest",
@@ -2384,11 +2384,11 @@ dependencies = [
 
 [[package]]
 name = "jvid-jobs"
-version = "1.0.0"
+version = "1.1.0"
 
 [[package]]
 name = "jvid-log"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "jvid-paths",
  "tracing",
@@ -2398,7 +2398,7 @@ dependencies = [
 
 [[package]]
 name = "jvid-media"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ffmpeg-next",
  "image",
@@ -2413,14 +2413,14 @@ dependencies = [
 
 [[package]]
 name = "jvid-paths"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "directories",
 ]
 
 [[package]]
 name = "jvid-render"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "cosmic-text",
  "image",
@@ -2433,7 +2433,7 @@ dependencies = [
 
 [[package]]
 name = "jvid-transcribe"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "jvid-core",
  "jvid-jobs",
@@ -2450,7 +2450,7 @@ dependencies = [
 
 [[package]]
 name = "jvid-updater"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ed25519-dalek",
  "semver",
@@ -4317,7 +4317,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "suite-ui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "eframe",
  "egui",
