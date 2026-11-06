@@ -663,7 +663,9 @@ mod tests {
         assert_ne!(edited, after_end);
         assert!(
             edited
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .any(|p| p[0] != 0 || p[1] != 0 || p[2] != 0)
         );
         let dir =
