@@ -13,6 +13,9 @@ use crate::model::Project;
 
 /// The version [`to_json`] writes.
 pub const SCHEMA_VERSION: u64 = 1;
+/// Highest supported envelope version. App-owned render resources require version 2;
+/// core-only projects retain the legacy version 1 representation.
+pub const SUPPORTED_SCHEMA_VERSION: u64 = 2;
 
 #[derive(Debug)]
 pub enum FileError {
@@ -142,13 +145,13 @@ pub fn from_json(
     Ok(project)
 }
 
-/// Upgrades `root` from `version` to [`SCHEMA_VERSION`] in place. Add one step
+/// Validates `root` up to [`SUPPORTED_SCHEMA_VERSION`]. Add one migration step
 /// per bump, e.g. `if version < 2 { ...; }`.
 fn migrate(root: &mut Value, version: u64) -> Result<(), FileError> {
-    if version > SCHEMA_VERSION || version == 0 {
+    if version > SUPPORTED_SCHEMA_VERSION || version == 0 {
         return Err(FileError::UnsupportedVersion(version));
     }
-    root["schema_version"] = SCHEMA_VERSION.into();
+    root["schema_version"] = version.into();
     Ok(())
 }
 
@@ -344,7 +347,11 @@ mod tests {
         let load = |s: &str| from_json(s, Path::new("/p"), |_| true);
         assert_eq!(load(&ok).unwrap(), Project::default());
         let v2 = ok.replace("\"schema_version\": 1", "\"schema_version\": 2");
-        assert!(matches!(load(&v2), Err(FileError::UnsupportedVersion(2))));
+        assert_eq!(load(&v2).unwrap(), Project::default());
+        assert_eq!(to_json(&load(&v2).unwrap(), Path::new("/p")).unwrap(), ok);
+        assert!(ok.contains("\"schema_version\": 1"));
+        let v3 = ok.replace("\"schema_version\": 1", "\"schema_version\": 3");
+        assert!(matches!(load(&v3), Err(FileError::UnsupportedVersion(3))));
         let none = ok.replace("\"schema_version\"", "\"version\"");
         assert!(matches!(load(&none), Err(FileError::MissingVersion)));
         let zero = ok.replace("\"den\": 1", "\"den\": 0");
