@@ -1030,8 +1030,7 @@ impl App {
             || ctx.memory(|m| m.top_modal_layer().is_some())
     }
 
-    /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
-    /// focus. shortcut: unimplemented actions are stubs until their features land.
+    /// Annotation creation shares one focus guard between menu, palette integration and dispatch.
     fn annotation_applicability(&mut self, menu: bool) -> crate::keymap::Applicability {
         let focused = self.dock.find_active_focused().map(|(_, tab)| *tab);
         crate::keymap::Applicability::when(
@@ -1041,6 +1040,7 @@ impl App {
         )
     }
 
+    /// Runs a keymap action; explicit menus target the timeline whatever has focus.
     fn run_action(&mut self, id: &str, menu: bool) {
         // Space and K stop the take along with playback, wherever focus is.
         if self.take.is_some() && matches!(id, "play_stop" | "shuttle_stop" | "record") {
@@ -1135,6 +1135,8 @@ impl App {
                 {
                     Ok(clip) => {
                         self.preview_active = 1;
+                        self.timeline
+                            .action("selection_tool", self.history.project());
                         self.timeline.select_program_clip(clip);
                     }
                     Err(e) => tracing::warn!("annotation creation failed: {e}"),
@@ -2671,4 +2673,40 @@ fn app_icon() -> egui::IconData {
         height: image.height(),
         rgba: image.into_raw(),
     }
+}
+
+#[cfg(test)]
+#[test]
+fn annotation_actions_preserve_focus_routing_and_live_bindings() {
+    let mut app = App::restore(None);
+    app.on_welcome = false;
+    for focus in ["focus_media", "focus_source"] {
+        app.run_action(focus, false);
+        assert!(!app.annotation_applicability(false).is_enabled());
+        assert!(app.annotation_applicability(false).reason().is_some());
+        app.run_action("add_arrow", false);
+        assert!(app.history.project().assets().is_empty());
+    }
+    app.run_action("focus_program", false);
+    app.timeline.action("text_tool", app.history.project());
+    let before = app.history.project().clone();
+    app.run_action("add_arrow", false);
+    assert_eq!(app.timeline.tool(), crate::timeline::Tool::Selection);
+    assert_eq!(app.timeline.selected().len(), 1);
+    assert_eq!(app.preview_active, 1);
+    app.history.undo();
+    assert_eq!(app.history.project(), &before);
+    app.run_action("focus_source", false);
+    app.run_action("add_rectangle", true);
+    assert_eq!(app.preview_active, 1);
+    assert_eq!(
+        app.history.project().assets()[0]
+            .annotation
+            .as_ref()
+            .unwrap()
+            .kind,
+        jvid_core::annotations::AnnotationKind::Rectangle
+    );
+    app.keymap = Keymap::from_toml("add_arrow = \"Alt+F8\"\n").unwrap();
+    assert_eq!(app.keymap.label("add_arrow").1, "Alt+F8");
 }
