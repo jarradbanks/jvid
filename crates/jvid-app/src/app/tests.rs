@@ -498,20 +498,22 @@ fn hover_remove_button_uses_the_remove_flow() {
     }
     let mut results = egui_kittest::SnapshotResults::new();
     let mut h = bin_harness();
-    h.hover_at(egui::pos2(90.0, 160.0));
+    let tile = h.get_by_label("clutch_round_3.mkv").rect();
+    let hover = tile.center();
+    h.hover_at(hover);
     settle_hover(&mut h);
     assert_eq!(h.state().bin.filmstrip_test_state(), (0, 1, true));
     if gpu() {
         results.add(h.try_snapshot("bin_grid_hover"));
     }
     // A later pointer event can retry the failed source; its completion also goes idle.
-    h.hover_at(egui::pos2(91.0, 160.0));
+    h.hover_at(hover + egui::vec2(1.0, 0.0));
     settle_hover(&mut h);
     assert_eq!(h.state().bin.filmstrip_test_state(), (0, 2, true));
     h.state_mut().bin.list = true;
     h.run();
-    // clutch_round_3.mkv, used by two clips: the dock strip adds one header above the list.
-    h.hover_at(egui::pos2(100.0, 164.0 + size::HEADER));
+    let row = h.get_by_label("clutch_round_3.mkv").rect();
+    h.hover_at(row.center());
     settle_hover(&mut h);
     if gpu() {
         results.add(h.try_snapshot("bin_list_hover"));
@@ -521,7 +523,8 @@ fn hover_remove_button_uses_the_remove_flow() {
     assert_eq!(h.state().bin.confirm_remove, Some(AssetId(2)));
     h.get_by_label("Cancel").click();
     // arena_01.mkv is unused: removed at once.
-    h.hover_at(egui::pos2(100.0, 132.0 + size::HEADER));
+    let row = h.get_by_label("arena_01.mkv").rect();
+    h.hover_at(row.center());
     settle_hover(&mut h);
     h.get_by_label("Remove from Project").click();
     h.run();
