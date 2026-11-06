@@ -677,6 +677,8 @@ pub enum Pane {
 
 /// What the Inspector edits: the selected clips by track kind, and the asset they share.
 pub struct Selection<'a> {
+    project: &'a Project,
+    selected: Vec<ClipId>,
     clips: Vec<&'a Clip>,
     audio: Vec<&'a Clip>,
     /// Only when every selected video clip shows it, so its editors edit them all.
@@ -718,6 +720,12 @@ impl<'a> Selection<'a> {
             .map(|c| crate::masks::fitted(project, c))
             .collect();
         Self {
+            project,
+            selected: {
+                let mut ids: Vec<_> = selected.iter().copied().collect();
+                ids.sort();
+                ids
+            },
             clips,
             audio,
             shared,
@@ -805,11 +813,20 @@ pub fn show(
         .show(ui);
         return (None, None);
     };
+    if !sel.panes().contains(&pane) {
+        return (None, None);
+    }
     // A gutter keeps the row buttons clear of the scroll bar.
     let gutter = ui.spacing().scroll.allocated_width() + space::S4;
     ui.set_max_width(ui.available_width() - gutter);
     let (clips, audio, shared, same) = (&sel.clips, &sel.audio, sel.shared, sel.same);
-    let (mut edit, mut seek) = (None, None);
+    let mut edit = if sel.selected.is_empty() {
+        None
+    } else {
+        crate::settings_transfer::show(ui, sel.project, &sel.selected, t)
+            .map(|command| (command, None))
+    };
+    let mut seek = None;
     let mut index = 0u64;
     for (id, props) in SECTIONS {
         let (clips, here) = if id == "audio" {
@@ -5063,6 +5080,8 @@ mod tests {
         let (v, a, footage, text) = (clip(1, 0), clip(2, 0), asset(false), asset(true));
         let sel = |clips: Vec<&Clip>, audio: Vec<&Clip>, shared| {
             Selection {
+                project: &Project::default(),
+                selected: vec![],
                 clips,
                 audio,
                 shared,
@@ -5110,6 +5129,8 @@ mod tests {
         };
         let label = |clips: &[&Clip]| {
             Selection {
+                project: &Project::default(),
+                selected: vec![],
                 clips: clips.to_vec(),
                 audio: vec![],
                 shared: None,
