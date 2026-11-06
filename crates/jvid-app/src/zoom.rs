@@ -124,7 +124,9 @@ pub fn show(
     t: Time,
     frame: Rect,
 ) -> Option<Command> {
+    let id = ui.id().with("zoom region");
     if ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle)) {
+        ui.data_mut(|d| d.remove::<Draw>(id));
         return None;
     }
     let seq = project.sequence();
@@ -138,7 +140,6 @@ pub fn show(
         })
         .map(|(_, c)| c)
         .min_by_key(|c| c.id.0)?;
-    let id = ui.id().with("zoom region");
     let st = project.settings();
     let (w, h) = (st.width as f32, st.height as f32);
     let geometry =
@@ -204,6 +205,59 @@ pub fn show(
 mod tests {
     use super::*;
     use egui::pos2;
+
+    #[test]
+    fn middle_pan_cancels_region_even_if_primary_releases_during_pan() {
+        let (history, clip) = clip();
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([480.0, 360.0])
+            .build_ui_state(
+                move |ui, state: &mut (usize, bool)| {
+                    let frame = Rect::from_center_size(pos2(240.0, 140.0), Vec2::new(400.0, 225.0));
+                    if show(
+                        ui,
+                        history.project(),
+                        &HashSet::from([clip.id]),
+                        Time(S),
+                        frame,
+                    )
+                    .is_some()
+                    {
+                        state.0 += 1;
+                    }
+                    state.1 =
+                        ui.data(|d| d.get_temp::<Draw>(ui.id().with("zoom region")).is_some());
+                },
+                (0, false),
+            );
+        let from = pos2(180.0, 120.0);
+        let to = pos2(300.0, 200.0);
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::ALT));
+        h.hover_at(from);
+        h.run();
+        h.drag_at(from);
+        h.run();
+        h.hover_at(to);
+        h.run();
+        assert!(h.state().1, "Alt-region started");
+        for (button, pressed) in [
+            (egui::PointerButton::Middle, true),
+            (egui::PointerButton::Primary, false),
+            (egui::PointerButton::Middle, false),
+        ] {
+            h.event(egui::Event::PointerButton {
+                pos: to,
+                button,
+                pressed,
+                modifiers: egui::Modifiers::ALT,
+            });
+            h.run();
+            assert!(!h.state().1, "pan abandoned stored region");
+        }
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        h.run();
+        assert_eq!(*h.state(), (0, false));
+    }
 
     #[test]
     fn zoomed_region_uses_complete_frame_mapping_and_leaves_transport_clickable() {
