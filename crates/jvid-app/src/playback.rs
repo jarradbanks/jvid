@@ -820,6 +820,9 @@ impl Playback {
             }
             match result {
                 Ok(image) => {
+                    if self.status.picture == Picture::Failed {
+                        self.shown = None;
+                    }
                     self.stills.insert(id, image);
                 }
                 Err(e) => {
