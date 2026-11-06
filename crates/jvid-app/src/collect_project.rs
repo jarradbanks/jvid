@@ -513,6 +513,7 @@ fn run(
         ));
     }
     if !fonts.is_empty() {
+        json["schema_version"] = jvid_core::file::SUPPORTED_SCHEMA_VERSION.into();
         json["fonts"] = serde_json::to_value(fonts).map_err(io::Error::other)?;
     }
     // Keep dependency provenance and incomplete-package status with the project.
