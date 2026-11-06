@@ -30,6 +30,7 @@ use crate::i18n::verbatim;
 use crate::i18n::{Label, tr, trn};
 use crate::keymap::{ACTIONS, Keymap};
 use crate::playback::{self, Pixels, Playback, Shown};
+use crate::playback_status::{self, Health, Observation, Picture};
 use crate::scopes;
 use crate::transport::{AudioSource, Transport};
 use crate::viewer_geometry::{View, ViewerGeometry};
@@ -191,6 +192,13 @@ pub struct Preview {
     /// slow decode drops frames instead of queueing them).
     requested: Option<Time>,
     pending: bool,
+    requested_proxy: bool,
+    frame_proxy: bool,
+    proxy_state: (u64, bool),
+    status_source: bool,
+    source_status: Observation,
+    source_health: Health,
+    view_session: u64,
     source_job: Option<jvid_jobs::Handle>,
     frame: Option<Arc<Frame>>,
     still: Option<Arc<image::RgbaImage>>,
@@ -261,6 +269,13 @@ impl Preview {
             source: None,
             requested: None,
             pending: false,
+            requested_proxy: false,
+            frame_proxy: false,
+            proxy_state: (0, false),
+            status_source: false,
+            source_status: Observation::default(),
+            source_health: Health::default(),
+            view_session: 0,
             source_job: None,
             frame: None,
             still: None,
@@ -298,6 +313,11 @@ impl Preview {
             out.flush();
         }
         self.program.reset_session();
+        self.view_session += 1;
+        self.proxied.clear();
+        self.source_status = Observation::default();
+        self.source_health.reset();
+        self.frame_proxy = false;
         self.player = None;
         self.source = None;
         self.requested = None;
@@ -382,6 +402,7 @@ impl Preview {
         self.frame = None;
         self.still = None;
         self.error = None;
+        self.source_shown = None;
         self.generation += 1;
         self.program.refresh_media();
         self.player = Some(Player {
@@ -468,6 +489,7 @@ impl Preview {
         missing: &HashSet<PathBuf>,
         keymap: &Keymap,
     ) -> Option<Command> {
+        self.proxy_sources(project);
         if let Some(p) = &self.player
             && project.asset(p.asset).is_none()
         {
@@ -549,6 +571,7 @@ impl Preview {
     }
 
     fn seek_source(&mut self, time: Time) {
+        self.source_health.reset();
         let clock = self.clock();
         let Some(player) = &mut self.player else {
             return;
@@ -930,8 +953,29 @@ impl Preview {
 
     /// Where the project frame sits in the viewer `ui` draws into, at the current zoom.
     pub fn project_rect(&self, ui: &Ui, settings: &ProjectSettings) -> Rect {
+        self.prepare_view(ui, false, [settings.width, settings.height]);
         self.geometry(ui, vec2(settings.width as f32, settings.height as f32))
             .frame
+    }
+
+    /// Panel tabs share a body UI id. Captured selection coordinates belong to one picture.
+    fn prepare_view(&self, ui: &Ui, source: bool, size: [u32; 2]) {
+        let identity = (
+            self.view_session,
+            source,
+            if source { self.source_asset() } else { None },
+            size,
+        );
+        let key = view_id(ui).with("picture");
+        ui.data_mut(|data| {
+            if data
+                .get_temp::<(u64, bool, Option<AssetId>, [u32; 2])>(key)
+                .is_some_and(|prior| prior != identity)
+            {
+                data.insert_temp(view_id(ui), View::default());
+            }
+            data.insert_temp(key, identity);
+        });
     }
 
     fn geometry(&self, ui: &Ui, size: egui::Vec2) -> ViewerGeometry {
@@ -957,11 +1001,25 @@ impl Preview {
         program: Option<(&ProjectSettings, bool)>,
         keymap: &Keymap,
     ) -> TransportInput {
+        self.status_source = program.is_none_or(|(_, source)| source);
+        let proxy_state = (self.proxies.revision(), self.proxies.enabled());
+        if proxy_state != self.proxy_state {
+            self.proxy_state = proxy_state;
+            if let Some(job) = self.source_job.take() {
+                job.cancel();
+            }
+            (self.tx, self.rx) = channel();
+            self.pending = false;
+            self.requested = None;
+            self.error = None;
+        }
         // Only the timeline's own row records.
         let records = matches!(program, Some((_, false)));
         let path = source.map(|(p, ..)| p);
         if self.source.as_deref() != path {
             self.source = path.map(Path::to_path_buf);
+            self.frame_proxy = false;
+            self.source_health.reset();
             (self.frame, self.still, self.error, self.requested) = (None, None, None, None);
         }
         if offline {
@@ -982,6 +1040,12 @@ impl Preview {
         {
             (self.requested, self.pending) = (Some(t), true);
             let (tx, ctx, p) = (self.tx.clone(), ui.ctx().clone(), path.to_path_buf());
+            let resolved = if jvid_media::stills::is_still(path) {
+                path.to_owned()
+            } else {
+                self.proxies.resolve(path)
+            };
+            self.requested_proxy = resolved != path;
             self.source_job = Some(if jvid_media::stills::is_still(path) {
                 self.jobs.submit(
                     format!("source-still:{:?}:{}", p, self.generation),
@@ -993,12 +1057,13 @@ impl Preview {
                     },
                 )
             } else {
-                self.pool.submit(
-                    &self.jobs,
-                    self.proxies.resolve(path),
-                    t,
-                    Priority::Interactive,
-                    move |r| {
+                let proxies = self.proxies.clone();
+                let proxy = self.requested_proxy;
+                self.pool
+                    .submit(&self.jobs, resolved, t, Priority::Interactive, move |r| {
+                        if proxy && let Err(error) = &r {
+                            proxies.reject(&p, error.to_string());
+                        }
                         let _ = tx.send((
                             p,
                             t,
@@ -1006,8 +1071,7 @@ impl Preview {
                                 .map_err(|e| e.to_string()),
                         ));
                         ctx.request_repaint();
-                    },
-                )
+                    })
             });
         }
         while let Ok((path, t, r)) = self.rx.try_recv() {
@@ -1026,6 +1090,7 @@ impl Preview {
                     self.error = None;
                     match f {
                         Pixels::Frame(f) => {
+                            self.frame_proxy = self.requested_proxy;
                             self.frame = Some(f);
                             self.still = None;
                         }
@@ -1050,6 +1115,32 @@ impl Preview {
             return TransportInput::default();
         }
 
+        let video =
+            source.is_some_and(|(path, _, video)| video && !jvid_media::stills::is_still(path));
+        self.source_status = Observation {
+            picture: if offline || self.error.is_some() {
+                Picture::Failed
+            } else if self.pending
+                || (video && source.is_some_and(|(_, time, _)| self.requested != Some(time)))
+            {
+                Picture::Loading
+            } else if self.frame.is_some() || self.still.is_some() || self.source_shown.is_some() {
+                Picture::Ready
+            } else {
+                Picture::Idle
+            },
+            proxies: usize::from(video && self.frame.is_some() && self.frame_proxy),
+            originals: usize::from(video && self.frame.is_some() && !self.frame_proxy),
+        };
+        if self.status_source {
+            let speed = self.player.as_ref().map_or(0, |p| p.transport.speed());
+            let index = self
+                .player
+                .as_ref()
+                .map_or(0, |p| p.transport.frame(self.clock()));
+            let ready = self.source_status.picture == Picture::Ready;
+            self.source_health.observe(index, speed, video, ready);
+        }
         let rect = ui.max_rect();
         let viewer = viewer_rect(ui);
         let view_id = view_id(ui);
@@ -1112,7 +1203,11 @@ impl Preview {
                 .as_ref()
                 .map(|f| [f.width as f32, f.height as f32]),
         };
+        if drawn.is_none() && self.status_source {
+            self.prepare_view(ui, true, [0, 0]);
+        }
         if let Some(drawn) = drawn {
+            self.prepare_view(ui, self.status_source, [drawn[0] as u32, drawn[1] as u32]);
             let view = [viewer.left(), viewer.top(), viewer.width(), viewer.height()];
             let geometry = self.geometry(ui, drawn.into());
             let image = geometry.frame;
@@ -1224,7 +1319,7 @@ impl Preview {
                 0.0
             };
             let secondary_width =
-                88.0 + 72.0 + proxy_text + 24.0 + 32.0 + 5.0 * space::S8 + reset_width;
+                88.0 + 72.0 + proxy_text + 24.0 + 32.0 + 112.0 + 6.0 * space::S8 + reset_width;
             let full_width = time_width
                 + 5.0 * 28.0
                 + record_extra
@@ -1250,7 +1345,7 @@ impl Preview {
             let rtl = Layout::right_to_left(Align::Center);
             let right = ui.scope_builder(UiBuilder::new().max_rect(inner).layout(rtl), |ui| {
                 ui.spacing_mut().item_spacing.x = space::S8;
-                self.dropdowns(ui, view_id);
+                self.dropdowns(ui, view_id, true);
                 ui.min_rect().left()
             });
             let x = bar
@@ -1294,7 +1389,7 @@ impl Preview {
             ui.scope_builder(UiBuilder::new().max_rect(bar), |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = space::S8;
-                    self.dropdowns(ui, view_id);
+                    self.dropdowns(ui, view_id, true);
                 });
             });
         }
@@ -1382,8 +1477,7 @@ impl Preview {
         let time_budget = if stacked { 0.0 } else { time_width };
         let take_budget = take.map_or(0.0, |t| take_width(ui, t.0).min(TAKE_WIDTH));
         let left_budget = if stacked { take_budget } else { time_budget };
-        let right_budget = size::CONTROL
-            + space::S8
+        let right_budget = 2.0 * (size::CONTROL + space::S8)
             + if !stacked && take.is_some() {
                 take_budget + space::S8
             } else {
@@ -1394,6 +1488,7 @@ impl Preview {
             >= 140.0 + record_width + 2.0 * (left_budget.max(right_budget) + space::S8);
         let buttons_width = if navigation { 140.0 } else { size::CONTROL } + record_width;
         let more_rect = row_rect.with_min_x(row_rect.right() - size::CONTROL);
+        let status_rect = more_rect.translate(vec2(-size::CONTROL - space::S8, 0.0));
         let min_x = row_rect.left()
             + if stacked {
                 0.0
@@ -1419,7 +1514,7 @@ impl Preview {
                     .with_min_x(controls.right() + space::S8)
                     .with_max_x(
                         (controls.right() + space::S8 + take_budget)
-                            .min(more_rect.left() - space::S8),
+                            .min(status_rect.left() - space::S8),
                     )
             };
             ui.scope_builder(
@@ -1431,6 +1526,12 @@ impl Preview {
                 },
             );
         }
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(status_rect)
+                .layout(Layout::left_to_right(Align::Center)),
+            |ui| self.status_control(ui, true),
+        );
         let mut action = None;
         ui.scope_builder(
             UiBuilder::new()
@@ -1481,14 +1582,14 @@ impl Preview {
                         }
                         ui.separator();
                     }
-                    self.dropdowns(ui, view_id);
+                    self.dropdowns(ui, view_id, false);
                 });
             },
         );
         action
     }
 
-    fn dropdowns(&mut self, ui: &mut Ui, view_id: egui::Id) {
+    fn dropdowns(&mut self, ui: &mut Ui, view_id: egui::Id, status: bool) {
         let zooms = ZOOMS.map(|z| z.0());
         let recovered = ui
             .data(|d| d.get_temp::<View>(view_id))
@@ -1536,9 +1637,11 @@ impl Preview {
         {
             self.proxies.set_enabled(on);
             // Frames decoded from the other files are stale now.
-            self.program.cache = playback::FrameCache::new(playback::DEFAULT_BUDGET);
-            self.program.refresh();
+            self.program.refresh_sources();
             self.requested = None;
+        }
+        if status {
+            self.status_control(ui, false);
         }
         let glyph = egui::RichText::new(icon::GRID).font(theme::icon_font());
         let guides = ui.menu_button(glyph, |ui| {
@@ -1557,6 +1660,33 @@ impl Preview {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("preview.guides"))
         });
         guides.response.on_hover_text(tr!("preview.guides"));
+    }
+    fn status_control(&mut self, ui: &mut Ui, compact: bool) {
+        let mut jobs: Vec<_> = self
+            .proxied
+            .iter()
+            .filter_map(|path| self.proxies.status(path).map(|state| (path.clone(), state)))
+            .filter(|(_, state)| {
+                self.proxies.enabled()
+                    || !matches!(state, proxy::Status::Failed(_) | proxy::Status::Cancelled)
+            })
+            .collect();
+        jobs.sort_by(|a, b| a.0.cmp(&b.0));
+        let (observation, health) = if self.status_source {
+            (self.source_status, &self.source_health)
+        } else {
+            (self.program.status, &self.program.health)
+        };
+        for path in playback_status::control(
+            ui,
+            observation,
+            health,
+            QUALITIES[self.quality].0(),
+            &jobs,
+            compact,
+        ) {
+            self.proxied.remove(&path);
+        }
     }
 }
 
@@ -2316,20 +2446,59 @@ mod program_tests {
             return;
         }
         for ppp in [1.0, 1.5] {
-            let (centre, items) = transport_ink([960.0, 360.0], ppp, None);
+            let (centre, items) = transport_ink([1280.0, 360.0], ppp, None);
             // Current time, separator and total; 5 buttons, Record, guides, checkbox box
-            // and label, and 2 dropdowns.
-            assert_eq!(items.len(), 14, "@{ppp}x: {items:?}");
+            // and label, 2 dropdowns, and the playback status caption.
+            assert_eq!(items.len(), 15, "@{ppp}x: {items:?}");
             // While recording: Stop, its elapsed time and meter join the row.
             let take = Some((std::time::Duration::from_secs(72), 0.5));
-            let (_, recording) = transport_ink([960.0, 360.0], ppp, take);
-            assert_eq!(recording.len(), 16, "@{ppp}x: {recording:?}");
+            let (_, recording) = transport_ink([1280.0, 360.0], ppp, take);
+            assert_eq!(recording.len(), 17, "@{ppp}x: {recording:?}");
             for i in items.iter().chain(&recording) {
                 assert!(
                     (i.1 - centre).abs() <= 1.0,
                     "@{ppp}x: {i:?} off the centre {centre}, all {items:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn playback_status_viewer_evidence() {
+        use egui_kittest::kittest::Queryable;
+        let Some(dir) = std::env::var_os("JVID_PLAYBACK_EVIDENCE_DIR").map(PathBuf::from) else {
+            return;
+        };
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, width) in [("viewer-compact", 240.0), ("viewer-wide", 960.0)] {
+            let mut h = egui_kittest::Harness::builder()
+                .with_size([width, 540.0])
+                .wgpu()
+                .build_eframe(|cc| Program {
+                    preview: Preview::new(cc.wgpu_render_state.as_ref()),
+                    history: History::new(Project::default()),
+                    fresh: true,
+                });
+            add_solid(&mut h.state_mut().history, [0.2, 0.25, 0.3, 1.0], Time(0));
+            for _ in 0..3 {
+                h.step();
+                h.render().unwrap();
+            }
+            h.step();
+            h.render()
+                .unwrap()
+                .save(dir.join(format!("{name}-control.png")))
+                .unwrap();
+            h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status"))
+                .click();
+            h.run();
+            h.render()
+                .unwrap()
+                .save(dir.join(format!("{name}.png")))
+                .unwrap();
         }
     }
 
@@ -2550,6 +2719,56 @@ mod program_tests {
             "no frame and no error text"
         );
         assert!(!log.contains("preview decode"), "{log}");
+        assert_eq!(p.source_status.picture, Picture::Idle);
+    }
+
+    #[test]
+    fn generated_source_to_audio_only_clears_retained_picture_and_status() {
+        use jvid_core::history::Created;
+        let mut history = History::new(Project::default());
+        let Created::Asset(solid) = history
+            .apply(Command::AddSolid {
+                name: "Solid".into(),
+                color: [0.0, 0.0, 0.0, 1.0],
+            })
+            .unwrap()
+        else {
+            panic!("solid")
+        };
+        history
+            .apply(Command::Import(vec![(
+                "/nonexistent/audio.wav".into(),
+                jvid_core::model::ProbeInfo {
+                    audio_streams: 1,
+                    duration: Time(FLICKS_PER_SECOND),
+                    ..Default::default()
+                },
+            )]))
+            .unwrap();
+        let audio = history.project().assets()[1].id;
+        let project = history.project().clone();
+        let mut preview = Preview::new(None);
+        preview.open(&project, solid);
+        let mut fresh = true;
+        let drawn_project = project.clone();
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([640.0, 360.0])
+            .build_ui_state(
+                move |ui, preview: &mut Preview| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    preview.show_source(ui, &drawn_project, &HashSet::new(), &Keymap::default());
+                },
+                preview,
+            );
+        h.run();
+        assert_eq!(h.state().source_status.picture, Picture::Ready);
+        h.state_mut().open(&project, audio);
+        h.run();
+        assert!(h.state().source_shown.is_none());
+        assert_eq!(h.state().source_status, Observation::default());
+        assert!(h.state().requested.is_none());
     }
 
     #[test]
@@ -2668,6 +2887,131 @@ mod viewer_fit_tests {
     use jvid_core::history::History;
     use jvid_core::model::{ClipId, Transform};
 
+    #[test]
+    fn panel_tabs_source_assets_and_aspect_changes_clear_unrelated_view_bounds() {
+        use jvid_core::history::Created;
+        struct State {
+            preview: Preview,
+            history: History,
+            active: usize,
+            capture: bool,
+            current: View,
+            key: egui::Id,
+        }
+        let mut history = History::new(Project::default());
+        let assets: Vec<_> = (0..2)
+            .map(|i| {
+                let Created::Asset(id) = history
+                    .apply(Command::AddSolid {
+                        name: i.to_string(),
+                        color: [0.0, 0.0, 0.0, 1.0],
+                    })
+                    .unwrap()
+                else {
+                    panic!("asset")
+                };
+                id
+            })
+            .collect();
+        let mut fresh = true;
+        let mut h = Harness::builder().with_size([640.0, 480.0]).build_ui_state(
+            move |ui, state: &mut State| {
+                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                let source = state.active == 1;
+                suite_ui::panel::Panel::tabbed(&["Program", "Source"], &mut state.active)
+                    .embedded(true)
+                    .show(ui, |ui| {
+                        if source {
+                            state.preview.show_source(
+                                ui,
+                                state.history.project(),
+                                &HashSet::new(),
+                                &Keymap::default(),
+                            );
+                        } else {
+                            state
+                                .preview
+                                .project_rect(ui, state.history.project().settings());
+                            state.preview.show_program(
+                                ui,
+                                state.history.project(),
+                                Time(0),
+                                None,
+                                false,
+                                &Keymap::default(),
+                            );
+                        }
+                        if state.capture {
+                            set_view(
+                                ui,
+                                View {
+                                    selection: Some(Rect::from_center_size(
+                                        Pos2::ZERO,
+                                        vec2(200.0, 100.0),
+                                    )),
+                                    pan: vec2(20.0, 10.0),
+                                },
+                            );
+                            state.capture = false;
+                        }
+                        state.current = view(ui);
+                        state.key = view_id(ui);
+                    });
+            },
+            State {
+                preview: Preview::new(None),
+                history,
+                active: 0,
+                capture: false,
+                current: View::default(),
+                key: egui::Id::NULL,
+            },
+        );
+        h.run();
+        let program_key = h.state().key;
+        h.state_mut().capture = true;
+        h.run();
+        assert!(h.state().current.selection.is_some());
+        let project = h.state().history.project().clone();
+        h.state_mut().preview.open(&project, assets[0]);
+        h.state_mut().active = 1;
+        h.run();
+        assert_eq!(
+            h.state().key,
+            program_key,
+            "actual panel body shares its UI identity"
+        );
+        assert_eq!(h.state().current, View::default());
+        h.state_mut().capture = true;
+        h.run();
+        h.state_mut().preview.open(&project, assets[1]);
+        h.run();
+        assert_eq!(h.state().current, View::default(), "new Source asset");
+        h.state_mut().capture = true;
+        h.run();
+        let mut settings = project.settings().clone();
+        settings.width = 1080;
+        settings.height = 1920;
+        h.state_mut()
+            .history
+            .apply(Command::SetSettings(settings))
+            .unwrap();
+        h.run();
+        assert_eq!(h.state().current, View::default(), "Source aspect changed");
+        h.state_mut().capture = true;
+        h.run();
+        h.state_mut().active = 0;
+        h.run();
+        assert_eq!(h.state().current, View::default(), "return to Program");
+        h.state_mut().capture = true;
+        h.run();
+        h.state_mut().preview.reset_session();
+        h.run();
+        assert_eq!(h.state().current, View::default(), "new project session");
+    }
+
     struct Viewer {
         preview: Preview,
         history: History,
@@ -2686,9 +3030,6 @@ mod viewer_fit_tests {
             }
             self.key = view_id(ui);
             self.body = viewer_rect(ui);
-            self.frame = self
-                .preview
-                .project_rect(ui, self.history.project().settings());
             if self.source {
                 self.preview.show_source(
                     ui,
@@ -2696,7 +3037,15 @@ mod viewer_fit_tests {
                     &HashSet::new(),
                     &Keymap::default(),
                 );
+                let settings = self.history.project().settings();
+                self.frame = self
+                    .preview
+                    .geometry(ui, vec2(settings.width as f32, settings.height as f32))
+                    .frame;
             } else {
+                self.frame = self
+                    .preview
+                    .project_rect(ui, self.history.project().settings());
                 self.preview.show_program(
                     ui,
                     self.history.project(),

@@ -3,6 +3,12 @@
 # use the imperative (Gem). Terms follow docs/i18n/da.md.
 
 [action]
+workspace_editing = "Arbejdsområde til redigering"
+workspace_captions = "Arbejdsområde til undertekster"
+workspace_audio = "Arbejdsområde til lyd"
+workspace_save = "Gem arbejdsområde…"
+reset_layout = "Nulstil panellayout"
+maximize_panel = "Maksimér/gendan panel"
 command_palette = "Kommandopalet"
 collect_project = "Saml Projekt"
 copy_settings = "Kopiér indstillinger"
@@ -802,6 +808,24 @@ reset_all = "Nulstil alle"
 file_type = "Tastaturgenveje"
 
 [preview]
+status = "Afspilningsstatus"
+status_idle = "Ingen Video"
+status_loading = "Indlæser"
+status_failed = "Billede Ikke Tilgængeligt"
+status_approximate = "Nøglebilledevisning"
+status_original = "Original"
+status_proxy = "Proxy"
+status_mixed = "Blandede Kilder"
+status_quality = "Forhåndsvisning: {quality} · {source}"
+status_export = "Eksport bruger de originale medier i eksportopløsningen."
+status_trouble = "Observerede billeder ikke klar til tiden: {count}. Prøv proxyer eller en lavere forhåndsvisningsopløsning."
+status_decode_failed = "Nogle medier kunne ikke afkodes. Kontrollér kildefilerne, eller forbind offline medier igen."
+status_generating = "Forbereder proxyer: {count} ({progress} %)."
+status_ready = "Klare proxyer: {count}. Proxybrug vises kun for afkodede proxypixels."
+status_proxy_failed = "Proxy utilgængelig for {source}: {error}"
+status_cancelled = "Proxyoprettelse annulleret. Prøv igen for at oprette dem på ny."
+status_retry = "Prøv Proxyer Igen"
+
 view_selection = "Vis Markering"
 pan_hint = "Træk med den midterste museknap for at panorere; vælg Tilpas for at nulstille visningen."
 position = "Afspilningsposition"
@@ -1137,3 +1161,15 @@ invalid_mask = "Kildeeffekten henviser til en manglende maske. Ret først masket
 incompatible_target = "Valgte kategorier er ikke kompatible med målklippene."
 unavailable_resources = "Nødvendige effekter eller LUT-filer er ikke tilgængelige."
 focus_clip = "Fokusér først Tidslinje, Program eller Inspektør."
+
+[workspace]
+menu = "Arbejdsområder"
+rename = "Omdøb arbejdsområde…"
+delete = "Slet arbejdsområde"
+apply = "Anvend arbejdsområde"
+name = "Arbejdsområdets navn"
+empty_name = "Indtast et navn til arbejdsområdet."
+duplicate_name = "Der findes allerede et arbejdsområde med dette navn."
+missing = "Dette arbejdsområde er ikke længere tilgængeligt."
+focus_panel = "Aktivér et panel for at maksimere det."
+save = "Gem arbejdsområde…"

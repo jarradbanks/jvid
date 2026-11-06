@@ -3,6 +3,12 @@
 # items use the imperative (Lagre). Terms follow docs/i18n/nb.md.
 
 [action]
+workspace_editing = "Arbeidsområde for redigering"
+workspace_captions = "Arbeidsområde for undertekster"
+workspace_audio = "Arbeidsområde for lyd"
+workspace_save = "Lagre arbeidsområde…"
+reset_layout = "Tilbakestill paneloppsett"
+maximize_panel = "Maksimer/gjenopprett panel"
 command_palette = "Kommandopalett"
 collect_project = "Samle Prosjekt"
 copy_settings = "Kopier innstillinger"
@@ -802,6 +808,24 @@ reset_all = "Tilbakestill alle"
 file_type = "Tastaturoppsett"
 
 [preview]
+status = "Avspillingsstatus"
+status_idle = "Ingen Video"
+status_loading = "Laster"
+status_failed = "Bilde Ikke Tilgjengelig"
+status_approximate = "Nøkkelbildeforhåndsvisning"
+status_original = "Original"
+status_proxy = "Proxy"
+status_mixed = "Blandede Kilder"
+status_quality = "Forhåndsvisning: {quality} · {source}"
+status_export = "Eksport bruker originalmediene i eksportoppløsningen."
+status_trouble = "Observerte bilder ikke klare i tide: {count}. Prøv proxyer eller lavere forhåndsvisningsoppløsning."
+status_decode_failed = "Noen medier kunne ikke dekodes. Kontroller kildefilene eller koble til frakoblede medier på nytt."
+status_generating = "Forbereder proxyer: {count} ({progress} %)."
+status_ready = "Klare proxyer: {count}. Proxybruk vises bare for dekodede proxypiksler."
+status_proxy_failed = "Proxy utilgjengelig for {source}: {error}"
+status_cancelled = "Proxygenerering avbrutt. Prøv igjen for å generere dem på nytt."
+status_retry = "Prøv Proxyer Igjen"
+
 view_selection = "Vis Markering"
 pan_hint = "Dra med midtknappen for å panorere; velg Tilpass for å tilbakestille visningen."
 position = "Avspillingsposisjon"
@@ -1137,3 +1161,15 @@ invalid_mask = "Kildeeffekten viser til en manglende maske. Rett først masketil
 incompatible_target = "Valgte kategorier er ikke kompatible med målklippene."
 unavailable_resources = "Nødvendige effekter eller LUT-filer er ikke tilgjengelige."
 focus_clip = "Fokuser først Tidslinje, Program eller Inspektør."
+
+[workspace]
+menu = "Arbeidsområder"
+rename = "Gi arbeidsområde nytt navn…"
+delete = "Slett arbeidsområde"
+apply = "Bruk arbeidsområde"
+name = "Navn på arbeidsområde"
+empty_name = "Skriv inn et navn på arbeidsområdet."
+duplicate_name = "Et arbeidsområde med dette navnet finnes allerede."
+missing = "Dette arbeidsområdet er ikke lenger tilgjengelig."
+focus_panel = "Aktiver et panel for å maksimere det."
+save = "Lagre arbeidsområde…"

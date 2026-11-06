@@ -3,6 +3,12 @@
 # imperatives, as on Windows and macOS. Terms follow docs/i18n/it.md.
 
 [action]
+workspace_editing = "Area di montaggio"
+workspace_captions = "Area sottotitoli"
+workspace_audio = "Area audio"
+workspace_save = "Salva area di lavoro…"
+reset_layout = "Ripristina disposizione pannelli"
+maximize_panel = "Massimizza/ripristina pannello"
 command_palette = "Tavolozza dei Comandi"
 collect_project = "Raccogli Progetto"
 copy_settings = "Copia impostazioni"
@@ -813,6 +819,24 @@ reset_all = "Reimposta tutto"
 file_type = "Mappa tasti"
 
 [preview]
+status = "Stato Riproduzione"
+status_idle = "Nessun Video"
+status_loading = "Caricamento"
+status_failed = "Fotogramma non Disponibile"
+status_approximate = "Anteprima Fotogramma Chiave"
+status_original = "Originale"
+status_proxy = "Proxy"
+status_mixed = "Sorgenti Miste"
+status_quality = "Anteprima: {quality} · {source}"
+status_export = "L’esportazione usa i media originali alla risoluzione di esportazione."
+status_trouble = "Fotogrammi osservati non disponibili in tempo: {count}. Prova i proxy o una risoluzione di anteprima inferiore."
+status_decode_failed = "Impossibile decodificare alcuni media. Controlla i file sorgente o ricollega i media non in linea."
+status_generating = "Preparazione proxy: {count} ({progress}%)."
+status_ready = "Proxy pronti: {count}. L’uso dei proxy è indicato solo per i pixel decodificati dal proxy."
+status_proxy_failed = "Proxy non disponibile per {source}: {error}"
+status_cancelled = "Generazione proxy annullata. Riprova per generarli di nuovo."
+status_retry = "Riprova Proxy"
+
 view_selection = "Mostra Selezione"
 pan_hint = "Trascina con il pulsante centrale per spostare; scegli Adatta per ripristinare la vista."
 position = "Posizione di Riproduzione"
@@ -1149,3 +1173,15 @@ invalid_mask = "L’effetto di origine usa una maschera mancante. Correggi prima
 incompatible_target = "Le categorie selezionate non sono compatibili con le clip di destinazione."
 unavailable_resources = "Gli effetti o i file LUT richiesti non sono disponibili."
 focus_clip = "Attiva prima Timeline, Programma o Ispettore."
+
+[workspace]
+menu = "Aree di lavoro"
+rename = "Rinomina area…"
+delete = "Elimina area"
+apply = "Applica area"
+name = "Nome area"
+empty_name = "Inserisci un nome per l’area."
+duplicate_name = "Esiste già un’area con questo nome."
+missing = "Questa area non è più disponibile."
+focus_panel = "Attiva un pannello per massimizzarlo."
+save = "Salva area di lavoro…"

@@ -3,6 +3,12 @@
 # docs/i18n/pl.md.
 
 [action]
+workspace_editing = "Obszar montażu"
+workspace_captions = "Obszar napisów"
+workspace_audio = "Obszar dźwięku"
+workspace_save = "Zapisz obszar roboczy…"
+reset_layout = "Przywróć układ paneli"
+maximize_panel = "Maksymalizuj/przywróć panel"
 command_palette = "Paleta Poleceń"
 collect_project = "Zbierz Projekt"
 copy_settings = "Kopiuj ustawienia"
@@ -828,6 +834,24 @@ reset_all = "Resetuj wszystkie"
 file_type = "Mapa klawiszy"
 
 [preview]
+status = "Stan Odtwarzania"
+status_idle = "Brak Wideo"
+status_loading = "Ładowanie"
+status_failed = "Klatka Niedostępna"
+status_approximate = "Podgląd Klatki Kluczowej"
+status_original = "Oryginał"
+status_proxy = "Proxy"
+status_mixed = "Mieszane Źródła"
+status_quality = "Podgląd: {quality} · {source}"
+status_export = "Eksport używa oryginalnych mediów w rozdzielczości eksportu."
+status_trouble = "Zaobserwowane klatki niedostępne na czas: {count}. Wypróbuj proxy lub niższą rozdzielczość podglądu."
+status_decode_failed = "Nie udało się zdekodować części mediów. Sprawdź pliki źródłowe lub ponownie połącz media offline."
+status_generating = "Przygotowywanie proxy: {count} ({progress}%)."
+status_ready = "Gotowe proxy: {count}. Użycie proxy jest zgłaszane tylko dla zdekodowanych pikseli proxy."
+status_proxy_failed = "Proxy niedostępne dla {source}: {error}"
+status_cancelled = "Generowanie proxy anulowane. Ponów próbę, aby wygenerować je ponownie."
+status_retry = "Ponów Generowanie Proxy"
+
 view_selection = "Pokaż Zaznaczenie"
 pan_hint = "Przeciągnij środkowym przyciskiem myszy, aby przesunąć; wybierz Dopasuj, aby przywrócić widok."
 position = "Pozycja Odtwarzania"
@@ -1165,3 +1189,15 @@ invalid_mask = "Efekt źródłowy odwołuje się do brakującej maski. Najpierw 
 incompatible_target = "Wybrane kategorie są niezgodne z klipami docelowymi."
 unavailable_resources = "Wymagane efekty lub pliki LUT są niedostępne."
 focus_clip = "Najpierw aktywuj Oś czasu, Program lub Inspektor."
+
+[workspace]
+menu = "Obszary robocze"
+rename = "Zmień nazwę obszaru…"
+delete = "Usuń obszar"
+apply = "Zastosuj obszar"
+name = "Nazwa obszaru"
+empty_name = "Wpisz nazwę obszaru roboczego."
+duplicate_name = "Obszar o tej nazwie już istnieje."
+missing = "Ten obszar nie jest już dostępny."
+focus_panel = "Uaktywnij panel, aby go zmaksymalizować."
+save = "Zapisz obszar roboczy…"

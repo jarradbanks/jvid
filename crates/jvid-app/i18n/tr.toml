@@ -5,6 +5,12 @@
 # {placeholder}: vowel harmony can't follow it. Terms follow docs/i18n/tr.md.
 
 [action]
+workspace_editing = "Kurgu çalışma alanı"
+workspace_captions = "Altyazı çalışma alanı"
+workspace_audio = "Ses çalışma alanı"
+workspace_save = "Çalışma alanını kaydet…"
+reset_layout = "Panel Düzenini Sıfırla"
+maximize_panel = "Paneli büyüt/geri yükle"
 command_palette = "Komut Paleti"
 collect_project = "Projeyi Topla"
 copy_settings = "Ayarları Kopyala"
@@ -805,6 +811,24 @@ reset_all = "Tümünü Sıfırla"
 file_type = "Tuş Haritası"
 
 [preview]
+status = "Oynatma Durumu"
+status_idle = "Video Yok"
+status_loading = "Yükleniyor"
+status_failed = "Kare Kullanılamıyor"
+status_approximate = "Anahtar Kare Önizlemesi"
+status_original = "Özgün"
+status_proxy = "Vekil"
+status_mixed = "Karışık Kaynaklar"
+status_quality = "Önizleme: {quality} · {source}"
+status_export = "Dışa aktarma, özgün medyayı dışa aktarma çözünürlüğünde kullanır."
+status_trouble = "Zamanında hazır olmayan gözlenen kareler: {count}. Vekilleri veya daha düşük önizleme çözünürlüğünü deneyin."
+status_decode_failed = "Bazı medya çözülemedi. Kaynak dosyaları denetleyin veya çevrimdışı medyayı yeniden bağlayın."
+status_generating = "Vekiller hazırlanıyor: {count} (%{progress})."
+status_ready = "Hazır vekiller: {count}. Vekil kullanımı yalnızca çözülen vekil pikselleri için bildirilir."
+status_proxy_failed = "{source} için vekil kullanılamıyor: {error}"
+status_cancelled = "Vekil oluşturma iptal edildi. Yeniden oluşturmak için tekrar deneyin."
+status_retry = "Vekilleri Yeniden Dene"
+
 view_selection = "Seçimi Göster"
 pan_hint = "Kaydırmak için orta düğmeyle sürükleyin; görünümü sıfırlamak için Sığdır seçin."
 position = "Oynatma Konumu"
@@ -1140,3 +1164,15 @@ invalid_mask = "Kaynak efekt eksik bir maskeye başvuruyor. Önce maske bağlant
 incompatible_target = "Seçilen kategoriler hedef kliplerle uyumlu değil."
 unavailable_resources = "Gerekli efektler veya LUT dosyaları kullanılamıyor."
 focus_clip = "Önce Zaman Çizelgesi, Program veya Denetçi paneline odaklanın."
+
+[workspace]
+menu = "Çalışma alanları"
+rename = "Alanı yeniden adlandır…"
+delete = "Alanı sil"
+apply = "Alanı uygula"
+name = "Alan adı"
+empty_name = "Çalışma alanı için bir ad girin."
+duplicate_name = "Bu ada sahip bir alan zaten var."
+missing = "Bu alan artık kullanılamıyor."
+focus_panel = "Büyütmek için bir panele odaklanın."
+save = "Çalışma alanını kaydet…"

@@ -3,6 +3,12 @@
 # infinitive, as in Dutch Windows. Terms follow docs/i18n/nl.md.
 
 [action]
+workspace_editing = "Werkruimte montage"
+workspace_captions = "Werkruimte ondertitels"
+workspace_audio = "Werkruimte audio"
+workspace_save = "Werkruimte opslaan…"
+reset_layout = "Paneelindeling herstellen"
+maximize_panel = "Paneel maximaliseren/herstellen"
 command_palette = "Opdrachtenpalet"
 collect_project = "Project Verzamelen"
 copy_settings = "Instellingen kopiëren"
@@ -815,6 +821,24 @@ reset_all = "Alles resetten"
 file_type = "Sneltoetsenset"
 
 [preview]
+status = "Afspeelstatus"
+status_idle = "Geen Video"
+status_loading = "Laden"
+status_failed = "Beeld Niet Beschikbaar"
+status_approximate = "Sleutelbeeldvoorbeeld"
+status_original = "Origineel"
+status_proxy = "Proxy"
+status_mixed = "Gemengde Bronnen"
+status_quality = "Voorbeeld: {quality} · {source}"
+status_export = "Export gebruikt originele media op de exportresolutie."
+status_trouble = "Waargenomen beelden niet op tijd beschikbaar: {count}. Probeer proxies of een lagere voorbeeldresolutie."
+status_decode_failed = "Sommige media konden niet worden gedecodeerd. Controleer de bronbestanden of koppel offline media opnieuw."
+status_generating = "Proxies voorbereiden: {count} ({progress}%)."
+status_ready = "Proxies gereed: {count}. Proxygebruik wordt alleen gemeld voor gedecodeerde proxypixels."
+status_proxy_failed = "Proxy niet beschikbaar voor {source}: {error}"
+status_cancelled = "Proxygeneratie geannuleerd. Probeer opnieuw om ze te genereren."
+status_retry = "Proxies Opnieuw Proberen"
+
 view_selection = "Selectie Weergeven"
 pan_hint = "Sleep met de middelste muisknop om te verschuiven; kies Passend om de weergave te herstellen."
 position = "Afspeelpositie"
@@ -1152,3 +1176,15 @@ invalid_mask = "Het broneffect verwijst naar een ontbrekend masker. Herstel eers
 incompatible_target = "Geselecteerde categorieën zijn niet compatibel met de doelclips."
 unavailable_resources = "Vereiste effecten of LUT-bestanden zijn niet beschikbaar."
 focus_clip = "Activeer eerst Tijdlijn, Programma of Inspector."
+
+[workspace]
+menu = "Werkruimten"
+rename = "Werkruimte hernoemen…"
+delete = "Werkruimte verwijderen"
+apply = "Werkruimte toepassen"
+name = "Naam werkruimte"
+empty_name = "Voer een naam voor de werkruimte in."
+duplicate_name = "Er bestaat al een werkruimte met deze naam."
+missing = "Deze werkruimte is niet meer beschikbaar."
+focus_panel = "Activeer een paneel om het te maximaliseren."
+save = "Werkruimte opslaan…"

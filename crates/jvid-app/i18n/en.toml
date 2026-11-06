@@ -3,6 +3,12 @@
 
 # Keyboard actions, by keymap.toml id: menus, the shortcut editor and docs/shortcuts.md.
 [action]
+workspace_editing = "Editing Workspace"
+workspace_captions = "Captions Workspace"
+workspace_audio = "Audio Workspace"
+workspace_save = "Save Workspace…"
+reset_layout = "Reset Panel Layout"
+maximize_panel = "Maximize/Restore Panel"
 command_palette = "Command Palette"
 collect_project = "Collect Project"
 copy_settings = "Copy Settings"
@@ -873,6 +879,24 @@ file_type = "Keymap"
 
 # The Preview panel.
 [preview]
+status = "Playback Status"
+status_idle = "No Video"
+status_loading = "Loading"
+status_failed = "Frame Unavailable"
+status_approximate = "Keyframe Preview"
+status_original = "Original"
+status_proxy = "Proxy"
+status_mixed = "Mixed Sources"
+status_quality = "Preview: {quality} · {source}"
+status_export = "Export uses original media at the export resolution."
+status_trouble = "Observed frames unavailable on time: {count}. Try proxies or a lower preview resolution."
+status_decode_failed = "Some media could not be decoded. Check the source files or relink offline media."
+status_generating = "Preparing proxies: {count} ({progress}%)."
+status_ready = "Ready proxies: {count}. Proxy use is reported only for decoded proxy pixels."
+status_proxy_failed = "Proxy unavailable for {source}: {error}"
+status_cancelled = "Proxy generation cancelled. Retry to generate it again."
+status_retry = "Retry Proxies"
+
 view_selection = "View Selection"
 pan_hint = "Middle-drag to pan; choose Fit to reset the view."
 position = "Playback Position"
@@ -1243,3 +1267,15 @@ invalid_mask = "The source effect refers to a missing mask. Repair its mask bind
 incompatible_target = "Selected categories are incompatible with the target clips."
 unavailable_resources = "Required effects or LUT files are unavailable."
 focus_clip = "Focus Timeline, Program or Inspector first."
+
+[workspace]
+menu = "Workspaces"
+rename = "Rename Workspace…"
+delete = "Delete Workspace"
+apply = "Apply Workspace"
+name = "Workspace Name"
+empty_name = "Enter a workspace name."
+duplicate_name = "A workspace with this name already exists."
+missing = "This workspace is no longer available."
+focus_panel = "Focus a panel to maximize it."
+save = "Save Workspace…"

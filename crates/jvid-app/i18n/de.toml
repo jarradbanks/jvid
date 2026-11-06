@@ -3,6 +3,12 @@
 # items use the infinitive (Speichern). Terms follow docs/i18n/de.md.
 
 [action]
+workspace_editing = "Arbeitsbereich Schnitt"
+workspace_captions = "Arbeitsbereich Untertitel"
+workspace_audio = "Arbeitsbereich Audio"
+workspace_save = "Arbeitsbereich speichern…"
+reset_layout = "Bereichsanordnung zurücksetzen"
+maximize_panel = "Bedienfeld maximieren/wiederherstellen"
 command_palette = "Befehlspalette"
 collect_project = "Projekt Sammeln"
 copy_settings = "Einstellungen kopieren"
@@ -802,6 +808,24 @@ reset_all = "Alle zurücksetzen"
 file_type = "Tastaturbelegung"
 
 [preview]
+status = "Wiedergabestatus"
+status_idle = "Kein Video"
+status_loading = "Wird geladen"
+status_failed = "Bild nicht verfügbar"
+status_approximate = "Schlüsselbildvorschau"
+status_original = "Original"
+status_proxy = "Proxy"
+status_mixed = "Gemischte Quellen"
+status_quality = "Vorschau: {quality} · {source}"
+status_export = "Der Export verwendet Originalmedien mit der Exportauflösung."
+status_trouble = "Nicht rechtzeitig verfügbare beobachtete Bilder: {count}. Proxys oder eine niedrigere Vorschauauflösung versuchen."
+status_decode_failed = "Einige Medien konnten nicht dekodiert werden. Quelldateien prüfen oder fehlende Medien neu verknüpfen."
+status_generating = "Proxys werden vorbereitet: {count} ({progress} %)."
+status_ready = "Bereite Proxys: {count}. Die Proxy-Nutzung wird nur für dekodierte Proxy-Pixel gemeldet."
+status_proxy_failed = "Proxy für {source} nicht verfügbar: {error}"
+status_cancelled = "Proxy-Erstellung abgebrochen. Erneut versuchen, um sie neu zu starten."
+status_retry = "Proxys erneut versuchen"
+
 view_selection = "Auswahl Anzeigen"
 pan_hint = "Mit der mittleren Maustaste ziehen zum Verschieben; Einpassen setzt die Ansicht zurück."
 position = "Wiedergabeposition"
@@ -1137,3 +1161,15 @@ invalid_mask = "Der Quelleffekt verweist auf eine fehlende Maske. Zuerst die Mas
 incompatible_target = "Gewählte Kategorien sind mit den Zielclips nicht kompatibel."
 unavailable_resources = "Benötigte Effekte oder LUT-Dateien sind nicht verfügbar."
 focus_clip = "Zuerst Timeline, Programm oder Inspektor fokussieren."
+
+[workspace]
+menu = "Arbeitsbereiche"
+rename = "Arbeitsbereich umbenennen…"
+delete = "Arbeitsbereich löschen"
+apply = "Arbeitsbereich anwenden"
+name = "Name des Arbeitsbereichs"
+empty_name = "Gib einen Namen für den Arbeitsbereich ein."
+duplicate_name = "Ein Arbeitsbereich mit diesem Namen ist bereits vorhanden."
+missing = "Dieser Arbeitsbereich ist nicht mehr verfügbar."
+focus_panel = "Aktiviere ein Bedienfeld zum Maximieren."
+save = "Arbeitsbereich speichern…"

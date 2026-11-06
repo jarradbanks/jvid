@@ -2,6 +2,12 @@
 # Spanish labels use sentence case (Guardar como), not English Title Case.
 
 [action]
+workspace_editing = "Espacio de edición"
+workspace_captions = "Espacio de subtítulos"
+workspace_audio = "Espacio de audio"
+workspace_save = "Guardar espacio de trabajo…"
+reset_layout = "Restablecer distribución de paneles"
+maximize_panel = "Maximizar/restaurar panel"
 command_palette = "Paleta de Comandos"
 collect_project = "Recopilar Proyecto"
 copy_settings = "Copiar ajustes"
@@ -815,6 +821,24 @@ reset_all = "Restablecer todo"
 file_type = "Mapa de teclas"
 
 [preview]
+status = "Estado de Reproducción"
+status_idle = "Sin Vídeo"
+status_loading = "Cargando"
+status_failed = "Fotograma no Disponible"
+status_approximate = "Vista de Fotograma Clave"
+status_original = "Original"
+status_proxy = "Proxy"
+status_mixed = "Fuentes Mixtas"
+status_quality = "Vista previa: {quality} · {source}"
+status_export = "La exportación utiliza los medios originales a la resolución de exportación."
+status_trouble = "Fotogramas observados no disponibles a tiempo: {count}. Prueba proxies o una resolución de vista previa menor."
+status_decode_failed = "No se pudieron decodificar algunos medios. Revisa los archivos de origen o vuelve a vincular los medios desconectados."
+status_generating = "Preparando proxies: {count} ({progress} %)."
+status_ready = "Proxies listos: {count}. Solo se indica el uso de proxies para píxeles decodificados del proxy."
+status_proxy_failed = "Proxy no disponible para {source}: {error}"
+status_cancelled = "Generación de proxies cancelada. Reinténtalo para generarlos de nuevo."
+status_retry = "Reintentar Proxies"
+
 view_selection = "Ver Selección"
 pan_hint = "Arrastra con el botón central para desplazar; elige Ajustar para restablecer la vista."
 position = "Posición de Reproducción"
@@ -1151,3 +1175,15 @@ invalid_mask = "El efecto de origen hace referencia a una máscara inexistente. 
 incompatible_target = "Las categorías seleccionadas no son compatibles con los clips de destino."
 unavailable_resources = "Los efectos o archivos LUT necesarios no están disponibles."
 focus_clip = "Primero enfoca Línea de tiempo, Programa o Inspector."
+
+[workspace]
+menu = "Espacios de trabajo"
+rename = "Renombrar espacio…"
+delete = "Eliminar espacio"
+apply = "Aplicar espacio"
+name = "Nombre del espacio"
+empty_name = "Introduce un nombre para el espacio."
+duplicate_name = "Ya existe un espacio con este nombre."
+missing = "Este espacio ya no está disponible."
+focus_panel = "Enfoca un panel para maximizarlo."
+save = "Guardar espacio de trabajo…"

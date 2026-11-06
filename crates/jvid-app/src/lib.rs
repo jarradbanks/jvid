@@ -23,6 +23,7 @@ mod media_bin;
 mod notices;
 pub mod package_smoke;
 mod playback;
+mod playback_status;
 pub mod preferences;
 mod preview;
 pub mod project_file;
@@ -40,6 +41,7 @@ mod transport;
 mod updates;
 mod viewer_geometry;
 mod welcome;
+pub mod workspaces;
 mod zoom;
 
 /// Test helpers the modules share.

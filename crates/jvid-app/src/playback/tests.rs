@@ -67,6 +67,107 @@ fn silent() -> OpenAudio {
 }
 
 #[test]
+fn status_moves_through_idle_loading_failure_recovery_and_audio_only() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let fail = Arc::new(AtomicBool::new(true));
+    let failing = fail.clone();
+    let mut pb = Playback::new(
+        Arc::new(move |_, t| {
+            if failing.load(Ordering::Relaxed) {
+                Err("unavailable".into())
+            } else {
+                Ok(tiny(t))
+            }
+        }),
+        silent(),
+        DEFAULT_BUDGET,
+    );
+    let mut history = History::new(Project::default());
+    assert!(pb.park(history.project()).is_some());
+    assert_eq!(pb.status.picture, Picture::Idle);
+    add(&mut history, TrackKind::Video, "video.mp4", secs(2));
+    pb.refresh();
+    pb.sync(history.project());
+    let done = Decodes::take(&mut pb);
+    assert!(pb.show(history.project(), 0).is_none());
+    assert_eq!(pb.status.picture, Picture::Loading);
+    done.settle(&mut pb, history.project(), 0);
+    assert!(pb.show(history.project(), 0).is_some());
+    assert_eq!(pb.status.picture, Picture::Failed);
+    fail.store(false, Ordering::Relaxed);
+    pb.failed
+        .values_mut()
+        .for_each(|at| *at = Instant::now() - RETRY);
+    done.settle(&mut pb, history.project(), 0);
+    assert!(
+        pb.show(history.project(), 0).is_some(),
+        "same parked frame recovers"
+    );
+    assert_eq!(
+        pb.status,
+        Observation {
+            picture: Picture::Ready,
+            originals: 1,
+            proxies: 0
+        }
+    );
+    let mut audio = History::new(Project::default());
+    add(&mut audio, TrackKind::Audio, "audio.wav", secs(2));
+    pb.refresh();
+    pb.park(audio.project());
+    assert_eq!(pb.status, Observation::default());
+    assert!(!pb.health.troubled());
+    pb.reset_session();
+    assert_eq!(pb.status, Observation::default());
+}
+
+#[test]
+fn status_uses_decode_provenance_across_toggle_and_failed_proxy_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("video.mp4");
+    std::fs::write(&src, b"source").unwrap();
+    let proxies = Arc::new(Proxies::new(dir.path().to_owned()));
+    std::fs::write(proxies.path(&src).unwrap(), b"proxy").unwrap();
+    proxies.set_enabled(true);
+    let mut h = History::new(Project::default());
+    add(&mut h, TrackKind::Video, src.to_str().unwrap(), secs(2));
+    let mut pb = Playback::new(Arc::new(|_, t| Ok(tiny(t))), silent(), DEFAULT_BUDGET);
+    pb.proxies = Some(proxies.clone());
+    pb.sync(h.project());
+    let done = Decodes::take(&mut pb);
+    done.settle(&mut pb, h.project(), 0);
+    pb.show(h.project(), 0).unwrap();
+    assert_eq!((pb.status.proxies, pb.status.originals), (1, 0));
+    proxies.set_enabled(false);
+    pb.sync(h.project());
+    let done = Decodes::take(&mut pb);
+    done.settle(&mut pb, h.project(), 0);
+    pb.show(h.project(), 0).unwrap();
+    assert_eq!((pb.status.proxies, pb.status.originals), (0, 1));
+    proxies.set_enabled(true);
+    pb.decode = Arc::new(move |path, t| {
+        if path == src {
+            Ok(tiny(t))
+        } else {
+            Err("unusable proxy".into())
+        }
+    });
+    pb.sync(h.project());
+    let done = Decodes::take(&mut pb);
+    done.settle(&mut pb, h.project(), 0);
+    pb.show(h.project(), 0).unwrap();
+    assert_eq!(
+        (pb.status.proxies, pb.status.originals),
+        (0, 1),
+        "original fallback never claims proxy use"
+    );
+    assert!(matches!(
+        proxies.status(&h.project().assets()[0].path),
+        Some(jvid_media::proxy::Status::Failed(_))
+    ));
+}
+
+#[test]
 fn cache_evicts_least_recently_used_over_budget() {
     let frame = |n| {
         Arc::new(Frame {
@@ -122,10 +223,12 @@ impl Decodes {
                 return;
             }
             assert!(!pb.pending.is_empty(), "nothing left to decode");
-            let (k, path, _, r) = self.decoded.recv_timeout(HUNG).unwrap_or_else(|_| {
+            let (k, path, _, r, proxy) = self.decoded.recv_timeout(HUNG).unwrap_or_else(|_| {
                 panic!("no decode finished in {HUNG:?}: {:?}", pb.pending.keys())
             });
-            self.to_pb.send((k, path, Duration::ZERO, r)).unwrap();
+            self.to_pb
+                .send((k, path, Duration::ZERO, r, proxy))
+                .unwrap();
         }
         panic!("decodes never settled");
     }
@@ -307,17 +410,17 @@ fn play_stepped(
             q.contains_key(k) || r.iter().any(|r| r.1.0 == *k)
         };
         while !pb.pending.keys().all(|k| held(k, &queued, &running)) {
-            let (k, path, _, r) = d.decoded.recv().unwrap();
-            queued.insert(k, (path, r));
+            let (k, path, _, r, proxy) = d.decoded.recv().unwrap();
+            queued.insert(k, (path, r, proxy));
         }
         // A decode cancelled before a thread took it never runs.
         queued.retain(|k, _| pb.pending.contains_key(k));
         while running.len() < DECODE_THREADS
-            && let Some((k, (path, r))) = queued.pop_first()
+            && let Some((k, (path, r, proxy))) = queued.pop_first()
         {
             let took = cost(&k);
             let frames = (took.as_micros() * 30).div_ceil(1_000_000).max(1) as u64;
-            running.push((step + frames, (k, path, took, r)));
+            running.push((step + frames, (k, path, took, r, proxy)));
         }
         if !playing {
             primed |= shown.is_some();
