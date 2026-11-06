@@ -49,6 +49,8 @@ pub struct Action {
     pub id: &'static str,
     pub default: &'static str,
     pub context: Context,
+    /// Additional search vocabulary; never displayed as a label.
+    pub aliases: &'static [&'static str],
 }
 
 impl Action {
@@ -65,6 +67,7 @@ const fn a(id: &'static str, default: &'static str) -> Action {
         id,
         default,
         context: Context::Global,
+        aliases: &[],
     }
 }
 
@@ -73,7 +76,13 @@ const fn t(id: &'static str, default: &'static str) -> Action {
         id,
         default,
         context: Context::Timeline,
+        aliases: &[],
     }
+}
+
+const fn aliases(mut action: Action, aliases: &'static [&'static str]) -> Action {
+    action.aliases = aliases;
+    action
 }
 
 /// Every action. "Ctrl" means Cmd on macOS.
@@ -82,10 +91,10 @@ pub const ACTIONS: &[Action] = &[
     a("open_project", "Ctrl+O"),
     a("save", "Ctrl+S"),
     a("save_as", "Ctrl+Shift+S"),
-    a("import", "Ctrl+I"),
+    aliases(a("import", "Ctrl+I"), &["ingest", "media"]),
     a("import_subtitles", "Ctrl+Shift+I"),
-    a("export_subtitles", ""),
-    a("export", "Ctrl+M"),
+    aliases(a("export_subtitles", ""), &["captions", "srt", "vtt"]),
+    aliases(a("export", "Ctrl+M"), &["render", "encode"]),
     a("quit", "Ctrl+Q"),
     a("play_stop", "Space"),
     a("shuttle_left", "J"),
@@ -112,7 +121,7 @@ pub const ACTIONS: &[Action] = &[
     a("overwrite", "."),
     t("ripple_trim_prev", "Q"),
     t("ripple_trim_next", "W"),
-    a("undo", "Ctrl+Z"),
+    aliases(a("undo", "Ctrl+Z"), &["revert"]),
     a("redo", "Ctrl+Shift+Z"),
     a("redo_alt", "Ctrl+Y"),
     t("select_all", "Ctrl+A"),
@@ -120,7 +129,7 @@ pub const ACTIONS: &[Action] = &[
     t("cut", "Ctrl+X"),
     t("paste", "Ctrl+V"),
     t("duplicate", "Ctrl+Shift+D"),
-    t("delete", "Delete"),
+    aliases(t("delete", "Delete"), &["remove"]),
     t("ripple_delete", "Shift+Delete"),
     t("link", "Ctrl+L"),
     t("enable", "Shift+E"),
@@ -135,15 +144,18 @@ pub const ACTIONS: &[Action] = &[
     t("detect_silence", "Ctrl+Alt+S"),
     t("find_highlights", "Ctrl+Alt+H"),
     t("hide_region", "Ctrl+Alt+R"),
-    a("generate_subtitles", "Ctrl+Alt+G"),
+    aliases(
+        a("generate_subtitles", "Ctrl+Alt+G"),
+        &["transcribe", "captions", "speech"],
+    ),
     t("nest", "Alt+N"),
     t("crossfade", "Ctrl+D"),
     t("dip_to_black", "Ctrl+Alt+B"),
     t("dip_to_white", "Ctrl+Alt+W"),
     t("linked_selection", "Ctrl+Shift+L"),
-    t("snapping", "S"),
-    a("razor_tool", "C"),
-    a("selection_tool", "V"),
+    aliases(t("snapping", "S"), &["magnet"]),
+    aliases(a("razor_tool", "C"), &["blade", "split"]),
+    aliases(a("selection_tool", "V"), &["pointer", "select"]),
     a("text_tool", "T"),
     t("add_edit", "Ctrl+K"),
     a("step_back", "Left"),
@@ -167,8 +179,12 @@ pub const ACTIONS: &[Action] = &[
     a("focus_program", "Shift+4"),
     a("focus_inspector", "Shift+5"),
     a("focus_effects", "Shift+7"),
-    a("export_frame", "Ctrl+Shift+E"),
-    a("record", "Shift+R"),
+    aliases(a("export_frame", "Ctrl+Shift+E"), &["screenshot", "png"]),
+    aliases(a("record", "Shift+R"), &["voiceover", "microphone"]),
+    aliases(
+        a("command_palette", "Ctrl+Shift+P"),
+        &["commands", "search"],
+    ),
 ];
 
 /// "Ctrl+Shift+K" → shortcut. Ctrl and Cmd both mean the platform command key.
