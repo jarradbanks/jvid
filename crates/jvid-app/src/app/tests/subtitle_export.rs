@@ -32,7 +32,7 @@ fn discoverable_subtitle_export_saves_without_gpu_models_recognition_or_video_jo
         .unwrap()
         .click();
     h.run();
-    h.get_by_label("Export Subtitles (.srt)… ").click();
+    h.get_by_label("Export Subtitles (.srt)…").click();
     h.run();
     assert!(h.state().subtitle_export.is_open());
     assert!(h.state().modal_owns_input(&h.ctx));
@@ -61,7 +61,7 @@ fn file_and_subtitle_context_routes_open_the_same_dialog_and_native_cancel_is_ha
     h.state_mut().subtitles.engine = Some((jvid_transcribe::models::Model::Base, fake.clone()));
     h.get_by_label("File").click();
     h.run();
-    h.get_by_label("Export Subtitles (.srt)… ").click();
+    h.get_by_label("Export Subtitles (.srt)…").click();
     h.run();
     h.state_mut().subtitle_export.test_destination = Some(None);
     h.get_by_label("Save SRT…").click();
