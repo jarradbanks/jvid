@@ -27,6 +27,7 @@ use crate::preview::{PROGRAM_ACTIONS, Preview, SOURCE_ACTIONS};
 use crate::subtitles::Done;
 use crate::timeline::{MARK_ACTIONS, Timeline, menus};
 use crate::welcome::{self, Recent, Welcome};
+use crate::workspaces::{Builtin, Panels, Workspaces};
 use crate::{autosave, project_file, relink};
 use eframe::egui_wgpu::wgpu;
 
@@ -37,6 +38,7 @@ mod tests;
 mod text_tools;
 pub(crate) mod tutorial;
 
+#[cfg(test)]
 const DOCK_KEY: &str = "dock";
 const RECENT_KEY: &str = "recent";
 
@@ -138,6 +140,7 @@ pub struct App {
     editor_context: Option<egui::Context>,
     path: Option<PathBuf>,
     dock: DockState<Tab>,
+    workspaces: Workspaces,
     /// A show/focus action also scrolls the requested dock tab into view.
     reveal_panel: Option<Tab>,
     /// The preview's views: one shows as a title, several as tabs.
@@ -272,18 +275,7 @@ impl App {
 
     /// A new project in the dock layout saved last time, or the default one.
     fn restore(storage: Option<&dyn eframe::Storage>) -> Self {
-        let dock = storage
-            .and_then(|s| eframe::get_value::<DockState<Tab>>(s, DOCK_KEY))
-            // A layout missing or duplicating a panel can't be fixed from the UI.
-            .filter(|d| {
-                let count = |t: Tab| d.iter_all_tabs().filter(|(_, x)| **x == t).count();
-                [Tab::Media, Tab::Preview, Tab::Inspector, Tab::Timeline]
-                    .into_iter()
-                    .all(|t| count(t) == 1)
-                    && count(Tab::RenderQueue) <= 1
-                    && count(Tab::Transcript) <= 1
-            })
-            .unwrap_or_else(default_dock);
+        let (workspaces, dock) = crate::settings_file::load_workspaces(storage);
         let exports = jvid_jobs::Pool::new(1);
         // Titles share the UI's CJK faces, so the binary links one copy of them.
         jvid_render::text::set_faces(suite_ui::theme::CJK_FACES.map(|(_, b)| b).to_vec());
@@ -299,7 +291,8 @@ impl App {
             project_session: 0,
             editor_context: None,
             path: None,
-            dock: visible_dock(dock),
+            dock,
+            workspaces,
             reveal_panel: None,
             preview_views: &["source", "program"],
             preview_active: 1,
@@ -630,8 +623,12 @@ impl App {
                 }
             }
             ui.separator();
-            if ui.button(tr!("menu.reset_layout")).clicked() {
-                self.reset_layout();
+            ui.menu_button(tr!("workspace.menu"), |ui| self.workspaces_menu(ui));
+            if self.action_menu_item(ui, "maximize_panel") {
+                picked = Some("maximize_panel");
+            }
+            if self.action_menu_item(ui, "reset_layout") {
+                picked = Some("reset_layout");
             }
             if ui.button(tr!("menu.preferences")).clicked() {
                 use jvid_audio::InputBackend;
@@ -645,6 +642,70 @@ impl App {
             self.run_action(id, true);
         }
         button.rect.right()
+    }
+
+    fn workspaces_menu(&mut self, ui: &mut Ui) {
+        for id in [
+            "workspace_editing",
+            "workspace_captions",
+            "workspace_audio",
+            "workspace_save",
+        ] {
+            if self.action_menu_item(ui, id) {
+                self.run_action(id, true);
+            }
+        }
+        ui.separator();
+        let mut apply = None;
+        let mut rename = None;
+        let mut delete = None;
+        for (index, personal) in self.workspaces.personal.iter().enumerate() {
+            ui.menu_button(&personal.name, |ui| {
+                if ui.button(tr!("workspace.apply")).clicked() {
+                    apply = Some(index);
+                    ui.close();
+                }
+                if ui.button(tr!("workspace.rename")).clicked() {
+                    rename = Some(index);
+                    ui.close();
+                }
+                if ui.button(tr!("workspace.delete")).clicked() {
+                    delete = Some(index);
+                    ui.close();
+                }
+            });
+        }
+        if let Some(index) = apply {
+            let layout = self.workspaces.personal[index]
+                .layout
+                .restore(Panels::default());
+            self.workspaces.apply(&mut self.dock, layout);
+            self.layout_changed();
+        }
+        if let Some(index) = rename {
+            self.workspaces.open_rename(index);
+        }
+        if let Some(index) = delete {
+            self.workspaces.delete(index);
+        }
+    }
+
+    fn apply_workspace(&mut self, builtin: Builtin) {
+        self.workspaces
+            .apply(&mut self.dock, builtin.layout(Panels::default()));
+        self.layout_changed();
+    }
+
+    fn layout_changed(&mut self) {
+        self.reveal_panel = None;
+        if let Some(ctx) = &self.editor_context {
+            ctx.memory_mut(|m| {
+                if let Some(id) = m.focused() {
+                    m.surrender_focus(id);
+                }
+            });
+            ctx.request_repaint();
+        }
     }
 
     /// The Timeline menu, its left edge at `left`. Returns its right edge.
@@ -677,10 +738,11 @@ impl App {
     fn action_menu_item(&mut self, ui: &mut Ui, id: &str) -> bool {
         let available = self.action_applicability(id, true);
         let (name, shortcut) = self.keymap.label(id);
-        let response = ui.add_enabled(
-            available.is_enabled(),
-            egui::Button::new(name).shortcut_text(shortcut),
-        );
+        let mut button = egui::Button::new(name);
+        if !shortcut.is_empty() {
+            button = button.shortcut_text(shortcut);
+        }
+        let response = ui.add_enabled(available.is_enabled(), button);
         let response = if let Some(reason) = available.reason() {
             response.on_disabled_hover_text(reason)
         } else {
@@ -887,6 +949,7 @@ impl App {
 
     /// Focuses a closable panel, first splitting it off the right of Timeline if closed.
     fn show_panel(&mut self, tab: Tab) {
+        self.workspaces.restore_maximized(&mut self.dock);
         if self.dock.find_tab(&tab).is_none() {
             match self.dock.find_main_surface_tab(&Tab::Timeline) {
                 Some((node, _)) => {
@@ -901,6 +964,7 @@ impl App {
 
     /// Activate as well as focus: a leaf may contain several tabs.
     fn focus_panel(&mut self, tab: Tab) {
+        self.workspaces.restore_maximized(&mut self.dock);
         if let Some(path) = self.dock.find_tab(&tab) {
             let _ = self.dock.set_active_tab(path);
             self.dock.set_focused_node_and_surface(path.node_path());
@@ -918,18 +982,12 @@ impl App {
 
     /// Restore panel placement, keeping optional panels open and their work intact.
     fn reset_layout(&mut self) {
-        let optional: Vec<_> = [Tab::Transcript, Tab::RenderQueue]
-            .into_iter()
-            .filter(|tab| self.dock.find_tab(tab).is_some())
-            .collect();
-        self.dock = default_dock();
-        for tab in optional {
-            self.show_panel(tab);
-        }
+        self.workspaces.reset(&mut self.dock, Panels::default());
         self.focus_panel(Tab::Timeline);
     }
 
     fn close_panel(&mut self, tab: Tab) {
+        self.workspaces.restore_maximized(&mut self.dock);
         if let Some(path) = self.dock.find_tab(&tab) {
             self.dock.remove_tab(path);
         }
@@ -1052,6 +1110,7 @@ impl App {
             || self.updates.open
             || self.keymap_editor.is_open()
             || self.command_palette.is_open()
+            || self.workspaces.is_open()
             || self.subtitles.is_open()
             || !self.prompts.is_empty()
             || self.bin.confirm_remove.is_some()
@@ -1065,6 +1124,16 @@ impl App {
             return Applicability::Disabled("palette.unavailable");
         };
         let enabled = match id {
+            "maximize_panel" => {
+                return Applicability::when(
+                    !self.on_welcome
+                        && (self.workspaces.is_maximized()
+                            || self.dock.find_active_focused().is_some()),
+                    "workspace.focus_panel",
+                );
+            }
+            "workspace_editing" | "workspace_captions" | "workspace_audio" | "workspace_save"
+            | "reset_layout" => Some(!self.on_welcome),
             "export_frame" => {
                 return Applicability::when(
                     self.history.project().sequence().duration() > Time(0),
@@ -1159,6 +1228,16 @@ impl App {
             return;
         }
         match id {
+            "workspace_editing" => return self.apply_workspace(Builtin::Editing),
+            "workspace_captions" => return self.apply_workspace(Builtin::Captions),
+            "workspace_audio" => return self.apply_workspace(Builtin::Audio),
+            "workspace_save" => return self.workspaces.open_save(),
+            "reset_layout" => return self.reset_layout(),
+            "maximize_panel" => {
+                self.workspaces.toggle_maximize(&mut self.dock);
+                self.layout_changed();
+                return;
+            }
             "command_palette" => {
                 if let Some(ctx) = &self.editor_context {
                     if menu {
@@ -1878,9 +1957,9 @@ impl eframe::App for App {
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
                 .hidable_tab_bars(false)
-                .draggable_tabs(true)
+                .draggable_tabs(!self.workspaces.is_maximized())
                 .tab_context_menus(false)
-                .show_close_buttons(true)
+                .show_close_buttons(!self.workspaces.is_maximized())
                 .show_add_buttons(false)
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
@@ -1897,7 +1976,7 @@ impl eframe::App for App {
                 viewer.tab_rects,
             );
             paint_dock_frames(ui, &self.dock);
-            dock_bottom_target(ui, &mut self.dock);
+            if !self.workspaces.is_maximized() { dock_bottom_target(ui, &mut self.dock); }
             if let Some(tab) = self.reveal_panel.take()
                 && let Some(path) = self.dock.find_tab(&tab)
                 && let Ok(leaf) = self.dock.leaf_mut(path.node_path())
@@ -2015,6 +2094,7 @@ impl eframe::App for App {
             if let Some(id) = relink {
                 self.relink_dialog(id);
             }
+            self.workspaces.show(ui, &self.dock, Panels::default());
             if self.keymap_editor.show(ui, &mut self.keymap)
                 && let Err(e) = keymap::save(&self.keymap)
             {
@@ -2097,7 +2177,7 @@ impl eframe::App for App {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, DOCK_KEY, &self.dock);
+        crate::settings_file::save_workspaces(storage, &self.workspaces, &self.dock);
         eframe::set_value(storage, RECENT_KEY, &self.welcome.recent);
     }
 }
@@ -2142,19 +2222,6 @@ pub fn default_dock() -> DockState<Tab> {
     let [top, _] = tree.split_below(NodeIndex::root(), 0.62, vec![Tab::Timeline]);
     let [preview, _] = tree.split_left(top, 0.26, vec![Tab::Media]);
     tree.split_right(preview, 0.69, vec![Tab::Inspector]);
-    dock
-}
-
-/// Migrate layouts saved before dock strips were exposed, without changing their topology.
-fn visible_dock(mut dock: DockState<Tab>) -> DockState<Tab> {
-    for (_, node) in dock.iter_all_nodes_mut() {
-        if !node.is_empty() {
-            node.set_collapsed(false);
-        }
-        if node.is_leaf() {
-            node.set_tab_bar_hidden(false);
-        }
-    }
     dock
 }
 
@@ -2918,6 +2985,211 @@ mod palette_tests {
                 .unwrap()
                 .in_point,
             Some(Time(0))
+        );
+    }
+}
+
+#[cfg(test)]
+mod workspace_tests {
+    use super::*;
+    use egui::{Key, Modifiers};
+    use egui_kittest::Harness;
+
+    #[test]
+    fn workspace_layouts_and_save_dialog_fit_narrow_translated_windows() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let artifacts = std::env::var_os("JVID_A2_ARTIFACT_DIR").map(PathBuf::from);
+        if let Some(dir) = &artifacts {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        for (size, scale, language) in [([1280.0, 720.0], 1.0, "en"), ([960.0, 600.0], 1.5, "de")] {
+            suite_ui::i18n::set_language(language);
+            let mut h = Harness::builder()
+                .with_size(size)
+                .with_pixels_per_point(scale)
+                .wgpu()
+                .build_eframe(|cc| App::new(cc, &Default::default()));
+            h.run();
+            h.state_mut().on_welcome = false;
+            for id in ["workspace_editing", "workspace_captions", "workspace_audio"] {
+                h.state_mut().run_action(id, false);
+                h.run();
+                let bounds = h.ctx.content_rect().expand(1.0);
+                for (_, leaf) in h.state().dock.iter_leaves() {
+                    assert!(
+                        bounds.contains_rect(leaf.rect),
+                        "{id}: {:?} outside {bounds:?}",
+                        leaf.rect
+                    );
+                    assert!(leaf.rect.is_finite());
+                }
+                if let Some(dir) = &artifacts {
+                    h.render()
+                        .unwrap()
+                        .save(dir.join(format!(
+                            "{id}_{}x{}_{scale}x_{language}.png",
+                            size[0], size[1]
+                        )))
+                        .unwrap();
+                }
+            }
+            h.state_mut().focus_panel(Tab::Inspector);
+            h.state_mut().run_action("maximize_panel", false);
+            h.run();
+            if let Some(dir) = &artifacts {
+                h.render()
+                    .unwrap()
+                    .save(dir.join(format!("workspace_maximize_{language}.png")))
+                    .unwrap();
+            }
+            h.state_mut().run_action("workspace_save", false);
+            h.run_steps(2);
+            let modal = h
+                .ctx
+                .memory(|m| m.area_rect(egui::Id::new("workspace_name")))
+                .unwrap();
+            assert!(h.ctx.content_rect().contains_rect(modal), "{modal:?}");
+            if let Some(dir) = &artifacts {
+                h.render()
+                    .unwrap()
+                    .save(dir.join(format!("workspace_save_{language}.png")))
+                    .unwrap();
+            }
+            h.event(egui::Event::Text("Personal".into()));
+            h.key_press(Key::Enter);
+            h.run_steps(2);
+            assert!(!h.state().workspaces.is_open());
+            assert_eq!(h.state().workspaces.personal[0].name, "Personal");
+            assert_eq!(
+                h.state().workspaces.personal[0]
+                    .layout
+                    .restore(Panels::default())
+                    .iter_all_tabs()
+                    .count(),
+                4
+            );
+        }
+        suite_ui::i18n::set_language("en");
+    }
+
+    #[test]
+    fn workspace_changes_preserve_content_history_panel_state_cache_and_live_jobs() {
+        let mut app = App::restore(None);
+        app.on_welcome = false;
+        app.history
+            .apply(Command::AddSolid {
+                name: "Keep".into(),
+                color: [1.0; 4],
+            })
+            .unwrap();
+        let project = app.history.project().clone();
+        let session = app.project_session;
+        app.transcript.query = "keep this search".into();
+        app.bin.selected = Some(AssetId(1));
+        app.preview_active = 0;
+        let store = app.transcript.cache.store.clone();
+        let (release, waiting) = std::sync::mpsc::channel();
+        let job = app.exports.submit(
+            "workspace-job",
+            jvid_jobs::Priority::Interactive,
+            move |_| {
+                let _ = waiting.recv_timeout(std::time::Duration::from_secs(10));
+            },
+        );
+        let (_results, receiver) = std::sync::mpsc::channel();
+        assert!(app.queue.push(
+            "workspace-export.mp4".into(),
+            "Test".into(),
+            Time(1),
+            (job.clone(), receiver)
+        ));
+        for id in [
+            "workspace_captions",
+            "maximize_panel",
+            "maximize_panel",
+            "workspace_audio",
+            "reset_layout",
+            "workspace_editing",
+        ] {
+            app.run_action(id, false);
+            assert_eq!(app.history.project(), &project);
+            assert_eq!(app.transcript.query, "keep this search");
+            assert!(std::sync::Arc::ptr_eq(&store, &app.transcript.cache.store));
+            assert!(std::sync::Arc::ptr_eq(&store, &app.subtitles.store));
+            assert_eq!(app.bin.selected, Some(AssetId(1)));
+            assert_eq!(app.preview_active, 0);
+            assert_eq!(app.project_session, session);
+            assert!(!job.is_cancelled());
+            assert!(!job.is_finished());
+            assert_eq!(app.queue.pending(), 1);
+        }
+        app.show_panel(Tab::Transcript);
+        assert_eq!(app.transcript.query, "keep this search");
+        release.send(()).unwrap();
+        app.history.undo();
+        assert!(app.history.project().assets().is_empty());
+        app.history.redo();
+        assert_eq!(app.history.project(), &project);
+    }
+
+    #[test]
+    fn remapped_maximize_and_focus_restore_use_shared_dispatch_and_dialogs_own_input() {
+        let mut h = Harness::builder()
+            .with_size([960.0, 600.0])
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run();
+        h.state_mut().on_welcome = false;
+        h.state_mut().keymap = Keymap::from_toml("maximize_panel = \"Ctrl+Shift+F8\"").unwrap();
+        h.state_mut().focus_panel(Tab::Inspector);
+        h.run();
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F8);
+        h.run();
+        assert!(h.state().workspaces.is_maximized());
+        assert_eq!(h.state().dock.iter_all_tabs().count(), 1);
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F8);
+        h.run();
+        assert!(!h.state().workspaces.is_maximized());
+        assert_eq!(
+            h.state_mut()
+                .dock
+                .find_active_focused()
+                .map(|(_, tab)| *tab),
+            Some(Tab::Inspector)
+        );
+        h.state_mut().run_action("workspace_save", false);
+        h.run_steps(2);
+        assert!(h.state().workspaces.is_open());
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F8);
+        h.run();
+        assert!(!h.state().workspaces.is_maximized());
+        h.key_press(Key::Escape);
+        h.run_steps(2);
+        assert!(!h.state().workspaces.is_open());
+        h.state_mut().keymap = Keymap::from_toml("maximize_panel = \"\"").unwrap();
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F10);
+        h.run();
+        assert!(!h.state().workspaces.is_maximized());
+    }
+
+    #[test]
+    fn focus_or_open_while_maximized_restores_full_layout_without_losing_optional_panels() {
+        let mut app = App::restore(None);
+        app.on_welcome = false;
+        app.show_panel(Tab::Transcript);
+        app.run_action("maximize_panel", false);
+        app.run_action("focus_source", false);
+        assert!(!app.workspaces.is_maximized());
+        assert_eq!(app.dock.iter_all_tabs().count(), 5);
+        assert_eq!(app.preview_active, 0);
+        app.run_action("maximize_panel", false);
+        app.show_queue();
+        assert!(!app.workspaces.is_maximized());
+        assert_eq!(app.dock.iter_all_tabs().count(), 6);
+        assert_eq!(
+            app.dock.find_active_focused().map(|(_, tab)| *tab),
+            Some(Tab::RenderQueue)
         );
     }
 }

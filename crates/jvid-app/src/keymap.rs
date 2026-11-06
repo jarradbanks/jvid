@@ -185,6 +185,12 @@ pub const ACTIONS: &[Action] = &[
         a("command_palette", "Ctrl+Shift+P"),
         &["commands", "search"],
     ),
+    a("workspace_editing", ""),
+    a("workspace_captions", ""),
+    a("workspace_audio", ""),
+    a("workspace_save", ""),
+    a("reset_layout", ""),
+    a("maximize_panel", "Ctrl+Shift+F10"),
 ];
 
 /// "Ctrl+Shift+K" → shortcut. Ctrl and Cmd both mean the platform command key.
