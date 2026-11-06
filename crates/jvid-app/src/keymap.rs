@@ -149,6 +149,7 @@ pub const ACTIONS: &[Action] = &[
     t("paste_grade", "Ctrl+Alt+V"),
     a("copy_settings", ""),
     a("paste_settings", ""),
+    a(crate::personal_presets::ACTION, ""),
     t("clean_up_voice", "Ctrl+Alt+U"),
     t("detect_silence", "Ctrl+Alt+S"),
     t("find_highlights", "Ctrl+Alt+H"),

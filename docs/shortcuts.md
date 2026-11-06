@@ -52,6 +52,7 @@ Work in any panel except while typing in a text field.
 | Redo (Alternate) | `Ctrl+Y` |
 | Copy Settings | — |
 | Paste Settings | — |
+| Personal Presets | — |
 | Generate Subtitles… | `Ctrl+Alt+G` |
 | Razor Tool | `C` |
 | Selection Tool | `V` |

@@ -1209,7 +1209,7 @@ impl App {
         id: &str,
         menu: bool,
     ) -> Option<keymap::Applicability> {
-        if !matches!(id, "copy_settings" | "paste_settings") {
+        if !matches!(id, "copy_settings" | "paste_settings" | "personal_presets") {
             return None;
         }
         let focused = self.dock.find_active_focused().map(|(_, tab)| *tab);
@@ -1226,6 +1226,13 @@ impl App {
             ));
         };
         let selected: Vec<_> = self.timeline.selected().iter().copied().collect();
+        if id == crate::personal_presets::ACTION {
+            return Some(crate::personal_presets::open_applicability(
+                ctx,
+                self.history.project(),
+                &selected,
+            ));
+        }
         Some(crate::settings_transfer::with(ctx, |transfer| match id {
             "copy_settings" => crate::settings_transfer::Transfer::copy_applicability(
                 self.history.project(),
@@ -1394,6 +1401,27 @@ impl App {
             return;
         }
         match id {
+            "personal_presets" => {
+                if !self
+                    .settings_transfer_applicability(id, menu)
+                    .is_some_and(keymap::Applicability::is_enabled)
+                {
+                    return;
+                }
+                let Some(ctx) = self.editor_context.clone() else {
+                    return;
+                };
+                let selected: Vec<_> = self.timeline.selected().iter().copied().collect();
+                if let Some(category) = crate::personal_presets::target_category(
+                    &ctx,
+                    self.history.project(),
+                    &selected,
+                ) {
+                    crate::personal_presets::reveal(&ctx, category);
+                    self.focus_panel(Tab::Inspector);
+                }
+                return;
+            }
             "copy_settings" | "paste_settings" => {
                 if !self
                     .settings_transfer_applicability(id, menu)
@@ -3530,6 +3558,77 @@ mod settings_transfer_tests {
         .unwrap();
         assert_eq!(map.shortcut("copy_settings"), "Ctrl+Shift+F10");
         assert_eq!(map.shortcut("paste_settings"), "Ctrl+Shift+F11");
+    }
+    #[test]
+    fn personal_presets_action_respects_source_program_routing_and_is_remappable() {
+        let mut app = App::restore(None);
+        app.editor_context = Some(egui::Context::default());
+        let Created::Track(track) = app
+            .history
+            .apply(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "Video".into(),
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let Created::Asset(asset) = app
+            .history
+            .apply(Command::AddSolid {
+                name: "Solid".into(),
+                color: [1.0; 4],
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let Created::Clip(id) = app
+            .history
+            .apply(Command::AddClip {
+                track,
+                clip: NewClip {
+                    asset,
+                    start: Time(0),
+                    source_in: Time(0),
+                    source_out: Time(100),
+                    link: None,
+                },
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        app.timeline.select_program_clip(id);
+        app.history.mark_saved();
+        let before = app.history.project().clone();
+        app.focus_panel(Tab::Preview);
+        app.preview_active = 0;
+        assert!(
+            !app.settings_transfer_applicability("personal_presets", false)
+                .unwrap()
+                .is_enabled()
+        );
+        app.run_action("personal_presets", false);
+        assert_eq!(
+            app.dock.find_active_focused().map(|(_, tab)| *tab),
+            Some(Tab::Preview)
+        );
+        app.preview_active = 1;
+        assert!(
+            app.settings_transfer_applicability("personal_presets", false)
+                .unwrap()
+                .is_enabled()
+        );
+        app.run_action("personal_presets", false);
+        assert_eq!(
+            app.dock.find_active_focused().map(|(_, tab)| *tab),
+            Some(Tab::Inspector)
+        );
+        assert_eq!(app.history.project(), &before);
+        assert!(!app.history.is_dirty());
+        let keymap = Keymap::from_toml("personal_presets = \"Ctrl+Shift+F9\"").unwrap();
+        assert_eq!(keymap.shortcut("personal_presets"), "Ctrl+Shift+F9");
     }
 }
 

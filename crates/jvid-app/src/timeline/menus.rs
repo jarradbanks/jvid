@@ -43,6 +43,7 @@ pub const EDIT: &[&str] = &[
     "duplicate",
     "copy_settings",
     "paste_settings",
+    "personal_presets",
     "",
     "delete",
     "ripple_delete",
