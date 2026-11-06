@@ -93,6 +93,10 @@ jplay recordings import markers from the adjacent `<name>.jplay.json` file. Plac
 
 Select a clip and use the Inspector. It holds Transform (position, scale, rotation, anchor), opacity, blend mode, crop, color (exposure, contrast, saturation, temperature, tint) and volume.
 
+**Personal presets.** In the Inspector’s Text, Audio or Effects tab, open Title Styles, Voice Treatments or Effect Stacks. Select one clip, enter a name and use **Save New Preset**; choose a saved entry to apply, rename or delete it. The unbound **Personal Presets** command opens the matching Inspector section and can be remapped in Keyboard Shortcuts. Preferences offers **Open Presets Folder**. These versioned files are separate from export presets and work across projects and restarts.
+
+Presets replace only their category in one undo step. Titles retain the destination’s words; voice treatments retain timing and links. Static settings are the default. **Include Animation** saves or applies relative key times: overflow is discarded, visible boundaries are sampled, longer targets hold the final value, and destination speed stays unchanged. Missing fonts or effects disable Apply with repair advice while preserving the saved definition. Collected fonts use their readable family requirement and can resolve to the destination project’s matching collected font. Effect stacks bound to clip masks must be transferred with Transform through settings transfer instead of saved as standalone stacks.
+
 - Click the diamond beside a property to animate it. That sets a keyframe at the playhead; change the value at another time to add another.
 - The arrows either side of the diamond jump to the previous and next keyframe. The middle diamond is filled when there's a key at the playhead; click it to add or remove one.
 - Right-click a key's diamond to pick its easing.
