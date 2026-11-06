@@ -160,6 +160,7 @@ pub struct App {
     match_source: bool,
     /// The next import also goes on the timeline: a media file opened at startup.
     place_import: bool,
+    collection: crate::collect_project::Dialog,
     settings_dialog: crate::project_settings::SettingsDialog,
     components: crate::components::Components,
     preferences: crate::preferences::Preferences,
@@ -319,6 +320,7 @@ impl App {
             on_welcome: true,
             match_source: false,
             place_import: false,
+            collection: Default::default(),
             settings_dialog: Default::default(),
             components: Default::default(),
             preferences: Default::default(),
@@ -740,6 +742,9 @@ impl App {
             FileAction::SaveAs => {
                 self.save(true);
             }
+            FileAction::Collect => self
+                .collection
+                .open(self.history.project(), self.path.as_deref()),
             FileAction::Settings => self.settings_dialog.open(self.history.project()),
             FileAction::Shortcuts => self.keymap_editor.open(),
         }
@@ -1044,7 +1049,8 @@ impl App {
     /// first frame before egui has registered a modal layer. Nested widget modals use
     /// egui's shared ownership state instead of another app-specific list.
     fn modal_owns_input(&self, ctx: &egui::Context) -> bool {
-        self.settings_dialog.draft.is_some()
+        self.collection.is_open()
+            || self.settings_dialog.draft.is_some()
             || self.export_dialog.is_open()
             || self.subtitle_export.is_open()
             || self.preferences.is_open()
@@ -1182,6 +1188,7 @@ impl App {
             "open_project" => return self.file_action(FileAction::Open),
             "save" => return self.file_action(FileAction::Save),
             "save_as" => return self.file_action(FileAction::SaveAs),
+            "collect_project" => return self.file_action(FileAction::Collect),
             "import" => return self.import_dialog(),
             "import_subtitles" => return self.import_subtitles(),
             "export_subtitles" => {
@@ -2009,6 +2016,7 @@ impl eframe::App for App {
             if let Some(id) = relink {
                 self.relink_dialog(id);
             }
+            self.collection.show(ui.ctx(), &self.exports);
             if self.keymap_editor.show(ui, &mut self.keymap)
                 && let Err(e) = keymap::save(&self.keymap)
             {
@@ -2102,6 +2110,7 @@ enum FileAction {
     Open,
     Save,
     SaveAs,
+    Collect,
     Settings,
     Shortcuts,
 }
