@@ -13,7 +13,11 @@
 //! exclusive end are discarded (never stretched or piled up at the end). Sampled keys at
 //! offset zero and the last visible flick preserve trimmed/overflow boundary values. Longer
 //! targets hold the source's last visible value. Source-coordinate interpolation remains
-//! source-coordinate interpolation: different speed ramps can change the curve between keys.
+//! source-coordinate interpolation. Boundary samples restart the original segment easing;
+//! they do not subdivide Bezier handles. Trimmed curves and different speed ramps can change
+//! interpolation between reconstructed keys; mapped key values/boundaries are guaranteed,
+//! not an identical continuous time curve. Reverse Hold jumps include a probe one source
+//! flick before the discontinuity, subject to the same time quantization.
 //! Reversed clips reverse easing; a frozen destination rejects varying animation because
 //! its single source coordinate cannot represent it. Quantized collisions keep the later
 //! playback offset. Neither clip's speed animation is replaced.
@@ -21,6 +25,8 @@
 //! Transform owns geometry, crop, opacity, blend and masks. Grade owns `GRADE_KEYS` and LUT.
 //! Effects owns the ordered effect stack, parameters and bypass flags; masked effects require
 //! Transform too, so mask IDs retain their meaning. Audio owns volume, pan and audio effects.
+//! Transform without Effects rejects targets whose effects refer to masks, so unselected
+//! effects cannot be orphaned or silently rebound by a mask replacement.
 //! Fades and transitions stay untouched. Text owns style and fill, never content; because text
 //! style is asset-wide, every use of a target text asset must be selected, including uses in
 //! other sequences (which cannot be selected here and therefore reject the operation).
@@ -66,6 +72,8 @@ pub enum Error {
     UnavailableEffect(String),
     UnavailableLut(String),
     MaskNeedsTransform,
+    MaskedTarget(ClipId),
+    InvalidEffectMask,
     SharedText(AssetId),
     FrozenAnimation(ClipId),
 }
@@ -199,6 +207,11 @@ impl Settings {
                 if effect.mask.is_some() && !self.categories.contains(&Category::Transform) {
                     return Err(Error::MaskNeedsTransform);
                 }
+                if let Some(id) = effect.mask
+                    && !self.sampled.masks.iter().any(|mask| mask.id == id)
+                {
+                    return Err(Error::InvalidEffectMask);
+                }
             }
         }
         if self.categories.contains(&Category::Grade)
@@ -211,6 +224,16 @@ impl Settings {
         let mut texts = BTreeMap::new();
         for &id in &targets {
             let clip = compatible(project, id, &self.categories, true)?;
+            if self.categories.contains(&Category::Transform)
+                && !self.categories.contains(&Category::Effects)
+                && clip
+                    .transform
+                    .effects
+                    .iter()
+                    .any(|effect| effect.mask.is_some())
+            {
+                return Err(Error::MaskedTarget(id));
+            }
             if self.categories.contains(&Category::Text) {
                 let all_selected = project.sequences().iter().all(|sequence| {
                     sequence.tracks().iter().all(|track| {
@@ -419,3 +442,567 @@ fn map_keys(source: &Clip, target: &Clip, keys: &[Keyframe]) -> Result<Vec<Keyfr
     Ok(mapped)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::history::History;
+    use crate::model::{Effect, LinkId, NewClip, ProbeInfo, TrackId};
+
+    fn clip(p: &mut Project, track: TrackId, start: i64, from: i64, to: i64) -> ClipId {
+        let asset = p.add_asset(format!("clip-{start}.mkv"));
+        p.asset_mut(asset).unwrap().probe = Some(ProbeInfo {
+            duration: Time(10000),
+            ..Default::default()
+        });
+        p.sequence
+            .add_clip(
+                track,
+                NewClip {
+                    asset,
+                    start: Time(start),
+                    source_in: Time(from),
+                    source_out: Time(to),
+                    link: Some(LinkId(start as u64)),
+                },
+            )
+            .unwrap()
+    }
+
+    fn key(time: i64, value: f64) -> Keyframe {
+        Keyframe {
+            time: Time(time),
+            value: Value::Scalar(value),
+            easing: Easing::Linear,
+        }
+    }
+
+    fn extract(p: &Project, source: ClipId, categories: &[Category], mode: Animation) -> Settings {
+        Settings::extract(p, source, categories, Time(50), mode).unwrap()
+    }
+
+    #[test]
+    fn static_replace_is_selective_atomic_undoable_and_survives_reopen() {
+        let mut p = Project::default();
+        let video = p.sequence.add_track(TrackKind::Video, "V1");
+        let audio = p.sequence.add_track(TrackKind::Audio, "A1");
+        let source = clip(&mut p, video, 0, 100, 300);
+        let a = clip(&mut p, video, 500, 1000, 1200);
+        let b = clip(&mut p, video, 1000, 3000, 3100);
+        let incompatible = clip(&mut p, audio, 0, 0, 200);
+        p.sequence
+            .with_clip_mut(source, |c| {
+                c.transform.exposure = 2.0;
+                c.transform.position = [23.0, 45.0];
+                c.keyframes
+                    .insert("exposure".into(), vec![key(100, 1.0), key(300, 3.0)]);
+            })
+            .unwrap();
+        for id in [a, b] {
+            p.sequence
+                .with_clip_mut(id, |c| {
+                    c.transform.position = [9.0, 8.0];
+                    c.transform.volume = 0.25;
+                    c.keyframes.insert("exposure".into(), vec![key(0, -1.0)]);
+                    c.keyframes.insert("rotation".into(), vec![key(0, 30.0)]);
+                })
+                .unwrap();
+        }
+        let settings = extract(&p, source, &[Category::Grade], Animation::default());
+        let before = p.clone();
+        assert!(matches!(
+            settings.command(&p, &[a, incompatible], |_| true),
+            Err(Error::Incompatible { .. })
+        ));
+        assert_eq!(p, before);
+        let mut history = History::new(p);
+        history
+            .apply(
+                settings
+                    .command(history.project(), &[a, b, a], |_| true)
+                    .unwrap(),
+            )
+            .unwrap();
+        for id in [a, b] {
+            let old = before.sequence().clip(id).unwrap().1;
+            let current = history.project().sequence().clip(id).unwrap().1;
+            let mut expected = old.clone();
+            expected.transform.exposure = 1.5;
+            expected.keyframes.remove("exposure");
+            assert_eq!(
+                current, &expected,
+                "identity, links, timing, other categories survive"
+            );
+        }
+        let edited = history.project().clone();
+        let dir = std::path::Path::new("/project");
+        let json = crate::file::to_json(&edited, dir).unwrap();
+        let reopened = crate::file::from_json(&json, dir, |_| false).unwrap();
+        assert_eq!(reopened, edited);
+        assert_eq!(
+            crate::eval::frame_at(&reopened, Time(510)),
+            crate::eval::frame_at(&edited, Time(510))
+        );
+        assert!(history.undo());
+        assert_eq!(history.project(), &before);
+        assert!(!history.can_undo(), "one batch, one undo");
+        assert!(history.redo());
+        assert_eq!(history.project(), &edited);
+    }
+
+    #[test]
+    fn relative_animation_maps_trim_and_speed_drops_overflow_and_samples_end() {
+        let mut p = Project::default();
+        let v = p.sequence.add_track(TrackKind::Video, "V1");
+        let source = clip(&mut p, v, 0, 100, 300);
+        let target = clip(&mut p, v, 500, 1000, 1120);
+        p.sequence.set_speed(source, 2.0, false, false).unwrap();
+        p.sequence.set_speed(target, 2.0, false, false).unwrap();
+        p.sequence
+            .with_clip_mut(source, |c| {
+                c.keyframes.insert(
+                    "rotation".into(),
+                    vec![
+                        key(0, -10.0),
+                        key(100, 0.0),
+                        key(200, 10.0),
+                        key(280, 20.0),
+                        key(400, 30.0),
+                    ],
+                );
+            })
+            .unwrap();
+        let settings = extract(&p, source, &[Category::Transform], Animation::Relative);
+        let mut h = History::new(p);
+        h.apply(settings.command(h.project(), &[target], |_| true).unwrap())
+            .unwrap();
+        let c = h.project().sequence().clip(target).unwrap().1;
+        assert_eq!(c.duration(), Time(60));
+        let keys = &c.keyframes["rotation"];
+        assert_eq!(
+            keys.iter().map(|k| k.time).collect::<Vec<_>>(),
+            [Time(1000), Time(1100), Time(1118)]
+        );
+        assert_eq!(c.transform_at(Time(550)).rotation, 10.0);
+        assert_eq!(c.transform_at(Time(559)).rotation, 12.25);
+        assert!(keys.iter().all(|k| k.time < c.source_out));
+    }
+
+    #[test]
+    fn resources_and_locks_validate_before_any_target_changes() {
+        let mut p = Project::default();
+        let v = p.sequence.add_track(TrackKind::Video, "V1");
+        let source = clip(&mut p, v, 0, 0, 100);
+        let target = clip(&mut p, v, 500, 0, 100);
+        p.sequence
+            .with_clip_mut(source, |c| {
+                c.transform.effects.push(Effect {
+                    shader: "missing".into(),
+                    params: BTreeMap::new(),
+                    enabled: false,
+                    mask: None,
+                });
+                c.transform.lut = Some("missing.cube".into());
+            })
+            .unwrap();
+        let fx = extract(&p, source, &[Category::Effects], Animation::Static);
+        assert_eq!(
+            fx.command(&p, &[target], |_| false),
+            Err(Error::UnavailableEffect("missing".into()))
+        );
+        let grade = extract(&p, source, &[Category::Grade], Animation::Static);
+        assert_eq!(
+            grade.command(&p, &[target], |_| false),
+            Err(Error::UnavailableLut("missing.cube".into()))
+        );
+        let mut track = p.sequence.track(v).unwrap().settings();
+        track.locked = true;
+        p.sequence.set_track(track).unwrap();
+        assert_eq!(
+            grade.command(&p, &[target], |_| true),
+            Err(Error::Model(ModelError::Locked(v)))
+        );
+    }
+
+    #[test]
+    fn text_style_preserves_words_and_rejects_unselected_shared_uses() {
+        let mut p = Project::default();
+        let v = p.sequence.add_track(TrackKind::Video, "V1");
+        let source = clip(&mut p, v, 0, 0, 100);
+        let target = clip(&mut p, v, 500, 0, 100);
+        for (id, words, size) in [
+            (source, "Source words", 32.0),
+            (target, "Target words", 64.0),
+        ] {
+            let asset = p.sequence.clip(id).unwrap().1.asset;
+            p.asset_mut(asset).unwrap().text = Some(Text {
+                content: words.into(),
+                size,
+                ..Text::default()
+            });
+        }
+        let asset = p.sequence.clip(target).unwrap().1.asset;
+        let duplicate = p
+            .sequence
+            .add_clip(
+                v,
+                NewClip {
+                    asset,
+                    start: Time(1000),
+                    source_in: Time(0),
+                    source_out: Time(100),
+                    link: None,
+                },
+            )
+            .unwrap();
+        let settings = extract(&p, source, &[Category::Text], Animation::Static);
+        assert_eq!(
+            settings.command(&p, &[target], |_| true),
+            Err(Error::SharedText(asset))
+        );
+        let mut h = History::new(p);
+        h.apply(
+            settings
+                .command(h.project(), &[target, duplicate], |_| true)
+                .unwrap(),
+        )
+        .unwrap();
+        let text = h.project().asset(asset).unwrap().text.as_ref().unwrap();
+        assert_eq!((&text.content[..], text.size), ("Target words", 32.0));
+        assert!(h.undo());
+        assert_eq!(
+            h.project()
+                .asset(asset)
+                .unwrap()
+                .text
+                .as_ref()
+                .unwrap()
+                .size,
+            64.0
+        );
+        h.apply(Command::Nest {
+            ids: vec![duplicate],
+            name: "Nested".into(),
+            outer: "Timeline".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            settings.command(h.project(), &[target], |_| true),
+            Err(Error::SharedText(asset)),
+            "closed-sequence uses cannot be accidentally changed"
+        );
+    }
+
+    #[test]
+    fn audio_replaces_only_audio_settings() {
+        let mut p = Project::default();
+        let a = p.sequence.add_track(TrackKind::Audio, "A1");
+        let source = clip(&mut p, a, 0, 0, 100);
+        let target = clip(&mut p, a, 500, 0, 100);
+        p.sequence
+            .with_clip_mut(source, |c| {
+                c.transform.volume = 0.5;
+                c.transform.pan = -0.5;
+                c.transform.audio_fx.high_pass.freq = 100.0;
+            })
+            .unwrap();
+        let settings = extract(&p, source, &[Category::Audio], Animation::Static);
+        let before = p.sequence.clip(target).unwrap().1.clone();
+        let mut h = History::new(p);
+        h.apply(settings.command(h.project(), &[target], |_| true).unwrap())
+            .unwrap();
+        let current = h.project().sequence().clip(target).unwrap().1;
+        let mut expected = before;
+        expected.transform.volume = 0.5;
+        expected.transform.pan = -0.5;
+        expected.transform.audio_fx.high_pass.freq = 100.0;
+        assert_eq!(current, &expected);
+        assert!(matches!(
+            Settings::extract(
+                h.project(),
+                source,
+                &[Category::Grade],
+                Time(0),
+                Animation::Static
+            ),
+            Err(Error::Incompatible { .. })
+        ));
+    }
+
+    #[test]
+    fn animation_preserves_destination_speed_ramp_and_longer_targets_hold_last_value() {
+        let mut p = Project::default();
+        let v = p.sequence.add_track(TrackKind::Video, "V1");
+        let source = clip(&mut p, v, 0, 100, 200);
+        let target = clip(&mut p, v, 500, 1000, 1600);
+        p.sequence
+            .with_clip_mut(source, |c| {
+                c.keyframes
+                    .insert("rotation".into(), vec![key(100, 0.0), key(150, 10.0)]);
+            })
+            .unwrap();
+        let speed = vec![key(1000, 1.0), key(1600, 3.0)];
+        p.sequence
+            .set_speed_keys(target, 1.0, speed.clone(), false)
+            .unwrap();
+        let settings = extract(&p, source, &[Category::Transform], Animation::Relative);
+        let old = p.sequence.clip(target).unwrap().1.clone();
+        let mut h = History::new(p);
+        h.apply(settings.command(h.project(), &[target], |_| true).unwrap())
+            .unwrap();
+        let current = h.project().sequence().clip(target).unwrap().1;
+        assert_eq!(current.keyframes["speed"], speed);
+        assert_eq!(
+            (
+                current.source_in,
+                current.source_out,
+                current.start,
+                current.duration()
+            ),
+            (old.source_in, old.source_out, old.start, old.duration())
+        );
+        let key = current.keyframes["rotation"]
+            .iter()
+            .find(|k| k.value == Value::Scalar(10.0))
+            .unwrap();
+        assert!((current.timeline_at(key.time).0 - current.start.0 - 50).abs() <= 1);
+        assert_eq!(current.transform_at(current.end() - Time(1)).rotation, 10.0);
+    }
+
+    #[test]
+    fn reversed_mapping_and_frozen_animation_have_explicit_outcomes() {
+        let mut p = Project::default();
+        let v = p.sequence.add_track(TrackKind::Video, "V1");
+        let source = clip(&mut p, v, 0, 100, 200);
+        let target = clip(&mut p, v, 500, 1000, 1100);
+        p.sequence
+            .with_clip_mut(source, |c| {
+                c.keyframes
+                    .insert("rotation".into(), vec![key(100, 0.0), key(199, 99.0)]);
+            })
+            .unwrap();
+        p.sequence.set_speed(target, 1.0, true, false).unwrap();
+        let settings = extract(&p, source, &[Category::Transform], Animation::Relative);
+        let mut h = History::new(p);
+        h.apply(settings.command(h.project(), &[target], |_| true).unwrap())
+            .unwrap();
+        let c = h.project().sequence().clip(target).unwrap().1;
+        assert_eq!(c.transform_at(Time(500)).rotation, 0.0);
+        assert_eq!(c.transform_at(Time(550)).rotation, 50.0);
+        let mut frozen = h.project().clone();
+        frozen.sequence.freeze_frame(target, Time(500)).unwrap();
+        assert_eq!(
+            settings.command(&frozen, &[target], |_| true),
+            Err(Error::FrozenAnimation(target))
+        );
+        assert!(
+            extract(&frozen, source, &[Category::Transform], Animation::Static)
+                .command(&frozen, &[target], |_| true)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn reversing_hold_animation_keeps_its_jump_at_the_mapped_offset() {
+        let mut p = Project::default();
+        let v = p.sequence.add_track(TrackKind::Video, "V1");
+        let source = clip(&mut p, v, 0, 100, 201);
+        let target = clip(&mut p, v, 500, 1000, 1101);
+        p.sequence
+            .with_clip_mut(source, |c| {
+                let mut held = key(100, 0.0);
+                held.easing = Easing::Hold;
+                c.keyframes
+                    .insert("rotation".into(), vec![held, key(200, 10.0)]);
+            })
+            .unwrap();
+        p.sequence.set_speed(source, 1.0, true, false).unwrap();
+        let settings = extract(&p, source, &[Category::Transform], Animation::Relative);
+        let mut h = History::new(p);
+        h.apply(settings.command(h.project(), &[target], |_| true).unwrap())
+            .unwrap();
+        let c = h.project().sequence().clip(target).unwrap().1;
+        assert_eq!(c.transform_at(Time(500)).rotation, 10.0);
+        assert_eq!(c.transform_at(Time(501)).rotation, 0.0);
+        assert_eq!(c.transform_at(Time(599)).rotation, 0.0);
+    }
+
+    #[test]
+    fn speed_rounding_keeps_explicit_key_values() {
+        let mut p = Project::default();
+        let v = p.sequence.add_track(TrackKind::Video, "V1");
+        let source = clip(&mut p, v, 0, 100, 200);
+        let target = clip(&mut p, v, 500, 1000, 1200);
+        p.sequence.set_speed(source, 2.0, false, false).unwrap();
+        p.sequence
+            .with_clip_mut(source, |c| {
+                c.keyframes.insert(
+                    "rotation".into(),
+                    vec![key(100, 0.0), key(151, 10.0), key(199, 0.0)],
+                );
+            })
+            .unwrap();
+        let settings = extract(&p, source, &[Category::Transform], Animation::Relative);
+        let mut h = History::new(p);
+        h.apply(settings.command(h.project(), &[target], |_| true).unwrap())
+            .unwrap();
+        assert_eq!(
+            h.project()
+                .sequence()
+                .clip(target)
+                .unwrap()
+                .1
+                .transform_at(Time(525))
+                .rotation,
+            10.0
+        );
+    }
+
+    #[test]
+    fn replacing_referenced_masks_requires_effects_and_keeps_combined_stack_coherent() {
+        use crate::model::{Mask, MaskShape};
+        let mut p = Project::default();
+        let v = p.sequence.add_track(TrackKind::Video, "V1");
+        let source = clip(&mut p, v, 0, 0, 100);
+        let plain = clip(&mut p, v, 500, 1000, 1100);
+        let masked = clip(&mut p, v, 1000, 2000, 2100);
+        for (id, mask_id, shader) in [(source, 7, "source"), (masked, 3, "destination")] {
+            p.sequence
+                .with_clip_mut(id, |c| {
+                    let mut mask =
+                        Mask::new(MaskShape::Rectangle, vec![[0.0, 0.0], [100.0, 100.0]]);
+                    mask.id = mask_id;
+                    c.transform.masks = vec![mask];
+                    c.transform.effects = vec![Effect {
+                        shader: shader.into(),
+                        params: BTreeMap::new(),
+                        enabled: true,
+                        mask: Some(mask_id),
+                    }];
+                })
+                .unwrap();
+        }
+        p.sequence
+            .with_clip_mut(source, |c| {
+                c.keyframes.insert(
+                    "mask0.p0".into(),
+                    vec![
+                        Keyframe {
+                            time: Time(0),
+                            value: Value::Vec2([20.0, 30.0]),
+                            easing: Easing::Linear,
+                        },
+                        Keyframe {
+                            time: Time(99),
+                            value: Value::Vec2([40.0, 50.0]),
+                            easing: Easing::Linear,
+                        },
+                    ],
+                );
+            })
+            .unwrap();
+        let before = p.clone();
+        let transform = extract(&p, source, &[Category::Transform], Animation::Relative);
+        assert_eq!(
+            transform.command(&p, &[plain, masked], |_| true),
+            Err(Error::MaskedTarget(masked))
+        );
+        assert_eq!(
+            p, before,
+            "every target remains unchanged on preflight failure"
+        );
+        let effects = extract(&p, source, &[Category::Effects], Animation::Relative);
+        assert_eq!(
+            effects.command(&p, &[masked], |_| true),
+            Err(Error::MaskNeedsTransform)
+        );
+        let combined = extract(
+            &p,
+            source,
+            &[Category::Transform, Category::Effects],
+            Animation::Relative,
+        );
+        let mut h = History::new(p);
+        h.apply(
+            combined
+                .command(h.project(), &[plain, masked], |_| true)
+                .unwrap(),
+        )
+        .unwrap();
+        for id in [plain, masked] {
+            let c = h.project().sequence().clip(id).unwrap().1;
+            assert_eq!(c.transform.effects[0].mask, Some(c.transform.masks[0].id));
+            assert_eq!(c.transform.effects[0].shader, "source");
+            assert_eq!(
+                c.value_at("mask0.p0", c.start),
+                Some(Value::Vec2([20.0, 30.0]))
+            );
+            assert_eq!(
+                c.value_at("mask0.p0", c.end() - Time(1)),
+                Some(Value::Vec2([40.0, 50.0]))
+            );
+        }
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        let mut invalid = before;
+        invalid
+            .sequence
+            .with_clip_mut(source, |c| c.transform.effects[0].mask = Some(99))
+            .unwrap();
+        let settings = extract(
+            &invalid,
+            source,
+            &[Category::Transform, Category::Effects],
+            Animation::Relative,
+        );
+        assert_eq!(
+            settings.command(&invalid, &[plain, masked], |_| true),
+            Err(Error::InvalidEffectMask)
+        );
+    }
+
+    #[test]
+    fn trimmed_bezier_reverse_and_hold_reconstruct_explicit_boundary_values() {
+        for reverse in [false, true] {
+            let mut p = Project::default();
+            let v = p.sequence.add_track(TrackKind::Video, "V1");
+            let source = clip(&mut p, v, 0, 150, 250);
+            let target = clip(&mut p, v, 500, 1000, if reverse { 1065 } else { 1100 });
+            let mut eased = key(100, 0.0);
+            eased.easing = Easing::Bezier([0.42, 0.0, 0.58, 1.0]);
+            let mut held = key(200, 10.0);
+            held.easing = Easing::Hold;
+            let keys = vec![eased, held, key(300, 20.0)];
+            p.sequence
+                .with_clip_mut(source, |c| {
+                    c.keyframes.insert("rotation".into(), keys.clone());
+                })
+                .unwrap();
+            p.sequence.set_speed(source, 1.0, reverse, false).unwrap();
+            p.sequence.set_speed(target, 1.0, reverse, false).unwrap();
+            let source_clip = p.sequence.clip(source).unwrap().1.clone();
+            let settings = extract(&p, source, &[Category::Transform], Animation::Relative);
+            let mut h = History::new(p);
+            h.apply(settings.command(h.project(), &[target], |_| true).unwrap())
+                .unwrap();
+            let target = h.project().sequence().clip(target).unwrap().1;
+            for offset in [Time(0), target.duration() - Time(1)] {
+                assert_eq!(
+                    target.value_at("rotation", target.start + offset),
+                    keyframe::value_at(&keys, source_clip.source_at(source_clip.start + offset))
+                );
+            }
+            let offset = source_clip.timeline_at(Time(200)) - source_clip.start;
+            assert!(
+                target.keyframes["rotation"]
+                    .iter()
+                    .any(|k| k.time == target.source_at(target.start + offset)
+                        && k.value == Value::Scalar(10.0))
+            );
+            assert!(
+                target.keyframes["rotation"]
+                    .iter()
+                    .all(|k| k.time >= target.source_in && k.time < target.source_out)
+            );
+        }
+    }
+}
