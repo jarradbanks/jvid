@@ -37,6 +37,7 @@ mod transcript;
 mod transport;
 mod updates;
 mod welcome;
+pub mod workspaces;
 mod zoom;
 
 /// Test helpers the modules share.
