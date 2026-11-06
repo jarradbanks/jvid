@@ -5,6 +5,7 @@
 # every English key.
 
 [action]
+command_palette = "コマンドパレット"
 text_tool = "テキストツール"
 export_subtitles = "字幕を書き出す (.srt)…"
 new_project = "新規プロジェクト"
@@ -1075,3 +1076,11 @@ transcript = "文字起こしがありません"
 transcript_help = "クリップの音声を文字に起こして、テキストで編集できます。"
 no_audio = "文字起こしする音声がありません"
 no_audio_help = "音声のあるクリップをタイムラインに追加して文字起こしを始めてください。"
+
+[palette]
+title = "コマンドパレット"
+no_results = "一致するコマンドがありません"
+focus_timeline = "このコマンドを使うにはタイムラインを選択してください"
+focus_playback = "このコマンドを使うにはソース、プログラム、タイムラインのいずれかを選択してください"
+unavailable = "現在の状況ではこのコマンドを使えません"
+no_source = "先にソースにクリップを読み込んでください"

@@ -2,6 +2,7 @@
 # Spanish labels use sentence case (Guardar como), not English Title Case.
 
 [action]
+command_palette = "Paleta de Comandos"
 text_tool = "Herramienta de texto"
 export_subtitles = "Exportar subtítulos (.srt)…"
 new_project = "Nuevo proyecto"
@@ -1087,3 +1088,11 @@ transcript = "Aún no hay transcripción"
 transcript_help = "Transcribe el habla de tus clips para editar con texto."
 no_audio = "Sin audio para transcribir"
 no_audio_help = "Añade un clip con audio a la línea de tiempo para iniciar una transcripción."
+
+[palette]
+title = "Paleta de Comandos"
+no_results = "No hay comandos coincidentes"
+focus_timeline = "Activa la línea de tiempo para usar este comando"
+focus_playback = "Activa Origen, Programa o Línea de Tiempo para usar este comando"
+unavailable = "Este comando no está disponible en el contexto actual"
+no_source = "Carga primero un clip en Origen"

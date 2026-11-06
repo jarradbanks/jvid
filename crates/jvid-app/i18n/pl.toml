@@ -3,6 +3,7 @@
 # docs/i18n/pl.md.
 
 [action]
+command_palette = "Paleta Poleceń"
 text_tool = "Narzędzie tekstowe"
 export_subtitles = "Eksportuj napisy (.srt)…"
 new_project = "Nowy projekt"
@@ -1101,3 +1102,11 @@ transcript = "Brak transkrypcji"
 transcript_help = "Transkrybuj mowę z klipów, aby montować za pomocą tekstu."
 no_audio = "Brak dźwięku do transkrypcji"
 no_audio_help = "Dodaj klip z dźwiękiem do osi czasu, aby rozpocząć transkrypcję."
+
+[palette]
+title = "Paleta Poleceń"
+no_results = "Brak pasujących poleceń"
+focus_timeline = "Aktywuj oś czasu, aby użyć tego polecenia"
+focus_playback = "Aktywuj panel Źródło, Program lub Oś Czasu, aby użyć tego polecenia"
+unavailable = "To polecenie jest niedostępne w bieżącym kontekście"
+no_source = "Najpierw wczytaj klip w panelu Źródło"
