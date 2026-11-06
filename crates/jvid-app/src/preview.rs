@@ -949,8 +949,28 @@ impl Preview {
 
     /// Where the project frame sits in the viewer `ui` draws into, at the current zoom.
     pub fn project_rect(&self, ui: &Ui, settings: &ProjectSettings) -> Rect {
+        self.prepare_view(ui, false, [settings.width, settings.height]);
         self.geometry(ui, vec2(settings.width as f32, settings.height as f32))
             .frame
+    }
+
+    /// Panel tabs share a body UI id. Captured selection coordinates belong to one picture.
+    fn prepare_view(&self, ui: &Ui, source: bool, size: [u32; 2]) {
+        let identity = (
+            source,
+            if source { self.source_asset() } else { None },
+            size,
+        );
+        let key = view_id(ui).with("picture");
+        ui.data_mut(|data| {
+            if data
+                .get_temp::<(bool, Option<AssetId>, [u32; 2])>(key)
+                .is_some_and(|prior| prior != identity)
+            {
+                data.insert_temp(view_id(ui), View::default());
+            }
+            data.insert_temp(key, identity);
+        });
     }
 
     fn geometry(&self, ui: &Ui, size: egui::Vec2) -> ViewerGeometry {
@@ -1178,7 +1198,11 @@ impl Preview {
                 .as_ref()
                 .map(|f| [f.width as f32, f.height as f32]),
         };
+        if drawn.is_none() && self.status_source {
+            self.prepare_view(ui, true, [0, 0]);
+        }
         if let Some(drawn) = drawn {
+            self.prepare_view(ui, self.status_source, [drawn[0] as u32, drawn[1] as u32]);
             let view = [viewer.left(), viewer.top(), viewer.width(), viewer.height()];
             let geometry = self.geometry(ui, drawn.into());
             let image = geometry.frame;
@@ -2768,6 +2792,126 @@ mod viewer_fit_tests {
     use egui_kittest::{Harness, kittest::Queryable};
     use jvid_core::history::History;
     use jvid_core::model::{ClipId, Transform};
+
+    #[test]
+    fn panel_tabs_source_assets_and_aspect_changes_clear_unrelated_view_bounds() {
+        use jvid_core::history::Created;
+        struct State {
+            preview: Preview,
+            history: History,
+            active: usize,
+            capture: bool,
+            current: View,
+            key: egui::Id,
+        }
+        let mut history = History::new(Project::default());
+        let assets: Vec<_> = (0..2)
+            .map(|i| {
+                let Created::Asset(id) = history
+                    .apply(Command::AddSolid {
+                        name: i.to_string(),
+                        color: [0.0, 0.0, 0.0, 1.0],
+                    })
+                    .unwrap()
+                else {
+                    panic!("asset")
+                };
+                id
+            })
+            .collect();
+        let mut fresh = true;
+        let mut h = Harness::builder().with_size([640.0, 480.0]).build_ui_state(
+            move |ui, state: &mut State| {
+                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                let source = state.active == 1;
+                suite_ui::panel::Panel::tabbed(&["Program", "Source"], &mut state.active)
+                    .embedded(true)
+                    .show(ui, |ui| {
+                        if source {
+                            state.preview.show_source(
+                                ui,
+                                state.history.project(),
+                                &HashSet::new(),
+                                &Keymap::default(),
+                            );
+                        } else {
+                            state
+                                .preview
+                                .project_rect(ui, state.history.project().settings());
+                            state.preview.show_program(
+                                ui,
+                                state.history.project(),
+                                Time(0),
+                                None,
+                                false,
+                                &Keymap::default(),
+                            );
+                        }
+                        if state.capture {
+                            set_view(
+                                ui,
+                                View {
+                                    selection: Some(Rect::from_center_size(
+                                        Pos2::ZERO,
+                                        vec2(200.0, 100.0),
+                                    )),
+                                    pan: vec2(20.0, 10.0),
+                                },
+                            );
+                            state.capture = false;
+                        }
+                        state.current = view(ui);
+                        state.key = view_id(ui);
+                    });
+            },
+            State {
+                preview: Preview::new(None),
+                history,
+                active: 0,
+                capture: false,
+                current: View::default(),
+                key: egui::Id::NULL,
+            },
+        );
+        h.run();
+        let program_key = h.state().key;
+        h.state_mut().capture = true;
+        h.run();
+        assert!(h.state().current.selection.is_some());
+        let project = h.state().history.project().clone();
+        h.state_mut().preview.open(&project, assets[0]);
+        h.state_mut().active = 1;
+        h.run();
+        assert_eq!(
+            h.state().key,
+            program_key,
+            "actual panel body shares its UI identity"
+        );
+        assert_eq!(h.state().current, View::default());
+        h.state_mut().capture = true;
+        h.run();
+        h.state_mut().preview.open(&project, assets[1]);
+        h.run();
+        assert_eq!(h.state().current, View::default(), "new Source asset");
+        h.state_mut().capture = true;
+        h.run();
+        let mut settings = project.settings().clone();
+        settings.width = 1080;
+        settings.height = 1920;
+        h.state_mut()
+            .history
+            .apply(Command::SetSettings(settings))
+            .unwrap();
+        h.run();
+        assert_eq!(h.state().current, View::default(), "Source aspect changed");
+        h.state_mut().capture = true;
+        h.run();
+        h.state_mut().active = 0;
+        h.run();
+        assert_eq!(h.state().current, View::default(), "return to Program");
+    }
 
     struct Viewer {
         preview: Preview,
