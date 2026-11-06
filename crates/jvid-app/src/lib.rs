@@ -2,6 +2,7 @@
 
 pub mod app;
 mod autosave;
+mod command_palette;
 mod components;
 mod easing;
 mod effects;
