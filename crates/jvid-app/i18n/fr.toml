@@ -819,6 +819,8 @@ reset_all = "Tout réinitialiser"
 file_type = "Configuration clavier"
 
 [preview]
+view_selection = "Voir la Sélection"
+pan_hint = "Faites glisser avec le bouton central pour déplacer ; choisissez Ajuster pour réinitialiser la vue."
 position = "Position de Lecture"
 more = "Plus"
 fit = "Ajuster"

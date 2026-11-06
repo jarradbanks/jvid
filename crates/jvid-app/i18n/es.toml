@@ -811,6 +811,8 @@ reset_all = "Restablecer todo"
 file_type = "Mapa de teclas"
 
 [preview]
+view_selection = "Ver Selección"
+pan_hint = "Arrastra con el botón central para desplazar; elige Ajustar para restablecer la vista."
 position = "Posición de Reproducción"
 more = "Más"
 fit = "Ajustar"
