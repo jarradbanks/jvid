@@ -133,7 +133,15 @@ drops out of the Program monitor and exports until you turn it back on. To write
 
 ## Subtitles
 
-Use **File > Import Subtitles** for an existing SRT, or **Timeline > Generate Subtitles** to turn speech into editable captions. Edit a caption's text in the Inspector and trim or move its timeline clip to adjust timing.
+Use **File > Import Subtitles** for an existing SRT, or **Timeline > Generate Subtitles** to turn speech into editable captions. Open **Timeline > Captions** for editable text, start and end rows; times use timeline seconds. Text typing and time scrubbing each undo as one operation. You can also edit text in the Inspector or trim and move caption clips on the timeline.
+
+Select caption rows with their checkboxes. **Split at Playhead** splits a row at both its remembered text cursor and the current playhead; before placing a cursor, it uses the text midpoint. Both cuts must be inside the caption. **Merge Selected** joins consecutive captions on one track with line breaks, includes any intervening gaps, and retains the earliest caption’s style. Invalid edits leave every caption unchanged.
+
+Find is literal and case-sensitive, including Unicode. **Replace All** uses the chosen **Selected Clips**, active caption’s **Track**, or **Entire Timeline** scope. Search only filters the displayed rows; it does not narrow that chosen scope. Hidden and disabled captions remain editable and carry a Hidden label; locked tracks refuse content changes. The workspace edits the current open sequence; open a nested sequence to edit its own caption rows.
+
+**Shared Style** starts from a reference caption. **Use Active Caption Style** refreshes that reference from the row most recently focused, selected or sought. **Apply Style to Scope** writes the shared values into the chosen captions as one undoable operation. By default, each value differing from the reference is an individual override; animated text properties retain their static values and keyframes. **Replace Overrides** explicitly applies every shared style value and clears text-style animation, while retaining caption text, timing, transforms and other effects. A single selected row with this option is an explicit per-caption style override. Shared styles are stored in the existing text assets, and edits detach reused assets so unrelated titles and other placed instances keep their appearance. Search, selection, scope, unapplied style controls and docking do not affect renders.
+
+Close Captions with its tab’s **×**; reopening keeps its view controls. The **Captions** action is available in the command palette and can receive a custom shortcut in Keyboard Shortcuts. Changing the duration of a speed-animated caption uses timeline trimming; text editing and moving an unchanged-duration caption remain available in the workspace.
 
 To save captions without exporting video, choose **Timeline > Export Subtitles (.srt)…**, **File > Export Subtitles (.srt)…**, or right-click a subtitle track header or caption clip and choose **Export Subtitles (.srt)…**. Choose **Entire Timeline** for the whole current sequence, or explicitly choose **In to Out**, then **Save SRT…** to open the native save dialog. One missing mark means the sequence start or end. Captions crossing the range edges are clipped, and times start at zero at the range's In point.
 

@@ -201,6 +201,7 @@ pub const ACTIONS: &[Action] = &[
     ),
     a("workspace_editing", ""),
     a("workspace_captions", ""),
+    aliases(a("show_captions", ""), &["captions", "subtitles", "rows"]),
     a("workspace_audio", ""),
     a("workspace_save", ""),
     a("reset_layout", ""),

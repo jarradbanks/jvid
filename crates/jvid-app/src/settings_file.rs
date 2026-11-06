@@ -210,7 +210,7 @@ mod tests {
         assert_eq!(dock.iter_all_tabs().count(), 5);
         assert_eq!(
             dock.find_active_focused().map(|(_, tab)| *tab),
-            Some(crate::app::Tab::Transcript)
+            Some(crate::app::Tab::Captions)
         );
         let legacy: egui_dock::DockState<crate::app::Tab> =
             eframe::get_value(&storage, "dock").unwrap();

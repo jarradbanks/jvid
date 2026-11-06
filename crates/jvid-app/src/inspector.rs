@@ -3647,7 +3647,7 @@ fn pair(ui: &mut Ui, v: &mut [f32; 2], (lo, hi): (f64, f64), decimals: usize, la
 }
 
 /// The fields of Text tab row `id` editing `s`; true once one changed it.
-fn text_fields(ui: &mut Ui, s: &mut Text, id: &str, label: &str) -> bool {
+pub(crate) fn text_fields(ui: &mut Ui, s: &mut Text, id: &str, label: &str) -> bool {
     use jvid_core::model::Align;
     let mut num = |v: &mut f32, range, slider| {
         let mut x = f64::from(*v);

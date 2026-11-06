@@ -3,6 +3,7 @@
 mod annotations;
 pub mod app;
 mod autosave;
+mod caption_workspace;
 pub mod collect_project;
 mod command_palette;
 mod components;

@@ -84,6 +84,7 @@ Work in any panel except while typing in a text field.
 | Command Palette | `Ctrl+Shift+P` |
 | Editing Workspace | — |
 | Captions Workspace | — |
+| Captions | — |
 | Audio Workspace | — |
 | Save Workspace… | — |
 | Reset Panel Layout | — |

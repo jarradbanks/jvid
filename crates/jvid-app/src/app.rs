@@ -122,6 +122,8 @@ pub enum Tab {
     Transcript,
     /// Marker-backed review; persisted name is additive to legacy tabs.
     Highlights,
+    /// Editable subtitle rows; optional and closable.
+    Captions,
 }
 
 impl Tab {
@@ -135,6 +137,7 @@ impl Tab {
             Tab::RenderQueue => tr!("export.queue"),
             Tab::Transcript => tr!("panel.transcript"),
             Tab::Highlights => tr!("highlights.review"),
+            Tab::Captions => tr!("captions.title"),
         }
     }
 
@@ -148,6 +151,7 @@ impl Tab {
             Tab::RenderQueue => "render_queue",
             Tab::Transcript => "transcript",
             Tab::Highlights => "highlights",
+            Tab::Captions => crate::workspaces::CAPTIONS_PANEL_ID,
         }
     }
 }
@@ -264,6 +268,7 @@ pub struct App {
     subtitles: crate::subtitles::Subtitles,
     transcript: crate::transcript::TranscriptPanel,
     highlight_review: crate::highlight_review::HighlightReview,
+    captions: crate::caption_workspace::CaptionWorkspace,
     /// Dialogs waiting to be answered, the first one showing.
     prompts: Vec<Prompt>,
     /// The user chose to quit; the next close request goes through.
@@ -409,6 +414,7 @@ impl App {
             autosave: Default::default(),
             queue: Default::default(),
             subtitles,
+            captions: Default::default(),
             transcript,
             highlight_review: Default::default(),
             prompts: Vec::new(),
@@ -468,6 +474,7 @@ impl App {
         self.reset_project_session();
         self.missing = relink::missing(&project);
         self.history = History::new(project);
+        self.captions = Default::default();
         self.path = path;
         self.match_source = match_source;
         self.place_import = false;
@@ -791,7 +798,7 @@ impl App {
     /// The Timeline menu, its left edge at `left`. Returns its right edge.
     fn timeline_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
         let button = menu_button(ui, tr!("menu.timeline"), left);
-        let (mut picked, mut transcript, mut export) = (false, false, false);
+        let (mut picked, mut transcript, mut export, mut captions) = (false, false, false, false);
         egui::Popup::menu(&button).show(|ui| {
             picked = self.action_menu_item(ui, "generate_subtitles");
             export = self.action_menu_item(ui, "export_subtitles");
@@ -799,6 +806,7 @@ impl App {
             if self.action_menu_item(ui, "review_highlights") {
                 self.run_action("review_highlights", true);
             }
+            captions = self.action_menu_item(ui, "show_captions");
         });
         if picked {
             self.run_action("generate_subtitles", true);
@@ -808,6 +816,9 @@ impl App {
         }
         if transcript {
             self.show_panel(Tab::Transcript);
+        }
+        if captions {
+            self.run_action("show_captions", true);
         }
         button.rect.right()
     }
@@ -1297,7 +1308,7 @@ impl App {
                 );
             }
             "workspace_editing" | "workspace_captions" | "workspace_audio" | "workspace_save"
-            | "reset_layout" => Some(!self.on_welcome),
+            | "reset_layout" | "show_captions" => Some(!self.on_welcome),
             "export_frame" => {
                 return Applicability::when(
                     self.history.project().sequence().duration() > Time(0),
@@ -1506,6 +1517,10 @@ impl App {
                         &self.name(),
                     );
                 }
+                return;
+            }
+            "show_captions" => {
+                self.show_panel(Tab::Captions);
                 return;
             }
             "workspace_editing" => return self.apply_workspace(Builtin::Editing),
@@ -2269,6 +2284,7 @@ impl eframe::App for App {
                 queue: &mut self.queue,
                 queue_action: None,
                 transcript: &mut self.transcript,
+                captions: &mut self.captions,
                 transcript_out: Default::default(),
                 highlight_review: &mut self.highlight_review,
                 highlight_revision: crate::highlight_review::ReviewRevision::current(
@@ -2379,6 +2395,7 @@ impl eframe::App for App {
                     .as_ref()
                     .is_some_and(|c| tutorial::silence_cut(c, self.history.project()));
             let detected_highlights = matches!(command.as_ref(), Some(Command::Batch(commands)) if !commands.is_empty() && commands.iter().all(|c| matches!(c, Command::AddMarker { .. })));
+            let caption_edit = matches!(command, Some(Command::Caption(_)));
             let applied = match (command, gesture) {
                 (Some(c), Some(k)) => Some(self.history.apply_coalesced(k, c)),
                 (Some(c), None) => Some(self.history.apply(c)),
@@ -2458,6 +2475,7 @@ impl eframe::App for App {
                     ModelError::Cycle => Some(tr!("timeline.cycle").to_owned()),
                     ModelError::TooDeep => Some(tr!("timeline.too_deep", max = MAX_NEST_DEPTH)),
                     ModelError::SequenceOpen => Some(tr!("bin.sequence_open").to_owned()),
+                    _ if caption_edit => crate::caption_workspace::error(&e),
                     _ => None,
                 };
                 if let Some(msg) = msg {
@@ -2845,7 +2863,7 @@ fn dock_titles(ui: &Ui, dock: &DockState<Tab>) -> std::collections::HashMap<Tab,
         let width = ((leaf.rect.width() - space::S8) / leaf.tabs.len() as f32 - space::S4)
             .clamp(size::TAB_MIN, size::TAB_MAX);
         for tab in &leaf.tabs {
-            let close = if matches!(tab, Tab::Transcript | Tab::RenderQueue) {
+            let close = if matches!(tab, Tab::Transcript | Tab::RenderQueue | Tab::Highlights | Tab::Captions) {
                 size::CONTROL
             } else {
                 0.0
@@ -2887,6 +2905,7 @@ struct Viewer<'a> {
     queue: &'a mut crate::export::queue::Queue,
     queue_action: Option<QueueAction>,
     transcript: &'a mut crate::transcript::TranscriptPanel,
+    captions: &'a mut crate::caption_workspace::CaptionWorkspace,
     transcript_out: crate::transcript::Output,
     highlight_review: &'a mut crate::highlight_review::HighlightReview,
     highlight_revision: crate::highlight_review::ReviewRevision,
@@ -2909,7 +2928,7 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn is_closeable(&self, tab: &Tab) -> bool {
-        matches!(tab, Tab::Transcript | Tab::RenderQueue | Tab::Highlights)
+        matches!(tab, Tab::Transcript | Tab::RenderQueue | Tab::Highlights | Tab::Captions)
     }
 
     fn allowed_in_windows(&self, _tab: &mut Tab) -> bool {
@@ -2944,6 +2963,7 @@ impl TabViewer for Viewer<'_> {
             let name = match tab {
                 Tab::Transcript => tr!("transcript.close"),
                 Tab::Highlights => tr!("highlights.close"),
+                Tab::Captions => tr!("captions.close"),
                 _ => tr!("export.close_queue"),
             };
             close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
@@ -3012,6 +3032,23 @@ impl TabViewer for Viewer<'_> {
             let can_export =
                 self.project.sequence().duration() > Time(0) && self.preview.gpu().is_some();
             self.queue_action = self.queue.panel_docked(ui, focused, can_export);
+            return;
+        }
+        if *tab == Tab::Captions {
+            let out = self.captions.show_docked(
+                ui,
+                self.project,
+                self.timeline.selected(),
+                self.timeline.playhead(),
+                focused,
+            );
+            if let Some(t) = out.seek {
+                self.timeline.seek(t);
+            }
+            if let Some(command) = out.command {
+                self.command = Some(command);
+                self.gesture = out.gesture;
+            }
             return;
         }
         if *tab == Tab::Transcript {
@@ -3970,6 +4007,63 @@ mod workspace_tests {
             app.dock.find_active_focused().map(|(_, tab)| *tab),
             Some(Tab::RenderQueue)
         );
+    }
+}
+
+#[cfg(test)]
+mod caption_tests {
+    use super::*;
+    use egui::{Key, Modifiers};
+    use egui_kittest::Harness;
+
+    #[test]
+    fn remapped_caption_panel_opens_once_and_layout_restore_keeps_closed_state() {
+        let mut h = Harness::builder()
+            .with_size([960.0, 600.0])
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run();
+        h.state_mut().on_welcome = false;
+        h.state_mut().keymap = Keymap::from_toml("show_captions = \"Ctrl+Alt+F9\"").unwrap();
+        let before = h.state().history.project().clone();
+        for _ in 0..2 {
+            h.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::F9);
+            h.run();
+            assert_eq!(
+                h.state()
+                    .dock
+                    .iter_all_tabs()
+                    .filter(|(_, tab)| **tab == Tab::Captions)
+                    .count(),
+                1
+            );
+        }
+        let mut restored = crate::workspaces::Snapshot::capture(&h.state().dock, Panels::default())
+            .restore(Panels::default());
+        assert_eq!(
+            restored.find_active_focused().map(|(_, tab)| *tab),
+            Some(Tab::Captions)
+        );
+        h.state_mut().close_panel(Tab::Captions);
+        h.run();
+        let closed = crate::workspaces::Snapshot::capture(&h.state().dock, Panels::default())
+            .restore(Panels::default());
+        assert!(closed.find_tab(&Tab::Captions).is_none());
+        assert_eq!(closed.iter_all_tabs().count(), 4);
+        assert_eq!(h.state().history.project(), &before);
+        assert!(!h.state().history.can_undo());
+        for (tab, name) in [
+            (Tab::Media, "Media"),
+            (Tab::Preview, "Preview"),
+            (Tab::Inspector, "Inspector"),
+            (Tab::Timeline, "Timeline"),
+            (Tab::RenderQueue, "RenderQueue"),
+            (Tab::Transcript, "Transcript"),
+        ] {
+            assert_eq!(
+                toml::to_string(&std::collections::BTreeMap::from([("tab", tab)])).unwrap(),
+                format!("tab = \"{name}\"\n")
+            );
+        }
     }
 }
 
