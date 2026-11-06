@@ -578,5 +578,21 @@
       "annotation": "The configuration 'macos-14-arm64-us-default' is not supported",
       "response": "Preserve owner CI edits; required platform CI uses macos-latest and will be dispatched on final main."
     }
-  ]
+  ],
+  "final_integration_task": {
+    "task_id": "task_3f782a6d5bd3",
+    "creation_request_id": "1f15d8b5-7c82-4a60-bd1a-d58ad124d8cd",
+    "dependencies": [
+      "task_cb16f69b6e97",
+      "task_0cb08e7f8192",
+      "task_91b3d19448da",
+      "task_6bf226588720",
+      "task_d0fea59d81f8",
+      "task_849401885e26",
+      "task_2716eb521408",
+      "task_a0a1ec867e0a"
+    ],
+    "spec": "I2 \u2014 Final all-package integration verification and bounded fixes. You are a real Orca worker in a fresh isolated Omarchy checkout for Run run_bdd46aa1fc52, sole coordinator execution orchestrator. Read DESIGN.md and applicable AGENTS.md. Never use origin/develop; fetch origin/main and wait for coordinator exact final integration SHA/ref before source edits/heavy checks. Do not merge main, dispatch more workers, alter protection or publish tags/releases. One cargo build job and expensive UI tests one thread; force Lavapipe Vulkan GPU required. Reflink only quiescent settled targets into own target, never modify donor; reuse generated corpus via JVID_TEST_MEDIA if complete. Shared files may be edited only in narrow independently reported integration/regression commits; substantial feature redesign or unrelated infrastructure needs coordinator decision. No new schema increments beyond centrally supported2. Preserve owner unrelated work.\n\nAll14 approved packages must work together: V viewer Fit/recovery mapping and unchanged render; A1 shared action applicability/menu/palette/executor/focus/custom keymap; A2 layouts/maximize including registered Captions/Highlights missing/closed panels; P1 transfer and P2 portable presets category/style/animation/resource validation; K complete/incomplete collection nested media/fonts/effects/LUT plus generated annotations; B organization/undo nested usage and Video filter for annotations; H immutable selected range export handoff; C hidden/locked Unicode captions/style overrides/split/merge/SRT/burned output; S stale proposals/linked AV/caption continuity/one undo; T drag plan equals feedback and commit; E per-variant independent reviewed framing/captions/naming/cancellation/actual encoded dimensions/ranges; F actual pixel provenance/proxy recovery/bounded status overhead. Read reports from each package and independently inspect serial shared-file merges, do not treat worker success as integration proof.\n\nRun exact required commands on final candidate: cargo fmt --all --check; cargo clippy --workspace --all-targets -- -D warnings; cargo test --workspace --no-fail-fast with JVID_GPU_TESTS=required JVID_TEST_MEDIA_REQUIRED=1 JVID_X265_TESTS=required; core dependency boundary check; python scripts/i18n_check.py and repository Python i18n/release/packaging unit tests. Execute relevant normally ignored locale tests individually to avoid global-locale interference. Run combined cross-feature regressions and representative actual UI captures at720p/1080p and100%/150% with long German labels, keyboard focus/cancel/undo/reopen; inspect pixels before any deliberate golden refresh. Use actual media encode paths for affected exported dimensions/ranges/caption policies and annotation compositor. Report exact commands, pass/fail/ignored/internal skips, exact tested SHA/tree, regression fix commits, files, artifact paths and material native/device/performance limits. Settle all child build/test processes.\n\nSend merge-ready status with exact tested tree before worker_done; coordinator will merge passing protected-main PR then send main SHA. Remain active only for this substantive final verification phase, fetch that main, confirm tree equality and run appropriate integrated-main smoke checks; report any difference, do not blindly rerun entire unchanged test corpus. Send one worker_done only after final-main verification and report complete, then coordinator releases Dispatch. Follow preamble exact ask/check/heartbeat/lifecycle instructions; actual questions through ask, never manual send type question. No invented/provisional commit hashes in messages.",
+    "implementation_status": "pending_dependencies"
+  }
 }
