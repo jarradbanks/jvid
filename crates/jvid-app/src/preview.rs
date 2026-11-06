@@ -41,6 +41,94 @@ const ZOOMS: [(Label, Option<f32>); 4] = [
     (|| "100%", Some(1.0)),
     (|| "200%", Some(2.0)),
 ];
+
+#[cfg(test)]
+mod status_summary_tests {
+    use super::*;
+    use egui_kittest::kittest::Queryable;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn large_status_snapshot_work_is_throttled_and_transitions_invalidate() {
+        let mut preview = Preview::new(None);
+        preview
+            .proxied
+            .extend((0..20_000).map(|i| PathBuf::from(format!("/media/recording-{i:05}.mp4"))));
+        let now = Instant::now();
+        let start = Instant::now();
+        for _ in 0..20 {
+            preview.status_updated = None;
+            assert!(preview.refresh_status_jobs(now));
+        }
+        let uncached = start.elapsed();
+        assert_eq!(preview.status_jobs.len(), 20_000);
+        let start = Instant::now();
+        for _ in 0..20 {
+            assert!(!preview.refresh_status_jobs(now + Duration::from_millis(249)));
+        }
+        let cached = start.elapsed();
+        eprintln!(
+            "PERF status snapshots 20k paths, 20 paints: prior {uncached:?}, cached {cached:?}"
+        );
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        preview.proxies.set_enabled(true);
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        let path = PathBuf::from("/media/recording-00000.mp4");
+        preview.proxies.reject(&path, "unreadable proxy".into());
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        assert!(
+            preview
+                .status_jobs
+                .iter()
+                .any(|(p, s)| p == &path && matches!(s, proxy::Status::Failed(_)))
+        );
+        preview.proxies.set_enabled(false);
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        assert!(
+            !preview
+                .status_jobs
+                .iter()
+                .any(|(_, s)| matches!(s, proxy::Status::Failed(_)))
+        );
+        preview.set_proxies(Arc::new(Proxies::new(PathBuf::new())));
+        assert!(preview.status_jobs.is_empty());
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        preview.reset_session();
+        assert!(preview.proxied.is_empty() && preview.status_jobs.is_empty());
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        assert!(preview.status_jobs.is_empty());
+    }
+
+    #[test]
+    fn explicit_status_retry_removes_cached_failure_immediately() {
+        let mut preview = Preview::new(None);
+        let path = PathBuf::from("/media/retry.mp4");
+        preview.proxied.insert(path.clone());
+        preview.proxies.set_enabled(true);
+        preview.proxies.reject(&path, "invalid proxy".into());
+        let mut fresh = true;
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([480.0, 540.0])
+            .build_ui_state(
+                move |ui, preview: &mut Preview| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    preview.status_control(ui, false);
+                },
+                preview,
+            );
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status"))
+            .click();
+        h.run();
+        h.get_by_label(tr!("preview.status_retry")).click();
+        h.run();
+        assert!(!h.state().proxied.contains(&path));
+        assert!(h.state().status_jobs.is_empty());
+        assert!(h.state().proxy_jobs.is_idle());
+    }
+}
 const QUALITIES: [(Label, PreviewQuality); 3] = [
     (|| tr!("preview.full"), PreviewQuality::Full),
     (|| "½", PreviewQuality::Half),
@@ -231,6 +319,9 @@ pub struct Preview {
     proxy_jobs: jvid_jobs::Pool,
     /// Sources a proxy was queued for this session.
     proxied: HashSet<PathBuf>,
+    /// Job summaries refresh at most every 250 ms; current-pixel observations stay live.
+    status_jobs: Vec<(PathBuf, proxy::Status)>,
+    status_updated: Option<(std::time::Instant, u64, bool)>,
     /// Project sources [`proxy::suggested`] says want a proxy.
     suggested: usize,
     thumb: Thumb,
@@ -297,6 +388,8 @@ impl Preview {
             proxies: Arc::new(Proxies::new(PathBuf::new())),
             proxy_jobs: jvid_jobs::Pool::new(1),
             proxied: HashSet::new(),
+            status_jobs: Vec::new(),
+            status_updated: None,
             suggested: 0,
             thumb,
             scopes: scopes::State::default(),
@@ -315,6 +408,8 @@ impl Preview {
         self.program.reset_session();
         self.view_session += 1;
         self.proxied.clear();
+        self.status_jobs.clear();
+        self.status_updated = None;
         self.source_status = Observation::default();
         self.source_health.reset();
         self.frame_proxy = false;
@@ -350,6 +445,8 @@ impl Preview {
     pub fn set_proxies(&mut self, proxies: Arc<Proxies>) {
         self.program = Playback::from_proxies(playback::DEFAULT_BUDGET, proxies.clone());
         self.proxies = proxies;
+        self.status_jobs.clear();
+        self.status_updated = None;
     }
 
     /// Counts the sources that want a proxy and, while proxies are on, queues the missing ones.
@@ -361,6 +458,7 @@ impl Preview {
             };
             self.suggested += 1;
             if self.proxies.enabled() && self.proxied.insert(a.path.clone()) {
+                self.status_updated = None;
                 self.proxies.submit(&self.proxy_jobs, a.path.clone(), info);
             }
         }
@@ -1668,7 +1766,19 @@ impl Preview {
         });
         guides.response.on_hover_text(tr!("preview.guides"));
     }
-    fn status_control(&mut self, ui: &mut Ui, compact: bool) {
+    fn refresh_status_jobs(&mut self, now: std::time::Instant) -> bool {
+        let revision = self.proxies.revision();
+        let enabled = self.proxies.enabled();
+        if self
+            .status_updated
+            .is_some_and(|(updated, old_revision, old_enabled)| {
+                revision == old_revision
+                    && enabled == old_enabled
+                    && now.duration_since(updated) < std::time::Duration::from_millis(250)
+            })
+        {
+            return false;
+        }
         let mut jobs: Vec<_> = self
             .proxied
             .iter()
@@ -1679,6 +1789,13 @@ impl Preview {
             })
             .collect();
         jobs.sort_by(|a, b| a.0.cmp(&b.0));
+        self.status_jobs = jobs;
+        self.status_updated = Some((now, revision, enabled));
+        true
+    }
+
+    fn status_control(&mut self, ui: &mut Ui, compact: bool) {
+        self.refresh_status_jobs(std::time::Instant::now());
         let (observation, health) = if self.status_source {
             (self.source_status, &self.source_health)
         } else {
@@ -1689,10 +1806,11 @@ impl Preview {
             observation,
             health,
             QUALITIES[self.quality].0(),
-            &jobs,
+            &self.status_jobs,
             compact,
         ) {
             self.proxied.remove(&path);
+            self.status_updated = None;
         }
     }
 }
