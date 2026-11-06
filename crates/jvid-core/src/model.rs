@@ -221,6 +221,9 @@ pub struct MediaAsset {
     /// with a `color` keyframe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<Text>,
+    /// Generated vector content; absent in legacy projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotation: Option<crate::annotations::Annotation>,
     /// A dedicated caption made by subtitle import/generation, rather than a reusable title.
     /// Older projects have no provenance and retain their existing Media entries.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -377,7 +380,10 @@ impl Text {
 impl MediaAsset {
     /// Made by jvid (a solid, text or sequence) rather than read from a file.
     pub fn generated(&self) -> bool {
-        self.solid.is_some() || self.text.is_some() || self.sequence.is_some()
+        self.solid.is_some()
+            || self.text.is_some()
+            || self.annotation.is_some()
+            || self.sequence.is_some()
     }
 
     pub fn display_name(&self) -> String {
@@ -1693,6 +1699,7 @@ pub enum ModelError {
     /// A speed that isn't a positive, finite rate, or a speed key outside
     /// [`crate::keyframe::SPEEDS`].
     BadSpeed,
+    BadAnnotation,
     /// The time is outside the clip.
     OutsideClip(ClipId),
     /// A clip at the cut is too short for a transition there.
@@ -1726,6 +1733,7 @@ impl std::fmt::Display for ModelError {
             Self::NoGap(id) => write!(f, "no gap there on track {}", id.0),
             Self::NoRange => f.write_str("no in/out range is marked"),
             Self::BadSpeed => f.write_str("speed must be above 0, and keyed from 1% to 10000%"),
+            Self::BadAnnotation => f.write_str("invalid annotation geometry or style"),
             Self::OutsideClip(id) => write!(f, "time is outside clip {}", id.0),
             Self::TooShort(_) => f.write_str("These clips are too short for a transition."),
             Self::NotTouching(_) => f.write_str("The clips must touch to add a transition."),
@@ -2804,6 +2812,7 @@ impl Project {
             out_point: None,
             solid: None,
             text: None,
+            annotation: None,
             generated_caption: false,
             sequence: None,
         });
