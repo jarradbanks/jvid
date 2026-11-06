@@ -2483,7 +2483,7 @@ mod program_tests {
                     fresh: true,
                 });
             add_solid(&mut h.state_mut().history, [0.2, 0.25, 0.3, 1.0], Time(0));
-            h.run();
+            h.run_steps(3);
             h.render()
                 .unwrap()
                 .save(dir.join(format!("{name}-control.png")))
