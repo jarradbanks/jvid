@@ -13,6 +13,7 @@ use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
 use suite_ui::themes::DARK;
 
 use crate::i18n::tr;
+use crate::viewer_geometry::ViewerGeometry;
 
 /// Duration and easing of the zoom in and out.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -123,6 +124,9 @@ pub fn show(
     t: Time,
     frame: Rect,
 ) -> Option<Command> {
+    if ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle)) {
+        return None;
+    }
     let seq = project.sequence();
     let c = selected
         .iter()
@@ -135,6 +139,14 @@ pub fn show(
         .map(|(_, c)| c)
         .min_by_key(|c| c.id.0)?;
     let id = ui.id().with("zoom region");
+    let st = project.settings();
+    let (w, h) = (st.width as f32, st.height as f32);
+    let geometry =
+        ViewerGeometry::from_frame(crate::preview::viewer_rect(ui), frame, Vec2::new(w, h));
+    let hit = geometry.picture();
+    if !hit.is_positive() {
+        return None;
+    }
     let start: Option<Draw> = ui.data(|d| d.get_temp(id));
     if !ui.input(|i| i.modifiers.alt) && start.is_none() {
         return None;
@@ -142,9 +154,13 @@ pub fn show(
     let mut preset: Preset = ui
         .data(|d| d.get_temp(id.with("preset")))
         .unwrap_or_default();
-    let bar = Rect::from_min_size(frame.min + Vec2::splat(8.0), Vec2::new(160.0, 20.0));
+    let bar = Rect::from_min_size(
+        hit.min + Vec2::splat(8.0),
+        Vec2::new((hit.width() - 16.0).clamp(1.0, 160.0), 20.0),
+    );
     ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| {
-        ui.horizontal(|ui| {
+        ui.set_clip_rect(hit.intersect(ui.clip_rect()));
+        ui.horizontal_wrapped(|ui| {
             ui.label(tr!("zoom.label"));
             for p in Preset::ALL {
                 ui.selectable_value(&mut preset, p, p.name());
@@ -153,7 +169,7 @@ pub fn show(
     });
     ui.data_mut(|d| d.insert_temp(id.with("preset"), preset));
 
-    let resp = ui.interact(frame, id, egui::Sense::drag());
+    let resp = ui.interact(hit, id, egui::Sense::drag());
     let resp = resp.on_hover_cursor(egui::CursorIcon::Crosshair);
     if resp.drag_started()
         && let Some(p) = resp.interact_pointer_pos()
@@ -161,12 +177,11 @@ pub fn show(
         ui.data_mut(|d| d.insert_temp(id, Draw(p)));
     }
     let Draw(from) = ui.data(|d| d.get_temp(id))?;
-    let to = resp.interact_pointer_pos().unwrap_or(from);
-    let st = project.settings();
-    let (w, h) = (st.width as f32, st.height as f32);
-    let s = frame.width() / w;
-    let px = |p: Pos2| ((p - frame.center()) / s).to_pos2();
-    let region = Rect::from_two_pos(px(from), px(to));
+    let to = hit.clamp(resp.interact_pointer_pos().unwrap_or(from));
+    let region = Rect::from_two_pos(
+        geometry.screen_to_project(from),
+        geometry.screen_to_project(to),
+    );
     if resp.drag_stopped() {
         ui.data_mut(|d| d.remove::<Draw>(id));
         // A click, not a drag.
@@ -174,11 +189,8 @@ pub fn show(
             .then(|| zoom(c, t, region, w, h, preset));
     }
     let shown = fit(region, w, h);
-    let screen = Rect::from_min_max(
-        frame.center() + shown.min.to_vec2() * s,
-        frame.center() + shown.max.to_vec2() * s,
-    );
-    let p = ui.painter().with_clip_rect(frame);
+    let screen = geometry.project_rect_to_screen(shown);
+    let p = ui.painter().with_clip_rect(hit);
     p.rect_stroke(
         screen,
         0.0,
@@ -192,6 +204,73 @@ pub fn show(
 mod tests {
     use super::*;
     use egui::pos2;
+
+    #[test]
+    fn zoomed_region_uses_complete_frame_mapping_and_leaves_transport_clickable() {
+        let (history, c) = clip();
+        let project = history.project().clone();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size([480.0, 360.0])
+            .build_ui_state(
+                move |ui, (clicks, command): &mut (u32, Option<Command>)| {
+                    let body = crate::preview::viewer_rect(ui);
+                    let transport =
+                        Rect::from_min_max(pos2(0.0, body.bottom() + 16.0), ui.max_rect().max);
+                    if ui.put(transport, egui::Button::new("Play")).clicked() {
+                        *clicks += 1;
+                    }
+                    // A 100% frame at 2x DPI, panned left: it covers all viewer chrome unless clipped.
+                    let frame = Rect::from_center_size(pos2(160.0, 110.0), Vec2::new(960.0, 540.0));
+                    *command = show(ui, &project, &HashSet::from([c.id]), Time(S), frame)
+                        .or(command.take());
+                },
+                (0, None),
+            );
+        harness.event(egui::Event::ModifiersChanged(egui::Modifiers::ALT));
+        harness.run();
+        let p = pos2(240.0, 340.0);
+        harness.hover_at(p);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::ALT,
+            });
+            harness.run();
+        }
+        assert_eq!(harness.state().0, 1);
+        assert!(harness.state().1.is_none());
+        // Visible screen rectangle maps to centred project pixels using the full zoomed frame.
+        let from = pos2(220.0, 140.0);
+        let to = pos2(340.0, 210.0);
+        harness.hover_at(from);
+        harness.run();
+        harness.drag_at(from);
+        harness.run();
+        harness.event(egui::Event::ModifiersChanged(egui::Modifiers::ALT));
+        harness.hover_at(to);
+        harness.run();
+        harness.drop_at(to);
+        harness.run();
+        let expected = zoom(
+            &c,
+            Time(S),
+            Rect::from_two_pos(pos2(120.0, 60.0), pos2(360.0, 200.0)),
+            1920.0,
+            1080.0,
+            Preset::Smooth,
+        );
+        let actual = harness
+            .state()
+            .1
+            .as_ref()
+            .expect("region creates a command");
+        let (Command::SetClipProps(a), Command::SetClipProps(b)) = (actual, expected) else {
+            panic!("clip properties")
+        };
+        assert_eq!(a, &b);
+    }
 
     /// A 10s clip filling a 1920x1080 project, with a position key at 0.
     fn clip() -> (jvid_core::history::History, Clip) {

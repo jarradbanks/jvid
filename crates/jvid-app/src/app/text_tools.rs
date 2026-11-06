@@ -18,7 +18,12 @@ pub(super) fn canvas(ui: &mut Ui, frame: Rect) -> Option<Creation> {
     if egui::DragAndDrop::has_any_payload(ui.ctx()) {
         return None;
     }
-    let hit = frame.intersect(crate::preview::viewer_rect(ui));
+    let geometry = crate::viewer_geometry::ViewerGeometry::from_frame(
+        crate::preview::viewer_rect(ui),
+        frame,
+        frame.size(),
+    );
+    let hit = geometry.picture();
     let r = ui.interact(hit, ui.id().with("text tool"), Sense::click());
     r.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("action.text_tool"))
@@ -28,10 +33,8 @@ pub(super) fn canvas(ui: &mut Ui, frame: Rect) -> Option<Creation> {
     }
     let at = r.interact_pointer_pos().filter(|_| r.clicked())?;
     let (name, _, mut text) = crate::media_bin::presets().into_iter().next()?;
-    text.anchor = [
-        ((at.x - frame.left()) / frame.width()).clamp(0.0, 1.0),
-        ((at.y - frame.top()) / frame.height()).clamp(0.0, 1.0),
-    ];
+    let point = geometry.screen_to_normalized(at);
+    text.anchor = [point.x.clamp(0.0, 1.0), point.y.clamp(0.0, 1.0)];
     Some(Creation {
         name: name.into(),
         text,
