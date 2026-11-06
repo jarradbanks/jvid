@@ -1302,10 +1302,51 @@ fn edit_menu_opens_preferences_and_the_project_menu_keeps_project_settings() {
 
     h.get_by_label("Edit").click();
     h.run();
+    h.get_by_label("Preferences…").scroll_to_me();
+    h.run();
+    assert!(
+        h.ctx
+            .content_rect()
+            .contains_rect(h.get_by_label("Preferences…").rect())
+    );
     h.get_by_label("Preferences…").click();
     h.run();
     assert!(h.state().preferences.is_open());
     assert!(h.query_by_label("Language").is_some());
+}
+
+#[test]
+#[ignore = "changes global locale; run this test in isolation"]
+fn translated_edit_menu_scrolls_to_preferences_at_minimum_size_and_high_dpi() {
+    struct Restore(&'static str);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            suite_ui::i18n::set_language(self.0);
+        }
+    }
+    let _restore = Restore(suite_ui::i18n::language());
+    for language in ["de", "pt-BR"] {
+        suite_ui::i18n::set_language(language);
+        for (size, scale) in [([960.0, 540.0], 1.0), ([640.0, 400.0], 1.5)] {
+            let mut h = builder(size, scale).build_eframe(|cc| App::new(cc, &Default::default()));
+            h.run();
+            h.state_mut().on_welcome = false;
+            h.run();
+            h.get_by_label(crate::i18n::tr!("menu.edit")).click();
+            h.run();
+            let label = crate::i18n::tr!("menu.preferences");
+            h.get_by_label(label).scroll_to_me();
+            h.run();
+            let viewport = h.ctx.content_rect();
+            assert!(
+                viewport.contains_rect(h.get_by_label(label).rect()),
+                "{language} @{scale}x"
+            );
+            h.get_by_label(label).click();
+            h.run();
+            assert!(h.state().preferences.is_open(), "{language} @{scale}x");
+        }
+    }
 }
 
 #[test]
@@ -1603,8 +1644,39 @@ fn title_harness() -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Po
 fn title_harness_sized(
     size: [f32; 2],
 ) -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
+    title_harness_with_text(
+        size,
+        jvid_core::model::Text {
+            box_color: [0.0, 0.0, 0.0, 1.0],
+            ..Default::default()
+        },
+    )
+}
+
+fn snapshot_font_family() -> &'static str {
+    const FAMILY: &str = "jvid-collection-ui-snapshot-inter";
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../suite-ui/assets");
+    let sources: Vec<_> = [
+        ("Inter-Regular.ttf", "Inter"),
+        ("Inter-SemiBold.ttf", "Inter SemiBold"),
+    ]
+    .into_iter()
+    .map(|(name, original_family)| jvid_render::text::FontSource {
+        family: FAMILY.into(),
+        original_family: original_family.into(),
+        path: directory.join(name),
+    })
+    .collect();
+    jvid_render::text::load_project_fonts(&sources).unwrap();
+    FAMILY
+}
+
+fn title_harness_with_text(
+    size: [f32; 2],
+    text: jvid_core::model::Text,
+) -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
     use jvid_core::history::Created;
-    use jvid_core::model::{NewClip, Text, TrackKind};
+    use jvid_core::model::{NewClip, TrackKind};
     use jvid_core::time::{FLICKS_PER_SECOND, Time};
     // Steps short enough for two clicks to make a double-click.
     let mut h = builder(size, 1.0)
@@ -1614,11 +1686,6 @@ fn title_harness_sized(
     h.state_mut().on_welcome = false;
     h.run();
     let history = &mut h.state_mut().history;
-    // A box makes the hit independent of the installed fonts.
-    let text = Text {
-        box_color: [0.0, 0.0, 0.0, 1.0],
-        ..Text::default()
-    };
     let Ok(Created::Asset(asset)) = history.apply(Command::AddText {
         name: "Title".into(),
         text,
@@ -1964,7 +2031,15 @@ fn editor_in_light_and_high_contrast() {
     let mut results = egui_kittest::SnapshotResults::new();
     for theme in ["light", "high-contrast"] {
         // A selected clip fills the inspector, so every panel shows its controls.
-        let (mut h, _, _) = title_harness();
+        let (mut h, _, _) = title_harness_with_text(
+            [1280.0, 720.0],
+            jvid_core::model::Text {
+                family: snapshot_font_family().into(),
+                weight: 600,
+                box_color: [0.0, 0.0, 0.0, 1.0],
+                ..Default::default()
+            },
+        );
         h.state_mut().theme = suite_ui::themes::LiveTheme::new(theme);
         h.run();
         let want = suite_ui::themes::BUILT_IN

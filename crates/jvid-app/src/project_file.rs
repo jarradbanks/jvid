@@ -2,7 +2,9 @@
 
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
 
 use jvid_core::file::{FileError, from_json, to_json_with_paths};
 use jvid_core::model::{MAX_NEST_DEPTH, Project};
@@ -11,8 +13,41 @@ use crate::i18n::tr;
 
 pub fn load(path: &Path) -> io::Result<Project> {
     let s = fs::read_to_string(path)?;
-    from_json(&s, &std::path::absolute(dir_of(path))?, |p| p.exists())
-        .map_err(|e| io::Error::other(describe(&e)))
+    let dir = std::path::absolute(dir_of(path))?;
+    let project =
+        from_json(&s, &dir, |p| p.exists()).map_err(|e| io::Error::other(describe(&e)))?;
+    let root: serde_json::Value = serde_json::from_str(&s).map_err(io::Error::other)?;
+    let mut sources = Vec::new();
+    if let Some(fonts) = root.get("fonts") {
+        let links: Vec<FontLink> =
+            serde_json::from_value(fonts.clone()).map_err(io::Error::other)?;
+        for link in links {
+            let candidate = link
+                .relative_path
+                .as_deref()
+                .map(|p| jvid_core::file::rebase(Path::new(p), &dir));
+            let path = candidate.filter(|p| p.is_file()).unwrap_or(link.path);
+            sources.push(jvid_render::text::FontSource {
+                family: link.family,
+                original_family: link.original_family,
+                path,
+            });
+        }
+    }
+    if project
+        .assets()
+        .iter()
+        .filter_map(|a| a.text.as_ref())
+        .any(|text| {
+            text.family.starts_with("jvid-collection-")
+                && !sources.iter().any(|font| font.family == text.family)
+        })
+    {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    jvid_render::text::load_project_fonts(&sources)?;
+    crate::effects::load_project(&project)?;
+    Ok(project)
 }
 
 /// A file error in the UI language; jvid-core words it in English for logs.
@@ -33,12 +68,34 @@ fn describe(e: &FileError) -> String {
 /// temp file from a crashed save is truncated and reused.
 pub fn save(project: &Project, path: &Path) -> io::Result<()> {
     let dir = dir_of(path);
+    let absolute_dir = std::path::absolute(dir)?;
     // Compare physical paths: Windows temp directories can use short names while imported
     // media is canonicalized. Resolve both sides, retaining lexical paths for offline media.
-    let s = to_json_with_paths(project, &std::path::absolute(dir)?, |path| {
+    let s = to_json_with_paths(project, &absolute_dir, |path| {
         fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
     })
     .map_err(io::Error::other)?;
+    let families: Vec<_> = project
+        .assets()
+        .iter()
+        .filter_map(|asset| asset.text.as_ref().map(|t| t.family.clone()))
+        .collect();
+    let sources = jvid_render::text::project_font_sources(&families);
+    if families.iter().any(|family| {
+        family.starts_with("jvid-collection-") && !sources.iter().any(|font| &font.family == family)
+    }) {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    let mut root: serde_json::Value = serde_json::from_str(&s).map_err(io::Error::other)?;
+    if !sources.is_empty() {
+        root["schema_version"] = jvid_core::file::SUPPORTED_SCHEMA_VERSION.into();
+        let fonts: Vec<_> = sources
+            .into_iter()
+            .map(|font| FontLink::new(font, &absolute_dir))
+            .collect();
+        root["fonts"] = serde_json::to_value(fonts).map_err(io::Error::other)?;
+    }
+    let s = serde_json::to_string_pretty(&root).map_err(io::Error::other)?;
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".tmp");
     let tmp = dir.join(name);
@@ -53,6 +110,31 @@ pub fn save(project: &Project, path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Optional project-file metadata; no core schema/model changes are needed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct FontLink {
+    pub family: String,
+    pub original_family: String,
+    pub path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+}
+
+impl FontLink {
+    pub(crate) fn new(font: jvid_render::text::FontSource, dir: &Path) -> Self {
+        let relative_path = jvid_core::file::relativize(&font.path, dir).and_then(|p| {
+            let parts: Option<Vec<_>> = p.iter().map(|c| c.to_str()).collect();
+            Some(parts?.join("/"))
+        });
+        Self {
+            family: font.family,
+            original_family: font.original_family,
+            path: font.path,
+            relative_path,
+        }
+    }
+}
+
 fn dir_of(path: &Path) -> &Path {
     match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
@@ -64,6 +146,47 @@ fn dir_of(path: &Path) -> &Path {
 mod tests {
     use super::*;
     use jvid_core::history::{Command, History};
+
+    #[test]
+    fn font_links_require_schema_two_but_ordinary_saves_remain_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("title.jvid");
+        save(&Project::default(), &path).unwrap();
+        let plain: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(plain["schema_version"], 1);
+        let alias = "jvid-collection-version-two-fixture";
+        jvid_render::text::load_project_fonts(&[jvid_render::text::FontSource {
+            family: alias.into(),
+            original_family: "Jvid Fixture Primary".into(),
+            path: Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../jvid-render/tests/fixtures/fonts/primary.ttf"),
+        }])
+        .unwrap();
+        let mut history = History::new(Project::default());
+        history
+            .apply(Command::AddText {
+                name: "Title".into(),
+                text: jvid_core::model::Text {
+                    family: alias.into(),
+                    content: "AB".into(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        save(history.project(), &path).unwrap();
+        let mut linked: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(linked["schema_version"], 2);
+        assert!(
+            linked["fonts"]
+                .as_array()
+                .is_some_and(|fonts| !fonts.is_empty())
+        );
+        assert_eq!(load(&path).unwrap(), *history.project());
+        linked["schema_version"] = 3.into();
+        fs::write(&path, serde_json::to_vec(&linked).unwrap()).unwrap();
+        assert!(load(&path).is_err());
+    }
 
     #[cfg(windows)]
     #[test]

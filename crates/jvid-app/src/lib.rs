@@ -2,6 +2,8 @@
 
 pub mod app;
 mod autosave;
+pub mod collect_project;
+mod command_palette;
 mod components;
 mod easing;
 mod effects;
@@ -21,6 +23,7 @@ mod media_bin;
 mod notices;
 pub mod package_smoke;
 mod playback;
+mod playback_status;
 pub mod preferences;
 mod preview;
 pub mod project_file;
@@ -30,12 +33,15 @@ mod relink;
 pub mod samples;
 mod scopes;
 pub mod settings_file;
+pub mod settings_transfer;
 mod subtitles;
 mod timeline;
 mod transcript;
 mod transport;
 mod updates;
+mod viewer_geometry;
 mod welcome;
+pub mod workspaces;
 mod zoom;
 
 /// Test helpers the modules share.

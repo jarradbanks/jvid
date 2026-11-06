@@ -14,6 +14,7 @@ Work in any panel except while typing in a text field.
 | Open Project | `Ctrl+O` |
 | Save | `Ctrl+S` |
 | Save As | `Ctrl+Shift+S` |
+| Collect Project | — |
 | Import | `Ctrl+I` |
 | Import Subtitles | `Ctrl+Shift+I` |
 | Export Subtitles (.srt)… | — |
@@ -43,6 +44,8 @@ Work in any panel except while typing in a text field.
 | Undo | `Ctrl+Z` |
 | Redo | `Ctrl+Shift+Z` |
 | Redo (Alternate) | `Ctrl+Y` |
+| Copy Settings | — |
+| Paste Settings | — |
 | Generate Subtitles… | `Ctrl+Alt+G` |
 | Razor Tool | `C` |
 | Selection Tool | `V` |
@@ -67,6 +70,13 @@ Work in any panel except while typing in a text field.
 | Focus Effects | `Shift+7` |
 | Export Frame | `Ctrl+Shift+E` |
 | Record Voiceover | `Shift+R` |
+| Command Palette | `Ctrl+Shift+P` |
+| Editing Workspace | — |
+| Captions Workspace | — |
+| Audio Workspace | — |
+| Save Workspace… | — |
+| Reset Panel Layout | — |
+| Maximize/Restore Panel | `Ctrl+Shift+F10` |
 
 ## Timeline
 

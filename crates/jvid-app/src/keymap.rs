@@ -15,10 +15,42 @@ pub enum Context {
     Timeline,
 }
 
+/// The single availability result shared by dispatch, menus and the command palette.
+/// Compute this against the same focused panel and target used by the action executor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Applicability {
+    Enabled,
+    /// A catalog key, resolved when displayed so an open surface follows language changes.
+    Disabled(&'static str),
+}
+
+impl Applicability {
+    pub fn when(enabled: bool, reason: &'static str) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled(reason)
+        }
+    }
+
+    pub fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+
+    pub fn reason(self) -> Option<&'static str> {
+        match self {
+            Self::Enabled => None,
+            Self::Disabled(key) => Some(CATALOG.get(key).unwrap_or(key)),
+        }
+    }
+}
+
 pub struct Action {
     pub id: &'static str,
     pub default: &'static str,
     pub context: Context,
+    /// Additional search vocabulary; never displayed as a label.
+    pub aliases: &'static [&'static str],
 }
 
 impl Action {
@@ -35,6 +67,7 @@ const fn a(id: &'static str, default: &'static str) -> Action {
         id,
         default,
         context: Context::Global,
+        aliases: &[],
     }
 }
 
@@ -43,7 +76,13 @@ const fn t(id: &'static str, default: &'static str) -> Action {
         id,
         default,
         context: Context::Timeline,
+        aliases: &[],
     }
+}
+
+const fn aliases(mut action: Action, aliases: &'static [&'static str]) -> Action {
+    action.aliases = aliases;
+    action
 }
 
 /// Every action. "Ctrl" means Cmd on macOS.
@@ -52,10 +91,11 @@ pub const ACTIONS: &[Action] = &[
     a("open_project", "Ctrl+O"),
     a("save", "Ctrl+S"),
     a("save_as", "Ctrl+Shift+S"),
-    a("import", "Ctrl+I"),
+    a("collect_project", ""),
+    aliases(a("import", "Ctrl+I"), &["ingest", "media"]),
     a("import_subtitles", "Ctrl+Shift+I"),
-    a("export_subtitles", ""),
-    a("export", "Ctrl+M"),
+    aliases(a("export_subtitles", ""), &["captions", "srt", "vtt"]),
+    aliases(a("export", "Ctrl+M"), &["render", "encode"]),
     a("quit", "Ctrl+Q"),
     a("play_stop", "Space"),
     a("shuttle_left", "J"),
@@ -82,7 +122,7 @@ pub const ACTIONS: &[Action] = &[
     a("overwrite", "."),
     t("ripple_trim_prev", "Q"),
     t("ripple_trim_next", "W"),
-    a("undo", "Ctrl+Z"),
+    aliases(a("undo", "Ctrl+Z"), &["revert"]),
     a("redo", "Ctrl+Shift+Z"),
     a("redo_alt", "Ctrl+Y"),
     t("select_all", "Ctrl+A"),
@@ -90,7 +130,7 @@ pub const ACTIONS: &[Action] = &[
     t("cut", "Ctrl+X"),
     t("paste", "Ctrl+V"),
     t("duplicate", "Ctrl+Shift+D"),
-    t("delete", "Delete"),
+    aliases(t("delete", "Delete"), &["remove"]),
     t("ripple_delete", "Shift+Delete"),
     t("link", "Ctrl+L"),
     t("enable", "Shift+E"),
@@ -101,19 +141,24 @@ pub const ACTIONS: &[Action] = &[
     t("stretch_to_fit", ""),
     t("copy_grade", "Ctrl+Alt+C"),
     t("paste_grade", "Ctrl+Alt+V"),
+    a("copy_settings", ""),
+    a("paste_settings", ""),
     t("clean_up_voice", "Ctrl+Alt+U"),
     t("detect_silence", "Ctrl+Alt+S"),
     t("find_highlights", "Ctrl+Alt+H"),
     t("hide_region", "Ctrl+Alt+R"),
-    a("generate_subtitles", "Ctrl+Alt+G"),
+    aliases(
+        a("generate_subtitles", "Ctrl+Alt+G"),
+        &["transcribe", "captions", "speech"],
+    ),
     t("nest", "Alt+N"),
     t("crossfade", "Ctrl+D"),
     t("dip_to_black", "Ctrl+Alt+B"),
     t("dip_to_white", "Ctrl+Alt+W"),
     t("linked_selection", "Ctrl+Shift+L"),
-    t("snapping", "S"),
-    a("razor_tool", "C"),
-    a("selection_tool", "V"),
+    aliases(t("snapping", "S"), &["magnet"]),
+    aliases(a("razor_tool", "C"), &["blade", "split"]),
+    aliases(a("selection_tool", "V"), &["pointer", "select"]),
     a("text_tool", "T"),
     t("add_edit", "Ctrl+K"),
     a("step_back", "Left"),
@@ -137,8 +182,18 @@ pub const ACTIONS: &[Action] = &[
     a("focus_program", "Shift+4"),
     a("focus_inspector", "Shift+5"),
     a("focus_effects", "Shift+7"),
-    a("export_frame", "Ctrl+Shift+E"),
-    a("record", "Shift+R"),
+    aliases(a("export_frame", "Ctrl+Shift+E"), &["screenshot", "png"]),
+    aliases(a("record", "Shift+R"), &["voiceover", "microphone"]),
+    aliases(
+        a("command_palette", "Ctrl+Shift+P"),
+        &["commands", "search"],
+    ),
+    a("workspace_editing", ""),
+    a("workspace_captions", ""),
+    a("workspace_audio", ""),
+    a("workspace_save", ""),
+    a("reset_layout", ""),
+    a("maximize_panel", "Ctrl+Shift+F10"),
 ];
 
 /// "Ctrl+Shift+K" → shortcut. Ctrl and Cmd both mean the platform command key.
@@ -368,6 +423,16 @@ pub fn load_from(path: &Path) -> Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn applicability_shares_its_guard_and_translated_reason() {
+        let enabled = Applicability::when(true, "export.nothing");
+        assert!(enabled.is_enabled());
+        assert_eq!(enabled.reason(), None);
+        let disabled = Applicability::when(false, "export.nothing");
+        assert!(!disabled.is_enabled());
+        assert_eq!(disabled.reason(), CATALOG.get("export.nothing"));
+    }
 
     #[test]
     fn action_names_are_title_case() {

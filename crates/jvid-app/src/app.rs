@@ -21,12 +21,13 @@ use crate::export::queue::Action as QueueAction;
 use crate::export::{Error as ExportError, Request};
 use crate::i18n::{tr, trn, verbatim};
 use crate::import::Importer;
-use crate::keymap::{self, Keymap};
+use crate::keymap::{self, Applicability, Keymap};
 use crate::media_bin::MediaBin;
 use crate::preview::{PROGRAM_ACTIONS, Preview, SOURCE_ACTIONS};
 use crate::subtitles::Done;
 use crate::timeline::{MARK_ACTIONS, Timeline, menus};
 use crate::welcome::{self, Recent, Welcome};
+use crate::workspaces::{Builtin, Panels, Workspaces};
 use crate::{autosave, project_file, relink};
 use eframe::egui_wgpu::wgpu;
 
@@ -37,6 +38,7 @@ mod tests;
 mod text_tools;
 pub(crate) mod tutorial;
 
+#[cfg(test)]
 const DOCK_KEY: &str = "dock";
 const RECENT_KEY: &str = "recent";
 
@@ -138,6 +140,7 @@ pub struct App {
     editor_context: Option<egui::Context>,
     path: Option<PathBuf>,
     dock: DockState<Tab>,
+    workspaces: Workspaces,
     /// A show/focus action also scrolls the requested dock tab into view.
     reveal_panel: Option<Tab>,
     /// The preview's views: one shows as a title, several as tabs.
@@ -160,6 +163,7 @@ pub struct App {
     match_source: bool,
     /// The next import also goes on the timeline: a media file opened at startup.
     place_import: bool,
+    collection: crate::collect_project::Dialog,
     settings_dialog: crate::project_settings::SettingsDialog,
     components: crate::components::Components,
     preferences: crate::preferences::Preferences,
@@ -179,6 +183,7 @@ pub struct App {
     theme_setting: String,
     theme: suite_ui::themes::LiveTheme,
     keymap_editor: crate::keymap_editor::KeymapEditor,
+    command_palette: crate::command_palette::CommandPalette,
     exports: jvid_jobs::Pool,
     export_dialog: crate::export::dialog::ExportDialog,
     subtitle_export: crate::export::subtitles::SubtitleExport,
@@ -271,18 +276,7 @@ impl App {
 
     /// A new project in the dock layout saved last time, or the default one.
     fn restore(storage: Option<&dyn eframe::Storage>) -> Self {
-        let dock = storage
-            .and_then(|s| eframe::get_value::<DockState<Tab>>(s, DOCK_KEY))
-            // A layout missing or duplicating a panel can't be fixed from the UI.
-            .filter(|d| {
-                let count = |t: Tab| d.iter_all_tabs().filter(|(_, x)| **x == t).count();
-                [Tab::Media, Tab::Preview, Tab::Inspector, Tab::Timeline]
-                    .into_iter()
-                    .all(|t| count(t) == 1)
-                    && count(Tab::RenderQueue) <= 1
-                    && count(Tab::Transcript) <= 1
-            })
-            .unwrap_or_else(default_dock);
+        let (workspaces, dock) = crate::settings_file::load_workspaces(storage);
         let exports = jvid_jobs::Pool::new(1);
         // Titles share the UI's CJK faces, so the binary links one copy of them.
         jvid_render::text::set_faces(suite_ui::theme::CJK_FACES.map(|(_, b)| b).to_vec());
@@ -298,7 +292,8 @@ impl App {
             project_session: 0,
             editor_context: None,
             path: None,
-            dock: visible_dock(dock),
+            dock,
+            workspaces,
             reveal_panel: None,
             preview_views: &["source", "program"],
             preview_active: 1,
@@ -318,6 +313,7 @@ impl App {
             on_welcome: true,
             match_source: false,
             place_import: false,
+            collection: Default::default(),
             settings_dialog: Default::default(),
             components: Default::default(),
             preferences: Default::default(),
@@ -331,6 +327,7 @@ impl App {
             theme_setting: "dark".into(),
             theme: suite_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
+            command_palette: Default::default(),
             exports,
             export_dialog: Default::default(),
             subtitle_export: Default::default(),
@@ -584,8 +581,7 @@ impl App {
                         });
                     }
                     _ => {
-                        let can = id != "export" || self.can_export();
-                        if menus::item(ui, &self.keymap, id, None, can) {
+                        if self.action_menu_item(ui, id) {
                             picked = Some(id);
                         }
                     }
@@ -598,10 +594,8 @@ impl App {
         if let Some(aspect) = reframe {
             self.reframe(aspect);
         }
-        match picked {
-            Some("quit") => ui.ctx().send_viewport_cmd(ViewportCommand::Close),
-            Some(id) => self.run_action(id, true),
-            None => {}
+        if let Some(id) = picked {
+            self.run_action(id, true);
         }
         button.rect.right()
     }
@@ -609,35 +603,47 @@ impl App {
     /// The Edit menu, its left edge at `left`: each row runs its keymap action, then Preferences.
     /// Returns its right edge.
     fn edit_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
+        let previous_focus = ui.ctx().memory(|m| m.focused());
         let button = menu_button(ui, tr!("menu.edit"), left);
+        if button.clicked() {
+            self.command_palette.remember_menu_focus(previous_focus);
+        }
         tutorial::anchor(ui.ctx(), "menu.edit", button.rect);
         let mut picked = None;
         egui::Popup::menu(&button).show(|ui| {
-            for &id in menus::EDIT {
-                if id.is_empty() {
+            let height = (ui.ctx().content_rect().height() - suite_ui::tokens::space::S16).max(1.0);
+            egui::ScrollArea::vertical()
+                .max_height(height)
+                .show(ui, |ui| {
+                    if self.action_menu_item(ui, "command_palette") {
+                        picked = Some("command_palette");
+                    }
                     ui.separator();
-                    continue;
-                }
-                let can = match id {
-                    "undo" => self.history.can_undo(),
-                    "redo" => self.history.can_redo(),
-                    _ => self.timeline.can(id, self.history.project().sequence()),
-                };
-                if menus::item(ui, &self.keymap, id, None, can) {
-                    picked = Some(id);
-                }
-            }
-            ui.separator();
-            if ui.button(tr!("menu.reset_layout")).clicked() {
-                self.reset_layout();
-            }
-            if ui.button(tr!("menu.preferences")).clicked() {
-                use jvid_audio::InputBackend;
-                self.preferences.open(
-                    jvid_audio::CpalInput::default().devices(),
-                    crate::settings_file::themes_dir(),
-                );
-            }
+                    for &id in menus::EDIT {
+                        if id.is_empty() {
+                            ui.separator();
+                            continue;
+                        }
+                        if self.action_menu_item(ui, id) {
+                            picked = Some(id);
+                        }
+                    }
+                    ui.separator();
+                    ui.menu_button(tr!("workspace.menu"), |ui| self.workspaces_menu(ui));
+                    if self.action_menu_item(ui, "maximize_panel") {
+                        picked = Some("maximize_panel");
+                    }
+                    if self.action_menu_item(ui, "reset_layout") {
+                        picked = Some("reset_layout");
+                    }
+                    if ui.button(tr!("menu.preferences")).clicked() {
+                        use jvid_audio::InputBackend;
+                        self.preferences.open(
+                            jvid_audio::CpalInput::default().devices(),
+                            crate::settings_file::themes_dir(),
+                        );
+                    }
+                });
         });
         if let Some(id) = picked {
             self.run_action(id, true);
@@ -645,14 +651,77 @@ impl App {
         button.rect.right()
     }
 
+    fn workspaces_menu(&mut self, ui: &mut Ui) {
+        for id in [
+            "workspace_editing",
+            "workspace_captions",
+            "workspace_audio",
+            "workspace_save",
+        ] {
+            if self.action_menu_item(ui, id) {
+                self.run_action(id, true);
+            }
+        }
+        ui.separator();
+        let mut apply = None;
+        let mut rename = None;
+        let mut delete = None;
+        for (index, personal) in self.workspaces.personal.iter().enumerate() {
+            ui.menu_button(&personal.name, |ui| {
+                if ui.button(tr!("workspace.apply")).clicked() {
+                    apply = Some(index);
+                    ui.close();
+                }
+                if ui.button(tr!("workspace.rename")).clicked() {
+                    rename = Some(index);
+                    ui.close();
+                }
+                if ui.button(tr!("workspace.delete")).clicked() {
+                    delete = Some(index);
+                    ui.close();
+                }
+            });
+        }
+        if let Some(index) = apply {
+            let layout = self.workspaces.personal[index]
+                .layout
+                .restore(Panels::default());
+            self.workspaces.apply(&mut self.dock, layout);
+            self.layout_changed();
+        }
+        if let Some(index) = rename {
+            self.workspaces.open_rename(index);
+        }
+        if let Some(index) = delete {
+            self.workspaces.delete(index);
+        }
+    }
+
+    fn apply_workspace(&mut self, builtin: Builtin) {
+        self.workspaces
+            .apply(&mut self.dock, builtin.layout(Panels::default()));
+        self.layout_changed();
+    }
+
+    fn layout_changed(&mut self) {
+        self.reveal_panel = None;
+        if let Some(ctx) = &self.editor_context {
+            ctx.memory_mut(|m| {
+                if let Some(id) = m.focused() {
+                    m.surrender_focus(id);
+                }
+            });
+            ctx.request_repaint();
+        }
+    }
+
     /// The Timeline menu, its left edge at `left`. Returns its right edge.
     fn timeline_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
         let button = menu_button(ui, tr!("menu.timeline"), left);
         let (mut picked, mut transcript, mut export) = (false, false, false);
         egui::Popup::menu(&button).show(|ui| {
-            let can = self.can_generate_subtitles();
-            picked = menus::item(ui, &self.keymap, "generate_subtitles", None, can);
-            export = menus::item(ui, &self.keymap, "export_subtitles", None, true);
+            picked = self.action_menu_item(ui, "generate_subtitles");
+            export = self.action_menu_item(ui, "export_subtitles");
             transcript = ui.button(tr!("menu.transcript")).clicked();
         });
         if picked {
@@ -670,6 +739,36 @@ impl App {
     fn can_generate_subtitles(&self) -> bool {
         let selected = self.timeline.selected();
         crate::subtitles::Subtitles::can_open(self.history.project(), selected)
+    }
+
+    /// App menus and dispatch share the same availability and translated explanation.
+    fn action_menu_item(&mut self, ui: &mut Ui, id: &str) -> bool {
+        let available = self.action_applicability(id, true);
+        let (name, shortcut) = self.keymap.label(id);
+        let mut button = egui::Button::new(name);
+        if !shortcut.is_empty() {
+            button = button.shortcut_text(shortcut);
+        }
+        let response = ui.add_enabled(available.is_enabled(), button);
+        let response = if let Some(reason) = available.reason() {
+            response.on_disabled_hover_text(reason)
+        } else {
+            response
+        };
+        response.clicked()
+    }
+
+    fn show_command_palette(&mut self, ui: &mut Ui) {
+        if !self.command_palette.needs_frame() {
+            return;
+        }
+        let mut palette = std::mem::take(&mut self.command_palette);
+        let map = self.keymap.clone();
+        let picked = palette.show(ui, &map, |id| self.action_applicability(id, false));
+        self.command_palette = palette;
+        if let Some(id) = picked {
+            self.run_action(id, false);
+        }
     }
 
     /// The Help menu, its left edge at `left`.
@@ -710,6 +809,9 @@ impl App {
             FileAction::SaveAs => {
                 self.save(true);
             }
+            FileAction::Collect => self
+                .collection
+                .open(self.history.project(), self.path.as_deref()),
             FileAction::Settings => self.settings_dialog.open(self.history.project()),
             FileAction::Shortcuts => self.keymap_editor.open(),
         }
@@ -857,6 +959,7 @@ impl App {
 
     /// Focuses a closable panel, first splitting it off the right of Timeline if closed.
     fn show_panel(&mut self, tab: Tab) {
+        self.workspaces.restore_maximized(&mut self.dock);
         if self.dock.find_tab(&tab).is_none() {
             match self.dock.find_main_surface_tab(&Tab::Timeline) {
                 Some((node, _)) => {
@@ -871,6 +974,7 @@ impl App {
 
     /// Activate as well as focus: a leaf may contain several tabs.
     fn focus_panel(&mut self, tab: Tab) {
+        self.workspaces.restore_maximized(&mut self.dock);
         if let Some(path) = self.dock.find_tab(&tab) {
             let _ = self.dock.set_active_tab(path);
             self.dock.set_focused_node_and_surface(path.node_path());
@@ -888,18 +992,12 @@ impl App {
 
     /// Restore panel placement, keeping optional panels open and their work intact.
     fn reset_layout(&mut self) {
-        let optional: Vec<_> = [Tab::Transcript, Tab::RenderQueue]
-            .into_iter()
-            .filter(|tab| self.dock.find_tab(tab).is_some())
-            .collect();
-        self.dock = default_dock();
-        for tab in optional {
-            self.show_panel(tab);
-        }
+        self.workspaces.reset(&mut self.dock, Panels::default());
         self.focus_panel(Tab::Timeline);
     }
 
     fn close_panel(&mut self, tab: Tab) {
+        self.workspaces.restore_maximized(&mut self.dock);
         if let Some(path) = self.dock.find_tab(&tab) {
             self.dock.remove_tab(path);
         }
@@ -1014,22 +1112,139 @@ impl App {
     /// first frame before egui has registered a modal layer. Nested widget modals use
     /// egui's shared ownership state instead of another app-specific list.
     fn modal_owns_input(&self, ctx: &egui::Context) -> bool {
-        self.settings_dialog.draft.is_some()
+        self.collection.is_open()
+            || self.settings_dialog.draft.is_some()
             || self.export_dialog.is_open()
             || self.subtitle_export.is_open()
             || self.preferences.is_open()
             || self.components.open
             || self.updates.open
             || self.keymap_editor.is_open()
+            || self.command_palette.is_open()
+            || self.workspaces.is_open()
             || self.subtitles.is_open()
             || !self.prompts.is_empty()
             || self.bin.confirm_remove.is_some()
             || ctx.memory(|m| m.top_modal_layer().is_some())
     }
 
+    /// P1 adapter for the shared A1 availability gate. Inspector, menus and dispatch all
+    /// delegate their actual target/resource checks to the same transfer clipboard.
+    fn settings_transfer_applicability(
+        &mut self,
+        id: &str,
+        menu: bool,
+    ) -> Option<keymap::Applicability> {
+        if !matches!(id, "copy_settings" | "paste_settings") {
+            return None;
+        }
+        let focused = self.dock.find_active_focused().map(|(_, tab)| *tab);
+        let eligible = matches!(focused, Some(Tab::Timeline | Tab::Inspector))
+            || (focused == Some(Tab::Preview) && self.preview_active == 1);
+        if !menu && !eligible {
+            return Some(keymap::Applicability::Disabled(
+                "settings_transfer.focus_clip",
+            ));
+        }
+        let Some(ctx) = self.editor_context.as_ref() else {
+            return Some(keymap::Applicability::Disabled(
+                "settings_transfer.invalid_target",
+            ));
+        };
+        let selected: Vec<_> = self.timeline.selected().iter().copied().collect();
+        Some(crate::settings_transfer::with(ctx, |transfer| match id {
+            "copy_settings" => crate::settings_transfer::Transfer::copy_applicability(
+                self.history.project(),
+                &selected,
+            ),
+            _ => transfer.applicability(self.history.project(), &selected),
+        }))
+    }
+
+    /// One availability result for the same target the executor will use. Menus explicitly
+    /// target Timeline; shortcuts and the palette preserve the focused dock and monitor.
+    fn action_applicability(&mut self, id: &str, menu: bool) -> Applicability {
+        if let Some(applicable) = self.settings_transfer_applicability(id, menu) {
+            return applicable;
+        }
+        let Some(action) = keymap::ACTIONS.iter().find(|a| a.id == id) else {
+            return Applicability::Disabled("palette.unavailable");
+        };
+        let enabled = match id {
+            "maximize_panel" => {
+                return Applicability::when(
+                    !self.on_welcome
+                        && (self.workspaces.is_maximized()
+                            || self.dock.find_active_focused().is_some()),
+                    "workspace.focus_panel",
+                );
+            }
+            "workspace_editing" | "workspace_captions" | "workspace_audio" | "workspace_save"
+            | "reset_layout" => Some(!self.on_welcome),
+            "export_frame" => {
+                return Applicability::when(
+                    self.history.project().sequence().duration() > Time(0),
+                    "preview.no_frame",
+                );
+            }
+            "undo" => Some(self.history.can_undo()),
+            "redo" | "redo_alt" => Some(self.history.can_redo()),
+            "export" => return Applicability::when(self.can_export(), "export.nothing"),
+            "generate_subtitles" => Some(self.can_generate_subtitles()),
+            "insert" | "overwrite" => {
+                return Applicability::when(
+                    self.preview.source_asset().is_some(),
+                    "palette.no_source",
+                );
+            }
+            "new_project" | "open_project" | "save" | "save_as" | "collect_project" | "import"
+            | "import_subtitles" | "export_subtitles" | "quit" | "record" | "command_palette"
+            | "focus_media" | "focus_effects" | "focus_source" | "focus_program"
+            | "focus_timeline" | "focus_inspector" => Some(true),
+            _ => None,
+        };
+        if let Some(enabled) = enabled {
+            return Applicability::when(enabled, "palette.unavailable");
+        }
+        // Stopping a take always works, even after moving focus to another panel.
+        if self.take.is_some() && matches!(id, "play_stop" | "shuttle_stop") {
+            return Applicability::Enabled;
+        }
+        let focused = self.dock.find_active_focused().map(|(_, t)| *t);
+        let preview = !menu && focused == Some(Tab::Preview);
+        if preview && self.preview_active == 0 && SOURCE_ACTIONS.contains(&id) {
+            return Applicability::when(self.preview.source_asset().is_some(), "palette.no_source");
+        }
+        let program = preview && self.preview_active == 1;
+        let timeline = focused == Some(Tab::Timeline);
+        if (timeline || program || menu) && PROGRAM_ACTIONS.contains(&id) {
+            return Applicability::Enabled;
+        }
+        let marking = program && MARK_ACTIONS.contains(&id);
+        let tool = matches!(id, "selection_tool" | "razor_tool" | "text_tool");
+        if timeline || menu || marking || (program && tool) {
+            return Applicability::when(
+                self.timeline.can(id, self.history.project().sequence()),
+                "palette.unavailable",
+            );
+        }
+        let reason = if action.context == keymap::Context::Global
+            && SOURCE_ACTIONS.contains(&id)
+            && PROGRAM_ACTIONS.contains(&id)
+        {
+            "palette.focus_playback"
+        } else {
+            "palette.focus_timeline"
+        };
+        Applicability::Disabled(reason)
+    }
+
     /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
-    /// focus. shortcut: unimplemented actions are stubs until their features land.
+    /// focus. The palette uses the same focused-panel route as shortcuts.
     fn run_action(&mut self, id: &str, menu: bool) {
+        if !self.action_applicability(id, menu).is_enabled() {
+            return;
+        }
         // Space and K stop the take along with playback, wherever focus is.
         if self.take.is_some() && matches!(id, "play_stop" | "shuttle_stop" | "record") {
             self.end_take();
@@ -1060,6 +1275,64 @@ impl App {
             return;
         }
         match id {
+            "copy_settings" | "paste_settings" => {
+                if !self
+                    .settings_transfer_applicability(id, menu)
+                    .unwrap()
+                    .is_enabled()
+                {
+                    return;
+                }
+                let ctx = self.editor_context.clone().unwrap();
+                let selected: Vec<_> = self.timeline.selected().iter().copied().collect();
+                let result = crate::settings_transfer::with(&ctx, |transfer| {
+                    if id == "copy_settings" {
+                        transfer
+                            .copy(self.history.project(), &selected, self.timeline.playhead())
+                            .map(|_| None)
+                    } else {
+                        transfer
+                            .command(self.history.project(), &selected)
+                            .map(Some)
+                    }
+                });
+                match result {
+                    Ok(Some(command)) => {
+                        if let Err(error) = self.history.apply(command) {
+                            tracing::warn!("paste settings: {error}");
+                        }
+                    }
+                    Err(error) => tracing::warn!("transfer settings: {error}"),
+                    Ok(None) => {}
+                }
+                return;
+            }
+            "workspace_editing" => return self.apply_workspace(Builtin::Editing),
+            "workspace_captions" => return self.apply_workspace(Builtin::Captions),
+            "workspace_audio" => return self.apply_workspace(Builtin::Audio),
+            "workspace_save" => return self.workspaces.open_save(),
+            "reset_layout" => return self.reset_layout(),
+            "maximize_panel" => {
+                self.workspaces.toggle_maximize(&mut self.dock);
+                self.layout_changed();
+                return;
+            }
+            "command_palette" => {
+                if let Some(ctx) = &self.editor_context {
+                    if menu {
+                        self.command_palette.open_from_menu(ctx);
+                    } else {
+                        self.command_palette.open(ctx);
+                    }
+                }
+                return;
+            }
+            "quit" => {
+                if let Some(ctx) = &self.editor_context {
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
+                return;
+            }
             "record" => return self.start_take(),
             "undo" => {
                 self.history.undo();
@@ -1073,6 +1346,7 @@ impl App {
             "open_project" => return self.file_action(FileAction::Open),
             "save" => return self.file_action(FileAction::Save),
             "save_as" => return self.file_action(FileAction::SaveAs),
+            "collect_project" => return self.file_action(FileAction::Collect),
             "import" => return self.import_dialog(),
             "import_subtitles" => return self.import_subtitles(),
             "export_subtitles" => {
@@ -1633,11 +1907,7 @@ impl eframe::App for App {
             self.keymap.pressed(&ctx, timeline)
         };
         for id in pressed {
-            if id == "quit" {
-                ctx.send_viewport_cmd(ViewportCommand::Close);
-            } else {
-                self.run_action(id, false);
-            }
+            self.run_action(id, false);
             // A shortcut can open a modal after this batch was collected. Stop
             // dispatch and release background focus before widgets see Space/Enter.
             if self.modal_owns_input(&ctx) {
@@ -1688,6 +1958,7 @@ impl eframe::App for App {
             if let Some(a) = self.welcome.show(ui) {
                 self.welcome_action(a);
             }
+            self.show_command_palette(ui);
             self.show_toasts(&ctx);
             return;
         }
@@ -1766,9 +2037,9 @@ impl eframe::App for App {
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
                 .hidable_tab_bars(false)
-                .draggable_tabs(true)
+                .draggable_tabs(!self.workspaces.is_maximized())
                 .tab_context_menus(false)
-                .show_close_buttons(true)
+                .show_close_buttons(!self.workspaces.is_maximized())
                 .show_add_buttons(false)
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
@@ -1785,7 +2056,7 @@ impl eframe::App for App {
                 viewer.tab_rects,
             );
             paint_dock_frames(ui, &self.dock);
-            dock_bottom_target(ui, &mut self.dock);
+            if !self.workspaces.is_maximized() { dock_bottom_target(ui, &mut self.dock); }
             if let Some(tab) = self.reveal_panel.take()
                 && let Some(path) = self.dock.find_tab(&tab)
                 && let Ok(leaf) = self.dock.leaf_mut(path.node_path())
@@ -1903,6 +2174,8 @@ impl eframe::App for App {
             if let Some(id) = relink {
                 self.relink_dialog(id);
             }
+            self.collection.show(ui.ctx(), &self.exports);
+            self.workspaces.show(ui, &self.dock, Panels::default());
             if self.keymap_editor.show(ui, &mut self.keymap)
                 && let Err(e) = keymap::save(&self.keymap)
             {
@@ -1964,6 +2237,7 @@ impl eframe::App for App {
             }
         });
 
+        self.show_command_palette(ui);
         // Apply the release frame's final value before closing its undo gesture. This
         // also closes cancelled drags and controls that disappeared while held.
         if ctx.input(|i| !i.pointer.any_down()) {
@@ -1984,7 +2258,7 @@ impl eframe::App for App {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, DOCK_KEY, &self.dock);
+        crate::settings_file::save_workspaces(storage, &self.workspaces, &self.dock);
         eframe::set_value(storage, RECENT_KEY, &self.welcome.recent);
     }
 }
@@ -1995,6 +2269,7 @@ enum FileAction {
     Open,
     Save,
     SaveAs,
+    Collect,
     Settings,
     Shortcuts,
 }
@@ -2029,19 +2304,6 @@ pub fn default_dock() -> DockState<Tab> {
     let [top, _] = tree.split_below(NodeIndex::root(), 0.62, vec![Tab::Timeline]);
     let [preview, _] = tree.split_left(top, 0.26, vec![Tab::Media]);
     tree.split_right(preview, 0.69, vec![Tab::Inspector]);
-    dock
-}
-
-/// Migrate layouts saved before dock strips were exposed, without changing their topology.
-fn visible_dock(mut dock: DockState<Tab>) -> DockState<Tab> {
-    for (_, node) in dock.iter_all_nodes_mut() {
-        if !node.is_empty() {
-            node.set_collapsed(false);
-        }
-        if node.is_leaf() {
-            node.set_tab_bar_hidden(false);
-        }
-    }
     dock
 }
 
@@ -2639,5 +2901,559 @@ fn app_icon() -> egui::IconData {
         width: image.width(),
         height: image.height(),
         rgba: image.into_raw(),
+    }
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::*;
+    use egui::{Event, Key, Modifiers};
+    use egui_kittest::Harness;
+    use jvid_core::model::{AssetId, ProbeInfo};
+    use jvid_core::time::{FLICKS_PER_SECOND, Rate};
+
+    #[test]
+    fn collection_executes_from_every_panel_without_changing_project() {
+        for focus in [
+            "focus_media",
+            "focus_inspector",
+            "focus_source",
+            "focus_timeline",
+        ] {
+            let mut app = App::restore(None);
+            app.run_action(focus, false);
+            let before = app.history.project().clone();
+            assert!(
+                app.action_applicability("collect_project", false)
+                    .is_enabled(),
+                "{focus}"
+            );
+            app.run_action("collect_project", false);
+            assert!(app.collection.is_open(), "{focus}");
+            assert_eq!(app.history.project(), &before);
+            assert!(!app.history.can_undo());
+        }
+    }
+
+    #[test]
+    fn applicability_matches_focused_source_program_and_explicit_menu_targets() {
+        let mut app = App::restore(None);
+        app.history
+            .apply(Command::Import(vec![(
+                "/missing/palette-fixture.mkv".into(),
+                ProbeInfo {
+                    duration: Time(10 * FLICKS_PER_SECOND),
+                    frame_rate: Some(Rate::new(25, 1)),
+                    ..Default::default()
+                },
+            )]))
+            .unwrap();
+        app.preview.open(app.history.project(), AssetId(1));
+        app.run_action("focus_source", false);
+        assert!(app.action_applicability("mark_in", false).is_enabled());
+        assert!(!app.action_applicability("snapping", false).is_enabled());
+        assert!(app.action_applicability("snapping", true).is_enabled());
+        app.run_action("step_forward", false);
+        app.run_action("mark_in", false);
+        let source_in = app.history.project().asset(AssetId(1)).unwrap().in_point;
+        assert_eq!(source_in, Some(Rate::new(25, 1).time_floor(1)));
+        assert_eq!(app.history.project().sequence().in_point(), None);
+        app.run_action("focus_program", false);
+        assert!(app.action_applicability("mark_in", false).is_enabled());
+        assert_eq!(
+            app.history.project().asset(AssetId(1)).unwrap().in_point,
+            source_in
+        );
+        app.run_action("focus_inspector", false);
+        assert!(!app.action_applicability("mark_in", false).is_enabled());
+        assert!(app.action_applicability("mark_in", true).is_enabled());
+        assert!(!app.action_applicability("export", false).is_enabled());
+        assert!(!app.action_applicability("copy", true).is_enabled());
+    }
+
+    #[test]
+    fn remapped_palette_shortcut_executes_existing_action_and_restores_panel_focus() {
+        let mut h = Harness::builder()
+            .with_size([800.0, 600.0])
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run();
+        h.state_mut().on_welcome = false;
+        h.state_mut().keymap = Keymap::from_toml("command_palette = \"Ctrl+Shift+F9\"").unwrap();
+        h.state_mut().focus_panel(Tab::Timeline);
+        h.run();
+        let project = h.state().history.project().clone();
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F9);
+        h.run_steps(2);
+        assert!(h.state().command_palette.is_open());
+        assert_eq!(
+            h.state_mut().dock.find_active_focused().map(|(_, t)| *t),
+            Some(Tab::Timeline)
+        );
+        h.event(Event::Text("blade".into()));
+        h.run();
+        let previous_tool = h.state().timeline.tool();
+        h.key_press(Key::Enter);
+        h.run_steps(2);
+        assert!(!h.state().command_palette.is_open());
+        assert_ne!(h.state().timeline.tool(), previous_tool);
+        assert_eq!(h.state().timeline.tool(), crate::timeline::Tool::Razor);
+        assert_eq!(
+            h.state().history.project(),
+            &project,
+            "view state does not alter content"
+        );
+        assert_eq!(
+            h.state_mut().dock.find_active_focused().map(|(_, t)| *t),
+            Some(Tab::Timeline)
+        );
+
+        // The same remapped shortcut belongs to a text field while typing.
+        h.state_mut().run_action("command_palette", false);
+        h.run_steps(2);
+        assert!(h.ctx.text_edit_focused());
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F9);
+        h.run();
+        assert!(h.state().command_palette.is_open());
+        h.key_press(Key::Escape);
+        h.run_steps(2);
+        assert!(!h.state().command_palette.is_open());
+        h.state_mut().keymap = Keymap::from_toml("command_palette = \"\"").unwrap();
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::P);
+        h.run();
+        assert!(!h.state().command_palette.is_open());
+    }
+
+    #[test]
+    fn palette_preserves_source_program_routing_and_undoable_persisted_marks() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut h = Harness::builder()
+            .with_size([800.0, 600.0])
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run();
+        let app = h.state_mut();
+        app.on_welcome = false;
+        app.history
+            .apply(Command::Import(vec![(
+                directory.path().join("palette-source.mkv"),
+                ProbeInfo {
+                    duration: Time(10 * FLICKS_PER_SECOND),
+                    frame_rate: Some(Rate::new(25, 1)),
+                    ..Default::default()
+                },
+            )]))
+            .unwrap();
+        app.preview.open(app.history.project(), AssetId(1));
+        app.run_action("focus_source", false);
+        h.run();
+        let pick_mark_in = |h: &mut Harness<'_, App>| {
+            h.state_mut().run_action("command_palette", false);
+            h.run_steps(2);
+            h.event(Event::Text("mark_in".into()));
+            h.run();
+            h.key_press(Key::Enter);
+            h.run_steps(2);
+            assert!(!h.state().command_palette.is_open());
+        };
+        pick_mark_in(&mut h);
+        assert_eq!(h.state().preview_active, 0);
+        assert_eq!(
+            h.state()
+                .history
+                .project()
+                .asset(AssetId(1))
+                .unwrap()
+                .in_point,
+            Some(Time(0))
+        );
+        assert_eq!(h.state().history.project().sequence().in_point(), None);
+        h.state_mut().run_action("focus_program", false);
+        h.run();
+        pick_mark_in(&mut h);
+        assert_eq!(h.state().preview_active, 1);
+        assert_eq!(
+            h.state().history.project().sequence().in_point(),
+            Some(Time(0))
+        );
+        let path = directory.path().join("palette-marks.jvid");
+        crate::project_file::save(h.state().history.project(), &path).unwrap();
+        assert_eq!(
+            crate::project_file::load(&path).unwrap(),
+            *h.state().history.project()
+        );
+        assert!(h.state_mut().history.undo());
+        assert_eq!(h.state().history.project().sequence().in_point(), None);
+        assert_eq!(
+            h.state()
+                .history
+                .project()
+                .asset(AssetId(1))
+                .unwrap()
+                .in_point,
+            Some(Time(0))
+        );
+    }
+}
+
+#[cfg(test)]
+mod settings_transfer_tests {
+    use super::*;
+    use jvid_core::history::Created;
+    use jvid_core::model::{NewClip, TrackKind, Transform};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn settings_transfer_actions_follow_panel_routing_and_undo_once() {
+        let mut app = App::restore(None);
+        app.editor_context = Some(egui::Context::default());
+        let Created::Track(track) = app
+            .history
+            .apply(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "V1".into(),
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let Created::Asset(asset) = app
+            .history
+            .apply(Command::AddSolid {
+                name: "Solid".into(),
+                color: [1.0; 4],
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let ids = [0, 1].map(|index| {
+            let Created::Clip(id) = app
+                .history
+                .apply(Command::AddClip {
+                    track,
+                    clip: NewClip {
+                        asset,
+                        start: Time(index * 100),
+                        source_in: Time(0),
+                        source_out: Time(100),
+                        link: None,
+                    },
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            id
+        });
+        app.history
+            .apply(Command::SetClipProps(vec![(
+                ids[0],
+                Transform {
+                    position: [12.0, 34.0],
+                    ..Transform::default()
+                },
+                BTreeMap::new(),
+            )]))
+            .unwrap();
+        app.timeline.select_program_clip(ids[0]);
+        app.focus_panel(Tab::Timeline);
+        app.run_action("copy_settings", false);
+        app.timeline.select_program_clip(ids[1]);
+        app.focus_panel(Tab::Preview);
+        app.preview_active = 0;
+        assert!(
+            !app.settings_transfer_applicability("paste_settings", false)
+                .unwrap()
+                .is_enabled()
+        );
+        let before = app.history.project().clone();
+        app.run_action("paste_settings", false);
+        assert_eq!(app.history.project(), &before);
+        app.preview_active = 1;
+        assert!(
+            app.settings_transfer_applicability("paste_settings", false)
+                .unwrap()
+                .is_enabled()
+        );
+        app.run_action("paste_settings", false);
+        assert_eq!(
+            app.history
+                .project()
+                .sequence()
+                .clip(ids[1])
+                .unwrap()
+                .1
+                .transform
+                .position,
+            [12.0, 34.0]
+        );
+        assert!(app.history.undo());
+        assert_eq!(app.history.project(), &before);
+        app.focus_panel(Tab::Inspector);
+        assert!(
+            app.settings_transfer_applicability("paste_settings", false)
+                .unwrap()
+                .is_enabled()
+        );
+        app.focus_panel(Tab::Media);
+        assert!(
+            !app.settings_transfer_applicability("paste_settings", false)
+                .unwrap()
+                .is_enabled()
+        );
+        assert!(
+            app.settings_transfer_applicability("paste_settings", true)
+                .unwrap()
+                .is_enabled()
+        );
+        let map = Keymap::from_toml(
+            "copy_settings = \"Ctrl+Shift+F10\"\npaste_settings = \"Ctrl+Shift+F11\"",
+        )
+        .unwrap();
+        assert_eq!(map.shortcut("copy_settings"), "Ctrl+Shift+F10");
+        assert_eq!(map.shortcut("paste_settings"), "Ctrl+Shift+F11");
+    }
+}
+
+#[cfg(test)]
+mod workspace_tests {
+    use super::*;
+    use egui::{Key, Modifiers};
+    use egui_kittest::Harness;
+
+    #[test]
+    fn workspace_layouts_and_save_dialog_fit_narrow_translated_windows() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let artifacts = std::env::var_os("JVID_A2_ARTIFACT_DIR").map(PathBuf::from);
+        if let Some(dir) = &artifacts {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        for (size, scale, language) in [([1280.0, 720.0], 1.0, "en"), ([960.0, 600.0], 1.5, "de")] {
+            suite_ui::i18n::set_language(language);
+            let mut h = Harness::builder()
+                .with_size(size)
+                .with_pixels_per_point(scale)
+                .wgpu()
+                .build_eframe(|cc| App::new(cc, &Default::default()));
+            h.run();
+            h.state_mut().on_welcome = false;
+            for id in ["workspace_editing", "workspace_captions", "workspace_audio"] {
+                h.state_mut().run_action(id, false);
+                h.run();
+                let bounds = h.ctx.content_rect().expand(1.0);
+                for (_, leaf) in h.state().dock.iter_leaves() {
+                    assert!(
+                        bounds.contains_rect(leaf.rect),
+                        "{id}: {:?} outside {bounds:?}",
+                        leaf.rect
+                    );
+                    assert!(leaf.rect.is_finite());
+                }
+                if let Some(dir) = &artifacts {
+                    h.render()
+                        .unwrap()
+                        .save(dir.join(format!(
+                            "{id}_{}x{}_{scale}x_{language}.png",
+                            size[0], size[1]
+                        )))
+                        .unwrap();
+                }
+            }
+            h.state_mut().focus_panel(Tab::Inspector);
+            h.state_mut().run_action("maximize_panel", false);
+            h.run();
+            if let Some(dir) = &artifacts {
+                h.render()
+                    .unwrap()
+                    .save(dir.join(format!("workspace_maximize_{language}.png")))
+                    .unwrap();
+            }
+            h.state_mut().run_action("workspace_save", false);
+            h.run_steps(2);
+            let modal = h
+                .ctx
+                .memory(|m| m.area_rect(egui::Id::new("workspace_name")))
+                .unwrap();
+            assert!(h.ctx.content_rect().contains_rect(modal), "{modal:?}");
+            if let Some(dir) = &artifacts {
+                h.render()
+                    .unwrap()
+                    .save(dir.join(format!("workspace_save_{language}.png")))
+                    .unwrap();
+            }
+            h.event(egui::Event::Text("Personal".into()));
+            h.key_press(Key::Enter);
+            h.run_steps(2);
+            assert!(!h.state().workspaces.is_open());
+            assert_eq!(h.state().workspaces.personal[0].name, "Personal");
+            assert_eq!(
+                h.state().workspaces.personal[0]
+                    .layout
+                    .restore(Panels::default())
+                    .iter_all_tabs()
+                    .count(),
+                4
+            );
+        }
+        suite_ui::i18n::set_language("en");
+    }
+
+    #[test]
+    fn workspace_changes_preserve_content_history_panel_state_cache_and_live_jobs() {
+        let mut app = App::restore(None);
+        app.on_welcome = false;
+        app.history
+            .apply(Command::AddSolid {
+                name: "Keep".into(),
+                color: [1.0; 4],
+            })
+            .unwrap();
+        let project = app.history.project().clone();
+        let session = app.project_session;
+        app.transcript.query = "keep this search".into();
+        app.bin.selected = Some(AssetId(1));
+        app.preview_active = 0;
+        let store = app.transcript.cache.store.clone();
+        let (release, waiting) = std::sync::mpsc::channel();
+        let job = app.exports.submit(
+            "workspace-job",
+            jvid_jobs::Priority::Interactive,
+            move |_| {
+                let _ = waiting.recv_timeout(std::time::Duration::from_secs(10));
+            },
+        );
+        let (_results, receiver) = std::sync::mpsc::channel();
+        assert!(app.queue.push(
+            "workspace-export.mp4".into(),
+            "Test".into(),
+            Time(1),
+            (job.clone(), receiver)
+        ));
+        for id in [
+            "workspace_captions",
+            "maximize_panel",
+            "maximize_panel",
+            "workspace_audio",
+            "reset_layout",
+            "workspace_editing",
+        ] {
+            app.run_action(id, false);
+            assert_eq!(app.history.project(), &project);
+            assert_eq!(app.transcript.query, "keep this search");
+            assert!(std::sync::Arc::ptr_eq(&store, &app.transcript.cache.store));
+            assert!(std::sync::Arc::ptr_eq(&store, &app.subtitles.store));
+            assert_eq!(app.bin.selected, Some(AssetId(1)));
+            assert_eq!(app.preview_active, 0);
+            assert_eq!(app.project_session, session);
+            assert!(!job.is_cancelled());
+            assert!(!job.is_finished());
+            assert_eq!(app.queue.pending(), 1);
+        }
+        app.show_panel(Tab::Transcript);
+        assert_eq!(app.transcript.query, "keep this search");
+        release.send(()).unwrap();
+        app.history.undo();
+        assert!(app.history.project().assets().is_empty());
+        app.history.redo();
+        assert_eq!(app.history.project(), &project);
+    }
+
+    #[test]
+    fn remapped_maximize_and_focus_restore_use_shared_dispatch_and_dialogs_own_input() {
+        let mut h = Harness::builder()
+            .with_size([960.0, 600.0])
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run();
+        h.state_mut().on_welcome = false;
+        h.state_mut().keymap = Keymap::from_toml("maximize_panel = \"Ctrl+Shift+F8\"").unwrap();
+        h.state_mut().focus_panel(Tab::Inspector);
+        h.run();
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F8);
+        h.run();
+        assert!(h.state().workspaces.is_maximized());
+        assert_eq!(h.state().dock.iter_all_tabs().count(), 1);
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F8);
+        h.run();
+        assert!(!h.state().workspaces.is_maximized());
+        assert_eq!(
+            h.state_mut()
+                .dock
+                .find_active_focused()
+                .map(|(_, tab)| *tab),
+            Some(Tab::Inspector)
+        );
+        h.state_mut().run_action("workspace_save", false);
+        h.run_steps(2);
+        assert!(h.state().workspaces.is_open());
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F8);
+        h.run();
+        assert!(!h.state().workspaces.is_maximized());
+        h.key_press(Key::Escape);
+        h.run_steps(2);
+        assert!(!h.state().workspaces.is_open());
+        h.state_mut().keymap = Keymap::from_toml("maximize_panel = \"\"").unwrap();
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F10);
+        h.run();
+        assert!(!h.state().workspaces.is_maximized());
+    }
+
+    #[test]
+    fn focus_or_open_while_maximized_restores_full_layout_without_losing_optional_panels() {
+        let mut app = App::restore(None);
+        app.on_welcome = false;
+        app.show_panel(Tab::Transcript);
+        app.run_action("maximize_panel", false);
+        app.run_action("focus_source", false);
+        assert!(!app.workspaces.is_maximized());
+        assert_eq!(app.dock.iter_all_tabs().count(), 5);
+        assert_eq!(app.preview_active, 0);
+        app.run_action("maximize_panel", false);
+        app.show_queue();
+        assert!(!app.workspaces.is_maximized());
+        assert_eq!(app.dock.iter_all_tabs().count(), 6);
+        assert_eq!(
+            app.dock.find_active_focused().map(|(_, tab)| *tab),
+            Some(Tab::RenderQueue)
+        );
+    }
+}
+
+#[cfg(test)]
+mod frame_export_applicability_tests {
+    use super::*;
+
+    #[test]
+    fn export_frame_requires_sequence_content_without_requiring_a_source_frame() {
+        let mut app = App::restore(None);
+        assert_eq!(
+            app.action_applicability("export_frame", false),
+            Applicability::Disabled("preview.no_frame")
+        );
+        // Disabled dispatch must return before opening a native Save dialog.
+        app.run_action("export_frame", false);
+        app.history
+            .apply(Command::AddSolid {
+                name: "Frame".into(),
+                color: [1.0; 4],
+            })
+            .unwrap();
+        let asset = app.history.project().assets()[0].id;
+        let placement = app
+            .history
+            .project()
+            .placement(asset, Time(0), false, None, false)
+            .unwrap();
+        app.history.apply(Command::Place(placement)).unwrap();
+        app.run_action("focus_program", false);
+        assert!(app.preview.source_asset().is_none());
+        assert_eq!(
+            app.action_applicability("export_frame", false),
+            Applicability::Enabled
+        );
+        assert_eq!(
+            app.action_applicability("export_frame", true),
+            Applicability::Enabled
+        );
     }
 }
