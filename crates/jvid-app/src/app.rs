@@ -40,6 +40,73 @@ pub(crate) mod tutorial;
 
 #[cfg(test)]
 const DOCK_KEY: &str = "dock";
+
+#[cfg(test)]
+mod media_library_routing_tests {
+    use super::*;
+
+    #[test]
+    fn library_actions_share_focus_guards_undo_and_modal_input_ownership() {
+        let mut app = App::restore(None);
+        app.history = History::new(Project::default());
+        app.history
+            .apply(Command::AddAsset("clip.mov".into()))
+            .unwrap();
+        app.bin.reset_session();
+        app.bin.select_only(AssetId(1));
+        app.focus_panel(Tab::Timeline);
+        assert!(
+            !app.media_library_applicability("media_favorite")
+                .is_enabled()
+        );
+        app.run_action("media_favorite", false);
+        assert!(
+            !app.history
+                .project()
+                .media_library()
+                .entry(AssetId(1))
+                .favorite
+        );
+        app.focus_panel(Tab::Media);
+        app.bin.tab = 1;
+        app.run_action("media_favorite", false);
+        assert!(
+            !app.history
+                .project()
+                .media_library()
+                .entry(AssetId(1))
+                .favorite
+        );
+        app.bin.tab = 0;
+        app.run_action("media_favorite", false);
+        assert!(
+            app.history
+                .project()
+                .media_library()
+                .entry(AssetId(1))
+                .favorite
+        );
+        assert_eq!(
+            app.dock.find_active_focused().map(|(_, tab)| *tab),
+            Some(Tab::Media)
+        );
+        app.run_action("undo", false);
+        assert!(
+            !app.history
+                .project()
+                .media_library()
+                .entry(AssetId(1))
+                .favorite
+        );
+        app.run_action("media_new_bin", false);
+        assert!(app.bin.library_modal_open());
+        assert!(app.modal_owns_input(&egui::Context::default()));
+        assert!(
+            !app.media_library_applicability("media_favorite")
+                .is_enabled()
+        );
+    }
+}
 const RECENT_KEY: &str = "recent";
 
 /// One dock panel. Persisted by name in the saved layout.
@@ -1120,6 +1187,7 @@ impl App {
             || self.subtitles.is_open()
             || !self.prompts.is_empty()
             || self.bin.confirm_remove.is_some()
+            || self.bin.library_modal_open()
             || ctx.memory(|m| m.top_modal_layer().is_some())
     }
 
@@ -1159,6 +1227,9 @@ impl App {
     /// One availability result for the same target the executor will use. Menus explicitly
     /// target Timeline; shortcuts and the palette preserve the focused dock and monitor.
     fn action_applicability(&mut self, id: &str, menu: bool) -> Applicability {
+        if crate::media_bin::library::ACTIONS.contains(&id) {
+            return self.media_library_applicability(id);
+        }
         if let Some(applicable) = self.settings_transfer_applicability(id, menu) {
             return applicable;
         }
@@ -1234,10 +1305,29 @@ impl App {
         Applicability::Disabled(reason)
     }
 
+    /// The media library uses the same target and reason for menu, palette and dispatch.
+    fn media_library_applicability(&mut self, id: &str) -> keymap::Applicability {
+        let focused = self
+            .dock
+            .find_active_focused()
+            .is_some_and(|(_, tab)| *tab == Tab::Media);
+        self.bin
+            .library_applicability(id, self.history.project(), focused)
+    }
+
     /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
     /// focus. The palette uses the same focused-panel route as shortcuts.
     fn run_action(&mut self, id: &str, menu: bool) {
         if !self.action_applicability(id, menu).is_enabled() {
+            return;
+        }
+        if crate::media_bin::library::ACTIONS.contains(&id) {
+            if self.media_library_applicability(id).is_enabled()
+                && let Some(command) = self.bin.library_action(id, self.history.project())
+                && let Err(error) = self.history.apply(command)
+            {
+                tracing::warn!("library edit failed: {error}");
+            }
             return;
         }
         // Space and K stop the take along with playback, wherever focus is.
@@ -2606,6 +2696,7 @@ impl TabViewer for Viewer<'_> {
         tutorial::anchor(ui.ctx(), tab.anchor(), ui.max_rect());
         let focused = self.focused == Some(*tab);
         if *tab == Tab::Media {
+            self.bin.set_library_keymap(self.keymap);
             self.bin.text_thumbs(self.preview, self.project);
             // The Scopes tab, fourth in the bin.
             self.preview.scopes_open(self.bin.tab == 3);

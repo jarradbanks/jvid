@@ -93,6 +93,10 @@ pub const ACTIONS: &[Action] = &[
     a("save_as", "Ctrl+Shift+S"),
     a("collect_project", ""),
     aliases(a("import", "Ctrl+I"), &["ingest", "media"]),
+    a("media_new_bin", ""),
+    a("media_rename_bin", ""),
+    a("media_delete_bin", ""),
+    a("media_favorite", ""),
     a("import_subtitles", "Ctrl+Shift+I"),
     aliases(a("export_subtitles", ""), &["captions", "srt", "vtt"]),
     aliases(a("export", "Ctrl+M"), &["render", "encode"]),
@@ -288,6 +292,15 @@ impl Keymap {
     /// The action's shortcut as text, empty when unbound.
     pub fn shortcut(&self, id: &str) -> String {
         self.label(id).1
+    }
+
+    /// Panel-local actions use their current binding after the app routes global input.
+    pub fn consume(&self, ctx: &egui::Context, id: &str) -> bool {
+        ACTIONS
+            .iter()
+            .position(|a| a.id == id)
+            .and_then(|i| self.bindings[i])
+            .is_some_and(|binding| ctx.input_mut(|i| i.consume_shortcut(&binding)))
     }
 
     /// Whether `id`'s key is down, for actions that finish on release.
