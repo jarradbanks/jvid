@@ -116,6 +116,10 @@ Each preset centers the whole source, clears crop and anchor offsets, and resets
 
 Open **Transcript** from the Timeline menu to work with recognized speech. **Copy** copies the selected words; the platform Copy shortcut (`Ctrl+C`, or `Cmd+C` on macOS) does the same when the Transcript panel has focus. The Find field keeps its normal text-copy behavior.
 
+Use **Edit > Review Speech Cuts** to review silence or recognized filler suggestions before editing. The selected audio source takes priority; with nothing selected, the review covers the current sequence. Choose the audio stream, adjust the pause threshold and breathing room, then tick the cuts to accept. Unticked suggestions keep the original footage. **Audition Before** and **Audition After** play the selected suggestion's surrounding audio using the proposed edits; **Stop** ends audition. The displayed time saved counts overlapping suggestions once.
+
+**Apply Cuts** removes accepted time ranges from every track, including linked video, background audio and captions, in one undo step. Affected locked tracks must be unlocked first. Analysis, audition and Cancel leave the project unchanged. Project edits, source replacement or updated recognition invalidate the plan; use **Recompute** before applying. Accepted edits save and export like other timeline edits. The review action can be assigned a shortcut in the keymap editor.
+
 **Copy All** and **Export Transcript (.txt)…** use the whole displayed transcript scope: selected clips when clips are selected, otherwise the current sequence, using the chosen audio sources. They follow timeline order, trims, removals and repeated clip instances. The scope is shown above the text; a partial-results message explains when some sources still need recognition. Export uses a native save dialog and writes readable UTF-8 text with punctuation and paragraph breaks. These actions use available recognition results and leave the project and playhead unchanged.
 
 ## Effects

@@ -223,6 +223,7 @@ pub struct App {
     bin: MediaBin,
     preview: Preview,
     timeline: Timeline,
+    speech_review: Option<crate::speech_review::Review>,
     /// Asset paths found missing when the project was opened; see [`relink::missing`].
     missing: HashSet<PathBuf>,
     /// Error toasts and the time each expires.
@@ -376,6 +377,7 @@ impl App {
             bin: MediaBin::default(),
             preview: Preview::new(None),
             timeline: Timeline::default(),
+            speech_review: None,
             missing: HashSet::new(),
             toasts: Vec::new(),
             welcome: Welcome::new(
@@ -425,6 +427,7 @@ impl App {
         self.importer.reset_session(self.project_session);
         self.timeline.reset_session();
         self.preview.reset_session();
+        self.speech_review = None;
         self.bin.reset_session();
         self.transcript.reset_session();
         self.highlight_review.reset_session();
@@ -1186,6 +1189,7 @@ impl App {
     /// egui's shared ownership state instead of another app-specific list.
     fn modal_owns_input(&self, ctx: &egui::Context) -> bool {
         self.collection.is_open()
+            || self.speech_review.is_some()
             || self.settings_dialog.draft.is_some()
             || self.export_dialog.is_open()
             || self.subtitle_export.is_open()
@@ -1245,6 +1249,9 @@ impl App {
     /// One availability result for the same target the executor will use. Menus explicitly
     /// target Timeline; shortcuts and the palette preserve the focused dock and monitor.
     fn action_applicability(&mut self, id: &str, menu: bool) -> Applicability {
+        if let Some(result) = self.speech_review_applicability(id) {
+            return result;
+        }
         if crate::annotations::kind(id).is_some() {
             return self.annotation_applicability(menu);
         }
@@ -1371,7 +1378,22 @@ impl App {
         )
     }
 
-    /// Runs actions through the same focused-panel route as palette and shortcuts.
+    /// Coordinator's shared action applicability adapter consumes this same result.
+    pub(crate) fn speech_review_applicability(&self, id: &str) -> Option<keymap::Applicability> {
+        (id == "review_speech_cuts").then(|| {
+            if self.take.is_some() {
+                keymap::Applicability::Disabled("timeline.stop_recording")
+            } else {
+                crate::speech_review::applicability(
+                    self.history.project(),
+                    self.timeline.selected(),
+                )
+            }
+        })
+    }
+
+    /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
+    /// focus. shortcut: unimplemented actions are stubs until their features land.
     fn run_action(&mut self, id: &str, menu: bool) {
         if !self.action_applicability(id, menu).is_enabled() {
             return;
@@ -1509,6 +1531,26 @@ impl App {
             "quit" => {
                 if let Some(ctx) = &self.editor_context {
                     ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
+                return;
+            }
+            "review_speech_cuts" => {
+                if self.speech_review_applicability(id).unwrap().is_enabled() {
+                    if self.preview.playing() {
+                        self.preview.program_action("shuttle_stop");
+                    }
+                    self.preview
+                        .source_action("shuttle_stop", self.history.project());
+                    let revision = crate::speech_review::Revision {
+                        session: self.project_session,
+                        history: self.history.rev(),
+                        transcript: self.transcript.review_revision(),
+                    };
+                    self.speech_review = Some(crate::speech_review::Review::open(
+                        self.history.project(),
+                        revision,
+                        self.timeline.selected(),
+                    ));
                 }
                 return;
             }
@@ -2504,6 +2546,28 @@ impl eframe::App for App {
             self.history.end_gesture();
         }
         self.lesson_frame(&ctx);
+        if let Some(mut review) = self.speech_review.take() {
+            let revision = crate::speech_review::Revision {
+                session: self.project_session,
+                history: self.history.rev(),
+                transcript: self.transcript.review_revision(),
+            };
+            let output = review.show(
+                &ctx,
+                self.history.project(),
+                revision,
+                &mut self.timeline,
+                &mut self.transcript,
+            );
+            if let Some(command) = output.command
+                && let Err(error) = self.history.apply(command)
+            {
+                tracing::warn!("speech review apply failed: {error}");
+            }
+            if !output.close {
+                self.speech_review = Some(review);
+            }
+        }
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             drop_overlay(&ctx);
         }
@@ -2520,6 +2584,43 @@ impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         crate::settings_file::save_workspaces(storage, &self.workspaces, &self.dock);
         eframe::set_value(storage, RECENT_KEY, &self.welcome.recent);
+    }
+}
+
+#[cfg(test)]
+mod speech_review_tests {
+    use super::*;
+
+    #[test]
+    fn review_action_uses_shared_availability_and_preserves_focus_and_history() {
+        let mut app = App::restore(None);
+        assert!(
+            !app.speech_review_applicability("review_speech_cuts")
+                .unwrap()
+                .is_enabled()
+        );
+        let (project, mic, _) = crate::subtitles::test_support::two_streams(false);
+        app.history = History::new(project.clone());
+        app.on_welcome = false;
+        app.timeline.select_clip(project.sequence(), mic);
+        app.focus_panel(Tab::Preview);
+        app.preview_active = 0;
+        let focused = app.dock.find_active_focused().map(|(_, t)| *t);
+        assert!(
+            app.speech_review_applicability("review_speech_cuts")
+                .unwrap()
+                .is_enabled()
+        );
+        app.keymap = Keymap::from_toml("review_speech_cuts = \"Ctrl+Alt+F8\"").unwrap();
+        assert!(app.keymap.shortcut("review_speech_cuts").contains("F8"));
+        app.run_action("review_speech_cuts", false);
+        assert!(app.speech_review.is_some());
+        assert_eq!(app.history.project(), &project);
+        assert_eq!(app.history.rev(), 0);
+        assert_eq!(app.preview_active, 0);
+        assert_eq!(app.dock.find_active_focused().map(|(_, t)| *t), focused);
+        app.speech_review = None;
+        assert_eq!(app.history.project(), &project);
     }
 }
 

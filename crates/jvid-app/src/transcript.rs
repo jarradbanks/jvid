@@ -224,7 +224,32 @@ fn covered_hits(
     project: &Project,
     selected: &HashSet<ClipId>,
 ) -> Vec<fillers::Hit> {
-    let mut hits = fillers::find(words, languages);
+    filter_covered_hits(fillers::find(words, languages), missing, project, selected)
+}
+
+fn covered_hits_with_settings(
+    words: &[(ClipId, Word)],
+    languages: &Languages,
+    missing: &[Source],
+    project: &Project,
+    selected: &HashSet<ClipId>,
+    pause: Time,
+    keep: Time,
+) -> Vec<fillers::Hit> {
+    filter_covered_hits(
+        fillers::find_with_settings(words, languages, pause, keep),
+        missing,
+        project,
+        selected,
+    )
+}
+
+fn filter_covered_hits(
+    mut hits: Vec<fillers::Hit>,
+    missing: &[Source],
+    project: &Project,
+    selected: &HashSet<ClipId>,
+) -> Vec<fillers::Hit> {
     let rate = jvid_core::time::Rate::new(jvid_media::audio::SAMPLE_RATE, 1);
     for target in targets(project, selected, true) {
         for source in missing
@@ -278,6 +303,33 @@ pub struct TranscriptPanel {
 }
 
 impl TranscriptPanel {
+    /// Review reuses source identity, language and missing-coverage checks of the panel.
+    pub(crate) fn review_hits(
+        &mut self,
+        project: &Project,
+        selected: &HashSet<ClipId>,
+        pause: Time,
+        keep: Time,
+    ) -> (Vec<(fillers::Hit, String)>, bool) {
+        let placed = self.cache.placed(project, selected);
+        let hits = covered_hits_with_settings(
+            &placed.0, &placed.2, &placed.1, project, selected, pause, keep,
+        );
+        let hits = hits
+            .into_iter()
+            .map(|hit| {
+                let seconds = format!("{:.1}", (hit.end - hit.start).0 as f64 / S as f64);
+                let context =
+                    fillers::context(&placed.0, &hit, &tr!("transcript.pause", seconds = seconds));
+                (hit, context)
+            })
+            .collect();
+        (hits, !placed.1.is_empty())
+    }
+
+    pub(crate) fn review_revision(&self) -> u64 {
+        self.cache.store.lock().unwrap().revision()
+    }
     /// Called before app key routing. Find retains its native clipboard behavior;
     /// Copy in the focused transcript belongs only to its selected words.
     pub(crate) fn copy_shortcut(

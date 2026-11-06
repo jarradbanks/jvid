@@ -47,6 +47,7 @@ pub const EDIT: &[&str] = &[
     "",
     "delete",
     "ripple_delete",
+    "review_speech_cuts",
     "add_edit",
     "ripple_trim_prev",
     "ripple_trim_next",

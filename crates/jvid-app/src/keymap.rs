@@ -152,6 +152,7 @@ pub const ACTIONS: &[Action] = &[
     a(crate::personal_presets::ACTION, ""),
     t("clean_up_voice", "Ctrl+Alt+U"),
     t("detect_silence", "Ctrl+Alt+S"),
+    a("review_speech_cuts", ""),
     t("find_highlights", "Ctrl+Alt+H"),
     t("hide_region", "Ctrl+Alt+R"),
     aliases(

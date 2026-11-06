@@ -49,7 +49,7 @@ pub mod menus;
 mod rubber;
 #[cfg(test)]
 mod seek_tests;
-mod silence;
+pub(crate) mod silence;
 mod transitions;
 #[cfg(test)]
 mod waveform_tests;
@@ -1806,7 +1806,19 @@ impl Timeline {
         project: &Project,
         ctx: &egui::Context,
     ) -> Option<Vec<silence::Span>> {
-        let s = self.silence.as_mut()?;
+        let mut s = self.silence.take()?;
+        let spans = self.review_silence_spans(&mut s, project, ctx);
+        self.silence = Some(s);
+        spans
+    }
+
+    /// Shared cached detector input for the proposal review; never emits an edit.
+    pub(crate) fn review_silence_spans(
+        &mut self,
+        s: &mut silence::Silence,
+        project: &Project,
+        ctx: &egui::Context,
+    ) -> Option<Vec<silence::Span>> {
         let seq = project.sequence();
         let key = |c: &Clip| Some((project.asset(c.asset)?, c.stream.unwrap_or(0) as usize));
         let mut loaded = HashSet::new();

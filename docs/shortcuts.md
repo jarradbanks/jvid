@@ -53,6 +53,7 @@ Work in any panel except while typing in a text field.
 | Copy Settings | — |
 | Paste Settings | — |
 | Personal Presets | — |
+| Review Speech Cuts | — |
 | Generate Subtitles… | `Ctrl+Alt+G` |
 | Razor Tool | `C` |
 | Selection Tool | `V` |
