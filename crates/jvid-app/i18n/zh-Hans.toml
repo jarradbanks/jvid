@@ -5,6 +5,8 @@
 # every English key.
 
 [action]
+review_highlights = "精彩片段"
+export_highlights = "导出所选精彩片段"
 workspace_editing = "剪辑工作区"
 workspace_captions = "字幕工作区"
 workspace_audio = "音频工作区"
@@ -622,6 +624,21 @@ db_suffix = " dB"
 seconds_suffix = " 秒"
 
 [highlights]
+review = "精彩片段"
+review_empty = "手动添加标记，或在选定剪辑中查找精彩片段。"
+stale = "时间线已更改。导出前请检查当前精彩片段。"
+refresh = "使用当前精彩片段"
+select_none = "取消全选"
+choose = "包含在导出中"
+duration = "{seconds} 秒"
+start = "开始"
+end = "结束"
+audition = "试听"
+invalid_span = "精彩片段超出时间线范围或为空。"
+export_selected = "导出所选精彩片段"
+close = "关闭精彩片段"
+no_selected = "请选择要导出的精彩片段。"
+scan_stale = "时间线已更改。请重新查找精彩片段。"
 title = "查找精彩片段"
 loud = "响亮时刻"
 scenes = "场景切换"

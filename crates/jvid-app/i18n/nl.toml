@@ -3,6 +3,8 @@
 # infinitive, as in Dutch Windows. Terms follow docs/i18n/nl.md.
 
 [action]
+review_highlights = "Hoogtepunten"
+export_highlights = "Geselecteerde hoogtepunten exporteren"
 workspace_editing = "Werkruimte montage"
 workspace_captions = "Werkruimte ondertitels"
 workspace_audio = "Werkruimte audio"
@@ -607,6 +609,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Hoogtepunten"
+review_empty = "Voeg markeringen toe of zoek hoogtepunten in geselecteerde clips."
+stale = "De tijdlijn is gewijzigd. Controleer huidige hoogtepunten vóór export."
+refresh = "Huidige hoogtepunten gebruiken"
+select_none = "Alles deselecteren"
+choose = "Opnemen in export"
+duration = "{seconds} s"
+start = "Begin"
+end = "Einde"
+audition = "Voorbeeld afspelen"
+invalid_span = "Het hoogtepunt valt buiten de tijdlijn of is leeg."
+export_selected = "Geselecteerde hoogtepunten exporteren"
+close = "Hoogtepunten sluiten"
+no_selected = "Selecteer hoogtepunten om te exporteren."
+scan_stale = "De tijdlijn is gewijzigd. Zoek opnieuw naar hoogtepunten."
 title = "Hoogtepunten zoeken"
 loud = "Luide momenten"
 scenes = "Scènewisselingen"

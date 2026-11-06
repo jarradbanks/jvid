@@ -3,6 +3,8 @@
 # items use the infinitive. Terms follow docs/i18n/ru.md.
 
 [action]
+review_highlights = "Лучшие моменты"
+export_highlights = "Экспортировать выбранные моменты"
 workspace_editing = "Рабочая среда монтажа"
 workspace_captions = "Рабочая среда субтитров"
 workspace_audio = "Рабочая среда звука"
@@ -623,6 +625,21 @@ db_suffix = " дБ"
 seconds_suffix = " с"
 
 [highlights]
+review = "Лучшие моменты"
+review_empty = "Добавьте маркеры вручную или найдите лучшие моменты в выбранных клипах."
+stale = "Монтажная линейка изменилась. Проверьте текущие моменты перед экспортом."
+refresh = "Использовать текущие моменты"
+select_none = "Снять выделение"
+choose = "Включить в экспорт"
+duration = "{seconds} с"
+start = "Начало"
+end = "Конец"
+audition = "Предпросмотр"
+invalid_span = "Момент пуст или выходит за пределы монтажной линейки."
+export_selected = "Экспортировать выбранные моменты"
+close = "Закрыть лучшие моменты"
+no_selected = "Выберите моменты для экспорта."
+scan_stale = "Монтажная линейка изменилась. Повторите поиск лучших моментов."
 title = "Найти яркие моменты"
 loud = "Громкие моменты"
 scenes = "Смены сцен"

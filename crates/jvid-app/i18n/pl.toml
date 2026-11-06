@@ -3,6 +3,8 @@
 # docs/i18n/pl.md.
 
 [action]
+review_highlights = "Najciekawsze momenty"
+export_highlights = "Eksportuj wybrane momenty"
 workspace_editing = "Obszar montażu"
 workspace_captions = "Obszar napisów"
 workspace_audio = "Obszar dźwięku"
@@ -623,6 +625,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Najciekawsze momenty"
+review_empty = "Dodaj znaczniki ręcznie lub wyszukaj momenty w wybranych klipach."
+stale = "Oś czasu się zmieniła. Przejrzyj aktualne momenty przed eksportem."
+refresh = "Użyj aktualnych momentów"
+select_none = "Odznacz wszystko"
+choose = "Uwzględnij w eksporcie"
+duration = "{seconds} s"
+start = "Początek"
+end = "Koniec"
+audition = "Odtwórz podgląd"
+invalid_span = "Moment jest poza osią czasu lub pusty."
+export_selected = "Eksportuj wybrane momenty"
+close = "Zamknij najciekawsze momenty"
+no_selected = "Wybierz momenty do eksportu."
+scan_stale = "Oś czasu się zmieniła. Wyszukaj momenty ponownie."
 title = "Znajdź najciekawsze momenty"
 loud = "Głośne momenty"
 scenes = "Zmiany sceny"

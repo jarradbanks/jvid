@@ -3,6 +3,8 @@
 # items use the infinitive (Speichern). Terms follow docs/i18n/de.md.
 
 [action]
+review_highlights = "Highlights"
+export_highlights = "Ausgewählte Highlights exportieren"
 workspace_editing = "Arbeitsbereich Schnitt"
 workspace_captions = "Arbeitsbereich Untertitel"
 workspace_audio = "Arbeitsbereich Audio"
@@ -599,6 +601,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Highlights"
+review_empty = "Marker manuell hinzufügen oder Highlights in ausgewählten Clips suchen."
+stale = "Die Timeline wurde geändert. Aktuelle Highlights vor dem Export prüfen."
+refresh = "Aktuelle Highlights verwenden"
+select_none = "Auswahl aufheben"
+choose = "In Export aufnehmen"
+duration = "{seconds} s"
+start = "Anfang"
+end = "Ende"
+audition = "Vorschau abspielen"
+invalid_span = "Das Highlight liegt außerhalb der Timeline oder ist leer."
+export_selected = "Ausgewählte Highlights exportieren"
+close = "Highlights schließen"
+no_selected = "Highlights zum Exportieren auswählen."
+scan_stale = "Die Timeline wurde geändert. Highlights erneut suchen."
 title = "Highlights finden"
 loud = "Laute Momente"
 scenes = "Szenenwechsel"

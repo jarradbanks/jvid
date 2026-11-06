@@ -100,6 +100,8 @@ pub const ACTIONS: &[Action] = &[
     a("import_subtitles", "Ctrl+Shift+I"),
     aliases(a("export_subtitles", ""), &["captions", "srt", "vtt"]),
     aliases(a("export", "Ctrl+M"), &["render", "encode"]),
+    aliases(a("review_highlights", ""), &["markers", "highlights"]),
+    a("export_highlights", ""),
     a("quit", "Ctrl+Q"),
     a("play_stop", "Space"),
     a("shuttle_left", "J"),

@@ -5,6 +5,8 @@
 # {placeholder}: vowel harmony can't follow it. Terms follow docs/i18n/tr.md.
 
 [action]
+review_highlights = "Öne Çıkanlar"
+export_highlights = "Seçili Öne Çıkanları Dışa Aktar"
 workspace_editing = "Kurgu çalışma alanı"
 workspace_captions = "Altyazı çalışma alanı"
 workspace_audio = "Ses çalışma alanı"
@@ -601,6 +603,21 @@ db_suffix = " dB"
 seconds_suffix = " sn"
 
 [highlights]
+review = "Öne Çıkanlar"
+review_empty = "İşaretçileri elle ekleyin veya seçili kliplerde öne çıkanları bulun."
+stale = "Zaman çizelgesi değişti. Dışa aktarmadan önce güncel öne çıkanları inceleyin."
+refresh = "Güncel Öne Çıkanları Kullan"
+select_none = "Seçimi Temizle"
+choose = "Dışa Aktarmaya Dahil Et"
+duration = "{seconds} sn"
+start = "Başlangıç"
+end = "Bitiş"
+audition = "Önizlemeyi Oynat"
+invalid_span = "Öne çıkan, zaman çizelgesinin dışında veya boş."
+export_selected = "Seçili Öne Çıkanları Dışa Aktar"
+close = "Öne Çıkanları Kapat"
+no_selected = "Dışa aktarılacak öne çıkanları seçin."
+scan_stale = "Zaman çizelgesi değişti. Öne çıkanları yeniden bulun."
 title = "Öne Çıkanları Bul"
 loud = "Yüksek Sesli Anlar"
 scenes = "Sahne Geçişleri"

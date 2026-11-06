@@ -3,6 +3,8 @@
 # items use the imperative (Lagre). Terms follow docs/i18n/nb.md.
 
 [action]
+review_highlights = "Høydepunkter"
+export_highlights = "Eksporter valgte høydepunkter"
 workspace_editing = "Arbeidsområde for redigering"
 workspace_captions = "Arbeidsområde for undertekster"
 workspace_audio = "Arbeidsområde for lyd"
@@ -599,6 +601,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Høydepunkter"
+review_empty = "Legg til markører manuelt, eller finn høydepunkter i valgte klipp."
+stale = "Tidslinjen er endret. Se gjennom gjeldende høydepunkter før eksport."
+refresh = "Bruk gjeldende høydepunkter"
+select_none = "Fjern alle valg"
+choose = "Ta med i eksport"
+duration = "{seconds} s"
+start = "Start"
+end = "Slutt"
+audition = "Prøveavspill"
+invalid_span = "Høydepunktet er utenfor tidslinjen eller tomt."
+export_selected = "Eksporter valgte høydepunkter"
+close = "Lukk høydepunkter"
+no_selected = "Velg høydepunkter å eksportere."
+scan_stale = "Tidslinjen er endret. Finn høydepunkter på nytt."
 title = "Finn høydepunkter"
 loud = "Høylytte øyeblikk"
 scenes = "Sceneskift"

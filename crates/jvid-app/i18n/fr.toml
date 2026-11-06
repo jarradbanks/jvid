@@ -3,6 +3,8 @@
 # docs/i18n/fr.md. The spaces before : ; ? ! and inside « » are no-break spaces (U+00A0).
 
 [action]
+review_highlights = "Temps forts"
+export_highlights = "Exporter les temps forts sélectionnés"
 workspace_editing = "Espace de montage"
 workspace_captions = "Espace de sous-titres"
 workspace_audio = "Espace audio"
@@ -612,6 +614,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Temps forts"
+review_empty = "Ajoutez des marqueurs ou recherchez les temps forts des clips sélectionnés."
+stale = "La timeline a changé. Vérifiez les temps forts actuels avant l’export."
+refresh = "Utiliser les temps forts actuels"
+select_none = "Tout désélectionner"
+choose = "Inclure dans l’export"
+duration = "{seconds} s"
+start = "Début"
+end = "Fin"
+audition = "Lire un aperçu"
+invalid_span = "Le temps fort est hors de la timeline ou vide."
+export_selected = "Exporter les temps forts sélectionnés"
+close = "Fermer les temps forts"
+no_selected = "Sélectionnez des temps forts à exporter."
+scan_stale = "La timeline a changé. Relancez la recherche de temps forts."
 title = "Trouver les temps forts"
 loud = "Moments sonores forts"
 scenes = "Changements de scène"

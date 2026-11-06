@@ -3,6 +3,8 @@
 # imperatives, as on Windows and macOS. Terms follow docs/i18n/it.md.
 
 [action]
+review_highlights = "Momenti salienti"
+export_highlights = "Esporta i momenti selezionati"
 workspace_editing = "Area di montaggio"
 workspace_captions = "Area sottotitoli"
 workspace_audio = "Area audio"
@@ -609,6 +611,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Momenti salienti"
+review_empty = "Aggiungi marcatori o cerca i momenti salienti nelle clip selezionate."
+stale = "La timeline è cambiata. Rivedi i momenti attuali prima di esportare."
+refresh = "Usa i momenti attuali"
+select_none = "Deseleziona tutto"
+choose = "Includi nell’esportazione"
+duration = "{seconds} s"
+start = "Inizio"
+end = "Fine"
+audition = "Riproduci anteprima"
+invalid_span = "Il momento è fuori dalla timeline o vuoto."
+export_selected = "Esporta i momenti selezionati"
+close = "Chiudi i momenti salienti"
+no_selected = "Seleziona i momenti da esportare."
+scan_stale = "La timeline è cambiata. Cerca nuovamente i momenti salienti."
 title = "Trova momenti salienti"
 loud = "Momenti forti"
 scenes = "Cambi di scena"

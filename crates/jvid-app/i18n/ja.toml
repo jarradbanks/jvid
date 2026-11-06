@@ -5,6 +5,8 @@
 # every English key.
 
 [action]
+review_highlights = "ハイライト"
+export_highlights = "選択したハイライトを書き出す"
 workspace_editing = "編集ワークスペース"
 workspace_captions = "字幕ワークスペース"
 workspace_audio = "オーディオワークスペース"
@@ -601,6 +603,21 @@ db_suffix = " dB"
 seconds_suffix = " 秒"
 
 [highlights]
+review = "ハイライト"
+review_empty = "マーカーを追加するか、選択したクリップからハイライトを検索します。"
+stale = "タイムラインが変更されました。書き出す前に現在のハイライトを確認してください。"
+refresh = "現在のハイライトを使用"
+select_none = "すべて選択解除"
+choose = "書き出しに含める"
+duration = "{seconds} 秒"
+start = "開始"
+end = "終了"
+audition = "試聴"
+invalid_span = "ハイライトがタイムラインの範囲外か空です。"
+export_selected = "選択したハイライトを書き出す"
+close = "ハイライトを閉じる"
+no_selected = "書き出すハイライトを選択してください。"
+scan_stale = "タイムラインが変更されました。ハイライトを再検索してください。"
 title = "ハイライトを検出"
 loud = "大きな音"
 scenes = "シーンチェンジ"

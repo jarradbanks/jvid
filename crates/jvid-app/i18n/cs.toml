@@ -3,6 +3,8 @@
 # instructions imperatives with vykání. Terms follow docs/i18n/cs.md.
 
 [action]
+review_highlights = "Zajímavé momenty"
+export_highlights = "Exportovat vybrané momenty"
 workspace_editing = "Pracovní plocha střihu"
 workspace_captions = "Pracovní plocha titulků"
 workspace_audio = "Pracovní plocha zvuku"
@@ -611,6 +613,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Zajímavé momenty"
+review_empty = "Přidejte značky ručně nebo vyhledejte zajímavé momenty ve vybraných klipech."
+stale = "Časová osa se změnila. Před exportem zkontrolujte aktuální momenty."
+refresh = "Použít aktuální momenty"
+select_none = "Zrušit výběr"
+choose = "Zahrnout do exportu"
+duration = "{seconds} s"
+start = "Začátek"
+end = "Konec"
+audition = "Přehrát ukázku"
+invalid_span = "Moment je mimo časovou osu nebo prázdný."
+export_selected = "Exportovat vybrané momenty"
+close = "Zavřít zajímavé momenty"
+no_selected = "Vyberte momenty k exportu."
+scan_stale = "Časová osa se změnila. Spusťte hledání momentů znovu."
 title = "Najít zajímavé momenty"
 loud = "Hlasité momenty"
 scenes = "Změny scény"

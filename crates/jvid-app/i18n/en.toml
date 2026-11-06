@@ -3,6 +3,8 @@
 
 # Keyboard actions, by keymap.toml id: menus, the shortcut editor and docs/shortcuts.md.
 [action]
+review_highlights = "Highlights"
+export_highlights = "Export Selected Highlights"
 workspace_editing = "Editing Workspace"
 workspace_captions = "Captions Workspace"
 workspace_audio = "Audio Workspace"
@@ -652,6 +654,21 @@ seconds_suffix = " s"
 
 # Find Highlights: marks loud moments and scene changes in the selected clips.
 [highlights]
+review = "Highlights"
+review_empty = "Add markers manually or use Find Highlights on selected clips."
+stale = "Timeline changed. Review current highlights before export."
+refresh = "Use Current Highlights"
+select_none = "Select None"
+choose = "Include in Export"
+duration = "{seconds} s"
+start = "Start"
+end = "End"
+audition = "Audition"
+invalid_span = "Highlight is outside the timeline or empty."
+export_selected = "Export Selected Highlights"
+close = "Close Highlights"
+no_selected = "Select highlights to export."
+scan_stale = "Timeline changed. Run Find Highlights again."
 title = "Find Highlights"
 loud = "Loud Moments"
 scenes = "Scene Changes"

@@ -3,6 +3,8 @@
 # use the imperative (Gem). Terms follow docs/i18n/da.md.
 
 [action]
+review_highlights = "Højdepunkter"
+export_highlights = "Eksportér valgte højdepunkter"
 workspace_editing = "Arbejdsområde til redigering"
 workspace_captions = "Arbejdsområde til undertekster"
 workspace_audio = "Arbejdsområde til lyd"
@@ -599,6 +601,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Højdepunkter"
+review_empty = "Tilføj markører manuelt, eller find højdepunkter i valgte klip."
+stale = "Tidslinjen er ændret. Gennemse aktuelle højdepunkter før eksport."
+refresh = "Brug aktuelle højdepunkter"
+select_none = "Fravælg alle"
+choose = "Medtag i eksport"
+duration = "{seconds} s"
+start = "Start"
+end = "Slut"
+audition = "Prøveafspil"
+invalid_span = "Højdepunktet er uden for tidslinjen eller tomt."
+export_selected = "Eksportér valgte højdepunkter"
+close = "Luk højdepunkter"
+no_selected = "Vælg højdepunkter til eksport."
+scan_stale = "Tidslinjen er ændret. Find højdepunkter igen."
 title = "Find højdepunkter"
 loud = "Høje øjeblikke"
 scenes = "Sceneskift"

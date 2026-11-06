@@ -23,6 +23,8 @@ Work in any panel except while typing in a text field.
 | Import Subtitles | `Ctrl+Shift+I` |
 | Export Subtitles (.srt)… | — |
 | Export Media | `Ctrl+M` |
+| Highlights | — |
+| Export Selected Highlights | — |
 | Quit | `Ctrl+Q` |
 | Play/Stop | `Space` |
 | Shuttle Left | `J` |

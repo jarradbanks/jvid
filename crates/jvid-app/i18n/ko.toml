@@ -5,6 +5,8 @@
 # every English key.
 
 [action]
+review_highlights = "하이라이트"
+export_highlights = "선택한 하이라이트 내보내기"
 workspace_editing = "편집 작업 영역"
 workspace_captions = "자막 작업 영역"
 workspace_audio = "오디오 작업 영역"
@@ -601,6 +603,21 @@ db_suffix = " dB"
 seconds_suffix = "초"
 
 [highlights]
+review = "하이라이트"
+review_empty = "마커를 직접 추가하거나 선택한 클립에서 하이라이트를 찾으세요."
+stale = "타임라인이 변경되었습니다. 내보내기 전에 현재 하이라이트를 검토하세요."
+refresh = "현재 하이라이트 사용"
+select_none = "모두 선택 해제"
+choose = "내보내기에 포함"
+duration = "{seconds}초"
+start = "시작"
+end = "끝"
+audition = "미리 재생"
+invalid_span = "하이라이트가 타임라인 범위 밖이거나 비어 있습니다."
+export_selected = "선택한 하이라이트 내보내기"
+close = "하이라이트 닫기"
+no_selected = "내보낼 하이라이트를 선택하세요."
+scan_stale = "타임라인이 변경되었습니다. 하이라이트를 다시 찾으세요."
 title = "하이라이트 찾기"
 loud = "큰 소리"
 scenes = "장면 전환"

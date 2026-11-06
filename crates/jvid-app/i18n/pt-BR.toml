@@ -3,6 +3,8 @@
 # Terms follow docs/i18n/pt-BR.md.
 
 [action]
+review_highlights = "Destaques"
+export_highlights = "Exportar destaques selecionados"
 workspace_editing = "Espaço de edição"
 workspace_captions = "Espaço de legendas"
 workspace_audio = "Espaço de áudio"
@@ -610,6 +612,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Destaques"
+review_empty = "Adicione marcadores manualmente ou encontre destaques nos clipes selecionados."
+stale = "A linha do tempo mudou. Revise os destaques atuais antes de exportar."
+refresh = "Usar destaques atuais"
+select_none = "Desmarcar tudo"
+choose = "Incluir na exportação"
+duration = "{seconds} s"
+start = "Início"
+end = "Fim"
+audition = "Reproduzir prévia"
+invalid_span = "O destaque está fora da linha do tempo ou vazio."
+export_selected = "Exportar destaques selecionados"
+close = "Fechar destaques"
+no_selected = "Selecione destaques para exportar."
+scan_stale = "A linha do tempo mudou. Encontre os destaques novamente."
 title = "Encontrar destaques"
 loud = "Momentos altos"
 scenes = "Mudanças de cena"

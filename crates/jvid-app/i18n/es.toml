@@ -2,6 +2,8 @@
 # Spanish labels use sentence case (Guardar como), not English Title Case.
 
 [action]
+review_highlights = "Momentos destacados"
+export_highlights = "Exportar momentos seleccionados"
 workspace_editing = "Espacio de edición"
 workspace_captions = "Espacio de subtítulos"
 workspace_audio = "Espacio de audio"
@@ -607,6 +609,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Momentos destacados"
+review_empty = "Añade marcadores manualmente o busca momentos destacados en los clips seleccionados."
+stale = "La línea de tiempo ha cambiado. Revisa los momentos actuales antes de exportar."
+refresh = "Usar momentos actuales"
+select_none = "Deseleccionar todo"
+choose = "Incluir en la exportación"
+duration = "{seconds} s"
+start = "Inicio"
+end = "Fin"
+audition = "Previsualizar"
+invalid_span = "El momento está fuera de la línea de tiempo o vacío."
+export_selected = "Exportar momentos seleccionados"
+close = "Cerrar momentos destacados"
+no_selected = "Selecciona momentos destacados para exportar."
+scan_stale = "La línea de tiempo ha cambiado. Busca momentos destacados de nuevo."
 title = "Buscar momentos destacados"
 loud = "Momentos fuertes"
 scenes = "Cambios de escena"

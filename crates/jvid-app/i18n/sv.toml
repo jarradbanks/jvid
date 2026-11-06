@@ -3,6 +3,8 @@
 # items use the imperative (Spara, Lägg till markör). Terms follow docs/i18n/sv.md.
 
 [action]
+review_highlights = "Höjdpunkter"
+export_highlights = "Exportera valda höjdpunkter"
 workspace_editing = "Arbetsyta för redigering"
 workspace_captions = "Arbetsyta för undertexter"
 workspace_audio = "Arbetsyta för ljud"
@@ -599,6 +601,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Höjdpunkter"
+review_empty = "Lägg till markörer manuellt eller hitta höjdpunkter i valda klipp."
+stale = "Tidslinjen har ändrats. Granska aktuella höjdpunkter före export."
+refresh = "Använd aktuella höjdpunkter"
+select_none = "Avmarkera alla"
+choose = "Ta med i export"
+duration = "{seconds} s"
+start = "Start"
+end = "Slut"
+audition = "Spela förhandsvisning"
+invalid_span = "Höjdpunkten ligger utanför tidslinjen eller är tom."
+export_selected = "Exportera valda höjdpunkter"
+close = "Stäng höjdpunkter"
+no_selected = "Välj höjdpunkter att exportera."
+scan_stale = "Tidslinjen har ändrats. Sök efter höjdpunkter igen."
 title = "Hitta höjdpunkter"
 loud = "Högljudda ögonblick"
 scenes = "Scenbyten"

@@ -3,6 +3,8 @@
 # imperatives (Desa, Obre) and messages address the user as vós (Seleccioneu). See docs/i18n/ca.md.
 
 [action]
+review_highlights = "Moments destacats"
+export_highlights = "Exporta els moments seleccionats"
 workspace_editing = "Espai de muntatge"
 workspace_captions = "Espai de subtítols"
 workspace_audio = "Espai d’àudio"
@@ -609,6 +611,21 @@ db_suffix = " dB"
 seconds_suffix = " s"
 
 [highlights]
+review = "Moments destacats"
+review_empty = "Afegeix marcadors manualment o cerca moments destacats als clips seleccionats."
+stale = "La línia de temps ha canviat. Revisa els moments destacats abans d’exportar."
+refresh = "Utilitza els moments actuals"
+select_none = "No seleccionis res"
+choose = "Inclou a l’exportació"
+duration = "{seconds} s"
+start = "Inici"
+end = "Final"
+audition = "Preescolta"
+invalid_span = "El moment destacat és fora de la línia de temps o és buit."
+export_selected = "Exporta els moments seleccionats"
+close = "Tanca els moments destacats"
+no_selected = "Selecciona moments destacats per exportar."
+scan_stale = "La línia de temps ha canviat. Torna a cercar moments destacats."
 title = "Cerca moments destacats"
 loud = "Moments forts"
 scenes = "Canvis d'escena"
