@@ -37,6 +37,8 @@ pub(super) struct Scan {
 
 /// The open dialog: its settings, the clips it reads and its scene scan.
 pub(super) struct Highlights {
+    /// A scan belongs to the sequence it opened on, never a later placement of its clips.
+    sequence: Sequence,
     /// 0–100: higher finds quieter peaks and smaller picture changes.
     sensitivity: f64,
     /// Seconds added at both ends of each range.
@@ -87,6 +89,7 @@ impl Highlights {
             .map(|(_, c)| c.id)
             .collect();
         (!audio.is_empty() || !video.is_empty()).then(|| Self {
+            sequence: seq.clone(),
             sensitivity: 50.0,
             pad: 2.0,
             loud: !audio.is_empty(),
@@ -113,7 +116,7 @@ impl Highlights {
         path: &dyn Fn(&Clip) -> Option<PathBuf>,
         ctx: &egui::Context,
     ) {
-        if !self.scenes || self.scan.is_some() || self.video.is_empty() {
+        if self.stale(seq) || !self.scenes || self.scan.is_some() || self.video.is_empty() {
             return;
         }
         let clips: Vec<_> = self
@@ -161,6 +164,9 @@ impl Highlights {
         seq: &Sequence,
         peaks: &dyn Fn(&Clip) -> Option<&'a [Peak]>,
     ) -> Option<Vec<(Time, Time)>> {
+        if self.stale(seq) {
+            return None;
+        }
         let s = self.sensitivity as f32 / 100.0;
         let rate = SAMPLE_RATE as i64;
         let time = |n: i64| Time(n * (FLICKS_PER_SECOND / rate));
@@ -171,7 +177,11 @@ impl Highlights {
             let (a, b) = (a.max(c.source_in), b.min(c.source_out));
             if a <= b {
                 let (x, y) = (c.timeline_at(a), c.timeline_at(b));
-                out.push(((x.min(y) - pad).max(Time(0)), x.max(y) + pad));
+                let a = (x.min(y) - pad).max(Time(0));
+                let b = (x.max(y) + pad).min(seq.duration());
+                if a < b {
+                    out.push((a, b));
+                }
             }
         };
         for &id in self.audio() {
@@ -215,6 +225,10 @@ impl Highlights {
         (self.scenes && !h.is_finished()).then(|| h.progress())
     }
 
+    fn stale(&self, seq: &Sequence) -> bool {
+        self.sequence != *seq
+    }
+
     /// The dialog, floating at `at` above the lanes. Returns the markers to add once Add
     /// Markers is picked, and false once it should close.
     pub(super) fn show(
@@ -226,6 +240,11 @@ impl Highlights {
         ranges: Option<&[(Time, Time)]>,
     ) -> (Option<Command>, bool) {
         let mut command = None;
+        let stale = self.stale(seq);
+        if stale && let Some(handle) = self.scan.as_ref().and_then(|s| s.handle.as_ref()) {
+            handle.cancel();
+        }
+        let ranges = if stale { None } else { ranges };
         let mut open = !ui.input(|i| i.key_pressed(Key::Escape));
         egui::Window::new(tr!("highlights.title"))
             .title_bar(false)
@@ -301,11 +320,12 @@ impl Highlights {
                         }
                     });
                 ui.add_space(space::S8);
-                let status = match (self.scanning(), ranges) {
-                    (Some(p), _) => tr!("highlights.scanning", percent = (p * 100.0) as u32),
-                    (None, None) => tr!("silence.reading").to_owned(),
-                    (None, Some([])) => tr!("highlights.none").to_owned(),
-                    (None, Some(r)) => trn!("highlights.found", r.len()),
+                let status = match (stale, self.scanning(), ranges) {
+                    (true, _, _) => tr!("highlights.scan_stale").to_owned(),
+                    (false, Some(p), _) => tr!("highlights.scanning", percent = (p * 100.0) as u32),
+                    (false, None, None) => tr!("silence.reading").to_owned(),
+                    (false, None, Some([])) => tr!("highlights.none").to_owned(),
+                    (false, None, Some(r)) => trn!("highlights.found", r.len()),
                 };
                 ui.label(status);
                 if let Some(p) = self.scanning() {
@@ -478,6 +498,78 @@ mod tests {
         assert!(
             near(ranges[1].0, 4.0) && near(ranges[1].1, 8.0),
             "{ranges:?}"
+        );
+    }
+
+    #[test]
+    fn linked_tracks_share_detection_and_stale_edits_reject_old_scan() {
+        let mut history = History::new(project(0));
+        let asset = history.project().assets()[0].id;
+        let tracks: Vec<_> = history
+            .project()
+            .sequence()
+            .tracks()
+            .iter()
+            .map(|t| t.id)
+            .collect();
+        for &track in &tracks {
+            history
+                .apply(Command::AddClip {
+                    track,
+                    clip: NewClip {
+                        asset,
+                        source_in: Time(0),
+                        source_out: Time(10 * S),
+                        start: Time(0),
+                        link: Some(jvid_core::model::LinkId(99)),
+                    },
+                })
+                .unwrap();
+        }
+        let sequence = history.project().sequence();
+        let video = sequence.tracks()[0].clips()[0].id;
+        let audio = sequence.tracks()[1].clips()[0].id;
+        let from_video = Highlights::open(sequence, &HashSet::from([video])).unwrap();
+        let from_both = Highlights::open(sequence, &HashSet::from([video, audio])).unwrap();
+        assert_eq!(from_video.audio(), &[audio]);
+        assert_eq!(from_both.audio(), &[audio], "linked audio analyzed once");
+        let mut scan = from_video;
+        scan.loud = false;
+        scan.scenes = true;
+        scan.pad = 2.0;
+        scan.scan = Some(Scan {
+            handle: None,
+            found: Arc::new(Mutex::new(Some(vec![(video, Time(9 * S), 1.0)]))),
+        });
+        assert_eq!(
+            scan.ranges(sequence, &|_| None),
+            Some(vec![(Time(7 * S), Time(10 * S))]),
+            "padding stays within timeline"
+        );
+        let clips = sequence.tracks().to_vec();
+        history
+            .apply(markers(&[(Time(7 * S), Time(10 * S))]))
+            .unwrap();
+        assert_eq!(
+            history.project().sequence().tracks(),
+            clips.as_slice(),
+            "adding highlights never edits linked media"
+        );
+        assert!(
+            scan.ranges(history.project().sequence(), &|_| None)
+                .is_none()
+        );
+        assert!(history.undo());
+        assert!(!scan.stale(history.project().sequence()));
+        history
+            .apply(Command::RemoveClips {
+                ids: vec![video],
+                ripple: false,
+            })
+            .unwrap();
+        assert!(
+            scan.ranges(history.project().sequence(), &|_| None)
+                .is_none()
         );
     }
 }
