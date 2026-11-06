@@ -115,7 +115,9 @@ impl Preferences {
                     self.sidebar(ui);
                 });
                 ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+                    ui.set_clip_rect(ui.clip_rect().intersect(body));
                     egui::ScrollArea::vertical()
+                        .max_height(body.height())
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             egui::Frame::new().inner_margin(space::S16).show(ui, |ui| {

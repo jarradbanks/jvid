@@ -2028,6 +2028,32 @@ fn preferences_fit_the_minimum_window() {
 }
 
 #[test]
+fn preferences_general_scrolls_preset_controls_without_moving_done() {
+    let mut h = plain_harness();
+    h.state_mut().on_welcome = false;
+    h.state_mut().preferences.open(Vec::new(), None);
+    h.run();
+    let done = h.get_by_label(tr!("settings.done")).rect();
+    for label in [
+        tr!("personal_presets.open_folder"),
+        tr!("settings.reduce_motion"),
+    ] {
+        h.get_by_label(label).scroll_to_me();
+        h.run();
+        let control = h.get_by_label(label).rect();
+        assert!(h.ctx.content_rect().contains_rect(control));
+        assert!(
+            control.bottom() < done.top(),
+            "{label} overlaps footer: {control:?}"
+        );
+        assert_eq!(h.get_by_label(tr!("settings.done")).rect(), done);
+    }
+    h.get_by_label(tr!("settings.done")).click();
+    h.run();
+    assert!(!h.state().preferences.is_open());
+}
+
+#[test]
 fn editor_in_light_and_high_contrast() {
     if !gpu() {
         return;
