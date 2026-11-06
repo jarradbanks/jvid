@@ -202,6 +202,9 @@ impl Store {
     }
 
     fn write(&self, id: &str, text: &str, replace: bool) -> Result<(), String> {
+        if text.len() as u64 > MAX_BYTES {
+            return Err(tr!("personal_presets.invalid").into());
+        }
         let destination = self.directory.join(id);
         let temporary = self.directory.join(format!(
             ".{id}-{}.tmp",
@@ -1016,6 +1019,23 @@ mod tests {
         assert!(store.save(" voice ", preset.clone()).is_err());
         assert!(store.save(" ", preset.clone()).is_err());
         assert!(store.save("bad\nname", preset.clone()).is_err());
+        let oversized = Preset {
+            style: Style::Effects {
+                effects: vec![
+                    Effect {
+                        shader: "x".repeat(4096),
+                        params: BTreeMap::new(),
+                        enabled: true,
+                        mask: None
+                    };
+                    300
+                ],
+            },
+            animation_duration: None,
+            keyframes: BTreeMap::new(),
+        };
+        assert!(store.save("Too Large", oversized).is_err());
+        assert_eq!(store.entries().unwrap().len(), 1);
         store.rename(&id, "Clear Voice").unwrap();
         let again = Store {
             directory: directory.path().into(),
