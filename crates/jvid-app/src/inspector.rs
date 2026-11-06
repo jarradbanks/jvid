@@ -3346,10 +3346,14 @@ fn font_button(ui: &mut Ui, shown: &str, missing: bool, open: bool) -> egui::Res
 fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     use egui::Key;
     let id = egui::Id::new("inspector font");
-    let missing = !family.is_empty() && !list.contains(family);
-    let shown = match family.as_str() {
-        "" => tr!("inspector.sans_serif").to_owned(),
-        f => f.to_owned(),
+    let collected =
+        !jvid_render::text::project_font_sources(std::slice::from_ref(family)).is_empty();
+    let missing = !family.is_empty() && !list.contains(family) && !collected;
+    let shown = jvid_render::text::display_family(family);
+    let shown = if shown.is_empty() {
+        tr!("inspector.sans_serif").to_owned()
+    } else {
+        shown
     };
     let st = ui.data(|d| d.get_temp::<FontSearch>(id));
     let r = font_button(ui, &shown, missing, st.is_some());
@@ -3511,9 +3515,11 @@ fn text_summary(s: &Text, id: &str) -> String {
     };
     match id {
         "text" => {
-            let family = match s.family.as_str() {
-                "" => tr!("inspector.sans_serif"),
-                f => f,
+            let family = jvid_render::text::display_family(&s.family);
+            let family = if family.is_empty() {
+                tr!("inspector.sans_serif").to_owned()
+            } else {
+                family
             };
             format!("{family} · {:.0}", s.size)
         }
