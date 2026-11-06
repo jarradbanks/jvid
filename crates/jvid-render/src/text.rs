@@ -128,63 +128,111 @@ impl Fonts {
     }
 }
 
-/// Verifies the original glyph faces against only the explicitly permitted files.
-/// Same-family substitutions and unbundled fallback faces remain unresolved.
-pub fn project_font_coverage(sources: &[FontSource], texts: &[Text]) -> io::Result<bool> {
-    let mut selected = Vec::new();
-    for source in sources {
-        let bytes = Arc::new(std::fs::read(&source.path)?);
-        let mut database = cosmic_text::fontdb::Database::new();
-        let ids = database.load_font_source(cosmic_text::fontdb::Source::Binary(bytes.clone()));
-        let indices: Vec<_> = ids
-            .into_iter()
-            .filter_map(|id| database.face(id))
-            .filter(|face| {
-                source.original_family.is_empty()
-                    || face
-                        .families
-                        .iter()
-                        .any(|(name, _)| name.eq_ignore_ascii_case(&source.original_family))
-            })
-            .map(|face| face.index)
-            .collect();
-        if indices.is_empty() {
-            return Err(io::Error::from(io::ErrorKind::InvalidData));
-        }
-        selected.push((bytes, indices));
-    }
+/// Proves that cold reopening with only permitted faces preserves actual shaping.
+/// Unsupported fallback/face unions remain explicitly unresolved.
+pub fn project_font_coverage(
+    sources: &[FontSource],
+    texts: &[Text],
+    size: (u32, u32),
+) -> io::Result<bool> {
     let mut fonts = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    project_font_coverage_with(&mut fonts, sources, texts, size)
+}
+
+fn project_font_coverage_with(
+    fonts: &mut Fonts,
+    sources: &[FontSource],
+    texts: &[Text],
+    size: (u32, u32),
+) -> io::Result<bool> {
+    let alias = "jvid-collection-cold-coverage";
+    let mut database = cosmic_text::fontdb::Database::new();
+    for source in sources {
+        let (_, faces) = read_font_faces(source)?;
+        // A valid permitted fallback file may have a different family from the UI's
+        // requested family. Report coverage, rather than a generic invalid-file error.
+        if faces.is_empty() {
+            return Ok(false);
+        }
+        alias_faces(&mut database, faces, alias);
+    }
+    let mut packaged = Fonts::new(FontSystem::new_with_locale_and_db(
+        fonts.system.locale().to_owned(),
+        database,
+    ));
     for text in texts {
         if text.content.trim().is_empty() {
             continue;
         }
-        let (buffer, _, _) = layout(&mut fonts, text, (320, 180));
-        let mut ids = std::collections::HashSet::new();
-        for glyph in buffer.layout_runs().flat_map(|run| run.glyphs) {
-            if glyph.glyph_id == 0 {
-                return Ok(false);
-            }
-            ids.insert(glyph.font_id);
-        }
-        if ids.is_empty() {
+        let (original, wrap, offset) = layout(fonts, text, size);
+        let collected = Text {
+            family: alias.into(),
+            ..text.clone()
+        };
+        let (cold, cold_wrap, cold_offset) = layout(&mut packaged, &collected, size);
+        if wrap != cold_wrap
+            || offset != cold_offset
+            || !same_shaping(&fonts.system, &original, &packaged.system, &cold)
+        {
             return Ok(false);
-        }
-        for id in ids {
-            if !fonts
-                .system
-                .db()
-                .with_face_data(id, |data, index| {
-                    selected.iter().any(|(bytes, indices)| {
-                        data == bytes.as_slice() && indices.contains(&index)
-                    })
-                })
-                .unwrap_or(false)
-            {
-                return Ok(false);
-            }
         }
     }
     Ok(true)
+}
+
+fn same_shaping(original: &FontSystem, a: &Buffer, packaged: &FontSystem, b: &Buffer) -> bool {
+    let left: Vec<_> = a.layout_runs().collect();
+    let right: Vec<_> = b.layout_runs().collect();
+    if left.is_empty() || left.len() != right.len() {
+        return false;
+    }
+    left.iter().zip(&right).all(|(a, b)| {
+        (
+            a.line_i,
+            a.rtl,
+            [a.line_y, a.line_top, a.line_height, a.line_w],
+        ) == (
+            b.line_i,
+            b.rtl,
+            [b.line_y, b.line_top, b.line_height, b.line_w],
+        ) && !a.glyphs.is_empty()
+            && a.glyphs.len() == b.glyphs.len()
+            && a.glyphs.iter().zip(b.glyphs).all(|(a, b)| {
+                a.glyph_id != 0
+                    && (
+                        a.start,
+                        a.end,
+                        a.glyph_id,
+                        a.font_size,
+                        a.font_weight,
+                        a.line_height_opt,
+                        a.level,
+                        [a.x, a.y, a.w, a.x_offset, a.y_offset],
+                        a.cache_key_flags,
+                    ) == (
+                        b.start,
+                        b.end,
+                        b.glyph_id,
+                        b.font_size,
+                        b.font_weight,
+                        b.line_height_opt,
+                        b.level,
+                        [b.x, b.y, b.w, b.x_offset, b.y_offset],
+                        b.cache_key_flags,
+                    )
+                    && original
+                        .db()
+                        .with_face_data(a.font_id, |data, index| {
+                            packaged
+                                .db()
+                                .with_face_data(b.font_id, |cold_data, cold_index| {
+                                    index == cold_index && data == cold_data
+                                })
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false)
+            })
+    })
 }
 
 /// Validates every alias before changing renderer state; retains loaded resources for
@@ -629,12 +677,78 @@ mod tests {
             .join(name)
     }
 
+    fn fixture_fonts() -> Fonts {
+        let mut db = cosmic_text::fontdb::Database::new();
+        db.load_font_file(fixture("primary.ttf")).unwrap();
+        db.load_font_file(fixture("fallback.ttf")).unwrap();
+        Fonts::new(FontSystem::new_with_locale_and_db("en-US".into(), db))
+    }
+
     fn fixture_source(name: &str, original: &str) -> FontSource {
         FontSource {
             family: PRIMARY.into(),
             original_family: original.into(),
             path: fixture(name),
         }
+    }
+
+    #[test]
+    fn portable_primary_preserves_cold_pixels_with_different_installed_fonts() {
+        let mut original = fixture_fonts();
+        let text = Text {
+            content: "AB".into(),
+            family: PRIMARY.into(),
+            ..Text::default()
+        };
+        let source = fixture_source("primary.ttf", PRIMARY);
+        assert!(
+            project_font_coverage_with(
+                &mut original,
+                std::slice::from_ref(&source),
+                std::slice::from_ref(&text),
+                (640, 360)
+            )
+            .unwrap()
+        );
+        let expected = masks(&mut original, &text, (640, 360));
+        let mut db = cosmic_text::fontdb::Database::new();
+        // A cold renderer has a conflicting installed primary face and no original fallback.
+        db.load_font_file(fixture("alternate.ttf")).unwrap();
+        let alias = "jvid-collection-cold-pixels-fixture";
+        let (_, faces) = read_font_faces(&source).unwrap();
+        alias_faces(&mut db, faces, alias);
+        let mut cold = Fonts::new(FontSystem::new_with_locale_and_db("ja-JP".into(), db));
+        let actual = masks(
+            &mut cold,
+            &Text {
+                family: alias.into(),
+                ..text
+            },
+            (640, 360),
+        );
+        assert_eq!(expected.fill, actual.fill);
+        assert_eq!(expected.bounds, actual.bounds);
+    }
+
+    #[test]
+    fn portable_ttc_coverage_rejects_changed_face_order() {
+        let mut db = cosmic_text::fontdb::Database::new();
+        db.load_font_file(fixture("faces.ttc")).unwrap();
+        let mut original = Fonts::new(FontSystem::new_with_locale_and_db("en-US".into(), db));
+        let text = Text {
+            content: "AΩ".into(),
+            family: PRIMARY.into(),
+            ..Text::default()
+        };
+        let sources = [
+            fixture_source("faces.ttc", FALLBACK),
+            fixture_source("faces.ttc", PRIMARY),
+        ];
+        let (_, primary) = read_font_faces(&sources[1]).unwrap();
+        let (_, fallback) = read_font_faces(&sources[0]).unwrap();
+        assert_eq!(primary[0].index, 0);
+        assert_eq!(fallback[0].index, 1);
+        assert!(!project_font_coverage_with(&mut original, &sources, &[text], (320, 180)).unwrap());
     }
 
     #[test]
@@ -665,6 +779,37 @@ mod tests {
             project_font_sources(&[alias.into()]),
             vec![primary, fallback]
         );
+    }
+
+    #[test]
+    fn portable_coverage_rejects_primary_changes_from_alias_face_union() {
+        let mut original = fixture_fonts();
+        let text = Text {
+            content: "AΩ".into(),
+            family: PRIMARY.into(),
+            ..Text::default()
+        };
+        // Both actual faces are present, but fallback-first aliasing changes Latin A.
+        let sources = [
+            fixture_source("fallback.ttf", FALLBACK),
+            fixture_source("primary.ttf", PRIMARY),
+        ];
+        assert!(!project_font_coverage_with(&mut original, &sources, &[text], (320, 180)).unwrap());
+    }
+
+    #[test]
+    fn portable_coverage_reports_requested_family_on_fallback_file_as_unresolved() {
+        let mut original = fixture_fonts();
+        let text = Text {
+            content: "AΩ".into(),
+            family: PRIMARY.into(),
+            ..Text::default()
+        };
+        let sources = [
+            fixture_source("primary.ttf", PRIMARY),
+            fixture_source("fallback.ttf", PRIMARY),
+        ];
+        assert!(!project_font_coverage_with(&mut original, &sources, &[text], (320, 180)).unwrap());
     }
 
     #[test]

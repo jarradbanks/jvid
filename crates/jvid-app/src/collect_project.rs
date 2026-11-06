@@ -448,7 +448,14 @@ fn run(
             .filter(|t| t.family == family)
             .cloned()
             .collect();
-        if !jvid_render::text::project_font_coverage(&fonts, &texts)? {
+        if !jvid_render::text::project_font_coverage(
+            &fonts,
+            &texts,
+            (
+                request.project.settings().width,
+                request.project.settings().height,
+            ),
+        )? {
             manifest.unresolved.push(Unresolved {
                 kind: Kind::Font,
                 reference: family,
@@ -487,7 +494,28 @@ fn run(
         }
     }
     let mut fonts = Vec::new();
-    for entry in manifest.files.iter().filter(|e| e.kind == Kind::Font) {
+    // An incomplete family keeps a readable installed-family reference. Never advertise a
+    // private alias whose packaged faces were not proven to preserve the original shaping.
+    for unresolved in manifest.unresolved.iter().filter(|e| e.kind == Kind::Font) {
+        for asset in json["project"]["assets"]
+            .as_array_mut()
+            .into_iter()
+            .flatten()
+        {
+            if let Some(text) = asset.get_mut("text").filter(|t| t.is_object())
+                && text["family"].as_str() == Some(&unresolved.reference)
+            {
+                text["family"] = jvid_render::text::display_family(&unresolved.reference).into();
+            }
+        }
+    }
+    for entry in manifest.files.iter().filter(|e| {
+        e.kind == Kind::Font
+            && !manifest
+                .unresolved
+                .iter()
+                .any(|u| u.kind == Kind::Font && u.reference == e.reference)
+    }) {
         let alias = font_alias(&entry.reference, &manifest.files);
         for asset in json["project"]["assets"]
             .as_array_mut()
@@ -557,13 +585,14 @@ fn run(
 fn font_alias(family: &str, files: &[Entry]) -> String {
     let mut hash = Sha256::new();
     hash.update(family.as_bytes());
-    let digests: BTreeSet<_> = files
+    for entry in files
         .iter()
         .filter(|e| e.kind == Kind::Font && e.reference == family)
-        .map(|e| &e.sha256)
-        .collect();
-    for digest in digests {
-        hash.update(digest.as_bytes());
+    {
+        hash.update(entry.sha256.as_bytes());
+        let original = entry.font_original_family.as_deref().unwrap_or(family);
+        hash.update((original.len() as u64).to_le_bytes());
+        hash.update(original.as_bytes());
     }
     format!("jvid-collection-{:x}", hash.finalize())
 }
@@ -1609,6 +1638,89 @@ mod tests {
                 .any(|u| u.reason == Reason::FontCoverage)
         );
         assert!(!req.destination.exists());
+    }
+
+    #[test]
+    fn permitted_fallback_mismatch_is_explicit_and_keeps_readable_family() {
+        let root = tempfile::tempdir().unwrap();
+        let fixtures =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../jvid-render/tests/fixtures/fonts");
+        let family = "jvid-collection-incomplete-fixture";
+        jvid_render::text::load_project_fonts(&[jvid_render::text::FontSource {
+            family: family.into(),
+            original_family: "Jvid Fixture Primary".into(),
+            path: fixtures.join("primary.ttf"),
+        }])
+        .unwrap();
+        let mut history = History::new(Project::default());
+        history
+            .apply(Command::AddText {
+                name: "Mixed-script title".into(),
+                text: Text {
+                    family: family.into(),
+                    content: "AΩ".into(),
+                    ..Text::default()
+                },
+            })
+            .unwrap();
+        let before = history.project().clone();
+        let mut req = request(before.clone(), root.path());
+        req.fonts.push(Font {
+            family: family.into(),
+            original_family: "Jvid Fixture Primary".into(),
+            path: fixtures.join("fallback.ttf"),
+            permitted: true,
+        });
+        let failure = collect(&req, || false, |_| {}).unwrap_err();
+        assert!(matches!(failure.kind, FailureKind::Unresolved));
+        assert!(
+            failure
+                .manifest
+                .unresolved
+                .iter()
+                .any(|u| u.reason == Reason::FontCoverage)
+        );
+        assert!(!req.destination.exists());
+        req.allow_unresolved = true;
+        let collected = collect(&req, || false, |_| {}).unwrap();
+        assert!(!collected.manifest.unresolved.is_empty());
+        let json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&collected.project).unwrap()).unwrap();
+        assert!(json.get("fonts").is_none());
+        let reopened = crate::project_file::load(&collected.project).unwrap();
+        assert_eq!(
+            reopened
+                .assets()
+                .iter()
+                .find_map(|a| a.text.as_ref())
+                .unwrap()
+                .family,
+            "Jvid Fixture Primary"
+        );
+        assert_eq!(history.project(), &before);
+    }
+
+    #[test]
+    fn font_alias_includes_face_filter_and_file_order() {
+        let entry = |digest: &str, original: &str| Entry {
+            kind: Kind::Font,
+            reference: "Title".into(),
+            relative_path: String::new(),
+            bytes: 1,
+            sha256: digest.into(),
+            font_original_family: Some(original.into()),
+            bundling_permitted: Some(true),
+        };
+        let a = entry("aaa", "Primary");
+        let b = entry("bbb", "Fallback");
+        assert_ne!(
+            font_alias("Title", &[a.clone(), b.clone()]),
+            font_alias("Title", &[b, a.clone()])
+        );
+        assert_ne!(
+            font_alias("Title", &[a]),
+            font_alias("Title", &[entry("aaa", "Fallback")])
+        );
     }
     #[test]
     fn shipped_shader_without_external_override_is_captured() {
