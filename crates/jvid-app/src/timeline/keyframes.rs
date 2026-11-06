@@ -719,6 +719,18 @@ mod tests {
         keys.extend(jvid_core::model::Wheels::KEYS);
         keys.extend(jvid_core::model::Curves::NAMES);
         keys.extend(jvid_core::model::Secondary::KEYS);
+        let annotation = jvid_core::annotations::Annotation::default();
+        for key in jvid_core::annotations::Annotation::POINT_KEYS
+            .into_iter()
+            .chain(jvid_core::annotations::AnnotationStyle::KEYS)
+            .chain(["annotation_number"])
+        {
+            assert!(
+                annotation.get(key).is_some(),
+                "unsupported annotation key {key}"
+            );
+            keys.push(key);
+        }
         let lanes: Vec<&str> = CATALOG
             .keys("en")
             .into_iter()
@@ -732,11 +744,16 @@ mod tests {
             assert!(keys.contains(&key), "lane.{key} isn't a built-in key");
             let words = caption(&c, key);
             assert!(
-                words.split(' ').all(|w| w.starts_with(char::is_uppercase)),
+                words
+                    .split(' ')
+                    .all(|w| w.starts_with(char::is_uppercase)
+                        || w.chars().all(|c| c.is_ascii_digit())),
                 "lane.{key} = {words:?} isn't Title Case"
             );
         }
         assert_eq!(caption(&c, "crop_bottom"), "Crop Bottom");
+        assert_eq!(caption(&c, "annotation_a"), "Annotation Point 1");
+        assert_eq!(caption(&c, "annotation_b"), "Annotation Point 2");
         // An effect the clip doesn't have, or any other name, shows as stored in Title Case.
         assert_eq!(caption(&c, "fx0.grain_size"), "Fx0 Grain Size");
         assert_eq!(caption(&c, "mask0.feather"), "Mask0 Feather");
