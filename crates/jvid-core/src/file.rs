@@ -210,7 +210,11 @@ pub fn remap_paths(
 
 fn visit_paths(p: &mut Value, mut visit: impl FnMut(&mut Value, &str, &str, DependencyKind)) {
     for asset in p["assets"].as_array_mut().into_iter().flatten() {
-        if asset["solid"].is_null() && asset["text"].is_null() && asset["sequence"].is_null() {
+        if asset["solid"].is_null()
+            && asset["text"].is_null()
+            && asset["annotation"].is_null()
+            && asset["sequence"].is_null()
+        {
             visit(asset, "path", "relative_path", DependencyKind::Media);
         }
     }

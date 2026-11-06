@@ -104,10 +104,7 @@ impl LibraryView {
                     Kind::Any => true,
                     Kind::Audio => is_audio(a),
                     Kind::Video => {
-                        a.probe.as_ref().is_some_and(|p| p.width.is_some())
-                            || a.solid.is_some()
-                            || a.text.is_some()
-                            || a.sequence.is_some()
+                        a.probe.as_ref().is_some_and(|p| p.width.is_some()) || a.generated()
                     }
                 };
                 !a.generated_caption
