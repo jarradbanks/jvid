@@ -14,6 +14,7 @@ Work in any panel except while typing in a text field.
 | Open Project | `Ctrl+O` |
 | Save | `Ctrl+S` |
 | Save As | `Ctrl+Shift+S` |
+| Collect Project | — |
 | Import | `Ctrl+I` |
 | Import Subtitles | `Ctrl+Shift+I` |
 | Export Subtitles (.srt)… | — |
