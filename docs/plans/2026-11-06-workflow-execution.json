@@ -108,13 +108,19 @@
       "spec": "Package V: Viewer Fit and transform access\n\nYou are an Orca worker executing one approved jvid workflow package for Run run_bdd46aa1fc52, coordinated solely by the execution orchestrator. Work only in the assigned isolated Omarchy checkout. Do not dispatch additional workers, implement other packages, merge main, change protection, or publish releases/tags. Base on the coordinator-specified commit reconciled with latest origin/main, never the repo default origin/develop; fetch/inspect before changing the base and report divergence. Read DESIGN.md and applicable AGENTS.md. The approved scope and exact acceptance for this package are included below. Preserve remappable shortcuts, translated labels, narrow panels and all three OSes. Content changes must undo, persist and match playback/export; view state must not alter renders. Keep jvid-core free of UI/media/I/O dependencies. Implement substantial logic in the owned modules. Shared-file patches require a declared coordinator ownership window and a small separate integration commit; include exact changed paths in the report. Publish a small contract commit before dependent consumers when named below. At checkpoints read the live preamble inbox; ask the coordinator with the preamble command when genuinely blocked. Follow that preamble exactly for heartbeat, Task/Dispatch IDs and one worker_done; do not invent handles or send lifecycle completion from another terminal. Commit the work and supply a report with commits, files, exact test commands/results, any skipped tests, UI artifact paths where appropriate and material limitations. Run focused meaningful tests plus formatting; do not claim manual/platform verification from unit tests. The coordinator independently reviews and integrates. Report before scope changes or any ownership collision.\n\nTarget and exclusive owned files: crates/jvid-app/src/preview.rs; crates/jvid-app/src/handles.rs; crates/jvid-app/src/viewer_geometry.rs (new).\n\nIntegration ownership and concrete work: First publish tested viewer geometry/recovery contract. Read zoom.rs, masks.rs and app/text_tools.rs; propose necessary mapping call-site patches separately. Own preview.rs exclusively until V is accepted; F and N cannot edit it concurrently. Supply before/after evidence for landscape/portrait/square/title clips at Fit and for rotated/off-frame selection; test screen/project roundtrips, high DPI, transport exclusion and unchanged model/export values.\n\nShared contracts:\nV must establish one screen/project coordinate mapping and separate the clipped viewer body, fitted project frame and editing gutter. Fit and View Selection affect view state only; never write clip transforms. Handle/hit-target dimensions are logical screen points. All overlays, text, masks, Alt-region gestures and reframe consume the same frame mapping. Recovery changes zoom/pan deliberately and remains stable during a drag. V publishes geometry helpers/tests before N consumes them; F inserts viewer status only after V.\nCoordinator serializes changes to core model.rs/history.rs/file.rs/lib.rs, app.rs/lib.rs, shared keymap wiring, i18n catalogs and guide docs. Workers may propose narrowly scoped changes in separately identified commits but must obtain a coordinator ownership window before applying shared-file changes that overlap another active task. No independent schema-version increments. Prefer backward-compatible serde defaults and preserve all legacy projects/settings.\n\n### V — Viewer Fit and transform access (new owner request)\n\nTarget: preview.rs, handles.rs, shared viewer geometry, applicable Source editing, zoom/mask/text overlays.\n\nFit currently risks placing edge and rotation controls outside the clipped viewer. Reserve a comfortable screen-space editing gutter so a normally fitted clip has reachable corner/edge/rotation controls. Keep the underlying frame mapping consistent for rendering, hit testing, text, masks, zoom-to-region and reframing. Do not shrink the actual clip or change exported framing. Handle oversize/rotated/off-frame selections with a deliberate recovery affordance (e.g. view selection), without unstable automatic zoom during a drag. Apply consistent view behavior in Program and Source; preserve Source's existing edit capabilities rather than inventing source edits. Keep overlays and hit targets out of transport controls and neighboring panels.\n\nAcceptance: fitted landscape/portrait/square clips and editable titles have reachable controls; rotations and large transforms can be recovered; narrow and high-DPI viewers work; zoom/pan, masks and Alt-region gestures retain correct coordinates; project transform values and rendered output do not change merely by fitting the view. Include geometry tests and before/after UI evidence.",
       "task_id": "task_15b134d60ea1",
       "dispatch_id": "ctx_b695bb17d93c",
-      "implementation_status": "dispatched",
+      "implementation_status": "worker_succeeded_pending_independent_integration",
       "creation_request_id": "a22c4fbf-53ed-4095-b9dd-c55c7d3fb5cc",
       "worktree_id": "41ac820a-a842-48f7-82fb-7df422766c74::/home/jarrad/orca/workspaces/jvid/workflow-viewer-fit",
       "launch_request_id": "16956b27-1769-491d-8067-9168335b0ac6",
       "effective_model": "gpt-6.1-sol",
       "effective_effort": "xhigh",
-      "initial_guidance_request_id": "2720d7ca-6f7d-470e-a29d-80047adf0509"
+      "initial_guidance_request_id": "2720d7ca-6f7d-470e-a29d-80047adf0509",
+      "worker_outcome": "succeeded",
+      "worker_lifecycle": "released",
+      "branch": "jarradbanks/workflow-viewer-fit",
+      "head": "bbd69cca1faa7097bcb7a40eca38d42a037a4afb",
+      "report_path": "/home/jarrad/.cache/jvid-workflow/run_bdd46aa1fc52/package-v/report.txt",
+      "release_request_id": "dd9e7d40-66ad-43fe-95a5-57d4f690a933"
     },
     {
       "package": "A1",
@@ -131,13 +137,19 @@
       "spec": "Package A1: Command palette\n\nYou are an Orca worker executing one approved jvid workflow package for Run run_bdd46aa1fc52, coordinated solely by the execution orchestrator. Work only in the assigned isolated Omarchy checkout. Do not dispatch additional workers, implement other packages, merge main, change protection, or publish releases/tags. Base on the coordinator-specified commit reconciled with latest origin/main, never the repo default origin/develop; fetch/inspect before changing the base and report divergence. Read DESIGN.md and applicable AGENTS.md. The approved scope and exact acceptance for this package are included below. Preserve remappable shortcuts, translated labels, narrow panels and all three OSes. Content changes must undo, persist and match playback/export; view state must not alter renders. Keep jvid-core free of UI/media/I/O dependencies. Implement substantial logic in the owned modules. Shared-file patches require a declared coordinator ownership window and a small separate integration commit; include exact changed paths in the report. Publish a small contract commit before dependent consumers when named below. At checkpoints read the live preamble inbox; ask the coordinator with the preamble command when genuinely blocked. Follow that preamble exactly for heartbeat, Task/Dispatch IDs and one worker_done; do not invent handles or send lifecycle completion from another terminal. Commit the work and supply a report with commits, files, exact test commands/results, any skipped tests, UI artifact paths where appropriate and material limitations. Run focused meaningful tests plus formatting; do not claim manual/platform verification from unit tests. The coordinator independently reviews and integrates. Report before scope changes or any ownership collision.\n\nTarget and exclusive owned files: crates/jvid-app/src/command_palette.rs (new); crates/jvid-app/src/keymap.rs.\n\nIntegration ownership and concrete work: Start the shared action applicability contract in a small commit. app.rs action routing/menu wiring and lib.rs registration are coordinator integration patches; preserve existing Source/Program focus semantics and text-input shortcut suppression. Test translated search/aliases, custom and unbound shortcuts, disabled reasons, navigation/Enter/Escape and focus restoration.\n\nShared contracts:\nKeep keymap::ACTIONS and its stable string IDs authoritative, resolve translated names and actual current bindings at display time, and expose one applicability result (enabled or a translated reason) consumed by palette/menu/dispatch. Preserve Source-vs-Program and focused-panel routing and restore prior focus after palette close. Feature workers submit registration IDs and a small wiring patch to coordinator; do not maintain a second action executor.\nCoordinator serializes changes to core model.rs/history.rs/file.rs/lib.rs, app.rs/lib.rs, shared keymap wiring, i18n catalogs and guide docs. Workers may propose narrowly scoped changes in separately identified commits but must obtain a coordinator ownership window before applying shared-file changes that overlap another active task. No independent schema-version increments. Prefer backward-compatible serde defaults and preserve all legacy projects/settings.\n\n### A1 — Command palette (#1)\n\nTarget: app action dispatch, keymap, new palette module. Search existing registered actions by translated name and useful aliases; show current shortcuts and availability reasons; support keyboard navigation, Enter and Escape. Reuse existing action execution and applicability checks. Text fields must retain typing shortcuts. New feature actions register through the same contract. Acceptance includes custom/unbound shortcuts, focus restoration, disabled actions and language switches.",
       "task_id": "task_25cb10efc22b",
       "dispatch_id": "ctx_17ead9b746a3",
-      "implementation_status": "dispatched",
+      "implementation_status": "worker_succeeded_pending_independent_integration",
       "creation_request_id": "202202c6-7e95-4def-8a92-e6a7b02ca4b5",
       "worktree_id": "41ac820a-a842-48f7-82fb-7df422766c74::/home/jarrad/orca/workspaces/jvid/workflow-command-palette",
       "launch_request_id": "54363992-81b8-43b4-90e3-be35edd76c6a",
       "effective_model": "gpt-6.1-sol",
       "effective_effort": "xhigh",
-      "initial_guidance_request_id": "7a07f462-10b2-48af-9a62-f6e9233666f1"
+      "initial_guidance_request_id": "7a07f462-10b2-48af-9a62-f6e9233666f1",
+      "worker_outcome": "succeeded",
+      "worker_lifecycle": "released",
+      "branch": "jarradbanks/workflow-command-palette",
+      "head": "4e459b559b09962a8e5dbac3764bff8c3ff452e3",
+      "report_path": "/home/jarrad/orca/worker-reports/task_25cb10efc22b/report.txt",
+      "release_request_id": "3b5322c9-ff29-47b8-884c-1abf90fe108b"
     },
     {
       "package": "A2",
@@ -156,9 +168,13 @@
       ],
       "spec": "Package A2: Workspaces and maximize\n\nYou are an Orca worker executing one approved jvid workflow package for Run run_bdd46aa1fc52, coordinated solely by the execution orchestrator. Work only in the assigned isolated Omarchy checkout. Do not dispatch additional workers, implement other packages, merge main, change protection, or publish releases/tags. Base on the coordinator-specified commit reconciled with latest origin/main, never the repo default origin/develop; fetch/inspect before changing the base and report divergence. Read DESIGN.md and applicable AGENTS.md. The approved scope and exact acceptance for this package are included below. Preserve remappable shortcuts, translated labels, narrow panels and all three OSes. Content changes must undo, persist and match playback/export; view state must not alter renders. Keep jvid-core free of UI/media/I/O dependencies. Implement substantial logic in the owned modules. Shared-file patches require a declared coordinator ownership window and a small separate integration commit; include exact changed paths in the report. Publish a small contract commit before dependent consumers when named below. At checkpoints read the live preamble inbox; ask the coordinator with the preamble command when genuinely blocked. Follow that preamble exactly for heartbeat, Task/Dispatch IDs and one worker_done; do not invent handles or send lifecycle completion from another terminal. Commit the work and supply a report with commits, files, exact test commands/results, any skipped tests, UI artifact paths where appropriate and material limitations. Run focused meaningful tests plus formatting; do not claim manual/platform verification from unit tests. The coordinator independently reviews and integrates. Report before scope changes or any ownership collision.\n\nTarget and exclusive owned files: crates/jvid-app/src/workspaces.rs (new); crates/jvid-app/src/settings_file.rs.\n\nIntegration ownership and concrete work: Continue the shell lane after A1, publish optional-panel IDs before H/C final wiring. Layout implementation may supply isolated app.rs docking/persistence patches after coordinator grants that window. Use Editing/Captions/Audio built-ins, personal save/rename/delete and reversible focused-panel maximize. Test restart, existing persisted DockState, unavailable optional panels, invalid-layout repair, reset and preservation of transcript/job/panel state.\n\nShared contracts:\nPreserve serialized names of all existing app::Tab variants. A2 owns a compatibility-aware optional-panel registration contract; reserve stable semantic IDs captions and highlights and repair missing/unavailable panels without dropping core panels or resurrecting closed panels. Layout snapshots own docking/view placement only, never history, jobs, transcript cache or panel domain state. H/C may start domain modules before A2, but final panel wiring waits for the A2 contract.\nKeep keymap::ACTIONS and its stable string IDs authoritative, resolve translated names and actual current bindings at display time, and expose one applicability result (enabled or a translated reason) consumed by palette/menu/dispatch. Preserve Source-vs-Program and focused-panel routing and restore prior focus after palette close. Feature workers submit registration IDs and a small wiring patch to coordinator; do not maintain a second action executor.\nCoordinator serializes changes to core model.rs/history.rs/file.rs/lib.rs, app.rs/lib.rs, shared keymap wiring, i18n catalogs and guide docs. Workers may propose narrowly scoped changes in separately identified commits but must obtain a coordinator ownership window before applying shared-file changes that overlap another active task. No independent schema-version increments. Prefer backward-compatible serde defaults and preserve all legacy projects/settings.\n\n### A2 — Workspaces and maximize (#2)\n\nTarget: dock layout/settings persistence. Ship Editing, Captions and Audio layouts, save/rename/delete personal layouts, and reversible maximize of the focused panel. Existing panel state, jobs and transcript cache survive layout changes. Preserve persisted layouts and repair invalid old layouts safely. Establish a stable optional-panel ID contract for caption/highlight workspaces before their consumers land. Test restart, maximize/restore, reset and missing optional panels.",
       "task_id": "task_257e77a2a405",
-      "dispatch_id": null,
-      "implementation_status": "not_started",
-      "creation_request_id": "4e861117-baae-434c-914c-4c89b185310a"
+      "dispatch_id": "ctx_1cf88c8c539f",
+      "implementation_status": "dispatched",
+      "creation_request_id": "4e861117-baae-434c-914c-4c89b185310a",
+      "worktree_id": "41ac820a-a842-48f7-82fb-7df422766c74::/home/jarrad/orca/workspaces/jvid/workflow-workspaces",
+      "launch_request_id": "ceb5804b-b238-4e99-ac87-8e829008fe66",
+      "effective_model": "gpt-6.1-sol",
+      "effective_effort": "xhigh"
     },
     {
       "package": "P1",
@@ -203,7 +219,8 @@
       "task_id": "task_0cb08e7f8192",
       "dispatch_id": null,
       "implementation_status": "not_started",
-      "creation_request_id": "f4eb786e-62ac-47e7-b977-4b6a023eebc8"
+      "creation_request_id": "f4eb786e-62ac-47e7-b977-4b6a023eebc8",
+      "integration_notes": "P1 Settings is opaque and not serializable; add portable style DTO/conversion in cooperation with its now-settled source module. Definitions must exclude words, original asset/clip/link identity and unrelated categories. Preserve explicit normalized animation semantics and reuse P1 validation/application. Coordinate K collected-font aliases/provenance for cross-project title styles and missing-font feedback."
     },
     {
       "package": "K",
@@ -387,16 +404,22 @@
       ],
       "spec": "Package F: Playback status\n\nYou are an Orca worker executing one approved jvid workflow package for Run run_bdd46aa1fc52, coordinated solely by the execution orchestrator. Work only in the assigned isolated Omarchy checkout. Do not dispatch additional workers, implement other packages, merge main, change protection, or publish releases/tags. Base on the coordinator-specified commit reconciled with latest origin/main, never the repo default origin/develop; fetch/inspect before changing the base and report divergence. Read DESIGN.md and applicable AGENTS.md. The approved scope and exact acceptance for this package are included below. Preserve remappable shortcuts, translated labels, narrow panels and all three OSes. Content changes must undo, persist and match playback/export; view state must not alter renders. Keep jvid-core free of UI/media/I/O dependencies. Implement substantial logic in the owned modules. Shared-file patches require a declared coordinator ownership window and a small separate integration commit; include exact changed paths in the report. Publish a small contract commit before dependent consumers when named below. At checkpoints read the live preamble inbox; ask the coordinator with the preamble command when genuinely blocked. Follow that preamble exactly for heartbeat, Task/Dispatch IDs and one worker_done; do not invent handles or send lifecycle completion from another terminal. Commit the work and supply a report with commits, files, exact test commands/results, any skipped tests, UI artifact paths where appropriate and material limitations. Run focused meaningful tests plus formatting; do not claim manual/platform verification from unit tests. The coordinator independently reviews and integrates. Report before scope changes or any ownership collision.\n\nTarget and exclusive owned files: crates/jvid-app/src/playback_status.rs (new); crates/jvid-app/src/playback.rs; crates/jvid-media/src/proxy.rs.\n\nIntegration ownership and concrete work: Playback/proxy logic may be prepared independently, but final compact viewer control edits preview.rs only after V with a coordinator window. Observe actual generation/use/failure/preview-quality and measured dropped/late-frame trouble with actionable explanations. Never derive claimed proxy use from the toggle alone or trigger extra per-frame expensive work. Test idle/loading/failure/ready/recovery and audio-only transitions plus compact long-label layouts. Coordinate N viewer insertion serially.\n\nShared contracts:\nV must establish one screen/project coordinate mapping and separate the clipped viewer body, fitted project frame and editing gutter. Fit and View Selection affect view state only; never write clip transforms. Handle/hit-target dimensions are logical screen points. All overlays, text, masks, Alt-region gestures and reframe consume the same frame mapping. Recovery changes zoom/pan deliberately and remains stable during a drag. V publishes geometry helpers/tests before N consumes them; F inserts viewer status only after V.\nCoordinator serializes changes to core model.rs/history.rs/file.rs/lib.rs, app.rs/lib.rs, shared keymap wiring, i18n catalogs and guide docs. Workers may propose narrowly scoped changes in separately identified commits but must obtain a coordinator ownership window before applying shared-file changes that overlap another active task. No independent schema-version increments. Prefer backward-compatible serde defaults and preserve all legacy projects/settings.\nKeep keymap::ACTIONS and its stable string IDs authoritative, resolve translated names and actual current bindings at display time, and expose one applicability result (enabled or a translated reason) consumed by palette/menu/dispatch. Preserve Source-vs-Program and focused-panel routing and restore prior focus after palette close. Feature workers submit registration IDs and a small wiring patch to coordinator; do not maintain a second action executor.\n\n### F — Playback status (#14)\n\nTarget: playback/proxy observability and a compact viewer status control. Show actual proxy generation/use, preview quality and measured playback trouble with an actionable explanation. Avoid fabricated performance claims and noisy always-on warnings. Status must not block decoding or request extra expensive work per frame. Coordinate viewer insertion after V; logic can proceed independently. Test idle/loading/failed/ready proxies, recovery, audio-only clips and status transitions.",
       "task_id": "task_bda32b59d97e",
-      "dispatch_id": null,
-      "implementation_status": "not_started",
-      "creation_request_id": "01017554-1d9c-4edd-a910-5297edddf01d"
+      "dispatch_id": "ctx_905dd3f8ba0b",
+      "implementation_status": "dispatched",
+      "creation_request_id": "01017554-1d9c-4edd-a910-5297edddf01d",
+      "worktree_id": "41ac820a-a842-48f7-82fb-7df422766c74::/home/jarrad/orca/workspaces/jvid/workflow-playback-status",
+      "launch_request_id": "ee3e0ac3-7ba2-4ee8-9977-e059732e0808",
+      "effective_model": "gpt-6.1-sol",
+      "effective_effort": "xhigh"
     }
   ],
-  "execution_state": "initial_wave_dispatched",
+  "execution_state": "initial_results_under_review_next_ready_tasks_dispatched",
   "lifecycle_accounting": {
-    "run_workers": 4,
+    "run_workers": 6,
     "reclaimable_terminals": 0,
-    "worker_list_include_remote_checked": true
+    "worker_list_include_remote_checked": true,
+    "active_workers": 4,
+    "released_workers": 2
   },
   "main_reconciliation": {
     "origin_main": "e49d81fa86204e6278584e96405194d3f2ba4dc1",
@@ -440,5 +463,25 @@
     "worker_start_attempts": 0,
     "note": "External placement is blocked; ready Tasks are preserved and have not been marked failed. No local feature implementation or replacement worker was launched.",
     "resolved_by": "powershell.exe -NoProfile -File C:\\Users\\Jarrad\\bin\\wake-omarchy.ps1"
+  },
+  "communication_exception": {
+    "dispatch": "ctx_186fdb41f468",
+    "diagnosis": "to_worker relay sequence 2 is a reply to ordinary non-ask question relay_32b249e86ebf; it and later answers remain unacknowledged. Read-only inspection only; no orchestration database changes.",
+    "user_approval": "Allow P1 terminal guidance",
+    "scope": "Guidance to the verified existing P1 agent only; lifecycle/cleanup stay on Dispatch.",
+    "terminal": "term_70da7688-a231-46ee-9bb6-a1f10b17438a",
+    "terminal_send_request_id": "5661050b-8edd-4c83-845b-0c50e63bb1bf",
+    "acknowledgement_message": "relay_c3048adaabc2",
+    "state": "decision_received_and_work_resumed"
+  },
+  "review_notes": {
+    "P1": "Core contract 9cf9727 reviewed. Transform-only mask replacement can change unselected masked destination effects: requested preflight validation and atomic regression. P1 acknowledged fix. Relative key mapping reconstruction/trim/reverse/Hold cases require explicit policy and tests.",
+    "K": "Pure path contract 39e43cd reviewed. Windows-only path tests remain for native CI. Distinguish bundled effects from external files. Extend generated-asset skip when N lands.",
+    "V": "Reviewed full production geometry/render/handle/mask/zoom/text mapping and GPU test report; independently viewed before/after, narrow portrait, off-frame recovery images. F is authorized to fix stale Alt-region Draw cancellation when middle-pan interrupts a gesture and to verify source/program view identity in separate V follow-up commits before main merge.",
+    "A1": "Reviewed production palette, registry and shared app dispatch plus focused test report and two UI captures. A2 is authorized to add empty-sequence export_frame availability preflight (existing export::frame_png prerequisite) as a separate A1 follow-up before protected-main merge. Skip duplicate catalog 7c82ff6."
+  },
+  "integration_premerge_followups": {
+    "V": "F owns Alt-region/middle-pan cancellation regression and verifies monitor/source view identity.",
+    "A1": "A2 owns export_frame empty-sequence availability preflight regression."
   }
 }
