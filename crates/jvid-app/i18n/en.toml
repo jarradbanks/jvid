@@ -3,6 +3,12 @@
 
 # Keyboard actions, by keymap.toml id: menus, the shortcut editor and docs/shortcuts.md.
 [action]
+workspace_editing = "Editing Workspace"
+workspace_captions = "Captions Workspace"
+workspace_audio = "Audio Workspace"
+workspace_save = "Save Workspace…"
+reset_layout = "Reset Panel Layout"
+maximize_panel = "Maximize/Restore Panel"
 command_palette = "Command Palette"
 text_tool = "Text Tool"
 export_subtitles = "Export Subtitles (.srt)…"
@@ -1188,3 +1194,15 @@ focus_timeline = "Focus the timeline to use this command"
 focus_playback = "Focus Source, Program or Timeline to use this command"
 unavailable = "This command is unavailable in the current context"
 no_source = "Load a clip in Source first"
+
+[workspace]
+menu = "Workspaces"
+rename = "Rename Workspace…"
+delete = "Delete Workspace"
+apply = "Apply Workspace"
+name = "Workspace Name"
+empty_name = "Enter a workspace name."
+duplicate_name = "A workspace with this name already exists."
+missing = "This workspace is no longer available."
+focus_panel = "Focus a panel to maximize it."
+save = "Save Workspace…"

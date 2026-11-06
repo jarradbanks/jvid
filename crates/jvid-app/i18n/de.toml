@@ -3,6 +3,12 @@
 # items use the infinitive (Speichern). Terms follow docs/i18n/de.md.
 
 [action]
+workspace_editing = "Arbeitsbereich Schnitt"
+workspace_captions = "Arbeitsbereich Untertitel"
+workspace_audio = "Arbeitsbereich Audio"
+workspace_save = "Arbeitsbereich speichern…"
+reset_layout = "Bereichsanordnung zurücksetzen"
+maximize_panel = "Bedienfeld maximieren/wiederherstellen"
 command_palette = "Befehlspalette"
 text_tool = "Textwerkzeug"
 export_subtitles = "Untertitel exportieren (.srt)…"
@@ -1082,3 +1088,15 @@ focus_timeline = "Aktiviere die Zeitleiste, um diesen Befehl zu verwenden"
 focus_playback = "Aktiviere Quelle, Programm oder Zeitleiste, um diesen Befehl zu verwenden"
 unavailable = "Dieser Befehl ist im aktuellen Kontext nicht verfügbar"
 no_source = "Lade zuerst einen Clip in Quelle"
+
+[workspace]
+menu = "Arbeitsbereiche"
+rename = "Arbeitsbereich umbenennen…"
+delete = "Arbeitsbereich löschen"
+apply = "Arbeitsbereich anwenden"
+name = "Name des Arbeitsbereichs"
+empty_name = "Gib einen Namen für den Arbeitsbereich ein."
+duplicate_name = "Ein Arbeitsbereich mit diesem Namen ist bereits vorhanden."
+missing = "Dieser Arbeitsbereich ist nicht mehr verfügbar."
+focus_panel = "Aktiviere ein Bedienfeld zum Maximieren."
+save = "Arbeitsbereich speichern…"

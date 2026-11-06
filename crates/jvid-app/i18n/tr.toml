@@ -5,6 +5,12 @@
 # {placeholder}: vowel harmony can't follow it. Terms follow docs/i18n/tr.md.
 
 [action]
+workspace_editing = "Kurgu çalışma alanı"
+workspace_captions = "Altyazı çalışma alanı"
+workspace_audio = "Ses çalışma alanı"
+workspace_save = "Çalışma alanını kaydet…"
+reset_layout = "Panel Düzenini Sıfırla"
+maximize_panel = "Paneli büyüt/geri yükle"
 command_palette = "Komut Paleti"
 text_tool = "Metin aracı"
 export_subtitles = "Altyazıları dışa aktar (.srt)…"
@@ -1085,3 +1091,15 @@ focus_timeline = "Bu komutu kullanmak için zaman çizelgesini etkinleştirin"
 focus_playback = "Bu komutu kullanmak için Kaynak, Program veya Zaman Çizelgesi panelini etkinleştirin"
 unavailable = "Bu komut geçerli bağlamda kullanılamıyor"
 no_source = "Önce Kaynak paneline bir klip yükleyin"
+
+[workspace]
+menu = "Çalışma alanları"
+rename = "Alanı yeniden adlandır…"
+delete = "Alanı sil"
+apply = "Alanı uygula"
+name = "Alan adı"
+empty_name = "Çalışma alanı için bir ad girin."
+duplicate_name = "Bu ada sahip bir alan zaten var."
+missing = "Bu alan artık kullanılamıyor."
+focus_panel = "Büyütmek için bir panele odaklanın."
+save = "Çalışma alanını kaydet…"

@@ -5,6 +5,12 @@
 # every English key.
 
 [action]
+workspace_editing = "編集ワークスペース"
+workspace_captions = "字幕ワークスペース"
+workspace_audio = "オーディオワークスペース"
+workspace_save = "ワークスペースを保存…"
+reset_layout = "パネルの配置をリセット"
+maximize_panel = "パネルを最大化／復元"
 command_palette = "コマンドパレット"
 text_tool = "テキストツール"
 export_subtitles = "字幕を書き出す (.srt)…"
@@ -1084,3 +1090,15 @@ focus_timeline = "このコマンドを使うにはタイムラインを選択�
 focus_playback = "このコマンドを使うにはソース、プログラム、タイムラインのいずれかを選択してください"
 unavailable = "現在の状況ではこのコマンドを使えません"
 no_source = "先にソースにクリップを読み込んでください"
+
+[workspace]
+menu = "ワークスペース"
+rename = "ワークスペースの名前を変更…"
+delete = "ワークスペースを削除"
+apply = "ワークスペースを適用"
+name = "ワークスペース名"
+empty_name = "ワークスペース名を入力してください。"
+duplicate_name = "同じ名前のワークスペースが既にあります。"
+missing = "このワークスペースは利用できなくなりました。"
+focus_panel = "最大化するパネルを選択してください。"
+save = "ワークスペースを保存…"

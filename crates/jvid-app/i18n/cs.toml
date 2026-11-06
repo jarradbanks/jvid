@@ -3,6 +3,12 @@
 # instructions imperatives with vykání. Terms follow docs/i18n/cs.md.
 
 [action]
+workspace_editing = "Pracovní plocha střihu"
+workspace_captions = "Pracovní plocha titulků"
+workspace_audio = "Pracovní plocha zvuku"
+workspace_save = "Uložit pracovní plochu…"
+reset_layout = "Obnovit rozložení panelů"
+maximize_panel = "Maximalizovat/obnovit panel"
 command_palette = "Paleta Příkazů"
 text_tool = "Textový nástroj"
 export_subtitles = "Exportovat titulky (.srt)…"
@@ -1101,3 +1107,15 @@ focus_timeline = "Aktivujte časovou osu, abyste mohli použít tento příkaz"
 focus_playback = "Aktivujte panel Zdroj, Program nebo Časová Osa, abyste mohli použít tento příkaz"
 unavailable = "Tento příkaz není v aktuálním kontextu dostupný"
 no_source = "Nejprve načtěte klip do panelu Zdroj"
+
+[workspace]
+menu = "Pracovní plochy"
+rename = "Přejmenovat plochu…"
+delete = "Smazat plochu"
+apply = "Použít plochu"
+name = "Název plochy"
+empty_name = "Zadejte název pracovní plochy."
+duplicate_name = "Plocha s tímto názvem už existuje."
+missing = "Tato plocha již není dostupná."
+focus_panel = "Aktivujte panel, který chcete maximalizovat."
+save = "Uložit pracovní plochu…"

@@ -3,6 +3,12 @@
 # docs/i18n/fr.md. The spaces before : ; ? ! and inside « » are no-break spaces (U+00A0).
 
 [action]
+workspace_editing = "Espace de montage"
+workspace_captions = "Espace de sous-titres"
+workspace_audio = "Espace audio"
+workspace_save = "Enregistrer l’espace de travail…"
+reset_layout = "Réinitialiser la disposition des panneaux"
+maximize_panel = "Agrandir/restaurer le panneau"
 command_palette = "Palette de Commandes"
 text_tool = "Outil Texte"
 export_subtitles = "Exporter les sous-titres (.srt)…"
@@ -1105,3 +1111,15 @@ focus_timeline = "Activez la timeline pour utiliser cette commande"
 focus_playback = "Activez Source, Programme ou Timeline pour utiliser cette commande"
 unavailable = "Cette commande est indisponible dans le contexte actuel"
 no_source = "Chargez d’abord un clip dans Source"
+
+[workspace]
+menu = "Espaces de travail"
+rename = "Renommer l’espace…"
+delete = "Supprimer l’espace"
+apply = "Appliquer l’espace"
+name = "Nom de l’espace"
+empty_name = "Saisissez un nom pour l’espace."
+duplicate_name = "Un espace porte déjà ce nom."
+missing = "Cet espace n’est plus disponible."
+focus_panel = "Activez un panneau pour l’agrandir."
+save = "Enregistrer l’espace de travail…"

@@ -3,6 +3,12 @@
 # items use the imperative (Spara, Lägg till markör). Terms follow docs/i18n/sv.md.
 
 [action]
+workspace_editing = "Arbetsyta för redigering"
+workspace_captions = "Arbetsyta för undertexter"
+workspace_audio = "Arbetsyta för ljud"
+workspace_save = "Spara arbetsyta…"
+reset_layout = "Återställ panellayout"
+maximize_panel = "Maximera/återställ panel"
 command_palette = "Kommandopalett"
 text_tool = "Textverktyg"
 export_subtitles = "Exportera undertexter (.srt)…"
@@ -1082,3 +1088,15 @@ focus_timeline = "Aktivera tidslinjen för att använda kommandot"
 focus_playback = "Aktivera Källa, Program eller Tidslinje för att använda kommandot"
 unavailable = "Kommandot är inte tillgängligt i det aktuella sammanhanget"
 no_source = "Läs först in ett klipp i Källa"
+
+[workspace]
+menu = "Arbetsytor"
+rename = "Byt namn på arbetsyta…"
+delete = "Ta bort arbetsyta"
+apply = "Använd arbetsyta"
+name = "Arbetsytans namn"
+empty_name = "Ange ett namn på arbetsytan."
+duplicate_name = "En arbetsyta med detta namn finns redan."
+missing = "Denna arbetsyta är inte längre tillgänglig."
+focus_panel = "Aktivera en panel för att maximera den."
+save = "Spara arbetsyta…"

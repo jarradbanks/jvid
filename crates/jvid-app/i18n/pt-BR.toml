@@ -3,6 +3,12 @@
 # Terms follow docs/i18n/pt-BR.md.
 
 [action]
+workspace_editing = "Espaço de edição"
+workspace_captions = "Espaço de legendas"
+workspace_audio = "Espaço de áudio"
+workspace_save = "Salvar espaço de trabalho…"
+reset_layout = "Redefinir layout dos painéis"
+maximize_panel = "Maximizar/restaurar painel"
 command_palette = "Paleta de Comandos"
 text_tool = "Ferramenta de texto"
 export_subtitles = "Exportar legendas (.srt)…"
@@ -1098,3 +1104,15 @@ focus_timeline = "Ative a linha do tempo para usar este comando"
 focus_playback = "Ative Origem, Programa ou Linha do Tempo para usar este comando"
 unavailable = "Este comando não está disponível no contexto atual"
 no_source = "Carregue primeiro um clipe em Origem"
+
+[workspace]
+menu = "Espaços de trabalho"
+rename = "Renomear espaço…"
+delete = "Excluir espaço"
+apply = "Aplicar espaço"
+name = "Nome do espaço"
+empty_name = "Digite um nome para o espaço."
+duplicate_name = "Já existe um espaço com esse nome."
+missing = "Este espaço não está mais disponível."
+focus_panel = "Foque um painel para maximizá-lo."
+save = "Salvar espaço de trabalho…"

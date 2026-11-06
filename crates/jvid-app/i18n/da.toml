@@ -3,6 +3,12 @@
 # use the imperative (Gem). Terms follow docs/i18n/da.md.
 
 [action]
+workspace_editing = "Arbejdsområde til redigering"
+workspace_captions = "Arbejdsområde til undertekster"
+workspace_audio = "Arbejdsområde til lyd"
+workspace_save = "Gem arbejdsområde…"
+reset_layout = "Nulstil panellayout"
+maximize_panel = "Maksimér/gendan panel"
 command_palette = "Kommandopalet"
 text_tool = "Tekstværktøj"
 export_subtitles = "Eksportér undertekster (.srt)…"
@@ -1082,3 +1088,15 @@ focus_timeline = "Aktivér tidslinjen for at bruge kommandoen"
 focus_playback = "Aktivér Kilde, Program eller Tidslinje for at bruge kommandoen"
 unavailable = "Kommandoen er ikke tilgængelig i den aktuelle sammenhæng"
 no_source = "Indlæs først et klip i Kilde"
+
+[workspace]
+menu = "Arbejdsområder"
+rename = "Omdøb arbejdsområde…"
+delete = "Slet arbejdsområde"
+apply = "Anvend arbejdsområde"
+name = "Arbejdsområdets navn"
+empty_name = "Indtast et navn til arbejdsområdet."
+duplicate_name = "Der findes allerede et arbejdsområde med dette navn."
+missing = "Dette arbejdsområde er ikke længere tilgængeligt."
+focus_panel = "Aktivér et panel for at maksimere det."
+save = "Gem arbejdsområde…"

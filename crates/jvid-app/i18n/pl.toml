@@ -3,6 +3,12 @@
 # docs/i18n/pl.md.
 
 [action]
+workspace_editing = "Obszar montażu"
+workspace_captions = "Obszar napisów"
+workspace_audio = "Obszar dźwięku"
+workspace_save = "Zapisz obszar roboczy…"
+reset_layout = "Przywróć układ paneli"
+maximize_panel = "Maksymalizuj/przywróć panel"
 command_palette = "Paleta Poleceń"
 text_tool = "Narzędzie tekstowe"
 export_subtitles = "Eksportuj napisy (.srt)…"
@@ -1110,3 +1116,15 @@ focus_timeline = "Aktywuj oś czasu, aby użyć tego polecenia"
 focus_playback = "Aktywuj panel Źródło, Program lub Oś Czasu, aby użyć tego polecenia"
 unavailable = "To polecenie jest niedostępne w bieżącym kontekście"
 no_source = "Najpierw wczytaj klip w panelu Źródło"
+
+[workspace]
+menu = "Obszary robocze"
+rename = "Zmień nazwę obszaru…"
+delete = "Usuń obszar"
+apply = "Zastosuj obszar"
+name = "Nazwa obszaru"
+empty_name = "Wpisz nazwę obszaru roboczego."
+duplicate_name = "Obszar o tej nazwie już istnieje."
+missing = "Ten obszar nie jest już dostępny."
+focus_panel = "Uaktywnij panel, aby go zmaksymalizować."
+save = "Zapisz obszar roboczy…"

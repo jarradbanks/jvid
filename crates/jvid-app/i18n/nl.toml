@@ -3,6 +3,12 @@
 # infinitive, as in Dutch Windows. Terms follow docs/i18n/nl.md.
 
 [action]
+workspace_editing = "Werkruimte montage"
+workspace_captions = "Werkruimte ondertitels"
+workspace_audio = "Werkruimte audio"
+workspace_save = "Werkruimte opslaan…"
+reset_layout = "Paneelindeling herstellen"
+maximize_panel = "Paneel maximaliseren/herstellen"
 command_palette = "Opdrachtenpalet"
 text_tool = "Tekstgereedschap"
 export_subtitles = "Ondertitels exporteren (.srt)…"
@@ -1097,3 +1103,15 @@ focus_timeline = "Activeer de tijdlijn om deze opdracht te gebruiken"
 focus_playback = "Activeer Bron, Programma of Tijdlijn om deze opdracht te gebruiken"
 unavailable = "Deze opdracht is niet beschikbaar in de huidige context"
 no_source = "Laad eerst een clip in Bron"
+
+[workspace]
+menu = "Werkruimten"
+rename = "Werkruimte hernoemen…"
+delete = "Werkruimte verwijderen"
+apply = "Werkruimte toepassen"
+name = "Naam werkruimte"
+empty_name = "Voer een naam voor de werkruimte in."
+duplicate_name = "Er bestaat al een werkruimte met deze naam."
+missing = "Deze werkruimte is niet meer beschikbaar."
+focus_panel = "Activeer een paneel om het te maximaliseren."
+save = "Werkruimte opslaan…"
