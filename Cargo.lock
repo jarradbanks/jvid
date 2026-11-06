@@ -2335,6 +2335,8 @@ dependencies = [
  "rfd",
  "same-file",
  "serde",
+ "serde_json",
+ "sha2",
  "suite-ui",
  "syn 2.0.119",
  "tempfile",

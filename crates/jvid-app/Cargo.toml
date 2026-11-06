@@ -26,6 +26,8 @@ egui.workspace = true
 egui_dock = { version = "0.21", features = ["serde"] }
 rfd = "0.17"
 serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 toml.workspace = true
 
 [features]
