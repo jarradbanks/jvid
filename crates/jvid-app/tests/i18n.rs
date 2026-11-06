@@ -96,6 +96,8 @@ fn editor_menus_inspector_and_dialogs_show_spanish() {
     h.get_by_label("Edición").click();
     h.run();
     assert!(has(&h, "Restablecer distribución de paneles"));
+    h.get_by_label("Preferencias…").scroll_to_me();
+    h.run();
     h.get_by_label("Preferencias…").click();
     h.run();
     assert!(has(&h, "Preferencias") && has(&h, "Idioma"));
@@ -149,6 +151,8 @@ fn titled_project(labels: [&str; 6]) -> Harness<'static, App> {
     h.drop_at(to);
     h.run();
     h.get_by_label(edit).click();
+    h.run();
+    h.get_by_label(select_all).scroll_to_me();
     h.run();
     h.get_by_label(select_all).click();
     h.run();

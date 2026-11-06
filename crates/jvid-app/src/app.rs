@@ -611,34 +611,39 @@ impl App {
         tutorial::anchor(ui.ctx(), "menu.edit", button.rect);
         let mut picked = None;
         egui::Popup::menu(&button).show(|ui| {
-            if self.action_menu_item(ui, "command_palette") {
-                picked = Some("command_palette");
-            }
-            ui.separator();
-            for &id in menus::EDIT {
-                if id.is_empty() {
+            let height = (ui.ctx().content_rect().height() - suite_ui::tokens::space::S16).max(1.0);
+            egui::ScrollArea::vertical()
+                .max_height(height)
+                .show(ui, |ui| {
+                    if self.action_menu_item(ui, "command_palette") {
+                        picked = Some("command_palette");
+                    }
                     ui.separator();
-                    continue;
-                }
-                if self.action_menu_item(ui, id) {
-                    picked = Some(id);
-                }
-            }
-            ui.separator();
-            ui.menu_button(tr!("workspace.menu"), |ui| self.workspaces_menu(ui));
-            if self.action_menu_item(ui, "maximize_panel") {
-                picked = Some("maximize_panel");
-            }
-            if self.action_menu_item(ui, "reset_layout") {
-                picked = Some("reset_layout");
-            }
-            if ui.button(tr!("menu.preferences")).clicked() {
-                use jvid_audio::InputBackend;
-                self.preferences.open(
-                    jvid_audio::CpalInput::default().devices(),
-                    crate::settings_file::themes_dir(),
-                );
-            }
+                    for &id in menus::EDIT {
+                        if id.is_empty() {
+                            ui.separator();
+                            continue;
+                        }
+                        if self.action_menu_item(ui, id) {
+                            picked = Some(id);
+                        }
+                    }
+                    ui.separator();
+                    ui.menu_button(tr!("workspace.menu"), |ui| self.workspaces_menu(ui));
+                    if self.action_menu_item(ui, "maximize_panel") {
+                        picked = Some("maximize_panel");
+                    }
+                    if self.action_menu_item(ui, "reset_layout") {
+                        picked = Some("reset_layout");
+                    }
+                    if ui.button(tr!("menu.preferences")).clicked() {
+                        use jvid_audio::InputBackend;
+                        self.preferences.open(
+                            jvid_audio::CpalInput::default().devices(),
+                            crate::settings_file::themes_dir(),
+                        );
+                    }
+                });
         });
         if let Some(id) = picked {
             self.run_action(id, true);
