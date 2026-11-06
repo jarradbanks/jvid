@@ -357,7 +357,7 @@ fn capture(
     let mut preset =
         Preset::capture(project, source, category, at, animation).map_err(preset_error)?;
     if let Style::Text(text) = &preset.style {
-        let sources = font_sources(&[text.family.clone()]);
+        let sources = font_sources(std::slice::from_ref(&text.family));
         portable_font(&mut preset, &sources)?;
     }
     Ok(preset)

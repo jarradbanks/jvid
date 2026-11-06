@@ -261,7 +261,7 @@ mod tests {
             };
             let pixels = rasterize(&a, (192, 108));
             assert_eq!(&pixels[..4], &[0; 4]);
-            assert!(pixels.chunks_exact(4).any(|p| p[3] > 0));
+            assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] > 0));
             assert!(Arc::ptr_eq(&pixels, &rasterize(&a, (192, 108))));
             assert!(hit(&a, a.points[0], 3.0));
             assert!(!hit(&a, [500.0, 500.0], 3.0));
@@ -273,7 +273,13 @@ mod tests {
             points: [[0.0; 2]; 2],
             ..Default::default()
         };
-        assert!(rasterize(&a, (64, 64)).chunks_exact(4).any(|p| p[3] > 0));
+        assert!(
+            rasterize(&a, (64, 64))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|p| p[3] > 0)
+        );
     }
 
     #[test]
@@ -308,7 +314,7 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         assert_eq!(exported.as_raw(), &preview);
         assert!(
-            preview.chunks_exact(4).any(|p| p[0] > 100),
+            preview.as_chunks::<4>().0.iter().any(|p| p[0] > 100),
             "arrow appears above background"
         );
         assert_eq!(&preview[..4], &[10, 20, 30, 255]);
@@ -328,11 +334,14 @@ mod tests {
         digits(&a, (128, 128), &mut two);
         assert_eq!(one, two, "isolated embedded font is deterministic");
         assert!(
-            one.chunks_exact(4).any(|p| p[3] == 255),
+            one.as_chunks::<4>().0.iter().any(|p| p[3] == 255),
             "digits have visible ink without system fonts"
         );
         assert!(
-            one.chunks_exact(4).any(|p| p[3] > 0 && p[3] < 255),
+            one.as_chunks::<4>()
+                .0
+                .iter()
+                .any(|p| p[3] > 0 && p[3] < 255),
             "glyph edges are antialiased"
         );
         two.fill(0);
