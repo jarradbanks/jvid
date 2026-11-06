@@ -1064,9 +1064,45 @@ impl App {
             || ctx.memory(|m| m.top_modal_layer().is_some())
     }
 
+    /// P1 adapter for the shared A1 availability gate. Inspector, menus and dispatch all
+    /// delegate their actual target/resource checks to the same transfer clipboard.
+    fn settings_transfer_applicability(
+        &mut self,
+        id: &str,
+        menu: bool,
+    ) -> Option<keymap::Applicability> {
+        if !matches!(id, "copy_settings" | "paste_settings") {
+            return None;
+        }
+        let focused = self.dock.find_active_focused().map(|(_, tab)| *tab);
+        let eligible = matches!(focused, Some(Tab::Timeline | Tab::Inspector))
+            || (focused == Some(Tab::Preview) && self.preview_active == 1);
+        if !menu && !eligible {
+            return Some(keymap::Applicability::Disabled(
+                "settings_transfer.focus_clip",
+            ));
+        }
+        let Some(ctx) = self.editor_context.as_ref() else {
+            return Some(keymap::Applicability::Disabled(
+                "settings_transfer.invalid_target",
+            ));
+        };
+        let selected: Vec<_> = self.timeline.selected().iter().copied().collect();
+        Some(crate::settings_transfer::with(ctx, |transfer| match id {
+            "copy_settings" => crate::settings_transfer::Transfer::copy_applicability(
+                self.history.project(),
+                &selected,
+            ),
+            _ => transfer.applicability(self.history.project(), &selected),
+        }))
+    }
+
     /// One availability result for the same target the executor will use. Menus explicitly
     /// target Timeline; shortcuts and the palette preserve the focused dock and monitor.
     fn action_applicability(&mut self, id: &str, menu: bool) -> Applicability {
+        if let Some(applicable) = self.settings_transfer_applicability(id, menu) {
+            return applicable;
+        }
         let Some(action) = keymap::ACTIONS.iter().find(|a| a.id == id) else {
             return Applicability::Disabled("palette.unavailable");
         };
@@ -1159,6 +1195,38 @@ impl App {
             return;
         }
         match id {
+            "copy_settings" | "paste_settings" => {
+                if !self
+                    .settings_transfer_applicability(id, menu)
+                    .unwrap()
+                    .is_enabled()
+                {
+                    return;
+                }
+                let ctx = self.editor_context.clone().unwrap();
+                let selected: Vec<_> = self.timeline.selected().iter().copied().collect();
+                let result = crate::settings_transfer::with(&ctx, |transfer| {
+                    if id == "copy_settings" {
+                        transfer
+                            .copy(self.history.project(), &selected, self.timeline.playhead())
+                            .map(|_| None)
+                    } else {
+                        transfer
+                            .command(self.history.project(), &selected)
+                            .map(Some)
+                    }
+                });
+                match result {
+                    Ok(Some(command)) => {
+                        if let Err(error) = self.history.apply(command) {
+                            tracing::warn!("paste settings: {error}");
+                        }
+                    }
+                    Err(error) => tracing::warn!("transfer settings: {error}"),
+                    Ok(None) => {}
+                }
+                return;
+            }
             "command_palette" => {
                 if let Some(ctx) = &self.editor_context {
                     if menu {
@@ -2922,5 +2990,125 @@ mod palette_tests {
                 .in_point,
             Some(Time(0))
         );
+    }
+}
+
+#[cfg(test)]
+mod settings_transfer_tests {
+    use super::*;
+    use jvid_core::history::Created;
+    use jvid_core::model::{NewClip, TrackKind, Transform};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn settings_transfer_actions_follow_panel_routing_and_undo_once() {
+        let mut app = App::restore(None);
+        app.editor_context = Some(egui::Context::default());
+        let Created::Track(track) = app
+            .history
+            .apply(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "V1".into(),
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let Created::Asset(asset) = app
+            .history
+            .apply(Command::AddSolid {
+                name: "Solid".into(),
+                color: [1.0; 4],
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let ids = [0, 1].map(|index| {
+            let Created::Clip(id) = app
+                .history
+                .apply(Command::AddClip {
+                    track,
+                    clip: NewClip {
+                        asset,
+                        start: Time(index * 100),
+                        source_in: Time(0),
+                        source_out: Time(100),
+                        link: None,
+                    },
+                })
+                .unwrap()
+            else {
+                panic!()
+            };
+            id
+        });
+        app.history
+            .apply(Command::SetClipProps(vec![(
+                ids[0],
+                Transform {
+                    position: [12.0, 34.0],
+                    ..Transform::default()
+                },
+                BTreeMap::new(),
+            )]))
+            .unwrap();
+        app.timeline.select_program_clip(ids[0]);
+        app.focus_panel(Tab::Timeline);
+        app.run_action("copy_settings", false);
+        app.timeline.select_program_clip(ids[1]);
+        app.focus_panel(Tab::Preview);
+        app.preview_active = 0;
+        assert!(
+            !app.settings_transfer_applicability("paste_settings", false)
+                .unwrap()
+                .is_enabled()
+        );
+        let before = app.history.project().clone();
+        app.run_action("paste_settings", false);
+        assert_eq!(app.history.project(), &before);
+        app.preview_active = 1;
+        assert!(
+            app.settings_transfer_applicability("paste_settings", false)
+                .unwrap()
+                .is_enabled()
+        );
+        app.run_action("paste_settings", false);
+        assert_eq!(
+            app.history
+                .project()
+                .sequence()
+                .clip(ids[1])
+                .unwrap()
+                .1
+                .transform
+                .position,
+            [12.0, 34.0]
+        );
+        assert!(app.history.undo());
+        assert_eq!(app.history.project(), &before);
+        app.focus_panel(Tab::Inspector);
+        assert!(
+            app.settings_transfer_applicability("paste_settings", false)
+                .unwrap()
+                .is_enabled()
+        );
+        app.focus_panel(Tab::Media);
+        assert!(
+            !app.settings_transfer_applicability("paste_settings", false)
+                .unwrap()
+                .is_enabled()
+        );
+        assert!(
+            app.settings_transfer_applicability("paste_settings", true)
+                .unwrap()
+                .is_enabled()
+        );
+        let map = Keymap::from_toml(
+            "copy_settings = \"Ctrl+Shift+F10\"\npaste_settings = \"Ctrl+Shift+F11\"",
+        )
+        .unwrap();
+        assert_eq!(map.shortcut("copy_settings"), "Ctrl+Shift+F10");
+        assert_eq!(map.shortcut("paste_settings"), "Ctrl+Shift+F11");
     }
 }
