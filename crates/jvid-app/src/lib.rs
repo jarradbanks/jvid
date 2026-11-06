@@ -3,6 +3,7 @@
 pub mod app;
 mod autosave;
 mod command_palette;
+pub mod collect_project;
 mod components;
 mod easing;
 mod effects;
