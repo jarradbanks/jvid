@@ -86,8 +86,13 @@ pub fn to_json_with_paths(
             a[relative] = rel.into();
         }
     });
+    let version = if project.assets().iter().any(|a| a.annotation.is_some()) {
+        2
+    } else {
+        SCHEMA_VERSION
+    };
     Ok(serde_json::to_string_pretty(
-        &json!({ "schema_version": SCHEMA_VERSION, "project": p }),
+        &json!({ "schema_version": version, "project": p }),
     )?)
 }
 
