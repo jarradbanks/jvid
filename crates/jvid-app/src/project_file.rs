@@ -60,6 +60,7 @@ fn describe(e: &FileError) -> String {
         FileError::Cycle => tr!("file.cycle").to_owned(),
         FileError::TooDeep => tr!("file.too_deep", max = MAX_NEST_DEPTH),
         FileError::BadSequence => tr!("file.bad_sequence").to_owned(),
+        FileError::BadAnnotation => tr!("annotations.invalid").to_owned(),
     }
 }
 

@@ -539,9 +539,16 @@ impl Preview {
             Some(a) => {
                 if self.source_shown.as_ref().is_none_or(|(was, _)| was != a) {
                     let s = project.settings();
-                    let px = match &a.text {
-                        Some(t) => Pixels::Text(text::rasterize(t, None, (s.width, s.height))),
-                        None => Pixels::Solid(solid::rgba8(a.solid.unwrap_or_default())),
+                    let px = if let Some(annotation) = &a.annotation {
+                        Pixels::Text(jvid_render::annotations::rasterize(
+                            annotation,
+                            (s.width, s.height),
+                        ))
+                    } else {
+                        match &a.text {
+                            Some(t) => Pixels::Text(text::rasterize(t, None, (s.width, s.height))),
+                            None => Pixels::Solid(solid::rgba8(a.solid.unwrap_or_default())),
+                        }
                     };
                     let shown = Shown {
                         index: 0,

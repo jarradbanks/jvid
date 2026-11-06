@@ -1,5 +1,6 @@
 //! wgpu compositor, transforms, blend modes, color and WGSL effects.
 
+pub mod annotations;
 pub mod composite;
 pub mod effect;
 pub mod lut;
