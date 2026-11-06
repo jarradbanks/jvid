@@ -2,6 +2,7 @@
 
 pub mod app;
 mod autosave;
+pub mod collect_project;
 mod components;
 mod easing;
 mod effects;
