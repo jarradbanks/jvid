@@ -693,6 +693,32 @@ pub fn texture(
 mod tests {
     use super::*;
 
+    /// Alias loads clear the process-global caches; unrelated rasters can also evict entries.
+    /// Returns true in the parent after the exact identity test passed in a fresh process.
+    fn isolate_cache_identity() -> bool {
+        const CHILD: &str = "JVID_TEXT_CACHE_TEST_CHILD";
+        let thread = std::thread::current();
+        let name = thread.name().expect("named test thread");
+        if std::env::var(CHILD).is_ok_and(|child| child == name) {
+            return false;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--nocapture", "--test-threads=1"])
+            .env(CHILD, name)
+            .output()
+            .expect("start isolated cache identity test");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success()
+                && stdout.lines().any(|line| {
+                    line.starts_with("test result: ok. 1 passed; 0 failed; 0 ignored;")
+                }),
+            "{name} failed in isolated process: {stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        true
+    }
+
     const PRIMARY: &str = "Jvid Fixture Primary";
     const FALLBACK: &str = "Jvid Fixture Fallback";
 
@@ -955,6 +981,9 @@ mod tests {
 
     #[test]
     fn warm_alias_accepts_identical_relocated_bytes_after_original_disappears() {
+        if isolate_cache_identity() {
+            return;
+        }
         let root = std::env::temp_dir().join(format!("jvid-font-relocate-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let old = root.join("original.ttf");
@@ -1134,6 +1163,9 @@ mod tests {
 
     #[test]
     fn raster_draws_fill_box_and_anchor() {
+        if isolate_cache_identity() {
+            return;
+        }
         let size = (320, 180);
         let text = Text {
             content: "Hi".into(),
