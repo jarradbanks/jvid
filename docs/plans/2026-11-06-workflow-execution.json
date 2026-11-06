@@ -525,8 +525,8 @@
   "execution_state": "first6_merged_protectedmain_PR518_final8_PR519_integration_verification_and_bounded_fixes_active",
   "lifecycle_accounting": {
     "run_workers": 16,
-    "active_workers": 2,
-    "released_workers": 14,
+    "active_workers": 1,
+    "released_workers": 15,
     "reclaimable_terminals": 0,
     "temporary_fifth_worker_reason": "first wave settled; measured 12GiB available and little build pressure; integration verification isolated",
     "temporary_sixth_worker_reason": "6CPUs, load2.73 and11GiB available; one buildjob perworker, firstwave settled"
@@ -609,7 +609,7 @@
   "integration_verifier": {
     "task_id": "task_c484d48ccad8",
     "dispatch_id": "ctx_0bfcebe0dc14",
-    "lifecycle": "active",
+    "lifecycle": "released",
     "initial_sha": "21f94e8ac5153569340369c9ca5a7289b7a072fd",
     "launch_request_id": "b8e9f057-4d3c-46d1-9cb6-ce37beb1df05",
     "bounded_ownership": [
@@ -624,7 +624,14 @@
       "c862f1b",
       "a2f706f34ef65520733cae5abd485f779c754411",
       "5290088f99134eb3a51ed3eaefa4f707cd048118"
-    ]
+    ],
+    "release_request_id": "2b18a80e-600e-4604-be00-2cd71886747b",
+    "release_process_action": "closed_agent_terminal",
+    "report_path": "/home/jarrad/orca/reports/task_c484d48ccad8/integration-verification.txt",
+    "worker_head": "775c8df3c40e29d5278abc34f505f778ace65d77",
+    "tested_tree": "9a00f58d4f7018f345bf4e0df44397c28758c432",
+    "first_merged_main": "f2fb63e170483426d0db92cacf17f3d4155e0141",
+    "local_full_suite": "exit101;759app_pass1unchangedhighlightfail10ignored;media_randomseek_fail_then_VFR_ownedtimeout;allother_targets_pass;onebounded_media_retry102pass1ignore23sec;hosted_exact775requiredCI_allpass"
   },
   "pull_requests": [
     {
@@ -708,7 +715,9 @@
       "45b9d4d40b1a894b1b3c8c1aea6939249016b161",
       "758c28b47d2b175fe607d472e50fbe69359f04ae",
       "67bda50eb82d93cca2254b37fa54a867990276d8",
-      "775c8df3c40e29d5278abc34f505f778ace65d77"
+      "775c8df3c40e29d5278abc34f505f778ace65d77",
+      "7e044fed35166f2e5caa070cd40eb38e23c41fe4",
+      "756b84f7391eab13dc9bbe434445b179033f32b8"
     ]
   },
   "verification_findings": {
@@ -737,7 +746,8 @@
       "clippy": "passed after seventh bounded pixel-iterator fix",
       "CJK": "deterministic regeneration passed",
       "remaining": "new unignored locale mutators race normalparallel English tests;10 C/N/P1/P2/K/A2 cases being subprocess isolated with exact-childpass proof, no new ignores/global thread changes. Real Preferences P2 hint overflow fixed by viewport clipping/bounded scroll and test validates. Annotation lanes registry test extended from authoritative supportedkeys. Expected B toolbar/keymap goldens await review after isolation.",
-      "status_performance": "F costly20k proxy path clone/sort removed from everypaint via<=250ms revision/enable/session/retry-invalidated cache; actual currentpixel Observation/Health staylive. Snapshot helper20forcedrefresh681.705ms vs20cached2.963us debugonly; fullUIpaintmeasurement pending, no releaseFPSclaim."
+      "status_performance": "F costly20k proxy path clone/sort removed from everypaint via<=250ms revision/enable/session/retry-invalidated cache; actual currentpixel Observation/Health staylive. Snapshot helper20forcedrefresh681.705ms vs20cached2.963us debugonly; fullUIpaintmeasurement pending, no releaseFPSclaim.",
+      "locale_status": "Ten new locale mutation unitcases remain active in defaultCI but execute isolated exact-test child processes, failure/status/count checked; all10 focusedpassed. No new ignores or global threadsetting change."
     }
   }
 }
