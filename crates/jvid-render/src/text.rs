@@ -183,9 +183,11 @@ fn project_font_coverage_with(
 fn same_shaping(original: &FontSystem, a: &Buffer, packaged: &FontSystem, b: &Buffer) -> bool {
     let left: Vec<_> = a.layout_runs().collect();
     let right: Vec<_> = b.layout_runs().collect();
-    if left.is_empty() || left.len() != right.len() {
+    if left.is_empty() || left.len() != right.len() || left.iter().all(|run| run.glyphs.is_empty())
+    {
         return false;
     }
+    let mut faces = BTreeMap::new();
     left.iter().zip(&right).all(|(a, b)| {
         (
             a.line_i,
@@ -195,8 +197,7 @@ fn same_shaping(original: &FontSystem, a: &Buffer, packaged: &FontSystem, b: &Bu
             b.line_i,
             b.rtl,
             [b.line_y, b.line_top, b.line_height, b.line_w],
-        ) && !a.glyphs.is_empty()
-            && a.glyphs.len() == b.glyphs.len()
+        ) && a.glyphs.len() == b.glyphs.len()
             && a.glyphs.iter().zip(b.glyphs).all(|(a, b)| {
                 a.glyph_id != 0
                     && (
@@ -220,17 +221,19 @@ fn same_shaping(original: &FontSystem, a: &Buffer, packaged: &FontSystem, b: &Bu
                         [b.x, b.y, b.w, b.x_offset, b.y_offset],
                         b.cache_key_flags,
                     )
-                    && original
-                        .db()
-                        .with_face_data(a.font_id, |data, index| {
-                            packaged
-                                .db()
-                                .with_face_data(b.font_id, |cold_data, cold_index| {
-                                    index == cold_index && data == cold_data
-                                })
-                                .unwrap_or(false)
-                        })
-                        .unwrap_or(false)
+                    && *faces.entry((a.font_id, b.font_id)).or_insert_with(|| {
+                        original
+                            .db()
+                            .with_face_data(a.font_id, |data, index| {
+                                packaged
+                                    .db()
+                                    .with_face_data(b.font_id, |cold_data, cold_index| {
+                                        index == cold_index && data == cold_data
+                                    })
+                                    .unwrap_or(false)
+                            })
+                            .unwrap_or(false)
+                    })
             })
     })
 }
@@ -696,7 +699,7 @@ mod tests {
     fn portable_primary_preserves_cold_pixels_with_different_installed_fonts() {
         let mut original = fixture_fonts();
         let text = Text {
-            content: "AB".into(),
+            content: "AB\n\nA".into(),
             family: PRIMARY.into(),
             ..Text::default()
         };
@@ -834,6 +837,37 @@ mod tests {
         assert_eq!(project_font_sources(&[alias.into()]), vec![first]);
         assert_eq!(before, rasterize(&text, None, (320, 180)));
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn warm_alias_accepts_identical_relocated_bytes_after_original_disappears() {
+        let root = std::env::temp_dir().join(format!("jvid-font-relocate-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let old = root.join("original.ttf");
+        let moved = root.join("moved.ttf");
+        std::fs::copy(fixture("primary.ttf"), &old).unwrap();
+        let alias = "jvid-collection-relocation-fixture";
+        let source = FontSource {
+            family: alias.into(),
+            original_family: PRIMARY.into(),
+            path: old.clone(),
+        };
+        load_project_fonts(std::slice::from_ref(&source)).unwrap();
+        let text = Text {
+            content: "AB".into(),
+            family: alias.into(),
+            ..Text::default()
+        };
+        let before = rasterize(&text, None, (320, 180));
+        std::fs::rename(old, &moved).unwrap();
+        let relocated = FontSource {
+            path: moved,
+            ..source
+        };
+        load_project_fonts(std::slice::from_ref(&relocated)).unwrap();
+        assert_eq!(project_font_sources(&[alias.into()]), vec![relocated]);
+        assert!(Arc::ptr_eq(&before, &rasterize(&text, None, (320, 180))));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
