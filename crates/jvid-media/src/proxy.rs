@@ -1,11 +1,11 @@
 //! Low-res, intra-frame proxies for smooth preview of heavy sources (4K, HEVC). Preview decodes
 //! through [`Proxies::resolve`]; export decodes the originals and never looks here.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use ffmpeg_next::Error;
 use jvid_core::model::{ProbeInfo, StreamInfo};
@@ -33,6 +33,26 @@ pub fn suggested(info: &ProbeInfo) -> bool {
 pub struct Proxies {
     dir: PathBuf,
     enabled: AtomicBool,
+    jobs: Mutex<HashMap<PathBuf, Job>>,
+    revision: AtomicU64,
+    rejected: Mutex<HashMap<PathBuf, String>>,
+}
+
+/// Last observed generation state. Reading this never probes or decodes a file.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Status {
+    #[default]
+    Idle,
+    Generating(f32),
+    Ready,
+    Failed(String),
+    Cancelled,
+    NotNeeded,
+}
+
+struct Job {
+    handle: Handle,
+    result: Arc<Mutex<Status>>,
 }
 
 impl Proxies {
@@ -40,6 +60,9 @@ impl Proxies {
         Self {
             dir,
             enabled: AtomicBool::new(false),
+            jobs: Mutex::new(HashMap::new()),
+            revision: AtomicU64::new(0),
+            rejected: Mutex::new(HashMap::new()),
         }
     }
 
@@ -47,8 +70,36 @@ impl Proxies {
         self.enabled.load(Ordering::Relaxed)
     }
 
+    /// Changes when a proxy becomes available; viewers can discard cached original pixels once.
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
+    }
+
     pub fn set_enabled(&self, on: bool) {
         self.enabled.store(on, Ordering::Relaxed);
+    }
+
+    /// An in-memory snapshot; contention skips this repaint rather than delaying decoding.
+    pub fn status(&self, src: &Path) -> Option<Status> {
+        if let Some(error) = self.rejected.try_lock().ok()?.get(src).cloned() {
+            return Some(Status::Failed(error));
+        }
+        let jobs = self.jobs.try_lock().ok()?;
+        let Some(job) = jobs.get(src) else {
+            return Some(Status::Idle);
+        };
+        let result = job.result.try_lock().ok()?;
+        Some(if job.handle.is_cancelled() {
+            Status::Cancelled
+        } else if matches!(*result, Status::Generating(_)) {
+            if job.handle.is_finished() {
+                Status::Idle
+            } else {
+                Status::Generating(job.handle.progress())
+            }
+        } else {
+            result.clone()
+        })
     }
 
     /// Where `src`'s proxy lives; it changes when `src` is rewritten, so a stale proxy misses.
@@ -64,33 +115,105 @@ impl Proxies {
 
     /// The file preview should decode for `src`: its proxy when proxies are on and it's made.
     pub fn resolve(&self, src: &Path) -> PathBuf {
-        self.enabled()
-            .then(|| self.existing(src))
-            .flatten()
-            .unwrap_or_else(|| src.to_owned())
+        (self.enabled()
+            && !self
+                .rejected
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(src))
+        .then(|| self.existing(src))
+        .flatten()
+        .unwrap_or_else(|| src.to_owned())
+    }
+
+    /// Called on the decode worker after an unusable proxy. Originals remain available;
+    /// an explicit retry regenerates this disposable file rather than reusing it.
+    pub fn reject(&self, src: &Path, error: String) {
+        let mut rejected = self.rejected.lock().unwrap_or_else(|e| e.into_inner());
+        if rejected.insert(src.to_owned(), error).is_none() {
+            self.revision.fetch_add(1, Ordering::Release);
+        }
     }
 
     /// Makes `src`'s proxy on `jobs` at proxy priority unless it exists; de-duplicated by path.
     pub fn submit(self: &Arc<Self>, jobs: &Pool, src: PathBuf, info: &ProbeInfo) -> Handle {
+        let mut states = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(job) = states.get(&src)
+            && !job.handle.is_finished()
+            && !job.handle.is_cancelled()
+        {
+            return job.handle.clone();
+        }
         let me = self.clone();
+        let regenerate = self
+            .rejected
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&src)
+            .is_some();
+        let result = Arc::new(Mutex::new(Status::Generating(0.0)));
+        let finished = result.clone();
+        let source = src.clone();
+        let video = info
+            .streams
+            .iter()
+            .any(|s| matches!(s, StreamInfo::Video(_)));
         let rate = info.frame_rate.unwrap_or(Rate::new(30, 1));
         // Rounded up: a container's duration often ends at the last frame's start.
         let frames = rate.index_floor(Time(info.duration.0 - 1)).max(0) + 1;
-        jobs.submit(
+        let handle = jobs.submit(
             format!("proxy:{}", src.display()),
             Priority::Proxy,
             move |ctx| {
-                let Some(dst) = me.path(&src).filter(|p| !p.exists()) else {
-                    return;
+                let state = if !video {
+                    Status::NotNeeded
+                } else {
+                    match me.path(&src) {
+                        None => Status::Failed(format!("cannot read source {}", src.display())),
+                        Some(dst) if !regenerate && dst.exists() => Status::Ready,
+                        Some(dst) => match fs::create_dir_all(&me.dir)
+                            .map_err(|e| e.to_string())
+                            .and_then(|()| {
+                                if regenerate {
+                                    match fs::remove_file(&dst) {
+                                        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                                            Err(e.to_string())
+                                        }
+                                        _ => Ok(()),
+                                    }
+                                } else {
+                                    Ok(())
+                                }
+                            })
+                            .and_then(|()| generate(&src, &dst, rate, frames, ctx))
+                        {
+                            Ok(()) if ctx.is_cancelled() => Status::Cancelled,
+                            Ok(()) => Status::Ready,
+                            Err(e) => {
+                                tracing::warn!("proxy for {}: {e}", src.display());
+                                Status::Failed(e)
+                            }
+                        },
+                    }
                 };
-                if let Err(e) = fs::create_dir_all(&me.dir)
-                    .map_err(|e| e.to_string())
-                    .and_then(|()| generate(&src, &dst, rate, frames, ctx))
-                {
-                    tracing::warn!("proxy for {}: {e}", src.display());
+                if state == Status::Ready {
+                    me.rejected
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&src);
+                    me.revision.fetch_add(1, Ordering::Release);
                 }
+                *finished.lock().unwrap_or_else(|e| e.into_inner()) = state;
             },
-        )
+        );
+        states.insert(
+            source,
+            Job {
+                handle: handle.clone(),
+                result,
+            },
+        );
+        handle
     }
 }
 
@@ -100,7 +223,7 @@ impl Proxies {
 pub fn generate(src: &Path, dst: &Path, rate: Rate, frames: i64, ctx: &Ctx) -> Result<(), String> {
     let tmp = dst.with_extension(format!("{}.tmp.mp4", std::process::id()));
     let r = match encode(src, &tmp, rate, frames, ctx) {
-        Ok(true) => return fs::rename(&tmp, dst).map_err(|e| e.to_string()),
+        Ok(true) => fs::rename(&tmp, dst).map_err(|e| e.to_string()),
         Ok(false) => Ok(()),
         Err(e) => Err(e.to_string()),
     };
@@ -156,6 +279,78 @@ mod tests {
     use super::*;
     use crate::decode::Frame;
     use jvid_core::model::VideoInfo;
+
+    fn wait(job: &Handle) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !job.is_finished() {
+            assert!(std::time::Instant::now() < deadline, "proxy job timed out");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn status_observes_queue_failure_cancel_retry_ready_and_audio_only() {
+        crate::ffmpeg::init().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("broken.mov");
+        fs::write(&src, b"not a video").unwrap();
+        let proxies = Arc::new(Proxies::new(dir.path().join("proxies")));
+        let pool = Pool::new(1);
+        let info = ProbeInfo {
+            streams: vec![StreamInfo::Video(VideoInfo::default())],
+            ..Default::default()
+        };
+        assert_eq!(proxies.status(&src), Some(Status::Idle));
+        let (release, blocked) = std::sync::mpsc::channel();
+        let blocker = pool.submit("block", Priority::Interactive, move |_| {
+            blocked.recv().unwrap();
+        });
+        let cancelled = proxies.submit(&pool, src.clone(), &info);
+        assert_eq!(proxies.status(&src), Some(Status::Generating(0.0)));
+        cancelled.cancel();
+        assert_eq!(proxies.status(&src), Some(Status::Cancelled));
+        let failed = proxies.submit(&pool, src.clone(), &info);
+        release.send(()).unwrap();
+        wait(&blocker);
+        wait(&failed);
+        assert!(matches!(proxies.status(&src), Some(Status::Failed(_))));
+        assert!(proxies.existing(&src).is_none());
+        // Discovering an already generated file is a ready transition, never a claim of use.
+        let dst = proxies.path(&src).unwrap();
+        fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        fs::write(&dst, b"cached proxy").unwrap();
+        wait(&proxies.submit(&pool, src.clone(), &info));
+        assert_eq!(proxies.status(&src), Some(Status::Ready));
+        assert!(proxies.revision() > 0);
+        assert_eq!(
+            proxies.resolve(&src),
+            src,
+            "ready does not imply enabled or used"
+        );
+        proxies.set_enabled(true);
+        assert_eq!(proxies.resolve(&src), dst);
+        proxies.reject(&src, "decode failed".into());
+        assert_eq!(
+            proxies.resolve(&src),
+            src,
+            "failed proxy falls back to original"
+        );
+        assert_eq!(
+            proxies.status(&src),
+            Some(Status::Failed("decode failed".into()))
+        );
+        wait(&proxies.submit(&pool, src.clone(), &info));
+        assert!(
+            proxies.existing(&src).is_none(),
+            "retry discarded the unusable proxy"
+        );
+        assert!(matches!(proxies.status(&src), Some(Status::Failed(_))));
+        let audio = dir.path().join("audio.wav");
+        wait(&proxies.submit(&pool, audio.clone(), &ProbeInfo::default()));
+        assert_eq!(proxies.status(&audio), Some(Status::NotNeeded));
+        assert!(proxies.existing(&audio).is_none());
+        assert_eq!(fs::read(&src).unwrap(), b"not a video");
+    }
 
     #[test]
     fn proxy_conversion_honors_matrix_and_range_changes() {
