@@ -56,6 +56,8 @@ pub struct ExportDialog {
     after: f64,
     /// Highlight file name: `{project}`, `{marker}` and `{index}` are filled in.
     template: String,
+    /// The reviewed project state, checked again before accepting the modal's output.
+    review_selection: Option<crate::highlight_review::HighlightSelectionSnapshot>,
     /// Deterministic codec preflight for dialog tests, independent of host encoders.
     #[cfg(test)]
     test_encoders: Option<Vec<&'static str>>,
@@ -77,6 +79,7 @@ impl Default for ExportDialog {
             before: 15.0,
             after: 5.0,
             template: TEMPLATE.into(),
+            review_selection: None,
             #[cfg(test)]
             test_encoders: None,
         }
@@ -92,6 +95,7 @@ impl ExportDialog {
     /// Dismiss tutorial-owned export guidance without changing the chosen output settings.
     pub(crate) fn close(&mut self) {
         self.range = None;
+        self.review_selection = None;
     }
 
     /// Sets the output file, whose folder the next `open` keeps; for tests that need a fixed path.
@@ -103,6 +107,7 @@ impl ExportDialog {
     /// Opens on In to Out when a mark is set, else the entire timeline; the file is named `name`
     /// next to the last export.
     pub fn open(&mut self, seq: &Sequence, name: &str) {
+        self.review_selection = None;
         let range = if seq.in_point().is_some() || seq.out_point().is_some() {
             Range::InOut
         } else {
@@ -116,6 +121,58 @@ impl ExportDialog {
         self.path = dir.join(format!("{name}.{ext}"));
         self.range = Some(range);
         self.name = name.into();
+    }
+
+    /// Open the established Highlights export UI from a review snapshot. Jobs capture their
+    /// own project and settings; this transfers values, never mutable review configuration.
+    pub fn open_highlight_selection(
+        &mut self,
+        selection: &crate::highlight_review::HighlightSelectionSnapshot,
+        project_session: u64,
+        history: &jvid_core::history::History,
+        name: &str,
+    ) -> Result<(), crate::highlight_review::SelectionError> {
+        selection.validate(project_session, history)?;
+        let seq = history.project().sequence();
+        self.open(seq, name);
+        let chosen: HashSet<_> = selection
+            .highlights()
+            .iter()
+            .map(|h| h.marker().id)
+            .collect();
+        self.skipped = seq
+            .markers()
+            .iter()
+            .map(|m| m.id)
+            .filter(|id| !chosen.contains(id))
+            .collect();
+        let (before, after) = selection.point_padding();
+        self.before = before.0 as f64 / FLICKS_PER_SECOND as f64;
+        self.after = after.0 as f64 / FLICKS_PER_SECOND as f64;
+        self.range = Some(Range::Highlights);
+        self.review_selection = Some(selection.clone());
+        Ok(())
+    }
+
+    /// Background imports can edit history while a modal owns keyboard input. Reject that
+    /// stale handoff before displaying/accepting requests, including on the submit frame.
+    pub(crate) fn review_is_current(
+        &mut self,
+        project_session: u64,
+        history: &jvid_core::history::History,
+    ) -> bool {
+        if self.range.is_none() {
+            self.review_selection = None;
+        }
+        if self
+            .review_selection
+            .as_ref()
+            .is_none_or(|s| s.validate(project_session, history).is_ok())
+        {
+            return true;
+        }
+        self.close();
+        false
     }
 
     /// What Export would queue for the entire timeline in the chosen format, without showing
