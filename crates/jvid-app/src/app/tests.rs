@@ -21,6 +21,7 @@ mod subtitle_export;
 mod timeline_recording;
 mod timeline_tools;
 mod updates;
+mod workflow_integration;
 
 const SIZES: [[f32; 2]; 2] = [[1280.0, 720.0], [1920.0, 1080.0]];
 const SCALES: [f32; 2] = [1.0, 1.5];
