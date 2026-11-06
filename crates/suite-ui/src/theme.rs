@@ -71,6 +71,11 @@ pub fn body() -> FontId {
     FontId::new(font::BODY, FontFamily::Proportional)
 }
 
+/// User content can mix scripts independently of the UI language.
+pub fn content() -> FontId {
+    FontId::new(font::BODY, FontFamily::Name("content".into()))
+}
+
 pub fn body_strong() -> FontId {
     FontId::new(font::BODY, medium())
 }
@@ -142,7 +147,7 @@ pub fn fonts(lang: &str) -> FontDefinitions {
             .font_data
             .insert(name.into(), Arc::new(FontData::from_static(bytes)));
     }
-    if let Some((l, bytes)) = cjk {
+    for (l, bytes) in CJK_FACES {
         fonts
             .font_data
             .insert(cjk_face(l), Arc::new(FontData::from_static(bytes)));
@@ -163,6 +168,19 @@ pub fn fonts(lang: &str) -> FontDefinitions {
         let chain = std::iter::once(face.to_owned()).chain(fallbacks.iter().cloned());
         fonts.families.insert(family, chain.collect());
     }
+    // Locale-specific chrome keeps its existing chain; only content gets every face.
+    let content = std::iter::once("inter".into())
+        .chain(cjk.map(|(lang, _)| cjk_face(lang)))
+        .chain(
+            CJK_FACES
+                .iter()
+                .filter(|(locale, _)| *locale != lang)
+                .map(|(locale, _)| cjk_face(locale)),
+        )
+        .collect();
+    fonts
+        .families
+        .insert(FontFamily::Name("content".into()), content);
     fonts
 }
 
