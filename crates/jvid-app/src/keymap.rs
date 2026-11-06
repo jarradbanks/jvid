@@ -91,6 +91,7 @@ pub const ACTIONS: &[Action] = &[
     a("open_project", "Ctrl+O"),
     a("save", "Ctrl+S"),
     a("save_as", "Ctrl+Shift+S"),
+    a("collect_project", ""),
     aliases(a("import", "Ctrl+I"), &["ingest", "media"]),
     a("import_subtitles", "Ctrl+Shift+I"),
     aliases(a("export_subtitles", ""), &["captions", "srt", "vtt"]),
