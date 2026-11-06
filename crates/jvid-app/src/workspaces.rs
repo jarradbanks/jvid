@@ -26,7 +26,16 @@ pub struct PanelRegistration {
 
 /// Final feature wiring adds registrations here through the shell ownership window.
 /// Unregistered IDs in saved workspaces are safely omitted when applying the layout.
-pub const OPTIONAL_PANELS: &[PanelRegistration] = &[];
+pub const OPTIONAL_PANELS: &[PanelRegistration] = &[
+    PanelRegistration {
+        id: HIGHLIGHTS_PANEL_ID,
+        tab: Tab::Highlights,
+    },
+    PanelRegistration {
+        id: CAPTIONS_PANEL_ID,
+        tab: Tab::Captions,
+    },
+];
 
 const CORE_PANELS: &[PanelRegistration] = &[
     PanelRegistration {
@@ -541,7 +550,7 @@ mod tests {
     #[test]
     fn builtins_keep_every_core_panel_and_captions_falls_back_to_transcript() {
         for builtin in [Builtin::Editing, Builtin::Captions, Builtin::Audio] {
-            let dock = builtin.layout(Panels::default());
+            let dock = builtin.layout(Panels(&[]));
             for panel in CORE_PANELS {
                 assert_eq!(
                     dock.iter_all_tabs()
@@ -558,7 +567,12 @@ mod tests {
         }
         assert_eq!(CAPTIONS_PANEL_ID, "captions");
         assert_eq!(HIGHLIGHTS_PANEL_ID, "highlights");
-        assert!(Panels::default().tab(CAPTIONS_PANEL_ID).is_none());
+        assert!(Panels(&[]).tab(CAPTIONS_PANEL_ID).is_none());
+        assert_eq!(
+            Panels::default().tab(CAPTIONS_PANEL_ID),
+            Some(Tab::Captions)
+        );
+        assert!(tabs(&Builtin::Captions.layout(Panels::default())).contains(&Tab::Captions));
     }
 
     #[test]
@@ -593,7 +607,7 @@ mod tests {
             ),
             focused: Some("captions".into()),
         };
-        let mut restored = snapshot.restore(Panels::default());
+        let mut restored = snapshot.restore(Panels(&[]));
         assert_eq!(restored.iter_all_tabs().count(), 5);
         for panel in CORE_PANELS {
             assert!(tabs(&restored).contains(&panel.tab));
@@ -608,10 +622,7 @@ mod tests {
             dock: DockState::new(vec![CAPTIONS_PANEL_ID.into()]),
             focused: None,
         };
-        assert_eq!(
-            snapshot.restore(Panels::default()).iter_all_tabs().count(),
-            4
-        );
+        assert_eq!(snapshot.restore(Panels(&[])).iter_all_tabs().count(), 4);
     }
 
     #[test]
@@ -623,7 +634,7 @@ mod tests {
             dock: raw,
             focused: Some("highlights".into()),
         }
-        .restore(Panels::default());
+        .restore(Panels(&[]));
         assert_eq!(dock.iter_all_tabs().count(), 5);
         assert_eq!(
             dock.find_active_focused().map(|(_, tab)| *tab),
@@ -714,7 +725,7 @@ mod tests {
         workspaces.reset(&mut dock, panels);
         assert!(!workspaces.is_maximized());
         assert_eq!(dock.iter_all_tabs().count(), 5);
-        assert!(tabs(&dock).contains(&Tab::Transcript));
+        assert!(tabs(&dock).contains(&Tab::Captions));
         assert!(!tabs(&dock).contains(&Tab::RenderQueue));
         assert_eq!(
             dock.find_active_focused().map(|(_, tab)| *tab),

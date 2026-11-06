@@ -115,7 +115,9 @@ impl Preferences {
                     self.sidebar(ui);
                 });
                 ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+                    ui.set_clip_rect(ui.clip_rect().intersect(body));
                     egui::ScrollArea::vertical()
+                        .max_height(body.height())
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             egui::Frame::new().inner_margin(space::S16).show(ui, |ui| {
@@ -238,6 +240,20 @@ impl Preferences {
         {
             open_folder(dir);
         }
+        ui.add_space(20.0);
+        field_label(ui, tr!("personal_presets.title"));
+        ui.add(egui::Label::new(tr!("personal_presets.folder_hint")).wrap());
+        if ui
+            .add(Button::secondary(tr!("personal_presets.open_folder")))
+            .clicked()
+            && let Some(directory) = crate::personal_presets::directory()
+        {
+            match std::fs::create_dir_all(&directory) {
+                Ok(()) => open_folder(&directory),
+                Err(error) => self.error = Some(("personal_presets", error.to_string())),
+            }
+        }
+        self.save_error(ui, "personal_presets");
         ui.add_space(20.0);
         if ui
             .add(Checkbox::new(motion, tr!("settings.reduce_motion")))

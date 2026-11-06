@@ -161,9 +161,21 @@ pub struct Hit {
 /// The fillers and pauses in `words` (sorted, in timeline time), in order. A pause is cut down
 /// to [`KEEP`] each side; one between clips is left, as the clips may not be next to each other.
 pub fn find(words: &[(ClipId, Word)], languages: &HashMap<ClipId, Option<String>>) -> Vec<Hit> {
+    find_with_settings(words, languages, PAUSE, KEEP)
+}
+
+/// Configurable review uses timeline durations, including the clip's speed/direction mapping.
+/// Excess breathing room leaves a pause intact instead of generating an inverted cut.
+pub fn find_with_settings(
+    words: &[(ClipId, Word)],
+    languages: &HashMap<ClipId, Option<String>>,
+    pause: Time,
+    keep: Time,
+) -> Vec<Hit> {
     let mut hits = Vec::new();
+    let keep = keep.max(Time(0));
     for (i, (c, w)) in words.iter().enumerate() {
-        if is_filler(&w.text, languages.get(c).and_then(|s| s.as_deref())) {
+        if w.start < w.end && is_filler(&w.text, languages.get(c).and_then(|s| s.as_deref())) {
             hits.push(Hit {
                 clip: *c,
                 start: w.start,
@@ -174,9 +186,10 @@ pub fn find(words: &[(ClipId, Word)], languages: &HashMap<ClipId, Option<String>
         }
         if let Some((n, next)) = words.get(i + 1)
             && n == c
-            && next.start - w.end >= PAUSE
+            && next.start - w.end >= pause.max(Time(0))
+            && w.end + keep < next.start - keep
         {
-            let (start, end) = (w.end + KEEP, next.start - KEEP);
+            let (start, end) = (w.end + keep, next.start - keep);
             hits.push(Hit {
                 clip: *c,
                 start,
@@ -294,5 +307,26 @@ mod tests {
         };
         assert_eq!((hit.start, hit.end), (t(0.625), t(2.875)));
         assert_eq!(context(&words, hit, "[3 s]"), "a [3 s] b");
+    }
+
+    #[test]
+    fn review_pause_threshold_and_breathing_room_never_invert_a_cut() {
+        let word = |start, end| {
+            (
+                ClipId(1),
+                Word {
+                    text: "word".into(),
+                    start: t(start),
+                    end: t(end),
+                    confidence: 1.0,
+                },
+            )
+        };
+        let words = [word(0.0, 0.5), word(2.5, 3.0)];
+        let hits = find_with_settings(&words, &HashMap::new(), t(1.5), t(0.25));
+        assert_eq!((hits[0].start, hits[0].end), (t(0.75), t(2.25)));
+        for (pause, keep) in [(3.0, 0.0), (1.0, 1.0), (1.0, 2.0)] {
+            assert!(find_with_settings(&words, &HashMap::new(), t(pause), t(keep)).is_empty());
+        }
     }
 }

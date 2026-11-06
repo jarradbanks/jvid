@@ -21,6 +21,7 @@ mod subtitle_export;
 mod timeline_recording;
 mod timeline_tools;
 mod updates;
+mod workflow_integration;
 
 const SIZES: [[f32; 2]; 2] = [[1280.0, 720.0], [1920.0, 1080.0]];
 const SCALES: [f32; 2] = [1.0, 1.5];
@@ -497,20 +498,22 @@ fn hover_remove_button_uses_the_remove_flow() {
     }
     let mut results = egui_kittest::SnapshotResults::new();
     let mut h = bin_harness();
-    h.hover_at(egui::pos2(90.0, 160.0));
+    let tile = h.get_by_label("clutch_round_3.mkv").rect();
+    let hover = tile.center();
+    h.hover_at(hover);
     settle_hover(&mut h);
     assert_eq!(h.state().bin.filmstrip_test_state(), (0, 1, true));
     if gpu() {
         results.add(h.try_snapshot("bin_grid_hover"));
     }
     // A later pointer event can retry the failed source; its completion also goes idle.
-    h.hover_at(egui::pos2(91.0, 160.0));
+    h.hover_at(hover + egui::vec2(1.0, 0.0));
     settle_hover(&mut h);
     assert_eq!(h.state().bin.filmstrip_test_state(), (0, 2, true));
     h.state_mut().bin.list = true;
     h.run();
-    // clutch_round_3.mkv, used by two clips: the dock strip adds one header above the list.
-    h.hover_at(egui::pos2(100.0, 164.0 + size::HEADER));
+    let row = h.get_by_label("clutch_round_3.mkv").rect();
+    h.hover_at(row.center());
     settle_hover(&mut h);
     if gpu() {
         results.add(h.try_snapshot("bin_list_hover"));
@@ -520,7 +523,8 @@ fn hover_remove_button_uses_the_remove_flow() {
     assert_eq!(h.state().bin.confirm_remove, Some(AssetId(2)));
     h.get_by_label("Cancel").click();
     // arena_01.mkv is unused: removed at once.
-    h.hover_at(egui::pos2(100.0, 132.0 + size::HEADER));
+    let row = h.get_by_label("arena_01.mkv").rect();
+    h.hover_at(row.center());
     settle_hover(&mut h);
     h.get_by_label("Remove from Project").click();
     h.run();
@@ -2021,6 +2025,32 @@ fn preferences_fit_the_minimum_window() {
     );
     results.add(h.try_snapshot("preferences_input_devices"));
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn preferences_general_scrolls_preset_controls_without_moving_done() {
+    let mut h = plain_harness();
+    h.state_mut().on_welcome = false;
+    h.state_mut().preferences.open(Vec::new(), None);
+    h.run();
+    let done = h.get_by_label(tr!("settings.done")).rect();
+    for label in [
+        tr!("personal_presets.open_folder"),
+        tr!("settings.reduce_motion"),
+    ] {
+        h.get_by_label(label).scroll_to_me();
+        h.run();
+        let control = h.get_by_label(label).rect();
+        assert!(h.ctx.content_rect().contains_rect(control));
+        assert!(
+            control.bottom() < done.top(),
+            "{label} overlaps footer: {control:?}"
+        );
+        assert_eq!(h.get_by_label(tr!("settings.done")).rect(), done);
+    }
+    h.get_by_label(tr!("settings.done")).click();
+    h.run();
+    assert!(!h.state().preferences.is_open());
 }
 
 #[test]

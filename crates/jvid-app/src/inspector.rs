@@ -826,7 +826,25 @@ pub fn show(
         crate::settings_transfer::show(ui, sel.project, &sel.selected, t)
             .map(|command| (command, None))
     };
+    let preset_category = match pane {
+        Pane::Text => Some(jvid_core::settings_transfer::Category::Text),
+        Pane::Audio => Some(jvid_core::settings_transfer::Category::Audio),
+        Pane::Effects => Some(jvid_core::settings_transfer::Category::Effects),
+        Pane::Video => None,
+    };
+    if let Some(category) = preset_category
+        && let Some(command) =
+            crate::personal_presets::show(ui, sel.project, &sel.selected, t, category)
+    {
+        edit = Some((command, None));
+    }
     let mut seek = None;
+    if pane == Pane::Video
+        && let Some(base) = shared.and_then(|a| a.annotation.as_ref())
+        && let Some(annotation_edit) = crate::annotations::inspector(ui, clips, base, t)
+    {
+        edit = Some(annotation_edit);
+    }
     let mut index = 0u64;
     for (id, props) in SECTIONS {
         let (clips, here) = if id == "audio" {
@@ -3629,7 +3647,7 @@ fn pair(ui: &mut Ui, v: &mut [f32; 2], (lo, hi): (f64, f64), decimals: usize, la
 }
 
 /// The fields of Text tab row `id` editing `s`; true once one changed it.
-fn text_fields(ui: &mut Ui, s: &mut Text, id: &str, label: &str) -> bool {
+pub(crate) fn text_fields(ui: &mut Ui, s: &mut Text, id: &str, label: &str) -> bool {
     use jvid_core::model::Align;
     let mut num = |v: &mut f32, range, slider| {
         let mut x = f64::from(*v);
@@ -4833,6 +4851,7 @@ mod tests {
             out_point: None,
             solid: None,
             text: text.then(Text::default),
+            annotation: None,
             generated_caption: false,
             sequence: None,
         }

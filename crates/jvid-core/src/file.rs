@@ -31,6 +31,7 @@ pub enum FileError {
     TooDeep,
     /// Sequence ids repeat, or an asset names a missing one.
     BadSequence,
+    BadAnnotation,
 }
 
 impl std::fmt::Display for FileError {
@@ -43,6 +44,9 @@ impl std::fmt::Display for FileError {
             Self::Cycle => f.write_str("project file nests a sequence inside itself"),
             Self::TooDeep => f.write_str("project file nests sequences too deep"),
             Self::BadSequence => f.write_str("project file has mismatched sequence ids"),
+            Self::BadAnnotation => {
+                f.write_str("project file has invalid annotation geometry or style")
+            }
         }
     }
 }
@@ -82,8 +86,13 @@ pub fn to_json_with_paths(
             a[relative] = rel.into();
         }
     });
+    let version = if project.assets().iter().any(|a| a.annotation.is_some()) {
+        2
+    } else {
+        SCHEMA_VERSION
+    };
     Ok(serde_json::to_string_pretty(
-        &json!({ "schema_version": SCHEMA_VERSION, "project": p }),
+        &json!({ "schema_version": version, "project": p }),
     )?)
 }
 
@@ -109,6 +118,14 @@ pub fn from_json(
         }
     });
     let project: Project = serde_json::from_value(p)?;
+    if project
+        .assets()
+        .iter()
+        .filter_map(|a| a.annotation.as_ref())
+        .any(|a| !a.valid())
+    {
+        return Err(FileError::BadAnnotation);
+    }
     let s = project.settings();
     let rates = std::iter::once(s.frame_rate).chain(
         project
@@ -193,7 +210,11 @@ pub fn remap_paths(
 
 fn visit_paths(p: &mut Value, mut visit: impl FnMut(&mut Value, &str, &str, DependencyKind)) {
     for asset in p["assets"].as_array_mut().into_iter().flatten() {
-        if asset["solid"].is_null() && asset["text"].is_null() && asset["sequence"].is_null() {
+        if asset["solid"].is_null()
+            && asset["text"].is_null()
+            && asset["annotation"].is_null()
+            && asset["sequence"].is_null()
+        {
             visit(asset, "path", "relative_path", DependencyKind::Media);
         }
     }

@@ -93,6 +93,10 @@ jplay recordings import markers from the adjacent `<name>.jplay.json` file. Plac
 
 Select a clip and use the Inspector. It holds Transform (position, scale, rotation, anchor), opacity, blend mode, crop, color (exposure, contrast, saturation, temperature, tint) and volume.
 
+**Personal presets.** In the Inspector’s Text, Audio or Effects tab, open Title Styles, Voice Treatments or Effect Stacks. Select one clip, enter a name and use **Save New Preset**; choose a saved entry to apply, rename or delete it. The unbound **Personal Presets** command opens the matching Inspector section and can be remapped in Keyboard Shortcuts. Preferences offers **Open Presets Folder**. These versioned files are separate from export presets and work across projects and restarts.
+
+Presets replace only their category in one undo step. Titles retain the destination’s words; voice treatments retain timing and links. Static settings are the default. **Include Animation** saves or applies relative key times: overflow is discarded, visible boundaries are sampled, longer targets hold the final value, and destination speed stays unchanged. Missing fonts or effects disable Apply with repair advice while preserving the saved definition. Collected fonts use their readable family requirement and can resolve to the destination project’s matching collected font. Effect stacks bound to clip masks must be transferred with Transform through settings transfer instead of saved as standalone stacks.
+
 - Click the diamond beside a property to animate it. That sets a keyframe at the playhead; change the value at another time to add another.
 - The arrows either side of the diamond jump to the previous and next keyframe. The middle diamond is filled when there's a key at the playhead; click it to add or remove one.
 - Right-click a key's diamond to pick its easing.
@@ -112,6 +116,10 @@ Each preset centers the whole source, clears crop and anchor offsets, and resets
 
 Open **Transcript** from the Timeline menu to work with recognized speech. **Copy** copies the selected words; the platform Copy shortcut (`Ctrl+C`, or `Cmd+C` on macOS) does the same when the Transcript panel has focus. The Find field keeps its normal text-copy behavior.
 
+Use **Edit > Review Speech Cuts** to review silence or recognized filler suggestions before editing. The selected audio source takes priority; with nothing selected, the review covers the current sequence. Choose the audio stream, adjust the pause threshold and breathing room, then tick the cuts to accept. Unticked suggestions keep the original footage. **Audition Before** and **Audition After** play the selected suggestion's surrounding audio using the proposed edits; **Stop** ends audition. The displayed time saved counts overlapping suggestions once.
+
+**Apply Cuts** removes accepted time ranges from every track, including linked video, background audio and captions, in one undo step. Affected locked tracks must be unlocked first. Analysis, audition and Cancel leave the project unchanged. Project edits, source replacement or updated recognition invalidate the plan; use **Recompute** before applying. Accepted edits save and export like other timeline edits. The review action can be assigned a shortcut in the keymap editor.
+
 **Copy All** and **Export Transcript (.txt)…** use the whole displayed transcript scope: selected clips when clips are selected, otherwise the current sequence, using the chosen audio sources. They follow timeline order, trims, removals and repeated clip instances. The scope is shown above the text; a partial-results message explains when some sources still need recognition. Export uses a native save dialog and writes readable UTF-8 text with punctuation and paragraph breaks. These actions use available recognition results and leave the project and playhead unchanged.
 
 ## Effects
@@ -125,7 +133,15 @@ drops out of the Program monitor and exports until you turn it back on. To write
 
 ## Subtitles
 
-Use **File > Import Subtitles** for an existing SRT, or **Timeline > Generate Subtitles** to turn speech into editable captions. Edit a caption's text in the Inspector and trim or move its timeline clip to adjust timing.
+Use **File > Import Subtitles** for an existing SRT, or **Timeline > Generate Subtitles** to turn speech into editable captions. Open **Timeline > Captions** for editable text, start and end rows; times use timeline seconds. Text typing and time scrubbing each undo as one operation. You can also edit text in the Inspector or trim and move caption clips on the timeline.
+
+Select caption rows with their checkboxes. **Split at Playhead** splits a row at both its remembered text cursor and the current playhead; before placing a cursor, it uses the text midpoint. Both cuts must be inside the caption. **Merge Selected** joins consecutive captions on one track with line breaks, includes any intervening gaps, and retains the earliest caption’s style. Invalid edits leave every caption unchanged.
+
+Find is literal and case-sensitive, including Unicode. **Replace All** uses the chosen **Selected Clips**, active caption’s **Track**, or **Entire Timeline** scope. Search only filters the displayed rows; it does not narrow that chosen scope. Hidden and disabled captions remain editable and carry a Hidden label; locked tracks refuse content changes. The workspace edits the current open sequence; open a nested sequence to edit its own caption rows.
+
+**Shared Style** starts from a reference caption. **Use Active Caption Style** selects the reference caption from the row most recently focused, selected or sought. Each application compares against that caption’s current style, including after undo. **Apply Style to Scope** writes the shared values into the chosen captions as one undoable operation. By default, each value differing from the reference is an individual override; animated text properties retain their static values and keyframes. **Replace Overrides** explicitly applies every shared style value and clears text-style animation, while retaining caption text, timing, transforms and other effects. A single selected row with this option is an explicit per-caption style override. Shared styles are stored in the existing text assets, and edits detach reused assets so unrelated titles and other placed instances keep their appearance. Search, selection, scope, unapplied style controls and docking do not affect renders.
+
+Close Captions with its tab’s **×**; reopening keeps its view controls. The **Captions** action is available in the command palette and can receive a custom shortcut in Keyboard Shortcuts. Changing the duration of a speed-animated caption uses timeline trimming; text editing and moving an unchanged-duration caption remain available in the workspace.
 
 To save captions without exporting video, choose **Timeline > Export Subtitles (.srt)…**, **File > Export Subtitles (.srt)…**, or right-click a subtitle track header or caption clip and choose **Export Subtitles (.srt)…**. Choose **Entire Timeline** for the whole current sequence, or explicitly choose **In to Out**, then **Save SRT…** to open the native save dialog. One missing mark means the sequence start or end. Captions crossing the range edges are clipped, and times start at zero at the range's In point.
 
@@ -141,6 +157,10 @@ Click **Export** in the header. The dialog opens on In to Out when you've marked
 - Exports run in the **Render Queue** while you keep editing. The menu beside **Export** shows the running export and the last few results; **Show Render Queue** opens the full list as a panel beside the Timeline, with **Cancel**, **Reveal**, **Cancel All** and **Clear Finished**.
 
 **Export frame** (`Ctrl+Shift+E`) saves the current Program frame as a PNG.
+
+**File > Export Versions…** opens landscape, vertical and size-limited copies of the current In/Out range, or the whole timeline when no marks are set. **File > Export Selected Highlight Versions…** uses the checked Highlights ranges, including their reviewed point-marker padding. Both commands can be assigned shortcuts.
+
+Choose each version's name, preset, dimensions, caption policy and target size (0 disables the limit). Inspect its rendered preview, scrub through each range, then choose **Accept Framing** for every range. Use the clip selector and Position controls to adjust that version's crop, with its own Undo and Redo. Changing dimensions resets its framing; framing, range or caption changes require another review. **Add to Queue** captures independent copies, so later edits, cancellation or failures cannot change sibling outputs or the original project. Existing names and SRT sidecars receive numeric suffixes; exports never replace them.
 
 ## Shortcuts
 

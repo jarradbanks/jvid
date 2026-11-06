@@ -93,9 +93,17 @@ pub const ACTIONS: &[Action] = &[
     a("save_as", "Ctrl+Shift+S"),
     a("collect_project", ""),
     aliases(a("import", "Ctrl+I"), &["ingest", "media"]),
+    a("media_new_bin", ""),
+    a("media_rename_bin", ""),
+    a("media_delete_bin", ""),
+    a("media_favorite", ""),
     a("import_subtitles", "Ctrl+Shift+I"),
     aliases(a("export_subtitles", ""), &["captions", "srt", "vtt"]),
     aliases(a("export", "Ctrl+M"), &["render", "encode"]),
+    aliases(a("review_highlights", ""), &["markers", "highlights"]),
+    a("export_highlights", ""),
+    a("export_versions", ""),
+    a("export_highlight_versions", ""),
     a("quit", "Ctrl+Q"),
     a("play_stop", "Space"),
     a("shuttle_left", "J"),
@@ -143,8 +151,10 @@ pub const ACTIONS: &[Action] = &[
     t("paste_grade", "Ctrl+Alt+V"),
     a("copy_settings", ""),
     a("paste_settings", ""),
+    a(crate::personal_presets::ACTION, ""),
     t("clean_up_voice", "Ctrl+Alt+U"),
     t("detect_silence", "Ctrl+Alt+S"),
+    a("review_speech_cuts", ""),
     t("find_highlights", "Ctrl+Alt+H"),
     t("hide_region", "Ctrl+Alt+R"),
     aliases(
@@ -160,6 +170,9 @@ pub const ACTIONS: &[Action] = &[
     aliases(a("razor_tool", "C"), &["blade", "split"]),
     aliases(a("selection_tool", "V"), &["pointer", "select"]),
     a("text_tool", "T"),
+    a("add_arrow", ""),
+    a("add_rectangle", ""),
+    a("add_callout", ""),
     t("add_edit", "Ctrl+K"),
     a("step_back", "Left"),
     a("step_forward", "Right"),
@@ -190,6 +203,7 @@ pub const ACTIONS: &[Action] = &[
     ),
     a("workspace_editing", ""),
     a("workspace_captions", ""),
+    aliases(a("show_captions", ""), &["captions", "subtitles", "rows"]),
     a("workspace_audio", ""),
     a("workspace_save", ""),
     a("reset_layout", ""),
@@ -288,6 +302,15 @@ impl Keymap {
     /// The action's shortcut as text, empty when unbound.
     pub fn shortcut(&self, id: &str) -> String {
         self.label(id).1
+    }
+
+    /// Panel-local actions use their current binding after the app routes global input.
+    pub fn consume(&self, ctx: &egui::Context, id: &str) -> bool {
+        ACTIONS
+            .iter()
+            .position(|a| a.id == id)
+            .and_then(|i| self.bindings[i])
+            .is_some_and(|binding| ctx.input_mut(|i| i.consume_shortcut(&binding)))
     }
 
     /// Whether `id`'s key is down, for actions that finish on release.
@@ -469,6 +492,17 @@ mod tests {
     fn framing_actions_are_unbound_by_default_and_remappable() {
         let defaults = Keymap::default();
         for id in crate::framing::ACTIONS {
+            assert_eq!(binding(&defaults, id), None);
+            let map = Keymap::from_toml(&format!("{id} = \"Ctrl+Shift+F\"\n")).unwrap();
+            assert_eq!(binding(&map, id), parse("Ctrl+Shift+F"));
+            assert_eq!(Keymap::from_toml(&map.to_toml()).unwrap(), map);
+        }
+    }
+
+    #[test]
+    fn version_export_actions_are_unbound_and_remappable() {
+        let defaults = Keymap::default();
+        for id in ["export_versions", "export_highlight_versions"] {
             assert_eq!(binding(&defaults, id), None);
             let map = Keymap::from_toml(&format!("{id} = \"Ctrl+Shift+F\"\n")).unwrap();
             assert_eq!(binding(&map, id), parse("Ctrl+Shift+F"));

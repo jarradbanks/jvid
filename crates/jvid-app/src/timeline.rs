@@ -34,6 +34,7 @@ use crate::keymap::Keymap;
 use crate::media_bin::{Caches, filmstrips::FilmstripRequests};
 use crate::transport::{SeekGesture, Transport};
 
+mod edit_feedback;
 #[cfg(test)]
 mod effect_drop_tests;
 mod fades;
@@ -49,7 +50,7 @@ pub mod menus;
 mod rubber;
 #[cfg(test)]
 mod seek_tests;
-mod silence;
+pub(crate) mod silence;
 mod transitions;
 #[cfg(test)]
 mod waveform_tests;
@@ -92,6 +93,11 @@ pub struct Timeline {
     fx_popover: Option<TrackId>,
     /// Where the dragged clip would land; the press origin is gone by the release frame.
     drag_to: Option<(TrackId, Time)>,
+    feedback: Option<edit_feedback::Plan>,
+    feedback_error: Option<ModelError>,
+    snap_target: Option<edit_feedback::SnapTarget>,
+    cancelled: bool,
+    press_origin: Option<Pos2>,
     /// Selection and linked closure captured once when a clip drag starts.
     drag_selection: Vec<ClipId>,
     selected: HashSet<ClipId>,
@@ -203,7 +209,6 @@ struct Trim {
     clip: ClipId,
     edge: Edge,
     by: Time,
-    ripple: bool,
 }
 
 /// An edit made in the timeline, and the gesture it coalesces under, if any.
@@ -234,6 +239,11 @@ impl Default for Timeline {
             renaming: None,
             fx_popover: None,
             drag_to: None,
+            feedback: None,
+            feedback_error: None,
+            snap_target: None,
+            cancelled: false,
+            press_origin: None,
             drag_selection: Vec::new(),
             selected: HashSet::new(),
             linked_selection: true,
@@ -822,114 +832,31 @@ impl Timeline {
         Some(cmd)
     }
 
-    /// Edge grips inside a clip in the selection tool; dragging one trims, Ctrl ripples.
-    /// Returns the edit on release.
-    fn trim_handles(
-        &mut self,
-        ui: &Ui,
-        project: &Project,
-        view: View,
-        clip: &Clip,
-        r: Rect,
-    ) -> Option<Edit> {
-        if self.tool != Tool::Selection || locked(project.sequence(), clip.id) {
-            return None;
-        }
-        let w = 6.0f32.min(r.width() / 3.0);
-        let rate = self.transport.rate;
-        for (edge, zone) in [
-            (Edge::Head, r.left()..=r.left() + w),
-            (Edge::Tail, r.right() - w..=r.right()),
-        ] {
-            let zone = Rect::from_x_y_ranges(zone, r.y_range());
-            let key = ("trim", clip.id, edge == Edge::Head);
-            let h = ui.interact(zone, ui.id().with(key), Sense::drag());
-            if h.hovered() || h.dragged() {
-                ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
-            }
-            if h.is_pointer_button_down_on() {
-                self.holding = Some(clip.id);
-            }
-            if h.dragged()
-                && let Some(p) = h.interact_pointer_pos()
-            {
-                let by = view.time(p.x) - self.press_time(ui, view, p);
-                let by = rate.time_floor(rate.index_nearest(by));
-                let at = match edge {
-                    Edge::Head => clip.start + by,
-                    Edge::Tail => clip.end() + by,
-                };
-                let seq = project.sequence();
-                let group: Vec<_> = seq.linked(clip.id).iter().map(|(_, c)| c.id).collect();
-                let by = by + self.snap(seq, &group, &[at]);
-                let ripple = ui.input(|i| i.modifiers.command);
-                let by = project.trim_limit(clip.id, edge, by, ripple);
-                let (clip, ripple) = (clip.id, ripple);
-                self.trim = Some(Trim {
-                    clip,
-                    edge,
-                    by,
-                    ripple,
-                });
-            }
-            if h.drag_stopped() {
-                self.snapped = None;
-            }
-            if h.drag_stopped()
-                && let Some(t) = self.trim.take()
-                && t.by != Time(0)
-            {
-                let trims = vec![(t.clip, t.edge, t.by)];
-                let ripple = t.ripple;
-                return Some((Command::Trim { trims, ripple }, None));
-            }
-        }
-        None
-    }
-
     /// Shifts `edges` onto the nearest snap target within reach when snapping is on: other
     /// clips' edges (not `moving`'s), the playhead, markers and in/out. Records the hit.
     fn snap(&mut self, seq: &Sequence, moving: &[ClipId], edges: &[Time]) -> Time {
-        self.snapped = None;
+        self.clear_snap();
         if !self.snapping {
             return Time(0);
         }
-        let mut targets = vec![self.playhead()];
-        let flag = self.mark_drag.map(|(is_in, _)| is_in);
-        if flag != Some(true) {
-            targets.extend(seq.in_point());
-        }
-        if flag != Some(false) {
-            targets.extend(seq.out_point());
-        }
-        let dragging = self.marker_drag.as_ref().map(|(_, m)| m.id);
-        for m in seq.markers().iter().filter(|m| Some(m.id) != dragging) {
-            targets.extend([m.time, m.time + m.duration]);
-        }
-        for t in seq.tracks() {
-            let others = t.clips().iter().filter(|c| !moving.contains(&c.id));
-            targets.extend(others.flat_map(|c| [c.start, c.end()]));
-        }
+        let targets = edit_feedback::snap_targets(
+            seq,
+            self.playhead(),
+            moving,
+            self.mark_drag.map(|(is_in, _)| is_in),
+            self.marker_drag.as_ref().map(|(_, m)| m.id),
+        );
+        let times: Vec<_> = targets.iter().map(|(time, _)| *time).collect();
         let reach = Time((SNAP_PX / self.zoom * FLICKS_PER_SECOND as f64) as i64);
-        let hit = snap_shift(edges, &targets, reach);
+        let hit = snap_shift(edges, &times, reach);
         self.snapped = hit.map(|h| h.1);
+        self.snap_target = hit.and_then(|(_, time)| {
+            targets
+                .iter()
+                .find(|(t, _)| *t == time)
+                .map(|(_, target)| *target)
+        });
         hit.map_or(Time(0), |h| h.0)
-    }
-
-    /// Where the trimmed clips would end up, as (track, start, end).
-    fn trim_ghosts(&self, seq: &Sequence) -> Vec<(Option<TrackId>, Time, Time)> {
-        let Some(t) = self.trim else {
-            return Vec::new();
-        };
-        let span = |c: &Clip| match (t.edge, t.ripple) {
-            (Edge::Head, false) => (c.start + t.by, c.end()),
-            (Edge::Head, true) => (c.start, c.end() - t.by),
-            (Edge::Tail, _) => (c.start, c.end() + t.by),
-        };
-        let group = seq.linked(t.clip).into_iter();
-        group
-            .map(|(tr, c)| (Some(tr), span(c).0, span(c).1))
-            .collect()
     }
 
     /// The source frame at the edge being trimmed, for the viewer: the video partner's when
@@ -1024,6 +951,12 @@ impl Timeline {
             self.shown_sequence = project.sequence().id();
             self.selected.clear();
             self.keys.clear_focus();
+            self.feedback = None;
+            self.trim = None;
+            self.drag_to = None;
+            self.drag_selection.clear();
+            self.clear_snap();
+            self.cancelled = true;
         }
         self.transport.rate = project.settings().frame_rate;
         // Room past the last clip, so the end of the sequence can be reached and seen.
@@ -1116,6 +1049,28 @@ impl Timeline {
             .strip_requests
             .on_focus(ui.ctx(), self.media.caches.as_deref());
         let mut edit = self.pending_action(ui.ctx(), project).map(|c| (c, None));
+        self.feedback = None;
+        self.feedback_error = None;
+        let cancel = ui.input(|i| {
+            i.key_pressed(Key::Escape)
+                || !i.focused
+                || i.events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::WindowFocused(false)))
+        });
+        if cancel
+            && (self.holding.is_some()
+                || self.trim.is_some()
+                || egui::DragAndDrop::has_payload_of_type::<AssetId>(ui.ctx()))
+        {
+            self.cancelled = true;
+            self.trim = None;
+            self.drag_to = None;
+            self.drag_selection.clear();
+            self.clear_snap();
+            egui::DragAndDrop::clear_payload(ui.ctx());
+            ui.ctx().stop_dragging();
+        }
         if self.keys.graph.is_some() {
             return edit.or(self.graph(ui, ui.max_rect(), project.sequence()));
         }
@@ -1245,6 +1200,8 @@ impl Timeline {
         let (pressed, down, dt) =
             ui.input(|i| (i.pointer.any_pressed(), i.pointer.any_down(), i.stable_dt));
         if pressed {
+            self.cancelled = false;
+            self.press_origin = ui.input(|i| i.pointer.press_origin());
             self.press_scroll = (self.scroll, self.vscroll);
             self.marquee_origin = ui
                 .input(|i| i.pointer.press_origin())
@@ -1268,14 +1225,17 @@ impl Timeline {
             .dragged_id()
             .is_some_and(|dragged| dragged == id.with("vbar") || dragged == id.with("hbar"));
         let ours = !refused
+            && !self.cancelled
             && !scrolling
             && ui.ctx().dragged_id().is_some()
             && ui
                 .input(|i| i.pointer.press_origin())
                 .is_some_and(|o| lanes.contains(o));
-        let bin = egui::DragAndDrop::has_payload_of_type::<AssetId>(ui.ctx())
+        let bin = !self.cancelled
+            && egui::DragAndDrop::has_payload_of_type::<AssetId>(ui.ctx())
             && ui.rect_contains_pointer(area);
-        if !scrubbing
+        if down
+            && !scrubbing
             && (ours || bin)
             && let Some(p) = ui.input(|i| i.pointer.interact_pos())
         {
@@ -1484,15 +1444,17 @@ impl Timeline {
                     self.drag_selection = group;
                 }
                 // A clip tied to a locked track can't move: no ghost, a refusal instead.
-                if cr.dragged()
+                if !self.cancelled
+                    && cr.dragged()
                     && (locked(seq, clip.id)
                         || self.drag_selection.iter().any(|id| locked(seq, *id)))
                 {
+                    self.feedback_error = Some(ModelError::Locked(track.id));
                     ui.ctx().set_cursor_icon(CursorIcon::NotAllowed);
                     egui::Tooltip::for_widget(&cr)
                         .at_pointer()
                         .show(|ui| ui.label(tr!("timeline.track_locked")));
-                } else if cr.dragged() || cr.drag_stopped() {
+                } else if !self.cancelled && (cr.dragged() || cr.drag_stopped()) {
                     held = Some((clip, track, cr));
                 }
             }
@@ -1569,12 +1531,8 @@ impl Timeline {
             );
             egui::Popup::menu(&r).show(|ui| add_menu(ui, &mut edit));
         }
-        let moving: Vec<_> = match self.trim {
-            Some(t) => seq.linked(t.clip).iter().map(|(_, c)| c.id).collect(),
-            None => self.drag_selection.clone(),
-        };
         let mut top = false;
-        let mut ghosts = self.drops(
+        self.drops(
             ui,
             project,
             view,
@@ -1589,8 +1547,13 @@ impl Timeline {
             self.drag_selection.clear();
             self.drag_to = None;
             self.marquee_origin = None;
+            self.trim = None;
+            self.feedback = None;
+            self.feedback_error = None;
+            if self.press_origin.take().is_some() {
+                self.clear_snap();
+            }
         }
-        ghosts.extend(self.trim_ghosts(seq));
         // Dropped into the slot: the new track takes its place, so it closes at once.
         if open && edit.is_some() {
             ui.ctx().animate_bool_with_time(slot_id, false, 0.0);
@@ -1601,41 +1564,7 @@ impl Timeline {
             let r = Rect::from_x_y_ranges(lanes.x_range(), y..=y + 2.0);
             clip_painter.rect_filled(r, 0.0, color::light_blue());
         }
-        // Ghosts for tracks a drop will add go in rows below the last lane, a new top video
-        // track's (it comes first) in the open slot.
-        let mut below = y;
-        let mut slot_rows = (top && open).then(|| slot.y_range());
-        for (t, from, to) in ghosts {
-            let rows = match t {
-                Some(t) => lane_rects.iter().find(|l| l.0 == t).map(|l| l.2.y_range()),
-                None if slot_rows.is_some() => slot_rows.take(),
-                None => {
-                    below += Track::default_height();
-                    Some((below - Track::default_height()..=below).into())
-                }
-            };
-            if let Some(rows) = rows {
-                let x = view.x(from)..=view.x(to);
-                let r = Rect::from_x_y_ranges(x, rows).shrink2(vec2(1.0, 2.0));
-                let corner = CornerRadius::same(radius::SMALL);
-                clip_painter.rect_filled(r, corner, color::blue().gamma_multiply(0.3));
-                clip_painter.rect_stroke(
-                    r,
-                    corner,
-                    Stroke::new(1.0, color::light_blue()),
-                    egui::StrokeKind::Inside,
-                );
-                // What the drop overwrites on that track, in red.
-                let track = t.and_then(|t| seq.track(t));
-                let hit = track.into_iter().flat_map(|tr| tr.clips());
-                let hit = hit.filter(|c| !moving.contains(&c.id));
-                for c in hit.filter(|c| c.start < to && c.end() > from) {
-                    let x = view.x(c.start.max(from))..=view.x(c.end().min(to));
-                    let o = Rect::from_x_y_ranges(x, rows).shrink2(vec2(1.0, 2.0));
-                    clip_painter.rect_filled(o, 0.0, color::red().gamma_multiply(0.45));
-                }
-            }
-        }
+        self.paint_edit_feedback(&clip_painter, view, &lane_rects, y, slot, top, open);
         // The in/out range, a missing mark standing for the start or end.
         let (mut mark_in, mut mark_out) = (seq.in_point(), seq.out_point());
         match self.mark_drag {
@@ -1654,8 +1583,8 @@ impl Timeline {
             clip_painter.rect_filled(r, 0.0, color::light_blue().gamma_multiply(0.08));
         }
         if let Some(t) = self.snapped {
-            let x = view.x(t);
-            let r = Rect::from_x_y_ranges(x - 0.5..=x + 0.5, lanes.y_range());
+            let x = (view.x(t) * ppp).round() / ppp;
+            let r = Rect::from_x_y_ranges(x..=x + line, lanes.y_range());
             clip_painter.rect_filled(r, 0.0, color::light_blue());
         }
         if seq.tracks().iter().all(|track| track.clips().is_empty())
@@ -1772,6 +1701,7 @@ impl Timeline {
             );
             playhead_head(&painter, pos2(x + line / 2.0, ruler.top()));
         }
+        self.paint_edit_label(ui, area, project);
         let ranges = self.highlight_ranges(project, ui.ctx());
         let rate = self.transport.rate;
         if let Some(h) = &mut self.highlights {
@@ -1806,7 +1736,19 @@ impl Timeline {
         project: &Project,
         ctx: &egui::Context,
     ) -> Option<Vec<silence::Span>> {
-        let s = self.silence.as_mut()?;
+        let mut s = self.silence.take()?;
+        let spans = self.review_silence_spans(&mut s, project, ctx);
+        self.silence = Some(s);
+        spans
+    }
+
+    /// Shared cached detector input for the proposal review; never emits an edit.
+    pub(crate) fn review_silence_spans(
+        &mut self,
+        s: &mut silence::Silence,
+        project: &Project,
+        ctx: &egui::Context,
+    ) -> Option<Vec<silence::Span>> {
         let seq = project.sequence();
         let key = |c: &Clip| Some((project.asset(c.asset)?, c.stream.unwrap_or(0) as usize));
         let mut loaded = HashSet::new();
@@ -1858,7 +1800,10 @@ impl Timeline {
 
     /// The sequence time under the press origin, as the view stood when it was pressed.
     fn press_time(&self, ui: &Ui, view: View, p: Pos2) -> Time {
-        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
+        let origin = ui
+            .input(|i| i.pointer.press_origin())
+            .or(self.press_origin)
+            .unwrap_or(p);
         let then = View {
             scroll: self.press_scroll.0,
             ..view
@@ -1985,11 +1930,12 @@ impl Timeline {
         edit: &mut Option<Edit>,
         top: &mut bool,
         slot: bool,
-    ) -> Vec<(Option<TrackId>, Time, Time)> {
-        let rate = self.transport.rate;
-        let snap = |t: Time| rate.time_floor(rate.index_nearest(t)).max(Time(0));
+    ) {
+        if self.cancelled {
+            return;
+        }
         let Some(p) = ui.input(|i| i.pointer.interact_pos()) else {
-            return Vec::new();
+            return;
         };
         let lane_at = |kind: Option<TrackKind>| {
             let hit = lanes
@@ -2036,69 +1982,9 @@ impl Timeline {
                     egui::DragAndDrop::clear_payload(ui.ctx());
                 }
             }
-            return Vec::new();
+            return;
         }
-        if let Some(asset) = egui::DragAndDrop::payload::<AssetId>(ui.ctx())
-            && area.contains(p)
-            // Alt merges a multi-stream file's audio into one clip.
-            && let merge = ui.input(|i| i.modifiers.alt)
-            && let on = lane_at(None).filter(|_| !slot)
-            && let Some(mut pl) = project.placement(*asset, snap(view.time(p.x)), false, on, merge)
-        {
-            *top = on.is_none() && onto_new_track(&mut pl);
-            let end = pl.start + (pl.source_out - pl.source_in);
-            let ghosts = [(pl.video, pl.add_video), (pl.audio, pl.add_audio)].into_iter();
-            let ghosts = ghosts.filter(|(t, add)| t.is_some() || *add);
-            let ghosts = ghosts.map(|(t, _)| (t, pl.start, end)).collect();
-            if ui.input(|i| i.pointer.any_released()) {
-                *edit = Some((Command::Place(pl), None));
-            }
-            return ghosts;
-        }
-        let Some((clip, from, r)) = held else {
-            return Vec::new();
-        };
-        if r.drag_stopped() {
-            self.snapped = None;
-            if let Some((to, start)) = self.drag_to.take()
-                && (start != clip.start || to != from.id)
-            {
-                let (id, track) = (clip.id, to);
-                *edit = Some((
-                    Command::MoveSelection {
-                        ids: self.drag_selection.clone(),
-                        anchor: id,
-                        track,
-                        start,
-                    },
-                    None,
-                ));
-            }
-            return Vec::new();
-        }
-        let start = snap(clip.start + (view.time(p.x) - self.press_time(ui, view, p)));
-        let seq = project.sequence();
-        let ids = self.drag_selection.clone();
-        let group: Vec<_> = ids.iter().filter_map(|id| seq.clip(*id)).collect();
-        let edges: Vec<_> = group.iter().flat_map(|(_, c)| [c.start, c.end()]).collect();
-        let edges: Vec<_> = edges.iter().map(|e| *e + start - clip.start).collect();
-        let start = start + self.snap(seq, &ids, &edges);
-        let to = lane_at(Some(from.kind)).unwrap_or(from.id);
-        match seq.plan_move_selection(&ids, clip.id, to, start) {
-            Ok(moved) => {
-                self.drag_to = Some((to, start));
-                moved
-                    .into_iter()
-                    .map(|(t, c)| (Some(t), c.start, c.end()))
-                    .collect()
-            }
-            Err(_) => {
-                self.drag_to = None;
-                self.snapped = None;
-                ui.ctx().set_cursor_icon(CursorIcon::NotAllowed);
-                Vec::new()
-            }
-        }
+        self.feedback_drop(ui, project, view, area, lanes, held, edit, top, slot, p);
     }
 
     /// One track's header: ID, name or rename field, toggles, menu and height grip.
@@ -4750,6 +4636,7 @@ mod tests {
     #[test]
     fn bin_drag_onto_an_empty_timeline_adds_tracks() {
         use crate::media_bin::MediaBin;
+        use egui_kittest::kittest::Queryable;
         if !suite_ui::test_support::gpu() {
             return;
         }
@@ -4792,7 +4679,7 @@ mod tests {
                     (bin, Timeline::default(), History::new(p)),
                 );
             h.run();
-            let from = pos2(80.0, if list { 90.0 } else { 100.0 });
+            let from = h.get_by_label("a.mp4").rect().center();
             let to = pos2(300.0 + size::TRACK_HEADER + 100.0, 150.0);
             h.hover_at(from);
             h.run();

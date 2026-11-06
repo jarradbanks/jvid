@@ -1562,6 +1562,9 @@ mod tests {
 
     #[test]
     fn narrow_dialog_keeps_actions_inside_view_and_snapshot_unchanged() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         use egui_kittest::kittest::Queryable;
         let artifact = std::env::var("JVID_COLLECT_ARTIFACT").ok();
         let render_artifact = artifact.is_some() && suite_ui::test_support::gpu();

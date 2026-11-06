@@ -40,6 +40,73 @@ pub(crate) mod tutorial;
 
 #[cfg(test)]
 const DOCK_KEY: &str = "dock";
+
+#[cfg(test)]
+mod media_library_routing_tests {
+    use super::*;
+
+    #[test]
+    fn library_actions_share_focus_guards_undo_and_modal_input_ownership() {
+        let mut app = App::restore(None);
+        app.history = History::new(Project::default());
+        app.history
+            .apply(Command::AddAsset("clip.mov".into()))
+            .unwrap();
+        app.bin.reset_session();
+        app.bin.select_only(AssetId(1));
+        app.focus_panel(Tab::Timeline);
+        assert!(
+            !app.media_library_applicability("media_favorite")
+                .is_enabled()
+        );
+        app.run_action("media_favorite", false);
+        assert!(
+            !app.history
+                .project()
+                .media_library()
+                .entry(AssetId(1))
+                .favorite
+        );
+        app.focus_panel(Tab::Media);
+        app.bin.tab = 1;
+        app.run_action("media_favorite", false);
+        assert!(
+            !app.history
+                .project()
+                .media_library()
+                .entry(AssetId(1))
+                .favorite
+        );
+        app.bin.tab = 0;
+        app.run_action("media_favorite", false);
+        assert!(
+            app.history
+                .project()
+                .media_library()
+                .entry(AssetId(1))
+                .favorite
+        );
+        assert_eq!(
+            app.dock.find_active_focused().map(|(_, tab)| *tab),
+            Some(Tab::Media)
+        );
+        app.run_action("undo", false);
+        assert!(
+            !app.history
+                .project()
+                .media_library()
+                .entry(AssetId(1))
+                .favorite
+        );
+        app.run_action("media_new_bin", false);
+        assert!(app.bin.library_modal_open());
+        assert!(app.modal_owns_input(&egui::Context::default()));
+        assert!(
+            !app.media_library_applicability("media_favorite")
+                .is_enabled()
+        );
+    }
+}
 const RECENT_KEY: &str = "recent";
 
 /// One dock panel. Persisted by name in the saved layout.
@@ -53,6 +120,10 @@ pub enum Tab {
     RenderQueue,
     /// Opened from Timeline > Transcript; closable.
     Transcript,
+    /// Marker-backed review; persisted name is additive to legacy tabs.
+    Highlights,
+    /// Editable subtitle rows; optional and closable.
+    Captions,
 }
 
 impl Tab {
@@ -65,6 +136,8 @@ impl Tab {
             Tab::Timeline => tr!("panel.timeline"),
             Tab::RenderQueue => tr!("export.queue"),
             Tab::Transcript => tr!("panel.transcript"),
+            Tab::Highlights => tr!("highlights.review"),
+            Tab::Captions => tr!("captions.title"),
         }
     }
 
@@ -77,6 +150,8 @@ impl Tab {
             Tab::Timeline => "timeline",
             Tab::RenderQueue => "render_queue",
             Tab::Transcript => "transcript",
+            Tab::Highlights => "highlights",
+            Tab::Captions => crate::workspaces::CAPTIONS_PANEL_ID,
         }
     }
 }
@@ -152,6 +227,7 @@ pub struct App {
     bin: MediaBin,
     preview: Preview,
     timeline: Timeline,
+    speech_review: Option<crate::speech_review::Review>,
     /// Asset paths found missing when the project was opened; see [`relink::missing`].
     missing: HashSet<PathBuf>,
     /// Error toasts and the time each expires.
@@ -186,11 +262,14 @@ pub struct App {
     command_palette: crate::command_palette::CommandPalette,
     exports: jvid_jobs::Pool,
     export_dialog: crate::export::dialog::ExportDialog,
+    versions_dialog: crate::export::versions::VersionsDialog,
     subtitle_export: crate::export::subtitles::SubtitleExport,
     autosave: crate::autosave::Autosave,
     queue: crate::export::queue::Queue,
     subtitles: crate::subtitles::Subtitles,
     transcript: crate::transcript::TranscriptPanel,
+    highlight_review: crate::highlight_review::HighlightReview,
+    captions: crate::caption_workspace::CaptionWorkspace,
     /// Dialogs waiting to be answered, the first one showing.
     prompts: Vec<Prompt>,
     /// The user chose to quit; the next close request goes through.
@@ -244,6 +323,7 @@ impl App {
         app.preview = Preview::new(cc.wgpu_render_state.as_ref());
         app.preview.set_proxies(caches.proxies.clone());
         app.set_recognition_cache(crate::transcript::Cache::new(caches.transcripts.clone()));
+        app.highlight_review = crate::highlight_review::HighlightReview::new(caches.clone());
         app.timeline = Timeline::new(caches);
         app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
         app.theme_setting = settings.theme.clone();
@@ -303,6 +383,7 @@ impl App {
             bin: MediaBin::default(),
             preview: Preview::new(None),
             timeline: Timeline::default(),
+            speech_review: None,
             missing: HashSet::new(),
             toasts: Vec::new(),
             welcome: Welcome::new(
@@ -330,11 +411,14 @@ impl App {
             command_palette: Default::default(),
             exports,
             export_dialog: Default::default(),
+            versions_dialog: Default::default(),
             subtitle_export: Default::default(),
             autosave: Default::default(),
             queue: Default::default(),
             subtitles,
+            captions: Default::default(),
             transcript,
+            highlight_review: Default::default(),
             prompts: Vec::new(),
             closing: false,
             lesson: None,
@@ -351,11 +435,14 @@ impl App {
         self.importer.reset_session(self.project_session);
         self.timeline.reset_session();
         self.preview.reset_session();
+        self.speech_review = None;
         self.bin.reset_session();
         self.transcript.reset_session();
+        self.highlight_review.reset_session();
         self.subtitles.close();
         self.settings_dialog = Default::default();
         self.export_dialog = Default::default();
+        self.versions_dialog = Default::default();
         self.subtitle_export = Default::default();
         self.autosave.reset_session();
         self.preview_active = 1;
@@ -390,6 +477,7 @@ impl App {
         self.reset_project_session();
         self.missing = relink::missing(&project);
         self.history = History::new(project);
+        self.captions = Default::default();
         self.path = path;
         self.match_source = match_source;
         self.place_import = false;
@@ -718,11 +806,15 @@ impl App {
     /// The Timeline menu, its left edge at `left`. Returns its right edge.
     fn timeline_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
         let button = menu_button(ui, tr!("menu.timeline"), left);
-        let (mut picked, mut transcript, mut export) = (false, false, false);
+        let (mut picked, mut transcript, mut export, mut captions) = (false, false, false, false);
         egui::Popup::menu(&button).show(|ui| {
             picked = self.action_menu_item(ui, "generate_subtitles");
             export = self.action_menu_item(ui, "export_subtitles");
             transcript = ui.button(tr!("menu.transcript")).clicked();
+            if self.action_menu_item(ui, "review_highlights") {
+                self.run_action("review_highlights", true);
+            }
+            captions = self.action_menu_item(ui, "show_captions");
         });
         if picked {
             self.run_action("generate_subtitles", true);
@@ -732,6 +824,9 @@ impl App {
         }
         if transcript {
             self.show_panel(Tab::Transcript);
+        }
+        if captions {
+            self.run_action("show_captions", true);
         }
         button.rect.right()
     }
@@ -1009,7 +1104,9 @@ impl App {
 
     /// Queues `req` on a snapshot of the project, so later edits don't change the file.
     fn queue_export(&mut self, req: Request, gpu: (wgpu::Device, wgpu::Queue), now: f64) {
-        if self.queue.writing(&req.path) {
+        if self.queue.writing(&req.path)
+            || (req.sidecar && self.queue.writing(&req.path.with_extension("srt")))
+        {
             let msg = tr!("export.busy", path = req.path.display());
             self.toasts.push((msg, now + TOAST_SECS));
             return;
@@ -1022,8 +1119,11 @@ impl App {
             None => crate::export::shown_name(&self.export_dialog.presets, &req.preset).into(),
         };
         let duration = req.range.1 - req.range.0;
+        let sidecar = req.sidecar;
         let job = crate::export::submit(&self.exports, project, req, gpu);
-        self.queue.push(path, preset, duration, job);
+        if self.queue.push(path.clone(), preset, duration, job) && sidecar {
+            self.queue.reserve_sidecar(&path);
+        }
     }
 
     /// Takes finished exports' results: each posts a notification, failures also a toast.
@@ -1113,8 +1213,10 @@ impl App {
     /// egui's shared ownership state instead of another app-specific list.
     fn modal_owns_input(&self, ctx: &egui::Context) -> bool {
         self.collection.is_open()
+            || self.speech_review.is_some()
             || self.settings_dialog.draft.is_some()
             || self.export_dialog.is_open()
+            || self.versions_dialog.is_open()
             || self.subtitle_export.is_open()
             || self.preferences.is_open()
             || self.components.open
@@ -1125,6 +1227,7 @@ impl App {
             || self.subtitles.is_open()
             || !self.prompts.is_empty()
             || self.bin.confirm_remove.is_some()
+            || self.bin.library_modal_open()
             || ctx.memory(|m| m.top_modal_layer().is_some())
     }
 
@@ -1135,7 +1238,7 @@ impl App {
         id: &str,
         menu: bool,
     ) -> Option<keymap::Applicability> {
-        if !matches!(id, "copy_settings" | "paste_settings") {
+        if !matches!(id, "copy_settings" | "paste_settings" | "personal_presets") {
             return None;
         }
         let focused = self.dock.find_active_focused().map(|(_, tab)| *tab);
@@ -1152,6 +1255,13 @@ impl App {
             ));
         };
         let selected: Vec<_> = self.timeline.selected().iter().copied().collect();
+        if id == crate::personal_presets::ACTION {
+            return Some(crate::personal_presets::open_applicability(
+                ctx,
+                self.history.project(),
+                &selected,
+            ));
+        }
         Some(crate::settings_transfer::with(ctx, |transfer| match id {
             "copy_settings" => crate::settings_transfer::Transfer::copy_applicability(
                 self.history.project(),
@@ -1164,6 +1274,15 @@ impl App {
     /// One availability result for the same target the executor will use. Menus explicitly
     /// target Timeline; shortcuts and the palette preserve the focused dock and monitor.
     fn action_applicability(&mut self, id: &str, menu: bool) -> Applicability {
+        if let Some(result) = self.speech_review_applicability(id) {
+            return result;
+        }
+        if crate::annotations::kind(id).is_some() {
+            return self.annotation_applicability(menu);
+        }
+        if crate::media_bin::library::ACTIONS.contains(&id) {
+            return self.media_library_applicability(id);
+        }
         if let Some(applicable) = self.settings_transfer_applicability(id, menu) {
             return applicable;
         }
@@ -1171,6 +1290,30 @@ impl App {
             return Applicability::Disabled("palette.unavailable");
         };
         let enabled = match id {
+            "review_highlights" => Some(!self.on_welcome),
+            "export_versions" => return Applicability::when(self.can_export(), "export.nothing"),
+            "export_highlights" | "export_highlight_versions" => {
+                let revision = crate::highlight_review::ReviewRevision::current(
+                    self.project_session,
+                    &self.history,
+                );
+                self.highlight_review
+                    .sync(revision, self.history.project().sequence());
+                if self.highlight_review.is_stale(revision) {
+                    return Applicability::Disabled("highlights.stale");
+                }
+                if self.highlight_review.selected().is_empty() {
+                    return Applicability::Disabled("highlights.no_selected");
+                }
+                if self
+                    .highlight_review
+                    .snapshot(self.project_session, &self.history)
+                    .is_err()
+                {
+                    return Applicability::Disabled("highlights.invalid_span");
+                }
+                return Applicability::when(self.can_export(), "export.nothing");
+            }
             "maximize_panel" => {
                 return Applicability::when(
                     !self.on_welcome
@@ -1180,7 +1323,7 @@ impl App {
                 );
             }
             "workspace_editing" | "workspace_captions" | "workspace_audio" | "workspace_save"
-            | "reset_layout" => Some(!self.on_welcome),
+            | "reset_layout" | "show_captions" => Some(!self.on_welcome),
             "export_frame" => {
                 return Applicability::when(
                     self.history.project().sequence().duration() > Time(0),
@@ -1239,10 +1382,55 @@ impl App {
         Applicability::Disabled(reason)
     }
 
+    /// The media library uses the same target and reason for menu, palette and dispatch.
+    fn media_library_applicability(&mut self, id: &str) -> keymap::Applicability {
+        let focused = self
+            .dock
+            .find_active_focused()
+            .is_some_and(|(_, tab)| *tab == Tab::Media);
+        self.bin
+            .library_applicability(id, self.history.project(), focused)
+    }
+
+    /// Availability for annotation creation in Program.
+    fn annotation_applicability(&mut self, menu: bool) -> crate::keymap::Applicability {
+        let focused = self.dock.find_active_focused().map(|(_, tab)| *tab);
+        crate::keymap::Applicability::when(
+            !self.on_welcome
+                && (menu
+                    || focused == Some(Tab::Timeline)
+                    || (focused == Some(Tab::Preview) && self.preview_active == 1)),
+            "annotations.program_only",
+        )
+    }
+
+    /// Coordinator's shared action applicability adapter consumes this same result.
+    pub(crate) fn speech_review_applicability(&self, id: &str) -> Option<keymap::Applicability> {
+        (id == "review_speech_cuts").then(|| {
+            if self.take.is_some() {
+                keymap::Applicability::Disabled("timeline.stop_recording")
+            } else {
+                crate::speech_review::applicability(
+                    self.history.project(),
+                    self.timeline.selected(),
+                )
+            }
+        })
+    }
+
     /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
-    /// focus. The palette uses the same focused-panel route as shortcuts.
+    /// focus. shortcut: unimplemented actions are stubs until their features land.
     fn run_action(&mut self, id: &str, menu: bool) {
         if !self.action_applicability(id, menu).is_enabled() {
+            return;
+        }
+        if crate::media_bin::library::ACTIONS.contains(&id) {
+            if self.media_library_applicability(id).is_enabled()
+                && let Some(command) = self.bin.library_action(id, self.history.project())
+                && let Err(error) = self.history.apply(command)
+            {
+                tracing::warn!("library edit failed: {error}");
+            }
             return;
         }
         // Space and K stop the take along with playback, wherever focus is.
@@ -1275,6 +1463,27 @@ impl App {
             return;
         }
         match id {
+            "personal_presets" => {
+                if !self
+                    .settings_transfer_applicability(id, menu)
+                    .is_some_and(keymap::Applicability::is_enabled)
+                {
+                    return;
+                }
+                let Some(ctx) = self.editor_context.clone() else {
+                    return;
+                };
+                let selected: Vec<_> = self.timeline.selected().iter().copied().collect();
+                if let Some(category) = crate::personal_presets::target_category(
+                    &ctx,
+                    self.history.project(),
+                    &selected,
+                ) {
+                    crate::personal_presets::reveal(&ctx, category);
+                    self.focus_panel(Tab::Inspector);
+                }
+                return;
+            }
             "copy_settings" | "paste_settings" => {
                 if !self
                     .settings_transfer_applicability(id, menu)
@@ -1307,6 +1516,50 @@ impl App {
                 }
                 return;
             }
+            "export_versions" | "export_highlight_versions" => {
+                let source = if id == "export_highlight_versions" {
+                    self.highlight_review
+                        .snapshot(self.project_session, &self.history)
+                        .map_err(|_| tr!("highlights.stale").to_owned())
+                        .and_then(|selection| {
+                            crate::export::versions::VersionSource::highlights(
+                                self.project_session,
+                                &self.history,
+                                &selection,
+                            )
+                        })
+                } else {
+                    self.export_dialog
+                        .version_source(self.project_session, &self.history)
+                };
+                match source {
+                    Ok(source) => self.versions_dialog.open(source, &self.name()),
+                    Err(error) => self.error(error),
+                }
+                return;
+            }
+            "review_highlights" => return self.show_panel(Tab::Highlights),
+            "export_highlights" => {
+                if let Ok(selection) = self
+                    .highlight_review
+                    .snapshot(self.project_session, &self.history)
+                    && selection
+                        .validate(self.project_session, &self.history)
+                        .is_ok()
+                {
+                    let _ = self.export_dialog.open_highlight_selection(
+                        &selection,
+                        self.project_session,
+                        &self.history,
+                        &self.name(),
+                    );
+                }
+                return;
+            }
+            "show_captions" => {
+                self.show_panel(Tab::Captions);
+                return;
+            }
             "workspace_editing" => return self.apply_workspace(Builtin::Editing),
             "workspace_captions" => return self.apply_workspace(Builtin::Captions),
             "workspace_audio" => return self.apply_workspace(Builtin::Audio),
@@ -1330,6 +1583,26 @@ impl App {
             "quit" => {
                 if let Some(ctx) = &self.editor_context {
                     ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
+                return;
+            }
+            "review_speech_cuts" => {
+                if self.speech_review_applicability(id).unwrap().is_enabled() {
+                    if self.preview.playing() {
+                        self.preview.program_action("shuttle_stop");
+                    }
+                    self.preview
+                        .source_action("shuttle_stop", self.history.project());
+                    let revision = crate::speech_review::Revision {
+                        session: self.project_session,
+                        history: self.history.rev(),
+                        transcript: self.transcript.review_revision(),
+                    };
+                    self.speech_review = Some(crate::speech_review::Review::open(
+                        self.history.project(),
+                        revision,
+                        self.timeline.selected(),
+                    ));
                 }
                 return;
             }
@@ -1391,6 +1664,21 @@ impl App {
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
         let program_focused = preview_focused && self.preview_active == 1;
+        if let Some(kind) = crate::annotations::kind(id) {
+            if self.annotation_applicability(menu).is_enabled() {
+                match crate::annotations::create(&mut self.history, kind, self.timeline.playhead())
+                {
+                    Ok(clip) => {
+                        self.preview_active = 1;
+                        self.timeline
+                            .action("selection_tool", self.history.project());
+                        self.timeline.select_program_clip(clip);
+                    }
+                    Err(e) => tracing::warn!("annotation creation failed: {e}"),
+                }
+            }
+            return;
+        }
         if (timeline_focused || program_focused || menu) && PROGRAM_ACTIONS.contains(&id) {
             self.preview_active = 1;
             self.preview.program_action(id);
@@ -2009,6 +2297,7 @@ impl eframe::App for App {
             {
                 self.timeline.seek(t);
             }
+            let highlight_export = self.action_applicability("export_highlights", false);
             let mut viewer = Viewer {
                 active_tabs,
                 titles,
@@ -2032,7 +2321,15 @@ impl eframe::App for App {
                 queue: &mut self.queue,
                 queue_action: None,
                 transcript: &mut self.transcript,
+                captions: &mut self.captions,
                 transcript_out: Default::default(),
+                highlight_review: &mut self.highlight_review,
+                highlight_revision: crate::highlight_review::ReviewRevision::current(
+                    self.project_session,
+                    &self.history,
+                ),
+                highlight_out: Default::default(),
+                highlight_export,
             };
             DockArea::new(&mut self.dock)
                 .style(dock_style(ui.style()))
@@ -2044,7 +2341,18 @@ impl eframe::App for App {
                 .show_leaf_close_all_buttons(false)
                 .show_leaf_collapse_buttons(false)
                 .show_inside(ui, &mut viewer);
-            let (import, command, gesture, text_clip, relink, open, queue, transcript, tab_rects) = (
+            let (
+                import,
+                command,
+                gesture,
+                text_clip,
+                relink,
+                open,
+                queue,
+                transcript,
+                highlights,
+                tab_rects,
+            ) = (
                 viewer.import_clicked,
                 viewer.command,
                 viewer.gesture,
@@ -2053,10 +2361,13 @@ impl eframe::App for App {
                 viewer.open,
                 viewer.queue_action,
                 viewer.transcript_out,
+                viewer.highlight_out,
                 viewer.tab_rects,
             );
             paint_dock_frames(ui, &self.dock);
-            if !self.workspaces.is_maximized() { dock_bottom_target(ui, &mut self.dock); }
+            if !self.workspaces.is_maximized() {
+                dock_bottom_target(ui, &mut self.dock);
+            }
             if let Some(tab) = self.reveal_panel.take()
                 && let Some(path) = self.dock.find_tab(&tab)
                 && let Ok(leaf) = self.dock.leaf_mut(path.node_path())
@@ -2120,16 +2431,58 @@ impl eframe::App for App {
                 && command
                     .as_ref()
                     .is_some_and(|c| tutorial::silence_cut(c, self.history.project()));
+            let detected_highlights = matches!(command.as_ref(), Some(Command::Batch(commands)) if !commands.is_empty() && commands.iter().all(|c| matches!(c, Command::AddMarker { .. })));
+            let caption_edit = matches!(command, Some(Command::Caption(_)));
             let applied = match (command, gesture) {
                 (Some(c), Some(k)) => Some(self.history.apply_coalesced(k, c)),
                 (Some(c), None) => Some(self.history.apply(c)),
                 (None, _) => None,
             };
+            if let Some(stop) = self.highlight_review.audition_stop(
+                crate::highlight_review::ReviewRevision::current(
+                    self.project_session,
+                    &self.history,
+                ),
+                self.timeline.playhead(),
+                self.preview.playing(),
+            ) {
+                self.preview.program_action("shuttle_stop");
+                self.timeline.seek(stop);
+            }
             if let Some(r) = &applied {
                 self.timeline.applied(r.is_ok());
                 if r.is_ok() {
                     self.lesson_silence_cut(silence_cut);
+                    if detected_highlights {
+                        self.show_panel(Tab::Highlights);
+                    }
                 }
+            }
+            if highlights.export {
+                self.run_action("export_highlights", false);
+            }
+            if let Some(span) = highlights.audition
+                && !self.highlight_review.is_stale(crate::highlight_review::ReviewRevision::current(self.project_session, &self.history))
+                && self.finalize_take()
+            {
+                self.preview_active = 1;
+                self.preview.program_action("shuttle_stop");
+                self.timeline.seek(span.0);
+                self.preview.hidden(
+                    ui.ctx(),
+                    self.history.project(),
+                    self.timeline.playhead(),
+                    false,
+                );
+                self.highlight_review.begin_audition(
+                    crate::highlight_review::ReviewRevision::current(
+                        self.project_session,
+                        &self.history,
+                    ),
+                    span,
+                );
+                self.preview.program_action("play_stop");
+                ui.ctx().request_repaint();
             }
             if let Some(creation) = text_clip
                 && let Err(e) = self.create_text(ui.ctx(), creation)
@@ -2159,6 +2512,7 @@ impl eframe::App for App {
                     ModelError::Cycle => Some(tr!("timeline.cycle").to_owned()),
                     ModelError::TooDeep => Some(tr!("timeline.too_deep", max = MAX_NEST_DEPTH)),
                     ModelError::SequenceOpen => Some(tr!("bin.sequence_open").to_owned()),
+                    _ if caption_edit => crate::caption_workspace::error(&e),
                     _ => None,
                 };
                 if let Some(msg) = msg {
@@ -2191,6 +2545,9 @@ impl eframe::App for App {
                     now + TOAST_SECS,
                 ));
             }
+            if !self.export_dialog.review_is_current(self.project_session, &self.history) {
+                self.toasts.push((tr!("highlights.stale").to_owned(), now + TOAST_SECS));
+            }
             if let Some((reqs, _)) = self
                 .export_dialog
                 .show(ui, self.history.project(), selected)
@@ -2199,6 +2556,13 @@ impl eframe::App for App {
                 for req in reqs {
                     self.queue_export(req, gpu.clone(), now);
                 }
+            }
+            if let Some(jobs) = self.versions_dialog.show(ui, self.project_session, &self.history, self.preview.gpu()) {
+                self.queue.versions(&self.exports, jobs, self.preview.gpu());
+                self.show_panel(Tab::RenderQueue);
+            }
+            if !self.versions_dialog.is_open() && let Some(error) = self.versions_dialog.take_error() {
+                self.toasts.push((error, now + TOAST_SECS));
             }
             if let Some(c) = self.settings_dialog.show(ui, self.history.project())
                 && let Err(e) = self.history.apply(c)
@@ -2244,6 +2608,28 @@ impl eframe::App for App {
             self.history.end_gesture();
         }
         self.lesson_frame(&ctx);
+        if let Some(mut review) = self.speech_review.take() {
+            let revision = crate::speech_review::Revision {
+                session: self.project_session,
+                history: self.history.rev(),
+                transcript: self.transcript.review_revision(),
+            };
+            let output = review.show(
+                &ctx,
+                self.history.project(),
+                revision,
+                &mut self.timeline,
+                &mut self.transcript,
+            );
+            if let Some(command) = output.command
+                && let Err(error) = self.history.apply(command)
+            {
+                tracing::warn!("speech review apply failed: {error}");
+            }
+            if !output.close {
+                self.speech_review = Some(review);
+            }
+        }
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             drop_overlay(&ctx);
         }
@@ -2260,6 +2646,43 @@ impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         crate::settings_file::save_workspaces(storage, &self.workspaces, &self.dock);
         eframe::set_value(storage, RECENT_KEY, &self.welcome.recent);
+    }
+}
+
+#[cfg(test)]
+mod speech_review_tests {
+    use super::*;
+
+    #[test]
+    fn review_action_uses_shared_availability_and_preserves_focus_and_history() {
+        let mut app = App::restore(None);
+        assert!(
+            !app.speech_review_applicability("review_speech_cuts")
+                .unwrap()
+                .is_enabled()
+        );
+        let (project, mic, _) = crate::subtitles::test_support::two_streams(false);
+        app.history = History::new(project.clone());
+        app.on_welcome = false;
+        app.timeline.select_clip(project.sequence(), mic);
+        app.focus_panel(Tab::Preview);
+        app.preview_active = 0;
+        let focused = app.dock.find_active_focused().map(|(_, t)| *t);
+        assert!(
+            app.speech_review_applicability("review_speech_cuts")
+                .unwrap()
+                .is_enabled()
+        );
+        app.keymap = Keymap::from_toml("review_speech_cuts = \"Ctrl+Alt+F8\"").unwrap();
+        assert!(app.keymap.shortcut("review_speech_cuts").contains("F8"));
+        app.run_action("review_speech_cuts", false);
+        assert!(app.speech_review.is_some());
+        assert_eq!(app.history.project(), &project);
+        assert_eq!(app.history.rev(), 0);
+        assert_eq!(app.preview_active, 0);
+        assert_eq!(app.dock.find_active_focused().map(|(_, t)| *t), focused);
+        app.speech_review = None;
+        assert_eq!(app.history.project(), &project);
     }
 }
 
@@ -2484,7 +2907,10 @@ fn dock_titles(ui: &Ui, dock: &DockState<Tab>) -> std::collections::HashMap<Tab,
         let width = ((leaf.rect.width() - space::S8) / leaf.tabs.len() as f32 - space::S4)
             .clamp(size::TAB_MIN, size::TAB_MAX);
         for tab in &leaf.tabs {
-            let close = if matches!(tab, Tab::Transcript | Tab::RenderQueue) {
+            let close = if matches!(
+                tab,
+                Tab::Transcript | Tab::RenderQueue | Tab::Highlights | Tab::Captions
+            ) {
                 size::CONTROL
             } else {
                 0.0
@@ -2526,7 +2952,12 @@ struct Viewer<'a> {
     queue: &'a mut crate::export::queue::Queue,
     queue_action: Option<QueueAction>,
     transcript: &'a mut crate::transcript::TranscriptPanel,
+    captions: &'a mut crate::caption_workspace::CaptionWorkspace,
     transcript_out: crate::transcript::Output,
+    highlight_review: &'a mut crate::highlight_review::HighlightReview,
+    highlight_revision: crate::highlight_review::ReviewRevision,
+    highlight_out: crate::highlight_review::Output,
+    highlight_export: Applicability,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -2544,7 +2975,10 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn is_closeable(&self, tab: &Tab) -> bool {
-        matches!(tab, Tab::Transcript | Tab::RenderQueue)
+        matches!(
+            tab,
+            Tab::Transcript | Tab::RenderQueue | Tab::Highlights | Tab::Captions
+        )
     }
 
     fn allowed_in_windows(&self, _tab: &mut Tab) -> bool {
@@ -2578,6 +3012,8 @@ impl TabViewer for Viewer<'_> {
             );
             let name = match tab {
                 Tab::Transcript => tr!("transcript.close"),
+                Tab::Highlights => tr!("highlights.close"),
+                Tab::Captions => tr!("captions.close"),
                 _ => tr!("export.close_queue"),
             };
             close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
@@ -2611,6 +3047,7 @@ impl TabViewer for Viewer<'_> {
         tutorial::anchor(ui.ctx(), tab.anchor(), ui.max_rect());
         let focused = self.focused == Some(*tab);
         if *tab == Tab::Media {
+            self.bin.set_library_keymap(self.keymap);
             self.bin.text_thumbs(self.preview, self.project);
             // The Scopes tab, fourth in the bin.
             self.preview.scopes_open(self.bin.tab == 3);
@@ -2647,6 +3084,23 @@ impl TabViewer for Viewer<'_> {
             self.queue_action = self.queue.panel_docked(ui, focused, can_export);
             return;
         }
+        if *tab == Tab::Captions {
+            let out = self.captions.show_docked(
+                ui,
+                self.project,
+                self.timeline.selected(),
+                self.timeline.playhead(),
+                focused,
+            );
+            if let Some(t) = out.seek {
+                self.timeline.seek(t);
+            }
+            if let Some(command) = out.command {
+                self.command = Some(command);
+                self.gesture = out.gesture;
+            }
+            return;
+        }
         if *tab == Tab::Transcript {
             let (selected, t) = (self.timeline.selected(), self.timeline.playhead());
             let mut out = self
@@ -2657,6 +3111,22 @@ impl TabViewer for Viewer<'_> {
             }
             self.command = out.command.take().or(self.command.take());
             self.transcript_out = out;
+            return;
+        }
+        if *tab == Tab::Highlights {
+            let mut out = self.highlight_review.show_docked(
+                ui,
+                self.project,
+                self.highlight_revision,
+                focused,
+                self.highlight_export,
+                self.keymap,
+            );
+            if let Some((command, gesture)) = out.command.take() {
+                self.command = Some(command);
+                self.gesture = gesture;
+            }
+            self.highlight_out = out;
             return;
         }
         let source_tab = self.preview_views.get(*self.preview_active) == Some(&"source");
@@ -2731,11 +3201,17 @@ impl TabViewer for Viewer<'_> {
                     }
                 }
                 let selected = self.timeline.selected();
-                if let Some((c, g)) =
-                    crate::handles::show(ui, self.project, selected, t, frame, &|c| {
-                        let a = self.project.asset(c.asset)?;
-                        self.timeline.strip_frame(a, c.source_at(t))
-                    })
+                let (annotation, endpoint) =
+                    crate::annotations::show(ui, self.project, selected, t, frame);
+                if let Some((c, g)) = annotation {
+                    (self.command, self.gesture) = (Some(c), g);
+                }
+                if !endpoint
+                    && let Some((c, g)) =
+                        crate::handles::show(ui, self.project, selected, t, frame, &|c| {
+                            let a = self.project.asset(c.asset)?;
+                            self.timeline.strip_frame(a, c.source_at(t))
+                        })
                 {
                     (self.command, self.gesture) = (Some(c), g);
                 }
@@ -2933,6 +3409,162 @@ mod palette_tests {
             assert_eq!(app.history.project(), &before);
             assert!(!app.history.can_undo());
         }
+    }
+
+    #[test]
+    fn export_versions_uses_shared_dispatch_and_closes_stale_modal() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = Harness::builder()
+            .with_size([960.0, 600.0])
+            .wgpu()
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run_steps(3);
+        let ctx = h.ctx.clone();
+        let app = h.state_mut();
+        assert!(
+            !app.action_applicability("export_versions", false)
+                .is_enabled()
+        );
+        app.on_welcome = false;
+        app.history
+            .apply(Command::AddSolid {
+                name: "Versions".into(),
+                color: [0.15, 0.3, 0.6, 1.0],
+            })
+            .unwrap();
+        let asset = app.history.project().assets()[0].id;
+        let placement = app
+            .history
+            .project()
+            .placement(asset, Time(0), false, None, false)
+            .unwrap();
+        app.history.apply(Command::Place(placement)).unwrap();
+        let original = app.history.project().clone();
+        assert!(
+            app.action_applicability("export_versions", false)
+                .is_enabled()
+        );
+        assert!(
+            !app.action_applicability("export_highlight_versions", false)
+                .is_enabled()
+        );
+        app.run_action("export_versions", false);
+        assert!(app.versions_dialog.is_open());
+        assert!(app.modal_owns_input(&ctx));
+        h.run_steps(3);
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/multiversion-export");
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render()
+            .unwrap()
+            .save(dir.join("app_versions_960x600.png"))
+            .unwrap();
+        assert_eq!(h.state().history.project(), &original);
+        h.state_mut()
+            .history
+            .apply(Command::SetInOut {
+                in_point: Some(Time(FLICKS_PER_SECOND)),
+                out_point: None,
+            })
+            .unwrap();
+        h.run_steps(2);
+        assert!(!h.state().versions_dialog.is_open());
+    }
+
+    #[test]
+    fn highlight_review_dispatch_opens_panel_and_rejects_export_after_edit() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = Harness::builder()
+            .with_size([960.0, 600.0])
+            .wgpu()
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run_steps(3);
+        let app = h.state_mut();
+        app.on_welcome = false;
+        app.history
+            .apply(Command::AddSolid {
+                name: "Review".into(),
+                color: [0.15, 0.3, 0.6, 1.0],
+            })
+            .unwrap();
+        let asset = app.history.project().assets()[0].id;
+        let placement = app
+            .history
+            .project()
+            .placement(asset, Time(0), false, None, false)
+            .unwrap();
+        app.history.apply(Command::Place(placement)).unwrap();
+        app.history
+            .apply(Command::AddMarker {
+                time: Time(FLICKS_PER_SECOND),
+                duration: Time(FLICKS_PER_SECOND),
+                name: "Manual Highlight".into(),
+            })
+            .unwrap();
+        assert!(
+            app.action_applicability("review_highlights", false)
+                .is_enabled()
+        );
+        app.run_action("review_highlights", false);
+        let project = app.history.project().clone();
+        h.run_steps(2);
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "Audition");
+        assert_eq!(h.state().history.project(), &project);
+        assert!(h.state().dock.find_tab(&Tab::Highlights).is_some());
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/highlight-review");
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render()
+            .unwrap()
+            .save(dir.join("app_highlights_960x600.png"))
+            .unwrap();
+        let app = h.state_mut();
+        assert!(
+            app.action_applicability("export_highlights", false)
+                .is_enabled()
+        );
+        app.run_action("export_highlights", false);
+        assert!(app.export_dialog.is_open());
+        let mut marker = app.history.project().sequence().markers()[0].clone();
+        marker.time = Time(2 * FLICKS_PER_SECOND);
+        app.history.apply(Command::SetMarker(marker)).unwrap();
+        assert!(
+            !app.action_applicability("export_highlights", false)
+                .is_enabled()
+        );
+        h.run_steps(3);
+        assert!(!h.state().export_dialog.is_open());
+        h.render()
+            .unwrap()
+            .save(dir.join("app_highlights_stale.png"))
+            .unwrap();
+        assert!(h.state().highlight_review.is_stale(
+            crate::highlight_review::ReviewRevision::current(
+                h.state().project_session,
+                &h.state().history
+            )
+        ));
+        let refresh = h
+            .query_by_label("Use Current Highlights")
+            .expect("review refresh button missing; see stale artifact");
+        refresh.click();
+        h.run_steps(3);
+        assert!(
+            h.state_mut()
+                .action_applicability("export_highlights", false)
+                .is_enabled()
+        );
+        let app = h.state_mut();
+        app.close_panel(Tab::Highlights);
+        app.reset_layout();
+        assert!(app.dock.find_tab(&Tab::Highlights).is_none());
+        app.new_project(None);
+        assert!(app.highlight_review.selected().is_empty());
     }
 
     #[test]
@@ -3212,6 +3844,77 @@ mod settings_transfer_tests {
         assert_eq!(map.shortcut("copy_settings"), "Ctrl+Shift+F10");
         assert_eq!(map.shortcut("paste_settings"), "Ctrl+Shift+F11");
     }
+    #[test]
+    fn personal_presets_action_respects_source_program_routing_and_is_remappable() {
+        let mut app = App::restore(None);
+        app.editor_context = Some(egui::Context::default());
+        let Created::Track(track) = app
+            .history
+            .apply(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "Video".into(),
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let Created::Asset(asset) = app
+            .history
+            .apply(Command::AddSolid {
+                name: "Solid".into(),
+                color: [1.0; 4],
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        let Created::Clip(id) = app
+            .history
+            .apply(Command::AddClip {
+                track,
+                clip: NewClip {
+                    asset,
+                    start: Time(0),
+                    source_in: Time(0),
+                    source_out: Time(100),
+                    link: None,
+                },
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        app.timeline.select_program_clip(id);
+        app.history.mark_saved();
+        let before = app.history.project().clone();
+        app.focus_panel(Tab::Preview);
+        app.preview_active = 0;
+        assert!(
+            !app.settings_transfer_applicability("personal_presets", false)
+                .unwrap()
+                .is_enabled()
+        );
+        app.run_action("personal_presets", false);
+        assert_eq!(
+            app.dock.find_active_focused().map(|(_, tab)| *tab),
+            Some(Tab::Preview)
+        );
+        app.preview_active = 1;
+        assert!(
+            app.settings_transfer_applicability("personal_presets", false)
+                .unwrap()
+                .is_enabled()
+        );
+        app.run_action("personal_presets", false);
+        assert_eq!(
+            app.dock.find_active_focused().map(|(_, tab)| *tab),
+            Some(Tab::Inspector)
+        );
+        assert_eq!(app.history.project(), &before);
+        assert!(!app.history.is_dirty());
+        let keymap = Keymap::from_toml("personal_presets = \"Ctrl+Shift+F9\"").unwrap();
+        assert_eq!(keymap.shortcut("personal_presets"), "Ctrl+Shift+F9");
+    }
 }
 
 #[cfg(test)]
@@ -3222,6 +3925,9 @@ mod workspace_tests {
 
     #[test]
     fn workspace_layouts_and_save_dialog_fit_narrow_translated_windows() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         if !suite_ui::test_support::gpu() {
             return;
         }
@@ -3420,6 +4126,63 @@ mod workspace_tests {
 }
 
 #[cfg(test)]
+mod caption_tests {
+    use super::*;
+    use egui::{Key, Modifiers};
+    use egui_kittest::Harness;
+
+    #[test]
+    fn remapped_caption_panel_opens_once_and_layout_restore_keeps_closed_state() {
+        let mut h = Harness::builder()
+            .with_size([960.0, 600.0])
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run();
+        h.state_mut().on_welcome = false;
+        h.state_mut().keymap = Keymap::from_toml("show_captions = \"Ctrl+Alt+F9\"").unwrap();
+        let before = h.state().history.project().clone();
+        for _ in 0..2 {
+            h.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::F9);
+            h.run();
+            assert_eq!(
+                h.state()
+                    .dock
+                    .iter_all_tabs()
+                    .filter(|(_, tab)| **tab == Tab::Captions)
+                    .count(),
+                1
+            );
+        }
+        let mut restored = crate::workspaces::Snapshot::capture(&h.state().dock, Panels::default())
+            .restore(Panels::default());
+        assert_eq!(
+            restored.find_active_focused().map(|(_, tab)| *tab),
+            Some(Tab::Captions)
+        );
+        h.state_mut().close_panel(Tab::Captions);
+        h.run();
+        let closed = crate::workspaces::Snapshot::capture(&h.state().dock, Panels::default())
+            .restore(Panels::default());
+        assert!(closed.find_tab(&Tab::Captions).is_none());
+        assert_eq!(closed.iter_all_tabs().count(), 4);
+        assert_eq!(h.state().history.project(), &before);
+        assert!(!h.state().history.can_undo());
+        for (tab, name) in [
+            (Tab::Media, "Media"),
+            (Tab::Preview, "Preview"),
+            (Tab::Inspector, "Inspector"),
+            (Tab::Timeline, "Timeline"),
+            (Tab::RenderQueue, "RenderQueue"),
+            (Tab::Transcript, "Transcript"),
+        ] {
+            assert_eq!(
+                toml::to_string(&std::collections::BTreeMap::from([("tab", tab)])).unwrap(),
+                format!("tab = \"{name}\"\n")
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod frame_export_applicability_tests {
     use super::*;
 
@@ -3456,4 +4219,41 @@ mod frame_export_applicability_tests {
             Applicability::Enabled
         );
     }
+}
+
+#[cfg(test)]
+#[test]
+fn annotation_actions_preserve_focus_routing_and_live_bindings() {
+    let mut app = App::restore(None);
+    assert!(!app.annotation_applicability(true).is_enabled());
+    app.on_welcome = false;
+    for focus in ["focus_media", "focus_source"] {
+        app.run_action(focus, false);
+        assert!(!app.annotation_applicability(false).is_enabled());
+        assert!(app.annotation_applicability(false).reason().is_some());
+        app.run_action("add_arrow", false);
+        assert!(app.history.project().assets().is_empty());
+    }
+    app.run_action("focus_program", false);
+    app.timeline.action("text_tool", app.history.project());
+    let before = app.history.project().clone();
+    app.run_action("add_arrow", false);
+    assert_eq!(app.timeline.tool(), crate::timeline::Tool::Selection);
+    assert_eq!(app.timeline.selected().len(), 1);
+    assert_eq!(app.preview_active, 1);
+    app.history.undo();
+    assert_eq!(app.history.project(), &before);
+    app.run_action("focus_source", false);
+    app.run_action("add_rectangle", true);
+    assert_eq!(app.preview_active, 1);
+    assert_eq!(
+        app.history.project().assets()[0]
+            .annotation
+            .as_ref()
+            .unwrap()
+            .kind,
+        jvid_core::annotations::AnnotationKind::Rectangle
+    );
+    app.keymap = Keymap::from_toml("add_arrow = \"Alt+F8\"\n").unwrap();
+    assert_eq!(app.keymap.label("add_arrow").1, "Alt+F8");
 }

@@ -280,6 +280,219 @@ impl Settings {
     }
 }
 
+/// Portable-style failures are separate from transfer errors for existing consumers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PresetError {
+    Invalid,
+    UnsupportedCategory,
+    Transfer(Error),
+}
+
+impl From<Error> for PresetError {
+    fn from(error: Error) -> Self {
+        Self::Transfer(error)
+    }
+}
+
+impl crate::personal_presets::Preset {
+    /// Capture one supported style. Only selected properties leave the source project.
+    pub fn capture(
+        project: &Project,
+        source: ClipId,
+        category: Category,
+        at: Time,
+        animation: Animation,
+    ) -> Result<Self, PresetError> {
+        use crate::personal_presets::Style;
+        let snapshot = Settings::extract(project, source, &[category], at, Animation::Static)?;
+        let sampled = &snapshot.sampled;
+        let style = match category {
+            Category::Text => Style::Text(snapshot.text.clone().ok_or(PresetError::Invalid)?),
+            Category::Audio => Style::Audio {
+                volume: sampled.volume,
+                pan: sampled.pan,
+                fx: sampled.audio_fx,
+            },
+            Category::Effects => {
+                if sampled.effects.iter().any(|e| e.mask.is_some()) {
+                    return Err(Error::MaskNeedsTransform.into());
+                }
+                Style::Effects {
+                    effects: sampled.effects.clone(),
+                }
+            }
+            _ => return Err(PresetError::UnsupportedCategory),
+        };
+        let mut preset = Self {
+            style,
+            animation_duration: None,
+            keyframes: BTreeMap::new(),
+        };
+        if animation == Animation::Relative {
+            let source = &snapshot.source;
+            let duration = source.duration();
+            let normalized = preset_source(duration);
+            for (name, keys) in &source.keyframes {
+                if owns(&snapshot.categories, name) && !keys.is_empty() {
+                    preset
+                        .keyframes
+                        .insert(name.clone(), map_keys(source, &normalized, keys)?);
+                }
+            }
+            if !preset.keyframes.is_empty() {
+                preset.animation_duration = Some(duration);
+            }
+        }
+        preset.validate_definition()?;
+        Ok(preset)
+    }
+
+    /// Validate untrusted disk data before constructing a transfer snapshot. No resources
+    /// are resolved here: a missing font or shader must not destroy a stored definition.
+    pub fn validate_definition(&self) -> Result<(), PresetError> {
+        use crate::personal_presets::Style;
+        let invalid = || PresetError::Invalid;
+        fn finite(value: &serde_json::Value) -> bool {
+            match value {
+                serde_json::Value::Null => false,
+                serde_json::Value::Array(values) => values.iter().all(finite),
+                serde_json::Value::Object(values) => values.values().all(finite),
+                _ => true,
+            }
+        }
+        if !finite(&serde_json::to_value(&self.style).map_err(|_| invalid())?)
+            || !finite(&serde_json::to_value(&self.keyframes).map_err(|_| invalid())?)
+        {
+            return Err(invalid());
+        }
+        match &self.style {
+            Style::Text(text) => {
+                if !text.content.is_empty()
+                    || text.size < 1.0
+                    || text.size > 100_000.0
+                    || !(100..=900).contains(&text.weight)
+                    || text.family.len() > 512
+                    || text.outline < 0.0
+                    || text.box_padding < 0.0
+                {
+                    return Err(invalid());
+                }
+            }
+            Style::Audio { volume, pan, .. } => {
+                if !(0.0..=2.0).contains(volume) || !(-1.0..=1.0).contains(pan) {
+                    return Err(invalid());
+                }
+            }
+            Style::Effects { effects } => {
+                for effect in effects {
+                    if effect.mask.is_some() {
+                        return Err(Error::MaskNeedsTransform.into());
+                    }
+                    if effect.shader.is_empty()
+                        || effect.shader.len() > 16_384
+                        || effect.shader.chars().any(char::is_control)
+                    {
+                        return Err(invalid());
+                    }
+                }
+            }
+        }
+        let duration = match (self.animation_duration, self.keyframes.is_empty()) {
+            (None, true) => return Ok(()),
+            (Some(duration), false) if duration > Time(0) => duration,
+            _ => return Err(invalid()),
+        };
+        for (name, keys) in &self.keyframes {
+            let expected = match &self.style {
+                Style::Text(text) => {
+                    if name == "color" {
+                        Some(Value::Color(text.color))
+                    } else {
+                        text.get(name)
+                    }
+                }
+                Style::Audio { .. } => {
+                    matches!(name.as_str(), "volume" | "pan").then_some(Value::Scalar(0.0))
+                }
+                Style::Effects { effects } => {
+                    effects.iter().enumerate().find_map(|(index, effect)| {
+                        effect
+                            .params
+                            .keys()
+                            .any(|param| crate::model::Effect::key(index, param) == *name)
+                            .then_some(Value::Scalar(0.0))
+                    })
+                }
+            }
+            .ok_or_else(invalid)?;
+            if keys.is_empty()
+                || keys.windows(2).any(|pair| pair[0].time >= pair[1].time)
+                || keys.iter().any(|key| {
+                    key.time < Time(0)
+                        || key.time >= duration
+                        || std::mem::discriminant(&key.value) != std::mem::discriminant(&expected)
+                })
+            {
+                return Err(invalid());
+            }
+        }
+        Ok(())
+    }
+
+    /// Reconstruct an identity-free source and delegate every target/resource check and
+    /// undo command to P1. Static remains the caller's default, even for animated presets.
+    pub fn settings(&self, animation: Animation) -> Result<Settings, PresetError> {
+        use crate::personal_presets::Style;
+        self.validate_definition()?;
+        let mut source = preset_source(self.animation_duration.unwrap_or(Time(1)));
+        let mut sampled = Transform::default();
+        let text = match &self.style {
+            Style::Text(text) => Some(text.clone()),
+            Style::Audio { volume, pan, fx } => {
+                sampled.volume = *volume;
+                sampled.pan = *pan;
+                sampled.audio_fx = *fx;
+                None
+            }
+            Style::Effects { effects } => {
+                sampled.effects.clone_from(effects);
+                None
+            }
+        };
+        source.transform = sampled.clone();
+        if animation == Animation::Relative {
+            source.keyframes.clone_from(&self.keyframes);
+        }
+        Ok(Settings {
+            categories: BTreeSet::from([self.style.category()]),
+            animation,
+            source,
+            sampled,
+            text,
+        })
+    }
+}
+
+// No original identity, timing, speed, links or params survive normalization.
+fn preset_source(duration: Time) -> Clip {
+    Clip {
+        id: ClipId(0),
+        asset: AssetId(0),
+        source_in: Time(0),
+        source_out: duration,
+        start: Time(0),
+        link: None,
+        params: BTreeMap::new(),
+        keyframes: BTreeMap::new(),
+        transform: Transform::default(),
+        stream: None,
+        enabled: true,
+        speed: 1.0,
+        reverse: false,
+        freeze: None,
+    }
+}
+
 fn compatible<'a>(
     project: &'a Project,
     id: ClipId,
@@ -478,6 +691,158 @@ mod tests {
 
     fn extract(p: &Project, source: ClipId, categories: &[Category], mode: Animation) -> Settings {
         Settings::extract(p, source, categories, Time(50), mode).unwrap()
+    }
+
+    #[test]
+    fn personal_presets_round_trip_without_identity_or_words() {
+        use crate::personal_presets::{Preset, Style};
+        let mut p = Project::default();
+        let video = p.sequence.add_track(TrackKind::Video, "V1");
+        let source = clip(&mut p, video, 1234, 100, 300);
+        let asset = p.sequence.clip(source).unwrap().1.asset;
+        p.asset_mut(asset).unwrap().text = Some(Text {
+            content: "private source words".into(),
+            family: "Missing Family".into(),
+            size: 64.0,
+            ..Text::default()
+        });
+        let preset =
+            Preset::capture(&p, source, Category::Text, Time(1234), Animation::Static).unwrap();
+        let encoded = toml::to_string(&preset).unwrap();
+        for excluded in [
+            "private source words",
+            "content",
+            "asset",
+            "source_in",
+            "link",
+            "start",
+            "speed",
+            "volume",
+            "exposure",
+        ] {
+            assert!(!encoded.contains(excluded), "{excluded}: {encoded}");
+        }
+        let loaded: Preset = toml::from_str(&encoded).unwrap();
+        assert_eq!(loaded, preset);
+        let mut other = Project::default();
+        let track = other.sequence.add_track(TrackKind::Video, "Destination");
+        let target = clip(&mut other, track, 500, 1000, 1200);
+        let target_asset = other.sequence.clip(target).unwrap().1.asset;
+        other.asset_mut(target_asset).unwrap().text = Some(Text {
+            content: "destination words".into(),
+            ..Text::default()
+        });
+        let mut h = History::new(other);
+        let before = h.project().clone();
+        let command = loaded
+            .settings(Animation::Static)
+            .unwrap()
+            .command(h.project(), &[target], |_| true)
+            .unwrap();
+        h.apply(command).unwrap();
+        let text = h
+            .project()
+            .asset(target_asset)
+            .unwrap()
+            .text
+            .as_ref()
+            .unwrap();
+        assert_eq!(text.content, "destination words");
+        assert_eq!(text.size, 64.0);
+        assert_eq!(text.family, "Missing Family");
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
+        let poisoned = encoded.replace("family =", "content = 'injected words'\nfamily =");
+        assert!(toml::from_str::<Preset>(&poisoned).is_err());
+        let mut invalid = preset;
+        if let Style::Text(text) = &mut invalid.style {
+            text.size = f32::NAN;
+        }
+        assert_eq!(invalid.validate_definition(), Err(PresetError::Invalid));
+    }
+
+    #[test]
+    fn personal_presets_normalize_animation_and_reuse_overflow_policy() {
+        use crate::personal_presets::Preset;
+        let mut p = Project::default();
+        let audio = p.sequence.add_track(TrackKind::Audio, "A1");
+        let source = clip(&mut p, audio, 700, 100, 300);
+        let target = clip(&mut p, audio, 2000, 1000, 1100);
+        p.sequence.set_speed(source, 2.0, false, false).unwrap();
+        p.sequence
+            .with_clip_mut(source, |c| {
+                c.keyframes.insert(
+                    "volume".into(),
+                    vec![key(100, 0.2), key(200, 1.0), key(299, 0.5)],
+                );
+                c.transform.pan = -0.25;
+            })
+            .unwrap();
+        p.sequence.set_speed(target, 2.0, false, false).unwrap();
+        let preset =
+            Preset::capture(&p, source, Category::Audio, Time(725), Animation::Relative).unwrap();
+        let encoded = toml::to_string(&preset).unwrap();
+        let loaded: Preset = toml::from_str(&encoded).unwrap();
+        assert_eq!(loaded.animation_duration, Some(Time(100)));
+        assert!(
+            loaded.keyframes["volume"]
+                .iter()
+                .any(|k| k.time == Time(50) && k.value == Value::Scalar(1.0))
+        );
+        let before = p.sequence.clip(target).unwrap().1.clone();
+        let mut h = History::new(p);
+        h.apply(
+            loaded
+                .settings(Animation::Relative)
+                .unwrap()
+                .command(h.project(), &[target], |_| true)
+                .unwrap(),
+        )
+        .unwrap();
+        let current = h.project().sequence().clip(target).unwrap().1;
+        assert_eq!(
+            (
+                current.speed,
+                current.source_in,
+                current.source_out,
+                current.start,
+                current.link
+            ),
+            (
+                before.speed,
+                before.source_in,
+                before.source_out,
+                before.start,
+                before.link
+            )
+        );
+        assert!(
+            current.keyframes["volume"]
+                .iter()
+                .all(|k| k.time >= Time(1000) && k.time < Time(1100))
+        );
+        assert_eq!(current.transform_at(Time(2000)).volume, 0.2);
+        assert!(h.undo());
+        h.apply(
+            loaded
+                .settings(Animation::Static)
+                .unwrap()
+                .command(h.project(), &[target], |_| true)
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !h.project()
+                .sequence()
+                .clip(target)
+                .unwrap()
+                .1
+                .keyframes
+                .contains_key("volume")
+        );
+        let mut invalid = loaded;
+        invalid.keyframes.insert("speed".into(), vec![key(0, 2.0)]);
+        assert_eq!(invalid.validate_definition(), Err(PresetError::Invalid));
     }
 
     #[test]

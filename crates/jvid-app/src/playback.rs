@@ -102,6 +102,12 @@ pub enum Pixels {
 
 /// The pixels of a solid or text asset's `layer` on a `size` frame; `None` for a file.
 pub fn generated(asset: &MediaAsset, layer: &Layer, size: (u32, u32)) -> Option<Pixels> {
+    if let Some(annotation) = &asset.annotation {
+        return Some(Pixels::Text(jvid_render::annotations::rasterize(
+            &annotation.with(&layer.annotation),
+            size,
+        )));
+    }
     if let Some(t) = &asset.text {
         let t = t.with(&layer.text);
         return Some(Pixels::Text(text::rasterize(&t, layer.color, size)));

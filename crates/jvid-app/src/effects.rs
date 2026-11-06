@@ -223,6 +223,40 @@ pub fn load_project(project: &jvid_core::model::Project) -> std::io::Result<()> 
     Ok(())
 }
 
+/// Load exact absolute preset resources on an explicit user preflight. Parse the whole
+/// batch before extending the cache; retain other projects' queued-export resources.
+pub fn load_exact(keys: &[String]) -> Result<(), (String, String)> {
+    let mut entries = BTreeMap::new();
+    let mut descriptions = BTreeMap::new();
+    let mut shipped = BTreeSet::new();
+    for key in keys {
+        let load = || {
+            let path = Path::new(key);
+            if !path.is_absolute() {
+                return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).to_string());
+            }
+            let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+            let shader = effect::parse(&source)?;
+            Ok::<_, String>((source, Arc::new(shader)))
+        };
+        let (source, shader) = load().map_err(|error| (key.clone(), error))?;
+        if shipped_source(key).is_some_and(|bundled| bundled == source) {
+            shipped.insert(key.clone());
+        }
+        descriptions.insert(key.clone(), description(&source));
+        entries.insert(key.clone(), Ok(shader));
+    }
+    if !entries.is_empty() {
+        let mut library = LIBRARY.lock().unwrap_or_else(|error| error.into_inner());
+        library.0.shipped.retain(|key| !entries.contains_key(key));
+        library.0.shipped.extend(shipped);
+        library.0.descriptions.extend(descriptions);
+        library.0.project_files.extend(entries);
+        library.0.generation += 1;
+    }
+    Ok(())
+}
+
 /// An Effects tab row.
 #[derive(Debug, PartialEq)]
 pub struct Row {

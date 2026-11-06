@@ -393,11 +393,17 @@ mod tests {
 
     #[test]
     fn inspector_controls_work_in_narrow_panel() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         controls(1.0);
     }
 
     #[test]
     fn inspector_controls_work_at_high_dpi() {
+        if crate::test_util::isolate_locale() {
+            return;
+        }
         controls(1.5);
     }
 
