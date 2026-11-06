@@ -555,6 +555,71 @@ fn show_scrolls_an_existing_tab_into_a_narrow_strip_at_common_scales() {
 }
 
 #[test]
+fn short_grouped_media_empty_action_scrolls_above_pinned_import() {
+    if !gpu() {
+        return;
+    }
+    for scale in SCALES {
+        let mut h = harness([960.0, 600.0], scale);
+        h.state_mut().show_panel(Tab::Transcript);
+        h.state_mut().show_queue();
+        group(h.state_mut(), Tab::Transcript, Tab::Timeline, 1);
+        group(h.state_mut(), Tab::RenderQueue, Tab::Timeline, 2);
+        h.state_mut().show_queue();
+        h.run();
+        let before = h.state().history.project().clone();
+        let footer = h.get_by_label("Import").rect();
+        let capture = std::env::var_os("JVID_SHORT_MEDIA_CAPTURE").map(PathBuf::from);
+        if let Some(dir) = &capture {
+            std::fs::create_dir_all(dir).unwrap();
+            h.render()
+                .unwrap()
+                .save(dir.join(format!("queue-{scale}x-before.png")))
+                .unwrap();
+        }
+        let mut focused = false;
+        for _ in 0..128 {
+            h.key_press(Key::Tab);
+            h.run();
+            focused = h
+                .query_by_label("Import Media…")
+                .is_some_and(|button| button.accesskit_node().is_focused());
+            if focused {
+                break;
+            }
+        }
+        assert!(
+            focused,
+            "short Media action is reachable by Tab at {scale}x"
+        );
+        h.run_steps(3);
+        let action = h.get_by_label("Import Media…").rect();
+        let media = h
+            .state()
+            .dock
+            .leaf(node(h.state(), Tab::Media))
+            .unwrap()
+            .rect;
+        assert!(
+            media.contains_rect(action),
+            "action outside Media: {action:?}"
+        );
+        assert!(
+            action.bottom() <= footer.top(),
+            "action hidden behind pinned import: {action:?}"
+        );
+        assert_eq!(h.get_by_label("Import").rect(), footer);
+        assert_eq!(h.state().history.project(), &before);
+        if let Some(dir) = &capture {
+            h.render()
+                .unwrap()
+                .save(dir.join(format!("queue-{scale}x-keyboard.png")))
+                .unwrap();
+        }
+    }
+}
+
+#[test]
 fn grouped_panels_and_split_drop_feedback_snapshots() {
     if !gpu() {
         return;
