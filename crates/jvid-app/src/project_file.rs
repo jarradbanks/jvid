@@ -88,6 +88,7 @@ pub fn save(project: &Project, path: &Path) -> io::Result<()> {
     }
     let mut root: serde_json::Value = serde_json::from_str(&s).map_err(io::Error::other)?;
     if !sources.is_empty() {
+        root["schema_version"] = jvid_core::file::SUPPORTED_SCHEMA_VERSION.into();
         let fonts: Vec<_> = sources
             .into_iter()
             .map(|font| FontLink::new(font, &absolute_dir))
@@ -145,6 +146,47 @@ fn dir_of(path: &Path) -> &Path {
 mod tests {
     use super::*;
     use jvid_core::history::{Command, History};
+
+    #[test]
+    fn font_links_require_schema_two_but_ordinary_saves_remain_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("title.jvid");
+        save(&Project::default(), &path).unwrap();
+        let plain: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(plain["schema_version"], 1);
+        let alias = "jvid-collection-version-two-fixture";
+        jvid_render::text::load_project_fonts(&[jvid_render::text::FontSource {
+            family: alias.into(),
+            original_family: "Jvid Fixture Primary".into(),
+            path: Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../jvid-render/tests/fixtures/fonts/primary.ttf"),
+        }])
+        .unwrap();
+        let mut history = History::new(Project::default());
+        history
+            .apply(Command::AddText {
+                name: "Title".into(),
+                text: jvid_core::model::Text {
+                    family: alias.into(),
+                    content: "AB".into(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        save(history.project(), &path).unwrap();
+        let mut linked: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(linked["schema_version"], 2);
+        assert!(
+            linked["fonts"]
+                .as_array()
+                .is_some_and(|fonts| !fonts.is_empty())
+        );
+        assert_eq!(load(&path).unwrap(), *history.project());
+        linked["schema_version"] = 3.into();
+        fs::write(&path, serde_json::to_vec(&linked).unwrap()).unwrap();
+        assert!(load(&path).is_err());
+    }
 
     #[cfg(windows)]
     #[test]
