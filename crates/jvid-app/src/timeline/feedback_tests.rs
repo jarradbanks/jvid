@@ -286,7 +286,7 @@ fn dragging_a_media_tile_or_row_to_the_zero_seam_places_it_undoably() {
                 );
             h.run();
             let before = h.state().2.project().clone();
-            let from = pos2(80.0, if list { 90.0 } else { 100.0 });
+            let from = h.get_by_label("Caption").rect().center();
             let to = pos2(
                 300.0 + size::TRACK_HEADER - 4.0,
                 if slot { 50.0 } else { 68.0 },
