@@ -21,7 +21,7 @@ use crate::export::queue::Action as QueueAction;
 use crate::export::{Error as ExportError, Request};
 use crate::i18n::{tr, trn, verbatim};
 use crate::import::Importer;
-use crate::keymap::{self, Keymap};
+use crate::keymap::{self, Applicability, Keymap};
 use crate::media_bin::MediaBin;
 use crate::preview::{PROGRAM_ACTIONS, Preview, SOURCE_ACTIONS};
 use crate::subtitles::Done;
@@ -179,6 +179,7 @@ pub struct App {
     theme_setting: String,
     theme: suite_ui::themes::LiveTheme,
     keymap_editor: crate::keymap_editor::KeymapEditor,
+    command_palette: crate::command_palette::CommandPalette,
     exports: jvid_jobs::Pool,
     export_dialog: crate::export::dialog::ExportDialog,
     subtitle_export: crate::export::subtitles::SubtitleExport,
@@ -331,6 +332,7 @@ impl App {
             theme_setting: "dark".into(),
             theme: suite_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
+            command_palette: Default::default(),
             exports,
             export_dialog: Default::default(),
             subtitle_export: Default::default(),
@@ -584,8 +586,7 @@ impl App {
                         });
                     }
                     _ => {
-                        let can = id != "export" || self.can_export();
-                        if menus::item(ui, &self.keymap, id, None, can) {
+                        if self.action_menu_item(ui, id) {
                             picked = Some(id);
                         }
                     }
@@ -598,10 +599,8 @@ impl App {
         if let Some(aspect) = reframe {
             self.reframe(aspect);
         }
-        match picked {
-            Some("quit") => ui.ctx().send_viewport_cmd(ViewportCommand::Close),
-            Some(id) => self.run_action(id, true),
-            None => {}
+        if let Some(id) = picked {
+            self.run_action(id, true);
         }
         button.rect.right()
     }
@@ -609,21 +608,24 @@ impl App {
     /// The Edit menu, its left edge at `left`: each row runs its keymap action, then Preferences.
     /// Returns its right edge.
     fn edit_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
+        let previous_focus = ui.ctx().memory(|m| m.focused());
         let button = menu_button(ui, tr!("menu.edit"), left);
+        if button.clicked() {
+            self.command_palette.remember_menu_focus(previous_focus);
+        }
         tutorial::anchor(ui.ctx(), "menu.edit", button.rect);
         let mut picked = None;
         egui::Popup::menu(&button).show(|ui| {
+            if self.action_menu_item(ui, "command_palette") {
+                picked = Some("command_palette");
+            }
+            ui.separator();
             for &id in menus::EDIT {
                 if id.is_empty() {
                     ui.separator();
                     continue;
                 }
-                let can = match id {
-                    "undo" => self.history.can_undo(),
-                    "redo" => self.history.can_redo(),
-                    _ => self.timeline.can(id, self.history.project().sequence()),
-                };
-                if menus::item(ui, &self.keymap, id, None, can) {
+                if self.action_menu_item(ui, id) {
                     picked = Some(id);
                 }
             }
@@ -650,9 +652,8 @@ impl App {
         let button = menu_button(ui, tr!("menu.timeline"), left);
         let (mut picked, mut transcript, mut export) = (false, false, false);
         egui::Popup::menu(&button).show(|ui| {
-            let can = self.can_generate_subtitles();
-            picked = menus::item(ui, &self.keymap, "generate_subtitles", None, can);
-            export = menus::item(ui, &self.keymap, "export_subtitles", None, true);
+            picked = self.action_menu_item(ui, "generate_subtitles");
+            export = self.action_menu_item(ui, "export_subtitles");
             transcript = ui.button(tr!("menu.transcript")).clicked();
         });
         if picked {
@@ -670,6 +671,35 @@ impl App {
     fn can_generate_subtitles(&self) -> bool {
         let selected = self.timeline.selected();
         crate::subtitles::Subtitles::can_open(self.history.project(), selected)
+    }
+
+    /// App menus and dispatch share the same availability and translated explanation.
+    fn action_menu_item(&mut self, ui: &mut Ui, id: &str) -> bool {
+        let available = self.action_applicability(id, true);
+        let (name, shortcut) = self.keymap.label(id);
+        let response = ui.add_enabled(
+            available.is_enabled(),
+            egui::Button::new(name).shortcut_text(shortcut),
+        );
+        let response = if let Some(reason) = available.reason() {
+            response.on_disabled_hover_text(reason)
+        } else {
+            response
+        };
+        response.clicked()
+    }
+
+    fn show_command_palette(&mut self, ui: &mut Ui) {
+        if !self.command_palette.needs_frame() {
+            return;
+        }
+        let mut palette = std::mem::take(&mut self.command_palette);
+        let map = self.keymap.clone();
+        let picked = palette.show(ui, &map, |id| self.action_applicability(id, false));
+        self.command_palette = palette;
+        if let Some(id) = picked {
+            self.run_action(id, false);
+        }
     }
 
     /// The Help menu, its left edge at `left`.
@@ -1021,15 +1051,78 @@ impl App {
             || self.components.open
             || self.updates.open
             || self.keymap_editor.is_open()
+            || self.command_palette.is_open()
             || self.subtitles.is_open()
             || !self.prompts.is_empty()
             || self.bin.confirm_remove.is_some()
             || ctx.memory(|m| m.top_modal_layer().is_some())
     }
 
+    /// One availability result for the same target the executor will use. Menus explicitly
+    /// target Timeline; shortcuts and the palette preserve the focused dock and monitor.
+    fn action_applicability(&mut self, id: &str, menu: bool) -> Applicability {
+        let Some(action) = keymap::ACTIONS.iter().find(|a| a.id == id) else {
+            return Applicability::Disabled("palette.unavailable");
+        };
+        let enabled = match id {
+            "undo" => Some(self.history.can_undo()),
+            "redo" | "redo_alt" => Some(self.history.can_redo()),
+            "export" => return Applicability::when(self.can_export(), "export.nothing"),
+            "generate_subtitles" => Some(self.can_generate_subtitles()),
+            "insert" | "overwrite" => {
+                return Applicability::when(
+                    self.preview.source_asset().is_some(),
+                    "palette.no_source",
+                );
+            }
+            "new_project" | "open_project" | "save" | "save_as" | "import" | "import_subtitles"
+            | "export_subtitles" | "quit" | "record" | "export_frame" | "command_palette"
+            | "focus_media" | "focus_effects" | "focus_source" | "focus_program"
+            | "focus_timeline" | "focus_inspector" => Some(true),
+            _ => None,
+        };
+        if let Some(enabled) = enabled {
+            return Applicability::when(enabled, "palette.unavailable");
+        }
+        // Stopping a take always works, even after moving focus to another panel.
+        if self.take.is_some() && matches!(id, "play_stop" | "shuttle_stop") {
+            return Applicability::Enabled;
+        }
+        let focused = self.dock.find_active_focused().map(|(_, t)| *t);
+        let preview = !menu && focused == Some(Tab::Preview);
+        if preview && self.preview_active == 0 && SOURCE_ACTIONS.contains(&id) {
+            return Applicability::when(self.preview.source_asset().is_some(), "palette.no_source");
+        }
+        let program = preview && self.preview_active == 1;
+        let timeline = focused == Some(Tab::Timeline);
+        if (timeline || program || menu) && PROGRAM_ACTIONS.contains(&id) {
+            return Applicability::Enabled;
+        }
+        let marking = program && MARK_ACTIONS.contains(&id);
+        let tool = matches!(id, "selection_tool" | "razor_tool" | "text_tool");
+        if timeline || menu || marking || (program && tool) {
+            return Applicability::when(
+                self.timeline.can(id, self.history.project().sequence()),
+                "palette.unavailable",
+            );
+        }
+        let reason = if action.context == keymap::Context::Global
+            && SOURCE_ACTIONS.contains(&id)
+            && PROGRAM_ACTIONS.contains(&id)
+        {
+            "palette.focus_playback"
+        } else {
+            "palette.focus_timeline"
+        };
+        Applicability::Disabled(reason)
+    }
+
     /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
-    /// focus. shortcut: unimplemented actions are stubs until their features land.
+    /// focus. The palette uses the same focused-panel route as shortcuts.
     fn run_action(&mut self, id: &str, menu: bool) {
+        if !self.action_applicability(id, menu).is_enabled() {
+            return;
+        }
         // Space and K stop the take along with playback, wherever focus is.
         if self.take.is_some() && matches!(id, "play_stop" | "shuttle_stop" | "record") {
             self.end_take();
@@ -1060,6 +1153,22 @@ impl App {
             return;
         }
         match id {
+            "command_palette" => {
+                if let Some(ctx) = &self.editor_context {
+                    if menu {
+                        self.command_palette.open_from_menu(ctx);
+                    } else {
+                        self.command_palette.open(ctx);
+                    }
+                }
+                return;
+            }
+            "quit" => {
+                if let Some(ctx) = &self.editor_context {
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
+                return;
+            }
             "record" => return self.start_take(),
             "undo" => {
                 self.history.undo();
@@ -1633,11 +1742,7 @@ impl eframe::App for App {
             self.keymap.pressed(&ctx, timeline)
         };
         for id in pressed {
-            if id == "quit" {
-                ctx.send_viewport_cmd(ViewportCommand::Close);
-            } else {
-                self.run_action(id, false);
-            }
+            self.run_action(id, false);
             // A shortcut can open a modal after this batch was collected. Stop
             // dispatch and release background focus before widgets see Space/Enter.
             if self.modal_owns_input(&ctx) {
@@ -1688,6 +1793,7 @@ impl eframe::App for App {
             if let Some(a) = self.welcome.show(ui) {
                 self.welcome_action(a);
             }
+            self.show_command_palette(ui);
             self.show_toasts(&ctx);
             return;
         }
@@ -1964,6 +2070,7 @@ impl eframe::App for App {
             }
         });
 
+        self.show_command_palette(ui);
         // Apply the release frame's final value before closing its undo gesture. This
         // also closes cancelled drags and controls that disappeared while held.
         if ctx.input(|i| !i.pointer.any_down()) {
@@ -2639,5 +2746,172 @@ fn app_icon() -> egui::IconData {
         width: image.width(),
         height: image.height(),
         rgba: image.into_raw(),
+    }
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::*;
+    use egui::{Event, Key, Modifiers};
+    use egui_kittest::Harness;
+    use jvid_core::model::{AssetId, ProbeInfo};
+    use jvid_core::time::{FLICKS_PER_SECOND, Rate};
+
+    #[test]
+    fn applicability_matches_focused_source_program_and_explicit_menu_targets() {
+        let mut app = App::restore(None);
+        app.history
+            .apply(Command::Import(vec![(
+                "/missing/palette-fixture.mkv".into(),
+                ProbeInfo {
+                    duration: Time(10 * FLICKS_PER_SECOND),
+                    frame_rate: Some(Rate::new(25, 1)),
+                    ..Default::default()
+                },
+            )]))
+            .unwrap();
+        app.preview.open(app.history.project(), AssetId(1));
+        app.run_action("focus_source", false);
+        assert!(app.action_applicability("mark_in", false).is_enabled());
+        assert!(!app.action_applicability("snapping", false).is_enabled());
+        assert!(app.action_applicability("snapping", true).is_enabled());
+        app.run_action("step_forward", false);
+        app.run_action("mark_in", false);
+        let source_in = app.history.project().asset(AssetId(1)).unwrap().in_point;
+        assert_eq!(source_in, Some(Rate::new(25, 1).time_floor(1)));
+        assert_eq!(app.history.project().sequence().in_point(), None);
+        app.run_action("focus_program", false);
+        assert!(app.action_applicability("mark_in", false).is_enabled());
+        assert_eq!(
+            app.history.project().asset(AssetId(1)).unwrap().in_point,
+            source_in
+        );
+        app.run_action("focus_inspector", false);
+        assert!(!app.action_applicability("mark_in", false).is_enabled());
+        assert!(app.action_applicability("mark_in", true).is_enabled());
+        assert!(!app.action_applicability("export", false).is_enabled());
+        assert!(!app.action_applicability("copy", true).is_enabled());
+    }
+
+    #[test]
+    fn remapped_palette_shortcut_executes_existing_action_and_restores_panel_focus() {
+        let mut h = Harness::builder()
+            .with_size([800.0, 600.0])
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run();
+        h.state_mut().on_welcome = false;
+        h.state_mut().keymap = Keymap::from_toml("command_palette = \"Ctrl+Shift+F9\"").unwrap();
+        h.state_mut().focus_panel(Tab::Timeline);
+        h.run();
+        let project = h.state().history.project().clone();
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F9);
+        h.run_steps(2);
+        assert!(h.state().command_palette.is_open());
+        assert_eq!(
+            h.state_mut().dock.find_active_focused().map(|(_, t)| *t),
+            Some(Tab::Timeline)
+        );
+        h.event(Event::Text("blade".into()));
+        h.run();
+        let previous_tool = h.state().timeline.tool();
+        h.key_press(Key::Enter);
+        h.run_steps(2);
+        assert!(!h.state().command_palette.is_open());
+        assert_ne!(h.state().timeline.tool(), previous_tool);
+        assert_eq!(h.state().timeline.tool(), crate::timeline::Tool::Razor);
+        assert_eq!(
+            h.state().history.project(),
+            &project,
+            "view state does not alter content"
+        );
+        assert_eq!(
+            h.state_mut().dock.find_active_focused().map(|(_, t)| *t),
+            Some(Tab::Timeline)
+        );
+
+        // The same remapped shortcut belongs to a text field while typing.
+        h.state_mut().run_action("command_palette", false);
+        h.run_steps(2);
+        assert!(h.ctx.text_edit_focused());
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::F9);
+        h.run();
+        assert!(h.state().command_palette.is_open());
+        h.key_press(Key::Escape);
+        h.run_steps(2);
+        assert!(!h.state().command_palette.is_open());
+        h.state_mut().keymap = Keymap::from_toml("command_palette = \"\"").unwrap();
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::P);
+        h.run();
+        assert!(!h.state().command_palette.is_open());
+    }
+
+    #[test]
+    fn palette_preserves_source_program_routing_and_undoable_persisted_marks() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut h = Harness::builder()
+            .with_size([800.0, 600.0])
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run();
+        let app = h.state_mut();
+        app.on_welcome = false;
+        app.history
+            .apply(Command::Import(vec![(
+                directory.path().join("palette-source.mkv"),
+                ProbeInfo {
+                    duration: Time(10 * FLICKS_PER_SECOND),
+                    frame_rate: Some(Rate::new(25, 1)),
+                    ..Default::default()
+                },
+            )]))
+            .unwrap();
+        app.preview.open(app.history.project(), AssetId(1));
+        app.run_action("focus_source", false);
+        h.run();
+        let pick_mark_in = |h: &mut Harness<'_, App>| {
+            h.state_mut().run_action("command_palette", false);
+            h.run_steps(2);
+            h.event(Event::Text("mark_in".into()));
+            h.run();
+            h.key_press(Key::Enter);
+            h.run_steps(2);
+            assert!(!h.state().command_palette.is_open());
+        };
+        pick_mark_in(&mut h);
+        assert_eq!(h.state().preview_active, 0);
+        assert_eq!(
+            h.state()
+                .history
+                .project()
+                .asset(AssetId(1))
+                .unwrap()
+                .in_point,
+            Some(Time(0))
+        );
+        assert_eq!(h.state().history.project().sequence().in_point(), None);
+        h.state_mut().run_action("focus_program", false);
+        h.run();
+        pick_mark_in(&mut h);
+        assert_eq!(h.state().preview_active, 1);
+        assert_eq!(
+            h.state().history.project().sequence().in_point(),
+            Some(Time(0))
+        );
+        let path = directory.path().join("palette-marks.jvid");
+        crate::project_file::save(h.state().history.project(), &path).unwrap();
+        assert_eq!(
+            crate::project_file::load(&path).unwrap(),
+            *h.state().history.project()
+        );
+        assert!(h.state_mut().history.undo());
+        assert_eq!(h.state().history.project().sequence().in_point(), None);
+        assert_eq!(
+            h.state()
+                .history
+                .project()
+                .asset(AssetId(1))
+                .unwrap()
+                .in_point,
+            Some(Time(0))
+        );
     }
 }

@@ -67,6 +67,7 @@ Work in any panel except while typing in a text field.
 | Focus Effects | `Shift+7` |
 | Export Frame | `Ctrl+Shift+E` |
 | Record Voiceover | `Shift+R` |
+| Command Palette | `Ctrl+Shift+P` |
 
 ## Timeline
 
