@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -340,6 +341,258 @@ class MacSourceTests(unittest.TestCase):
         self.write_receipt()
         with self.assertRaisesRegex(sources.SourceError, "immutable tap revision"):
             self.provider()
+
+    def api_bottle_fixture(self):
+        # Shape and build identity from run 42232717165's retained aom receipt.
+        # The source scm_revision is upstream AOM, never a replacement tap head.
+        self.receipt.update(built_as_bottle=True, poured_from_bottle=True,
+                            loaded_from_api=True, loaded_from_internal_api=True,
+                            source_modified_time=1792611921,
+                            built_on={"os": "Macintosh", "os_version": "macOS 15.8", "cpu_family": "dunno",
+                                      "xcode": "26.3", "clt": "26.3.0.0.1.1771626560", "preferred_perl": "5.34"})
+        self.receipt["source"].update(tap_git_head=None,
+            scm_revision="b141d9c45db236335351c8a4b2a14b3ade27c937",
+            path="/Users/runner/Library/Caches/Homebrew/api/internal/packages.arm64_sequoia.jws.json")
+        self.receipt["runtime_dependencies"] = [{"full_name": "fixture", "pkg_version": "1.2.3_2", "bottle_rebuild": 1}]
+        self.write_receipt()
+        self.bottle_recipe = self.recipe.read_bytes()
+        self.bottle_member = "fixture/1.2.3_2/.brew/fixture.rb"
+        self.bottle_member_type = tarfile.REGTYPE
+        self.bottle_duplicate = False
+        tab = {key: self.receipt[key] for key in
+               ("homebrew_version", "arch", "built_on", "source_modified_time", "compiler")}
+        tab["source"] = {"scm_revision": self.receipt["source"]["scm_revision"]}
+        # Runtime dependencies legitimately differ after installation.
+        tab["runtime_dependencies"] = [{"full_name": "old-dependency", "pkg_version": "1.0"}]
+        self.bottle_tab = tab
+        self.bottle_annotations = {"org.opencontainers.image.version": "1.2.3_2",
+            "org.opencontainers.image.ref.name": "1.2.3_2.arm64_sequoia.1",
+            "org.opencontainers.image.revision": TAP_REVISION,
+            "org.opencontainers.image.source": f"https://github.com/homebrew/homebrew-core/blob/{TAP_REVISION}/Formula/f/fixture.rb"}
+
+    def bottle_responses(self, *, index_change=None, manifest_change=None, bad_manifest=False, bad_bottle=False):
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+            for _ in range(2 if self.bottle_duplicate else 1):
+                member = tarfile.TarInfo(self.bottle_member)
+                member.type = self.bottle_member_type
+                member.size = len(self.bottle_recipe) if member.isfile() else 0
+                archive.addfile(member, io.BytesIO(self.bottle_recipe) if member.isfile() else None)
+        bottle = stream.getvalue()
+        digest = hashlib.sha256(bottle).hexdigest()
+        annotations = dict(self.bottle_annotations, **{"sh.brew.tab": json.dumps(self.bottle_tab), "sh.brew.bottle.digest": digest})
+        manifest = {"annotations": annotations.copy(), "layers": [{"digest": "sha256:" + digest}]}
+        if manifest_change:
+            manifest_change(manifest)
+        manifest_bytes = json.dumps(manifest).encode()
+        index = {"annotations": {"org.opencontainers.image.version": "1.2.3_2"}, "manifests": [
+            {"digest": "sha256:" + hashlib.sha256(manifest_bytes).hexdigest(),
+             "platform": {"os": "darwin", "architecture": "arm64"}, "annotations": annotations}]}
+        if index_change:
+            index_change(index)
+        self.expected_bottle_digest = digest
+        return [Response(json.dumps({"token": "public-fixture-token"}).encode()), Response(json.dumps(index).encode()),
+                Response(manifest_bytes + (b"corrupt" if bad_manifest else b"")),
+                Response(bottle + (b"corrupt" if bad_bottle else b""))]
+
+    def verify_bottle(self, **kwargs):
+        with mock.patch.object(sources.urllib.request, "urlopen", side_effect=self.bottle_responses(**kwargs)) as request:
+            identity = sources._bottle_identity(self.provider(), self.out, self.root)
+        return identity, request
+
+    def test_null_and_missing_api_receipt_tap_bind_exact_bottle_without_mutation(self):
+        for missing in (False, True):
+            with self.subTest(missing=missing):
+                self.api_bottle_fixture()
+                if missing:
+                    del self.receipt["source"]["tap_git_head"]
+                    self.write_receipt()
+                original = (self.provider_dir / "INSTALL_RECEIPT.json").read_bytes()
+                identity, request = self.verify_bottle()
+                self.assertEqual(identity["bottle_sha256"], self.expected_bottle_digest)
+                self.assertEqual(identity["recipe_sha256"], sources._hash(self.recipe))
+                self.assertEqual(identity["tag"], "1.2.3_2-1")
+                self.assertNotIn("tap_revision", identity)
+                self.assertNotIn("public-fixture-token", json.dumps(identity))
+                self.assertEqual((self.provider_dir / "INSTALL_RECEIPT.json").read_bytes(), original)
+                self.assertEqual(self.provider()["receipt"], self.receipt)
+                self.assertTrue((self.out / "providers/fixture/bottle-manifest.json").is_file())
+                self.assertIn("/manifests/1.2.3_2-1", request.call_args_list[1].args[0].full_url)
+                self.assertFalse((self.root / "fixture.bottle.tar.gz").exists())
+                shutil.rmtree(self.out / "providers")
+
+    def test_api_fallback_rejects_nonbottles_noncore_and_malformed_revisions(self):
+        self.api_bottle_fixture()
+        for field, value in (("poured_from_bottle", False), ("built_as_bottle", False), ("loaded_from_api", False)):
+            with self.subTest(field=field):
+                self.receipt[field] = value
+                self.write_receipt()
+                with self.assertRaisesRegex(sources.SourceError, "immutable tap revision"):
+                    self.provider()
+                self.receipt[field] = True
+        for revision in ("main", "", 17):
+            self.receipt["source"]["tap_git_head"] = revision
+            self.write_receipt()
+            with self.assertRaisesRegex(sources.SourceError, "immutable tap revision"):
+                self.provider()
+        self.receipt["source"].update(tap_git_head=None, tap="other/tap")
+        self.write_receipt()
+        with self.assertRaisesRegex(sources.SourceError, "immutable tap revision"):
+            self.provider()
+
+    def test_bottle_candidate_requires_unique_complete_build_version_arch_identity(self):
+        self.api_bottle_fixture()
+        def mismatch_tab(index, field):
+            annotations = index["manifests"][0]["annotations"]
+            tab = json.loads(annotations["sh.brew.tab"])
+            tab[field] = "mismatch"
+            annotations["sh.brew.tab"] = json.dumps(tab)
+        for key in ("homebrew_version", "arch", "built_on", "source_modified_time", "compiler", "source", "changed_files"):
+            with self.subTest(field=key):
+                with self.assertRaises(sources.SourceError):
+                    self.verify_bottle(index_change=lambda index: mismatch_tab(index, key))
+        for change in (
+            lambda index: index["manifests"].append(index["manifests"][0].copy()),
+            lambda index: index["annotations"].update({"org.opencontainers.image.version": "9.9"}),
+            lambda index: index["manifests"][0]["platform"].update(architecture="amd64"),
+            lambda index: index["manifests"].clear(),
+        ):
+            with self.assertRaises(sources.SourceError):
+                self.verify_bottle(index_change=change)
+
+    def test_manifest_bottle_and_recipe_mismatches_fail_closed(self):
+        self.api_bottle_fixture()
+        for arguments, error in (({"bad_manifest": True}, "manifest checksum mismatch"),
+                                 ({"bad_bottle": True}, "source archive checksum mismatch"),
+                                 ({"manifest_change": lambda m: m["layers"][0].update(digest="sha256:" + "0" * 64)}, "immutable bottle"),
+                                 ({"manifest_change": lambda m: m["annotations"].update({"org.opencontainers.image.version": "9.9"})}, "selected build identity")):
+            with self.subTest(arguments=arguments):
+                with self.assertRaisesRegex(sources.SourceError, error):
+                    self.verify_bottle(**arguments)
+        self.bottle_recipe += b"# changed build instructions\n"
+        with self.assertRaisesRegex(sources.SourceError, "recipe differs"):
+            self.verify_bottle()
+        self.assertFalse((self.out / "providers").exists())
+
+    def test_bottle_recipe_member_missing_duplicate_or_link_is_rejected(self):
+        self.api_bottle_fixture()
+        for kind in (tarfile.SYMTYPE, tarfile.LNKTYPE):
+            self.bottle_member_type = kind
+            with self.assertRaisesRegex(sources.SourceError, "unique regular retained recipe"):
+                self.verify_bottle()
+        self.bottle_member_type = tarfile.REGTYPE
+        self.bottle_duplicate = True
+        with self.assertRaisesRegex(sources.SourceError, "unique regular retained recipe"):
+            self.verify_bottle()
+        self.bottle_duplicate = False
+        self.bottle_member = "fixture/9.9/.brew/fixture.rb"
+        with self.assertRaisesRegex(sources.SourceError, "unique regular retained recipe"):
+            self.verify_bottle()
+
+    def test_bottle_patch_tap_requires_git_verified_exact_recipe(self):
+        self.api_bottle_fixture()
+        identity, _ = self.verify_bottle()
+        provider = self.provider()
+        provider["bottle_identity"] = identity
+        recipe = self.recipe.read_bytes().replace(b"  revision 2\n", b'  revision 2\n  bottle do\n    rebuild 1\n  end\n\n')
+        with mock.patch.object(sources, "_git_repository", return_value=self.root / "tap.git"), \
+             mock.patch.object(sources, "_git_blob", return_value=recipe):
+            self.assertEqual(sources._bottle_patch_tap(provider, self.out, self.root), TAP_REVISION)
+        with mock.patch.object(sources, "_git_repository", return_value=self.root / "tap.git"), \
+             mock.patch.object(sources, "_git_blob", return_value=recipe + b"# changed install\n"):
+            with self.assertRaisesRegex(sources.SourceError, "tap recipe differs"):
+                sources._bottle_patch_tap(provider, self.out, self.root)
+        path = self.out / "providers/fixture/bottle-manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["annotations"]["org.opencontainers.image.revision"] = "main"
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(sources.SourceError, "lack a verified recipe revision"):
+            sources._bottle_patch_tap(provider, self.out, self.root)
+
+    def test_bottle_registry_errors_hide_token_and_are_bounded(self):
+        failure = urllib.error.HTTPError("https://redirect.invalid/?token=secret", 403, "secret", {}, None)
+        with mock.patch.object(sources.urllib.request, "urlopen", side_effect=failure):
+            with self.assertRaisesRegex(sources.SourceError, "registry metadata unavailable") as raised:
+                sources._registry_json("https://ghcr.io/example", token="secret")
+        self.assertNotIn("secret", str(raised.exception))
+        with mock.patch.object(sources.urllib.request, "urlopen", return_value=Response(b" " * (4 * 1024 * 1024 + 1))):
+            with self.assertRaisesRegex(sources.SourceError, "size limit"):
+                sources._registry_json("https://ghcr.io/example")
+
+    def test_unresolved_bottle_build_helpers_fail_before_network(self):
+        self.api_bottle_fixture()
+        self.recipe.write_text(self.recipe.read_text() + '\nrequire_relative "private-helper"\n')
+        with mock.patch.object(sources, "_formula_plan", return_value=self.plan), \
+             mock.patch.object(sources.urllib.request, "urlopen") as request:
+            with self.assertRaisesRegex(sources.SourceError, "unresolved tap/build-helper"):
+                sources.collect(self.stage, self.out)
+        request.assert_not_called()
+
+    def test_collect_bottle_identity_and_installed_build_support_with_original_receipt(self):
+        self.api_bottle_fixture()
+        original = (self.provider_dir / "INSTALL_RECEIPT.json").read_bytes()
+        def installed_support(*args, **kwargs):
+            if args[:2] == ("brew", "--repository"):
+                return str(self.root).encode()
+            if "rev-parse" in args:
+                return TAP_REVISION.encode()
+            if "archive" in args:
+                kwargs["stdout"].write(b"installed Homebrew source")
+                return b""
+            self.fail(f"unexpected build-support command: {args}")
+        responses = self.bottle_responses() + [Response(ARCHIVE), Response(RESOURCE)]
+        with mock.patch.object(sources, "_formula_plan", return_value=self.plan), \
+             mock.patch.object(sources, "_run", side_effect=installed_support), \
+             mock.patch.object(sources.urllib.request, "urlopen", side_effect=responses), \
+             mock.patch.object(sources, "_git_snapshot") as snapshot:
+            records = sources.collect(self.stage, self.out)
+        snapshot.assert_not_called()
+        record = records[0]
+        self.assertIsNone(record["provenance"]["tap_revision"])
+        self.assertEqual(record["provenance"]["bottle_identity"]["bottle_sha256"], self.expected_bottle_digest)
+        self.assertEqual((self.out / "providers/fixture/INSTALL_RECEIPT.json").read_bytes(), original)
+        plan = json.loads((self.out / "providers/fixture/source-plan.json").read_text())
+        self.assertEqual(plan["bottle_identity"], record["provenance"]["bottle_identity"])
+        self.assertEqual([item["sha256"] for item in plan["sources"]], [hashlib.sha256(ARCHIVE).hexdigest(), hashlib.sha256(RESOURCE).hexdigest()])
+        self.assertTrue(any(path.endswith("bottle-manifest.json") for path in record["files"]))
+        self.assertEqual(records[-1]["id"], "homebrew-build-support@" + TAP_REVISION)
+
+    def test_invalid_or_conflicting_bottle_rebuild_hints_fail_closed(self):
+        self.api_bottle_fixture()
+        dependency = self.receipt["runtime_dependencies"][0]
+        for value in (-1, "1", {}, True):
+            dependency["bottle_rebuild"] = value
+            self.write_receipt()
+            with self.assertRaisesRegex(sources.SourceError, "invalid installed bottle rebuild"):
+                self.provider()
+        dependency["bottle_rebuild"] = 1
+        self.receipt["runtime_dependencies"].append(dict(dependency, bottle_rebuild=2))
+        self.write_receipt()
+        with self.assertRaisesRegex(sources.SourceError, "ambiguous or invalid installed bottle rebuild"):
+            self.provider()
+
+    def test_known_tap_keeps_original_snapshot_without_bottle_lookup(self):
+        provider = self.provider()
+        def snapshot(url, revision, dest, cache):
+            dest.parent.mkdir(parents=True)
+            dest.write_bytes(b"original receipt tap")
+            return [{"file": dest.name}]
+        def installed_support(*args, **kwargs):
+            if args[:2] == ("brew", "--repository"):
+                return str(self.root).encode()
+            if "rev-parse" in args:
+                return TAP_REVISION.encode()
+            kwargs["stdout"].write(b"installed Homebrew source")
+            return b""
+        with mock.patch.object(sources, "_git_snapshot", side_effect=snapshot), \
+             mock.patch.object(sources, "_git_repository", return_value=self.root / "tap.git"), \
+             mock.patch.object(sources, "_run", side_effect=installed_support), \
+             mock.patch.object(sources, "_bottle_identity") as bottle:
+            records, repositories = sources._build_support(self.out, self.root, [provider])
+        bottle.assert_not_called()
+        self.assertEqual(records[0]["id"], "homebrew-tap:homebrew/core@" + TAP_REVISION)
+        self.assertEqual(records[0]["provenance"], "Git-verified receipt tap snapshot including dependency recipes and patches")
+        self.assertIn(("homebrew/core", TAP_REVISION), repositories)
 
     def test_floating_git_source_is_rejected(self):
         self.plan["payloads"][0] = {"id": "source", "role": "source", "kind": "git", "url": "https://example.invalid/repo.git", "revision": "main"}

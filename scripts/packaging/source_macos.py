@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import time
 import urllib.error
@@ -111,7 +112,7 @@ def _url(value: str, *, git=False) -> str:
     return value
 
 
-def _download(url: str, digest: str, dest: Path) -> None:
+def _download(url: str, digest: str, dest: Path, *, headers=None) -> None:
     _url(url)
     if not isinstance(digest, str) or not SHA256.fullmatch(digest):
         raise SourceError("source archive has no pinned SHA-256")
@@ -119,7 +120,7 @@ def _download(url: str, digest: str, dest: Path) -> None:
     started = time.monotonic()
     size = 0
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "jvid-corresponding-source/1"})
+        request = urllib.request.Request(url, headers={"User-Agent": "jvid-corresponding-source/1", **(headers or {})})
         with urllib.request.urlopen(request, timeout=60) as response, dest.open("wb") as stream:
             _url(response.geturl())
             while chunk := response.read(1024 * 1024):
@@ -272,14 +273,152 @@ def _providers(stage: Path) -> list[dict]:
             raise SourceError(f"receipt version differs from recorded provider: {name}")
         if not isinstance(source.get("tap"), str) or not TAP.fullmatch(source["tap"]):
             raise SourceError(f"missing receipt tap: {name}")
-        if not isinstance(source.get("tap_git_head"), str) or not REVISION.fullmatch(source["tap_git_head"]):
+        revision = source.get("tap_git_head")
+        # API pours overwrite the original bottle's tap revision with null when
+        # the tap is not installed. Only those receipts may use verified bottle
+        # identity below; a malformed/nonimmutable revision is never repaired.
+        api_bottle = (source["tap"] == "homebrew/core" and receipt.get("loaded_from_api") is True
+                      and receipt.get("built_as_bottle") is True and receipt.get("poured_from_bottle") is True)
+        if not (isinstance(revision, str) and REVISION.fullmatch(revision)) and not (revision is None and api_bottle):
             raise SourceError(f"missing immutable tap revision: {name}")
         for option_key in ("used_options", "unused_options"):
             if not isinstance(receipt.get(option_key), list) or not all(isinstance(x, str) for x in receipt[option_key]):
                 raise SourceError(f"missing receipt build options: {name}")
         providers.append({"name": name, "version": version, "recipe": recipe,
                           "receipt_path": receipt_path, "receipt": receipt, "cellar": cellars[name]})
+    # Homebrew refreshes runtime_dependencies when pouring. These are discovery
+    # hints for the installed bottle rebuild, never substitutes for verification.
+    for provider in providers:
+        if provider["receipt"]["source"].get("tap_git_head") is not None:
+            continue
+        rebuilds = [d["bottle_rebuild"] for p in providers for d in p["receipt"].get("runtime_dependencies", [])
+                    if d.get("full_name") == provider["name"] and d.get("pkg_version") == provider["version"]
+                    and "bottle_rebuild" in d]
+        if any(type(value) is not int or value < 0 for value in rebuilds) or len(set(rebuilds)) > 1:
+            raise SourceError(f"ambiguous or invalid installed bottle rebuild: {provider['name']}")
+        provider["bottle_rebuild"] = next(iter(rebuilds), 0)
     return providers
+
+
+def _registry_json(url: str, *, token=None, digest=None) -> tuple[dict, bytes]:
+    """Bound public registry metadata; never expose bearer/redirect diagnostics."""
+    headers = {"Accept": "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as response:
+            data = response.read(4 * 1024 * 1024 + 1)
+        if len(data) > 4 * 1024 * 1024:
+            raise SourceError("bottle registry metadata exceeded its size limit")
+        if digest is not None and (not isinstance(digest, str) or not SHA256.fullmatch(digest)
+                                   or hashlib.sha256(data).hexdigest() != digest):
+            raise SourceError("bottle manifest checksum mismatch")
+        result = json.loads(data)
+        if not isinstance(result, dict):
+            raise SourceError("invalid bottle registry metadata")
+        return result, data
+    except SourceError:
+        raise
+    except Exception:
+        raise SourceError("bottle registry metadata unavailable or invalid") from None
+
+
+def _bottle_identity(provider: dict, out: Path, cache: Path) -> dict:
+    """Bind a null-tap API receipt to an immutable bottle and exact recipe bytes."""
+    name, version, receipt = provider["name"], provider["version"], provider["receipt"]
+    required = ("homebrew_version", "arch", "built_on", "source_modified_time", "compiler")
+    if (any(not receipt.get(key) for key in required) or receipt["arch"] not in ("arm64", "x86_64")
+            or not isinstance(receipt["built_on"], dict)):
+        raise SourceError(f"missing original bottle build identity: {name}")
+    repository = "homebrew/core/" + name.replace("@", "/")
+    query = urllib.parse.urlencode({"service": "ghcr.io", "scope": f"repository:{repository}:pull"})
+    auth, _ = _registry_json("https://ghcr.io/token?" + query)
+    token = auth.get("token")
+    if not isinstance(token, str) or not token:
+        raise SourceError("missing public bottle registry token")
+    registry = "https://ghcr.io/v2/" + repository
+    rebuild = provider["bottle_rebuild"]
+    tag = version + (f"-{rebuild}" if rebuild else "")
+    index, index_bytes = _registry_json(registry + "/manifests/" + tag, token=token)
+    try:
+        if index["annotations"]["org.opencontainers.image.version"] != version:
+            raise SourceError("bottle index version differs from installed provider")
+        candidates = []
+        for item in index["manifests"]:
+            tab = json.loads(item["annotations"].get("sh.brew.tab", "{}"))
+            if not all(key in tab and tab[key] == receipt[key] for key in required):
+                continue
+            if item["platform"]["os"] != "darwin" or item["platform"]["architecture"] != {"arm64": "arm64", "x86_64": "amd64"}[receipt["arch"]]:
+                continue
+            # Compare every original build-tab field, including source Git
+            # identity when present. Only runtime_dependencies are rewritten by
+            # installation; retain both complete versions in the evidence.
+            if all((all(receipt["source"].get(k) == v for k, v in value.items()) if key == "source"
+                    else receipt.get(key) == value) for key, value in tab.items() if key != "runtime_dependencies"):
+                candidates.append(item)
+        if len(candidates) != 1:
+            raise SourceError(f"missing or ambiguous original bottle identity: {name}")
+        selected = candidates[0]
+        manifest_digest = selected["digest"].removeprefix("sha256:")
+        manifest, manifest_bytes = _registry_json(registry + "/manifests/sha256:" + manifest_digest,
+                                                   token=token, digest=manifest_digest)
+        annotations = manifest["annotations"]
+        if (annotations["org.opencontainers.image.version"] != version
+                or annotations["sh.brew.tab"] != selected["annotations"]["sh.brew.tab"]
+                or annotations["org.opencontainers.image.ref.name"] != selected["annotations"]["org.opencontainers.image.ref.name"]):
+            raise SourceError("bottle manifest differs from selected build identity")
+        digest = annotations["sh.brew.bottle.digest"]
+        if (not isinstance(digest, str) or not SHA256.fullmatch(digest)
+                or digest != selected["annotations"]["sh.brew.bottle.digest"]
+                or len(manifest["layers"]) != 1 or manifest["layers"][0]["digest"] != "sha256:" + digest):
+            raise SourceError("bottle manifest has no unique immutable bottle")
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise SourceError("invalid original bottle identity metadata") from None
+    bottle = cache / f"{name}.bottle.tar.gz"
+    url = registry + "/blobs/sha256:" + digest
+    _download(url, digest, bottle, headers={"Authorization": "Bearer " + token})
+    try:
+        # Never extract or execute a package. Verify the entire compressed
+        # bottle before reading one bounded, regular recipe member.
+        with tarfile.open(bottle, "r:gz") as archive:
+            matches = [m for m in archive if m.name == f"{name}/{version}/.brew/{name}.rb"]
+            if len(matches) != 1 or not matches[0].isfile() or matches[0].size > 1024 * 1024:
+                raise SourceError("bottle has no unique regular retained recipe")
+            if archive.extractfile(matches[0]).read() != provider["recipe"].read_bytes():
+                raise SourceError("immutable bottle recipe differs from retained recipe")
+    except (tarfile.TarError, OSError):
+        raise SourceError("invalid verified bottle archive") from None
+    finally:
+        bottle.unlink(missing_ok=True)
+    dest = out / "providers" / name
+    dest.mkdir(parents=True)
+    (dest / "bottle-index.json").write_bytes(index_bytes)
+    (dest / "bottle-manifest.json").write_bytes(manifest_bytes)
+    return {"kind": "verified-bottle-recipe", "registry": registry, "tag": tag,
+            "index_sha256": hashlib.sha256(index_bytes).hexdigest(),
+            "manifest_sha256": manifest_digest, "bottle_sha256": digest, "bottle_url": url,
+            "recipe_sha256": _hash(provider["recipe"])}
+
+
+def _bottle_patch_tap(provider: dict, out: Path, cache: Path) -> str:
+    """Use a bottle annotation only after Git verifies its exact recipe bytes."""
+    annotations = _json(out / "providers" / provider["name"] / "bottle-manifest.json")["annotations"]
+    revision = annotations.get("org.opencontainers.image.revision")
+    url = annotations.get("org.opencontainers.image.source", "")
+    if not isinstance(revision, str) or not REVISION.fullmatch(revision):
+        raise SourceError("bottle tap-local inputs lack a verified recipe revision")
+    prefix = f"https://github.com/homebrew/homebrew-core/blob/{revision}/"
+    name = provider["name"]
+    if url not in (prefix + f"Formula/{name}.rb", prefix + f"Formula/{name[0]}/{name}.rb"):
+        raise SourceError("bottle tap-local inputs lack an exact recipe location")
+    repo = _git_repository("https://github.com/homebrew/homebrew-core.git", revision, cache)
+    recipe = _git_blob(repo, revision, url.removeprefix(prefix))
+    # Exact operation used by Homebrew's FormulaInstaller to retain .brew files.
+    retained = re.sub(rb"  bottle do.+?end\n\n?", b"", recipe, flags=re.S)
+    if retained != provider["recipe"].read_bytes():
+        raise SourceError("bottle tap recipe differs from retained recipe")
+    provider["bottle_identity"]["verified_patch_tap_revision"] = revision
+    return revision
 
 
 def _formula_plan(provider: dict) -> dict:
@@ -428,7 +567,13 @@ def _build_support(out: Path, cache: Path, providers: list[dict]) -> tuple[list[
     """Archive exact taps (dependency recipes and local patches) and brew DSL."""
     records = []
     repositories = {}
-    taps = sorted({(p["receipt"]["source"]["tap"], p["receipt"]["source"]["tap_git_head"]) for p in providers})
+    for provider in providers:
+        provider["tap_revision"] = provider["receipt"]["source"].get("tap_git_head")
+        if provider["tap_revision"] is None:
+            provider["bottle_identity"] = _bottle_identity(provider, out, cache)
+            if provider["needs_patch_tap"]:
+                provider["tap_revision"] = _bottle_patch_tap(provider, out, cache)
+    taps = sorted({(p["receipt"]["source"]["tap"], p["tap_revision"]) for p in providers if p["tap_revision"]})
     for tap, revision in taps:
         owner, name = tap.split("/")
         url = f"https://github.com/{owner}/homebrew-{name}.git"
@@ -436,14 +581,16 @@ def _build_support(out: Path, cache: Path, providers: list[dict]) -> tuple[list[
         snapshots = _git_snapshot(url, revision, dest, cache)
         repositories[(tap, revision)] = _git_repository(url, revision, cache)
         files = [_relative(dest.with_name(x["file"]), out) for x in snapshots]
+        origin = "receipt" if any(p["receipt"]["source"].get("tap_git_head") == revision for p in providers) else "exact bottle recipe"
         records.append({"id": f"homebrew-tap:{tap}@{revision}", "source": url, "version": revision,
-                        "provenance": "Git-verified receipt tap snapshot including dependency recipes and patches",
+                        "provenance": f"Git-verified {origin} tap snapshot including dependency recipes and patches",
                         "files": files})
     brew_repo = Path(_run("brew", "--repository", timeout=60).decode().strip())
     revision = _run("git", "-C", brew_repo, "rev-parse", "HEAD^{commit}").decode().strip()
     if not REVISION.fullmatch(revision):
         raise SourceError("installed Homebrew has no immutable build-support revision")
     dest = out / "build-support" / f"homebrew-brew-{revision}.tar"
+    dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("wb") as stream:
         _run("git", "-C", brew_repo, "archive", "--format=tar", revision, stdout=stream)
     records.append({"id": f"homebrew-build-support@{revision}", "version": revision,
@@ -459,6 +606,17 @@ def collect(stage: Path, out: Path) -> list[dict]:
         raise SourceError("macOS source output must be a fresh empty directory")
     # Resolve and validate *all* recipes before the first network request.
     plans = [_formula_plan(provider) for provider in providers]
+    for provider, plan in zip(providers, plans):
+        provider["tap_revision"] = provider["receipt"]["source"].get("tap_git_head")
+        provider["needs_patch_tap"] = any(item["kind"] == "tap-file" for item in plan["payloads"])
+        if provider["tap_revision"] is None:
+            # Arbitrary tap-relative Ruby helpers or external-tap dependencies
+            # need explicit capture support. Do not call a bottle recipe alone
+            # sufficient when it relies on additional, unresolved build files.
+            text = provider["recipe"].read_text(encoding="utf-8")
+            if (re.search(r"\b(?:tap\.|__dir__|__FILE__|require_relative\b)|^\s*(?:require|load)\b", text, re.M)
+                    or any("/" in dep["name"] for dep in plan.get("dependencies", []))):
+                raise SourceError("bottle recipe has unresolved tap/build-helper dependencies")
     shutil.copyfile(stage / "SOURCE-INFO.txt", out / "SOURCE-INFO.txt")
     with tempfile.TemporaryDirectory(prefix="jvid-macos-sources-") as temporary:
         cache = Path(temporary)
@@ -467,7 +625,7 @@ def collect(stage: Path, out: Path) -> list[dict]:
         for provider, plan in zip(providers, plans):
             name = provider["name"]
             dest = out / "providers" / name
-            dest.mkdir(parents=True)
+            dest.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(provider["recipe"], dest / f"{name}.rb")
             shutil.copyfile(provider["receipt_path"], dest / "INSTALL_RECEIPT.json")
             source = provider["receipt"]["source"]
@@ -495,8 +653,9 @@ def collect(stage: Path, out: Path) -> list[dict]:
                     item = dict(item, repositories=_git_snapshot(item["url"], item["revision"], target, cache))
                 elif item["kind"] == "tap-file":
                     target = dest / (stem + ".patch")
-                    target.write_bytes(_git_blob(taps[(source["tap"], source["tap_git_head"])], source["tap_git_head"], item["path"]))
-                    item = dict(item, tap=source["tap"], revision=source["tap_git_head"])
+                    revision = provider["tap_revision"]
+                    target.write_bytes(_git_blob(taps[(source["tap"], revision)], revision, item["path"]))
+                    item = dict(item, tap=source["tap"], revision=revision)
                 elif item["kind"] == "inline":
                     target = dest / (stem + ".patch")
                     target.write_text(item["contents"], encoding="utf-8")
@@ -504,11 +663,13 @@ def collect(stage: Path, out: Path) -> list[dict]:
                 provenance.append(dict(item, file=_relative(target, out)))
             (dest / "source-plan.json").write_text(json.dumps({"name": name, "version": provider["version"],
                 "sources": provenance, "dependencies": plan.get("dependencies", []),
-                "resource_declarations": plan["resource_declarations"]}, indent=2) + "\n", encoding="utf-8")
+                "resource_declarations": plan["resource_declarations"],
+                **({"bottle_identity": provider["bottle_identity"]} if "bottle_identity" in provider else {})}, indent=2) + "\n", encoding="utf-8")
             records.append({"id": f"homebrew:{name}@{provider['version']}", "name": name,
                 "version": provider["version"], "source": provenance[0].get("url"),
                 "provenance": {"formula": f"{name}.rb", "tap": source["tap"],
-                    "tap_revision": source["tap_git_head"], "spec": source["spec"],
+                    "tap_revision": source.get("tap_git_head"), "spec": source["spec"],
+                    **({"bottle_identity": provider["bottle_identity"]} if "bottle_identity" in provider else {}),
                     "used_options": provider["receipt"]["used_options"],
                     "unused_options": provider["receipt"]["unused_options"]},
                 "files": sorted(_relative(p, out) for p in dest.iterdir() if p.is_file())})
@@ -521,6 +682,12 @@ def collect(stage: Path, out: Path) -> list[dict]:
             "commits. For submodules, extract each separately at its recorded repository path.\n"
             "The build-support tap snapshots contain dependency recipes and tap-local patches\n"
             "at the receipt's tap revision. Use those recipes, not current Homebrew formulae.\n"
+            "API bottle receipts may have no tap revision. Those providers instead retain\n"
+            "registry manifests binding the installed version and original build metadata\n"
+            "to a SHA-256-verified bottle whose recipe exactly matches the retained file.\n"
+            "Their original receipt tap revision stays null/missing; bottle_identity records\n"
+            "the manifest, bottle and recipe hashes. A tap-local patch additionally requires\n"
+            "a Git-verified tap snapshot whose recipe matches after Homebrew bottle removal.\n"
             "Homebrew's installed DSL/build implementation is retained as a separate snapshot.\n"
             "The receipts preserve the original bottle tool versions and build host information.\n"
             "Rebuild on macOS with Xcode Command Line Tools and Homebrew; restore the selected\n"
