@@ -32,7 +32,7 @@ pub struct CaptionWorkspace {
     query: String,
     replacement: String,
     scope: usize,
-    reference: Option<Text>,
+    reference: Option<ClipId>,
     style: Option<Text>,
     replace_overrides: bool,
 }
@@ -67,11 +67,11 @@ impl CaptionWorkspace {
         if !rows.iter().any(|r| Some(r.clip.id) == self.active) {
             self.active = rows.first().map(|r| r.clip.id);
         }
-        if self.reference.is_none()
-            && let Some(row) = rows.first()
-        {
-            self.reference = Some(row.text.clone());
-            self.style = self.reference.clone();
+        if !rows.iter().any(|row| Some(row.clip.id) == self.reference) {
+            self.reference = rows.first().map(|row| row.clip.id);
+        }
+        if self.style.is_none() {
+            self.style = rows.first().map(|row| row.text.clone());
         }
         Panel::body()
             .embedded(true)
@@ -173,8 +173,8 @@ impl CaptionWorkspace {
                                     && let Some(row) =
                                         rows.iter().find(|r| Some(r.clip.id) == self.active)
                                 {
-                                    self.reference = Some(row.text.clone());
-                                    self.style = self.reference.clone();
+                                    self.reference = Some(row.clip.id);
+                                    self.style = Some(row.text.clone());
                                 }
                                 ui.checkbox(
                                     &mut self.replace_overrides,
@@ -220,10 +220,12 @@ impl CaptionWorkspace {
                                 {
                                     out.command = Some(Command::Caption(Edit::Style {
                                         scope: scope.clone(),
-                                        reference: self
-                                            .reference
+                                        reference: rows
+                                            .iter()
+                                            .find(|row| Some(row.clip.id) == self.reference)
+                                            .expect("reference caption")
+                                            .text
                                             .clone()
-                                            .expect("reference")
                                             .into(),
                                         style: self.style.clone().expect("style").into(),
                                         overrides: if self.replace_overrides {
@@ -446,9 +448,9 @@ mod tests {
         fresh: bool,
     }
 
-    fn harness(width: f32, scale: f32, gpu: bool) -> Harness<'static, Editor> {
+    fn harness(width: f32, height: f32, scale: f32, gpu: bool) -> Harness<'static, Editor> {
         let builder = Harness::builder()
-            .with_size([width, 800.0])
+            .with_size([width, height])
             .with_pixels_per_point(scale);
         let builder = if gpu { builder.wgpu() } else { builder };
         builder.build_ui_state(
@@ -485,7 +487,7 @@ mod tests {
     #[test]
     fn native_row_typing_coalesces_then_split_undo_and_disk_reopen_match_srt() {
         suite_ui::i18n::set_language("en");
-        let mut h = harness(240.0, 1.0, false);
+        let mut h = harness(240.0, 800.0, 1.0, false);
         h.run();
         let before = h.state().history.project().clone();
         h.get_all_by_role(egui::accesskit::Role::MultilineTextInput)
@@ -532,6 +534,43 @@ mod tests {
     }
 
     #[test]
+    fn repeated_shared_style_applies_follow_authoritative_reference_after_undo() {
+        suite_ui::i18n::set_language("en");
+        let mut h = harness(600.0, 1400.0, 1.0, false);
+        h.run();
+        let before = h.state().history.project().clone();
+        h.get_by_label(tr!("captions.style")).click();
+        h.run();
+        for size in [60.0, 72.0] {
+            h.state_mut().panel.style.as_mut().unwrap().size = size;
+            h.run();
+            h.get_by_label(tr!("captions.apply_style")).click();
+            h.run();
+            assert_eq!(
+                captions::rows(h.state().history.project())[0].text.size,
+                size
+            );
+        }
+        assert!(h.state_mut().history.undo());
+        h.run();
+        assert_eq!(
+            captions::rows(h.state().history.project())[0].text.size,
+            60.0
+        );
+        h.state_mut().panel.style.as_mut().unwrap().size = 80.0;
+        h.run();
+        h.get_by_label(tr!("captions.apply_style")).click();
+        h.run();
+        assert_eq!(
+            captions::rows(h.state().history.project())[0].text.size,
+            80.0
+        );
+        assert!(h.state_mut().history.undo() && h.state_mut().history.undo());
+        assert_eq!(h.state().history.project(), &before);
+        assert!(!h.state().history.can_undo());
+    }
+
+    #[test]
     fn narrow_translated_panel_controls_stay_in_bounds_and_view_state_never_edits_project() {
         assert!(
             suite_ui::test_support::gpu(),
@@ -543,7 +582,7 @@ mod tests {
         for language in ["en", "de", "ja"] {
             suite_ui::i18n::set_language(language);
             for scale in [1.0, 1.5] {
-                let mut h = harness(240.0, scale, true);
+                let mut h = harness(240.0, 800.0, scale, true);
                 h.run();
                 let before = h.state().history.project().clone();
                 h.ctx.fonts_mut(|fonts| {

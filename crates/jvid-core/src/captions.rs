@@ -195,9 +195,11 @@ impl Edit {
                 let source_out = source_end(row.clip, end - start)?;
                 let mut style = row.text.clone();
                 style.content = text;
-                project
-                    .sequence
-                    .set_clip_range(id, start, row.clip.source_in, source_out)?;
+                if start != row.clip.start || end != row.clip.end() {
+                    project
+                        .sequence
+                        .set_clip_range(id, start, row.clip.source_in, source_out)?;
+                }
                 write_text(project, id, style)?;
             }
             Self::Split { id, at, character } => {
@@ -816,6 +818,18 @@ mod tests {
         clips[1]["start"] = serde_json::to_value(Time(S)).unwrap();
         let mut h = History::new(serde_json::from_value(value).unwrap());
         let before = h.project().clone();
+        apply(
+            &mut h,
+            Edit::Row {
+                id: ids[0],
+                text: "Editable legacy overlap".into(),
+                start: Time(0),
+                end: Time(10 * S),
+            },
+        );
+        assert_eq!(rows(h.project())[0].text.content, "Editable legacy overlap");
+        assert!(h.undo());
+        assert_eq!(h.project(), &before);
         let untouched = rows(h.project())
             .iter()
             .find(|r| r.clip.id == ids[1])
