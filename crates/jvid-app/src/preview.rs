@@ -399,6 +399,7 @@ impl Preview {
         self.frame = None;
         self.still = None;
         self.error = None;
+        self.source_shown = None;
         self.generation += 1;
         self.program.refresh_media();
         self.player = Some(Player {
@@ -2675,6 +2676,56 @@ mod program_tests {
             "no frame and no error text"
         );
         assert!(!log.contains("preview decode"), "{log}");
+        assert_eq!(p.source_status.picture, Picture::Idle);
+    }
+
+    #[test]
+    fn generated_source_to_audio_only_clears_retained_picture_and_status() {
+        use jvid_core::history::Created;
+        let mut history = History::new(Project::default());
+        let Created::Asset(solid) = history
+            .apply(Command::AddSolid {
+                name: "Solid".into(),
+                color: [0.0, 0.0, 0.0, 1.0],
+            })
+            .unwrap()
+        else {
+            panic!("solid")
+        };
+        history
+            .apply(Command::Import(vec![(
+                "/nonexistent/audio.wav".into(),
+                jvid_core::model::ProbeInfo {
+                    audio_streams: 1,
+                    duration: Time(FLICKS_PER_SECOND),
+                    ..Default::default()
+                },
+            )]))
+            .unwrap();
+        let audio = history.project().assets()[1].id;
+        let project = history.project().clone();
+        let mut preview = Preview::new(None);
+        preview.open(&project, solid);
+        let mut fresh = true;
+        let drawn_project = project.clone();
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([640.0, 360.0])
+            .build_ui_state(
+                move |ui, preview: &mut Preview| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    preview.show_source(ui, &drawn_project, &HashSet::new(), &Keymap::default());
+                },
+                preview,
+            );
+        h.run();
+        assert_eq!(h.state().source_status.picture, Picture::Ready);
+        h.state_mut().open(&project, audio);
+        h.run();
+        assert!(h.state().source_shown.is_none());
+        assert_eq!(h.state().source_status, Observation::default());
+        assert!(h.state().requested.is_none());
     }
 
     #[test]
