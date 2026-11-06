@@ -1302,10 +1302,51 @@ fn edit_menu_opens_preferences_and_the_project_menu_keeps_project_settings() {
 
     h.get_by_label("Edit").click();
     h.run();
+    h.get_by_label("Preferences…").scroll_to_me();
+    h.run();
+    assert!(
+        h.ctx
+            .content_rect()
+            .contains_rect(h.get_by_label("Preferences…").rect())
+    );
     h.get_by_label("Preferences…").click();
     h.run();
     assert!(h.state().preferences.is_open());
     assert!(h.query_by_label("Language").is_some());
+}
+
+#[test]
+#[ignore = "changes global locale; run this test in isolation"]
+fn translated_edit_menu_scrolls_to_preferences_at_minimum_size_and_high_dpi() {
+    struct Restore(&'static str);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            suite_ui::i18n::set_language(self.0);
+        }
+    }
+    let _restore = Restore(suite_ui::i18n::language());
+    for language in ["de", "pt-BR"] {
+        suite_ui::i18n::set_language(language);
+        for (size, scale) in [([960.0, 540.0], 1.0), ([640.0, 400.0], 1.5)] {
+            let mut h = builder(size, scale).build_eframe(|cc| App::new(cc, &Default::default()));
+            h.run();
+            h.state_mut().on_welcome = false;
+            h.run();
+            h.get_by_label(crate::i18n::tr!("menu.edit")).click();
+            h.run();
+            let label = crate::i18n::tr!("menu.preferences");
+            h.get_by_label(label).scroll_to_me();
+            h.run();
+            let viewport = h.ctx.content_rect();
+            assert!(
+                viewport.contains_rect(h.get_by_label(label).rect()),
+                "{language} @{scale}x"
+            );
+            h.get_by_label(label).click();
+            h.run();
+            assert!(h.state().preferences.is_open(), "{language} @{scale}x");
+        }
+    }
 }
 
 #[test]
