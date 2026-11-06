@@ -2,7 +2,10 @@
 //! size of the frame, so the compositor's fit fills the frame and transforms, crop and
 //! opacity apply as to any clip.
 
+use std::collections::BTreeMap;
+use std::io;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Weight};
@@ -20,6 +23,8 @@ struct Masks {
 }
 
 struct Fonts {
+    // ponytail: retain loaded project faces until exit for concurrent and queued exports.
+    project_sources: BTreeMap<String, Vec<FontSource>>,
     system: FontSystem,
     swash: SwashCache,
     /// Recent rasters, newest last.
@@ -49,12 +54,170 @@ fn fonts() -> &'static Mutex<Fonts> {
     static FONTS: OnceLock<Mutex<Fonts>> = OnceLock::new();
     FONTS.get_or_init(|| {
         Mutex::new(Fonts {
+            project_sources: BTreeMap::new(),
             system: FontSystem::new_with_fonts(sources(FACES.get().map_or(&[], |f| f))),
             swash: SwashCache::new(),
             recent: Vec::new(),
             masks: Vec::new(),
         })
     })
+}
+
+/// A font file whose owner explicitly allowed project bundling. `family` is a
+/// content-derived private alias, so an installed face cannot override collected bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontSource {
+    pub family: String,
+    pub original_family: String,
+    pub path: PathBuf,
+}
+
+/// Verifies the original glyph faces against only the explicitly permitted files.
+/// Same-family substitutions and unbundled fallback faces remain unresolved.
+pub fn project_font_coverage(sources: &[FontSource], texts: &[Text]) -> io::Result<bool> {
+    let mut selected = Vec::new();
+    for source in sources {
+        let bytes = Arc::new(std::fs::read(&source.path)?);
+        let mut database = cosmic_text::fontdb::Database::new();
+        let ids = database.load_font_source(cosmic_text::fontdb::Source::Binary(bytes.clone()));
+        let indices: Vec<_> = ids
+            .into_iter()
+            .filter_map(|id| database.face(id))
+            .filter(|face| {
+                source.original_family.is_empty()
+                    || face
+                        .families
+                        .iter()
+                        .any(|(name, _)| name.eq_ignore_ascii_case(&source.original_family))
+            })
+            .map(|face| face.index)
+            .collect();
+        if indices.is_empty() {
+            return Err(io::Error::from(io::ErrorKind::InvalidData));
+        }
+        selected.push((bytes, indices));
+    }
+    let mut fonts = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    for text in texts {
+        if text.content.trim().is_empty() {
+            continue;
+        }
+        let (buffer, _, _) = layout(&mut fonts, text, (320, 180));
+        let mut ids = std::collections::HashSet::new();
+        for glyph in buffer.layout_runs().flat_map(|run| run.glyphs) {
+            if glyph.glyph_id == 0 {
+                return Ok(false);
+            }
+            ids.insert(glyph.font_id);
+        }
+        if ids.is_empty() {
+            return Ok(false);
+        }
+        for id in ids {
+            if !fonts
+                .system
+                .db()
+                .with_face_data(id, |data, index| {
+                    selected.iter().any(|(bytes, indices)| {
+                        data == bytes.as_slice() && indices.contains(&index)
+                    })
+                })
+                .unwrap_or(false)
+            {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// Validates all files before changing renderer state; keeps system and bundled fallback.
+/// Call on the file-loading thread before rendering the returned project.
+pub fn load_project_fonts(sources: &[FontSource]) -> io::Result<()> {
+    let mut parsed = Vec::new();
+    for source in sources {
+        if !source.family.starts_with("jvid-collection-") {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+        let mut database = cosmic_text::fontdb::Database::new();
+        let ids = database.load_font_source(cosmic_text::fontdb::Source::Binary(Arc::new(
+            std::fs::read(&source.path)?,
+        )));
+        let faces: Vec<_> = ids
+            .into_iter()
+            .filter_map(|id| database.face(id))
+            .filter(|face| {
+                source.original_family.is_empty()
+                    || face
+                        .families
+                        .iter()
+                        .any(|(name, _)| name.eq_ignore_ascii_case(&source.original_family))
+            })
+            .cloned()
+            .collect();
+        if faces.is_empty() {
+            return Err(io::Error::from(io::ErrorKind::InvalidData));
+        }
+        parsed.push((source.clone(), faces));
+    }
+    if parsed.is_empty() {
+        return Ok(());
+    }
+    let mut fonts = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let mut changed = false;
+    let mut current: BTreeMap<String, Vec<FontSource>> = BTreeMap::new();
+    for (source, faces) in parsed {
+        if !fonts.project_sources.contains_key(&source.family) {
+            for mut face in faces {
+                for (name, _) in &mut face.families {
+                    name.clone_from(&source.family);
+                }
+                fonts.system.db_mut().push_face_info(face);
+            }
+            changed = true;
+        }
+        current
+            .entry(source.family.clone())
+            .or_default()
+            .push(source);
+    }
+    // A moved package replaces stale source paths for the same content-derived alias.
+    fonts.project_sources.extend(current);
+    if changed {
+        fonts.recent.clear();
+        fonts.masks.clear();
+        fonts.swash = SwashCache::new();
+    }
+    Ok(())
+}
+
+/// Display a collected family's original name while retaining its private render key.
+pub fn display_family(family: &str) -> String {
+    if !family.starts_with("jvid-collection-") {
+        return family.to_owned();
+    }
+    let fonts = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    fonts
+        .project_sources
+        .get(family)
+        .and_then(|s| s.first())
+        .map_or_else(|| family.to_owned(), |s| s.original_family.clone())
+}
+
+/// Permission/provenance for private aliases used in a project, retained by Save As.
+pub fn project_font_sources(families: &[String]) -> Vec<FontSource> {
+    if !families.iter().any(|f| f.starts_with("jvid-collection-")) {
+        return Vec::new();
+    }
+    let fonts = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    families
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|family| fonts.project_sources.get(family))
+        .flatten()
+        .cloned()
+        .collect()
 }
 
 /// Loads the system fonts, which takes seconds on some systems; call it off the UI thread
@@ -74,6 +237,7 @@ pub fn families() -> &'static [String] {
             .db()
             .faces()
             .filter_map(|face| face.families.first().map(|(n, _)| n.clone()))
+            .filter(|name| !name.starts_with("jvid-collection-"))
             .collect();
         v.sort_by_key(|n| n.to_lowercase());
         v.dedup();
@@ -400,6 +564,51 @@ pub fn texture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collected_font_alias_wins_over_same_named_installed_face() {
+        use cosmic_text::fontdb::{Family, Query, Source};
+        let regular = include_bytes!("../../suite-ui/assets/Inter-Regular.ttf").to_vec();
+        let medium = include_bytes!("../../suite-ui/assets/Inter-Medium.ttf").to_vec();
+        let path =
+            std::env::temp_dir().join(format!("jvid-collected-font-{}.ttf", std::process::id()));
+        std::fs::write(&path, &regular).unwrap();
+        {
+            let mut fonts = fonts().lock().unwrap();
+            // Simulate an installed face using the same family and queried weight.
+            let mut database = cosmic_text::fontdb::Database::new();
+            let ids = database.load_font_source(Source::Binary(Arc::new(medium)));
+            for id in ids {
+                let mut face = database.face(id).unwrap().clone();
+                face.weight = cosmic_text::fontdb::Weight::NORMAL;
+                fonts.system.db_mut().push_face_info(face);
+            }
+        }
+        let alias = "jvid-collection-isolation-test";
+        load_project_fonts(&[FontSource {
+            family: alias.into(),
+            original_family: "Inter".into(),
+            path: path.clone(),
+        }])
+        .unwrap();
+        let fonts = fonts().lock().unwrap();
+        let id = fonts
+            .system
+            .db()
+            .query(&Query {
+                families: &[Family::Name(alias)],
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(
+            fonts
+                .system
+                .db()
+                .with_face_data(id, |bytes, _| bytes == regular)
+                .unwrap()
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 
     /// Shapes `s` with the system fonts; `None` when no installed font covers it.
     fn shape(s: &str) -> Option<(bool, Vec<u16>)> {
