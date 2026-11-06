@@ -158,6 +158,10 @@ Click **Export** in the header. The dialog opens on In to Out when you've marked
 
 **Export frame** (`Ctrl+Shift+E`) saves the current Program frame as a PNG.
 
+**File > Export Versions…** opens landscape, vertical and size-limited copies of the current In/Out range, or the whole timeline when no marks are set. **File > Export Selected Highlight Versions…** uses the checked Highlights ranges, including their reviewed point-marker padding. Both commands can be assigned shortcuts.
+
+Choose each version's name, preset, dimensions, caption policy and target size (0 disables the limit). Inspect its rendered preview, scrub through each range, then choose **Accept Framing** for every range. Use the clip selector and Position controls to adjust that version's crop, with its own Undo and Redo. Changing dimensions resets its framing; framing, range or caption changes require another review. **Add to Queue** captures independent copies, so later edits, cancellation or failures cannot change sibling outputs or the original project. Existing names and SRT sidecars receive numeric suffixes; exports never replace them.
+
 ## Shortcuts
 
 See the [cheat sheet](shortcuts.md). To change one, open **Keyboard shortcuts…** from the project menu. Your changes are saved to `keymap.toml` beside `settings.toml` in jvid's config folder, holding only the shortcuts that differ from the defaults; set one to `""` to unbind it.

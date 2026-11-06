@@ -3,6 +3,8 @@
 # imperatives, as on Windows and macOS. Terms follow docs/i18n/it.md.
 
 [action]
+export_versions = "Esporta Versioni…"
+export_highlight_versions = "Esporta Versioni dei Momenti Selezionati…"
 review_highlights = "Momenti salienti"
 export_highlights = "Esporta i momenti selezionati"
 show_captions = "Sottotitoli"
@@ -1337,3 +1339,18 @@ invalid_merge = "Seleziona sottotitoli consecutivi su una traccia."
 invalid_style = "Lo stile del sottotitolo contiene un valore non valido."
 animated_timing = "Ritaglia i sottotitoli con velocità animata nella timeline."
 overlap = "Il sottotitolo si sovrapporrebbe a un’altra clip."
+
+[versions]
+name = "Nome Versione"
+dimensions = "Dimensioni"
+captions = "Sottotitoli"
+framing = "Inquadratura"
+preview = "Fotogramma di Anteprima"
+accept = "Conferma Inquadratura"
+landscape = "Orizzontale"
+vertical = "Verticale"
+limited = "Dimensione Limitata"
+help = "Controlla ogni versione e intervallo prima di accodarli. Le modifiche all’inquadratura riguardano solo questa versione. Cambiare dimensioni ripristina l’inquadratura."
+dimensions_error = "Usa dimensioni pari da 2 a 8192 pixel."
+review_required = "Renderizza e controlla questo intervallo prima di confermare l’inquadratura."
+review_count = "{done} intervalli su {total} controllati"

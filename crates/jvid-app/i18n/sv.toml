@@ -3,6 +3,8 @@
 # items use the imperative (Spara, Lägg till markör). Terms follow docs/i18n/sv.md.
 
 [action]
+export_versions = "Exportera Versioner…"
+export_highlight_versions = "Exportera Versioner av Valda Höjdpunkter…"
 review_highlights = "Höjdpunkter"
 export_highlights = "Exportera valda höjdpunkter"
 show_captions = "Undertexter"
@@ -1325,3 +1327,18 @@ invalid_merge = "Markera undertexter i följd på ett spår."
 invalid_style = "Undertextstilen innehåller ett ogiltigt värde."
 animated_timing = "Trimma undertexter med animerad hastighet i tidslinjen."
 overlap = "Undertextens tid skulle överlappa ett annat klipp."
+
+[versions]
+name = "Versionsnamn"
+dimensions = "Dimensioner"
+captions = "Undertexter"
+framing = "Bildutsnitt"
+preview = "Förhandsgranska Bildruta"
+accept = "Godkänn Bildutsnitt"
+landscape = "Liggande"
+vertical = "Stående"
+limited = "Begränsad Storlek"
+help = "Granska varje version och intervall före köläggning. Ändringar av bildutsnitt gäller bara denna version. Nya dimensioner återställer bildutsnittet."
+dimensions_error = "Använd jämna dimensioner från 2 till 8192 pixlar."
+review_required = "Rendera och granska intervallet innan du godkänner bildutsnittet."
+review_count = "{done} av {total} intervall granskade"

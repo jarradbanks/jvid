@@ -3,6 +3,8 @@
 # docs/i18n/pl.md.
 
 [action]
+export_versions = "Eksportuj Wersje…"
+export_highlight_versions = "Eksportuj Wersje Wybranych Momentów…"
 review_highlights = "Najciekawsze momenty"
 export_highlights = "Eksportuj wybrane momenty"
 show_captions = "Napisy"
@@ -1353,3 +1355,18 @@ invalid_merge = "Zaznacz kolejne napisy na jednej ścieżce."
 invalid_style = "Styl napisu zawiera nieprawidłową wartość."
 animated_timing = "Przytnij napisy z animowaną prędkością na osi czasu."
 overlap = "Czas napisu nakładałby się na inny klip."
+
+[versions]
+name = "Nazwa Wersji"
+dimensions = "Wymiary"
+captions = "Napisy"
+framing = "Kadrowanie"
+preview = "Klatka Podglądu"
+accept = "Zatwierdź Kadrowanie"
+landscape = "Poziomo"
+vertical = "Pionowo"
+limited = "Ograniczony Rozmiar"
+help = "Sprawdź każdą wersję i zakres przed dodaniem do kolejki. Kadrowanie zmienia tylko tę wersję. Zmiana wymiarów resetuje kadrowanie."
+dimensions_error = "Użyj parzystych wymiarów od 2 do 8192 pikseli."
+review_required = "Wyrenderuj i sprawdź zakres przed zatwierdzeniem kadrowania."
+review_count = "Sprawdzono {done} z {total} zakresów"

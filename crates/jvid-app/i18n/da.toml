@@ -3,6 +3,8 @@
 # use the imperative (Gem). Terms follow docs/i18n/da.md.
 
 [action]
+export_versions = "Eksportér Versioner…"
+export_highlight_versions = "Eksportér Versioner af Valgte Højdepunkter…"
 review_highlights = "Højdepunkter"
 export_highlights = "Eksportér valgte højdepunkter"
 show_captions = "Undertekster"
@@ -1325,3 +1327,18 @@ invalid_merge = "Vælg fortløbende undertekster på ét spor."
 invalid_style = "Undertekststilen indeholder en ugyldig værdi."
 animated_timing = "Trim undertekster med animeret hastighed på tidslinjen."
 overlap = "Undertekstens tid ville overlappe et andet klip."
+
+[versions]
+name = "Versionsnavn"
+dimensions = "Dimensioner"
+captions = "Undertekster"
+framing = "Beskæring"
+preview = "Forhåndsvis Billede"
+accept = "Godkend Beskæring"
+landscape = "Liggende"
+vertical = "Stående"
+limited = "Begrænset Størrelse"
+help = "Gennemgå hver version og hvert interval før køen. Beskæringsændringer påvirker kun denne version. Nye dimensioner nulstiller beskæringen."
+dimensions_error = "Brug lige dimensioner fra 2 til 8192 pixels."
+review_required = "Render og gennemgå intervallet før godkendelse af beskæringen."
+review_count = "{done} af {total} intervaller gennemgået"

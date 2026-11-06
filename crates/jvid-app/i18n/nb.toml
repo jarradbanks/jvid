@@ -3,6 +3,8 @@
 # items use the imperative (Lagre). Terms follow docs/i18n/nb.md.
 
 [action]
+export_versions = "Eksporter Versjoner…"
+export_highlight_versions = "Eksporter Versjoner av Valgte Høydepunkter…"
 review_highlights = "Høydepunkter"
 export_highlights = "Eksporter valgte høydepunkter"
 show_captions = "Undertekster"
@@ -1325,3 +1327,18 @@ invalid_merge = "Velg påfølgende undertekster på ett spor."
 invalid_style = "Undertekststilen inneholder en ugyldig verdi."
 animated_timing = "Trim undertekster med animert hastighet på tidslinjen."
 overlap = "Undertekstens tid ville overlappe et annet klipp."
+
+[versions]
+name = "Versjonsnavn"
+dimensions = "Dimensjoner"
+captions = "Undertekster"
+framing = "Utsnitt"
+preview = "Forhåndsvis Bilde"
+accept = "Godkjenn Utsnitt"
+landscape = "Liggende"
+vertical = "Stående"
+limited = "Begrenset Størrelse"
+help = "Se gjennom hver versjon og hvert område før kølegging. Utsnittsendringer påvirker bare denne versjonen. Nye dimensjoner tilbakestiller utsnittet."
+dimensions_error = "Bruk partallsdimensjoner fra 2 til 8192 piksler."
+review_required = "Render og se gjennom området før du godkjenner utsnittet."
+review_count = "{done} av {total} områder gjennomgått"

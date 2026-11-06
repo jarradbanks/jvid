@@ -3,6 +3,8 @@
 # instructions imperatives with vykání. Terms follow docs/i18n/cs.md.
 
 [action]
+export_versions = "Exportovat Verze…"
+export_highlight_versions = "Exportovat Verze Vybraných Momentů…"
 review_highlights = "Zajímavé momenty"
 export_highlights = "Exportovat vybrané momenty"
 show_captions = "Titulky"
@@ -1344,3 +1346,18 @@ invalid_merge = "Vyberte po sobě jdoucí titulky na jedné stopě."
 invalid_style = "Styl titulku obsahuje neplatnou hodnotu."
 animated_timing = "Titulky s animovanou rychlostí ořízněte na časové ose."
 overlap = "Čas titulku by se překrýval s jiným klipem."
+
+[versions]
+name = "Název Verze"
+dimensions = "Rozměry"
+captions = "Titulky"
+framing = "Kompozice"
+preview = "Náhled Snímku"
+accept = "Potvrdit Kompozici"
+landscape = "Na Šířku"
+vertical = "Na Výšku"
+limited = "Omezená Velikost"
+help = "Před zařazením zkontrolujte každou verzi a rozsah. Úpravy kompozice ovlivní jen tuto verzi. Změna rozměrů kompozici obnoví."
+dimensions_error = "Použijte sudé rozměry od 2 do 8192 pixelů."
+review_required = "Před potvrzením kompozice vykreslete a zkontrolujte tento rozsah."
+review_count = "Zkontrolováno {done} z {total} rozsahů"

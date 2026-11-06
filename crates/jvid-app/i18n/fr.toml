@@ -3,6 +3,8 @@
 # docs/i18n/fr.md. The spaces before : ; ? ! and inside « » are no-break spaces (U+00A0).
 
 [action]
+export_versions = "Exporter des Versions…"
+export_highlight_versions = "Exporter les Versions des Moments Sélectionnés…"
 review_highlights = "Temps forts"
 export_highlights = "Exporter les temps forts sélectionnés"
 show_captions = "Sous-titres"
@@ -1348,3 +1350,18 @@ invalid_merge = "Sélectionnez des sous-titres consécutifs sur une piste."
 invalid_style = "Le style du sous-titre contient une valeur incorrecte."
 animated_timing = "Ajustez les sous-titres à vitesse animée dans la timeline."
 overlap = "Le sous-titre chevaucherait un autre clip."
+
+[versions]
+name = "Nom de la Version"
+dimensions = "Dimensions"
+captions = "Sous-titres"
+framing = "Cadrage"
+preview = "Image de Prévisualisation"
+accept = "Valider le Cadrage"
+landscape = "Paysage"
+vertical = "Portrait"
+limited = "Taille Limitée"
+help = "Vérifiez chaque version et plage avant la mise en file. Le cadrage ne modifie que cette version. Changer les dimensions réinitialise le cadrage."
+dimensions_error = "Utilisez des dimensions paires de 2 à 8192 pixels."
+review_required = "Calculez et vérifiez cette plage avant de valider son cadrage."
+review_count = "{done} plages sur {total} vérifiées"

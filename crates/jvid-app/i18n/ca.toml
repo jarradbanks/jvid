@@ -3,6 +3,8 @@
 # imperatives (Desa, Obre) and messages address the user as vós (Seleccioneu). See docs/i18n/ca.md.
 
 [action]
+export_versions = "Exporta Versions…"
+export_highlight_versions = "Exporta Versions dels Destacats Seleccionats…"
 review_highlights = "Moments destacats"
 export_highlights = "Exporta els moments seleccionats"
 show_captions = "Subtítols"
@@ -1337,3 +1339,18 @@ invalid_merge = "Selecciona subtítols consecutius d’una pista."
 invalid_style = "L’estil del subtítol conté un valor no vàlid."
 animated_timing = "Retalla els subtítols amb velocitat animada a la línia de temps."
 overlap = "El temps del subtítol se superposaria a un altre clip."
+
+[versions]
+name = "Nom de la Versió"
+dimensions = "Dimensions"
+captions = "Subtítols"
+framing = "Enquadrament"
+preview = "Fotograma de Previsualització"
+accept = "Accepta l’Enquadrament"
+landscape = "Horitzontal"
+vertical = "Vertical"
+limited = "Mida Limitada"
+help = "Revisa cada versió i interval abans d’afegir-los a la cua. Els canvis d’enquadrament només afecten aquesta versió. Canviar les dimensions restableix l’enquadrament."
+dimensions_error = "Utilitza dimensions parelles de 2 a 8192 píxels."
+review_required = "Renderitza i revisa aquest interval abans d’acceptar-ne l’enquadrament."
+review_count = "{done} de {total} intervals revisats"

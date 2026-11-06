@@ -2,6 +2,8 @@
 # Spanish labels use sentence case (Guardar como), not English Title Case.
 
 [action]
+export_versions = "Exportar Versiones…"
+export_highlight_versions = "Exportar Versiones de Destacados Seleccionados…"
 review_highlights = "Momentos destacados"
 export_highlights = "Exportar momentos seleccionados"
 show_captions = "Subtítulos"
@@ -1339,3 +1341,18 @@ invalid_merge = "Selecciona subtítulos consecutivos de una pista."
 invalid_style = "El estilo del subtítulo contiene un valor no válido."
 animated_timing = "Recorta subtítulos con velocidad animada en la línea de tiempo."
 overlap = "El tiempo del subtítulo se solaparía con otro clip."
+
+[versions]
+name = "Nombre de la Versión"
+dimensions = "Dimensiones"
+captions = "Subtítulos"
+framing = "Encuadre"
+preview = "Fotograma de Vista Previa"
+accept = "Aceptar Encuadre"
+landscape = "Horizontal"
+vertical = "Vertical"
+limited = "Tamaño Limitado"
+help = "Revisa cada versión e intervalo antes de encolarlos. Los cambios de encuadre solo afectan a esta versión. Cambiar las dimensiones restablece el encuadre."
+dimensions_error = "Usa dimensiones pares de 2 a 8192 píxeles."
+review_required = "Renderiza y revisa este intervalo antes de aceptar el encuadre."
+review_count = "{done} de {total} intervalos revisados"

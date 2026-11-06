@@ -28,6 +28,8 @@ pub const FILE: &[&str] = &[
     "import_subtitles",
     "export_subtitles",
     "export",
+    "export_versions",
+    "export_highlight_versions",
     "",
     "quit",
 ];

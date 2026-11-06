@@ -3,6 +3,8 @@
 # items use the infinitive (Speichern). Terms follow docs/i18n/de.md.
 
 [action]
+export_versions = "Versionen Exportieren…"
+export_highlight_versions = "Versionen Ausgewählter Highlights Exportieren…"
 review_highlights = "Highlights"
 export_highlights = "Ausgewählte Highlights exportieren"
 show_captions = "Untertitel"
@@ -1325,3 +1327,18 @@ invalid_merge = "Aufeinanderfolgende Untertitel einer Spur auswählen."
 invalid_style = "Der Untertitelstil enthält einen ungültigen Wert."
 animated_timing = "Untertitel mit animierter Geschwindigkeit in der Timeline trimmen."
 overlap = "Die Untertitelzeit würde einen anderen Clip überlappen."
+
+[versions]
+name = "Versionsname"
+dimensions = "Abmessungen"
+captions = "Untertitel"
+framing = "Bildausschnitt"
+preview = "Vorschaubild"
+accept = "Bildausschnitt Bestätigen"
+landscape = "Querformat"
+vertical = "Hochformat"
+limited = "Begrenzte Größe"
+help = "Prüfe jede Version und jeden Bereich vor dem Einreihen. Ausschnittänderungen betreffen nur diese Version. Neue Abmessungen setzen den Ausschnitt zurück."
+dimensions_error = "Verwende gerade Abmessungen von 2 bis 8192 Pixeln."
+review_required = "Rendere und prüfe diesen Bereich, bevor du den Bildausschnitt bestätigst."
+review_count = "{done} von {total} Bereichen geprüft"

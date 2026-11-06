@@ -5,6 +5,8 @@
 # every English key.
 
 [action]
+export_versions = "複数バージョンを書き出す…"
+export_highlight_versions = "選択したハイライトの複数バージョンを書き出す…"
 review_highlights = "ハイライト"
 export_highlights = "選択したハイライトを書き出す"
 show_captions = "字幕"
@@ -1327,3 +1329,18 @@ invalid_merge = "同じトラックの連続する字幕を選択してくださ
 invalid_style = "字幕スタイルに無効な値があります。"
 animated_timing = "速度アニメーション付きの字幕はタイムラインでトリムしてください。"
 overlap = "字幕の時間が別のクリップと重なります。"
+
+[versions]
+name = "バージョン名"
+dimensions = "サイズ"
+captions = "字幕"
+framing = "フレーミング"
+preview = "プレビューフレーム"
+accept = "フレーミングを承認"
+landscape = "横向き"
+vertical = "縦向き"
+limited = "サイズ制限"
+help = "キューに追加する前に各バージョンと範囲を確認してください。フレーミングの変更はこのバージョンだけに適用されます。サイズ変更でフレーミングがリセットされます。"
+dimensions_error = "2〜8192ピクセルの偶数サイズを指定してください。"
+review_required = "フレーミングを承認する前に、この範囲を描画して確認してください。"
+review_count = "{total}範囲中{done}範囲を確認済み"

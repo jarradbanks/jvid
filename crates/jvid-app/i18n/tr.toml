@@ -5,6 +5,8 @@
 # {placeholder}: vowel harmony can't follow it. Terms follow docs/i18n/tr.md.
 
 [action]
+export_versions = "Sürümleri Dışa Aktar…"
+export_highlight_versions = "Seçili Öne Çıkanların Sürümlerini Dışa Aktar…"
 review_highlights = "Öne Çıkanlar"
 export_highlights = "Seçili Öne Çıkanları Dışa Aktar"
 show_captions = "Altyazılar"
@@ -1328,3 +1330,18 @@ invalid_merge = "Bir kanalda art arda gelen altyazıları seçin."
 invalid_style = "Altyazı stilinde geçersiz bir değer var."
 animated_timing = "Hız animasyonlu altyazıları zaman çizelgesinde kırpın."
 overlap = "Altyazı zamanı başka bir kliple çakışır."
+
+[versions]
+name = "Sürüm Adı"
+dimensions = "Boyutlar"
+captions = "Altyazılar"
+framing = "Kadraj"
+preview = "Önizleme Karesi"
+accept = "Kadrajı Onayla"
+landscape = "Yatay"
+vertical = "Dikey"
+limited = "Boyut Sınırlı"
+help = "Kuyruğa eklemeden önce her sürümü ve aralığı inceleyin. Kadraj değişiklikleri yalnızca bu sürümü etkiler. Boyutları değiştirmek kadrajı sıfırlar."
+dimensions_error = "2 ile 8192 piksel arasında çift boyutlar kullanın."
+review_required = "Kadrajı onaylamadan önce bu aralığı işleyip inceleyin."
+review_count = "{total} aralıktan {done} tanesi incelendi"

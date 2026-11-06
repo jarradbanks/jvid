@@ -5,6 +5,8 @@
 # every English key.
 
 [action]
+export_versions = "导出多个版本…"
+export_highlight_versions = "导出所选精彩片段的多个版本…"
 review_highlights = "精彩片段"
 export_highlights = "导出所选精彩片段"
 show_captions = "字幕"
@@ -1358,3 +1360,18 @@ invalid_merge = "请选择同一轨道上连续的字幕。"
 invalid_style = "字幕样式包含无效值。"
 animated_timing = "请在时间线上修剪带速度动画的字幕。"
 overlap = "字幕时间会与其他片段重叠。"
+
+[versions]
+name = "版本名称"
+dimensions = "尺寸"
+captions = "字幕"
+framing = "构图"
+preview = "预览帧"
+accept = "确认构图"
+landscape = "横向"
+vertical = "纵向"
+limited = "大小限制"
+help = "加入队列前，请检查每个版本及范围。构图修改仅影响当前版本。更改尺寸会重置构图。"
+dimensions_error = "请使用 2 到 8192 像素之间的偶数尺寸。"
+review_required = "确认构图前，请渲染并检查此范围。"
+review_count = "已检查 {done}/{total} 个范围"

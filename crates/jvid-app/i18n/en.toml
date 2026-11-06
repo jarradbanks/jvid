@@ -3,6 +3,8 @@
 
 # Keyboard actions, by keymap.toml id: menus, the shortcut editor and docs/shortcuts.md.
 [action]
+export_versions = "Export Versions…"
+export_highlight_versions = "Export Selected Highlight Versions…"
 review_highlights = "Highlights"
 export_highlights = "Export Selected Highlights"
 show_captions = "Captions"
@@ -1431,3 +1433,18 @@ invalid_merge = "Select consecutive captions on one track."
 invalid_style = "The caption style has an invalid value."
 animated_timing = "Trim speed-animated captions in the timeline."
 overlap = "Caption timing would overlap another clip."
+
+[versions]
+name = "Version Name"
+dimensions = "Dimensions"
+captions = "Captions"
+framing = "Framing"
+preview = "Preview Frame"
+accept = "Accept Framing"
+landscape = "Landscape"
+vertical = "Vertical"
+limited = "Size Limited"
+help = "Review each version and range before queuing. Framing edits affect only this version. Changing dimensions resets its framing."
+dimensions_error = "Use even dimensions from 2 to 8192 pixels."
+review_required = "Render and inspect this range before accepting its framing."
+review_count = "{done} of {total} ranges reviewed"

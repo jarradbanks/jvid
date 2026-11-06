@@ -3,6 +3,8 @@
 # infinitive, as in Dutch Windows. Terms follow docs/i18n/nl.md.
 
 [action]
+export_versions = "Versies Exporteren…"
+export_highlight_versions = "Versies van Geselecteerde Hoogtepunten Exporteren…"
 review_highlights = "Hoogtepunten"
 export_highlights = "Geselecteerde hoogtepunten exporteren"
 show_captions = "Ondertitels"
@@ -1340,3 +1342,18 @@ invalid_merge = "Selecteer opeenvolgende ondertitels op één spoor."
 invalid_style = "De ondertitelstijl bevat een ongeldige waarde."
 animated_timing = "Trim ondertitels met geanimeerde snelheid in de tijdlijn."
 overlap = "De ondertiteltijd zou een andere clip overlappen."
+
+[versions]
+name = "Versienaam"
+dimensions = "Afmetingen"
+captions = "Ondertitels"
+framing = "Kadrering"
+preview = "Voorbeeldframe"
+accept = "Kadrering Goedkeuren"
+landscape = "Liggend"
+vertical = "Staand"
+limited = "Beperkte Grootte"
+help = "Controleer elke versie en elk bereik vóór het toevoegen. Kadreringswijzigingen gelden alleen voor deze versie. Nieuwe afmetingen herstellen de kadrering."
+dimensions_error = "Gebruik even afmetingen van 2 tot 8192 pixels."
+review_required = "Render en controleer dit bereik voordat je de kadrering goedkeurt."
+review_count = "{done} van {total} bereiken gecontroleerd"

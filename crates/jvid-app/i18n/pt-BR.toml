@@ -3,6 +3,8 @@
 # Terms follow docs/i18n/pt-BR.md.
 
 [action]
+export_versions = "Exportar Versões…"
+export_highlight_versions = "Exportar Versões dos Destaques Selecionados…"
 review_highlights = "Destaques"
 export_highlights = "Exportar destaques selecionados"
 show_captions = "Legendas"
@@ -1341,3 +1343,18 @@ invalid_merge = "Selecione legendas consecutivas em uma faixa."
 invalid_style = "O estilo da legenda contém um valor inválido."
 animated_timing = "Apare legendas com velocidade animada na linha do tempo."
 overlap = "O tempo da legenda sobreporia outro clipe."
+
+[versions]
+name = "Nome da Versão"
+dimensions = "Dimensões"
+captions = "Legendas"
+framing = "Enquadramento"
+preview = "Quadro de Prévia"
+accept = "Aceitar Enquadramento"
+landscape = "Horizontal"
+vertical = "Vertical"
+limited = "Tamanho Limitado"
+help = "Revise cada versão e intervalo antes de enfileirar. Alterações no enquadramento afetam apenas esta versão. Alterar dimensões redefine o enquadramento."
+dimensions_error = "Use dimensões pares de 2 a 8192 pixels."
+review_required = "Renderize e revise este intervalo antes de aceitar o enquadramento."
+review_count = "{done} de {total} intervalos revisados"

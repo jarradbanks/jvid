@@ -102,6 +102,8 @@ pub const ACTIONS: &[Action] = &[
     aliases(a("export", "Ctrl+M"), &["render", "encode"]),
     aliases(a("review_highlights", ""), &["markers", "highlights"]),
     a("export_highlights", ""),
+    a("export_versions", ""),
+    a("export_highlight_versions", ""),
     a("quit", "Ctrl+Q"),
     a("play_stop", "Space"),
     a("shuttle_left", "J"),
@@ -490,6 +492,17 @@ mod tests {
     fn framing_actions_are_unbound_by_default_and_remappable() {
         let defaults = Keymap::default();
         for id in crate::framing::ACTIONS {
+            assert_eq!(binding(&defaults, id), None);
+            let map = Keymap::from_toml(&format!("{id} = \"Ctrl+Shift+F\"\n")).unwrap();
+            assert_eq!(binding(&map, id), parse("Ctrl+Shift+F"));
+            assert_eq!(Keymap::from_toml(&map.to_toml()).unwrap(), map);
+        }
+    }
+
+    #[test]
+    fn version_export_actions_are_unbound_and_remappable() {
+        let defaults = Keymap::default();
+        for id in ["export_versions", "export_highlight_versions"] {
             assert_eq!(binding(&defaults, id), None);
             let map = Keymap::from_toml(&format!("{id} = \"Ctrl+Shift+F\"\n")).unwrap();
             assert_eq!(binding(&map, id), parse("Ctrl+Shift+F"));

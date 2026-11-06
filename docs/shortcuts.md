@@ -25,6 +25,8 @@ Work in any panel except while typing in a text field.
 | Export Media | `Ctrl+M` |
 | Highlights | — |
 | Export Selected Highlights | — |
+| Export Versions… | — |
+| Export Selected Highlight Versions… | — |
 | Quit | `Ctrl+Q` |
 | Play/Stop | `Space` |
 | Shuttle Left | `J` |
