@@ -12,6 +12,7 @@ pub mod history;
 pub mod keyframe;
 pub mod media_library;
 pub mod model;
+pub mod personal_presets;
 pub mod preset;
 pub mod reframe;
 pub mod settings;
