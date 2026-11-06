@@ -826,6 +826,18 @@ pub fn show(
         crate::settings_transfer::show(ui, sel.project, &sel.selected, t)
             .map(|command| (command, None))
     };
+    let preset_category = match pane {
+        Pane::Text => Some(jvid_core::settings_transfer::Category::Text),
+        Pane::Audio => Some(jvid_core::settings_transfer::Category::Audio),
+        Pane::Effects => Some(jvid_core::settings_transfer::Category::Effects),
+        Pane::Video => None,
+    };
+    if let Some(category) = preset_category
+        && let Some(command) =
+            crate::personal_presets::show(ui, sel.project, &sel.selected, t, category)
+    {
+        edit = Some((command, None));
+    }
     let mut seek = None;
     let mut index = 0u64;
     for (id, props) in SECTIONS {

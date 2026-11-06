@@ -23,6 +23,7 @@ mod masks;
 mod media_bin;
 mod notices;
 pub mod package_smoke;
+mod personal_presets;
 mod playback;
 mod playback_status;
 pub mod preferences;
