@@ -40,6 +40,7 @@ mod transport;
 mod updates;
 mod viewer_geometry;
 mod welcome;
+pub mod workspaces;
 mod zoom;
 
 /// Test helpers the modules share.
