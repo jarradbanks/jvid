@@ -21,6 +21,7 @@ mod media_bin;
 mod notices;
 pub mod package_smoke;
 mod playback;
+mod playback_status;
 pub mod preferences;
 mod preview;
 pub mod project_file;
