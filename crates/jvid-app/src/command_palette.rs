@@ -30,6 +30,7 @@ impl CommandPalette {
             self.open = true;
             self.pending_action = None;
             egui::Popup::close_all(ctx);
+            ctx.request_repaint();
         }
     }
 
