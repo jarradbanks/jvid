@@ -47,6 +47,9 @@ Work in any panel except while typing in a text field.
 | Razor Tool | `C` |
 | Selection Tool | `V` |
 | Text Tool | `T` |
+| Add Arrow | — |
+| Add Rectangle | — |
+| Add Numbered Callout | — |
 | Step Back One Frame | `Left` |
 | Step Forward One Frame | `Right` |
 | Step Back One Second | `Shift+Left` |
