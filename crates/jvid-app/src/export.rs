@@ -1024,6 +1024,7 @@ pub mod dialog;
 pub mod lossless;
 pub mod queue;
 pub(crate) mod subtitles;
+pub mod versions;
 
 pub use lossless::Lossless;
 
