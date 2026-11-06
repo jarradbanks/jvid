@@ -30,6 +30,7 @@ use crate::i18n::verbatim;
 use crate::i18n::{Label, tr, trn};
 use crate::keymap::{ACTIONS, Keymap};
 use crate::playback::{self, Pixels, Playback, Shown};
+use crate::playback_status::{self, Health, Observation, Picture};
 use crate::scopes;
 use crate::transport::{AudioSource, Transport};
 use crate::viewer_geometry::{View, ViewerGeometry};
@@ -191,6 +192,12 @@ pub struct Preview {
     /// slow decode drops frames instead of queueing them).
     requested: Option<Time>,
     pending: bool,
+    requested_proxy: bool,
+    frame_proxy: bool,
+    proxy_state: (u64, bool),
+    status_source: bool,
+    source_status: Observation,
+    source_health: Health,
     source_job: Option<jvid_jobs::Handle>,
     frame: Option<Arc<Frame>>,
     still: Option<Arc<image::RgbaImage>>,
@@ -261,6 +268,12 @@ impl Preview {
             source: None,
             requested: None,
             pending: false,
+            requested_proxy: false,
+            frame_proxy: false,
+            proxy_state: (0, false),
+            status_source: false,
+            source_status: Observation::default(),
+            source_health: Health::default(),
             source_job: None,
             frame: None,
             still: None,
@@ -298,6 +311,10 @@ impl Preview {
             out.flush();
         }
         self.program.reset_session();
+        self.proxied.clear();
+        self.source_status = Observation::default();
+        self.source_health.reset();
+        self.frame_proxy = false;
         self.player = None;
         self.source = None;
         self.requested = None;
@@ -468,6 +485,7 @@ impl Preview {
         missing: &HashSet<PathBuf>,
         keymap: &Keymap,
     ) -> Option<Command> {
+        self.proxy_sources(project);
         if let Some(p) = &self.player
             && project.asset(p.asset).is_none()
         {
@@ -549,6 +567,7 @@ impl Preview {
     }
 
     fn seek_source(&mut self, time: Time) {
+        self.source_health.reset();
         let clock = self.clock();
         let Some(player) = &mut self.player else {
             return;
@@ -957,11 +976,25 @@ impl Preview {
         program: Option<(&ProjectSettings, bool)>,
         keymap: &Keymap,
     ) -> TransportInput {
+        self.status_source = program.is_none_or(|(_, source)| source);
+        let proxy_state = (self.proxies.revision(), self.proxies.enabled());
+        if proxy_state != self.proxy_state {
+            self.proxy_state = proxy_state;
+            if let Some(job) = self.source_job.take() {
+                job.cancel();
+            }
+            (self.tx, self.rx) = channel();
+            self.pending = false;
+            self.requested = None;
+            self.error = None;
+        }
         // Only the timeline's own row records.
         let records = matches!(program, Some((_, false)));
         let path = source.map(|(p, ..)| p);
         if self.source.as_deref() != path {
             self.source = path.map(Path::to_path_buf);
+            self.frame_proxy = false;
+            self.source_health.reset();
             (self.frame, self.still, self.error, self.requested) = (None, None, None, None);
         }
         if offline {
@@ -982,6 +1015,12 @@ impl Preview {
         {
             (self.requested, self.pending) = (Some(t), true);
             let (tx, ctx, p) = (self.tx.clone(), ui.ctx().clone(), path.to_path_buf());
+            let resolved = if jvid_media::stills::is_still(path) {
+                path.to_owned()
+            } else {
+                self.proxies.resolve(path)
+            };
+            self.requested_proxy = resolved != path;
             self.source_job = Some(if jvid_media::stills::is_still(path) {
                 self.jobs.submit(
                     format!("source-still:{:?}:{}", p, self.generation),
@@ -993,12 +1032,13 @@ impl Preview {
                     },
                 )
             } else {
-                self.pool.submit(
-                    &self.jobs,
-                    self.proxies.resolve(path),
-                    t,
-                    Priority::Interactive,
-                    move |r| {
+                let proxies = self.proxies.clone();
+                let proxy = self.requested_proxy;
+                self.pool
+                    .submit(&self.jobs, resolved, t, Priority::Interactive, move |r| {
+                        if proxy && let Err(error) = &r {
+                            proxies.reject(&p, error.to_string());
+                        }
                         let _ = tx.send((
                             p,
                             t,
@@ -1006,8 +1046,7 @@ impl Preview {
                                 .map_err(|e| e.to_string()),
                         ));
                         ctx.request_repaint();
-                    },
-                )
+                    })
             });
         }
         while let Ok((path, t, r)) = self.rx.try_recv() {
@@ -1026,6 +1065,7 @@ impl Preview {
                     self.error = None;
                     match f {
                         Pixels::Frame(f) => {
+                            self.frame_proxy = self.requested_proxy;
                             self.frame = Some(f);
                             self.still = None;
                         }
@@ -1050,6 +1090,32 @@ impl Preview {
             return TransportInput::default();
         }
 
+        let video =
+            source.is_some_and(|(path, _, video)| video && !jvid_media::stills::is_still(path));
+        self.source_status = Observation {
+            picture: if offline || self.error.is_some() {
+                Picture::Failed
+            } else if self.pending
+                || (video && source.is_some_and(|(_, time, _)| self.requested != Some(time)))
+            {
+                Picture::Loading
+            } else if self.frame.is_some() || self.still.is_some() || self.source_shown.is_some() {
+                Picture::Ready
+            } else {
+                Picture::Idle
+            },
+            proxies: usize::from(video && self.frame.is_some() && self.frame_proxy),
+            originals: usize::from(video && self.frame.is_some() && !self.frame_proxy),
+        };
+        if self.status_source {
+            let speed = self.player.as_ref().map_or(0, |p| p.transport.speed());
+            let index = self
+                .player
+                .as_ref()
+                .map_or(0, |p| p.transport.frame(self.clock()));
+            let ready = self.source_status.picture == Picture::Ready;
+            self.source_health.observe(index, speed, video, ready);
+        }
         let rect = ui.max_rect();
         let viewer = viewer_rect(ui);
         let view_id = view_id(ui);
@@ -1224,7 +1290,7 @@ impl Preview {
                 0.0
             };
             let secondary_width =
-                88.0 + 72.0 + proxy_text + 24.0 + 32.0 + 5.0 * space::S8 + reset_width;
+                88.0 + 72.0 + proxy_text + 24.0 + 32.0 + 112.0 + 6.0 * space::S8 + reset_width;
             let full_width = time_width
                 + 5.0 * 28.0
                 + record_extra
@@ -1250,7 +1316,7 @@ impl Preview {
             let rtl = Layout::right_to_left(Align::Center);
             let right = ui.scope_builder(UiBuilder::new().max_rect(inner).layout(rtl), |ui| {
                 ui.spacing_mut().item_spacing.x = space::S8;
-                self.dropdowns(ui, view_id);
+                self.dropdowns(ui, view_id, true);
                 ui.min_rect().left()
             });
             let x = bar
@@ -1294,7 +1360,7 @@ impl Preview {
             ui.scope_builder(UiBuilder::new().max_rect(bar), |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = space::S8;
-                    self.dropdowns(ui, view_id);
+                    self.dropdowns(ui, view_id, true);
                 });
             });
         }
@@ -1382,8 +1448,7 @@ impl Preview {
         let time_budget = if stacked { 0.0 } else { time_width };
         let take_budget = take.map_or(0.0, |t| take_width(ui, t.0).min(TAKE_WIDTH));
         let left_budget = if stacked { take_budget } else { time_budget };
-        let right_budget = size::CONTROL
-            + space::S8
+        let right_budget = 2.0 * (size::CONTROL + space::S8)
             + if !stacked && take.is_some() {
                 take_budget + space::S8
             } else {
@@ -1394,6 +1459,7 @@ impl Preview {
             >= 140.0 + record_width + 2.0 * (left_budget.max(right_budget) + space::S8);
         let buttons_width = if navigation { 140.0 } else { size::CONTROL } + record_width;
         let more_rect = row_rect.with_min_x(row_rect.right() - size::CONTROL);
+        let status_rect = more_rect.translate(vec2(-size::CONTROL - space::S8, 0.0));
         let min_x = row_rect.left()
             + if stacked {
                 0.0
@@ -1419,7 +1485,7 @@ impl Preview {
                     .with_min_x(controls.right() + space::S8)
                     .with_max_x(
                         (controls.right() + space::S8 + take_budget)
-                            .min(more_rect.left() - space::S8),
+                            .min(status_rect.left() - space::S8),
                     )
             };
             ui.scope_builder(
@@ -1431,6 +1497,12 @@ impl Preview {
                 },
             );
         }
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(status_rect)
+                .layout(Layout::left_to_right(Align::Center)),
+            |ui| self.status_control(ui, true),
+        );
         let mut action = None;
         ui.scope_builder(
             UiBuilder::new()
@@ -1481,14 +1553,14 @@ impl Preview {
                         }
                         ui.separator();
                     }
-                    self.dropdowns(ui, view_id);
+                    self.dropdowns(ui, view_id, false);
                 });
             },
         );
         action
     }
 
-    fn dropdowns(&mut self, ui: &mut Ui, view_id: egui::Id) {
+    fn dropdowns(&mut self, ui: &mut Ui, view_id: egui::Id, status: bool) {
         let zooms = ZOOMS.map(|z| z.0());
         let recovered = ui
             .data(|d| d.get_temp::<View>(view_id))
@@ -1536,9 +1608,11 @@ impl Preview {
         {
             self.proxies.set_enabled(on);
             // Frames decoded from the other files are stale now.
-            self.program.cache = playback::FrameCache::new(playback::DEFAULT_BUDGET);
-            self.program.refresh();
+            self.program.refresh_sources();
             self.requested = None;
+        }
+        if status {
+            self.status_control(ui, false);
         }
         let glyph = egui::RichText::new(icon::GRID).font(theme::icon_font());
         let guides = ui.menu_button(glyph, |ui| {
@@ -1557,6 +1631,33 @@ impl Preview {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("preview.guides"))
         });
         guides.response.on_hover_text(tr!("preview.guides"));
+    }
+    fn status_control(&mut self, ui: &mut Ui, compact: bool) {
+        let mut jobs: Vec<_> = self
+            .proxied
+            .iter()
+            .filter_map(|path| self.proxies.status(path).map(|state| (path.clone(), state)))
+            .filter(|(_, state)| {
+                self.proxies.enabled()
+                    || !matches!(state, proxy::Status::Failed(_) | proxy::Status::Cancelled)
+            })
+            .collect();
+        jobs.sort_by(|a, b| a.0.cmp(&b.0));
+        let (observation, health) = if self.status_source {
+            (self.source_status, &self.source_health)
+        } else {
+            (self.program.status, &self.program.health)
+        };
+        for path in playback_status::control(
+            ui,
+            observation,
+            health,
+            QUALITIES[self.quality].0(),
+            &jobs,
+            compact,
+        ) {
+            self.proxied.remove(&path);
+        }
     }
 }
 
