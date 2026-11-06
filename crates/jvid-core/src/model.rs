@@ -3305,7 +3305,10 @@ impl Project {
     /// How far `id`'s `edge`, with its linked clips', can move from `by`: held to the media,
     /// a one-frame minimum length and, without ripple, the neighbouring clips and zero.
     pub fn trim_limit(&self, id: ClipId, edge: Edge, by: Time, ripple: bool) -> Time {
-        let s = &self.sequence;
+        self.trim_limit_in(&self.sequence, id, edge, by, ripple)
+    }
+
+    fn trim_limit_in(&self, s: &Sequence, id: ClipId, edge: Edge, by: Time, ripple: bool) -> Time {
         let min = self.settings.frame_rate.time_floor(1);
         let (mut lo, mut hi) = (Time(i64::MIN / 4), Time(i64::MAX / 4));
         for (t, c) in s.linked(id) {
@@ -3373,28 +3376,38 @@ impl Project {
         Ok(r.time_floor(2 * half))
     }
 
-    /// Moves each clip's edge by its amount, as far as [`trim_limit`](Self::trim_limit)
-    /// allows, its linked clips' with it. Ripple keeps the head in place and shifts the
-    /// later clips on each trimmed track by the change in length.
+    #[cfg(test)]
     pub(crate) fn trim(
         &mut self,
         trims: &[(ClipId, Edge, Time)],
         ripple: bool,
     ) -> Result<(), ModelError> {
-        let mut p = self.clone();
+        self.sequence = self.trimmed_sequence(trims, ripple)?;
+        Ok(())
+    }
+
+    /// Moves each clip's edge by its amount, as far as [`trim_limit`](Self::trim_limit)
+    /// allows, its linked clips' with it. Ripple keeps the head in place and shifts the
+    /// later clips on each trimmed track by the change in length.
+    pub(crate) fn trimmed_sequence(
+        &self,
+        trims: &[(ClipId, Edge, Time)],
+        ripple: bool,
+    ) -> Result<Sequence, ModelError> {
+        let mut sequence = self.sequence.clone();
         let mut done = Vec::new();
         for &(id, edge, by) in trims {
-            p.sequence.clip(id).ok_or(ModelError::UnknownClip(id))?;
+            sequence.clip(id).ok_or(ModelError::UnknownClip(id))?;
             if done.contains(&id) {
                 continue;
             }
-            let by = p.trim_limit(id, edge, by, ripple);
-            let group = p.sequence.linked(id).into_iter();
+            let by = self.trim_limit_in(&sequence, id, edge, by, ripple);
+            let group = sequence.linked(id).into_iter();
             let group: Vec<_> = group.map(|(t, c)| (t, c.id, c.end())).collect();
             let mut later = Vec::new();
             for (t, cid, end) in group {
                 done.push(cid);
-                let s = &mut p.sequence;
+                let s = &mut sequence;
                 let ti = s.index(t)?;
                 for c in &mut s.tracks[ti].clips {
                     if c.id == cid {
@@ -3417,10 +3430,9 @@ impl Project {
                 Edge::Head => Time(0) - by,
                 Edge::Tail => by,
             };
-            p.sequence.shift_synced(later, shift)?;
+            sequence.shift_synced(later, shift)?;
         }
-        *self = p;
-        Ok(())
+        Ok(sequence)
     }
 }
 

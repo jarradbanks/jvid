@@ -359,12 +359,11 @@ impl Command {
         }
     }
 
-    /// Applies to `p`; on error `p` is unchanged.
-    fn apply(self, p: &mut Project) -> Result<Created, ModelError> {
+    fn validate(&self, p: &Project) -> Result<(), ModelError> {
         if let Some(t) = self.locked(p) {
             return Err(ModelError::Locked(t));
         }
-        let nest = match &self {
+        let nest = match self {
             Self::Place(pl) => p.nest_error(pl.asset),
             Self::AddClip { clip, .. } => p.nest_error(clip.asset),
             Self::SetClipAsset { asset, .. } => p.nest_error(*asset),
@@ -374,6 +373,70 @@ impl Command {
         if let Some(e) = nest {
             return Err(e);
         }
+        Ok(())
+    }
+
+    /// The validated result of a drag, source placement or trim. Only the active sequence
+    /// is copied; assets, media libraries and other sequences are never cloned. Application
+    /// uses the same planner, including source markers, linked ripple closure and locks.
+    /// Other commands return `None`.
+    pub fn preview_timeline(&self, p: &Project) -> Result<Option<Sequence>, ModelError> {
+        Ok(self.plan_timeline(p)?.map(|(sequence, _)| sequence))
+    }
+
+    fn plan_timeline(&self, p: &Project) -> Result<Option<(Sequence, Created)>, ModelError> {
+        if !matches!(
+            self,
+            Self::Place(_) | Self::MoveSelection { .. } | Self::Trim { .. }
+        ) {
+            return Ok(None);
+        }
+        self.validate(p)?;
+        let (sequence, created) = match self {
+            Self::Place(placement) => {
+                let mut sequence = p.sequence.clone();
+                let ids = sequence.place(placement.clone())?;
+                let created = ids.first().copied().map_or(Created::Nothing, Created::Clip);
+                if !ids.is_empty() {
+                    for marker in p
+                        .asset(placement.asset)
+                        .and_then(|a| a.probe.as_ref())
+                        .into_iter()
+                        .flat_map(|probe| &probe.markers)
+                        .filter(|m| placement.source_in <= m.time && m.time < placement.source_out)
+                    {
+                        sequence.add_marker(
+                            placement.start + (marker.time - placement.source_in),
+                            Time(0),
+                            marker.name.clone(),
+                        );
+                    }
+                }
+                (sequence, created)
+            }
+            Self::MoveSelection {
+                ids,
+                anchor,
+                track,
+                start,
+            } => {
+                let mut sequence = p.sequence.clone();
+                sequence.move_selection(ids, *anchor, *track, *start)?;
+                (sequence, Created::Nothing)
+            }
+            Self::Trim { trims, ripple } => (p.trimmed_sequence(trims, *ripple)?, Created::Nothing),
+            _ => unreachable!(),
+        };
+        Ok(Some((sequence, created)))
+    }
+
+    /// Applies to `p`; on error `p` is unchanged.
+    fn apply(self, p: &mut Project) -> Result<Created, ModelError> {
+        if let Some((sequence, created)) = self.plan_timeline(p)? {
+            p.sequence = sequence;
+            return Ok(created);
+        }
+        self.validate(p)?;
         let s = &mut p.sequence;
         Ok(match self {
             Self::Caption(edit) => edit.apply(p)?,
@@ -405,33 +468,7 @@ impl Command {
                 s.remove_clip(id)?;
                 Created::Nothing
             }
-            Self::Place(placement) => {
-                let markers: Vec<_> = p
-                    .assets
-                    .iter()
-                    .find(|a| a.id == placement.asset)
-                    .and_then(|a| a.probe.as_ref())
-                    .into_iter()
-                    .flat_map(|probe| &probe.markers)
-                    .filter(|m| placement.source_in <= m.time && m.time < placement.source_out)
-                    .map(|m| {
-                        (
-                            placement.start + (m.time - placement.source_in),
-                            m.name.clone(),
-                        )
-                    })
-                    .collect();
-                match s.place(placement)?.first() {
-                    Some(c) => {
-                        let id = *c;
-                        for (time, name) in markers {
-                            s.add_marker(time, Time(0), name);
-                        }
-                        Created::Clip(id)
-                    }
-                    None => Created::Nothing,
-                }
-            }
+            Self::Place(_) | Self::MoveSelection { .. } | Self::Trim { .. } => unreachable!(),
             Self::DragClip { id, track, start } => {
                 s.drag_clip(id, track, start)?;
                 Created::Nothing
@@ -457,15 +494,6 @@ impl Command {
                 }
                 Created::Nothing
             }
-            Self::MoveSelection {
-                ids,
-                anchor,
-                track,
-                start,
-            } => {
-                s.move_selection(&ids, anchor, track, start)?;
-                Created::Nothing
-            }
             Self::MoveClip { id, track, start } => {
                 s.move_clip(id, track, start)?;
                 Created::Nothing
@@ -477,10 +505,6 @@ impl Command {
                 source_out,
             } => {
                 s.set_clip_range(id, start, source_in, source_out)?;
-                Created::Nothing
-            }
-            Self::Trim { trims, ripple } => {
-                p.trim(&trims, ripple)?;
                 Created::Nothing
             }
             Self::SetClipSpeed {
@@ -985,6 +1009,96 @@ mod tests {
                 link: None,
             },
         }
+    }
+
+    #[test]
+    fn timeline_preview_matches_commit_and_never_mutates_the_project() {
+        use crate::time::FLICKS_PER_SECOND as S;
+        let mut setup = History::new(Project::default());
+        setup
+            .apply(Command::Import(vec![(
+                PathBuf::from("preview.mp4"),
+                ProbeInfo {
+                    duration: Time(20 * S),
+                    width: Some(1920),
+                    audio_streams: 1,
+                    ..Default::default()
+                },
+            )]))
+            .unwrap();
+        let asset = setup.project().assets()[0].id;
+        let v = track(&mut setup);
+        for start in [0, 2] {
+            setup
+                .apply(Command::AddClip {
+                    track: v,
+                    clip: NewClip {
+                        asset,
+                        start: Time(start * S),
+                        source_in: Time(0),
+                        source_out: Time(2 * S),
+                        link: None,
+                    },
+                })
+                .unwrap();
+        }
+        let before = setup.project().clone();
+        let id = before.sequence().tracks()[0].clips()[0].id;
+        let mut commands = vec![
+            Command::MoveSelection {
+                ids: vec![id],
+                anchor: id,
+                track: v,
+                start: Time(S),
+            },
+            Command::Trim {
+                trims: vec![(id, Edge::Tail, Time(S))],
+                ripple: false,
+            },
+            Command::Trim {
+                trims: vec![(id, Edge::Tail, Time(S))],
+                ripple: true,
+            },
+        ];
+        for insert in [false, true] {
+            commands.push(Command::Place(
+                before
+                    .placement(asset, Time(S), insert, Some(v), false)
+                    .unwrap(),
+            ));
+        }
+        for command in commands {
+            let mut h = History::new(before.clone());
+            let preview = command.preview_timeline(h.project()).unwrap().unwrap();
+            assert_eq!(h.project(), &before);
+            h.apply(command).unwrap();
+            assert_eq!(h.project().sequence(), &preview);
+            if h.can_undo() {
+                assert!(h.undo());
+                assert_eq!(h.project(), &before);
+            }
+        }
+        let mut settings = before.sequence().track(v).unwrap().settings();
+        settings.locked = true;
+        setup.apply(Command::SetTrack(settings)).unwrap();
+        let command = Command::Trim {
+            trims: vec![(id, Edge::Tail, Time(S))],
+            ripple: true,
+        };
+        assert_eq!(
+            command.preview_timeline(setup.project()),
+            Err(ModelError::Locked(v))
+        );
+        assert_eq!(setup.apply(command), Err(ModelError::Locked(v)));
+        assert!(
+            Command::AddTrack {
+                kind: TrackKind::Video,
+                name: String::new()
+            }
+            .preview_timeline(&before)
+            .unwrap()
+            .is_none()
+        );
     }
 
     #[test]
