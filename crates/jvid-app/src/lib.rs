@@ -13,6 +13,7 @@ pub mod export;
 mod framing;
 mod handles;
 mod hide_region;
+pub mod highlight_review;
 pub mod i18n;
 mod import;
 mod inspector;
