@@ -198,6 +198,7 @@ pub struct Preview {
     status_source: bool,
     source_status: Observation,
     source_health: Health,
+    view_session: u64,
     source_job: Option<jvid_jobs::Handle>,
     frame: Option<Arc<Frame>>,
     still: Option<Arc<image::RgbaImage>>,
@@ -274,6 +275,7 @@ impl Preview {
             status_source: false,
             source_status: Observation::default(),
             source_health: Health::default(),
+            view_session: 0,
             source_job: None,
             frame: None,
             still: None,
@@ -311,6 +313,7 @@ impl Preview {
             out.flush();
         }
         self.program.reset_session();
+        self.view_session += 1;
         self.proxied.clear();
         self.source_status = Observation::default();
         self.source_health.reset();
@@ -958,6 +961,7 @@ impl Preview {
     /// Panel tabs share a body UI id. Captured selection coordinates belong to one picture.
     fn prepare_view(&self, ui: &Ui, source: bool, size: [u32; 2]) {
         let identity = (
+            self.view_session,
             source,
             if source { self.source_asset() } else { None },
             size,
@@ -965,7 +969,7 @@ impl Preview {
         let key = view_id(ui).with("picture");
         ui.data_mut(|data| {
             if data
-                .get_temp::<(bool, Option<AssetId>, [u32; 2])>(key)
+                .get_temp::<(u64, bool, Option<AssetId>, [u32; 2])>(key)
                 .is_some_and(|prior| prior != identity)
             {
                 data.insert_temp(view_id(ui), View::default());
@@ -2962,6 +2966,11 @@ mod viewer_fit_tests {
         h.state_mut().active = 0;
         h.run();
         assert_eq!(h.state().current, View::default(), "return to Program");
+        h.state_mut().capture = true;
+        h.run();
+        h.state_mut().preview.reset_session();
+        h.run();
+        assert_eq!(h.state().current, View::default(), "new project session");
     }
 
     struct Viewer {
@@ -2982,9 +2991,6 @@ mod viewer_fit_tests {
             }
             self.key = view_id(ui);
             self.body = viewer_rect(ui);
-            self.frame = self
-                .preview
-                .project_rect(ui, self.history.project().settings());
             if self.source {
                 self.preview.show_source(
                     ui,
@@ -2992,7 +2998,15 @@ mod viewer_fit_tests {
                     &HashSet::new(),
                     &Keymap::default(),
                 );
+                let settings = self.history.project().settings();
+                self.frame = self
+                    .preview
+                    .geometry(ui, vec2(settings.width as f32, settings.height as f32))
+                    .frame;
             } else {
+                self.frame = self
+                    .preview
+                    .project_rect(ui, self.history.project().settings());
                 self.preview.show_program(
                     ui,
                     self.history.project(),
