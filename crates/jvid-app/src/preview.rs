@@ -42,93 +42,6 @@ const ZOOMS: [(Label, Option<f32>); 4] = [
     (|| "200%", Some(2.0)),
 ];
 
-#[cfg(test)]
-mod status_summary_tests {
-    use super::*;
-    use egui_kittest::kittest::Queryable;
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn large_status_snapshot_work_is_throttled_and_transitions_invalidate() {
-        let mut preview = Preview::new(None);
-        preview
-            .proxied
-            .extend((0..20_000).map(|i| PathBuf::from(format!("/media/recording-{i:05}.mp4"))));
-        let now = Instant::now();
-        let start = Instant::now();
-        for _ in 0..20 {
-            preview.status_updated = None;
-            assert!(preview.refresh_status_jobs(now));
-        }
-        let uncached = start.elapsed();
-        assert_eq!(preview.status_jobs.len(), 20_000);
-        let start = Instant::now();
-        for _ in 0..20 {
-            assert!(!preview.refresh_status_jobs(now + Duration::from_millis(249)));
-        }
-        let cached = start.elapsed();
-        eprintln!(
-            "PERF status snapshots 20k paths, 20 paints: prior {uncached:?}, cached {cached:?}"
-        );
-        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
-        preview.proxies.set_enabled(true);
-        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
-        let path = PathBuf::from("/media/recording-00000.mp4");
-        preview.proxies.reject(&path, "unreadable proxy".into());
-        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
-        assert!(
-            preview
-                .status_jobs
-                .iter()
-                .any(|(p, s)| p == &path && matches!(s, proxy::Status::Failed(_)))
-        );
-        preview.proxies.set_enabled(false);
-        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
-        assert!(
-            !preview
-                .status_jobs
-                .iter()
-                .any(|(_, s)| matches!(s, proxy::Status::Failed(_)))
-        );
-        preview.set_proxies(Arc::new(Proxies::new(PathBuf::new())));
-        assert!(preview.status_jobs.is_empty());
-        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
-        preview.reset_session();
-        assert!(preview.proxied.is_empty() && preview.status_jobs.is_empty());
-        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
-        assert!(preview.status_jobs.is_empty());
-    }
-
-    #[test]
-    fn explicit_status_retry_removes_cached_failure_immediately() {
-        let mut preview = Preview::new(None);
-        let path = PathBuf::from("/media/retry.mp4");
-        preview.proxied.insert(path.clone());
-        preview.proxies.set_enabled(true);
-        preview.proxies.reject(&path, "invalid proxy".into());
-        let mut fresh = true;
-        let mut h = egui_kittest::Harness::builder()
-            .with_size([480.0, 540.0])
-            .build_ui_state(
-                move |ui, preview: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
-                        return;
-                    }
-                    preview.status_control(ui, false);
-                },
-                preview,
-            );
-        h.run();
-        h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status"))
-            .click();
-        h.run();
-        h.get_by_label(tr!("preview.status_retry")).click();
-        h.run();
-        assert!(!h.state().proxied.contains(&path));
-        assert!(h.state().status_jobs.is_empty());
-        assert!(h.state().proxy_jobs.is_idle());
-    }
-}
 const QUALITIES: [(Label, PreviewQuality); 3] = [
     (|| tr!("preview.full"), PreviewQuality::Full),
     (|| "½", PreviewQuality::Half),
@@ -4069,5 +3982,132 @@ mod audit_transport_tests {
             suite_ui::i18n::set_pseudo(language == "en");
             audit_454_transport_hit_bounds_fit_without_intersections();
         }
+    }
+}
+
+#[cfg(test)]
+mod status_summary_tests {
+    use super::*;
+    use egui_kittest::kittest::Queryable;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn cached_full_status_control_cost_on_large_projects() {
+        let mut preview = Preview::new(None);
+        preview
+            .proxied
+            .extend((0..20_000).map(|i| PathBuf::from(format!("/media/recording-{i:05}.mp4"))));
+        let mut fresh = true;
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([480.0, 540.0])
+            .build_ui_state(
+                move |ui, preview: &mut Preview| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    preview.status_control(ui, false);
+                },
+                preview,
+            );
+        h.run();
+        let start = Instant::now();
+        for _ in 0..20 {
+            h.state_mut().status_updated = None;
+            h.step();
+        }
+        let uncached = start.elapsed();
+        let start = Instant::now();
+        for _ in 0..20 {
+            h.step();
+        }
+        let cached = start.elapsed();
+        eprintln!(
+            "PERF full status control 20k paths, 20 paints: prior {uncached:?}, cached {cached:?}"
+        );
+        assert!(
+            h.state().proxy_jobs.is_idle(),
+            "status paint never submits proxy work"
+        );
+    }
+
+    #[test]
+    fn large_status_snapshot_work_is_throttled_and_transitions_invalidate() {
+        let mut preview = Preview::new(None);
+        preview
+            .proxied
+            .extend((0..20_000).map(|i| PathBuf::from(format!("/media/recording-{i:05}.mp4"))));
+        let now = Instant::now();
+        let start = Instant::now();
+        for _ in 0..20 {
+            preview.status_updated = None;
+            assert!(preview.refresh_status_jobs(now));
+        }
+        let uncached = start.elapsed();
+        assert_eq!(preview.status_jobs.len(), 20_000);
+        let start = Instant::now();
+        for _ in 0..20 {
+            assert!(!preview.refresh_status_jobs(now + Duration::from_millis(249)));
+        }
+        let cached = start.elapsed();
+        eprintln!(
+            "PERF status snapshots 20k paths, 20 paints: prior {uncached:?}, cached {cached:?}"
+        );
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        preview.proxies.set_enabled(true);
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        let path = PathBuf::from("/media/recording-00000.mp4");
+        preview.proxies.reject(&path, "unreadable proxy".into());
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        assert!(
+            preview
+                .status_jobs
+                .iter()
+                .any(|(p, s)| p == &path && matches!(s, proxy::Status::Failed(_)))
+        );
+        preview.proxies.set_enabled(false);
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        assert!(
+            !preview
+                .status_jobs
+                .iter()
+                .any(|(_, s)| matches!(s, proxy::Status::Failed(_)))
+        );
+        preview.set_proxies(Arc::new(Proxies::new(PathBuf::new())));
+        assert!(preview.status_jobs.is_empty());
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        preview.reset_session();
+        assert!(preview.proxied.is_empty() && preview.status_jobs.is_empty());
+        assert!(preview.refresh_status_jobs(now + Duration::from_millis(250)));
+        assert!(preview.status_jobs.is_empty());
+    }
+
+    #[test]
+    fn explicit_status_retry_removes_cached_failure_immediately() {
+        let mut preview = Preview::new(None);
+        let path = PathBuf::from("/media/retry.mp4");
+        preview.proxied.insert(path.clone());
+        preview.proxies.set_enabled(true);
+        preview.proxies.reject(&path, "invalid proxy".into());
+        let mut fresh = true;
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([480.0, 540.0])
+            .build_ui_state(
+                move |ui, preview: &mut Preview| {
+                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        return;
+                    }
+                    preview.status_control(ui, false);
+                },
+                preview,
+            );
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status"))
+            .click();
+        h.run();
+        h.get_by_label(tr!("preview.status_retry")).click();
+        h.run();
+        assert!(!h.state().proxied.contains(&path));
+        assert!(h.state().status_jobs.is_empty());
+        assert!(h.state().proxy_jobs.is_idle());
     }
 }
