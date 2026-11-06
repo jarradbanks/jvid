@@ -21,6 +21,8 @@ use crate::i18n::{tr, trn};
 
 struct Job {
     path: PathBuf,
+    /// All outputs stay reserved until cancellation/failure has fully settled.
+    outputs: Vec<PathBuf>,
     /// The preset's shown name, or the lossless mode's.
     preset: String,
     /// The exported range's length.
@@ -119,6 +121,7 @@ impl Queue {
             return false;
         }
         self.jobs.push(Job {
+            outputs: vec![path.clone()],
             path,
             preset,
             duration,
@@ -134,9 +137,43 @@ impl Queue {
 
     /// True while a job not yet over writes to `path`.
     pub fn writing(&self, path: &Path) -> bool {
-        self.jobs
-            .iter()
-            .any(|j| j.result.is_none() && j.path == path)
+        let key = super::versions::output_key(path);
+        self.jobs.iter().any(|j| {
+            j.result.is_none()
+                && j.outputs
+                    .iter()
+                    .any(|output| super::versions::output_key(output) == key)
+        })
+    }
+
+    /// Ordinary sidecar exports also reserve their SRT against later version batches.
+    pub fn reserve_sidecar(&mut self, media: &Path) {
+        if let Some(job) = self
+            .jobs
+            .iter_mut()
+            .find(|j| j.result.is_none() && j.path == media)
+        {
+            job.outputs.push(media.with_extension("srt"));
+        }
+    }
+
+    /// Queue independently captured versions through the existing pool and progress model.
+    pub fn versions(
+        &mut self,
+        pool: &jvid_jobs::Pool,
+        jobs: Vec<super::versions::VersionJob>,
+        gpu: Option<super::GpuContext>,
+    ) {
+        for job in super::versions::allocate(jobs, |path| self.writing(path)) {
+            let path = job.request().path.clone();
+            let duration = job.request().range.1 - job.request().range.0;
+            let label = job.label().to_owned();
+            let outputs = job.destinations();
+            let submitted = super::versions::submit(pool, job, gpu.clone());
+            if self.push(path, label, duration, submitted) {
+                self.jobs.last_mut().unwrap().outputs = outputs;
+            }
+        }
     }
 
     /// Collects results; returns the jobs that ended since the last call.

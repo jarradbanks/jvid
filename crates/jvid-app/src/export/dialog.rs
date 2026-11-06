@@ -87,6 +87,23 @@ impl Default for ExportDialog {
 }
 
 impl ExportDialog {
+    /// The same In/Out default as ordinary export, captured for independently reviewed versions.
+    pub fn version_source(
+        &self,
+        session: u64,
+        history: &jvid_core::history::History,
+    ) -> Result<super::versions::VersionSource, String> {
+        let seq = history.project().sequence();
+        let range = if seq.in_point().is_some() || seq.out_point().is_some() {
+            Range::InOut
+        } else {
+            Range::Entire
+        };
+        let span = span(range, seq, &HashSet::new(), self.pad())
+            .ok_or_else(|| tr!("export.nothing").to_owned())?;
+        super::versions::VersionSource::range(session, history, span)
+    }
+
     /// Whether the export modal currently owns input, including before its first draw.
     pub fn is_open(&self) -> bool {
         self.range.is_some()
