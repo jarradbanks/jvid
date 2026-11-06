@@ -46,6 +46,7 @@ def face(name, family, characters, width):
 primary = face("primary", "Jvid Fixture Primary", "AB", 600)
 fallback = face("fallback", "Jvid Fixture Fallback", "AΩ", 900)
 face("alternate", "Jvid Fixture Primary", "AB", 1000)
+face("environment", "Noto Sans", "AΩ", 1200)
 collection = TTCollection()
 collection.fonts = [primary, fallback]
 collection.save(ROOT / "faces.ttc")

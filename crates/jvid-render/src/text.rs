@@ -170,6 +170,28 @@ fn project_font_coverage_with(
             ..text.clone()
         };
         let (cold, cold_wrap, cold_offset) = layout(&mut packaged, &collected, size);
+        let Some(primary) = packaged.system.db().query(&cosmic_text::fontdb::Query {
+            families: &[Family::Name(alias)],
+            weight: Weight(text.weight),
+            ..Default::default()
+        }) else {
+            return Ok(false);
+        };
+        // cosmic-text tries installed script/common fallbacks before secondary alias
+        // faces, and requires an exact weight for its named-family first choice. Those
+        // paths cannot be made portable with the current single-family representation.
+        if packaged
+            .system
+            .db()
+            .face(primary)
+            .is_none_or(|face| face.weight.0 != text.weight)
+            || cold
+                .layout_runs()
+                .flat_map(|run| run.glyphs)
+                .any(|glyph| glyph.font_id != primary)
+        {
+            return Ok(false);
+        }
         if wrap != cold_wrap
             || offset != cold_offset
             || !same_shaping(&fonts.system, &original, &packaged.system, &cold)
@@ -701,6 +723,7 @@ mod tests {
         let text = Text {
             content: "AB\n\nA".into(),
             family: PRIMARY.into(),
+            weight: 400,
             ..Text::default()
         };
         let source = fixture_source("primary.ttf", PRIMARY);
@@ -714,6 +737,10 @@ mod tests {
             .unwrap()
         );
         let expected = masks(&mut original, &text, (640, 360));
+        assert!(
+            expected.fill.iter().any(|alpha| *alpha > 0),
+            "fixture must rasterize visible glyphs"
+        );
         let mut db = cosmic_text::fontdb::Database::new();
         // A cold renderer has a conflicting installed primary face and no original fallback.
         db.load_font_file(fixture("alternate.ttf")).unwrap();
@@ -741,6 +768,7 @@ mod tests {
         let text = Text {
             content: "AΩ".into(),
             family: PRIMARY.into(),
+            weight: 400,
             ..Text::default()
         };
         let sources = [
@@ -785,11 +813,79 @@ mod tests {
     }
 
     #[test]
+    fn portable_coverage_rejects_installed_fallback_preemption() {
+        let mut original = fixture_fonts();
+        let text = Text {
+            content: "AΩ".into(),
+            family: PRIMARY.into(),
+            weight: 400,
+            ..Text::default()
+        };
+        let sources = [
+            fixture_source("primary.ttf", PRIMARY),
+            fixture_source("fallback.ttf", FALLBACK),
+        ];
+        let alias = "jvid-collection-installed-fallback-fixture";
+        let cold = |installed| {
+            let mut db = cosmic_text::fontdb::Database::new();
+            for source in &sources {
+                let (_, faces) = read_font_faces(source).unwrap();
+                alias_faces(&mut db, faces, alias);
+            }
+            if installed {
+                db.load_font_file(fixture("environment.ttf")).unwrap();
+            }
+            Fonts::new(FontSystem::new_with_locale_and_db("en-US".into(), db))
+        };
+        let collected = Text {
+            family: alias.into(),
+            ..text.clone()
+        };
+        let mut isolated = cold(false);
+        let mut changed_environment = cold(true);
+        let expected = masks(&mut original, &text, (320, 180));
+        assert!(
+            expected.fill.iter().any(|alpha| *alpha > 0),
+            "fixture must rasterize visible glyphs"
+        );
+        assert_eq!(
+            expected.fill,
+            masks(&mut isolated, &collected, (320, 180)).fill
+        );
+        assert!(
+            expected.fill != masks(&mut changed_environment, &collected, (320, 180)).fill,
+            "different installed fallback must change visible glyph pixels"
+        );
+        assert!(!project_font_coverage_with(&mut original, &sources, &[text], (320, 180)).unwrap());
+    }
+
+    #[test]
+    fn portable_coverage_rejects_weight_that_requires_system_fallback() {
+        let mut original = fixture_fonts();
+        let text = Text {
+            content: "AB".into(),
+            family: PRIMARY.into(),
+            weight: 500,
+            ..Text::default()
+        };
+        assert!(
+            !project_font_coverage_with(
+                &mut original,
+                &[fixture_source("primary.ttf", PRIMARY)],
+                &[text],
+                (320, 180)
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
     fn portable_coverage_rejects_primary_changes_from_alias_face_union() {
         let mut original = fixture_fonts();
         let text = Text {
             content: "AΩ".into(),
             family: PRIMARY.into(),
+            weight: 400,
             ..Text::default()
         };
         // Both actual faces are present, but fallback-first aliasing changes Latin A.
@@ -806,6 +902,7 @@ mod tests {
         let text = Text {
             content: "AΩ".into(),
             family: PRIMARY.into(),
+            weight: 400,
             ..Text::default()
         };
         let sources = [
@@ -829,9 +926,14 @@ mod tests {
         let text = Text {
             content: "AB".into(),
             family: alias.into(),
+            weight: 400,
             ..Text::default()
         };
         let before = rasterize(&text, None, (320, 180));
+        assert!(
+            before.chunks_exact(4).any(|pixel| pixel[3] > 0),
+            "queued resource must contain visible glyphs"
+        );
         std::fs::copy(fixture("alternate.ttf"), &path).unwrap();
         assert!(load_project_fonts(std::slice::from_ref(&first)).is_err());
         assert_eq!(project_font_sources(&[alias.into()]), vec![first]);
@@ -856,9 +958,14 @@ mod tests {
         let text = Text {
             content: "AB".into(),
             family: alias.into(),
+            weight: 400,
             ..Text::default()
         };
         let before = rasterize(&text, None, (320, 180));
+        assert!(
+            before.chunks_exact(4).any(|pixel| pixel[3] > 0),
+            "queued resource must contain visible glyphs"
+        );
         std::fs::rename(old, &moved).unwrap();
         let relocated = FontSource {
             path: moved,
