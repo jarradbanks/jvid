@@ -71,6 +71,12 @@ Work in any panel except while typing in a text field.
 | Export Frame | `Ctrl+Shift+E` |
 | Record Voiceover | `Shift+R` |
 | Command Palette | `Ctrl+Shift+P` |
+| Editing Workspace | — |
+| Captions Workspace | — |
+| Audio Workspace | — |
+| Save Workspace… | — |
+| Reset Panel Layout | — |
+| Maximize/Restore Panel | `Ctrl+Shift+F10` |
 
 ## Timeline
 
