@@ -10,6 +10,7 @@ pub mod framing;
 pub mod hdr;
 pub mod history;
 pub mod keyframe;
+pub mod media_library;
 pub mod model;
 pub mod preset;
 pub mod reframe;

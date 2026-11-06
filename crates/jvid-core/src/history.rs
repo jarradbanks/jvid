@@ -225,6 +225,8 @@ pub enum Command {
         id: AssetId,
         name: Option<String>,
     },
+    /// Changes bins/favorites only; media paths and timeline clips stay untouched.
+    EditMediaLibrary(crate::media_library::LibraryEdit),
     /// Removes the asset and every clip that uses it; a sequence's takes the sequence too.
     RemoveAsset(AssetId),
     /// Points assets at new paths as one step, e.g. after their media moved.
@@ -342,6 +344,7 @@ impl Command {
             | Self::SetAssetProbe { .. }
             | Self::Import(_)
             | Self::RenameAsset { .. }
+            | Self::EditMediaLibrary(_)
             | Self::RelinkAssets(_)
             | Self::SetAssetInOut { .. } => None,
             Self::Batch(cmds) => cmds.iter().find_map(|c| c.locked(p)),
@@ -659,6 +662,12 @@ impl Command {
             Self::RenameAsset { id, name } => {
                 let name = name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty());
                 p.asset_mut(id).ok_or(ModelError::UnknownAsset(id))?.name = name;
+                Created::Nothing
+            }
+            Self::EditMediaLibrary(edit) => {
+                p.media_library
+                    .apply(edit, &p.assets)
+                    .map_err(ModelError::MediaLibrary)?;
                 Created::Nothing
             }
             Self::SetAssetInOut {

@@ -1679,6 +1679,7 @@ pub enum ModelError {
     EmptyClip,
     UnknownMarker(MarkerId),
     UnknownAsset(AssetId),
+    MediaLibrary(crate::media_library::LibraryError),
     /// No keyframe on the clip's param at that source time.
     UnknownKeyframe(ClipId, Time),
     /// The edit touches a locked track.
@@ -1718,6 +1719,7 @@ impl std::fmt::Display for ModelError {
             Self::EmptyClip => f.write_str("clip source out must be after source in"),
             Self::UnknownMarker(id) => write!(f, "unknown marker {}", id.0),
             Self::UnknownAsset(id) => write!(f, "unknown asset {}", id.0),
+            Self::MediaLibrary(error) => error.fmt(f),
             Self::UnknownKeyframe(id, t) => write!(f, "no keyframe at {} on clip {}", t.0, id.0),
             Self::Locked(id) => write!(f, "track {} is locked", id.0),
             Self::WrongKind(id) => write!(f, "track {} is the wrong kind", id.0),
@@ -2468,6 +2470,11 @@ fn insert_sorted(clips: &mut Vec<Clip>, c: Clip) {
 pub struct Project {
     pub(crate) settings: ProjectSettings,
     pub(crate) assets: Vec<MediaAsset>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::media_library::MediaLibrary::is_empty"
+    )]
+    pub(crate) media_library: crate::media_library::MediaLibrary,
     /// The open sequence: the one the Timeline shows and edits change.
     pub(crate) sequence: Sequence,
     /// The other sequences; opening one swaps it with `sequence`.
@@ -2498,6 +2505,10 @@ impl Project {
 
     pub fn assets(&self) -> &[MediaAsset] {
         &self.assets
+    }
+
+    pub fn media_library(&self) -> &crate::media_library::MediaLibrary {
+        &self.media_library
     }
 
     /// The open sequence.
@@ -2772,6 +2783,7 @@ impl Project {
             self.sequences.retain(|o| o.id != s);
         }
         self.assets.remove(i);
+        self.media_library.forget_asset(id);
         for s in std::iter::once(&mut self.sequence).chain(&mut self.sequences) {
             for t in &mut s.tracks {
                 t.clips.retain(|c| c.asset != id);
