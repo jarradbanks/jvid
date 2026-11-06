@@ -10,6 +10,8 @@ use jvid_render::effect::{self, Shader};
 
 use crate::i18n::{CATALOG, tr};
 
+pub mod drag;
+
 /// An effect file by stem: its parsed shader, or why it doesn't load.
 pub type Entry = Result<Arc<Shader>, String>;
 
@@ -28,6 +30,8 @@ type Stamp = (Option<std::time::SystemTime>, u64);
 pub struct Library {
     /// By file stem: the file's (modified time, length) when last read and what it parsed to.
     files: BTreeMap<String, (Stamp, Entry)>,
+    // ponytail: retain project shaders until exit so queued exports keep their dependencies.
+    project_files: BTreeMap<String, Entry>,
     /// By file stem: the first plain comment line of the file, saying what the effect does.
     descriptions: BTreeMap<String, String>,
     /// Stems of the bundled examples whose file is exactly as shipped, so shown translated.
@@ -59,7 +63,8 @@ impl Library {
         }
         let before = self.files.len();
         self.files.retain(|stem, _| seen.contains_key(stem));
-        self.shipped.retain(|stem| seen.contains_key(stem));
+        self.shipped
+            .retain(|stem| seen.contains_key(stem) || self.project_files.contains_key(stem));
         let mut changed = self.files.len() != before;
         let disabled = std::fs::read_to_string(dir.join(DISABLED)).unwrap_or_default();
         let disabled: BTreeSet<String> = disabled.lines().map(str::to_owned).collect();
@@ -92,6 +97,11 @@ impl Library {
 
     /// Marks `stem` as failing with `error` (e.g. the GPU rejected it) until its file changes.
     fn fail(&mut self, stem: &str, error: String) {
+        if let Some(entry) = self.project_files.get_mut(stem) {
+            *entry = Err(error);
+            self.generation += 1;
+            return;
+        }
         if let Some((_, entry)) = self.files.get_mut(stem) {
             *entry = Err(error);
             self.generation += 1;
@@ -99,7 +109,9 @@ impl Library {
     }
 
     pub fn get(&self, stem: &str) -> Option<&Entry> {
-        self.files.get(stem).map(|(_, e)| e)
+        self.project_files
+            .get(stem)
+            .or_else(|| self.files.get(stem).map(|(_, e)| e))
     }
 
     /// Whether `stem` is a bundled example whose file hasn't been edited.
@@ -115,7 +127,11 @@ impl Library {
     /// The effects whose name, file or description contains `query` (case-insensitive).
     pub fn rows(&self, query: &str) -> Vec<Row> {
         let q = query.trim().to_lowercase();
-        self.entries()
+        // Retained private shaders resolve by exact key for queued renders, but are
+        // not additional user/config catalog choices in Add Effect.
+        self.files
+            .iter()
+            .map(|(stem, (_, entry))| (stem.as_str(), entry))
             .map(|(stem, e)| Row {
                 stem: stem.to_owned(),
                 name: e.as_ref().map_or_else(
@@ -137,7 +153,10 @@ impl Library {
     }
 
     pub fn entries(&self) -> impl Iterator<Item = (&str, &Entry)> {
-        self.files.iter().map(|(k, (_, e))| (k.as_str(), e))
+        self.files
+            .iter()
+            .map(|(k, (_, e))| (k.as_str(), e))
+            .chain(self.project_files.iter().map(|(k, e)| (k.as_str(), e)))
     }
 }
 
@@ -145,6 +164,7 @@ impl Library {
 static LIBRARY: Mutex<(Library, Option<Instant>)> = Mutex::new((
     Library {
         files: BTreeMap::new(),
+        project_files: BTreeMap::new(),
         descriptions: BTreeMap::new(),
         shipped: BTreeSet::new(),
         disabled: BTreeSet::new(),
@@ -164,6 +184,77 @@ pub fn with<R>(f: impl FnOnce(&Library) -> R) -> R {
         }
     }
     f(lib)
+}
+
+/// Validate and install project-local shader paths without writing global config files.
+/// Absolute keys isolate two projects that use different files with the same original stem.
+pub fn load_project(project: &jvid_core::model::Project) -> std::io::Result<()> {
+    use jvid_core::file::{DependencyKind, dependencies};
+    let mut entries = BTreeMap::new();
+    let mut shipped = BTreeSet::new();
+    let mut descriptions = BTreeMap::new();
+    for dependency in dependencies(project).map_err(std::io::Error::other)? {
+        if dependency.kind != DependencyKind::Effect || !dependency.path.is_absolute() {
+            continue;
+        }
+        if entries.contains_key(dependency.path.to_string_lossy().as_ref()) {
+            continue;
+        }
+        let source = std::fs::read_to_string(&dependency.path)?;
+        let key = dependency.path.to_string_lossy().into_owned();
+        if shipped_source(&key).is_some_and(|text| text == source) {
+            shipped.insert(key.clone());
+        }
+        descriptions.insert(key, description(&source));
+        let shader = effect::parse(&source).map_err(std::io::Error::other)?;
+        entries.insert(
+            dependency.path.to_string_lossy().into_owned(),
+            Ok(Arc::new(shader)),
+        );
+    }
+    if !entries.is_empty() {
+        let mut library = LIBRARY.lock().unwrap_or_else(|e| e.into_inner());
+        library.0.shipped.retain(|key| !entries.contains_key(key));
+        library.0.shipped.extend(shipped);
+        library.0.descriptions.extend(descriptions);
+        library.0.project_files.extend(entries);
+        library.0.generation += 1;
+    }
+    Ok(())
+}
+
+/// Load exact absolute preset resources on an explicit user preflight. Parse the whole
+/// batch before extending the cache; retain other projects' queued-export resources.
+pub fn load_exact(keys: &[String]) -> Result<(), (String, String)> {
+    let mut entries = BTreeMap::new();
+    let mut descriptions = BTreeMap::new();
+    let mut shipped = BTreeSet::new();
+    for key in keys {
+        let load = || {
+            let path = Path::new(key);
+            if !path.is_absolute() {
+                return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).to_string());
+            }
+            let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+            let shader = effect::parse(&source)?;
+            Ok::<_, String>((source, Arc::new(shader)))
+        };
+        let (source, shader) = load().map_err(|error| (key.clone(), error))?;
+        if shipped_source(key).is_some_and(|bundled| bundled == source) {
+            shipped.insert(key.clone());
+        }
+        descriptions.insert(key.clone(), description(&source));
+        entries.insert(key.clone(), Ok(shader));
+    }
+    if !entries.is_empty() {
+        let mut library = LIBRARY.lock().unwrap_or_else(|error| error.into_inner());
+        library.0.shipped.retain(|key| !entries.contains_key(key));
+        library.0.shipped.extend(shipped);
+        library.0.descriptions.extend(descriptions);
+        library.0.project_files.extend(entries);
+        library.0.generation += 1;
+    }
+    Ok(())
 }
 
 /// An Effects tab row.
@@ -227,7 +318,7 @@ fn offer_bundled(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// What a timeline drop of an Effects tab row carries: the effect's file stem.
+/// What a timeline or Program drop of an Effects tab row carries: the effect's file stem.
 #[derive(Clone)]
 pub struct Drag(pub String);
 
@@ -245,7 +336,19 @@ pub fn bundled(stem: &str) -> bool {
     shipped_source(stem).is_some()
 }
 
+fn shipped_key(stem: &str) -> &str {
+    if Path::new(stem).is_absolute() {
+        Path::new(stem)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(stem)
+    } else {
+        stem
+    }
+}
+
 fn shipped_source(stem: &str) -> Option<&'static str> {
+    let stem = shipped_key(stem);
     effect::BUNDLED
         .iter()
         .find(|(f, _)| f.strip_suffix(".wgsl") == Some(stem))
@@ -255,6 +358,7 @@ fn shipped_source(stem: &str) -> Option<&'static str> {
 /// A bundled example's `bundled.<stem><part>` text, when its file is as `shipped`. Any other
 /// effect's name and words are its author's, shown as written in the file.
 fn shipped_text(shipped: bool, stem: &str, part: &str) -> Option<&'static str> {
+    let stem = shipped_key(stem);
     shipped
         .then(|| CATALOG.get(&format!("bundled.{stem}{part}")))
         .flatten()
@@ -546,6 +650,29 @@ pub fn fail(stem: &str, error: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_project_shaders_remain_resolvable_without_duplicate_catalog_rows() {
+        let root = tempfile::tempdir().unwrap();
+        let mut library = Library::default();
+        library.scan(root.path());
+        let before: Vec<_> = library.rows("").into_iter().map(|row| row.stem).collect();
+        let shader = library.get("vignette").unwrap().clone();
+        let key = root
+            .path()
+            .join("collected/vignette.wgsl")
+            .to_string_lossy()
+            .into_owned();
+        library.project_files.insert(key.clone(), shader);
+        let after: Vec<_> = library.rows("").into_iter().map(|row| row.stem).collect();
+        assert_eq!(before, after);
+        assert!(library.get(&key).unwrap().is_ok());
+        assert!(
+            library
+                .entries()
+                .any(|(stem, entry)| stem == key && entry.is_ok())
+        );
+    }
 
     #[test]
     fn shipped_examples_show_translated_until_edited() {

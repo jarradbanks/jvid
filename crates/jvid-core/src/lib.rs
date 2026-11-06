@@ -3,6 +3,8 @@
 //! This crate stays free of I/O and UI so it can be tested in isolation and
 //! driven by both the desktop app and the headless CLI.
 
+pub mod annotations;
+pub mod captions;
 pub mod curve;
 pub mod eval;
 pub mod file;
@@ -10,9 +12,12 @@ pub mod framing;
 pub mod hdr;
 pub mod history;
 pub mod keyframe;
+pub mod media_library;
 pub mod model;
+pub mod personal_presets;
 pub mod preset;
 pub mod reframe;
 pub mod settings;
+pub mod settings_transfer;
 pub mod srt;
 pub mod time;

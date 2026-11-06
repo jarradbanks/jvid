@@ -84,6 +84,16 @@ pub struct ProbeInfo {
     /// Bytes on disk when probed; relink uses it to tell same-named files apart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_size: Option<u64>,
+    /// Imported points of interest in source time, retained when the sidecar is unavailable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<SourceMarker>,
+}
+
+/// A point of interest relative to the start of a media file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceMarker {
+    pub time: Time,
+    pub name: String,
 }
 
 impl ProbeInfo {
@@ -211,6 +221,13 @@ pub struct MediaAsset {
     /// with a `color` keyframe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<Text>,
+    /// Generated vector content; absent in legacy projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotation: Option<crate::annotations::Annotation>,
+    /// A dedicated caption made by subtitle import/generation, rather than a reusable title.
+    /// Older projects have no provenance and retain their existing Media entries.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub generated_caption: bool,
     /// A nested sequence instead of a file; `path` is empty. Its clips play that sequence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence: Option<SequenceId>,
@@ -363,7 +380,10 @@ impl Text {
 impl MediaAsset {
     /// Made by jvid (a solid, text or sequence) rather than read from a file.
     pub fn generated(&self) -> bool {
-        self.solid.is_some() || self.text.is_some() || self.sequence.is_some()
+        self.solid.is_some()
+            || self.text.is_some()
+            || self.annotation.is_some()
+            || self.sequence.is_some()
     }
 
     pub fn display_name(&self) -> String {
@@ -1657,6 +1677,7 @@ pub struct Marker {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelError {
+    Caption(crate::captions::Error),
     UnknownTrack(TrackId),
     UnknownClip(ClipId),
     /// The clip would overlap another clip on the same track.
@@ -1665,6 +1686,7 @@ pub enum ModelError {
     EmptyClip,
     UnknownMarker(MarkerId),
     UnknownAsset(AssetId),
+    MediaLibrary(crate::media_library::LibraryError),
     /// No keyframe on the clip's param at that source time.
     UnknownKeyframe(ClipId, Time),
     /// The edit touches a locked track.
@@ -1678,6 +1700,7 @@ pub enum ModelError {
     /// A speed that isn't a positive, finite rate, or a speed key outside
     /// [`crate::keyframe::SPEEDS`].
     BadSpeed,
+    BadAnnotation,
     /// The time is outside the clip.
     OutsideClip(ClipId),
     /// A clip at the cut is too short for a transition there.
@@ -1698,18 +1721,21 @@ pub enum ModelError {
 impl std::fmt::Display for ModelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Caption(error) => error.fmt(f),
             Self::UnknownTrack(id) => write!(f, "unknown track {}", id.0),
             Self::UnknownClip(id) => write!(f, "unknown clip {}", id.0),
             Self::Overlap(id) => write!(f, "clip would overlap clip {}", id.0),
             Self::EmptyClip => f.write_str("clip source out must be after source in"),
             Self::UnknownMarker(id) => write!(f, "unknown marker {}", id.0),
             Self::UnknownAsset(id) => write!(f, "unknown asset {}", id.0),
+            Self::MediaLibrary(error) => error.fmt(f),
             Self::UnknownKeyframe(id, t) => write!(f, "no keyframe at {} on clip {}", t.0, id.0),
             Self::Locked(id) => write!(f, "track {} is locked", id.0),
             Self::WrongKind(id) => write!(f, "track {} is the wrong kind", id.0),
             Self::NoGap(id) => write!(f, "no gap there on track {}", id.0),
             Self::NoRange => f.write_str("no in/out range is marked"),
             Self::BadSpeed => f.write_str("speed must be above 0, and keyed from 1% to 10000%"),
+            Self::BadAnnotation => f.write_str("invalid annotation geometry or style"),
             Self::OutsideClip(id) => write!(f, "time is outside clip {}", id.0),
             Self::TooShort(_) => f.write_str("These clips are too short for a transition."),
             Self::NotTouching(_) => f.write_str("The clips must touch to add a transition."),
@@ -2454,6 +2480,11 @@ fn insert_sorted(clips: &mut Vec<Clip>, c: Clip) {
 pub struct Project {
     pub(crate) settings: ProjectSettings,
     pub(crate) assets: Vec<MediaAsset>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::media_library::MediaLibrary::is_empty"
+    )]
+    pub(crate) media_library: crate::media_library::MediaLibrary,
     /// The open sequence: the one the Timeline shows and edits change.
     pub(crate) sequence: Sequence,
     /// The other sequences; opening one swaps it with `sequence`.
@@ -2484,6 +2515,10 @@ impl Project {
 
     pub fn assets(&self) -> &[MediaAsset] {
         &self.assets
+    }
+
+    pub fn media_library(&self) -> &crate::media_library::MediaLibrary {
+        &self.media_library
     }
 
     /// The open sequence.
@@ -2758,6 +2793,7 @@ impl Project {
             self.sequences.retain(|o| o.id != s);
         }
         self.assets.remove(i);
+        self.media_library.forget_asset(id);
         for s in std::iter::once(&mut self.sequence).chain(&mut self.sequences) {
             for t in &mut s.tracks {
                 t.clips.retain(|c| c.asset != id);
@@ -2778,6 +2814,8 @@ impl Project {
             out_point: None,
             solid: None,
             text: None,
+            annotation: None,
+            generated_caption: false,
             sequence: None,
         });
         id
@@ -3267,7 +3305,10 @@ impl Project {
     /// How far `id`'s `edge`, with its linked clips', can move from `by`: held to the media,
     /// a one-frame minimum length and, without ripple, the neighbouring clips and zero.
     pub fn trim_limit(&self, id: ClipId, edge: Edge, by: Time, ripple: bool) -> Time {
-        let s = &self.sequence;
+        self.trim_limit_in(&self.sequence, id, edge, by, ripple)
+    }
+
+    fn trim_limit_in(&self, s: &Sequence, id: ClipId, edge: Edge, by: Time, ripple: bool) -> Time {
         let min = self.settings.frame_rate.time_floor(1);
         let (mut lo, mut hi) = (Time(i64::MIN / 4), Time(i64::MAX / 4));
         for (t, c) in s.linked(id) {
@@ -3335,28 +3376,38 @@ impl Project {
         Ok(r.time_floor(2 * half))
     }
 
-    /// Moves each clip's edge by its amount, as far as [`trim_limit`](Self::trim_limit)
-    /// allows, its linked clips' with it. Ripple keeps the head in place and shifts the
-    /// later clips on each trimmed track by the change in length.
+    #[cfg(test)]
     pub(crate) fn trim(
         &mut self,
         trims: &[(ClipId, Edge, Time)],
         ripple: bool,
     ) -> Result<(), ModelError> {
-        let mut p = self.clone();
+        self.sequence = self.trimmed_sequence(trims, ripple)?;
+        Ok(())
+    }
+
+    /// Moves each clip's edge by its amount, as far as [`trim_limit`](Self::trim_limit)
+    /// allows, its linked clips' with it. Ripple keeps the head in place and shifts the
+    /// later clips on each trimmed track by the change in length.
+    pub(crate) fn trimmed_sequence(
+        &self,
+        trims: &[(ClipId, Edge, Time)],
+        ripple: bool,
+    ) -> Result<Sequence, ModelError> {
+        let mut sequence = self.sequence.clone();
         let mut done = Vec::new();
         for &(id, edge, by) in trims {
-            p.sequence.clip(id).ok_or(ModelError::UnknownClip(id))?;
+            sequence.clip(id).ok_or(ModelError::UnknownClip(id))?;
             if done.contains(&id) {
                 continue;
             }
-            let by = p.trim_limit(id, edge, by, ripple);
-            let group = p.sequence.linked(id).into_iter();
+            let by = self.trim_limit_in(&sequence, id, edge, by, ripple);
+            let group = sequence.linked(id).into_iter();
             let group: Vec<_> = group.map(|(t, c)| (t, c.id, c.end())).collect();
             let mut later = Vec::new();
             for (t, cid, end) in group {
                 done.push(cid);
-                let s = &mut p.sequence;
+                let s = &mut sequence;
                 let ti = s.index(t)?;
                 for c in &mut s.tracks[ti].clips {
                     if c.id == cid {
@@ -3379,10 +3430,9 @@ impl Project {
                 Edge::Head => Time(0) - by,
                 Edge::Tail => by,
             };
-            p.sequence.shift_synced(later, shift)?;
+            sequence.shift_synced(later, shift)?;
         }
-        *self = p;
-        Ok(())
+        Ok(sequence)
     }
 }
 

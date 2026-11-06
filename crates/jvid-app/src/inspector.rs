@@ -504,9 +504,54 @@ fn put(
 fn set_field(clips: &[&Clip], name: &str, i: usize, f: impl Fn(f64) -> f64, t: Time) -> Command {
     rewrite(clips, |c, x, keys| {
         let old = value(c, name, t);
-        let v = with_field(old, i, f(fields(old)[i]));
+        let n = f(fields(old)[i]);
+        if name == "scale" && !n.is_finite() {
+            return;
+        }
+        let v = with_field(old, i, n);
         put(c, x, keys, name, t, v);
     })
+}
+
+/// Changes one scale axis using each clip's own signed ratio. A drag keeps its starting
+/// basis through zero, so crossing zero does not lose the proportions or the flip.
+fn set_scale_field(
+    clips: &[&Clip],
+    i: usize,
+    f: impl Fn(f64) -> f64,
+    t: Time,
+    basis: &[(ClipId, [f64; 2])],
+) -> Command {
+    rewrite(clips, |c, x, keys| {
+        let old = c.transform_at(t).scale;
+        let reference = basis
+            .iter()
+            .find(|(id, _)| *id == c.id)
+            .map_or(old, |b| b.1);
+        let v = scaled_axes(old, reference, i, f(old[i]));
+        if v != old {
+            put(c, x, keys, "scale", t, Value::Vec2(v));
+        }
+    })
+}
+
+fn scaled_axes(old: [f64; 2], basis: [f64; 2], i: usize, v: f64) -> [f64; 2] {
+    let mut next = old;
+    next[i] = v;
+    let other = 1 - i;
+    if basis[i] != 0.0 {
+        next[other] = (basis[other] / basis[i]) * v;
+    } else if basis[other] == 0.0 {
+        // A completely collapsed scale has no ratio: start uniformly. If only the edited
+        // axis is zero, leave the other unchanged rather than inventing a proportion.
+        next[other] = v;
+    }
+    // Typed NaN/infinity and ratios that overflow must never enter the project/keyframes.
+    if next.iter().all(|v| v.is_finite()) {
+        next
+    } else {
+        old
+    }
 }
 
 /// Sets each of `names` to its value in `x` on every clip, keying animated ones at `t`. Once
@@ -632,6 +677,8 @@ pub enum Pane {
 
 /// What the Inspector edits: the selected clips by track kind, and the asset they share.
 pub struct Selection<'a> {
+    project: &'a Project,
+    selected: Vec<ClipId>,
     clips: Vec<&'a Clip>,
     audio: Vec<&'a Clip>,
     /// Only when every selected video clip shows it, so its editors edit them all.
@@ -673,6 +720,12 @@ impl<'a> Selection<'a> {
             .map(|c| crate::masks::fitted(project, c))
             .collect();
         Self {
+            project,
+            selected: {
+                let mut ids: Vec<_> = selected.iter().copied().collect();
+                ids.sort();
+                ids
+            },
             clips,
             audio,
             shared,
@@ -751,15 +804,47 @@ pub fn show(
     pane: Option<Pane>,
     t: Time,
 ) -> (Option<Edit>, Option<Time>) {
+    let Some(pane) = pane else {
+        suite_ui::empty_state::EmptyState::new(
+            icon::POINTER,
+            tr!("empty.select_clip"),
+            tr!("inspector.empty"),
+        )
+        .show(ui);
+        return (None, None);
+    };
+    if !sel.panes().contains(&pane) {
+        return (None, None);
+    }
     // A gutter keeps the row buttons clear of the scroll bar.
     let gutter = ui.spacing().scroll.allocated_width() + space::S4;
     ui.set_max_width(ui.available_width() - gutter);
-    let Some(pane) = pane else {
-        ui.label(egui::RichText::new(tr!("inspector.empty")).color(color::ink_3()));
-        return (None, None);
-    };
     let (clips, audio, shared, same) = (&sel.clips, &sel.audio, sel.shared, sel.same);
-    let (mut edit, mut seek) = (None, None);
+    let mut edit = if sel.selected.is_empty() {
+        None
+    } else {
+        crate::settings_transfer::show(ui, sel.project, &sel.selected, t)
+            .map(|command| (command, None))
+    };
+    let preset_category = match pane {
+        Pane::Text => Some(jvid_core::settings_transfer::Category::Text),
+        Pane::Audio => Some(jvid_core::settings_transfer::Category::Audio),
+        Pane::Effects => Some(jvid_core::settings_transfer::Category::Effects),
+        Pane::Video => None,
+    };
+    if let Some(category) = preset_category
+        && let Some(command) =
+            crate::personal_presets::show(ui, sel.project, &sel.selected, t, category)
+    {
+        edit = Some((command, None));
+    }
+    let mut seek = None;
+    if pane == Pane::Video
+        && let Some(base) = shared.and_then(|a| a.annotation.as_ref())
+        && let Some(annotation_edit) = crate::annotations::inspector(ui, clips, base, t)
+    {
+        edit = Some(annotation_edit);
+    }
     let mut index = 0u64;
     for (id, props) in SECTIONS {
         let (clips, here) = if id == "audio" {
@@ -2840,6 +2925,27 @@ fn prop_rows<R>(
     lines: usize,
     vals: impl FnOnce(&mut Ui) -> R,
 ) -> (R, Clicks) {
+    prop_rows_link(ui, label, tools, lines, false, vals)
+}
+
+/// Link mode is an Inspector interaction setting, like the chosen pane and open sections:
+/// shared across selections for this session, defaulting to linked on launch. It is not
+/// saved in the project or undo history; old project transforms and keys stay unchanged.
+fn scale_linked(ctx: &egui::Context) -> bool {
+    ctx.data(|d| {
+        d.get_temp(egui::Id::new("inspector scale linked"))
+            .unwrap_or(true)
+    })
+}
+
+fn prop_rows_link<R>(
+    ui: &mut Ui,
+    label: &str,
+    tools: Tools,
+    lines: usize,
+    link_scale: bool,
+    vals: impl FnOnce(&mut Ui) -> R,
+) -> (R, Clicks) {
     let n = lines as f32;
     let h = n * size::CONTROL + (n - 1.0) * space::S4;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
@@ -2851,7 +2957,38 @@ fn prop_rows<R>(
     row.spacing_mut().item_spacing = vec2(space::S4, space::S4);
     row.allocate_ui_with_layout(vec2(size::INSPECTOR_LABEL, size::CONTROL), layout, |ui| {
         ui.set_min_width(size::INSPECTOR_LABEL);
-        ui.add(egui::Label::new(egui::RichText::new(label).color(color::ink_2())).truncate())
+        let label = egui::Label::new(egui::RichText::new(label).color(color::ink_2())).truncate();
+        if link_scale {
+            let width = size::INSPECTOR_LABEL - size::SMALL_CONTROL - space::S4;
+            ui.allocate_ui_with_layout(vec2(width, size::CONTROL), layout, |ui| {
+                ui.set_width(width);
+                ui.add(label);
+            });
+            let mut linked = scale_linked(ui.ctx());
+            let name = tr!("inspector.link_scale");
+            let r = ui.add(Button::icon(icon::LINK, name).small().on(linked));
+            let hint = if linked {
+                tr!("inspector.scale_linked_hint")
+            } else {
+                tr!("inspector.scale_unlinked_hint")
+            };
+            let mut r = r.on_hover_text(hint);
+            if r.clicked() {
+                linked = !linked;
+                ui.data_mut(|d| d.insert_temp(egui::Id::new("inspector scale linked"), linked));
+                r.mark_changed();
+            }
+            r.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    ui.is_enabled(),
+                    linked,
+                    name,
+                )
+            });
+        } else {
+            ui.add(label);
+        }
     });
     let w = rect.right() - TOOLS - space::S4 - row.cursor().left();
     let inner = row
@@ -2927,7 +3064,10 @@ fn row(
         1
     };
     let per = n.div_ceil(lines);
-    let (_, c) = prop_rows(ui, p.label(), tools, lines, |ui| {
+    // Clicking the toggle can also commit a focused text field. Commit that value in
+    // the mode in which it was entered; the new mode applies to the next edit.
+    let linked_scale = p.name == "scale" && scale_linked(ui.ctx());
+    let (_, c) = prop_rows_link(ui, p.label(), tools, lines, p.name == "scale", |ui| {
         // Each drag is its own undo step, even of the field the last one dragged.
         let drags = ui.id().with("inspector drags");
         let mut put = |ui: &Ui, r: &egui::Response, cmd: Command, slot: usize| {
@@ -2961,15 +3101,39 @@ fn row(
                 f = f.prefix(field());
             }
             let r = ui.add(f);
+            let basis_id = r.id.with("scale drag basis");
+            if p.name == "scale" && r.drag_started() {
+                let basis: Vec<_> = clips
+                    .iter()
+                    .map(|c| (c.id, c.transform_at(t).scale))
+                    .collect();
+                ui.data_mut(|d| d.insert_temp(basis_id, basis));
+            }
             if r.changed() {
                 let v = shown / p.display;
                 // A drag of a mixed field moves each clip by the delta, not to the first's value.
-                let cmd = if mixed && r.dragged() {
-                    set_field(clips, name, j, |o| (o + v - first).clamp(lo, hi), t)
+                let field_value = |o: f64| {
+                    if mixed && r.dragged() {
+                        (o + v - first).clamp(lo, hi)
+                    } else {
+                        v
+                    }
+                };
+                let cmd = if linked_scale {
+                    let basis = if r.dragged() {
+                        ui.data(|d| d.get_temp::<Vec<(ClipId, [f64; 2])>>(basis_id))
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    set_scale_field(clips, j, field_value, t, &basis)
                 } else {
-                    set_field(clips, name, j, |_| v, t)
+                    set_field(clips, name, j, field_value, t)
                 };
                 put(ui, &r, cmd, i);
+            }
+            if !r.dragged() {
+                ui.data_mut(|d| d.remove::<Vec<(ClipId, [f64; 2])>>(basis_id));
             }
         }
         if let Some((a, b)) = slider {
@@ -3217,10 +3381,14 @@ fn font_button(ui: &mut Ui, shown: &str, missing: bool, open: bool) -> egui::Res
 fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     use egui::Key;
     let id = egui::Id::new("inspector font");
-    let missing = !family.is_empty() && !list.contains(family);
-    let shown = match family.as_str() {
-        "" => tr!("inspector.sans_serif").to_owned(),
-        f => f.to_owned(),
+    let collected =
+        !jvid_render::text::project_font_sources(std::slice::from_ref(family)).is_empty();
+    let missing = !family.is_empty() && !list.contains(family) && !collected;
+    let shown = jvid_render::text::display_family(family);
+    let shown = if shown.is_empty() {
+        tr!("inspector.sans_serif").to_owned()
+    } else {
+        shown
     };
     let st = ui.data(|d| d.get_temp::<FontSearch>(id));
     let r = font_button(ui, &shown, missing, st.is_some());
@@ -3382,9 +3550,11 @@ fn text_summary(s: &Text, id: &str) -> String {
     };
     match id {
         "text" => {
-            let family = match s.family.as_str() {
-                "" => tr!("inspector.sans_serif"),
-                f => f,
+            let family = jvid_render::text::display_family(&s.family);
+            let family = if family.is_empty() {
+                tr!("inspector.sans_serif").to_owned()
+            } else {
+                family
             };
             format!("{family} · {:.0}", s.size)
         }
@@ -3477,7 +3647,7 @@ fn pair(ui: &mut Ui, v: &mut [f32; 2], (lo, hi): (f64, f64), decimals: usize, la
 }
 
 /// The fields of Text tab row `id` editing `s`; true once one changed it.
-fn text_fields(ui: &mut Ui, s: &mut Text, id: &str, label: &str) -> bool {
+pub(crate) fn text_fields(ui: &mut Ui, s: &mut Text, id: &str, label: &str) -> bool {
     use jvid_core::model::Align;
     let mut num = |v: &mut f32, range, slider| {
         let mut x = f64::from(*v);
@@ -4167,6 +4337,110 @@ mod tests {
     }
 
     #[test]
+    fn linked_scale_edits_each_axis_using_each_clips_own_ratio() {
+        let mut clips = [clip(1, 0), clip(2, 0)];
+        clips[0].transform.scale = [2.0, 3.0];
+        clips[1].transform.scale = [-4.0, 1.0];
+        // Typing sets the edited axis of every clip, retaining each clip's proportions.
+        apply(&mut clips, |c| set_scale_field(c, 0, |_| 4.0, Time(0), &[]));
+        assert_eq!(clips[0].transform.scale, [4.0, 6.0]);
+        assert_eq!(clips[1].transform.scale, [4.0, -1.0]);
+        // Mixed scrubs retain the inspector's delta behavior on the edited axis.
+        apply(&mut clips, |c| {
+            set_scale_field(c, 1, |v| v + 1.0, Time(0), &[])
+        });
+        assert!((clips[0].transform.scale[0] - 14.0 / 3.0).abs() < 1e-12);
+        assert_eq!(clips[0].transform.scale[1], 7.0);
+        assert_eq!(clips[1].transform.scale, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn linked_scale_zero_negative_and_nonfinite_values_are_deliberate() {
+        assert_eq!(scaled_axes([2.0, -3.0], [2.0, -3.0], 0, -4.0), [-4.0, 6.0]);
+        assert_eq!(scaled_axes([0.0, 3.0], [0.0, 3.0], 0, 2.0), [2.0, 3.0]);
+        assert_eq!(scaled_axes([2.0, 0.0], [2.0, 0.0], 0, 4.0), [4.0, 0.0]);
+        assert_eq!(scaled_axes([2.0, 0.0], [2.0, 0.0], 1, -3.0), [2.0, -3.0]);
+        assert_eq!(scaled_axes([0.0; 2], [0.0; 2], 1, -2.0), [-2.0; 2]);
+        for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(scaled_axes([2.0, 3.0], [2.0, 3.0], 0, v), [2.0, 3.0]);
+        }
+        assert_eq!(
+            scaled_axes([1e-300, 1e300], [1e-300, 1e300], 0, 2.0),
+            [1e-300, 1e300]
+        );
+        // The drag's basis survives its zero frame and preserves the signed ratio.
+        assert_eq!(scaled_axes([0.0; 2], [2.0, -3.0], 0, -2.0), [-2.0, 3.0]);
+    }
+
+    #[test]
+    fn linked_scale_keys_evaluated_ratios_at_each_clips_source_time_and_resets() {
+        let mut clips = [clip(1, 0), clip(2, 50)];
+        clips[0].transform.scale = [2.0, 3.0];
+        clips[1].transform.scale = [-4.0, 2.0];
+        apply(&mut clips, |c| toggle_animate(c, &["scale"], Time(50)));
+        apply(&mut clips, |c| {
+            set_scale_field(c, 1, |_| 6.0, Time(75), &[])
+        });
+        assert_eq!(
+            clips[0].transform.scale,
+            [2.0, 3.0],
+            "static basis unchanged"
+        );
+        assert_eq!(clips[0].transform_at(Time(75)).scale, [4.0, 6.0]);
+        assert_eq!(clips[1].transform_at(Time(75)).scale, [-12.0, 6.0]);
+        assert_eq!(clips[0].keyframes["scale"][1].time, Time(85));
+        assert_eq!(clips[1].keyframes["scale"][1].time, Time(35));
+        assert_eq!(clips[0].transform_at(Time(60)).scale, [2.8, 4.2]);
+        apply(&mut clips, |c| reset_prop(c, scale()));
+        assert!(
+            clips
+                .iter()
+                .all(|c| c.transform.scale == [1.0; 2] && c.keyframes.is_empty())
+        );
+    }
+
+    #[test]
+    fn linked_scale_upgrades_legacy_scalar_keys_without_changing_their_values() {
+        let mut clips = [clip(1, 0)];
+        clips[0].keyframes.insert(
+            "scale".into(),
+            vec![
+                Keyframe {
+                    time: Time(10),
+                    value: Value::Scalar(2.0),
+                    easing: Easing::Linear,
+                },
+                Keyframe {
+                    time: Time(110),
+                    value: Value::Scalar(4.0),
+                    easing: Easing::Linear,
+                },
+            ],
+        );
+        let before = clips.clone();
+        apply(&mut clips, |c| {
+            set_scale_field(c, 1, |_| f64::NAN, Time(50), &[])
+        });
+        assert_eq!(
+            clips, before,
+            "invalid linked edits leave legacy keys unchanged"
+        );
+        apply(&mut clips, |c| {
+            set_field(c, "scale", 0, |_| f64::INFINITY, Time(50))
+        });
+        assert_eq!(
+            clips, before,
+            "invalid independent edits leave legacy keys unchanged"
+        );
+        apply(&mut clips, |c| {
+            set_scale_field(c, 1, |_| 6.0, Time(50), &[])
+        });
+        assert_eq!(clips[0].keyframes["scale"][0].value, Value::Vec2([2.0; 2]));
+        assert_eq!(clips[0].keyframes["scale"][2].value, Value::Vec2([4.0; 2]));
+        assert_eq!(clips[0].transform_at(Time(50)).scale, [6.0; 2]);
+    }
+
+    #[test]
     fn mixed_drags_move_each_clip_by_the_delta() {
         let mut clips = [clip(1, 0), clip(2, 0)];
         clips[1].transform.opacity = 0.5;
@@ -4188,6 +4462,10 @@ mod tests {
 
     /// Like [`harness_on`], with the one clip on a track of `kind`.
     fn harness_of(kind: TrackKind, pane: Pane) -> egui_kittest::Harness<'static, History> {
+        inspector_harness(history_of(kind), pane, true)
+    }
+
+    fn history_of(kind: TrackKind) -> History {
         use jvid_core::model::{NewClip, ProbeInfo};
         use jvid_core::time::FLICKS_PER_SECOND as S;
         let mut h = History::new(Project::default());
@@ -4216,29 +4494,351 @@ mod tests {
                 link: None,
             },
         });
-        let id = h.project().sequence().tracks()[0].clips()[0].id;
+        h
+    }
+
+    /// Accessibility/interaction tests can run without a rendering device.
+    fn inspector_harness(
+        h: History,
+        pane: Pane,
+        render: bool,
+    ) -> egui_kittest::Harness<'static, History> {
+        use jvid_core::time::FLICKS_PER_SECOND as S;
+        let selected = h.project().sequence().tracks()[0]
+            .clips()
+            .iter()
+            .map(|c| c.id)
+            .collect();
         let mut fresh = true;
-        let mut harness = egui_kittest::Harness::builder()
-            .with_size([340.0, 420.0])
-            .wgpu()
-            .build_ui_state(
-                move |ui, h: &mut History| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
-                        return;
-                    }
-                    ui.painter().rect_filled(ui.max_rect(), 0.0, color::panel());
-                    let sel = Selection::new(h.project(), &HashSet::from([id]), None);
-                    let (edit, _) = show(ui, &sel, Some(pane), Time(S));
-                    match edit {
-                        Some((c, Some(k))) => h.apply_coalesced(k, c).unwrap(),
-                        Some((c, None)) => h.apply(c).unwrap(),
-                        None => jvid_core::history::Created::Nothing,
-                    };
-                },
-                h,
-            );
+        let builder = egui_kittest::Harness::builder().with_size([340.0, 420.0]);
+        let builder = if render { builder.wgpu() } else { builder };
+        let mut harness = builder.build_ui_state(
+            move |ui, h: &mut History| {
+                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                ui.painter().rect_filled(ui.max_rect(), 0.0, color::panel());
+                let sel = Selection::new(h.project(), &selected, None);
+                let (edit, _) = show(ui, &sel, Some(pane), Time(S));
+                match edit {
+                    Some((c, Some(k))) => h.apply_coalesced(k, c).unwrap(),
+                    Some((c, None)) => h.apply(c).unwrap(),
+                    None => jvid_core::history::Created::Nothing,
+                };
+            },
+            h,
+        );
         harness.run();
         harness
+    }
+
+    fn scale_harness(initial: [f64; 2]) -> egui_kittest::Harness<'static, History> {
+        let mut h = history_of(TrackKind::Video);
+        let c = h.project().sequence().tracks()[0].clips()[0].clone();
+        let x = Transform {
+            scale: initial,
+            ..c.transform.clone()
+        };
+        h.apply(set_props(&[&c], &["scale"], &x, Time(0))).unwrap();
+        inspector_harness(h, Pane::Video, false)
+    }
+
+    fn shown_scale(h: &egui_kittest::Harness<'_, History>) -> [f64; 2] {
+        use jvid_core::time::FLICKS_PER_SECOND as S;
+        h.state().project().sequence().tracks()[0].clips()[0]
+            .transform_at(Time(S))
+            .scale
+    }
+
+    fn type_scale(h: &mut egui_kittest::Harness<'_, History>, axis: usize, text: &str) {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        h.get_all_by_role(Role::SpinButton)
+            .nth(2 + axis)
+            .unwrap()
+            .focus();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.run();
+        h.event(egui::Event::Text(text.into()));
+        h.run();
+        h.key_press(egui::Key::Enter);
+        h.run();
+    }
+
+    #[test]
+    fn linked_scale_toggle_has_state_and_fits_beside_wrapped_fields_at_240px() {
+        use egui::accesskit::{Role, Toggled};
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let mut h = scale_harness([2.0, 3.0]);
+        // The app's 12px insets, compared with the harness's 8px margins.
+        h.set_size(vec2(240.0 - 24.0 + 16.0, 1600.0));
+        h.run();
+        let toggle = h.get_by_role_and_label(Role::CheckBox, "Link Scale Axes");
+        assert_eq!(toggle.accesskit_node().toggled(), Some(Toggled::True));
+        let link = toggle.rect();
+        assert!(link.width() >= size::SMALL_CONTROL && link.height() >= size::SMALL_CONTROL);
+        assert_eq!(
+            h.get_by_role_and_label(Role::Label, "Scale").rect().left(),
+            h.get_by_role_and_label(Role::Label, "Position")
+                .rect()
+                .left(),
+        );
+        let axes: Vec<_> = h
+            .get_all_by_role(Role::SpinButton)
+            .skip(2)
+            .take(2)
+            .map(|n| n.rect())
+            .collect();
+        let key = h.get_by_label("Animate Scale").rect();
+        assert_eq!(axes[0].left(), axes[1].left());
+        assert!(axes[0].bottom() <= axes[1].top());
+        for field in &axes {
+            assert!(link.right() + space::S4 <= field.left() + 0.5);
+            assert!(field.width() >= 76.0, "{field:?}");
+            assert!(field.right() + space::S4 <= key.left());
+            assert!(field.right() < 240.0 - 12.0);
+        }
+        // Keyboard toggle changes only the mode, preserving transforms/history.
+        let before = h.state().project().clone();
+        toggle.focus();
+        h.key_press(egui::Key::Space);
+        h.run();
+        assert_eq!(h.state().project(), &before);
+        assert_eq!(
+            h.get_by_role_and_label(Role::CheckBox, "Link Scale Axes")
+                .accesskit_node()
+                .toggled(),
+            Some(Toggled::False)
+        );
+        h.get_by_label("Link Scale Axes").click();
+        h.run();
+        assert_eq!(h.state().project(), &before, "enabling link must not jump");
+        assert_eq!(h.get_by_label("Link Scale Axes").rect(), link);
+    }
+
+    #[test]
+    fn linked_scale_240px_snapshot_shows_both_modes() {
+        use egui_kittest::kittest::Queryable;
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = inspector_harness(history_of(TrackKind::Video), Pane::Video, true);
+        h.set_size(vec2(240.0 - 24.0 + 16.0, 420.0));
+        h.run();
+        h.snapshot("inspector_scale_linked_240");
+        h.get_by_label("Link Scale Axes").click();
+        h.run();
+        h.event(egui::Event::PointerGone);
+        h.run();
+        h.snapshot("inspector_scale_unlinked_240");
+    }
+
+    #[test]
+    fn linked_scale_keyboard_edits_and_undo_redo_preserve_nonuniform_ratios() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = scale_harness([2.0, 3.0]);
+        type_scale(&mut h, 0, "400");
+        assert_eq!(shown_scale(&h), [4.0, 6.0]);
+        assert!(h.state_mut().undo());
+        assert_eq!(shown_scale(&h), [2.0, 3.0]);
+        assert!(h.state_mut().redo());
+        assert_eq!(shown_scale(&h), [4.0, 6.0]);
+        h.run();
+        type_scale(&mut h, 1, "300");
+        assert_eq!(shown_scale(&h), [2.0, 3.0]);
+        h.get_by_label("Link Scale Axes").click();
+        h.run();
+        type_scale(&mut h, 0, "500");
+        assert_eq!(shown_scale(&h), [5.0, 3.0]);
+        type_scale(&mut h, 1, "200");
+        assert_eq!(shown_scale(&h), [5.0, 2.0]);
+        h.get_by_label("Link Scale Axes").click();
+        h.run();
+        assert_eq!(shown_scale(&h), [5.0, 2.0]);
+        type_scale(&mut h, 1, "400");
+        assert_eq!(shown_scale(&h), [10.0, 4.0]);
+        assert!(h.state_mut().undo());
+        assert_eq!(shown_scale(&h), [5.0, 2.0]);
+        assert!(h.state_mut().undo());
+        assert_eq!(
+            shown_scale(&h),
+            [5.0, 3.0],
+            "mode changes add no undo steps"
+        );
+    }
+
+    #[test]
+    fn linked_scale_scrub_through_zero_is_one_step_and_each_drag_is_separate() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        let mut h = scale_harness([0.1, -0.2]);
+        let at = h
+            .get_all_by_role(Role::SpinButton)
+            .nth(2)
+            .unwrap()
+            .rect()
+            .center();
+        h.hover_at(at);
+        h.run();
+        h.drag_at(at);
+        h.run();
+        h.hover_at(at - vec2(10.0, 0.0));
+        h.run();
+        assert_eq!(shown_scale(&h), [0.0; 2]);
+        h.hover_at(at - vec2(20.0, 0.0));
+        h.run();
+        h.drop_at(at - vec2(20.0, 0.0));
+        h.run();
+        assert_eq!(shown_scale(&h), [-0.1, 0.2]);
+        assert!(h.state_mut().undo());
+        assert_eq!(shown_scale(&h), [0.1, -0.2]);
+        assert!(h.state_mut().redo());
+        assert_eq!(shown_scale(&h), [-0.1, 0.2]);
+        h.run();
+        h.hover_at(at);
+        h.run();
+        h.drag_at(at);
+        h.run();
+        h.hover_at(at - vec2(10.0, 0.0));
+        h.run();
+        h.drop_at(at - vec2(10.0, 0.0));
+        h.run();
+        assert_eq!(shown_scale(&h), [-0.2, 0.4]);
+        assert!(h.state_mut().undo());
+        assert_eq!(shown_scale(&h), [-0.1, 0.2]);
+    }
+
+    #[test]
+    fn linked_scale_animated_typing_and_reset_undo_redo_restore_both_axes_and_keys() {
+        use egui_kittest::kittest::Queryable;
+        use jvid_core::time::FLICKS_PER_SECOND as S;
+        let mut h = scale_harness([2.0, 3.0]);
+        h.get_by_label("Animate Scale").click();
+        h.run();
+        let c = h.state().project().sequence().tracks()[0].clips()[0].clone();
+        let x = Transform {
+            scale: [4.0, 6.0],
+            ..c.transform.clone()
+        };
+        h.state_mut()
+            .apply(set_props(&[&c], &["scale"], &x, Time(3 * S)))
+            .unwrap();
+        h.run();
+        let before = h.state().project().clone();
+        type_scale(&mut h, 1, "450");
+        assert_eq!(shown_scale(&h), [3.0, 4.5]);
+        let c = &h.state().project().sequence().tracks()[0].clips()[0];
+        assert_eq!(c.transform.scale, [2.0, 3.0]);
+        assert_eq!(c.keyframes["scale"].len(), 2);
+        assert_eq!(c.transform_at(Time(2 * S)).scale, [3.5, 5.25]);
+        let edited = h.state().project().clone();
+        assert!(h.state_mut().undo());
+        assert_eq!(h.state().project(), &before);
+        assert!(h.state_mut().redo());
+        assert_eq!(h.state().project(), &edited);
+        h.run();
+        h.get_by_label("Reset").click();
+        h.run();
+        assert_eq!(shown_scale(&h), [1.0; 2]);
+        assert!(
+            h.state().project().sequence().tracks()[0].clips()[0]
+                .keyframes
+                .is_empty()
+        );
+        assert!(h.state_mut().undo());
+        assert_eq!(h.state().project(), &edited);
+        assert!(h.state_mut().redo());
+        assert_eq!(shown_scale(&h), [1.0; 2]);
+    }
+
+    #[test]
+    fn linked_scale_mixed_selection_types_and_scrubs_in_one_history_step() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        use jvid_core::model::NewClip;
+        use jvid_core::time::FLICKS_PER_SECOND as S;
+        let mut history = history_of(TrackKind::Video);
+        let track = &history.project().sequence().tracks()[0];
+        history
+            .apply(Command::AddClip {
+                track: track.id,
+                clip: NewClip {
+                    asset: track.clips()[0].asset,
+                    source_in: Time(0),
+                    source_out: Time(10 * S),
+                    start: Time(10 * S),
+                    link: None,
+                },
+            })
+            .unwrap();
+        let clips = history.project().sequence().tracks()[0].clips().to_vec();
+        for (c, scale) in clips.iter().zip([[2.0, 3.0], [4.0, 2.0]]) {
+            let x = Transform {
+                scale,
+                ..c.transform.clone()
+            };
+            history
+                .apply(set_props(&[c], &["scale"], &x, Time(S)))
+                .unwrap();
+        }
+        let before = history.project().clone();
+        let mut h = inspector_harness(history, Pane::Video, false);
+        let scales = |h: &egui_kittest::Harness<'_, History>| -> Vec<_> {
+            h.state().project().sequence().tracks()[0]
+                .clips()
+                .iter()
+                .map(|c| c.transform.scale)
+                .collect()
+        };
+        type_scale(&mut h, 0, "600");
+        assert_eq!(scales(&h), [[6.0, 9.0], [6.0, 3.0]]);
+        assert!(h.state_mut().undo());
+        assert_eq!(h.state().project(), &before);
+        h.run();
+        let at = h
+            .get_all_by_role(Role::SpinButton)
+            .nth(2)
+            .unwrap()
+            .rect()
+            .center();
+        h.hover_at(at);
+        h.run();
+        h.drag_at(at);
+        h.run();
+        for dx in [10.0, 20.0] {
+            h.hover_at(at + vec2(dx, 0.0));
+            h.run();
+        }
+        h.drop_at(at + vec2(20.0, 0.0));
+        h.run();
+        for (actual, expected) in scales(&h).iter().zip([[2.2, 3.3], [4.2, 2.1]]) {
+            for i in 0..2 {
+                assert!((actual[i] - expected[i]).abs() < 1e-12);
+            }
+        }
+        assert!(h.state_mut().undo());
+        assert_eq!(h.state().project(), &before);
+        assert!(h.state_mut().redo());
+        assert!((scales(&h)[0][0] - 2.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn linked_scale_nonfinite_typing_is_a_noop_in_either_mode() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = scale_harness([2.0, 3.0]);
+        let before = h.state().project().clone();
+        for text in ["NaN", "inf", "-inf"] {
+            type_scale(&mut h, 0, text);
+            assert_eq!(h.state().project(), &before);
+        }
+        h.get_by_label("Link Scale Axes").click();
+        h.run();
+        type_scale(&mut h, 1, "NaN");
+        assert_eq!(h.state().project(), &before);
+        assert!(h.state_mut().undo());
+        assert_eq!(shown_scale(&h), [1.0; 2], "invalid edits add no undo steps");
     }
 
     fn asset(text: bool) -> MediaAsset {
@@ -4251,6 +4851,8 @@ mod tests {
             out_point: None,
             solid: None,
             text: text.then(Text::default),
+            annotation: None,
+            generated_caption: false,
             sequence: None,
         }
     }
@@ -4497,6 +5099,8 @@ mod tests {
         let (v, a, footage, text) = (clip(1, 0), clip(2, 0), asset(false), asset(true));
         let sel = |clips: Vec<&Clip>, audio: Vec<&Clip>, shared| {
             Selection {
+                project: &Project::default(),
+                selected: vec![],
                 clips,
                 audio,
                 shared,
@@ -4544,6 +5148,8 @@ mod tests {
         };
         let label = |clips: &[&Clip]| {
             Selection {
+                project: &Project::default(),
+                selected: vec![],
                 clips: clips.to_vec(),
                 audio: vec![],
                 shared: None,
@@ -4841,6 +5447,8 @@ mod tests {
         h.state_mut()
             .apply(set_props(&[&c], &["scale"], &x, Time(0)))
             .unwrap();
+        h.run();
+        h.get_by_label("Link Scale Axes").click();
         h.run();
         let axes: Vec<_> = h
             .get_all_by_role(Role::SpinButton)

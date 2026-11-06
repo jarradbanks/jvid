@@ -18,10 +18,49 @@ mod audit_b09;
 mod audit_b11;
 mod docking;
 mod subtitle_export;
+mod timeline_recording;
+mod timeline_tools;
 mod updates;
+mod workflow_integration;
 
 const SIZES: [[f32; 2]; 2] = [[1280.0, 720.0], [1920.0, 1080.0]];
 const SCALES: [f32; 2] = [1.0, 1.5];
+
+#[test]
+fn startup_project_opens_its_timeline_and_takes_precedence_over_untitled_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("試合 highlights.jvid");
+    let mut history = History::new(Project::default());
+    history
+        .apply(Command::AddSolid {
+            name: "Event".into(),
+            color: [1.0; 4],
+        })
+        .unwrap();
+    let asset = history.project().assets()[0].id;
+    let placement = history
+        .project()
+        .placement(asset, Time(0), false, None, false)
+        .unwrap();
+    history.apply(Command::Place(placement)).unwrap();
+    crate::project_file::save(history.project(), &path).unwrap();
+    let mut app = App::restore(None);
+    app.open_startup(None);
+    assert!(app.on_welcome);
+    app.prompts.push(Prompt::Restore {
+        path: None,
+        auto: dir.path().join("untitled.jvid"),
+    });
+    app.open_startup(Some(path.clone()));
+    assert_eq!(app.path, Some(path));
+    assert!(!app.on_welcome);
+    assert!(app.prompts.is_empty());
+    assert_eq!(app.history.project(), history.project());
+    assert_eq!(
+        app.history.project().sequence().tracks()[0].clips().len(),
+        1
+    );
+}
 
 fn configs() -> impl Iterator<Item = ([f32; 2], f32)> {
     SIZES
@@ -239,7 +278,7 @@ fn hairlines_are_one_physical_pixel() {
         for &(t, r) in &s.panels {
             let down = s.column(r);
             let ctx = format!("{}: {t:?} down {down:?}", s.ctx);
-            let lines = if matches!(t, Tab::Media | Tab::Preview | Tab::Timeline) {
+            let lines = if matches!(t, Tab::Media | Tab::Preview) {
                 4
             } else {
                 3
@@ -459,20 +498,22 @@ fn hover_remove_button_uses_the_remove_flow() {
     }
     let mut results = egui_kittest::SnapshotResults::new();
     let mut h = bin_harness();
-    h.hover_at(egui::pos2(90.0, 160.0));
+    let tile = h.get_by_label("clutch_round_3.mkv").rect();
+    let hover = tile.center();
+    h.hover_at(hover);
     settle_hover(&mut h);
     assert_eq!(h.state().bin.filmstrip_test_state(), (0, 1, true));
     if gpu() {
         results.add(h.try_snapshot("bin_grid_hover"));
     }
     // A later pointer event can retry the failed source; its completion also goes idle.
-    h.hover_at(egui::pos2(91.0, 160.0));
+    h.hover_at(hover + egui::vec2(1.0, 0.0));
     settle_hover(&mut h);
     assert_eq!(h.state().bin.filmstrip_test_state(), (0, 2, true));
     h.state_mut().bin.list = true;
     h.run();
-    // clutch_round_3.mkv, used by two clips: the dock strip adds one header above the list.
-    h.hover_at(egui::pos2(100.0, 164.0 + size::HEADER));
+    let row = h.get_by_label("clutch_round_3.mkv").rect();
+    h.hover_at(row.center());
     settle_hover(&mut h);
     if gpu() {
         results.add(h.try_snapshot("bin_list_hover"));
@@ -482,7 +523,8 @@ fn hover_remove_button_uses_the_remove_flow() {
     assert_eq!(h.state().bin.confirm_remove, Some(AssetId(2)));
     h.get_by_label("Cancel").click();
     // arena_01.mkv is unused: removed at once.
-    h.hover_at(egui::pos2(100.0, 132.0 + size::HEADER));
+    let row = h.get_by_label("arena_01.mkv").rect();
+    h.hover_at(row.center());
     settle_hover(&mut h);
     h.get_by_label("Remove from Project").click();
     h.run();
@@ -948,6 +990,52 @@ fn dropping_media_on_welcome_matches_the_first_clip() {
 }
 
 #[test]
+fn media_opened_at_startup_lands_on_the_timeline() {
+    let mut h = plain_harness();
+    h.state_mut().importer = Importer::new(jvid_jobs::Pool::new(1), |p| {
+        Ok(jvid_core::model::ProbeInfo {
+            duration: Time(jvid_core::time::FLICKS_PER_SECOND * 42),
+            audio_streams: 2,
+            sample_rate: Some(48_000),
+            ..fake_probe(p)?
+        })
+    });
+    let clip = PathBuf::from("/m/screen-1440p60.mp4");
+    h.state_mut().open_startup(Some(clip.clone()));
+    assert!(!h.state().on_welcome && h.state().path.is_none());
+    while h.state().importer.is_busy() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    let project = h.state().history.project();
+    assert_eq!(project.assets()[0].path, clip);
+    assert_eq!(project.settings().width, 2560, "Match Source fits the clip");
+    let placed: usize = project
+        .sequence()
+        .tracks()
+        .iter()
+        .map(|t| t.clips().len())
+        .sum();
+    assert!(placed >= 2, "video and audio on the timeline, got {placed}");
+    // Later imports only go to the media bin.
+    h.state_mut().import([PathBuf::from("/m/phone.mp4")]);
+    while h.state().importer.is_busy() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.step();
+    }
+    let after: usize = h
+        .state()
+        .history
+        .project()
+        .sequence()
+        .tracks()
+        .iter()
+        .map(|t| t.clips().len())
+        .sum();
+    assert_eq!(after, placed);
+}
+
+#[test]
 fn new_project_uses_the_chosen_preset() {
     let mut h = plain_harness();
     assert_eq!(h.state().welcome.preset, 0, "Match Source is the default");
@@ -1218,10 +1306,51 @@ fn edit_menu_opens_preferences_and_the_project_menu_keeps_project_settings() {
 
     h.get_by_label("Edit").click();
     h.run();
+    h.get_by_label("Preferences…").scroll_to_me();
+    h.run();
+    assert!(
+        h.ctx
+            .content_rect()
+            .contains_rect(h.get_by_label("Preferences…").rect())
+    );
     h.get_by_label("Preferences…").click();
     h.run();
     assert!(h.state().preferences.is_open());
     assert!(h.query_by_label("Language").is_some());
+}
+
+#[test]
+#[ignore = "changes global locale; run this test in isolation"]
+fn translated_edit_menu_scrolls_to_preferences_at_minimum_size_and_high_dpi() {
+    struct Restore(&'static str);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            suite_ui::i18n::set_language(self.0);
+        }
+    }
+    let _restore = Restore(suite_ui::i18n::language());
+    for language in ["de", "pt-BR"] {
+        suite_ui::i18n::set_language(language);
+        for (size, scale) in [([960.0, 540.0], 1.0), ([640.0, 400.0], 1.5)] {
+            let mut h = builder(size, scale).build_eframe(|cc| App::new(cc, &Default::default()));
+            h.run();
+            h.state_mut().on_welcome = false;
+            h.run();
+            h.get_by_label(crate::i18n::tr!("menu.edit")).click();
+            h.run();
+            let label = crate::i18n::tr!("menu.preferences");
+            h.get_by_label(label).scroll_to_me();
+            h.run();
+            let viewport = h.ctx.content_rect();
+            assert!(
+                viewport.contains_rect(h.get_by_label(label).rect()),
+                "{language} @{scale}x"
+            );
+            h.get_by_label(label).click();
+            h.run();
+            assert!(h.state().preferences.is_open(), "{language} @{scale}x");
+        }
+    }
 }
 
 #[test]
@@ -1258,9 +1387,10 @@ fn about_opens_the_third_party_notices() {
         h.query_by_label_contains("jvid Third-Party Notices")
             .is_some()
     );
-    // A move-and-click in one frame misses here, so hover first as a real pointer does.
+    let settled = h.get_by_label("OK").rect();
     h.get_by_label("OK").hover();
     h.run();
+    assert_eq!(h.get_by_label("OK").rect(), settled);
     h.get_by_label("OK").click();
     h.run();
     assert!(h.state().prompts.is_empty());
@@ -1336,7 +1466,7 @@ fn dragging_a_title_preset_onto_v2_places_a_text_clip() {
 }
 
 #[test]
-fn clicking_a_preset_shows_its_asset_in_the_media_tab() {
+fn clicking_a_preset_keeps_the_browser_and_selects_its_timeline_clip() {
     if !gpu() {
         return;
     }
@@ -1348,7 +1478,8 @@ fn clicking_a_preset_shows_its_asset_in_the_media_tab() {
     h.run();
     let id = h.state().history.project().assets().last().map(|a| a.id);
     assert!(id.is_some());
-    assert_eq!((h.state().bin.tab, h.state().bin.selected), (0, id));
+    assert_eq!((h.state().bin.tab, h.state().bin.selected), (2, id));
+    assert_eq!(h.state().timeline.selected().len(), 1);
 }
 
 #[test]
@@ -1437,7 +1568,15 @@ fn effect_rows_show_each_effect_and_hover_only_fills() {
     let apply: Vec<_> = h.get_all_by_label("Apply to Selected Clips").collect();
     assert_eq!(apply.len(), names.len());
     assert!(apply.iter().all(|n| n.accesskit_node().is_disabled()));
-    assert_eq!(h.get_all_by_label("More").count(), names.len());
+    let media = h.state().dock.find_tab(&Tab::Media).unwrap().node_path();
+    let media = h.state().dock.leaf(media).unwrap().rect;
+    // Preview and the vertical timeline rail have their own overflow menus.
+    assert_eq!(
+        h.get_all_by_label("More")
+            .filter(|node| media.contains_rect(node.rect()))
+            .count(),
+        names.len()
+    );
     h.get_by_label("Vignette").hover();
     h.run();
     assert_eq!(nodes(&h), before, "hover moved or added something");
@@ -1509,8 +1648,39 @@ fn title_harness() -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Po
 fn title_harness_sized(
     size: [f32; 2],
 ) -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
+    title_harness_with_text(
+        size,
+        jvid_core::model::Text {
+            box_color: [0.0, 0.0, 0.0, 1.0],
+            ..Default::default()
+        },
+    )
+}
+
+fn snapshot_font_family() -> &'static str {
+    const FAMILY: &str = "jvid-collection-ui-snapshot-inter";
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../suite-ui/assets");
+    let sources: Vec<_> = [
+        ("Inter-Regular.ttf", "Inter"),
+        ("Inter-SemiBold.ttf", "Inter SemiBold"),
+    ]
+    .into_iter()
+    .map(|(name, original_family)| jvid_render::text::FontSource {
+        family: FAMILY.into(),
+        original_family: original_family.into(),
+        path: directory.join(name),
+    })
+    .collect();
+    jvid_render::text::load_project_fonts(&sources).unwrap();
+    FAMILY
+}
+
+fn title_harness_with_text(
+    size: [f32; 2],
+    text: jvid_core::model::Text,
+) -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
     use jvid_core::history::Created;
-    use jvid_core::model::{NewClip, Text, TrackKind};
+    use jvid_core::model::{NewClip, TrackKind};
     use jvid_core::time::{FLICKS_PER_SECOND, Time};
     // Steps short enough for two clicks to make a double-click.
     let mut h = builder(size, 1.0)
@@ -1520,11 +1690,6 @@ fn title_harness_sized(
     h.state_mut().on_welcome = false;
     h.run();
     let history = &mut h.state_mut().history;
-    // A box makes the hit independent of the installed fonts.
-    let text = Text {
-        box_color: [0.0, 0.0, 0.0, 1.0],
-        ..Text::default()
-    };
     let Ok(Created::Asset(asset)) = history.apply(Command::AddText {
         name: "Title".into(),
         text,
@@ -1551,6 +1716,22 @@ fn title_harness_sized(
     let app = h.state_mut();
     app.timeline
         .select_clip(app.history.project().sequence(), id);
+    // A repaint can settle before the background media jobs deliver their wakeup.
+    // Wait for the actual title frame and its filmstrip before capturing the fixture.
+    for _ in 0..500 {
+        h.step();
+        if h.state().preview.has_program_frame()
+            && h.state().preview.program_caught_up()
+            && h.state().timeline.jobs_idle()
+            && h.try_run().is_ok()
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(h.state().preview.has_program_frame());
+    assert!(h.state().preview.program_caught_up());
+    assert!(h.state().timeline.jobs_idle());
     h.run();
     let shot = Shot::take(&mut h, "title".into());
     let r = shot.panel(Tab::Preview);
@@ -1847,6 +2028,32 @@ fn preferences_fit_the_minimum_window() {
 }
 
 #[test]
+fn preferences_general_scrolls_preset_controls_without_moving_done() {
+    let mut h = plain_harness();
+    h.state_mut().on_welcome = false;
+    h.state_mut().preferences.open(Vec::new(), None);
+    h.run();
+    let done = h.get_by_label(tr!("settings.done")).rect();
+    for label in [
+        tr!("personal_presets.open_folder"),
+        tr!("settings.reduce_motion"),
+    ] {
+        h.get_by_label(label).scroll_to_me();
+        h.run();
+        let control = h.get_by_label(label).rect();
+        assert!(h.ctx.content_rect().contains_rect(control));
+        assert!(
+            control.bottom() < done.top(),
+            "{label} overlaps footer: {control:?}"
+        );
+        assert_eq!(h.get_by_label(tr!("settings.done")).rect(), done);
+    }
+    h.get_by_label(tr!("settings.done")).click();
+    h.run();
+    assert!(!h.state().preferences.is_open());
+}
+
+#[test]
 fn editor_in_light_and_high_contrast() {
     if !gpu() {
         return;
@@ -1854,7 +2061,15 @@ fn editor_in_light_and_high_contrast() {
     let mut results = egui_kittest::SnapshotResults::new();
     for theme in ["light", "high-contrast"] {
         // A selected clip fills the inspector, so every panel shows its controls.
-        let (mut h, _, _) = title_harness();
+        let (mut h, _, _) = title_harness_with_text(
+            [1280.0, 720.0],
+            jvid_core::model::Text {
+                family: snapshot_font_family().into(),
+                weight: 600,
+                box_color: [0.0, 0.0, 0.0, 1.0],
+                ..Default::default()
+            },
+        );
         h.state_mut().theme = suite_ui::themes::LiveTheme::new(theme);
         h.run();
         let want = suite_ui::themes::BUILT_IN

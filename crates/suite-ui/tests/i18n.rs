@@ -187,7 +187,7 @@ fn polish_russian_and_their_neighbours_have_glyphs() {
 }
 
 #[test]
-fn japanese_loads_its_face_only_while_active() {
+fn japanese_chrome_uses_its_face_only_while_active_content_keeps_all_scripts() {
     let _en = switch("en");
     let ctx = egui::Context::default();
     suite_ui::theme::install(&ctx);
@@ -199,7 +199,14 @@ fn japanese_loads_its_face_only_while_active() {
                 .textures_delta
                 .clear();
         }
-        ctx.fonts(|f| f.definitions().font_data.contains_key(&ja))
+        ctx.fonts(|f| {
+            let definitions = f.definitions();
+            let content = &definitions.families[&suite_ui::theme::content().family];
+            for (locale, _) in suite_ui::theme::CJK_FACES {
+                assert!(content.contains(&suite_ui::theme::cjk_face(locale)));
+            }
+            definitions.families[&egui::FontFamily::Proportional].contains(&ja)
+        })
     };
     assert!(!loaded(&ctx));
     i18n::set_language("ja");

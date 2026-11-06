@@ -2,7 +2,10 @@
 //! size of the frame, so the compositor's fit fills the frame and transforms, crop and
 //! opacity apply as to any clip.
 
+use std::collections::BTreeMap;
+use std::io;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Weight};
@@ -20,6 +23,9 @@ struct Masks {
 }
 
 struct Fonts {
+    // ponytail: retain loaded project faces until exit for concurrent and queued exports.
+    project_sources: BTreeMap<String, Vec<FontSource>>,
+    project_content: BTreeMap<String, Vec<FontContent>>,
     system: FontSystem,
     swash: SwashCache,
     /// Recent rasters, newest last.
@@ -48,13 +54,298 @@ fn sources(faces: &[&'static [u8]]) -> impl Iterator<Item = cosmic_text::fontdb:
 fn fonts() -> &'static Mutex<Fonts> {
     static FONTS: OnceLock<Mutex<Fonts>> = OnceLock::new();
     FONTS.get_or_init(|| {
-        Mutex::new(Fonts {
-            system: FontSystem::new_with_fonts(sources(FACES.get().map_or(&[], |f| f))),
+        Mutex::new(Fonts::new(FontSystem::new_with_fonts(sources(
+            FACES.get().map_or(&[], |f| f),
+        ))))
+    })
+}
+
+/// A font file whose owner explicitly allowed project bundling. `family` is a
+/// content-derived private alias, so an installed face cannot override collected bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontSource {
+    pub family: String,
+    pub original_family: String,
+    pub path: PathBuf,
+}
+
+/// The immutable bytes and selected faces behind a private alias. Paths may move;
+/// content, face order and provenance cannot change while queued exports use it.
+#[derive(PartialEq)]
+struct FontContent {
+    original_family: String,
+    bytes: Arc<Vec<u8>>,
+    indices: Vec<u32>,
+}
+
+fn read_font_faces(
+    source: &FontSource,
+) -> io::Result<(Arc<Vec<u8>>, Vec<cosmic_text::fontdb::FaceInfo>)> {
+    let bytes = Arc::new(std::fs::read(&source.path)?);
+    let mut database = cosmic_text::fontdb::Database::new();
+    let ids = database.load_font_source(cosmic_text::fontdb::Source::Binary(bytes.clone()));
+    if ids.is_empty() {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+    let faces = ids
+        .into_iter()
+        .filter_map(|id| database.face(id))
+        .filter(|face| {
+            source.original_family.is_empty()
+                || face
+                    .families
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(&source.original_family))
+        })
+        .cloned()
+        .collect();
+    Ok((bytes, faces))
+}
+
+fn alias_faces(
+    database: &mut cosmic_text::fontdb::Database,
+    faces: Vec<cosmic_text::fontdb::FaceInfo>,
+    alias: &str,
+) {
+    for mut face in faces {
+        for (name, _) in &mut face.families {
+            *name = alias.to_owned();
+        }
+        database.push_face_info(face);
+    }
+}
+
+impl Fonts {
+    fn new(system: FontSystem) -> Self {
+        Self {
+            project_sources: BTreeMap::new(),
+            project_content: BTreeMap::new(),
+            system,
             swash: SwashCache::new(),
             recent: Vec::new(),
             masks: Vec::new(),
-        })
+        }
+    }
+}
+
+/// Proves that cold reopening with only permitted faces preserves actual shaping.
+/// Unsupported fallback/face unions remain explicitly unresolved.
+pub fn project_font_coverage(
+    sources: &[FontSource],
+    texts: &[Text],
+    size: (u32, u32),
+) -> io::Result<bool> {
+    let mut fonts = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    project_font_coverage_with(&mut fonts, sources, texts, size)
+}
+
+fn project_font_coverage_with(
+    fonts: &mut Fonts,
+    sources: &[FontSource],
+    texts: &[Text],
+    size: (u32, u32),
+) -> io::Result<bool> {
+    let alias = "jvid-collection-cold-coverage";
+    let mut database = cosmic_text::fontdb::Database::new();
+    for source in sources {
+        let (_, faces) = read_font_faces(source)?;
+        // A valid permitted fallback file may have a different family from the UI's
+        // requested family. Report coverage, rather than a generic invalid-file error.
+        if faces.is_empty() {
+            return Ok(false);
+        }
+        alias_faces(&mut database, faces, alias);
+    }
+    let mut packaged = Fonts::new(FontSystem::new_with_locale_and_db(
+        fonts.system.locale().to_owned(),
+        database,
+    ));
+    for text in texts {
+        if text.content.trim().is_empty() {
+            continue;
+        }
+        let (original, wrap, offset) = layout(fonts, text, size);
+        let collected = Text {
+            family: alias.into(),
+            ..text.clone()
+        };
+        let (cold, cold_wrap, cold_offset) = layout(&mut packaged, &collected, size);
+        let Some(primary) = packaged.system.db().query(&cosmic_text::fontdb::Query {
+            families: &[Family::Name(alias)],
+            weight: Weight(text.weight),
+            ..Default::default()
+        }) else {
+            return Ok(false);
+        };
+        // cosmic-text tries installed script/common fallbacks before secondary alias
+        // faces, and requires an exact weight for its named-family first choice. Those
+        // paths cannot be made portable with the current single-family representation.
+        if packaged
+            .system
+            .db()
+            .face(primary)
+            .is_none_or(|face| face.weight.0 != text.weight)
+            || cold
+                .layout_runs()
+                .flat_map(|run| run.glyphs)
+                .any(|glyph| glyph.font_id != primary)
+        {
+            return Ok(false);
+        }
+        if wrap != cold_wrap
+            || offset != cold_offset
+            || !same_shaping(&fonts.system, &original, &packaged.system, &cold)
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn same_shaping(original: &FontSystem, a: &Buffer, packaged: &FontSystem, b: &Buffer) -> bool {
+    let left: Vec<_> = a.layout_runs().collect();
+    let right: Vec<_> = b.layout_runs().collect();
+    if left.is_empty() || left.len() != right.len() || left.iter().all(|run| run.glyphs.is_empty())
+    {
+        return false;
+    }
+    let mut faces = BTreeMap::new();
+    left.iter().zip(&right).all(|(a, b)| {
+        (
+            a.line_i,
+            a.rtl,
+            [a.line_y, a.line_top, a.line_height, a.line_w],
+        ) == (
+            b.line_i,
+            b.rtl,
+            [b.line_y, b.line_top, b.line_height, b.line_w],
+        ) && a.glyphs.len() == b.glyphs.len()
+            && a.glyphs.iter().zip(b.glyphs).all(|(a, b)| {
+                a.glyph_id != 0
+                    && (
+                        a.start,
+                        a.end,
+                        a.glyph_id,
+                        a.font_size,
+                        a.font_weight,
+                        a.line_height_opt,
+                        a.level,
+                        [a.x, a.y, a.w, a.x_offset, a.y_offset],
+                        a.cache_key_flags,
+                    ) == (
+                        b.start,
+                        b.end,
+                        b.glyph_id,
+                        b.font_size,
+                        b.font_weight,
+                        b.line_height_opt,
+                        b.level,
+                        [b.x, b.y, b.w, b.x_offset, b.y_offset],
+                        b.cache_key_flags,
+                    )
+                    && *faces.entry((a.font_id, b.font_id)).or_insert_with(|| {
+                        original
+                            .db()
+                            .with_face_data(a.font_id, |data, index| {
+                                packaged
+                                    .db()
+                                    .with_face_data(b.font_id, |cold_data, cold_index| {
+                                        index == cold_index && data == cold_data
+                                    })
+                                    .unwrap_or(false)
+                            })
+                            .unwrap_or(false)
+                    })
+            })
     })
+}
+
+/// Validates every alias before changing renderer state; retains loaded resources for
+/// queued exports. Moving identical bytes is allowed; reusing an alias for different
+/// bytes, selected faces or provenance is rejected even with a warm cache.
+pub fn load_project_fonts(sources: &[FontSource]) -> io::Result<()> {
+    let mut parsed = Vec::new();
+    let mut identities: BTreeMap<String, Vec<FontContent>> = BTreeMap::new();
+    for source in sources {
+        if !source.family.starts_with("jvid-collection-") {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+        let (bytes, faces) = read_font_faces(source)?;
+        if faces.is_empty() {
+            return Err(io::Error::from(io::ErrorKind::InvalidData));
+        }
+        identities
+            .entry(source.family.clone())
+            .or_default()
+            .push(FontContent {
+                original_family: source.original_family.clone(),
+                bytes,
+                indices: faces.iter().map(|face| face.index).collect(),
+            });
+        parsed.push((source.clone(), faces));
+    }
+    if parsed.is_empty() {
+        return Ok(());
+    }
+    let mut fonts = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    for (alias, identity) in &identities {
+        if fonts
+            .project_content
+            .get(alias)
+            .is_some_and(|loaded| loaded != identity)
+        {
+            return Err(io::Error::from(io::ErrorKind::InvalidData));
+        }
+    }
+    let mut changed = false;
+    let mut current: BTreeMap<String, Vec<FontSource>> = BTreeMap::new();
+    for (source, faces) in parsed {
+        if !fonts.project_sources.contains_key(&source.family) {
+            alias_faces(fonts.system.db_mut(), faces, &source.family);
+            changed = true;
+        }
+        current
+            .entry(source.family.clone())
+            .or_default()
+            .push(source);
+    }
+    fonts.project_sources.extend(current);
+    fonts.project_content.extend(identities);
+    if changed {
+        fonts.recent.clear();
+        fonts.masks.clear();
+        fonts.swash = SwashCache::new();
+    }
+    Ok(())
+}
+
+/// Display a collected family's original name while retaining its private render key.
+pub fn display_family(family: &str) -> String {
+    if !family.starts_with("jvid-collection-") {
+        return family.to_owned();
+    }
+    let fonts = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    fonts
+        .project_sources
+        .get(family)
+        .and_then(|s| s.first())
+        .map_or_else(|| family.to_owned(), |s| s.original_family.clone())
+}
+
+/// Permission/provenance for private aliases used in a project, retained by Save As.
+pub fn project_font_sources(families: &[String]) -> Vec<FontSource> {
+    if !families.iter().any(|f| f.starts_with("jvid-collection-")) {
+        return Vec::new();
+    }
+    let fonts = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    families
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|family| fonts.project_sources.get(family))
+        .flatten()
+        .cloned()
+        .collect()
 }
 
 /// Loads the system fonts, which takes seconds on some systems; call it off the UI thread
@@ -74,6 +365,7 @@ pub fn families() -> &'static [String] {
             .db()
             .faces()
             .filter_map(|face| face.families.first().map(|(n, _)| n.clone()))
+            .filter(|name| !name.starts_with("jvid-collection-"))
             .collect();
         v.sort_by_key(|n| n.to_lowercase());
         v.dedup();
@@ -400,6 +692,347 @@ pub fn texture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PRIMARY: &str = "Jvid Fixture Primary";
+    const FALLBACK: &str = "Jvid Fixture Fallback";
+
+    fn fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fonts")
+            .join(name)
+    }
+
+    fn fixture_fonts() -> Fonts {
+        let mut db = cosmic_text::fontdb::Database::new();
+        db.load_font_file(fixture("primary.ttf")).unwrap();
+        db.load_font_file(fixture("fallback.ttf")).unwrap();
+        Fonts::new(FontSystem::new_with_locale_and_db("en-US".into(), db))
+    }
+
+    fn fixture_source(name: &str, original: &str) -> FontSource {
+        FontSource {
+            family: PRIMARY.into(),
+            original_family: original.into(),
+            path: fixture(name),
+        }
+    }
+
+    #[test]
+    fn portable_primary_preserves_cold_pixels_with_different_installed_fonts() {
+        let mut original = fixture_fonts();
+        let text = Text {
+            content: "AB\n\nA".into(),
+            family: PRIMARY.into(),
+            weight: 400,
+            ..Text::default()
+        };
+        let source = fixture_source("primary.ttf", PRIMARY);
+        assert!(
+            project_font_coverage_with(
+                &mut original,
+                std::slice::from_ref(&source),
+                std::slice::from_ref(&text),
+                (640, 360)
+            )
+            .unwrap()
+        );
+        let expected = masks(&mut original, &text, (640, 360));
+        assert!(
+            expected.fill.iter().any(|alpha| *alpha > 0),
+            "fixture must rasterize visible glyphs"
+        );
+        let mut db = cosmic_text::fontdb::Database::new();
+        // A cold renderer has a conflicting installed primary face and no original fallback.
+        db.load_font_file(fixture("alternate.ttf")).unwrap();
+        let alias = "jvid-collection-cold-pixels-fixture";
+        let (_, faces) = read_font_faces(&source).unwrap();
+        alias_faces(&mut db, faces, alias);
+        let mut cold = Fonts::new(FontSystem::new_with_locale_and_db("ja-JP".into(), db));
+        let actual = masks(
+            &mut cold,
+            &Text {
+                family: alias.into(),
+                ..text
+            },
+            (640, 360),
+        );
+        assert_eq!(expected.fill, actual.fill);
+        assert_eq!(expected.bounds, actual.bounds);
+    }
+
+    #[test]
+    fn portable_ttc_coverage_rejects_changed_face_order() {
+        let mut db = cosmic_text::fontdb::Database::new();
+        db.load_font_file(fixture("faces.ttc")).unwrap();
+        let mut original = Fonts::new(FontSystem::new_with_locale_and_db("en-US".into(), db));
+        let text = Text {
+            content: "AΩ".into(),
+            family: PRIMARY.into(),
+            weight: 400,
+            ..Text::default()
+        };
+        let sources = [
+            fixture_source("faces.ttc", FALLBACK),
+            fixture_source("faces.ttc", PRIMARY),
+        ];
+        let (_, primary) = read_font_faces(&sources[1]).unwrap();
+        let (_, fallback) = read_font_faces(&sources[0]).unwrap();
+        assert_eq!(primary[0].index, 0);
+        assert_eq!(fallback[0].index, 1);
+        assert!(!project_font_coverage_with(&mut original, &sources, &[text], (320, 180)).unwrap());
+    }
+
+    #[test]
+    fn warm_alias_rejects_face_order_and_provenance_before_any_mutation() {
+        let alias = "jvid-collection-warm-order-fixture";
+        let primary = FontSource {
+            family: alias.into(),
+            ..fixture_source("primary.ttf", PRIMARY)
+        };
+        let fallback = FontSource {
+            family: alias.into(),
+            ..fixture_source("fallback.ttf", FALLBACK)
+        };
+        load_project_fonts(&[primary.clone(), fallback.clone()]).unwrap();
+        assert!(load_project_fonts(&[fallback.clone(), primary.clone()]).is_err());
+        let new_alias = "jvid-collection-rejected-batch-fixture";
+        let unrelated = FontSource {
+            family: new_alias.into(),
+            ..primary.clone()
+        };
+        let relabeled = FontSource {
+            original_family: String::new(),
+            ..primary.clone()
+        };
+        assert!(load_project_fonts(&[unrelated, relabeled, fallback.clone()]).is_err());
+        assert!(project_font_sources(&[new_alias.into()]).is_empty());
+        assert_eq!(
+            project_font_sources(&[alias.into()]),
+            vec![primary, fallback]
+        );
+    }
+
+    #[test]
+    fn portable_coverage_rejects_installed_fallback_preemption() {
+        let mut original = fixture_fonts();
+        let text = Text {
+            content: "AΩ".into(),
+            family: PRIMARY.into(),
+            weight: 400,
+            ..Text::default()
+        };
+        let sources = [
+            fixture_source("primary.ttf", PRIMARY),
+            fixture_source("fallback.ttf", FALLBACK),
+        ];
+        let alias = "jvid-collection-installed-fallback-fixture";
+        let cold = |installed| {
+            let mut db = cosmic_text::fontdb::Database::new();
+            for source in &sources {
+                let (_, faces) = read_font_faces(source).unwrap();
+                alias_faces(&mut db, faces, alias);
+            }
+            if installed {
+                let mut environment = cosmic_text::fontdb::Database::new();
+                environment
+                    .load_font_file(fixture("environment.ttf"))
+                    .unwrap();
+                for mut face in environment.faces().cloned() {
+                    let language = face.families[0].1;
+                    face.families =
+                        cosmic_text::Fallback::common_fallback(&cosmic_text::PlatformFallback)
+                            .iter()
+                            .map(|name| ((*name).to_owned(), language))
+                            .collect();
+                    db.push_face_info(face);
+                }
+            }
+            Fonts::new(FontSystem::new_with_locale_and_db("en-US".into(), db))
+        };
+        let collected = Text {
+            family: alias.into(),
+            ..text.clone()
+        };
+        let mut isolated = cold(false);
+        let mut changed_environment = cold(true);
+        let expected = masks(&mut original, &text, (320, 180));
+        assert!(
+            expected.fill.iter().any(|alpha| *alpha > 0),
+            "fixture must rasterize visible glyphs"
+        );
+        assert_eq!(
+            expected.fill,
+            masks(&mut isolated, &collected, (320, 180)).fill
+        );
+        assert!(
+            expected.fill != masks(&mut changed_environment, &collected, (320, 180)).fill,
+            "different installed fallback must change visible glyph pixels"
+        );
+        assert!(!project_font_coverage_with(&mut original, &sources, &[text], (320, 180)).unwrap());
+    }
+
+    #[test]
+    fn portable_coverage_rejects_weight_that_requires_system_fallback() {
+        let mut original = fixture_fonts();
+        let text = Text {
+            content: "AB".into(),
+            family: PRIMARY.into(),
+            weight: 500,
+            ..Text::default()
+        };
+        assert!(
+            !project_font_coverage_with(
+                &mut original,
+                &[fixture_source("primary.ttf", PRIMARY)],
+                &[text],
+                (320, 180)
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn portable_coverage_rejects_primary_changes_from_alias_face_union() {
+        let mut original = fixture_fonts();
+        let text = Text {
+            content: "AΩ".into(),
+            family: PRIMARY.into(),
+            weight: 400,
+            ..Text::default()
+        };
+        // Both actual faces are present, but fallback-first aliasing changes Latin A.
+        let sources = [
+            fixture_source("fallback.ttf", FALLBACK),
+            fixture_source("primary.ttf", PRIMARY),
+        ];
+        assert!(!project_font_coverage_with(&mut original, &sources, &[text], (320, 180)).unwrap());
+    }
+
+    #[test]
+    fn portable_coverage_reports_requested_family_on_fallback_file_as_unresolved() {
+        let mut original = fixture_fonts();
+        let text = Text {
+            content: "AΩ".into(),
+            family: PRIMARY.into(),
+            weight: 400,
+            ..Text::default()
+        };
+        let sources = [
+            fixture_source("primary.ttf", PRIMARY),
+            fixture_source("fallback.ttf", PRIMARY),
+        ];
+        assert!(!project_font_coverage_with(&mut original, &sources, &[text], (320, 180)).unwrap());
+    }
+
+    #[test]
+    fn warm_alias_rejects_changed_font_bytes_and_preserves_queued_resources() {
+        let alias = "jvid-collection-warm-fixture";
+        let path = std::env::temp_dir().join(format!("jvid-warm-font-{}.ttf", std::process::id()));
+        std::fs::copy(fixture("primary.ttf"), &path).unwrap();
+        let first = FontSource {
+            family: alias.into(),
+            original_family: PRIMARY.into(),
+            path: path.clone(),
+        };
+        load_project_fonts(std::slice::from_ref(&first)).unwrap();
+        let text = Text {
+            content: "AB".into(),
+            family: alias.into(),
+            weight: 400,
+            ..Text::default()
+        };
+        let before = rasterize(&text, None, (320, 180));
+        assert!(
+            before.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0),
+            "queued resource must contain visible glyphs"
+        );
+        std::fs::copy(fixture("alternate.ttf"), &path).unwrap();
+        assert!(load_project_fonts(std::slice::from_ref(&first)).is_err());
+        assert_eq!(project_font_sources(&[alias.into()]), vec![first]);
+        assert_eq!(before, rasterize(&text, None, (320, 180)));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn warm_alias_accepts_identical_relocated_bytes_after_original_disappears() {
+        let root = std::env::temp_dir().join(format!("jvid-font-relocate-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let old = root.join("original.ttf");
+        let moved = root.join("moved.ttf");
+        std::fs::copy(fixture("primary.ttf"), &old).unwrap();
+        let alias = "jvid-collection-relocation-fixture";
+        let source = FontSource {
+            family: alias.into(),
+            original_family: PRIMARY.into(),
+            path: old.clone(),
+        };
+        load_project_fonts(std::slice::from_ref(&source)).unwrap();
+        let text = Text {
+            content: "AB".into(),
+            family: alias.into(),
+            weight: 400,
+            ..Text::default()
+        };
+        let before = rasterize(&text, None, (320, 180));
+        assert!(
+            before.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0),
+            "queued resource must contain visible glyphs"
+        );
+        std::fs::rename(old, &moved).unwrap();
+        let relocated = FontSource {
+            path: moved,
+            ..source
+        };
+        load_project_fonts(std::slice::from_ref(&relocated)).unwrap();
+        assert_eq!(project_font_sources(&[alias.into()]), vec![relocated]);
+        assert!(Arc::ptr_eq(&before, &rasterize(&text, None, (320, 180))));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn collected_font_alias_wins_over_same_named_installed_face() {
+        use cosmic_text::fontdb::{Family, Query, Source};
+        let regular = include_bytes!("../../suite-ui/assets/Inter-Regular.ttf").to_vec();
+        let medium = include_bytes!("../../suite-ui/assets/Inter-Medium.ttf").to_vec();
+        let path =
+            std::env::temp_dir().join(format!("jvid-collected-font-{}.ttf", std::process::id()));
+        std::fs::write(&path, &regular).unwrap();
+        {
+            let mut fonts = fonts().lock().unwrap();
+            // Simulate an installed face using the same family and queried weight.
+            let mut database = cosmic_text::fontdb::Database::new();
+            let ids = database.load_font_source(Source::Binary(Arc::new(medium)));
+            for id in ids {
+                let mut face = database.face(id).unwrap().clone();
+                face.weight = cosmic_text::fontdb::Weight::NORMAL;
+                fonts.system.db_mut().push_face_info(face);
+            }
+        }
+        let alias = "jvid-collection-isolation-test";
+        load_project_fonts(&[FontSource {
+            family: alias.into(),
+            original_family: "Inter".into(),
+            path: path.clone(),
+        }])
+        .unwrap();
+        let fonts = fonts().lock().unwrap();
+        let id = fonts
+            .system
+            .db()
+            .query(&Query {
+                families: &[Family::Name(alias)],
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(
+            fonts
+                .system
+                .db()
+                .with_face_data(id, |bytes, _| bytes == regular)
+                .unwrap()
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 
     /// Shapes `s` with the system fonts; `None` when no installed font covers it.
     fn shape(s: &str) -> Option<(bool, Vec<u16>)> {

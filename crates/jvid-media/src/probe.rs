@@ -60,7 +60,7 @@ pub fn probe(path: &Path) -> Result<ProbeInfo, ProbeError> {
         }
         _ => Time(0),
     };
-    Ok(ProbeInfo {
+    let mut info = ProbeInfo {
         // 705.6 flicks per microsecond: dividing first truncated every duration by 0.085%.
         duration: Time((i128::from(micros) * i128::from(FLICKS_PER_SECOND) / 1_000_000) as i64)
             - padding,
@@ -78,7 +78,10 @@ pub fn probe(path: &Path) -> Result<ProbeInfo, ProbeError> {
         container: input.format().name().to_owned(),
         streams,
         file_size: std::fs::metadata(path).ok().map(|m| m.len()),
-    })
+        markers: Vec::new(),
+    };
+    crate::jplay::import(path, &mut info);
+    Ok(info)
 }
 
 /// The encoder delay and trailing padding an MP3's duration counts in whole 1152-sample frames.

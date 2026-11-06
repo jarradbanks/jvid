@@ -21,6 +21,8 @@ use crate::i18n::{tr, trn};
 
 struct Job {
     path: PathBuf,
+    /// All outputs stay reserved until cancellation/failure has fully settled.
+    outputs: Vec<PathBuf>,
     /// The preset's shown name, or the lossless mode's.
     preset: String,
     /// The exported range's length.
@@ -119,6 +121,7 @@ impl Queue {
             return false;
         }
         self.jobs.push(Job {
+            outputs: vec![path.clone()],
             path,
             preset,
             duration,
@@ -134,9 +137,43 @@ impl Queue {
 
     /// True while a job not yet over writes to `path`.
     pub fn writing(&self, path: &Path) -> bool {
-        self.jobs
-            .iter()
-            .any(|j| j.result.is_none() && j.path == path)
+        let key = super::versions::output_key(path);
+        self.jobs.iter().any(|j| {
+            j.result.is_none()
+                && j.outputs
+                    .iter()
+                    .any(|output| super::versions::output_key(output) == key)
+        })
+    }
+
+    /// Ordinary sidecar exports also reserve their SRT against later version batches.
+    pub fn reserve_sidecar(&mut self, media: &Path) {
+        if let Some(job) = self
+            .jobs
+            .iter_mut()
+            .find(|j| j.result.is_none() && j.path == media)
+        {
+            job.outputs.push(media.with_extension("srt"));
+        }
+    }
+
+    /// Queue independently captured versions through the existing pool and progress model.
+    pub fn versions(
+        &mut self,
+        pool: &jvid_jobs::Pool,
+        jobs: Vec<super::versions::VersionJob>,
+        gpu: Option<super::GpuContext>,
+    ) {
+        for job in super::versions::allocate(jobs, |path| self.writing(path)) {
+            let path = job.request().path.clone();
+            let duration = job.request().range.1 - job.request().range.0;
+            let label = job.label().to_owned();
+            let outputs = job.destinations();
+            let submitted = super::versions::submit(pool, job, gpu.clone());
+            if self.push(path, label, duration, submitted) {
+                self.jobs.last_mut().unwrap().outputs = outputs;
+            }
+        }
     }
 
     /// Collects results; returns the jobs that ended since the last call.
@@ -267,9 +304,21 @@ impl Queue {
     }
 
     /// The Render Queue dock panel.
-    pub(crate) fn panel_docked(&mut self, ui: &mut Ui, focused: bool) -> Option<Action> {
+    pub(crate) fn panel_docked(
+        &mut self,
+        ui: &mut Ui,
+        focused: bool,
+        can_export: bool,
+    ) -> Option<Action> {
         self.failed_unseen = false;
-        let a = panel_inner(ui, &self.rows(), self.confirm_all, focused, true);
+        let a = panel_inner(
+            ui,
+            &self.rows(),
+            self.confirm_all,
+            focused,
+            true,
+            can_export,
+        );
         a.inspect(|a| self.apply(*a))
     }
 
@@ -329,26 +378,21 @@ pub fn menu(ui: &mut Ui, rows: &[Row], confirm: bool, shortcut: &str) -> Option<
     separator(ui);
     let live = rows.iter().filter(|r| r.status.live()).count();
     if confirm {
-        ui.horizontal(|ui| {
-            ui.set_height(size::CONTROL);
-            ui.add_space(space::S8);
-            ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::ink()));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = space::S4;
-                if ui
-                    .add(Button::destructive(tr!("export.cancel_all")))
-                    .clicked()
-                {
-                    action = Some(Action::ConfirmCancelAll);
-                }
-                if ui
-                    .add(Button::ghost(tr!("export.keep_exporting")))
-                    .clicked()
-                {
-                    action = Some(Action::KeepExporting);
-                }
-            });
-        });
+        ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::ink()));
+        ui.add_space(space::S8);
+        let actions = suite_ui::dialog::action_footer(
+            ui,
+            [
+                Button::secondary(tr!("export.keep_exporting")),
+                Button::destructive(tr!("export.cancel_all")),
+            ],
+        );
+        if actions[0].clicked() {
+            action = Some(Action::KeepExporting);
+        }
+        if actions[1].clicked() {
+            action = Some(Action::ConfirmCancelAll);
+        }
         return action;
     }
     let finished = rows.len() > live;
@@ -537,7 +581,7 @@ const NARROW: f32 = 640.0;
 
 /// The Render Queue panel: Cancel All and Clear Finished in its header, then one row per job.
 pub fn panel(ui: &mut Ui, rows: &[Row], confirm: bool, focused: bool) -> Option<Action> {
-    panel_inner(ui, rows, confirm, focused, false)
+    panel_inner(ui, rows, confirm, focused, false, true)
 }
 
 fn panel_inner(
@@ -546,6 +590,7 @@ fn panel_inner(
     confirm: bool,
     focused: bool,
     docked: bool,
+    can_export: bool,
 ) -> Option<Action> {
     let mut action = None;
     let close = [(icon::X, tr!("export.close_queue"))];
@@ -556,13 +601,19 @@ fn panel_inner(
     };
     let r = panel.focused(focused).show(ui, |ui| {
         if rows.is_empty() {
-            ui.vertical_centered(|ui| {
-                ui.add_space(space::S32);
-                let t = RichText::new(tr!("export.empty_title")).font(theme::title());
-                ui.label(t.color(color::ink()));
-                ui.add_space(space::S4);
-                ui.label(RichText::new(tr!("export.empty_help")).color(color::ink_3()));
-            });
+            let empty = suite_ui::empty_state::EmptyState::new(
+                icon::LIST,
+                tr!("export.empty_title"),
+                tr!("empty.queue_help"),
+            );
+            let empty = if can_export {
+                empty.action(tr!("export.new"))
+            } else {
+                empty
+            };
+            if empty.show(ui).action.is_some_and(|r| r.clicked()) {
+                action = Some(Action::New);
+            }
             return;
         }
         let wide = ui.available_width() >= NARROW;

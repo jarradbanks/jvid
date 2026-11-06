@@ -14,10 +14,19 @@ Work in any panel except while typing in a text field.
 | Open Project | `Ctrl+O` |
 | Save | `Ctrl+S` |
 | Save As | `Ctrl+Shift+S` |
+| Collect Project | — |
 | Import | `Ctrl+I` |
+| New Bin | — |
+| Rename Bin | — |
+| Delete Bin | — |
+| Toggle Favorite | — |
 | Import Subtitles | `Ctrl+Shift+I` |
 | Export Subtitles (.srt)… | — |
 | Export Media | `Ctrl+M` |
+| Highlights | — |
+| Export Selected Highlights | — |
+| Export Versions… | — |
+| Export Selected Highlight Versions… | — |
 | Quit | `Ctrl+Q` |
 | Play/Stop | `Space` |
 | Shuttle Left | `J` |
@@ -43,9 +52,17 @@ Work in any panel except while typing in a text field.
 | Undo | `Ctrl+Z` |
 | Redo | `Ctrl+Shift+Z` |
 | Redo (Alternate) | `Ctrl+Y` |
+| Copy Settings | — |
+| Paste Settings | — |
+| Personal Presets | — |
+| Review Speech Cuts | — |
 | Generate Subtitles… | `Ctrl+Alt+G` |
 | Razor Tool | `C` |
 | Selection Tool | `V` |
+| Text Tool | `T` |
+| Add Arrow | — |
+| Add Rectangle | — |
+| Add Numbered Callout | — |
 | Step Back One Frame | `Left` |
 | Step Forward One Frame | `Right` |
 | Step Back One Second | `Shift+Left` |
@@ -66,6 +83,14 @@ Work in any panel except while typing in a text field.
 | Focus Effects | `Shift+7` |
 | Export Frame | `Ctrl+Shift+E` |
 | Record Voiceover | `Shift+R` |
+| Command Palette | `Ctrl+Shift+P` |
+| Editing Workspace | — |
+| Captions Workspace | — |
+| Captions | — |
+| Audio Workspace | — |
+| Save Workspace… | — |
+| Reset Panel Layout | — |
+| Maximize/Restore Panel | `Ctrl+Shift+F10` |
 
 ## Timeline
 

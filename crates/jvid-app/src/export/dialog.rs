@@ -56,6 +56,8 @@ pub struct ExportDialog {
     after: f64,
     /// Highlight file name: `{project}`, `{marker}` and `{index}` are filled in.
     template: String,
+    /// The reviewed project state, checked again before accepting the modal's output.
+    review_selection: Option<crate::highlight_review::HighlightSelectionSnapshot>,
     /// Deterministic codec preflight for dialog tests, independent of host encoders.
     #[cfg(test)]
     test_encoders: Option<Vec<&'static str>>,
@@ -77,6 +79,7 @@ impl Default for ExportDialog {
             before: 15.0,
             after: 5.0,
             template: TEMPLATE.into(),
+            review_selection: None,
             #[cfg(test)]
             test_encoders: None,
         }
@@ -84,9 +87,32 @@ impl Default for ExportDialog {
 }
 
 impl ExportDialog {
+    /// The same In/Out default as ordinary export, captured for independently reviewed versions.
+    pub fn version_source(
+        &self,
+        session: u64,
+        history: &jvid_core::history::History,
+    ) -> Result<super::versions::VersionSource, String> {
+        let seq = history.project().sequence();
+        let range = if seq.in_point().is_some() || seq.out_point().is_some() {
+            Range::InOut
+        } else {
+            Range::Entire
+        };
+        let span = span(range, seq, &HashSet::new(), self.pad())
+            .ok_or_else(|| tr!("export.nothing").to_owned())?;
+        super::versions::VersionSource::range(session, history, span)
+    }
+
     /// Whether the export modal currently owns input, including before its first draw.
     pub fn is_open(&self) -> bool {
         self.range.is_some()
+    }
+
+    /// Dismiss tutorial-owned export guidance without changing the chosen output settings.
+    pub(crate) fn close(&mut self) {
+        self.range = None;
+        self.review_selection = None;
     }
 
     /// Sets the output file, whose folder the next `open` keeps; for tests that need a fixed path.
@@ -98,6 +124,7 @@ impl ExportDialog {
     /// Opens on In to Out when a mark is set, else the entire timeline; the file is named `name`
     /// next to the last export.
     pub fn open(&mut self, seq: &Sequence, name: &str) {
+        self.review_selection = None;
         let range = if seq.in_point().is_some() || seq.out_point().is_some() {
             Range::InOut
         } else {
@@ -111,6 +138,58 @@ impl ExportDialog {
         self.path = dir.join(format!("{name}.{ext}"));
         self.range = Some(range);
         self.name = name.into();
+    }
+
+    /// Open the established Highlights export UI from a review snapshot. Jobs capture their
+    /// own project and settings; this transfers values, never mutable review configuration.
+    pub fn open_highlight_selection(
+        &mut self,
+        selection: &crate::highlight_review::HighlightSelectionSnapshot,
+        project_session: u64,
+        history: &jvid_core::history::History,
+        name: &str,
+    ) -> Result<(), crate::highlight_review::SelectionError> {
+        selection.validate(project_session, history)?;
+        let seq = history.project().sequence();
+        self.open(seq, name);
+        let chosen: HashSet<_> = selection
+            .highlights()
+            .iter()
+            .map(|h| h.marker().id)
+            .collect();
+        self.skipped = seq
+            .markers()
+            .iter()
+            .map(|m| m.id)
+            .filter(|id| !chosen.contains(id))
+            .collect();
+        let (before, after) = selection.point_padding();
+        self.before = before.0 as f64 / FLICKS_PER_SECOND as f64;
+        self.after = after.0 as f64 / FLICKS_PER_SECOND as f64;
+        self.range = Some(Range::Highlights);
+        self.review_selection = Some(selection.clone());
+        Ok(())
+    }
+
+    /// Background imports can edit history while a modal owns keyboard input. Reject that
+    /// stale handoff before displaying/accepting requests, including on the submit frame.
+    pub(crate) fn review_is_current(
+        &mut self,
+        project_session: u64,
+        history: &jvid_core::history::History,
+    ) -> bool {
+        if self.range.is_none() {
+            self.review_selection = None;
+        }
+        if self
+            .review_selection
+            .as_ref()
+            .is_none_or(|s| s.validate(project_session, history).is_ok())
+        {
+            return true;
+        }
+        self.close();
+        false
     }
 
     /// What Export would queue for the entire timeline in the chosen format, without showing
@@ -443,12 +522,11 @@ impl ExportDialog {
                     bottom: 16,
                 };
                 egui::Frame::NONE.inner_margin(foot).show(ui, |ui| {
+                    let preset = &self.presets[self.preset];
+                    let sizable = matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
+                    let span = span(*range, seq, selected, pad).filter(|(a, b)| b > a);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = space::S8;
-                        let preset = &self.presets[self.preset];
-                        let sizable =
-                            matches!(preset.video, Some(VideoCodec::H264 | VideoCodec::Hevc));
-                        let span = span(*range, seq, selected, pad).filter(|(a, b)| b > a);
                         let size = match (span, self.target.filter(|_| sizable)) {
                             (None, _) => verbatim("–").to_owned(),
                             (Some(_), Some(mb)) => tr!("export.under_mb", mb = mb),
@@ -462,67 +540,71 @@ impl ExportDialog {
                         ui.label(RichText::new(tr!("export.estimated_size")).color(color::ink_3()));
                         let size = RichText::new(size).font(theme::body_strong());
                         ui.label(size.color(color::ink()));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let chosen = chosen(seq, &self.skipped);
-                            let kind = *range;
-                            let ok = span.is_some()
-                                && path.file_name().is_some()
-                                && (kind != Range::Highlights || !chosen.is_empty());
-                            let state = if ok { State::Live } else { State::Disabled };
-                            let export = Button::primary(tr!("export.export"));
-                            let export = ui.add(export.state(state).height(FOOT_BUTTON)).clicked();
-                            let queue = Button::secondary(tr!("export.add_to_queue"));
-                            let queue = ui.add(queue.state(state).height(FOOT_BUTTON)).clicked();
-                            if (export || queue)
-                                && let Some(range) = span
-                            {
-                                let mut preset = preset.clone();
-                                if let Some(mb) = self.target.filter(|_| sizable) {
-                                    preset
-                                        .options
-                                        .insert("target_size".into(), (mb * MB).to_string());
-                                }
-                                let req = |path: PathBuf, range| Request {
-                                    path,
-                                    range,
-                                    preset: preset.clone(),
-                                    loudness: self.loudness,
-                                    lossless: self
-                                        .lossless
-                                        .filter(|_| lossless::check(project, range).is_ok()),
-                                    sidecar: self.sidecar,
-                                };
-                                let reqs = if kind == Range::Highlights {
-                                    let ext =
-                                        path.extension().unwrap_or_default().to_string_lossy();
-                                    let dir = path.parent().unwrap_or(std::path::Path::new(""));
-                                    chosen
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(i, m)| {
-                                            let name =
-                                                file_name(&self.template, &self.name, m, i + 1);
-                                            req(
-                                                dir.join(format!("{name}.{ext}")),
-                                                highlight(m, pad, seq.duration()),
-                                            )
-                                        })
-                                        .collect()
-                                } else {
-                                    vec![req(path.clone(), range)]
-                                };
-                                request = Some((reqs, export));
-                                ui.close();
-                            }
-                            let cancel =
-                                Button::secondary(tr!("prompt.cancel")).height(FOOT_BUTTON);
-                            if ui.add(cancel).clicked() {
-                                ui.close();
-                            }
-                        });
                     });
+                    {
+                        let chosen = chosen(seq, &self.skipped);
+                        let kind = *range;
+                        let ok = span.is_some()
+                            && path.file_name().is_some()
+                            && (kind != Range::Highlights || !chosen.is_empty());
+                        let state = if ok { State::Live } else { State::Disabled };
+                        let actions = suite_ui::dialog::action_footer(
+                            ui,
+                            [
+                                Button::secondary(tr!("prompt.cancel")),
+                                Button::secondary(tr!("export.add_to_queue")).state(state),
+                                Button::primary(tr!("export.export")).state(state),
+                            ],
+                        );
+                        crate::app::tutorial::anchor(ui.ctx(), "export.action", actions[2].rect);
+                        let export = actions[2].clicked();
+                        let queue = actions[1].clicked();
+                        if (export || queue)
+                            && let Some(range) = span
+                        {
+                            let mut preset = preset.clone();
+                            if let Some(mb) = self.target.filter(|_| sizable) {
+                                preset
+                                    .options
+                                    .insert("target_size".into(), (mb * MB).to_string());
+                            }
+                            let req = |path: PathBuf, range| Request {
+                                path,
+                                range,
+                                preset: preset.clone(),
+                                loudness: self.loudness,
+                                lossless: self
+                                    .lossless
+                                    .filter(|_| lossless::check(project, range).is_ok()),
+                                sidecar: self.sidecar,
+                            };
+                            let reqs = if kind == Range::Highlights {
+                                let ext = path.extension().unwrap_or_default().to_string_lossy();
+                                let dir = path.parent().unwrap_or(std::path::Path::new(""));
+                                chosen
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, m)| {
+                                        let name = file_name(&self.template, &self.name, m, i + 1);
+                                        req(
+                                            dir.join(format!("{name}.{ext}")),
+                                            highlight(m, pad, seq.duration()),
+                                        )
+                                    })
+                                    .collect()
+                            } else {
+                                vec![req(path.clone(), range)]
+                            };
+                            request = Some((reqs, export));
+                            ui.close();
+                        }
+                        if actions[0].clicked() {
+                            ui.close();
+                        }
+                    }
                 });
             });
+        crate::app::tutorial::anchor(ui.ctx(), "export.dialog", modal.response.rect);
         if modal.should_close() {
             self.range = None;
         }
@@ -533,8 +615,7 @@ impl ExportDialog {
 /// The dialog's width; its head and footer heights, which the body scrolls between.
 const WIDTH: f32 = 480.0;
 const HEAD: f32 = 46.0;
-const FOOT: f32 = 57.0;
-const FOOT_BUTTON: f32 = 28.0;
+const FOOT: f32 = 85.0;
 /// The rows' label column.
 const LABEL: f32 = 96.0;
 /// The Range options, in their segmented control's order.

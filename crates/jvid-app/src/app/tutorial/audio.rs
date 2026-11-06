@@ -57,7 +57,7 @@ pub const AUDIO: Lesson = Lesson {
             anchor: "inspector.volume",
             text: |_| tr!("tutorial.audio_levels").into(),
             done: |a| clip_of(a, MUSIC).is_some_and(|c| c.transform.volume < 1.0),
-            show_me: |a| {
+            example: |a| {
                 let Some(c) = clip_of(a, MUSIC) else { return };
                 let (id, mut x, keys) = (c.id, c.transform.clone(), c.keyframes.clone());
                 x.volume = 0.6;
@@ -72,7 +72,7 @@ pub const AUDIO: Lesson = Lesson {
             anchor: "timeline",
             text: |_| tr!("tutorial.audio_duck", key = verbatim("Ctrl")),
             done: |a| clip_of(a, MUSIC).is_some_and(ducked),
-            show_me: |a| {
+            example: |a| {
                 use jvid_core::keyframe::{Easing, Keyframe, Value};
                 let Some(c) = clip_of(a, MUSIC) else { return };
                 let s = FLICKS_PER_SECOND;
@@ -107,7 +107,7 @@ pub const AUDIO: Lesson = Lesson {
                     eq.enabled && eq.bands.iter().any(|b| *b != 0.0)
                 })
             },
-            show_me: |a| {
+            example: |a| {
                 let Some(c) = clip_of(a, VOICE) else { return };
                 let (id, mut x, keys) = (c.id, c.transform.clone(), c.keyframes.clone());
                 // Rumble out, a little presence in.
@@ -130,7 +130,7 @@ pub const AUDIO: Lesson = Lesson {
                 assets.any(|x| x.path.extension().is_some_and(|e| e == "wav"))
             },
             // As pressing Record does: starts a take, or stops the one running.
-            show_me: |a| match a.take.is_some() {
+            example: |a| match a.take.is_some() {
                 true => a.end_take(),
                 false => a.start_take(),
             },

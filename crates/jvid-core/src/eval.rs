@@ -25,6 +25,8 @@ pub struct Layer<'a> {
     /// The clip's keyed text style at this instant, applied over a text asset's with
     /// [`crate::model::Text::with`].
     pub text: Vec<(&'static str, crate::keyframe::Value)>,
+    /// Per-clip vector geometry/style, applied over the generated annotation asset.
+    pub annotation: Vec<(&'static str, crate::keyframe::Value)>,
     /// A sequence clip's sequence at `source_time`, top first; filled by [`frame_at`].
     pub nested: Vec<Layer<'a>>,
 }
@@ -151,6 +153,7 @@ fn layer<'a>(tr: TrackId, c: &'a Clip, t: Time) -> Layer<'a> {
             _ => None,
         },
         text: c.text_keys(t),
+        annotation: c.annotation_keys(t),
         nested: Vec::new(),
     }
 }
@@ -192,6 +195,7 @@ pub fn video_at(seq: &Sequence, t: Time) -> Vec<Layer<'_>> {
                 },
                 color: Some([rgb, rgb, rgb, 1.0]),
                 text: Vec::new(),
+                annotation: Vec::new(),
                 ..layer(tr.id, under, t)
             };
             vec![dip, layer(tr.id, under, t)]

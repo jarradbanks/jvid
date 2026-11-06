@@ -12,6 +12,9 @@ on:
       - 'crates/jvid-updater/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'assets/**'
+      - 'crates/jvid-app/build.rs'
+      - 'crates/jvid-app/Cargo.toml'
       - 'crates/jvid-app/src/components.rs'
       - 'crates/jvid-app/src/package_smoke.rs'
   workflow_dispatch:
@@ -69,7 +72,7 @@ jobs:
         include:
           - os: windows-latest
             target: windows-x86_64
-          - os: macos-14
+          - os: macos-15
             target: macos-aarch64
           - os: ubuntu-22.04
             target: linux-x86_64

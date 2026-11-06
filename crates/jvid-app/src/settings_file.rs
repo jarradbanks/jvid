@@ -1,4 +1,5 @@
-//! Where `settings.toml` lives and reading/writing it; the format lives in `jvid_core::settings`.
+//! Settings paths/read-write and docking-only window persistence.
+//! The `settings.toml` format lives in `jvid_core::settings`.
 
 use std::path::{Path, PathBuf};
 use std::{fs, io};
@@ -6,6 +7,65 @@ use std::{fs, io};
 use jvid_core::settings::Settings;
 
 use crate::i18n::tr;
+use crate::workspaces::{Panels, Snapshot, Workspaces};
+
+const WORKSPACES_KEY: &str = "workspaces";
+const WORKSPACE_LAYOUT_KEY: &str = "workspace_layout";
+
+/// User layouts and current placement live beside the legacy `dock` in window storage.
+/// A bad personal-layout collection never prevents restoring the current/legacy layout.
+pub fn load_workspaces(
+    storage: Option<&dyn eframe::Storage>,
+) -> (Workspaces, egui_dock::DockState<crate::app::Tab>) {
+    let panels = Panels::default();
+    let personal = storage
+        .and_then(|s| eframe::get_value(s, WORKSPACES_KEY))
+        .unwrap_or_default();
+    let snapshot: Option<Snapshot> = storage
+        .and_then(|s| eframe::get_value(s, WORKSPACE_LAYOUT_KEY))
+        .or_else(|| {
+            let storage = storage?;
+            let dock: egui_dock::DockState<crate::app::Tab> = eframe::get_value(storage, "dock")?;
+            // Read the old private surface index separately, then bounds-check every step.
+            // Calling DockState::focused_leaf on malformed persisted focus can panic.
+            #[derive(serde::Deserialize)]
+            struct Focus {
+                focused_surface: Option<egui_dock::SurfaceIndex>,
+            }
+            let focused = eframe::get_value::<Focus>(storage, "dock")
+                .and_then(|focus| focus.focused_surface)
+                .and_then(|index| dock.get_surface(index))
+                .and_then(|surface| surface.node_tree())
+                .and_then(|tree| tree.focused_leaf().and_then(|node| tree.iter().nth(node.0)))
+                .and_then(|node| node.get_leaf())
+                .and_then(|leaf| leaf.tabs.get(leaf.active.0))
+                .and_then(|tab| panels.id(*tab));
+            let mut snapshot = Snapshot::legacy(&dock, panels);
+            snapshot.focused = focused.map(str::to_owned);
+            Some(snapshot)
+        });
+    let dock = snapshot.map_or_else(crate::app::default_dock, |snapshot| {
+        snapshot.restore(panels)
+    });
+    (personal, dock)
+}
+
+/// Persist the full pre-maximize layout, never the single-panel temporary view.
+/// Keep writing legacy `dock` so older builds can still restore all existing Tab names.
+pub fn save_workspaces(
+    storage: &mut dyn eframe::Storage,
+    workspaces: &Workspaces,
+    dock: &egui_dock::DockState<crate::app::Tab>,
+) {
+    let dock = workspaces.normal_dock(dock);
+    eframe::set_value(storage, "dock", dock);
+    eframe::set_value(storage, WORKSPACES_KEY, workspaces);
+    eframe::set_value(
+        storage,
+        WORKSPACE_LAYOUT_KEY,
+        &Snapshot::capture(dock, Panels::default()),
+    );
+}
 
 /// `<platform config dir>/settings.toml`, or `None` if the platform has no home dir.
 pub fn path() -> Option<PathBuf> {
@@ -105,6 +165,108 @@ pub fn save_to(settings: &Settings, path: &std::path::Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct Memory(std::collections::HashMap<String, String>);
+    impl eframe::Storage for Memory {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.into(), value);
+        }
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+        fn flush(&mut self) {}
+    }
+
+    #[test]
+    fn workspaces_restart_rename_delete_and_maximize_persist_the_normal_layout() {
+        let (mut workspaces, mut dock) = load_workspaces(None);
+        workspaces.apply(
+            &mut dock,
+            crate::workspaces::Builtin::Captions.layout(Panels::default()),
+        );
+        workspaces
+            .save("Original", &dock, Panels::default())
+            .unwrap();
+        workspaces.save("Remove", &dock, Panels::default()).unwrap();
+        workspaces.rename(0, "Personal captions").unwrap();
+        assert!(workspaces.delete(1));
+        workspaces.toggle_maximize(&mut dock);
+        assert_eq!(dock.iter_all_tabs().count(), 1);
+        let mut storage = Memory::default();
+        save_workspaces(&mut storage, &workspaces, &dock);
+        let dir = tempfile::tempdir().unwrap();
+        // Round-trip actual persisted strings through a file and a fresh storage instance.
+        let file = dir.path().join("window.toml");
+        fs::write(&file, toml::to_string(&storage.0).unwrap()).unwrap();
+        let storage = Memory(toml::from_str(&fs::read_to_string(file).unwrap()).unwrap());
+        let (restored, mut dock) = load_workspaces(Some(&storage));
+        assert!(!restored.is_maximized());
+        assert_eq!(restored.personal.len(), 1);
+        assert_eq!(restored.personal[0].name, "Personal captions");
+        assert_eq!(dock.iter_all_tabs().count(), 5);
+        assert_eq!(
+            dock.find_active_focused().map(|(_, tab)| *tab),
+            Some(crate::app::Tab::Captions)
+        );
+        let legacy: egui_dock::DockState<crate::app::Tab> =
+            eframe::get_value(&storage, "dock").unwrap();
+        assert_eq!(legacy.iter_all_tabs().count(), 5);
+        assert!(!storage.0[WORKSPACES_KEY].contains("normal:"));
+    }
+
+    #[test]
+    fn corrupt_new_storage_recovers_legacy_without_losing_closed_panel_state() {
+        let mut storage = Memory::default();
+        let legacy = crate::workspaces::Builtin::Audio.layout(Panels::default());
+        eframe::set_value(&mut storage, "dock", &legacy);
+        storage.0.insert(WORKSPACES_KEY.into(), "broken".into());
+        storage
+            .0
+            .insert(WORKSPACE_LAYOUT_KEY.into(), "broken".into());
+        let (workspaces, restored) = load_workspaces(Some(&storage));
+        assert!(workspaces.personal.is_empty());
+        assert_eq!(
+            restored.find_tab(&crate::app::Tab::Media),
+            legacy.find_tab(&crate::app::Tab::Media)
+        );
+        assert_eq!(restored.iter_all_tabs().count(), 4);
+        assert!(restored.find_tab(&crate::app::Tab::Transcript).is_none());
+    }
+
+    #[test]
+    fn legacy_focus_survives_and_invalid_surface_focus_is_ignored() {
+        let mut storage = Memory::default();
+        let mut dock = crate::app::default_dock();
+        let path = dock.find_tab(&crate::app::Tab::Inspector).unwrap();
+        dock.set_focused_node_and_surface(path.node_path());
+        eframe::set_value(&mut storage, "dock", &dock);
+        let (_, mut restored) = load_workspaces(Some(&storage));
+        assert_eq!(
+            restored.find_active_focused().map(|(_, tab)| *tab),
+            Some(crate::app::Tab::Inspector)
+        );
+
+        #[derive(serde::Serialize)]
+        struct CorruptFocus {
+            surfaces: Vec<egui_dock::Surface<crate::app::Tab>>,
+            focused_surface: Option<egui_dock::SurfaceIndex>,
+        }
+        eframe::set_value(
+            &mut storage,
+            "dock",
+            &CorruptFocus {
+                surfaces: dock.iter_surfaces().cloned().collect(),
+                focused_surface: Some(egui_dock::SurfaceIndex(999)),
+            },
+        );
+        let (_, mut restored) = load_workspaces(Some(&storage));
+        assert_eq!(restored.iter_all_tabs().count(), 4);
+        assert!(restored.find_active_focused().is_none());
+    }
 
     #[test]
     fn missing_file_is_default_and_save_round_trips() {

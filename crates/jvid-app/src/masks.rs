@@ -13,6 +13,7 @@ use suite_ui::tokens::{color, space};
 
 use crate::i18n::tr;
 use crate::timeline::Edit;
+use crate::viewer_geometry::ViewerGeometry;
 
 /// Undo gesture for mask handle drags, xored with the drag count.
 const GESTURE: GestureKey = 0x6d61_736b_0000; // "mask"
@@ -225,6 +226,7 @@ pub fn show(
     t: Time,
     frame: Rect,
 ) -> Option<Edit> {
+    let panning = ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle));
     let pen: Option<Pen> = ui.data(|d| d.get_temp(pen_id()));
     if pen.as_ref().is_some_and(|p| !selected.contains(&p.clip)) {
         ui.data_mut(|d| d.remove::<Pen>(pen_id()));
@@ -241,14 +243,16 @@ pub fn show(
         .map(|(_, c)| c)
         .min_by_key(|c| c.id.0)?;
     let x = c.transform_at(t);
-    let s = frame.width() / project.settings().width as f32;
-    let (to_screen, to_image) = (
-        |p| screen(&x, frame.center(), s, p),
-        |q| image(&x, frame.center(), s, q),
+    let st = project.settings();
+    let geometry = ViewerGeometry::from_frame(
+        crate::preview::viewer_rect(ui),
+        frame,
+        vec2(st.width as f32, st.height as f32),
     );
-    let clip = frame
-        .expand(HANDLE * 2.0)
-        .intersect(crate::preview::viewer_rect(ui));
+    let centre = geometry.project_to_screen(Pos2::ZERO);
+    let s = geometry.scale();
+    let (to_screen, to_image) = (|p| screen(&x, centre, s, p), |q| image(&x, centre, s, q));
+    let clip = geometry.body;
     let painter = ui.painter().with_clip_rect(clip);
     let line = Stroke::new(1.0, color::light_blue());
     if let Some(pen) = pen.filter(|p| p.clip == c.id) {
@@ -266,7 +270,8 @@ pub fn show(
             let r = Rect::from_center_size(p, Vec2::splat(HANDLE * 1.5)).intersect(clip);
             let resp = ui.interact(r, id.with((i, k)), Sense::drag());
             let resp = resp.on_hover_cursor(egui::CursorIcon::Crosshair);
-            if resp.drag_started()
+            if !panning
+                && resp.drag_started()
                 && let Some(from) = resp.interact_pointer_pos()
             {
                 let drag = start.as_ref().map_or(0, |s| s.drag) + 1;
@@ -278,7 +283,8 @@ pub fn show(
                 };
                 ui.data_mut(|d| d.insert_temp(id, st));
             }
-            if resp.dragged()
+            if !panning
+                && resp.dragged()
                 && let Some(to) = resp.interact_pointer_pos()
                 && let Some(st) = ui
                     .data(|d| d.get_temp::<Start>(id))
@@ -503,6 +509,87 @@ mod tests {
         }
         h.drop_at(to);
         h.run();
+    }
+
+    #[test]
+    fn panned_mask_handles_outside_project_frame_stay_inside_viewer_body() {
+        use jvid_core::history::History;
+        let (mut history, id) = crate::handles::tests::history();
+        let c = history.project().sequence().clip(id).unwrap().1.clone();
+        let original = Mask::new(MaskShape::Rectangle, vec![[1200.0, 0.0], [100.0, 100.0]]);
+        history
+            .apply(Command::SetClipProps(vec![(
+                id,
+                Transform {
+                    masks: vec![original.clone()],
+                    ..c.transform
+                },
+                c.keyframes,
+            )]))
+            .unwrap();
+        let mut h = egui_kittest::Harness::builder()
+            .with_size([480.0, 360.0])
+            .with_pixels_per_point(1.5)
+            .build_ui_state(
+                move |ui, (history, clicks): &mut (History, u32)| {
+                    let body = crate::preview::viewer_rect(ui);
+                    let transport = Rect::from_min_max(
+                        egui::pos2(0.0, body.bottom() + 16.0),
+                        ui.max_rect().max,
+                    );
+                    if ui.put(transport, egui::Button::new("Play")).clicked() {
+                        *clicks += 1;
+                    }
+                    let frame =
+                        Rect::from_center_size(egui::pos2(240.0, 140.0), vec2(240.0, 135.0));
+                    if let Some((command, Some(key))) =
+                        show(ui, history.project(), &HashSet::from([id]), Time(0), frame)
+                    {
+                        history.apply_coalesced(key, command).unwrap();
+                    }
+                },
+                (history, 0),
+            );
+        h.run();
+        let from = egui::pos2(390.0, 140.0);
+        h.hover_at(from);
+        h.run();
+        h.drag_at(from);
+        h.run();
+        for k in 1..=3 {
+            h.hover_at(from + vec2(20.0, 10.0) * (k as f32 / 3.0));
+            h.run();
+        }
+        h.drop_at(from + vec2(20.0, 10.0));
+        h.run();
+        let c = h.state().0.project().sequence().clip(id).unwrap().1;
+        assert!((c.transform.masks[0].points[0][0] - 1360.0).abs() < 0.01);
+        assert!((c.transform.masks[0].points[0][1] - 80.0).abs() < 0.01);
+        assert!(h.state_mut().0.undo());
+        assert_eq!(
+            h.state()
+                .0
+                .project()
+                .sequence()
+                .clip(id)
+                .unwrap()
+                .1
+                .transform
+                .masks,
+            vec![original]
+        );
+        let p = egui::pos2(240.0, 340.0);
+        h.hover_at(p);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            });
+            h.run();
+        }
+        assert_eq!(h.state().1, 1);
     }
 
     #[test]

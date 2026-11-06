@@ -148,7 +148,8 @@ def notices(stage, providers):
     )
     (stage / "SOURCE-INFO.txt").write_text(
         "Corresponding source and build scripts for a published release are provided as\n"
-        "the versioned corresponding-source archive alongside its binary downloads.\n"
+        "a separate source release at:\n"
+        f"https://github.com/jarradbanks/jvid/releases/tag/sources-v{version()}\n"
         "CI candidates are not approved release distributions. Publication is gated on\n"
         "that archive and its reviewed SHA-256; see docs/packaging.md.\n"
         "jvid source: https://github.com/jarradbanks/jvid\n\n" + "\n".join(providers) + "\n",

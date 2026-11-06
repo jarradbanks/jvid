@@ -18,6 +18,7 @@ except ModuleNotFoundError:  # Local Python 3.10 tooling; CI uses Python 3.12.
     import tomli as tomllib
 
 from github_api import github, pages, release_for_tag, tag_commit
+from notes import draft_highlights, render
 
 PLAN = '.github/release-plan.json'
 RELEASE_FILES = {'Cargo.toml', 'Cargo.lock', 'packaging/release-notes.md', PLAN}
@@ -162,6 +163,15 @@ def workflow_pending(repository, workflow, commit, title=None):
                and (r['status'] != 'completed' or r['conclusion'] == 'success') for r in runs)
 
 
+def source_publication_started(repository, tag, *, api=None):
+    # Even a tag alone can survive a lost create response. Only the original
+    # Package run may recover it with its retained candidate bytes.
+    api = github if api is None else api
+    source_tag = 'sources-' + tag
+    return (tag_commit(repository, source_tag, api=api) is not None
+            or release_for_tag(repository, source_tag, api=api) is not None)
+
+
 def prepare_candidate(root, kind, repository):
     if run('git', 'status', '--porcelain', cwd=root):
         raise RuntimeError('Release preparation requires a clean checkout')
@@ -185,7 +195,9 @@ def prepare_candidate(root, kind, repository):
     matching = [p for p in matching if p['state'] == 'open']
     if len(matching) > 1:
         raise RuntimeError('Duplicate open release candidate PRs')
-    if tag_commit(repository, 'v' + new, api=github) or release_for_tag(repository, 'v' + new, api=github):
+    if (tag_commit(repository, 'v' + new, api=github)
+            or release_for_tag(repository, 'v' + new, api=github)
+            or source_publication_started(repository, 'v' + new)):
         raise RuntimeError('This release version already has a tag or release')
     reference = github(f'repos/{repository}/git/ref/heads/' + urllib.parse.quote(branch, safe=''))
     if reference:
@@ -213,13 +225,12 @@ def prepare_candidate(root, kind, repository):
             raise RuntimeError('Merged workspace version differs from selected release base')
         version_files(root, new)
         subjects = run('git', 'log', '--no-merges', '--format=%s', main + '..' + source, cwd=root).splitlines()
-        template = (root / 'packaging/release-notes-template.md').read_text()
-        notes = ('Changes in ' + new + '\n\n' + '\n'.join('- ' + s for s in subjects) + '\n\n' + template)
-        (root / 'packaging/release-notes.md').write_text(notes)
+        notes = render(root, new, draft_highlights(subjects), repository)
+        (root / 'packaging/release-notes.md').write_bytes(notes.encode('utf-8'))
         (root / PLAN).parent.mkdir(parents=True, exist_ok=True)
         (root / PLAN).write_text(json.dumps({'schema': 1, 'version': new, 'previous_version': current,
             'bump': kind, 'source_commit': source, 'source_branch': 'develop', 'main_commit': main,
-            'base_commit': base, 'notes_sha256': hashlib.sha256(notes.encode()).hexdigest()}, indent=2) + '\n')
+            'base_commit': base, 'notes_sha256': hashlib.sha256(notes.encode('utf-8')).hexdigest()}, indent=2) + '\n')
         run('git', 'add', *sorted(RELEASE_FILES), cwd=root)
         run('git', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', 'commit', '-m', 'Prepare jvid ' + new, cwd=root)
         read_plan(root)
@@ -266,6 +277,9 @@ def dispatch(root, repository, commit, before):
             raise ValueError('Release exists without its immutable tag; refusing to recreate it')
         output(release='false', reason='Release already published' if not release['draft']
                else 'Draft exists; rerun the original Package failed jobs to preserve its assets')
+        return
+    if source_publication_started(repository, tag):
+        output(release='false', reason='Source publication already started; rerun the original Package failed jobs to preserve its assets')
         return
     if not target:
         annotation = github(f'repos/{repository}/git/tags', 'POST',

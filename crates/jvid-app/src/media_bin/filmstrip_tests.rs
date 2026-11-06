@@ -97,6 +97,8 @@ fn failed_hover_drains_completion_repaints_before_retrying_on_later_activity() {
         out_point: None,
         solid: None,
         text: None,
+        annotation: None,
+        generated_caption: false,
         sequence: None,
     };
     let ctx = egui::Context::default();
