@@ -127,7 +127,11 @@ impl Library {
     /// The effects whose name, file or description contains `query` (case-insensitive).
     pub fn rows(&self, query: &str) -> Vec<Row> {
         let q = query.trim().to_lowercase();
-        self.entries()
+        // Retained private shaders resolve by exact key for queued renders, but are
+        // not additional user/config catalog choices in Add Effect.
+        self.files
+            .iter()
+            .map(|(stem, (_, entry))| (stem.as_str(), entry))
             .map(|(stem, e)| Row {
                 stem: stem.to_owned(),
                 name: e.as_ref().map_or_else(
@@ -612,6 +616,29 @@ pub fn fail(stem: &str, error: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_project_shaders_remain_resolvable_without_duplicate_catalog_rows() {
+        let root = tempfile::tempdir().unwrap();
+        let mut library = Library::default();
+        library.scan(root.path());
+        let before: Vec<_> = library.rows("").into_iter().map(|row| row.stem).collect();
+        let shader = library.get("vignette").unwrap().clone();
+        let key = root
+            .path()
+            .join("collected/vignette.wgsl")
+            .to_string_lossy()
+            .into_owned();
+        library.project_files.insert(key.clone(), shader);
+        let after: Vec<_> = library.rows("").into_iter().map(|row| row.stem).collect();
+        assert_eq!(before, after);
+        assert!(library.get(&key).unwrap().is_ok());
+        assert!(
+            library
+                .entries()
+                .any(|(stem, entry)| stem == key && entry.is_ok())
+        );
+    }
 
     #[test]
     fn shipped_examples_show_translated_until_edited() {
