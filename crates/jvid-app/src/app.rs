@@ -262,6 +262,7 @@ pub struct App {
     command_palette: crate::command_palette::CommandPalette,
     exports: jvid_jobs::Pool,
     export_dialog: crate::export::dialog::ExportDialog,
+    versions_dialog: crate::export::versions::VersionsDialog,
     subtitle_export: crate::export::subtitles::SubtitleExport,
     autosave: crate::autosave::Autosave,
     queue: crate::export::queue::Queue,
@@ -410,6 +411,7 @@ impl App {
             command_palette: Default::default(),
             exports,
             export_dialog: Default::default(),
+            versions_dialog: Default::default(),
             subtitle_export: Default::default(),
             autosave: Default::default(),
             queue: Default::default(),
@@ -440,6 +442,7 @@ impl App {
         self.subtitles.close();
         self.settings_dialog = Default::default();
         self.export_dialog = Default::default();
+        self.versions_dialog = Default::default();
         self.subtitle_export = Default::default();
         self.autosave.reset_session();
         self.preview_active = 1;
@@ -1101,7 +1104,9 @@ impl App {
 
     /// Queues `req` on a snapshot of the project, so later edits don't change the file.
     fn queue_export(&mut self, req: Request, gpu: (wgpu::Device, wgpu::Queue), now: f64) {
-        if self.queue.writing(&req.path) {
+        if self.queue.writing(&req.path)
+            || (req.sidecar && self.queue.writing(&req.path.with_extension("srt")))
+        {
             let msg = tr!("export.busy", path = req.path.display());
             self.toasts.push((msg, now + TOAST_SECS));
             return;
@@ -1114,8 +1119,11 @@ impl App {
             None => crate::export::shown_name(&self.export_dialog.presets, &req.preset).into(),
         };
         let duration = req.range.1 - req.range.0;
+        let sidecar = req.sidecar;
         let job = crate::export::submit(&self.exports, project, req, gpu);
-        self.queue.push(path, preset, duration, job);
+        if self.queue.push(path.clone(), preset, duration, job) && sidecar {
+            self.queue.reserve_sidecar(&path);
+        }
     }
 
     /// Takes finished exports' results: each posts a notification, failures also a toast.
@@ -1208,6 +1216,7 @@ impl App {
             || self.speech_review.is_some()
             || self.settings_dialog.draft.is_some()
             || self.export_dialog.is_open()
+            || self.versions_dialog.is_open()
             || self.subtitle_export.is_open()
             || self.preferences.is_open()
             || self.components.open
@@ -1282,7 +1291,8 @@ impl App {
         };
         let enabled = match id {
             "review_highlights" => Some(!self.on_welcome),
-            "export_highlights" => {
+            "export_versions" => return Applicability::when(self.can_export(), "export.nothing"),
+            "export_highlights" | "export_highlight_versions" => {
                 let revision = crate::highlight_review::ReviewRevision::current(
                     self.project_session,
                     &self.history,
@@ -1503,6 +1513,28 @@ impl App {
                     }
                     Err(error) => tracing::warn!("transfer settings: {error}"),
                     Ok(None) => {}
+                }
+                return;
+            }
+            "export_versions" | "export_highlight_versions" => {
+                let source = if id == "export_highlight_versions" {
+                    self.highlight_review
+                        .snapshot(self.project_session, &self.history)
+                        .map_err(|_| tr!("highlights.stale").to_owned())
+                        .and_then(|selection| {
+                            crate::export::versions::VersionSource::highlights(
+                                self.project_session,
+                                &self.history,
+                                &selection,
+                            )
+                        })
+                } else {
+                    self.export_dialog
+                        .version_source(self.project_session, &self.history)
+                };
+                match source {
+                    Ok(source) => self.versions_dialog.open(source, &self.name()),
+                    Err(error) => self.error(error),
                 }
                 return;
             }
@@ -2525,6 +2557,13 @@ impl eframe::App for App {
                     self.queue_export(req, gpu.clone(), now);
                 }
             }
+            if let Some(jobs) = self.versions_dialog.show(ui, self.project_session, &self.history, self.preview.gpu()) {
+                self.queue.versions(&self.exports, jobs, self.preview.gpu());
+                self.show_panel(Tab::RenderQueue);
+            }
+            if !self.versions_dialog.is_open() && let Some(error) = self.versions_dialog.take_error() {
+                self.toasts.push((error, now + TOAST_SECS));
+            }
             if let Some(c) = self.settings_dialog.show(ui, self.history.project())
                 && let Err(e) = self.history.apply(c)
             {
@@ -3370,6 +3409,68 @@ mod palette_tests {
             assert_eq!(app.history.project(), &before);
             assert!(!app.history.can_undo());
         }
+    }
+
+    #[test]
+    fn export_versions_uses_shared_dispatch_and_closes_stale_modal() {
+        if !suite_ui::test_support::gpu() {
+            return;
+        }
+        let mut h = Harness::builder()
+            .with_size([960.0, 600.0])
+            .wgpu()
+            .build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run_steps(3);
+        let ctx = h.ctx.clone();
+        let app = h.state_mut();
+        assert!(
+            !app.action_applicability("export_versions", false)
+                .is_enabled()
+        );
+        app.on_welcome = false;
+        app.history
+            .apply(Command::AddSolid {
+                name: "Versions".into(),
+                color: [0.15, 0.3, 0.6, 1.0],
+            })
+            .unwrap();
+        let asset = app.history.project().assets()[0].id;
+        let placement = app
+            .history
+            .project()
+            .placement(asset, Time(0), false, None, false)
+            .unwrap();
+        app.history.apply(Command::Place(placement)).unwrap();
+        let original = app.history.project().clone();
+        assert!(
+            app.action_applicability("export_versions", false)
+                .is_enabled()
+        );
+        assert!(
+            !app.action_applicability("export_highlight_versions", false)
+                .is_enabled()
+        );
+        app.run_action("export_versions", false);
+        assert!(app.versions_dialog.is_open());
+        assert!(app.modal_owns_input(&ctx));
+        h.run_steps(3);
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/multiversion-export");
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render()
+            .unwrap()
+            .save(dir.join("app_versions_960x600.png"))
+            .unwrap();
+        assert_eq!(h.state().history.project(), &original);
+        h.state_mut()
+            .history
+            .apply(Command::SetInOut {
+                in_point: Some(Time(FLICKS_PER_SECOND)),
+                out_point: None,
+            })
+            .unwrap();
+        h.run_steps(2);
+        assert!(!h.state().versions_dialog.is_open());
     }
 
     #[test]
