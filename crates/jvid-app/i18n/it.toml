@@ -3,6 +3,7 @@
 # imperatives, as on Windows and macOS. Terms follow docs/i18n/it.md.
 
 [action]
+command_palette = "Tavolozza dei Comandi"
 text_tool = "Strumento testo"
 export_subtitles = "Esporta sottotitoli (.srt)…"
 new_project = "Nuovo progetto"
@@ -1085,3 +1086,11 @@ transcript = "Nessuna trascrizione"
 transcript_help = "Trascrivi il parlato delle clip per montare con il testo."
 no_audio = "Nessun audio da trascrivere"
 no_audio_help = "Aggiungi una clip con audio alla timeline per avviare una trascrizione."
+
+[palette]
+title = "Tavolozza dei Comandi"
+no_results = "Nessun comando corrispondente"
+focus_timeline = "Attiva la timeline per usare questo comando"
+focus_playback = "Attiva Sorgente, Programma o Timeline per usare questo comando"
+unavailable = "Questo comando non è disponibile nel contesto attuale"
+no_source = "Carica prima una clip in Sorgente"

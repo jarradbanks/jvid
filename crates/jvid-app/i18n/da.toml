@@ -3,6 +3,7 @@
 # use the imperative (Gem). Terms follow docs/i18n/da.md.
 
 [action]
+command_palette = "Kommandopalet"
 text_tool = "Tekstværktøj"
 export_subtitles = "Eksportér undertekster (.srt)…"
 new_project = "Nyt projekt"
@@ -1073,3 +1074,11 @@ transcript = "Ingen transskription endnu"
 transcript_help = "Transskriber talen i dine klip for at redigere med tekst."
 no_audio = "Ingen lyd at transskribere"
 no_audio_help = "Tilføj et klip med lyd til tidslinjen for at starte en transskription."
+
+[palette]
+title = "Kommandopalet"
+no_results = "Ingen matchende kommandoer"
+focus_timeline = "Aktivér tidslinjen for at bruge kommandoen"
+focus_playback = "Aktivér Kilde, Program eller Tidslinje for at bruge kommandoen"
+unavailable = "Kommandoen er ikke tilgængelig i den aktuelle sammenhæng"
+no_source = "Indlæs først et klip i Kilde"

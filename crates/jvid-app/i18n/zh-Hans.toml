@@ -5,6 +5,7 @@
 # every English key.
 
 [action]
+command_palette = "命令面板"
 text_tool = "文字工具"
 export_subtitles = "导出字幕 (.srt)…"
 new_project = "新建项目"
@@ -1106,3 +1107,11 @@ transcript = "尚无转录文本"
 transcript_help = "转录片段中的语音，即可通过文本进行剪辑。"
 no_audio = "没有可转录的音频"
 no_audio_help = "将带有音频的片段添加到时间线以开始转录。"
+
+[palette]
+title = "命令面板"
+no_results = "没有匹配的命令"
+focus_timeline = "请先激活时间线以使用此命令"
+focus_playback = "请先激活源监视器、节目监视器或时间线以使用此命令"
+unavailable = "此命令在当前上下文中不可用"
+no_source = "请先在源监视器中加载剪辑"

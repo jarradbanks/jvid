@@ -3,6 +3,7 @@
 # instructions imperatives with vykání. Terms follow docs/i18n/cs.md.
 
 [action]
+command_palette = "Paleta Příkazů"
 text_tool = "Textový nástroj"
 export_subtitles = "Exportovat titulky (.srt)…"
 new_project = "Nový projekt"
@@ -1092,3 +1093,11 @@ transcript = "Zatím žádný přepis"
 transcript_help = "Přepište řeč z klipů a stříhejte pomocí textu."
 no_audio = "Žádný zvuk k přepisu"
 no_audio_help = "Přidejte klip se zvukem na časovou osu a začněte přepis."
+
+[palette]
+title = "Paleta Příkazů"
+no_results = "Žádné odpovídající příkazy"
+focus_timeline = "Aktivujte časovou osu, abyste mohli použít tento příkaz"
+focus_playback = "Aktivujte panel Zdroj, Program nebo Časová Osa, abyste mohli použít tento příkaz"
+unavailable = "Tento příkaz není v aktuálním kontextu dostupný"
+no_source = "Nejprve načtěte klip do panelu Zdroj"

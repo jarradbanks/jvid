@@ -3,6 +3,7 @@
 # items use the infinitive (Speichern). Terms follow docs/i18n/de.md.
 
 [action]
+command_palette = "Befehlspalette"
 text_tool = "Textwerkzeug"
 export_subtitles = "Untertitel exportieren (.srt)…"
 new_project = "Neues Projekt"
@@ -1073,3 +1074,11 @@ transcript = "Noch kein Transkript"
 transcript_help = "Transkribiere die Sprache deiner Clips, um mit Text zu schneiden."
 no_audio = "Kein Audio zum Transkribieren"
 no_audio_help = "Füge einen Clip mit Audio zur Timeline hinzu, um ein Transkript zu erstellen."
+
+[palette]
+title = "Befehlspalette"
+no_results = "Keine passenden Befehle"
+focus_timeline = "Aktiviere die Zeitleiste, um diesen Befehl zu verwenden"
+focus_playback = "Aktiviere Quelle, Programm oder Zeitleiste, um diesen Befehl zu verwenden"
+unavailable = "Dieser Befehl ist im aktuellen Kontext nicht verfügbar"
+no_source = "Lade zuerst einen Clip in Quelle"
