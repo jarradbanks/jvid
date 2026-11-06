@@ -356,10 +356,10 @@ mod tests {
                         false,
                     );
                 });
-            h.run();
+            h.run_steps(4);
             h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status"))
                 .click();
-            h.run();
+            h.run_steps(4);
             h.render()
                 .unwrap()
                 .save(dir.join(format!("{name}.png")))

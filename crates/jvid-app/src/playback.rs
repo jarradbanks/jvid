@@ -206,6 +206,7 @@ impl FrameCache {
     }
 
     /// Adds a frame, evicting the least recently used others while over budget.
+    #[cfg(test)]
     fn insert(&mut self, k: Key, f: Arc<Frame>) {
         self.insert_from(k, f, false);
     }
@@ -839,7 +840,12 @@ impl Playback {
             }
             self.latency = (self.latency * 3 + took) / 4;
             match r {
-                Ok(f) => self.cache.insert_from(k, Arc::new(f), proxy),
+                Ok(f) => {
+                    if self.status.picture == Picture::Failed {
+                        self.shown = None;
+                    }
+                    self.cache.insert_from(k, Arc::new(f), proxy);
+                }
                 Err(e) => {
                     tracing::warn!("playback decode: {e}");
                     self.failed.insert(k, Instant::now());
@@ -1102,7 +1108,6 @@ impl Playback {
             if stills::is_still(&asset.path) {
                 if failed.contains_key(&(asset.id, Time(0))) {
                     observation.picture = Picture::Failed;
-                    exact = false;
                     return Ok(None);
                 }
                 return Ok(Some(Pixels::Still(
@@ -1114,7 +1119,6 @@ impl Playback {
             let key = (layer.asset, layer.source_time);
             if failed.contains_key(&key) {
                 observation.picture = Picture::Failed;
-                exact = false;
                 return Ok(None);
             }
             let f = match cache.get(&key) {
