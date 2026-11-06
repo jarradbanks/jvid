@@ -839,6 +839,12 @@ pub fn show(
         edit = Some((command, None));
     }
     let mut seek = None;
+    if pane == Pane::Video
+        && let Some(base) = shared.and_then(|a| a.annotation.as_ref())
+        && let Some(annotation_edit) = crate::annotations::inspector(ui, clips, base, t)
+    {
+        edit = Some(annotation_edit);
+    }
     let mut index = 0u64;
     for (id, props) in SECTIONS {
         let (clips, here) = if id == "audio" {
@@ -4845,6 +4851,7 @@ mod tests {
             out_point: None,
             solid: None,
             text: text.then(Text::default),
+            annotation: None,
             generated_caption: false,
             sequence: None,
         }

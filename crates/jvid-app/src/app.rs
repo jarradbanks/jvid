@@ -1245,6 +1245,9 @@ impl App {
     /// One availability result for the same target the executor will use. Menus explicitly
     /// target Timeline; shortcuts and the palette preserve the focused dock and monitor.
     fn action_applicability(&mut self, id: &str, menu: bool) -> Applicability {
+        if crate::annotations::kind(id).is_some() {
+            return self.annotation_applicability(menu);
+        }
         if crate::media_bin::library::ACTIONS.contains(&id) {
             return self.media_library_applicability(id);
         }
@@ -1356,8 +1359,17 @@ impl App {
             .library_applicability(id, self.history.project(), focused)
     }
 
-    /// Runs a keymap action; `menu` (Edit menu or app bar) targets the timeline whatever has
-    /// focus. The palette uses the same focused-panel route as shortcuts.
+    /// Availability for annotation creation in Program.
+    fn annotation_applicability(&mut self, menu: bool) -> crate::keymap::Applicability {
+        let focused = self.dock.find_active_focused().map(|(_, tab)| *tab);
+        crate::keymap::Applicability::when(
+            menu || focused == Some(Tab::Timeline)
+                || (focused == Some(Tab::Preview) && self.preview_active == 1),
+            "annotations.program_only",
+        )
+    }
+
+    /// Runs actions through the same focused-panel route as palette and shortcuts.
     fn run_action(&mut self, id: &str, menu: bool) {
         if !self.action_applicability(id, menu).is_enabled() {
             return;
@@ -1556,6 +1568,19 @@ impl App {
             .find_active_focused()
             .is_some_and(|(_, t)| *t == Tab::Timeline);
         let program_focused = preview_focused && self.preview_active == 1;
+        if let Some(kind) = crate::annotations::kind(id) {
+            if self.annotation_applicability(menu).is_enabled() {
+                match crate::annotations::create(&mut self.history, kind, self.timeline.playhead())
+                {
+                    Ok(clip) => {
+                        self.preview_active = 1;
+                        self.timeline.select_program_clip(clip);
+                    }
+                    Err(e) => tracing::warn!("annotation creation failed: {e}"),
+                }
+            }
+            return;
+        }
         if (timeline_focused || program_focused || menu) && PROGRAM_ACTIONS.contains(&id) {
             self.preview_active = 1;
             self.preview.program_action(id);
@@ -2984,11 +3009,17 @@ impl TabViewer for Viewer<'_> {
                     }
                 }
                 let selected = self.timeline.selected();
-                if let Some((c, g)) =
-                    crate::handles::show(ui, self.project, selected, t, frame, &|c| {
-                        let a = self.project.asset(c.asset)?;
-                        self.timeline.strip_frame(a, c.source_at(t))
-                    })
+                let (annotation, endpoint) =
+                    crate::annotations::show(ui, self.project, selected, t, frame);
+                if let Some((c, g)) = annotation {
+                    (self.command, self.gesture) = (Some(c), g);
+                }
+                if !endpoint
+                    && let Some((c, g)) =
+                        crate::handles::show(ui, self.project, selected, t, frame, &|c| {
+                            let a = self.project.asset(c.asset)?;
+                            self.timeline.strip_frame(a, c.source_at(t))
+                        })
                 {
                     (self.command, self.gesture) = (Some(c), g);
                 }

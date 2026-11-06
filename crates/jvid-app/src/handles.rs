@@ -117,7 +117,14 @@ fn bounds(
     x: &Transform,
     text: Option<&Text>,
     frame: Rect,
+    at: Time,
 ) -> Option<[Pos2; 4]> {
+    if project
+        .asset(c.asset)
+        .is_some_and(|a| a.annotation.is_some())
+    {
+        return crate::annotations::corners(project, c, x, frame, at);
+    }
     let q @ [tl, tr, bl, _] = corners(project, c, x, frame)?;
     let st = project.settings();
     let Some([x0, y0, x1, y1]) = text.and_then(|t| text::drawn_bounds(t, (st.width, st.height)))
@@ -140,12 +147,15 @@ pub fn clip_at(project: &Project, t: Time, frame: Rect, pos: Pos2) -> Option<Cli
                 return None;
             }
             let (_, c) = project.sequence().clip(l.clip)?;
+            if project.asset(c.asset)?.annotation.is_some() {
+                return crate::annotations::hit(project, c, t, frame, pos).then_some(c.id);
+            }
             let text = project
                 .asset(c.asset)?
                 .text
                 .as_ref()
                 .map(|text| text.with(&l.text));
-            let [tl, tr, bl, _] = bounds(project, c, &l.transform, text.as_ref(), frame)?;
+            let [tl, tr, bl, _] = bounds(project, c, &l.transform, text.as_ref(), frame, t)?;
             let (u, v, d) = (tr - tl, bl - tl, pos - tl);
             let det = u.x * v.y - u.y * v.x;
             if det.abs() < 1e-6 {
@@ -389,7 +399,7 @@ pub fn show(
                 .find(|l| l.clip == c.id);
             layer.map_or_else(|| text.clone(), |l| text.with(&l.text))
         });
-    let [tl, tr, bl, br] = bounds(project, c, &x, text.as_ref(), frame)?;
+    let [tl, tr, bl, br] = bounds(project, c, &x, text.as_ref(), frame, t)?;
     let st = project.settings();
     let viewer = crate::preview::viewer_rect(ui);
     let geometry =
@@ -956,7 +966,7 @@ pub(crate) mod tests {
         let p = h.project();
         let (_, c) = p.sequence().clip(id).unwrap();
         let text = p.asset(c.asset).unwrap().text.clone();
-        let b = bounds(p, c, &c.transform, text.as_ref(), frame).unwrap();
+        let b = bounds(p, c, &c.transform, text.as_ref(), frame, Time(0)).unwrap();
         let r = Rect::from_points(&b);
         if r == frame {
             return; // No font, nothing drawn.
