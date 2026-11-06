@@ -276,7 +276,7 @@
       ],
       "spec": "Package B: Media library\n\nYou are an Orca worker executing one approved jvid workflow package for Run run_bdd46aa1fc52, coordinated solely by the execution orchestrator. Work only in the assigned isolated Omarchy checkout. Do not dispatch additional workers, implement other packages, merge main, change protection, or publish releases/tags. Base on the coordinator-specified commit reconciled with latest origin/main, never the repo default origin/develop; fetch/inspect before changing the base and report divergence. Read DESIGN.md and applicable AGENTS.md. The approved scope and exact acceptance for this package are included below. Preserve remappable shortcuts, translated labels, narrow panels and all three OSes. Content changes must undo, persist and match playback/export; view state must not alter renders. Keep jvid-core free of UI/media/I/O dependencies. Implement substantial logic in the owned modules. Shared-file patches require a declared coordinator ownership window and a small separate integration commit; include exact changed paths in the report. Publish a small contract commit before dependent consumers when named below. At checkpoints read the live preamble inbox; ask the coordinator with the preamble command when genuinely blocked. Follow that preamble exactly for heartbeat, Task/Dispatch IDs and one worker_done; do not invent handles or send lifecycle completion from another terminal. Commit the work and supply a report with commits, files, exact test commands/results, any skipped tests, UI artifact paths where appropriate and material limitations. Run focused meaningful tests plus formatting; do not claim manual/platform verification from unit tests. The coordinator independently reviews and integrates. Report before scope changes or any ownership collision.\n\nTarget and exclusive owned files: crates/jvid-app/src/media_bin.rs; crates/jvid-app/src/media_bin/library.rs (new); crates/jvid-core/src/media_library.rs (new).\n\nIntegration ownership and concrete work: Project lane follows K for capacity/ownership, not an intrinsic hard DAG edge. Propose one backward-compatible metadata shape and undo commands for coordinator-serialized model/history/file wiring. Keep asset IDs stable and flat default. Bin moves never touch disk; organization deletion and asset removal remain distinct. Test rename/move/delete, undo/reopen, combined search/sort/filters, nested-sequence usage and missing/large media sets.\n\nShared contracts:\nCoordinator serializes changes to core model.rs/history.rs/file.rs/lib.rs, app.rs/lib.rs, shared keymap wiring, i18n catalogs and guide docs. Workers may propose narrowly scoped changes in separately identified commits but must obtain a coordinator ownership window before applying shared-file changes that overlap another active task. No independent schema-version increments. Prefer backward-compatible serde defaults and preserve all legacy projects/settings.\nKeep keymap::ACTIONS and its stable string IDs authoritative, resolve translated names and actual current bindings at display time, and expose one applicability result (enabled or a translated reason) consumed by palette/menu/dispatch. Preserve Source-vs-Program and focused-panel routing and restore prior focus after palette close. Feature workers submit registration IDs and a small wiring patch to coordinator; do not maintain a second action executor.\n\n### B \u2014 Media library (#15)\n\nTarget: media bin and backward-compatible project metadata. Favorites, simple bins and filters for Used/Unused, Video/Audio and Missing, combined with existing search/sort. Usage includes nested sequences. Moving a bin item does not move source files; deletion rules distinguish organization from removing an asset. Keep a flat default for quick edits. Test rename/move/delete, undo where project metadata changes, reopen, nested usage, missing media and large-bin responsiveness.",
       "task_id": "task_cb16f69b6e97",
-      "dispatch_id": null,
+      "dispatch_id": "ctx_5465a6b2e0ff",
       "implementation_status": "reviewed_and_serially_integrated_next_batch",
       "creation_request_id": "14c113fa-fc2b-4d57-8f4f-7c385fd83a24",
       "worker_head": "e39a733a73af87ba3f4d2158ff5f41e8171a7a75",
@@ -331,7 +331,8 @@
       "creation_request_id": "9dbccd76-9d04-414d-b5d9-d3e1df286a43",
       "launch_request_id": "8102174c-9bed-4797-90e5-566e77d0cd08",
       "effective_model": "gpt-6.1-sol",
-      "effective_effort": "xhigh"
+      "effective_effort": "xhigh",
+      "worktree_id": "41ac820a-a842-48f7-82fb-7df422766c74::/home/jarrad/orca/workspaces/jvid/workflow-caption-workspace"
     },
     {
       "package": "S",
@@ -348,9 +349,13 @@
       ],
       "spec": "Package S: Review automatic speech cuts\n\nYou are an Orca worker executing one approved jvid workflow package for Run run_bdd46aa1fc52, coordinated solely by the execution orchestrator. Work only in the assigned isolated Omarchy checkout. Do not dispatch additional workers, implement other packages, merge main, change protection, or publish releases/tags. Base on the coordinator-specified commit reconciled with latest origin/main, never the repo default origin/develop; fetch/inspect before changing the base and report divergence. Read DESIGN.md and applicable AGENTS.md. The approved scope and exact acceptance for this package are included below. Preserve remappable shortcuts, translated labels, narrow panels and all three OSes. Content changes must undo, persist and match playback/export; view state must not alter renders. Keep jvid-core free of UI/media/I/O dependencies. Implement substantial logic in the owned modules. Shared-file patches require a declared coordinator ownership window and a small separate integration commit; include exact changed paths in the report. Publish a small contract commit before dependent consumers when named below. At checkpoints read the live preamble inbox; ask the coordinator with the preamble command when genuinely blocked. Follow that preamble exactly for heartbeat, Task/Dispatch IDs and one worker_done; do not invent handles or send lifecycle completion from another terminal. Commit the work and supply a report with commits, files, exact test commands/results, any skipped tests, UI artifact paths where appropriate and material limitations. Run focused meaningful tests plus formatting; do not claim manual/platform verification from unit tests. The coordinator independently reviews and integrates. Report before scope changes or any ownership collision.\n\nTarget and exclusive owned files: crates/jvid-app/src/speech_review.rs (new); crates/jvid-app/src/timeline/silence.rs; crates/jvid-app/src/transcript/fillers.rs.\n\nIntegration ownership and concrete work: Read current detector analysis cache and filler behavior; propose-only analysis must never mutate timeline. Show audition before/after, per-proposal keep/reject, threshold/breathing room and time saved. Capture project/source revision, reject/recompute stale plans and apply accepted cuts as one undoable edit. Coordinate timeline.rs/history.rs/transcript.rs integration serially, keeping H/T domains separate. Test cancellation, edits during analysis, none/all accepted, edge cuts, linked A/V/captions/locked tracks, undo and audio continuity export.\n\nShared contracts:\nKeep keymap::ACTIONS and its stable string IDs authoritative, resolve translated names and actual current bindings at display time, and expose one applicability result (enabled or a translated reason) consumed by palette/menu/dispatch. Preserve Source-vs-Program and focused-panel routing and restore prior focus after palette close. Feature workers submit registration IDs and a small wiring patch to coordinator; do not maintain a second action executor.\nCoordinator serializes changes to core model.rs/history.rs/file.rs/lib.rs, app.rs/lib.rs, shared keymap wiring, i18n catalogs and guide docs. Workers may propose narrowly scoped changes in separately identified commits but must obtain a coordinator ownership window before applying shared-file changes that overlap another active task. No independent schema-version increments. Prefer backward-compatible serde defaults and preserve all legacy projects/settings.\n\n### S \u2014 Review automatic speech cuts (#6)\n\nTarget: silence detection, transcript/fillers, new proposal review UI. Audition before/after cuts, keep/reject individual suggestions, tune pause threshold and retained breathing room, show time saved, then apply one undoable operation. Analyze without immediately mutating the timeline. Record source/project revision and invalidate or recompute proposals after conflicting edits. Preserve linked A/V sync, captions and locked-track rules. Test cancellation, stale analysis, all/none accepted, edge cuts, undo and export audio continuity.",
       "task_id": "task_d0fea59d81f8",
-      "dispatch_id": null,
-      "implementation_status": "not_started",
-      "creation_request_id": "776f3ee1-f446-47b1-9ae4-82eadc47fbcd"
+      "dispatch_id": "ctx_2bd45eebc586",
+      "implementation_status": "dispatched",
+      "creation_request_id": "776f3ee1-f446-47b1-9ae4-82eadc47fbcd",
+      "launch_request_id": "a2a30af2-a40e-4c65-9d69-f96f11cd2a4a",
+      "effective_model": "gpt-6.1-sol",
+      "effective_effort": "xhigh",
+      "worktree_id": "41ac820a-a842-48f7-82fb-7df422766c74::/home/jarrad/orca/workspaces/jvid/workflow-speech-cut-review"
     },
     {
       "package": "N",
@@ -452,11 +457,12 @@
   ],
   "execution_state": "first_six_on_pr518_full_verification_remote_next_batch_B_integrated",
   "lifecycle_accounting": {
-    "run_workers": 12,
-    "active_workers": 5,
+    "run_workers": 13,
+    "active_workers": 6,
     "released_workers": 7,
     "reclaimable_terminals": 0,
-    "temporary_fifth_worker_reason": "first wave settled; measured 12GiB available and little build pressure; integration verification isolated"
+    "temporary_fifth_worker_reason": "first wave settled; measured 12GiB available and little build pressure; integration verification isolated",
+    "temporary_sixth_worker_reason": "6CPUs, load2.73 and11GiB available; one buildjob perworker, firstwave settled"
   },
   "main_reconciliation": {
     "origin_main": "e49d81fa86204e6278584e96405194d3f2ba4dc1",
@@ -517,7 +523,9 @@
     "V": "Reviewed full production geometry/render/handle/mask/zoom/text mapping and GPU test report; independently viewed before/after, narrow portrait, off-frame recovery images. F is authorized to fix stale Alt-region Draw cancellation when middle-pan interrupts a gesture and to verify source/program view identity in separate V follow-up commits before main merge.",
     "A1": "Reviewed production palette, registry and shared app dispatch plus focused test report and two UI captures. A2 is authorized to add empty-sequence export_frame availability preflight (existing export::frame_png prerequisite) as a separate A1 follow-up before protected-main merge. Skip duplicate catalog 7c82ff6.",
     "A2": "Reviewed semantic optional IDs, docking repair/persistence/maximize and app wiring; German960x600 at150% capture reviewed. Empty frame export preflight d87d62e integrated. H/C final registration remains.",
-    "F": "Reviewed observation health/decode provenance/proxy failure retry and V compatibility diffs/report; compact actual viewer artifact reviewed. Final catalogs inserted directly into preview table, making273ea07 redundant."
+    "F": "Reviewed observation health/decode provenance/proxy failure retry and V compatibility diffs/report; compact actual viewer artifact reviewed. Final catalogs inserted directly into preview table, making273ea07 redundant.",
+    "C": "Reviewed core caption contract in-progress; found split tail identity collision at existing overlap and merge using last-start end instead of max end; assigned fixes and atomic regressions to C before completion.",
+    "N": "Reviewed shape/style contract and raster/hit logic in-progress; requested portable embedded digits instead of system default for callout numbers, plus centralized dynamic schema2 writer predicate."
   },
   "integration_premerge_followups": {
     "V": "F owns Alt-region/middle-pan cancellation regression and verifies monitor/source view identity.",
@@ -535,7 +543,13 @@
       "changed-workflow clippy repairs",
       "full integrated verification on Omarchy"
     ],
-    "expanded_base": "e446016629362c7342ebf47cdb5a685d16d5158a"
+    "expanded_base": "e446016629362c7342ebf47cdb5a685d16d5158a",
+    "early_fixes_integrated": [
+      "7874bfd47890ecc56ba0b234f8961a01c62bc971",
+      "c862f1b",
+      "a2f706f34ef65520733cae5abd485f779c754411",
+      "5290088f99134eb3a51ed3eaefa4f707cd048118"
+    ]
   },
   "pull_requests": [
     {
@@ -552,7 +566,7 @@
         "F"
       ],
       "status": "open_full_verification_pending",
-      "head_sha": "e446016629362c7342ebf47cdb5a685d16d5158a"
+      "head_sha": "5290088f99134eb3a51ed3eaefa4f707cd048118"
     }
   ],
   "next_batch_branch": "jarradbanks/workflow-content-tools",
