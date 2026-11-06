@@ -12,7 +12,9 @@ use jvid_render::text;
 use suite_ui::themes::DARK;
 use suite_ui::tokens::color;
 
+use crate::i18n::tr;
 use crate::timeline::Edit;
+use crate::viewer_geometry::{View, ViewerGeometry};
 
 /// Undo gesture for handle drags, xored with the drag count.
 const GESTURE: GestureKey = 0x6861_6e64_0000; // "hand"
@@ -101,12 +103,9 @@ pub(crate) fn corners(
     let size = [st.width as f32, st.height as f32];
     let image = crate::masks::upright(project, c).unwrap_or(size);
     let q = jvid_render::composite::quad(image, size, x)?;
+    let geometry = ViewerGeometry::from_frame(frame, frame, size.into());
     Some(q.map(|[cx, cy, ..]| {
-        frame.min
-            + vec2(
-                (cx + 1.0) / 2.0 * frame.width(),
-                (1.0 - cy) / 2.0 * frame.height(),
-            )
+        geometry.project_to_screen(egui::pos2(cx * size[0] / 2.0, -cy * size[1] / 2.0))
     }))
 }
 
@@ -173,7 +172,7 @@ pub fn double_clicked_text(
         let p = i.pointer.interact_pos();
         p.filter(|_| i.pointer.button_double_clicked(primary))
     });
-    let pos = pos.filter(|p| frame.contains(*p) && crate::preview::viewer_rect(ui).contains(*p))?;
+    let pos = pos.filter(|p| crate::preview::viewer_rect(ui).contains(*p))?;
     let st = project.settings();
     let (w, h) = (st.width as i64, st.height as i64);
     let seq = project.sequence();
@@ -392,7 +391,10 @@ pub fn show(
         });
     let [tl, tr, bl, br] = bounds(project, c, &x, text.as_ref(), frame)?;
     let st = project.settings();
-    let s = frame.width() / st.width as f32;
+    let viewer = crate::preview::viewer_rect(ui);
+    let geometry =
+        ViewerGeometry::from_frame(viewer, frame, vec2(st.width as f32, st.height as f32));
+    let s = geometry.scale();
     // A shot of another shape covering the frame, as Reframe leaves one: the frame is a box
     // to aim over it.
     let drawn = Rect::from_points(&[tl, tr, bl, br]);
@@ -403,7 +405,7 @@ pub fn show(
         // Stretch can match the frame exactly. Only overflow is a wide shot to reframe;
         // an exact match retains the normal drag direction for the clip.
         && (drawn.width() > frame.width() + 0.5 || drawn.height() > frame.height() + 0.5);
-    let anchor = frame.center() + vec2(x.position[0] as f32, x.position[1] as f32) * s;
+    let anchor = geometry.project_to_screen(egui::pos2(x.position[0] as f32, x.position[1] as f32));
     let up = (tl - bl).normalized();
     let top = tl.lerp(tr, 0.5);
     let rot = top + up * STEM;
@@ -436,15 +438,11 @@ pub fn show(
         Grab::Rotate,
         Rect::from_center_size(rot, Vec2::splat(HANDLE * 1.5)),
     ));
-    // Off the viewer, nothing draws or takes clicks; Fit zoom brings off-frame handles back.
-    // A reframed shot's outline runs on across the viewer.
-    let viewer = crate::preview::viewer_rect(ui);
-    let clip = if reframe {
-        viewer
-    } else {
-        frame.expand(STEM + HANDLE).intersect(viewer)
-    };
+    // Editing can extend beyond the project frame; only the viewer body clips it.
+    // View Selection deliberately recovers inaccessible bounds without following a drag.
+    let clip = viewer;
     let mut edit = None;
+    let panning = ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle));
     for (i, (grab, r)) in grabs.into_iter().enumerate() {
         let resp = ui.interact(r.intersect(clip), id.with(i), Sense::drag());
         let icon = match grab {
@@ -453,7 +451,8 @@ pub fn show(
             Grab::Rotate => egui::CursorIcon::Alias,
         };
         let resp = resp.on_hover_cursor(icon);
-        if resp.drag_started()
+        if !panning
+            && resp.drag_started()
             && let Some(from) = resp.interact_pointer_pos()
         {
             let drag = start.as_ref().map_or(0, |s| s.drag) + 1;
@@ -475,7 +474,8 @@ pub fn show(
         else {
             continue;
         };
-        if resp.dragged()
+        if !panning
+            && resp.dragged()
             && let Some(to) = resp.interact_pointer_pos()
         {
             let shift = ui.input(|i| i.modifiers.shift);
@@ -562,7 +562,75 @@ pub fn show(
         ],
         stroke,
     );
+    view_selection(ui, geometry, Rect::from_points(&[tl, tr, bl, br, anchor]));
     edit
+}
+
+/// A foreground icon stays clickable even when an oversized body/mask covers the viewer.
+/// Capture bounds once on click, so the view remains fixed throughout the next edit.
+fn view_selection(ui: &Ui, geometry: ViewerGeometry, bounds: Rect) {
+    use suite_ui::tokens::{size, space};
+    let body = geometry.body.intersect(ui.clip_rect());
+    if body.width() < size::CONTROL + 2.0 * space::S4
+        || body.height() < size::CONTROL + 2.0 * space::S4
+    {
+        return;
+    }
+    egui::Area::new(ui.id().with("view selection"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(body.right_top() + vec2(-size::CONTROL - space::S4, space::S4))
+        .movable(false)
+        .constrain_to(body)
+        .show(ui.ctx(), |button_ui| {
+            button_ui.set_clip_rect(body);
+            // Like the transform handles, this overlay has no font dependency. Its four
+            // corners use screen points; translated text is the accessible name/tooltip.
+            let (rect, response) =
+                button_ui.allocate_exact_size(Vec2::splat(size::CONTROL), Sense::click());
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    true,
+                    tr!("preview.view_selection"),
+                )
+            });
+            let response = response.on_hover_text(tr!("preview.view_selection"));
+            if response.hovered() || response.has_focus() {
+                button_ui.painter().rect_filled(rect, 6.0, color::raised());
+            }
+            let centre = rect.center();
+            let stroke = Stroke::new(
+                1.0,
+                if response.has_focus() {
+                    DARK.light_blue
+                } else {
+                    DARK.ink
+                },
+            );
+            for sign in [
+                vec2(-1.0, -1.0),
+                vec2(1.0, -1.0),
+                vec2(-1.0, 1.0),
+                vec2(1.0, 1.0),
+            ] {
+                let corner = centre + sign * 6.0;
+                button_ui
+                    .painter()
+                    .line_segment([corner - vec2(sign.x * 3.0, 0.0), corner], stroke);
+                button_ui
+                    .painter()
+                    .line_segment([corner, corner - vec2(0.0, sign.y * 3.0)], stroke);
+            }
+            if response.clicked() {
+                crate::preview::set_view(
+                    ui,
+                    View {
+                        selection: Some(geometry.screen_rect_to_project(bounds)),
+                        pan: Vec2::ZERO,
+                    },
+                );
+            }
+        });
 }
 
 #[cfg(test)]
@@ -847,7 +915,7 @@ pub(crate) mod tests {
 
     /// A title clip filling 0..1s of a default project, with a box so its hit and bounds
     /// don't depend on the installed fonts.
-    fn title() -> (jvid_core::history::History, ClipId) {
+    pub(crate) fn title() -> (jvid_core::history::History, ClipId) {
         use jvid_core::history::{Command, Created, History};
         use jvid_core::model::NewClip;
         use jvid_core::time::FLICKS_PER_SECOND as S;
