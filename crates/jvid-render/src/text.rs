@@ -833,7 +833,19 @@ mod tests {
                 alias_faces(&mut db, faces, alias);
             }
             if installed {
-                db.load_font_file(fixture("environment.ttf")).unwrap();
+                let mut environment = cosmic_text::fontdb::Database::new();
+                environment
+                    .load_font_file(fixture("environment.ttf"))
+                    .unwrap();
+                for mut face in environment.faces().cloned() {
+                    let language = face.families[0].1;
+                    face.families =
+                        cosmic_text::Fallback::common_fallback(&cosmic_text::PlatformFallback)
+                            .iter()
+                            .map(|name| ((*name).to_owned(), language))
+                            .collect();
+                    db.push_face_info(face);
+                }
             }
             Fonts::new(FontSystem::new_with_locale_and_db("en-US".into(), db))
         };
