@@ -178,7 +178,8 @@
       "worker_head": "c361ef348a423b710b46e6dd704faf0353454623",
       "lifecycle": "released",
       "release_request_id": "d5157c50-fdcf-4ab2-b14a-375b3b0b61b5",
-      "release_process_action": "closed_agent_terminal"
+      "release_process_action": "closed_agent_terminal",
+      "report_path": "/tmp/jvid-a2-artifacts/report.txt"
     },
     {
       "package": "P1",
@@ -206,7 +207,8 @@
       "worker_head": "84d93b8cf916f2c62e3d0d9ef0a6271d3f3f479c",
       "lifecycle": "released",
       "release_request_id": "9ac03ae2-9475-4344-9a77-741a5a4608b1",
-      "release_process_action": "closed_agent_terminal"
+      "release_process_action": "closed_agent_terminal",
+      "report_path": "/home/jarrad/.local/share/jvid-workflow-reports/task_e794ec7ec163/report.json"
     },
     {
       "package": "P2",
@@ -265,7 +267,8 @@
       "worker_head": "3a140177317a2d012bf1cf7819553480d80dc580",
       "lifecycle": "released",
       "release_request_id": "78416c22-8ceb-405e-9664-971b89f17b30",
-      "release_process_action": "closed_agent_terminal"
+      "release_process_action": "closed_agent_terminal",
+      "report_path": "/home/jarrad/orca/workspaces/jvid/workflow-collect-project/dist/package-k/report.txt"
     },
     {
       "package": "B",
@@ -290,7 +293,8 @@
       "release_request_id": "fe582513-c288-4f84-88ac-cb880c94cccf",
       "release_process_action": "closed_agent_terminal",
       "integration_head": "431d831",
-      "review_notes": "Reviewed sparse metadata and atomic history, nested usage/filtering, virtualization and app shared routing; applied three-line A1 adapter during serial App conflict resolution. Focused worker tests pass, full combined next-batch checks remain. Existing quadratic Import deliberately unchanged."
+      "review_notes": "Reviewed sparse metadata and atomic history, nested usage/filtering, virtualization and app shared routing; applied three-line A1 adapter during serial App conflict resolution. Focused worker tests pass, full combined next-batch checks remain. Existing quadratic Import deliberately unchanged.",
+      "report_path": "/home/jarrad/orca/workspaces/jvid/workflow-media-library/target/package-b-media-library-report.txt"
     },
     {
       "package": "H",
@@ -502,13 +506,14 @@
       "worker_head": "85a9f6659432fed16a528a226cd75e4687db2f2b",
       "lifecycle": "released",
       "release_request_id": "1bb20376-eda2-40e3-a954-c8054ca7a8ee",
-      "release_process_action": "closed_agent_terminal"
+      "release_process_action": "closed_agent_terminal",
+      "report_path": "/home/jarrad/orca/workspaces/jvid/workflow-playback-status/target/package-f-report.txt"
     }
   ],
-  "execution_state": "all14_packages_reviewed_serially_integrated_and_feature_workers_released_I1_final_sweep_I2_ready",
+  "execution_state": "all14_integrated_first_PR518_font_snapshot_portability_fix_pending_final_PR519_I2_verification_active",
   "lifecycle_accounting": {
-    "run_workers": 15,
-    "active_workers": 1,
+    "run_workers": 16,
+    "active_workers": 2,
     "released_workers": 14,
     "reclaimable_terminals": 0,
     "temporary_fifth_worker_reason": "first wave settled; measured 12GiB available and little build pressure; integration verification isolated",
@@ -613,7 +618,7 @@
       "number": 518,
       "url": "https://github.com/jarradbanks/jvid/pull/518",
       "base": "main",
-      "head": "825c174921975e528afa42674d1a04fecbd22280",
+      "head": "a9b32d3bac941227a6fbd2cbd17f41deb8af9025",
       "packages": [
         "V",
         "A1",
@@ -624,6 +629,23 @@
       ],
       "status": "open_full_verification_pending",
       "head_sha": "fe35ea2cdee8faeb3c6e06e50404b728413633cf"
+    },
+    {
+      "number": 519,
+      "url": "https://github.com/jarradbanks/jvid/pull/519",
+      "base": "main",
+      "branch": "jarradbanks/workflow-content-tools",
+      "state": "open_pending_final_verification_and_required_checks",
+      "packages": [
+        "B",
+        "H",
+        "P2",
+        "N",
+        "S",
+        "C",
+        "E",
+        "T"
+      ]
     }
   ],
   "next_batch_branch": "jarradbanks/workflow-content-tools",
@@ -650,8 +672,19 @@
       "task_a0a1ec867e0a"
     ],
     "spec": "I2 — Final all-package integration verification and bounded fixes. You are a real Orca worker in a fresh isolated Omarchy checkout for Run run_bdd46aa1fc52, sole coordinator execution orchestrator. Read DESIGN.md and applicable AGENTS.md. Never use origin/develop; fetch origin/main and wait for coordinator exact final integration SHA/ref before source edits/heavy checks. Do not merge main, dispatch more workers, alter protection or publish tags/releases. One cargo build job and expensive UI tests one thread; force Lavapipe Vulkan GPU required. Reflink only quiescent settled targets into own target, never modify donor; reuse generated corpus via JVID_TEST_MEDIA if complete. Shared files may be edited only in narrow independently reported integration/regression commits; substantial feature redesign or unrelated infrastructure needs coordinator decision. No new schema increments beyond centrally supported2. Preserve owner unrelated work.\n\nAll14 approved packages must work together: V viewer Fit/recovery mapping and unchanged render; A1 shared action applicability/menu/palette/executor/focus/custom keymap; A2 layouts/maximize including registered Captions/Highlights missing/closed panels; P1 transfer and P2 portable presets category/style/animation/resource validation; K complete/incomplete collection nested media/fonts/effects/LUT plus generated annotations; B organization/undo nested usage and Video filter for annotations; H immutable selected range export handoff; C hidden/locked Unicode captions/style overrides/split/merge/SRT/burned output; S stale proposals/linked AV/caption continuity/one undo; T drag plan equals feedback and commit; E per-variant independent reviewed framing/captions/naming/cancellation/actual encoded dimensions/ranges; F actual pixel provenance/proxy recovery/bounded status overhead. Read reports from each package and independently inspect serial shared-file merges, do not treat worker success as integration proof.\n\nRun exact required commands on final candidate: cargo fmt --all --check; cargo clippy --workspace --all-targets -- -D warnings; cargo test --workspace --no-fail-fast with JVID_GPU_TESTS=required JVID_TEST_MEDIA_REQUIRED=1 JVID_X265_TESTS=required; core dependency boundary check; python scripts/i18n_check.py and repository Python i18n/release/packaging unit tests. Execute relevant normally ignored locale tests individually to avoid global-locale interference. Run combined cross-feature regressions and representative actual UI captures at720p/1080p and100%/150% with long German labels, keyboard focus/cancel/undo/reopen; inspect pixels before any deliberate golden refresh. Use actual media encode paths for affected exported dimensions/ranges/caption policies and annotation compositor. Report exact commands, pass/fail/ignored/internal skips, exact tested SHA/tree, regression fix commits, files, artifact paths and material native/device/performance limits. Settle all child build/test processes.\n\nSend merge-ready status with exact tested tree before worker_done; coordinator will merge passing protected-main PR then send main SHA. Remain active only for this substantive final verification phase, fetch that main, confirm tree equality and run appropriate integrated-main smoke checks; report any difference, do not blindly rerun entire unchanged test corpus. Send one worker_done only after final-main verification and report complete, then coordinator releases Dispatch. Follow preamble exact ask/check/heartbeat/lifecycle instructions; actual questions through ask, never manual send type question. No invented/provisional commit hashes in messages.",
-    "implementation_status": "ready_dependencies_settled",
-    "candidate_source_head": "800776d8b8b01d4c58f16f53ccd86aaedc811002"
+    "implementation_status": "dispatched_verifying_all14",
+    "candidate_source_head": "800776d8b8b01d4c58f16f53ccd86aaedc811002",
+    "dispatch_id": "ctx_efae53b68f74",
+    "launch_request_id": "a849a6cf-97ea-4322-9aa8-26ed8a3bfcf9",
+    "effective_model": "gpt-6.1-sol",
+    "effective_effort": "xhigh",
+    "worktree_id": "41ac820a-a842-48f7-82fb-7df422766c74::/home/jarrad/orca/workspaces/jvid/workflow-final-verification",
+    "candidate_commit": "ea78cf29d33136be42bdf30414625ace7a4d01cf",
+    "candidate_tree": "701facd00d14197494a7b98860dda62a2d5b6618",
+    "early_reviewed_fixes": [
+      "9894dcfbbe42c6063a4143fd2d0aeab38a49f69d",
+      "21a391845992103331aa63ce1677e56feedeecf6"
+    ]
   },
   "verification_findings": {
     "first_pr_ci": "fmt andClippyfixed; fullCIrun42214274103 reachedtests743pass16fail9ignored +i18n3pass4fail. I1 owns actualEditpopupoverflow productfix, staleaccessibilityqueries, inspected intentionalgoldens andrerun. No merge yet.",
@@ -671,6 +704,8 @@
       "corpus8": "/home/jarrad/orca/reports/task_c484d48ccad8/test-media-ffmpeg8",
       "corpus8_status": "complete_verified_by_E",
       "app_link_precedence": "Verify ELF: native ALSA/X11 -L/usr/lib can override prefix. E wrapper prepends native prefix only to jvid_app rustc; I1 cc wrapper prepends at final link for all workspace binaries. Owned wrappers only; verify libavcodec62/libavformat62/libavutil60 with prefix LD_LIBRARY_PATH before counting8 results."
-    }
+    },
+    "PR518_final_font_snapshots": "Hosted Linux run42218822281 passed all behavior/media and other crates; app758pass2fail10ignored.4 small font-render goldens differ(editor_light/high-contrast555px;timeline_tools minimum64/large322). Root downloaded/viewed actual diffs and gave I1 bounded deterministic existing-font fixture ownership, no tolerance loosening.",
+    "PR519_initial_CI": "ea78cf2 required check failed6 currentClippy lints(5annotation fixed-chunk tests,1preset clone); i18nCJK generator found3 existing subsets outdated. I2 fixes9894dcf+21a3918 reviewed and integrated; generated fonts deterministic double-run exactfonttools4.65.0. Python i18n7/release56/packaging166 pass(10platformskips). Fullworkspace/combined regressions ongoing."
   }
 }
