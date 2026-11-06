@@ -1263,8 +1263,8 @@ impl App {
                     "palette.no_source",
                 );
             }
-            "new_project" | "open_project" | "save" | "save_as" | "import" | "import_subtitles"
-            | "export_subtitles" | "quit" | "record" | "command_palette"
+            "new_project" | "open_project" | "save" | "save_as" | "collect_project" | "import"
+            | "import_subtitles" | "export_subtitles" | "quit" | "record" | "command_palette"
             | "focus_media" | "focus_effects" | "focus_source" | "focus_program"
             | "focus_timeline" | "focus_inspector" => Some(true),
             _ => None,
@@ -2997,6 +2997,29 @@ mod palette_tests {
     use egui_kittest::Harness;
     use jvid_core::model::{AssetId, ProbeInfo};
     use jvid_core::time::{FLICKS_PER_SECOND, Rate};
+
+    #[test]
+    fn collection_executes_from_every_panel_without_changing_project() {
+        for focus in [
+            "focus_media",
+            "focus_inspector",
+            "focus_source",
+            "focus_timeline",
+        ] {
+            let mut app = App::restore(None);
+            app.run_action(focus, false);
+            let before = app.history.project().clone();
+            assert!(
+                app.action_applicability("collect_project", false)
+                    .is_enabled(),
+                "{focus}"
+            );
+            app.run_action("collect_project", false);
+            assert!(app.collection.is_open(), "{focus}");
+            assert_eq!(app.history.project(), &before);
+            assert!(!app.history.can_undo());
+        }
+    }
 
     #[test]
     fn applicability_matches_focused_source_program_and_explicit_menu_targets() {

@@ -221,7 +221,9 @@ fn run(
     let name = Path::new(&request.project_name);
     if name.components().count() != 1
         || !matches!(name.components().next(), Some(Component::Normal(_)))
-        || name.extension().is_none_or(|ext| ext != "jvid")
+        || name
+            .extension()
+            .is_none_or(|ext| !ext.eq_ignore_ascii_case("jvid"))
     {
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
@@ -980,6 +982,20 @@ mod tests {
             Some(root.join("original/project.jvid")),
             root.join("collected"),
         )
+    }
+
+    #[test]
+    fn uppercase_source_project_extension_is_preserved() {
+        let root = tempfile::tempdir().unwrap();
+        let mut req = request(Project::default(), root.path());
+        req.source_project = Some(root.path().join("original/EDIT.JVID"));
+        req.project_name = "EDIT.JVID".into();
+        let collected = collect(&req, || false, |_| {}).unwrap();
+        assert_eq!(collected.project.file_name().unwrap(), "EDIT.JVID");
+        assert_eq!(
+            crate::project_file::load(&collected.project).unwrap(),
+            req.project
+        );
     }
 
     #[test]
