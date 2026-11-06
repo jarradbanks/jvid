@@ -52,6 +52,7 @@ pub const ACTIONS: &[Action] = &[
     a("open_project", "Ctrl+O"),
     a("save", "Ctrl+S"),
     a("save_as", "Ctrl+Shift+S"),
+    a("collect_project", ""),
     a("import", "Ctrl+I"),
     a("import_subtitles", "Ctrl+Shift+I"),
     a("export_subtitles", ""),

@@ -21,6 +21,7 @@ pub const FILE: &[&str] = &[
     "",
     "save",
     "save_as",
+    "collect_project",
     "reframe",
     "",
     "import",
