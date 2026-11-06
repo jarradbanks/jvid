@@ -1645,8 +1645,39 @@ fn title_harness() -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Po
 fn title_harness_sized(
     size: [f32; 2],
 ) -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
+    title_harness_with_text(
+        size,
+        jvid_core::model::Text {
+            box_color: [0.0, 0.0, 0.0, 1.0],
+            ..Default::default()
+        },
+    )
+}
+
+fn snapshot_font_family() -> &'static str {
+    const FAMILY: &str = "jvid-collection-ui-snapshot-inter";
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../suite-ui/assets");
+    let sources: Vec<_> = [
+        ("Inter-Regular.ttf", "Inter"),
+        ("Inter-SemiBold.ttf", "Inter SemiBold"),
+    ]
+    .into_iter()
+    .map(|(name, original_family)| jvid_render::text::FontSource {
+        family: FAMILY.into(),
+        original_family: original_family.into(),
+        path: directory.join(name),
+    })
+    .collect();
+    jvid_render::text::load_project_fonts(&sources).unwrap();
+    FAMILY
+}
+
+fn title_harness_with_text(
+    size: [f32; 2],
+    text: jvid_core::model::Text,
+) -> (Harness<'static, App>, jvid_core::model::ClipId, egui::Pos2) {
     use jvid_core::history::Created;
-    use jvid_core::model::{NewClip, Text, TrackKind};
+    use jvid_core::model::{NewClip, TrackKind};
     use jvid_core::time::{FLICKS_PER_SECOND, Time};
     // Steps short enough for two clicks to make a double-click.
     let mut h = builder(size, 1.0)
@@ -1656,11 +1687,6 @@ fn title_harness_sized(
     h.state_mut().on_welcome = false;
     h.run();
     let history = &mut h.state_mut().history;
-    // A box makes the hit independent of the installed fonts.
-    let text = Text {
-        box_color: [0.0, 0.0, 0.0, 1.0],
-        ..Text::default()
-    };
     let Ok(Created::Asset(asset)) = history.apply(Command::AddText {
         name: "Title".into(),
         text,
@@ -2006,7 +2032,15 @@ fn editor_in_light_and_high_contrast() {
     let mut results = egui_kittest::SnapshotResults::new();
     for theme in ["light", "high-contrast"] {
         // A selected clip fills the inspector, so every panel shows its controls.
-        let (mut h, _, _) = title_harness();
+        let (mut h, _, _) = title_harness_with_text(
+            [1280.0, 720.0],
+            jvid_core::model::Text {
+                family: snapshot_font_family().into(),
+                weight: 600,
+                box_color: [0.0, 0.0, 0.0, 1.0],
+                ..Default::default()
+            },
+        );
         h.state_mut().theme = suite_ui::themes::LiveTheme::new(theme);
         h.run();
         let want = suite_ui::themes::BUILT_IN
