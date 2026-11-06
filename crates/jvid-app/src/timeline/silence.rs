@@ -23,7 +23,7 @@ use crate::i18n::{tr, trn};
 use crate::subtitles::AudioSources;
 
 /// A timeline span to cut from a clip and its linked clips.
-pub(super) type Span = (ClipId, Time, Time);
+pub(crate) type Span = (ClipId, Time, Time);
 
 /// The computational settings, expressed exactly as the detector consumes them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -82,7 +82,7 @@ fn detect(
 }
 
 /// The open dialog: its settings and the clips it reads.
-pub(super) struct Silence {
+pub(crate) struct Silence {
     /// dBFS a stretch has to stay under.
     #[cfg(test)]
     scans: std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -104,7 +104,7 @@ pub(super) struct Silence {
 impl Silence {
     /// Reads the audio clips among `selected` and their linked partners; `None` if there are
     /// none.
-    pub(super) fn open(seq: &Sequence, selected: &HashSet<ClipId>) -> Option<Self> {
+    pub(crate) fn open(seq: &Sequence, selected: &HashSet<ClipId>) -> Option<Self> {
         if selected.is_empty() {
             return None;
         }
@@ -126,8 +126,15 @@ impl Silence {
     }
 
     /// The clips whose peaks it needs.
-    pub(super) fn clips(&self) -> &[ClipId] {
+    pub(crate) fn clips(&self) -> &[ClipId] {
         &self.clips
+    }
+
+    /// Review changes settings without touching the timeline or opening the legacy dialog.
+    pub(crate) fn configure(&mut self, threshold: f64, min_len: f64, pad: f64) {
+        self.threshold = threshold.clamp(-80.0, -10.0);
+        self.min_len = min_len.clamp(0.1, 30.0);
+        self.pad = pad.clamp(0.0, 2.0);
     }
 
     fn settings(&self) -> Settings {
@@ -141,7 +148,7 @@ impl Silence {
     /// One source scan per immutable peak generation and settings, shared across every cut.
     /// Only ready results for the current keys can reach Cut / Speed Up. Clip timing edits
     /// reuse source intervals and map them through the current trim, direction and speed ramp.
-    pub(super) fn spans(
+    pub(crate) fn spans(
         &mut self,
         project: &Project,
         peaks: &dyn Fn(&Clip) -> Option<Arc<Pyramid>>,
