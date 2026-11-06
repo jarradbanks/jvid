@@ -35,6 +35,7 @@ mod record;
 mod relink;
 pub mod samples;
 mod scopes;
+mod speech_review;
 pub mod settings_file;
 pub mod settings_transfer;
 mod subtitles;
