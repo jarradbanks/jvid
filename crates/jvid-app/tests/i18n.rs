@@ -130,9 +130,14 @@ const ES: [&str; 6] = [
 /// dragged onto the timeline. Run in the language `labels` are in (see [`ES`]).
 fn titled_project(labels: [&str; 6]) -> Harness<'static, App> {
     let [new, text, title, track, edit, select_all] = labels;
-    let mut h = Harness::builder()
-        .with_size([1280.0, 720.0])
-        .build_eframe(|cc| App::new(cc, &Default::default()));
+    let builder = Harness::builder().with_size([1280.0, 720.0]);
+    let builder = if std::env::var_os("JVID_I18N_CAPTURE").is_some() {
+        assert!(suite_ui::test_support::gpu());
+        builder.wgpu()
+    } else {
+        builder
+    };
+    let mut h = builder.build_eframe(|cc| App::new(cc, &Default::default()));
     h.run();
     h.get_by_label(new).click();
     h.run();
@@ -530,10 +535,32 @@ fn clashes(h: &Harness<'_, impl Sized>) -> Vec<String> {
         ink: egui::Rect,
         clip: egui::Rect,
         elided: bool,
+        order: usize,
     }
-    fn walk(shape: &egui::Shape, clip: egui::Rect, out: &mut Vec<Text>) {
+    fn walk(
+        shape: &egui::Shape,
+        clip: egui::Rect,
+        out: &mut Vec<Text>,
+        opaque: &mut Vec<(usize, egui::Rect)>,
+        order: &mut usize,
+    ) {
+        let here = *order;
+        *order += 1;
         match shape {
-            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, out)),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, out, opaque, order)),
+            egui::Shape::Rect(r)
+                if r.fill.a() == 255
+                    && r.brush.is_none()
+                    && r.angle == 0.0
+                    && r.blur_width == 0.0 =>
+            {
+                let corners = r.corner_radius;
+                let radius = corners.nw.max(corners.ne).max(corners.sw).max(corners.se);
+                let inside = r.rect.shrink(f32::from(radius)).intersect(clip);
+                if inside.is_positive() {
+                    opaque.push((here, inside));
+                }
+            }
             egui::Shape::Text(t) => {
                 let ink = t.galley.mesh_bounds.translate(t.pos.to_vec2());
                 if t.angle == 0.0 && ink.is_positive() && ink.intersects(clip) {
@@ -542,6 +569,7 @@ fn clashes(h: &Harness<'_, impl Sized>) -> Vec<String> {
                         ink,
                         clip,
                         elided: t.galley.elided,
+                        order: here,
                     });
                 }
             }
@@ -549,9 +577,17 @@ fn clashes(h: &Harness<'_, impl Sized>) -> Vec<String> {
         }
     }
     let mut texts = Vec::new();
+    let mut opaque = Vec::new();
+    let mut order = 0;
     for c in &h.output().shapes {
-        walk(&c.shape, c.clip_rect, &mut texts);
+        walk(&c.shape, c.clip_rect, &mut texts, &mut opaque, &mut order);
     }
+    // Only fully covered ink is invisible. Partial coverage retains every existing check.
+    texts.retain(|text| {
+        !opaque.iter().any(|(order, rect)| {
+            *order > text.order && rect.contains_rect(text.ink.intersect(text.clip))
+        })
+    });
     // Where each widget named by its text sits, to catch text spilling out of its own widget.
     let mut widgets: std::collections::HashMap<String, Vec<egui::Rect>> = Default::default();
     for n in h.query_all_by(|n| n.label().is_some()) {
@@ -583,6 +619,52 @@ fn clashes(h: &Harness<'_, impl Sized>) -> Vec<String> {
         }
     }
     out
+}
+
+#[test]
+fn overlap_checks_ignore_only_fully_opaque_later_coverage() {
+    let _en = switch("en");
+    for mode in 0..6 {
+        let mut fresh = true;
+        let mut h = Harness::builder()
+            .with_size([320.0, 160.0])
+            .build_ui(move |ui| {
+                if install_theme(ui, &mut fresh) {
+                    return;
+                }
+                let painter = ui.painter();
+                let text = |label: &str| {
+                    painter.text(
+                        egui::pos2(40.0, 40.0),
+                        egui::Align2::LEFT_TOP,
+                        label,
+                        egui::FontId::proportional(12.0),
+                        egui::Color32::WHITE,
+                    );
+                };
+                let cover = || {
+                    let right = if mode == 2 { 85.0 } else { 220.0 };
+                    painter.rect_filled(
+                        egui::Rect::from_min_max(egui::pos2(20.0, 20.0), egui::pos2(right, 100.0)),
+                        if mode == 3 { 30 } else { 12 },
+                        egui::Color32::from_black_alpha(if mode == 1 { 128 } else { 255 }),
+                    );
+                };
+                if mode == 5 {
+                    cover();
+                }
+                text("Background Text");
+                if mode != 5 {
+                    cover();
+                }
+                text("Foreground Text");
+                if mode == 4 {
+                    text("Another Foreground");
+                }
+            });
+        h.run();
+        assert_eq!(clashes(&h).is_empty(), mode == 0, "coverage case {mode}");
+    }
 }
 
 /// The editor's English text padded about 40%, as a long translation runs (see
@@ -630,6 +712,14 @@ fn long_text_fits_the_editor_and_preferences() {
         // The sidebar's row, before the section's own heading.
         h.get_all_by_label(en(section)).next().unwrap().click();
         h.run();
+        if let Some(directory) = std::env::var_os("JVID_I18N_CAPTURE") {
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            h.render()
+                .unwrap()
+                .save(directory.join(format!("{section}.png")))
+                .unwrap();
+        }
         found.extend(clashes(&h).into_iter().map(|c| format!("{section}: {c}")));
     }
     assert_eq!(found, Vec::<String>::new());
