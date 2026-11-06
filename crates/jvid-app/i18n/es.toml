@@ -1356,3 +1356,17 @@ help = "Revisa cada versión e intervalo antes de encolarlos. Los cambios de enc
 dimensions_error = "Usa dimensiones pares de 2 a 8192 píxeles."
 review_required = "Renderiza y revisa este intervalo antes de aceptar el encuadre."
 review_count = "{done} de {total} intervalos revisados"
+
+[timeline_feedback]
+playhead = "Ajuste: Cabezal de Reproducción"
+in_point = "Ajuste: Punto de Entrada"
+out_point = "Ajuste: Punto de Salida"
+marker = "Ajuste: Marcador {name}"
+marker_end = "Ajuste: Fin del Marcador {name}"
+clip_start = "Ajuste: Inicio de {name}"
+clip_end = "Ajuste: Fin de {name}"
+insert = "Insertar"
+overwrite = "Sobrescribir"
+trim = "Recorte {delta}"
+ripple_trim = "Recorte con Desplazamiento {delta}"
+unavailable = "Edición no disponible aquí"

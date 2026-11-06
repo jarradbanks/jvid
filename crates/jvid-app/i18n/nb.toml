@@ -1342,3 +1342,17 @@ help = "Se gjennom hver versjon og hvert område før kølegging. Utsnittsendrin
 dimensions_error = "Bruk partallsdimensjoner fra 2 til 8192 piksler."
 review_required = "Render og se gjennom området før du godkjenner utsnittet."
 review_count = "{done} av {total} områder gjennomgått"
+
+[timeline_feedback]
+playhead = "Fest: Avspillingshode"
+in_point = "Fest: Innpunkt"
+out_point = "Fest: Utpunkt"
+marker = "Fest: Markør {name}"
+marker_end = "Fest: Markørslutt {name}"
+clip_start = "Fest: Start på {name}"
+clip_end = "Fest: Slutt på {name}"
+insert = "Sett Inn"
+overwrite = "Overskriv"
+trim = "Trim {delta}"
+ripple_trim = "Trim med Forskyvning {delta}"
+unavailable = "Redigering er ikke tilgjengelig her"

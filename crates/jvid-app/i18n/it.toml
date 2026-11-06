@@ -1354,3 +1354,17 @@ help = "Controlla ogni versione e intervallo prima di accodarli. Le modifiche al
 dimensions_error = "Usa dimensioni pari da 2 a 8192 pixel."
 review_required = "Renderizza e controlla questo intervallo prima di confermare l’inquadratura."
 review_count = "{done} intervalli su {total} controllati"
+
+[timeline_feedback]
+playhead = "Aggancio: Testina di Riproduzione"
+in_point = "Aggancio: Punto di Attacco"
+out_point = "Aggancio: Punto di Stacco"
+marker = "Aggancio: Marcatore {name}"
+marker_end = "Aggancio: Fine Marcatore {name}"
+clip_start = "Aggancio: Inizio di {name}"
+clip_end = "Aggancio: Fine di {name}"
+insert = "Inserisci"
+overwrite = "Sovrascrivi"
+trim = "Taglio {delta}"
+ripple_trim = "Taglio con Scorrimento {delta}"
+unavailable = "Modifica non disponibile qui"

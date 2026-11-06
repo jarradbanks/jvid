@@ -1361,3 +1361,17 @@ help = "Před zařazením zkontrolujte každou verzi a rozsah. Úpravy kompozice
 dimensions_error = "Použijte sudé rozměry od 2 do 8192 pixelů."
 review_required = "Před potvrzením kompozice vykreslete a zkontrolujte tento rozsah."
 review_count = "Zkontrolováno {done} z {total} rozsahů"
+
+[timeline_feedback]
+playhead = "Přichycení: Přehrávací Hlava"
+in_point = "Přichycení: Vstupní Bod"
+out_point = "Přichycení: Výstupní Bod"
+marker = "Přichycení: Značka {name}"
+marker_end = "Přichycení: Konec Značky {name}"
+clip_start = "Přichycení: Začátek {name}"
+clip_end = "Přichycení: Konec {name}"
+insert = "Vložit"
+overwrite = "Přepsat"
+trim = "Oříznutí {delta}"
+ripple_trim = "Oříznutí s Posunem {delta}"
+unavailable = "Úprava zde není dostupná"

@@ -1370,3 +1370,17 @@ help = "Sprawdź każdą wersję i zakres przed dodaniem do kolejki. Kadrowanie 
 dimensions_error = "Użyj parzystych wymiarów od 2 do 8192 pikseli."
 review_required = "Wyrenderuj i sprawdź zakres przed zatwierdzeniem kadrowania."
 review_count = "Sprawdzono {done} z {total} zakresów"
+
+[timeline_feedback]
+playhead = "Przyciąganie: Głowica Odtwarzania"
+in_point = "Przyciąganie: Punkt Wejścia"
+out_point = "Przyciąganie: Punkt Wyjścia"
+marker = "Przyciąganie: Znacznik {name}"
+marker_end = "Przyciąganie: Koniec Znacznika {name}"
+clip_start = "Przyciąganie: Początek {name}"
+clip_end = "Przyciąganie: Koniec {name}"
+insert = "Wstaw"
+overwrite = "Nadpisz"
+trim = "Przycięcie {delta}"
+ripple_trim = "Przycięcie z Przesunięciem {delta}"
+unavailable = "Edycja jest tutaj niedostępna"

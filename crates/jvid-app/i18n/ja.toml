@@ -1344,3 +1344,17 @@ help = "キューに追加する前に各バージョンと範囲を確認して
 dimensions_error = "2〜8192ピクセルの偶数サイズを指定してください。"
 review_required = "フレーミングを承認する前に、この範囲を描画して確認してください。"
 review_count = "{total}範囲中{done}範囲を確認済み"
+
+[timeline_feedback]
+playhead = "スナップ: 再生ヘッド"
+in_point = "スナップ: イン点"
+out_point = "スナップ: アウト点"
+marker = "スナップ: マーカー {name}"
+marker_end = "スナップ: マーカー終点 {name}"
+clip_start = "スナップ: {name} の開始"
+clip_end = "スナップ: {name} の終了"
+insert = "挿入"
+overwrite = "上書き"
+trim = "トリム {delta}"
+ripple_trim = "リップルトリム {delta}"
+unavailable = "ここでは編集できません"

@@ -1342,3 +1342,17 @@ help = "Gennemgå hver version og hvert interval før køen. Beskæringsændring
 dimensions_error = "Brug lige dimensioner fra 2 til 8192 pixels."
 review_required = "Render og gennemgå intervallet før godkendelse af beskæringen."
 review_count = "{done} af {total} intervaller gennemgået"
+
+[timeline_feedback]
+playhead = "Fastgør: Afspilningsmarkør"
+in_point = "Fastgør: Indpunkt"
+out_point = "Fastgør: Udpunkt"
+marker = "Fastgør: Markør {name}"
+marker_end = "Fastgør: Markørslutning {name}"
+clip_start = "Fastgør: {name} Start"
+clip_end = "Fastgør: {name} Slutning"
+insert = "Indsæt"
+overwrite = "Overskriv"
+trim = "Beskær {delta}"
+ripple_trim = "Beskær med Forskydning {delta}"
+unavailable = "Redigering er ikke tilgængelig her"

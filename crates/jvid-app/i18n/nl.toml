@@ -1357,3 +1357,17 @@ help = "Controleer elke versie en elk bereik vóór het toevoegen. Kadreringswij
 dimensions_error = "Gebruik even afmetingen van 2 tot 8192 pixels."
 review_required = "Render en controleer dit bereik voordat je de kadrering goedkeurt."
 review_count = "{done} van {total} bereiken gecontroleerd"
+
+[timeline_feedback]
+playhead = "Uitlijnen: Afspeelkop"
+in_point = "Uitlijnen: In-punt"
+out_point = "Uitlijnen: Uit-punt"
+marker = "Uitlijnen: Markering {name}"
+marker_end = "Uitlijnen: Einde Markering {name}"
+clip_start = "Uitlijnen: Begin van {name}"
+clip_end = "Uitlijnen: Einde van {name}"
+insert = "Invoegen"
+overwrite = "Overschrijven"
+trim = "Trimmen {delta}"
+ripple_trim = "Trimmen met Verschuiving {delta}"
+unavailable = "Bewerking hier niet beschikbaar"

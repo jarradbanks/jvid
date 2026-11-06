@@ -1448,3 +1448,17 @@ help = "Review each version and range before queuing. Framing edits affect only 
 dimensions_error = "Use even dimensions from 2 to 8192 pixels."
 review_required = "Render and inspect this range before accepting its framing."
 review_count = "{done} of {total} ranges reviewed"
+
+[timeline_feedback]
+playhead = "Snap: Playhead"
+in_point = "Snap: In Point"
+out_point = "Snap: Out Point"
+marker = "Snap: Marker {name}"
+marker_end = "Snap: Marker End {name}"
+clip_start = "Snap: {name} Start"
+clip_end = "Snap: {name} End"
+insert = "Insert"
+overwrite = "Overwrite"
+trim = "Trim {delta}"
+ripple_trim = "Ripple Trim {delta}"
+unavailable = "Edit unavailable here"

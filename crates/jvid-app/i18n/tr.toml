@@ -1345,3 +1345,17 @@ help = "Kuyruğa eklemeden önce her sürümü ve aralığı inceleyin. Kadraj d
 dimensions_error = "2 ile 8192 piksel arasında çift boyutlar kullanın."
 review_required = "Kadrajı onaylamadan önce bu aralığı işleyip inceleyin."
 review_count = "{total} aralıktan {done} tanesi incelendi"
+
+[timeline_feedback]
+playhead = "Yakala: Oynatma Kafası"
+in_point = "Yakala: Giriş Noktası"
+out_point = "Yakala: Çıkış Noktası"
+marker = "Yakala: İşaretçi {name}"
+marker_end = "Yakala: İşaretçi Sonu {name}"
+clip_start = "Yakala: {name} Başlangıcı"
+clip_end = "Yakala: {name} Sonu"
+insert = "Ekle"
+overwrite = "Üzerine Yaz"
+trim = "Kırp {delta}"
+ripple_trim = "Kaydırarak Kırp {delta}"
+unavailable = "Burada düzenleme kullanılamıyor"

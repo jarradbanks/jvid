@@ -1365,3 +1365,17 @@ help = "Vérifiez chaque version et plage avant la mise en file. Le cadrage ne m
 dimensions_error = "Utilisez des dimensions paires de 2 à 8192 pixels."
 review_required = "Calculez et vérifiez cette plage avant de valider son cadrage."
 review_count = "{done} plages sur {total} vérifiées"
+
+[timeline_feedback]
+playhead = "Magnétisme : Tête de Lecture"
+in_point = "Magnétisme : Point d’Entrée"
+out_point = "Magnétisme : Point de Sortie"
+marker = "Magnétisme : Marqueur {name}"
+marker_end = "Magnétisme : Fin du Marqueur {name}"
+clip_start = "Magnétisme : Début de {name}"
+clip_end = "Magnétisme : Fin de {name}"
+insert = "Insérer"
+overwrite = "Écraser"
+trim = "Raccord {delta}"
+ripple_trim = "Raccord avec Décalage {delta}"
+unavailable = "Modification indisponible ici"

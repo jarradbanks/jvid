@@ -1344,3 +1344,17 @@ help = "대기열에 넣기 전에 각 버전과 범위를 검토하세요. 프�
 dimensions_error = "2~8192픽셀의 짝수 크기를 사용하세요."
 review_required = "프레이밍을 승인하기 전에 이 범위를 렌더링하고 확인하세요."
 review_count = "{total}개 범위 중 {done}개 검토됨"
+
+[timeline_feedback]
+playhead = "스냅: 재생 헤드"
+in_point = "스냅: 시작점"
+out_point = "스냅: 종료점"
+marker = "스냅: 마커 {name}"
+marker_end = "스냅: 마커 끝 {name}"
+clip_start = "스냅: {name} 시작"
+clip_end = "스냅: {name} 끝"
+insert = "삽입"
+overwrite = "덮어쓰기"
+trim = "트림 {delta}"
+ripple_trim = "리플 트림 {delta}"
+unavailable = "여기서는 편집할 수 없습니다"

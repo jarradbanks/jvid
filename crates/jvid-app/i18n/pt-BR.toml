@@ -1358,3 +1358,17 @@ help = "Revise cada versão e intervalo antes de enfileirar. Alterações no enq
 dimensions_error = "Use dimensões pares de 2 a 8192 pixels."
 review_required = "Renderize e revise este intervalo antes de aceitar o enquadramento."
 review_count = "{done} de {total} intervalos revisados"
+
+[timeline_feedback]
+playhead = "Ajuste: Indicador de Reprodução"
+in_point = "Ajuste: Ponto de Entrada"
+out_point = "Ajuste: Ponto de Saída"
+marker = "Ajuste: Marcador {name}"
+marker_end = "Ajuste: Fim do Marcador {name}"
+clip_start = "Ajuste: Início de {name}"
+clip_end = "Ajuste: Fim de {name}"
+insert = "Inserir"
+overwrite = "Sobrescrever"
+trim = "Aparar {delta}"
+ripple_trim = "Aparar com Deslocamento {delta}"
+unavailable = "Edição indisponível aqui"

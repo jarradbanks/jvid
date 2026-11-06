@@ -1342,3 +1342,17 @@ help = "Granska varje version och intervall före köläggning. Ändringar av bi
 dimensions_error = "Använd jämna dimensioner från 2 till 8192 pixlar."
 review_required = "Rendera och granska intervallet innan du godkänner bildutsnittet."
 review_count = "{done} av {total} intervall granskade"
+
+[timeline_feedback]
+playhead = "Fäst: Uppspelningshuvud"
+in_point = "Fäst: Inpunkt"
+out_point = "Fäst: Utpunkt"
+marker = "Fäst: Markör {name}"
+marker_end = "Fäst: Markörslut {name}"
+clip_start = "Fäst: Början av {name}"
+clip_end = "Fäst: Slutet av {name}"
+insert = "Infoga"
+overwrite = "Skriv Över"
+trim = "Trimma {delta}"
+ripple_trim = "Trimma med Förskjutning {delta}"
+unavailable = "Redigering är inte tillgänglig här"

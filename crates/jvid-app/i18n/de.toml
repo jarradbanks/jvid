@@ -1342,3 +1342,17 @@ help = "Prüfe jede Version und jeden Bereich vor dem Einreihen. Ausschnittände
 dimensions_error = "Verwende gerade Abmessungen von 2 bis 8192 Pixeln."
 review_required = "Rendere und prüfe diesen Bereich, bevor du den Bildausschnitt bestätigst."
 review_count = "{done} von {total} Bereichen geprüft"
+
+[timeline_feedback]
+playhead = "Einrasten: Abspielkopf"
+in_point = "Einrasten: In-Punkt"
+out_point = "Einrasten: Out-Punkt"
+marker = "Einrasten: Marker {name}"
+marker_end = "Einrasten: Marker-Ende {name}"
+clip_start = "Einrasten: Anfang von {name}"
+clip_end = "Einrasten: Ende von {name}"
+insert = "Einfügen"
+overwrite = "Überschreiben"
+trim = "Trimmen {delta}"
+ripple_trim = "Ripple-Trimmen {delta}"
+unavailable = "Bearbeitung hier nicht verfügbar"

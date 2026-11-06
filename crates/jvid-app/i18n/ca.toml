@@ -1354,3 +1354,17 @@ help = "Revisa cada versió i interval abans d’afegir-los a la cua. Els canvis
 dimensions_error = "Utilitza dimensions parelles de 2 a 8192 píxels."
 review_required = "Renderitza i revisa aquest interval abans d’acceptar-ne l’enquadrament."
 review_count = "{done} de {total} intervals revisats"
+
+[timeline_feedback]
+playhead = "Ajust: Capçal de Reproducció"
+in_point = "Ajust: Punt d’Entrada"
+out_point = "Ajust: Punt de Sortida"
+marker = "Ajust: Marcador {name}"
+marker_end = "Ajust: Final del Marcador {name}"
+clip_start = "Ajust: Inici de {name}"
+clip_end = "Ajust: Final de {name}"
+insert = "Insereix"
+overwrite = "Sobreescriu"
+trim = "Retalla {delta}"
+ripple_trim = "Retall amb Desplaçament {delta}"
+unavailable = "L’edició no està disponible aquí"
