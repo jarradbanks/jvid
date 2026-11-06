@@ -1,6 +1,17 @@
-- Bind API bottles to source
-- Require macOS 15.8.1
-- Require macOS 15 or newer
+- Find actions with the command palette, switch saved workspaces, and maximize panels.
+- Keep transform handles reachable in Program and Source previews, with a control to recover off-screen selections.
+- Organize media with favorites, bins and filters, and collect projects with their media.
+- Copy selected clip settings and save reusable title, voice and effect presets.
+- Review highlights and automatic speech cuts, and edit captions in a dedicated workspace.
+- Add arrows, rectangles and numbered callouts, with clearer trim, overwrite and ripple previews.
+- Queue independently framed landscape, vertical and size-limited exports with separate caption settings.
+- See actual proxy use and playback trouble, with recovery actions.
+
+**macOS:** this release requires macOS 15.8.1 or newer.
+
+**Project compatibility:** projects saved with annotations or collected fonts require jvid 1.1.0 or newer.
+
+**Windows users on 0.2.0 or earlier:** run the installer manually once to replace the older update helper. Keep the same installation folder to preserve your settings, projects and models.
 
 ### Downloads
 
