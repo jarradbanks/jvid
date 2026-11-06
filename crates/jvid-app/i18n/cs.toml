@@ -815,6 +815,8 @@ reset_all = "Obnovit vše"
 file_type = "Klávesová mapa"
 
 [preview]
+view_selection = "Zobrazit Výběr"
+pan_hint = "Tažením prostředním tlačítkem posunete pohled; volbou Přizpůsobit jej obnovíte."
 position = "Pozice Přehrávání"
 more = "Další"
 fit = "Vcelku"

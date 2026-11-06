@@ -798,6 +798,8 @@ reset_all = "Tilbakestill alle"
 file_type = "Tastaturoppsett"
 
 [preview]
+view_selection = "Vis Markering"
+pan_hint = "Dra med midtknappen for å panorere; velg Tilpass for å tilbakestille visningen."
 position = "Avspillingsposisjon"
 more = "Mer"
 fit = "Tilpass"

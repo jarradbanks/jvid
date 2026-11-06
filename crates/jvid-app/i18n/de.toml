@@ -798,6 +798,8 @@ reset_all = "Alle zurücksetzen"
 file_type = "Tastaturbelegung"
 
 [preview]
+view_selection = "Auswahl Anzeigen"
+pan_hint = "Mit der mittleren Maustaste ziehen zum Verschieben; Einpassen setzt die Ansicht zurück."
 position = "Wiedergabeposition"
 more = "Mehr"
 fit = "Passend"

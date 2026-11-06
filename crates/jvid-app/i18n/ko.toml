@@ -800,6 +800,8 @@ reset_all = "모두 재설정"
 file_type = "키맵"
 
 [preview]
+view_selection = "선택 영역 보기"
+pan_hint = "가운데 버튼으로 드래그하여 이동하고 맞춤을 선택하여 보기를 초기화합니다."
 position = "재생 위치"
 more = "더 보기"
 fit = "맞춤"

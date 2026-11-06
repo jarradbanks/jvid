@@ -811,6 +811,8 @@ reset_all = "Alles resetten"
 file_type = "Sneltoetsenset"
 
 [preview]
+view_selection = "Selectie Weergeven"
+pan_hint = "Sleep met de middelste muisknop om te verschuiven; kies Passend om de weergave te herstellen."
 position = "Afspeelpositie"
 more = "Meer"
 fit = "Passend"
