@@ -505,13 +505,11 @@ fn clean_name(name: &str) -> String {
             }
         })
         .collect();
-    let name = name
-        .trim()
-        .trim_matches('.')
-        .trim_end()
-        .chars()
-        .take(120)
-        .collect::<String>();
+    let mut name = name.trim().trim_matches('.').trim_end().to_owned();
+    while name.len() > 120 {
+        name.pop();
+    }
+    let name = name.trim_end_matches([' ', '.']).to_owned();
     let device = name.split('.').next().unwrap_or("").to_ascii_uppercase();
     if name.is_empty()
         || matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL")
@@ -564,6 +562,7 @@ fn preview(
 #[derive(Default)]
 pub struct VersionsDialog {
     source: Option<VersionSource>,
+    presets: Vec<Preset>,
     versions: Vec<Version>,
     selected: usize,
     directory: PathBuf,
@@ -594,6 +593,7 @@ impl VersionsDialog {
             Version::new(&source, tr!("versions.vertical").into(), vertical),
             Version::new(&source, tr!("versions.limited").into(), limited),
         ];
+        self.presets = presets;
         self.source = Some(source);
         self.selected = 0;
         self.project_name = name.into();
@@ -805,7 +805,7 @@ impl VersionsDialog {
     }
 
     fn controls(&mut self, ui: &mut Ui) {
-        let presets = super::presets();
+        let presets = &self.presets;
         let v = &mut self.versions[self.selected];
         ui.label(tr!("versions.name"));
         ui.text_edit_singleline(&mut v.name);
@@ -813,7 +813,7 @@ impl VersionsDialog {
         ui.label(tr!("export.preset"));
         let mut picked = None;
         egui::ComboBox::from_id_salt("version_preset")
-            .selected_text(super::shown_name(&presets, &v.preset))
+            .selected_text(super::shown_name(presets, &v.preset))
             .show_ui(ui, |ui| {
                 for (i, p) in presets.iter().enumerate() {
                     if ui
@@ -1263,6 +1263,9 @@ mod tests {
             assert!(!clean.contains(['/', '\\', ':']));
             assert_ne!(clean, name);
         }
+        let unicode = clean_name(&"映像".repeat(120));
+        assert!(unicode.len() <= 120);
+        assert!(!unicode.is_empty());
         let mut bad = preset([321, 180]);
         assert!(dimensions(&bad, h.project()).is_err());
         bad.size = Some([8194, 2]);
