@@ -35,12 +35,18 @@ impl ViewerGeometry {
             EDITING_GUTTER.min((body.height() - 1.0).max(0.0) / 2.0),
         );
         let editing = body.shrink2(gutter);
+        let mut geometry = Self {
+            body,
+            editing,
+            frame: Rect::NOTHING,
+            project_size: size,
+        };
         let target = view
             .selection
             .unwrap_or_else(|| Rect::from_center_size(Pos2::ZERO, size));
         let fitted = || {
-            (editing.width() / target.width().max(1.0))
-                .min(editing.height() / target.height().max(1.0))
+            (geometry.editing.width() / target.width().max(1.0))
+                .min(geometry.editing.height() / target.height().max(1.0))
                 .max(f32::EPSILON)
         };
         let scale = if view.selection.is_some() {
@@ -48,23 +54,17 @@ impl ViewerGeometry {
         } else {
             zoom.map_or_else(fitted, |z| z / dpi.max(f32::EPSILON))
         };
-        let centre = editing.center() - target.center().to_vec2() * scale + view.pan;
-        Self {
-            body,
-            editing,
-            frame: Rect::from_center_size(centre, size * scale),
-            project_size: size,
-        }
+        let centre = geometry.editing.center() - target.center().to_vec2() * scale + view.pan;
+        geometry.frame = Rect::from_center_size(centre, size * scale);
+        geometry
     }
 
     /// Adapt an existing complete frame rect. Overlays must use this rect, never the
     /// frame/body intersection, otherwise zoomed and panned coordinates change.
     pub fn from_frame(body: Rect, frame: Rect, size: Vec2) -> Self {
         Self {
-            body,
-            editing: body,
             frame,
-            project_size: size.max(Vec2::splat(1.0)),
+            ..Self::new(body, size, None, 1.0, View::default())
         }
     }
 
@@ -127,6 +127,10 @@ mod tests {
                     let g = ViewerGeometry::new(body, size, None, dpi, View::default());
                     assert!(body.contains_rect(g.frame.expand(32.0)));
                     assert_eq!(g.picture(), g.frame);
+                    assert_eq!(
+                        ViewerGeometry::from_frame(body, g.frame, size).editing,
+                        g.editing
+                    );
                     if let Some(frame) = previous {
                         assert_eq!(g.frame, frame, "Fit uses logical points at every DPI");
                     }
