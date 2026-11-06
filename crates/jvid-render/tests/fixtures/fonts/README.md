@@ -6,5 +6,7 @@ needed to run the tests.
 `alternate.ttf` has the primary family name with width 1000. `faces.ttc` contains
 the primary and fallback faces at indices 0 and 1. Their overlapping A exposes
 selection changes when distinct families become one private alias.
+`environment.ttf` uses the platform fallback name Noto Sans with width 1200 to
+expose installed-font preemption of a private family's secondary face.
 
 Regenerate with Python and `fonttools==4.65.0`: `python generate.py`.
