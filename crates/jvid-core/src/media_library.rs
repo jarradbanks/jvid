@@ -190,8 +190,9 @@ mod tests {
     use super::*;
     use crate::{
         file,
-        history::{Command, History},
-        model::Project,
+        history::{Command, Created, History},
+        model::{NewClip, Project, TrackKind},
+        time::Time,
     };
     use std::path::Path;
 
@@ -204,6 +205,26 @@ mod tests {
         let mut h = History::new(Project::default());
         h.apply(Command::AddAsset("/media/original.mov".into()))
             .unwrap();
+        let Created::Track(track) = h
+            .apply(Command::AddTrack {
+                kind: TrackKind::Video,
+                name: "V1".into(),
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        h.apply(Command::AddClip {
+            track,
+            clip: NewClip {
+                asset: AssetId(1),
+                source_in: Time(0),
+                source_out: Time(10),
+                start: Time(0),
+                link: None,
+            },
+        })
+        .unwrap();
         let flat = h.project().clone();
         edit(
             &mut h,
@@ -235,6 +256,10 @@ mod tests {
         let organized = h.project().clone();
         assert_eq!(organized.assets(), flat.assets());
         assert_eq!(organized.sequence(), flat.sequence());
+        assert_eq!(
+            crate::eval::frame_at(&organized, Time(5)),
+            crate::eval::frame_at(&flat, Time(5))
+        );
         assert_eq!(organized.media_library().bins()[&BinId(1)], "Selects");
         edit(&mut h, LibraryEdit::DeleteBin(BinId(1)));
         assert_eq!(
@@ -245,6 +270,10 @@ mod tests {
             }
         );
         assert_eq!(h.project().assets(), flat.assets());
+        assert_eq!(
+            crate::eval::frame_at(h.project(), Time(5)),
+            crate::eval::frame_at(&flat, Time(5))
+        );
         assert!(h.undo());
         assert_eq!(h.project(), &organized);
         let json = file::to_json(h.project(), Path::new("/project")).unwrap();

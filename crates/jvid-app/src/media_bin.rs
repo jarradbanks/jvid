@@ -27,6 +27,7 @@ use crate::preview::Preview;
 #[cfg(test)]
 pub(crate) mod filmstrip_tests;
 pub(crate) mod filmstrips;
+pub(crate) mod library;
 #[cfg(test)]
 mod selection_tests;
 use filmstrips::{FilmstripRequests, Filmstrips};
@@ -95,6 +96,9 @@ pub struct MediaBin {
     pub query: String,
     /// Index into [`sorts`].
     pub sort: usize,
+    library: library::LibraryView,
+    /// Current combined-filter order; selection and removal use the same visible results.
+    visible_ids: Option<Vec<AssetId>>,
     pub selected: Option<AssetId>,
     /// All selected assets in the current visible view; `selected` is the inspector target.
     selected_ids: HashSet<AssetId>,
@@ -165,12 +169,16 @@ pub fn visible<'a>(assets: &'a [MediaAsset], query: &str, sort: usize) -> Vec<&'
         .filter(|a| !a.generated_caption)
         .filter(|a| a.display_name().to_lowercase().contains(&q))
         .collect();
+    sort_assets(&mut v, sort);
+    v
+}
+
+fn sort_assets(v: &mut Vec<&MediaAsset>, sort: usize) {
     match sort {
         1 => v.sort_by_cached_key(|a| a.display_name().to_lowercase()),
         2 => v.sort_by_key(|a| std::cmp::Reverse(a.probe.as_ref().map(|p| p.duration))),
         _ => {}
     }
-    v
 }
 
 /// `m:ss`, or `h:mm:ss` from an hour, as in the prototype's badges.
@@ -322,6 +330,7 @@ impl MediaBin {
         if let Some(id) = self.confirm_remove {
             out.command = out.command.or(self.remove_warning(ui, project, id));
         }
+        self.library_dialog(ui, project, &mut out);
         out
     }
 
@@ -376,25 +385,32 @@ impl MediaBin {
                 ui.add(Dropdown::new(&mut self.sort, &sorts()).width(sort_w));
                 view_toggle(ui, &mut self.list);
             });
+            self.library_controls(ui, project, out);
 
-            let assets = visible(project.assets(), &self.query, self.sort);
+            let assets = self
+                .library
+                .visible(project, &self.query, self.sort, missing);
             let ids: Vec<_> = assets.iter().map(|a| a.id).collect();
+            self.visible_ids = Some(ids.clone());
             self.retain_visible(&ids);
             if assets.is_empty() {
                 if importing {
                     ui.label(egui::RichText::new(tr!("bin.importing")).color(color::ink_3()));
-                } else if !self.query.trim().is_empty() {
+                } else if !self.query.trim().is_empty() || self.library.active() {
                     if suite_ui::empty_state::EmptyState::new(
                         icon::SEARCH,
-                        tr!("empty.search_media"),
-                        tr!("empty.search_help"),
+                        tr!("bin.no_results"),
+                        tr!("bin.no_results_help"),
                     )
-                    .action(tr!("empty.clear_search"))
+                    .action(tr!("bin.reset_view"))
                     .show(ui)
                     .action
                     .is_some_and(|r| r.clicked())
                     {
                         self.query.clear();
+                        let keymap = self.library.keymap.clone();
+                        self.library = library::LibraryView::default();
+                        self.library.keymap = keymap;
                     }
                 } else {
                     out.import |= suite_ui::empty_state::EmptyState::new(
@@ -409,59 +425,67 @@ impl MediaBin {
                 }
                 return;
             }
-            egui::ScrollArea::vertical()
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    if self.list {
-                        for a in &assets {
-                            ui.push_id(a.id, |ui| {
-                                let r = ui.allocate_response(
-                                    vec2(ui.available_width(), ROW),
-                                    Sense::click_and_drag(),
-                                );
-                                self.row(ui, r, a, project, missing.contains(&a.path), out);
-                            });
-                        }
-                    } else {
-                        let gap = space::S8;
-                        let w = ui.available_width();
-                        let cols = ((w + gap) / (TILE_MIN + gap)).floor().max(1.0) as usize;
-                        let tile_w = (w - gap * (cols as f32 - 1.0)) / cols as f32;
-                        let tile = vec2(tile_w, tile_w * 9.0 / 16.0 + ROW);
-                        for chunk in assets.chunks(cols) {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = gap;
-                                for a in chunk {
-                                    ui.push_id(a.id, |ui| {
-                                        let r = ui.allocate_response(tile, Sense::click_and_drag());
-                                        self.tile(
-                                            ui,
-                                            r,
-                                            a,
-                                            project,
-                                            missing.contains(&a.path),
-                                            out,
-                                        );
-                                    });
-                                }
-                            });
-                        }
+            let gap = space::S8;
+            let w = ui.available_width();
+            let cols = if self.list {
+                1
+            } else {
+                ((w + gap) / (TILE_MIN + gap)).floor().max(1.0) as usize
+            };
+            let tile_w = (w - gap * (cols as f32 - 1.0)) / cols as f32;
+            let row_h = if self.list {
+                ROW
+            } else {
+                tile_w * 9.0 / 16.0 + ROW
+            };
+            let mut scroll = egui::ScrollArea::vertical().auto_shrink(false);
+            // Virtual rows still honor Reveal without waiting for an off-screen widget.
+            if let Some(index) = self.reveal.and_then(|id| ids.iter().position(|a| *a == id)) {
+                scroll = scroll.vertical_scroll_offset((index / cols) as f32 * (row_h + space::S8));
+            }
+            scroll.show_rows(ui, row_h, assets.len().div_ceil(cols), |ui, rows| {
+                if self.list {
+                    for a in &assets[rows] {
+                        ui.push_id(a.id, |ui| {
+                            let r = ui.allocate_response(
+                                vec2(ui.available_width(), ROW),
+                                Sense::click_and_drag(),
+                            );
+                            self.row(ui, r, a, project, missing.contains(&a.path), out);
+                        });
                     }
-                });
+                } else {
+                    let tile = vec2(tile_w, row_h);
+                    let first = rows.start * cols;
+                    let last = (rows.end * cols).min(assets.len());
+                    for chunk in assets[first..last].chunks(cols) {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            for a in chunk {
+                                ui.push_id(a.id, |ui| {
+                                    let r = ui.allocate_response(tile, Sense::click_and_drag());
+                                    self.tile(ui, r, a, project, missing.contains(&a.path), out);
+                                });
+                            }
+                        });
+                    }
+                }
+            });
             // Search and inline rename keep their own editing keys. Dock focus, rather than
             // the retained selection, decides whether Media owns these shortcuts.
             if focused
                 && !ui.ctx().text_edit_focused()
                 && self.renaming.is_none()
+                && !self.library_modal_open()
                 && self.confirm_remove.is_none()
                 && ui.ctx().memory(|m| m.top_modal_layer().is_none())
             {
-                if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::A)) {
+                if self.library.keymap.consume(ui.ctx(), "select_all") {
                     self.selected_ids = ids.iter().copied().collect();
                     self.selected = ids.last().copied();
                     self.selection_anchor = ids.first().copied();
                 }
-                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Delete)) {
+                if self.library.keymap.consume(ui.ctx(), "delete") {
                     out.command = self.remove_selected(project);
                 }
             }
@@ -469,6 +493,7 @@ impl MediaBin {
                 ui.label(egui::RichText::new(tr!("bin.importing")).color(color::ink_3()));
             }
         });
+        self.finish_rename(ui, project, out);
         self.drag_preview(ui, project, missing);
     }
 
@@ -734,13 +759,9 @@ impl MediaBin {
             self.reveal = None;
         }
         if r.clicked() {
-            let ids: Vec<_> = visible(project.assets(), &self.query, self.sort)
-                .iter()
-                .map(|a| a.id)
-                .collect();
+            let ids = self.visible_ids.clone().unwrap_or_default();
             self.select(a.id, r.ctx.input(|i| i.modifiers), &ids);
             r.request_focus();
-            self.renaming = self.renaming.take().filter(|(id, _)| *id == a.id);
         }
         r.widget_info(|| {
             egui::WidgetInfo::selected(
@@ -751,7 +772,7 @@ impl MediaBin {
             )
         });
         let name = a.display_name();
-        let (stem, ext) = split_ext(&name);
+        let (stem, _) = split_ext(&name);
         if r.double_clicked() {
             out.open = Some(a.id);
         }
@@ -767,6 +788,7 @@ impl MediaBin {
             if ui.button(tr!("bin.rename")).clicked() {
                 self.renaming = Some((a.id, stem.to_owned()));
             }
+            self.library_asset_menu(ui, project, out);
             let label = if self.selected_ids.len() > 1 {
                 tr!("bin.remove_selected")
             } else {
@@ -777,10 +799,12 @@ impl MediaBin {
                 ui.close();
             }
         });
-        if let Some((id, text)) = &self.renaming
-            && *id == a.id
-        {
-            let (enter, esc) = r.ctx.input(|i| {
+    }
+
+    /// Runs even if a filter or scrolling hid the renamed row this frame.
+    fn finish_rename(&mut self, ui: &Ui, project: &Project, out: &mut BinResponse) {
+        if let Some((id, text)) = &self.renaming {
+            let (enter, esc) = ui.ctx().input(|i| {
                 // Clicking away commits, like Enter.
                 let away = i.pointer.any_pressed()
                     && i.pointer
@@ -791,10 +815,19 @@ impl MediaBin {
                     i.key_pressed(Key::Escape),
                 )
             });
-            if enter {
-                out.command = Some(Command::RenameAsset {
+            if enter
+                && !esc
+                && let Some(asset) = project.asset(*id)
+            {
+                let name = asset.display_name();
+                let ext = split_ext(&name).1;
+                let command = Command::RenameAsset {
                     id: *id,
                     name: Some(format!("{text}{ext}")),
+                };
+                out.command = Some(match out.command.take() {
+                    Some(previous) => Command::Batch(vec![command, previous]),
+                    None => command,
                 });
             }
             if enter || esc {
@@ -816,7 +849,8 @@ impl MediaBin {
         {
             self.select_only(id);
         }
-        self.selected_ids.retain(|id| ids.contains(id));
+        let visible: HashSet<_> = ids.iter().copied().collect();
+        self.selected_ids.retain(|id| visible.contains(id));
         self.selected = self.selected.filter(|id| self.selected_ids.contains(id));
         if self.selected.is_none() {
             self.selected = ids
@@ -825,7 +859,7 @@ impl MediaBin {
                 .find(|id| self.selected_ids.contains(id))
                 .copied();
         }
-        self.selection_anchor = self.selection_anchor.filter(|id| ids.contains(id));
+        self.selection_anchor = self.selection_anchor.filter(|id| visible.contains(id));
     }
 
     fn select(&mut self, id: AssetId, modifiers: egui::Modifiers, ids: &[AssetId]) {
@@ -857,11 +891,12 @@ impl MediaBin {
     }
 
     fn forget_removed(&mut self, ids: &[AssetId]) {
-        self.selected_ids.retain(|id| !ids.contains(id));
-        self.selected = self.selected.filter(|id| !ids.contains(id));
-        self.selection_anchor = self.selection_anchor.filter(|id| !ids.contains(id));
-        self.renaming = self.renaming.take().filter(|(id, _)| !ids.contains(id));
-        self.remove_focus = self.remove_focus.filter(|id| !ids.contains(id));
+        let removed: HashSet<_> = ids.iter().copied().collect();
+        self.selected_ids.retain(|id| !removed.contains(id));
+        self.selected = self.selected.filter(|id| !removed.contains(id));
+        self.selection_anchor = self.selection_anchor.filter(|id| !removed.contains(id));
+        self.renaming = self.renaming.take().filter(|(id, _)| !removed.contains(id));
+        self.remove_focus = self.remove_focus.filter(|id| !removed.contains(id));
     }
 
     fn removal_command(&mut self, ids: Vec<AssetId>) -> Option<Command> {
@@ -876,16 +911,19 @@ impl MediaBin {
     }
 
     fn remove_selected(&mut self, project: &Project) -> Option<Command> {
-        let ids: Vec<_> = visible(project.assets(), &self.query, self.sort)
-            .into_iter()
-            .map(|a| a.id)
-            .collect();
+        let ids: Vec<_> = self.visible_ids.clone().unwrap_or_else(|| {
+            visible(project.assets(), &self.query, self.sort)
+                .into_iter()
+                .map(|a| a.id)
+                .collect()
+        });
         self.retain_visible(&ids);
         let ids: Vec<_> = ids
             .into_iter()
             .filter(|id| self.selected_ids.contains(id))
             .collect();
-        if let Some(id) = ids.iter().find(|id| project.clips_using(**id) > 0) {
+        let usage = library::usage_counts(project);
+        if let Some(id) = ids.iter().find(|id| usage.contains_key(id)) {
             self.confirm_remove = Some(*id);
             self.pending_remove = ids;
             return None;
@@ -912,11 +950,12 @@ impl MediaBin {
             ids.push(id);
         }
         ids.retain(|id| project.asset(*id).is_some());
-        let used = ids
+        let usage = library::usage_counts(project);
+        let used = ids.iter().filter(|id| usage.contains_key(id)).count();
+        let n: usize = ids
             .iter()
-            .filter(|id| project.clips_using(**id) > 0)
-            .count();
-        let n: usize = ids.iter().map(|id| project.clips_using(*id)).sum();
+            .map(|id| usage.get(id).copied().unwrap_or(0))
+            .sum();
         let mut command = None;
         let modal = egui::Modal::new(egui::Id::new("remove_asset"))
             .frame(
@@ -1843,19 +1882,21 @@ mod tests {
                 (MediaBin::default(), history.project().clone()),
             );
         h.run();
+        use egui_kittest::kittest::Queryable;
+        let first_tile = h.get_by_label("a.mkv").rect();
+        let second_tile = h.get_by_label("b.mkv").rect();
         // The second tile's left edge, below the remove button and above the badges.
         let second = |h: &mut egui_kittest::Harness<'_, (MediaBin, Project)>| {
             let img = h.render().expect("render");
-            let y = 125;
+            let y = (second_tile.top() + second_tile.height() * 0.4) as u32;
             let fill = |x| img.get_pixel(x, y).0[..3] == color::raised().to_array()[..3];
             let first_end = (0..320).skip_while(|&x| !fill(x)).find(|&x| !fill(x));
             (first_end.unwrap()..320).find(|&x| fill(x))
         };
         let rest = second(&mut h);
         // On the first tile's name, clear of the skim line across its thumbnail.
-        h.hover_at(pos2(60.0, 180.0));
+        h.hover_at(pos2(first_tile.center().x, first_tile.bottom() - ROW / 2.0));
         h.run();
-        use egui_kittest::kittest::Queryable;
         assert!(h.query_by_label(tr!("bin.remove")).is_some());
         assert_eq!(second(&mut h), rest);
     }
