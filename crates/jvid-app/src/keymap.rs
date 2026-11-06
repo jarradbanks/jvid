@@ -131,6 +131,8 @@ pub const ACTIONS: &[Action] = &[
     t("stretch_to_fit", ""),
     t("copy_grade", "Ctrl+Alt+C"),
     t("paste_grade", "Ctrl+Alt+V"),
+    a("copy_settings", ""),
+    a("paste_settings", ""),
     t("clean_up_voice", "Ctrl+Alt+U"),
     t("detect_silence", "Ctrl+Alt+S"),
     t("find_highlights", "Ctrl+Alt+H"),
