@@ -26,13 +26,16 @@ pub struct PanelRegistration {
 
 /// Final feature wiring adds registrations here through the shell ownership window.
 /// Unregistered IDs in saved workspaces are safely omitted when applying the layout.
-pub const OPTIONAL_PANELS: &[PanelRegistration] = &[PanelRegistration {
-    id: HIGHLIGHTS_PANEL_ID,
-    tab: Tab::Highlights,
-}, PanelRegistration {
-    id: CAPTIONS_PANEL_ID,
-    tab: Tab::Captions,
-}];
+pub const OPTIONAL_PANELS: &[PanelRegistration] = &[
+    PanelRegistration {
+        id: HIGHLIGHTS_PANEL_ID,
+        tab: Tab::Highlights,
+    },
+    PanelRegistration {
+        id: CAPTIONS_PANEL_ID,
+        tab: Tab::Captions,
+    },
+];
 
 const CORE_PANELS: &[PanelRegistration] = &[
     PanelRegistration {

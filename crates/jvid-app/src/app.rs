@@ -2863,7 +2863,10 @@ fn dock_titles(ui: &Ui, dock: &DockState<Tab>) -> std::collections::HashMap<Tab,
         let width = ((leaf.rect.width() - space::S8) / leaf.tabs.len() as f32 - space::S4)
             .clamp(size::TAB_MIN, size::TAB_MAX);
         for tab in &leaf.tabs {
-            let close = if matches!(tab, Tab::Transcript | Tab::RenderQueue | Tab::Highlights | Tab::Captions) {
+            let close = if matches!(
+                tab,
+                Tab::Transcript | Tab::RenderQueue | Tab::Highlights | Tab::Captions
+            ) {
                 size::CONTROL
             } else {
                 0.0
@@ -2928,7 +2931,10 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn is_closeable(&self, tab: &Tab) -> bool {
-        matches!(tab, Tab::Transcript | Tab::RenderQueue | Tab::Highlights | Tab::Captions)
+        matches!(
+            tab,
+            Tab::Transcript | Tab::RenderQueue | Tab::Highlights | Tab::Captions
+        )
     }
 
     fn allowed_in_windows(&self, _tab: &mut Tab) -> bool {
