@@ -1065,6 +1065,12 @@ impl App {
             return Applicability::Disabled("palette.unavailable");
         };
         let enabled = match id {
+            "export_frame" => {
+                return Applicability::when(
+                    self.history.project().sequence().duration() > Time(0),
+                    "preview.no_frame",
+                );
+            }
             "undo" => Some(self.history.can_undo()),
             "redo" | "redo_alt" => Some(self.history.can_redo()),
             "export" => return Applicability::when(self.can_export(), "export.nothing"),
@@ -1076,9 +1082,9 @@ impl App {
                 );
             }
             "new_project" | "open_project" | "save" | "save_as" | "import" | "import_subtitles"
-            | "export_subtitles" | "quit" | "record" | "export_frame" | "command_palette"
-            | "focus_media" | "focus_effects" | "focus_source" | "focus_program"
-            | "focus_timeline" | "focus_inspector" => Some(true),
+            | "export_subtitles" | "quit" | "record" | "command_palette" | "focus_media"
+            | "focus_effects" | "focus_source" | "focus_program" | "focus_timeline"
+            | "focus_inspector" => Some(true),
             _ => None,
         };
         if let Some(enabled) = enabled {
@@ -2912,6 +2918,45 @@ mod palette_tests {
                 .unwrap()
                 .in_point,
             Some(Time(0))
+        );
+    }
+}
+
+#[cfg(test)]
+mod frame_export_applicability_tests {
+    use super::*;
+
+    #[test]
+    fn export_frame_requires_sequence_content_without_requiring_a_source_frame() {
+        let mut app = App::restore(None);
+        assert_eq!(
+            app.action_applicability("export_frame", false),
+            Applicability::Disabled("preview.no_frame")
+        );
+        // Disabled dispatch must return before opening a native Save dialog.
+        app.run_action("export_frame", false);
+        app.history
+            .apply(Command::AddSolid {
+                name: "Frame".into(),
+                color: [1.0; 4],
+            })
+            .unwrap();
+        let asset = app.history.project().assets()[0].id;
+        let placement = app
+            .history
+            .project()
+            .placement(asset, Time(0), false, None, false)
+            .unwrap();
+        app.history.apply(Command::Place(placement)).unwrap();
+        app.run_action("focus_program", false);
+        assert!(app.preview.source_asset().is_none());
+        assert_eq!(
+            app.action_applicability("export_frame", false),
+            Applicability::Enabled
+        );
+        assert_eq!(
+            app.action_applicability("export_frame", true),
+            Applicability::Enabled
         );
     }
 }
