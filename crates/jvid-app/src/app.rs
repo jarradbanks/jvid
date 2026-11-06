@@ -1034,8 +1034,10 @@ impl App {
     fn annotation_applicability(&mut self, menu: bool) -> crate::keymap::Applicability {
         let focused = self.dock.find_active_focused().map(|(_, tab)| *tab);
         crate::keymap::Applicability::when(
-            menu || focused == Some(Tab::Timeline)
-                || (focused == Some(Tab::Preview) && self.preview_active == 1),
+            !self.on_welcome
+                && (menu
+                    || focused == Some(Tab::Timeline)
+                    || (focused == Some(Tab::Preview) && self.preview_active == 1)),
             "annotations.program_only",
         )
     }
@@ -2679,6 +2681,7 @@ fn app_icon() -> egui::IconData {
 #[test]
 fn annotation_actions_preserve_focus_routing_and_live_bindings() {
     let mut app = App::restore(None);
+    assert!(!app.annotation_applicability(true).is_enabled());
     app.on_welcome = false;
     for focus in ["focus_media", "focus_source"] {
         app.run_action(focus, false);
