@@ -931,7 +931,7 @@ mod tests {
         };
         let before = rasterize(&text, None, (320, 180));
         assert!(
-            before.chunks_exact(4).any(|pixel| pixel[3] > 0),
+            before.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0),
             "queued resource must contain visible glyphs"
         );
         std::fs::copy(fixture("alternate.ttf"), &path).unwrap();
@@ -963,7 +963,7 @@ mod tests {
         };
         let before = rasterize(&text, None, (320, 180));
         assert!(
-            before.chunks_exact(4).any(|pixel| pixel[3] > 0),
+            before.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0),
             "queued resource must contain visible glyphs"
         );
         std::fs::rename(old, &moved).unwrap();
