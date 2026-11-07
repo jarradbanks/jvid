@@ -343,7 +343,7 @@ impl MediaBin {
         if let Some(id) = self.confirm_remove {
             out.command = out.command.or(self.remove_warning(ui, project, id));
         }
-        self.library_dialog(ui, project, &mut out);
+        self.delete_dialog(ui, project, &mut out);
         out
     }
 
@@ -406,7 +406,8 @@ impl MediaBin {
             let ids: Vec<_> = assets.iter().map(|a| a.id).collect();
             self.visible_ids = Some(ids.clone());
             self.retain_visible(&ids);
-            if assets.is_empty() {
+            let bins = self.library.tiles(project, &self.query);
+            if assets.is_empty() && bins.is_empty() {
                 if importing {
                     ui.label(egui::RichText::new(tr!("bin.importing")).color(color::ink_3()));
                 } else if !self.query.trim().is_empty() || self.library.active() {
@@ -464,34 +465,50 @@ impl MediaBin {
             } else {
                 tile_w * 9.0 / 16.0 + ROW
             };
-            let mut scroll = egui::ScrollArea::vertical().auto_shrink(false);
+            // No 64px minimum: in a short panel the grid scrolls in what's left rather than
+            // spilling over the pinned Import bar.
+            let mut scroll = egui::ScrollArea::vertical()
+                .auto_shrink(false)
+                .min_scrolled_height(0.0);
             // Virtual rows still honor Reveal without waiting for an off-screen widget.
             if let Some(index) = self.reveal.and_then(|id| ids.iter().position(|a| *a == id)) {
+                let index = index + bins.len();
                 scroll = scroll.vertical_scroll_offset((index / cols) as f32 * (row_h + space::S8));
             }
-            scroll.show_rows(ui, row_h, assets.len().div_ceil(cols), |ui, rows| {
-                if self.list {
-                    for a in &assets[rows] {
-                        ui.push_id(a.id, |ui| {
-                            let r = ui.allocate_response(
-                                vec2(ui.available_width(), ROW),
-                                Sense::click_and_drag(),
-                            );
-                            self.row(ui, r, a, project, missing.contains(&a.path), out);
+            // Bin tiles come first and share the media's grid, rows and virtual scrolling.
+            let count = bins.len() + assets.len();
+            let item =
+                |this: &mut Self, ui: &mut Ui, i: usize, size: Vec2, out: &mut BinResponse| {
+                    if let Some(&tile) = bins.get(i) {
+                        ui.push_id(tile, |ui| {
+                            let r = ui.allocate_response(size, Sense::click());
+                            this.bin_tile(ui, r, tile, project, out);
                         });
+                        return;
+                    }
+                    let a = assets[i - bins.len()];
+                    ui.push_id(a.id, |ui| {
+                        let r = ui.allocate_response(size, Sense::click_and_drag());
+                        let offline = missing.contains(&a.path);
+                        if this.list {
+                            this.row(ui, r, a, project, offline, out);
+                        } else {
+                            this.tile(ui, r, a, project, offline, out);
+                        }
+                    });
+                };
+            scroll.show_rows(ui, row_h, count.div_ceil(cols), |ui, rows| {
+                if self.list {
+                    for i in rows {
+                        item(self, ui, i, vec2(ui.available_width(), ROW), out);
                     }
                 } else {
                     let tile = vec2(tile_w, row_h);
-                    let first = rows.start * cols;
-                    let last = (rows.end * cols).min(assets.len());
-                    for chunk in assets[first..last].chunks(cols) {
+                    for row in rows {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = gap;
-                            for a in chunk {
-                                ui.push_id(a.id, |ui| {
-                                    let r = ui.allocate_response(tile, Sense::click_and_drag());
-                                    self.tile(ui, r, a, project, missing.contains(&a.path), out);
-                                });
+                            for i in row * cols..((row + 1) * cols).min(count) {
+                                item(self, ui, i, tile, out);
                             }
                         });
                     }
@@ -502,6 +519,7 @@ impl MediaBin {
             if focused
                 && !ui.ctx().text_edit_focused()
                 && self.renaming.is_none()
+                && !self.library_naming()
                 && !self.library_modal_open()
                 && self.confirm_remove.is_none()
                 && ui.ctx().memory(|m| m.top_modal_layer().is_none())
@@ -520,6 +538,7 @@ impl MediaBin {
             }
         });
         self.finish_rename(ui, project, out);
+        self.finish_naming(ui, project, out);
         self.drag_preview(ui, project, missing);
     }
 
@@ -753,9 +772,12 @@ impl MediaBin {
                 pos2(rect.left(), rect.center().y - size::CONTROL / 2.0),
                 vec2(w, size::CONTROL),
             );
-            self.rename_field = Some(field);
+            // Focus once, when the field opens; asking every frame can drop fast typing.
+            let opened = self.rename_field.replace(field).is_none();
             let r = put_over(ui, field, TextInput::new(text).width(w));
-            r.request_focus();
+            if opened {
+                r.request_focus();
+            }
             let pos = pos2(
                 field.right() + space::S4,
                 rect.center().y - g.size().y / 2.0,
@@ -813,6 +835,7 @@ impl MediaBin {
             }
             if ui.button(tr!("bin.rename")).clicked() {
                 self.renaming = Some((a.id, stem.to_owned()));
+                self.rename_field = None;
             }
             self.library_asset_menu(ui, project, out);
             let label = if self.selected_ids.len() > 1 {
@@ -858,6 +881,7 @@ impl MediaBin {
             }
             if enter || esc {
                 self.renaming = None;
+                self.rename_field = None;
             }
         }
     }
@@ -983,23 +1007,17 @@ impl MediaBin {
             .map(|id| usage.get(id).copied().unwrap_or(0))
             .sum();
         let mut command = None;
-        let modal = egui::Modal::new(egui::Id::new("remove_asset"))
-            .frame(
-                egui::Frame::popup(ui.style())
-                    .corner_radius(radius::DIALOG)
-                    .inner_margin(space::S16),
-            )
-            .show(ui.ctx(), |ui| {
-                ui.set_width(320.0);
-                ui.label(
-                    egui::RichText::new(if ids.len() > 1 {
-                        trn!("bin.remove_selected_title", ids.len())
-                    } else {
-                        tr!("bin.remove_title", name = asset.display_name())
-                    })
-                    .font(theme::headline()),
-                );
-                ui.add_space(space::S8);
+        let title = if ids.len() > 1 {
+            trn!("bin.remove_selected_title", ids.len())
+        } else {
+            tr!("bin.remove_title", name = asset.display_name())
+        };
+        let modal = suite_ui::dialog::modal(
+            ui.ctx(),
+            egui::Id::new("remove_asset"),
+            &title,
+            320.0,
+            |ui| {
                 if ids.len() > 1 {
                     ui.label(trn!("bin.remove_selected_body", n, used = used));
                     ui.label(tr!("bin.files_retained"));
@@ -1021,7 +1039,8 @@ impl MediaBin {
                 if actions[0].clicked() {
                     ui.close();
                 }
-            });
+            },
+        );
         if modal.should_close() {
             self.confirm_remove = None;
             self.pending_remove.clear();

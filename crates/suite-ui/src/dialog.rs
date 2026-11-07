@@ -1,5 +1,6 @@
-//! The confirm dialog: a modal over a dimmed backdrop with a title, a body and
-//! right-aligned buttons.
+//! Dialogs: [`modal`] is the one frame every dialog uses (centred over a dimmed
+//! backdrop, Headline title, right-aligned [`action_footer`]); [`Dialog`] is the
+//! ready-made confirm dialog built on it.
 
 use egui::{Align, Context, Frame, Id, Layout, Response, RichText, Ui};
 
@@ -75,6 +76,31 @@ pub fn action_footer<'a>(
     .inner
 }
 
+/// The shared dialog frame: centred over the scrim, 12px corners, 16px padding and a
+/// Headline title, `width` wide but never wider than the window less 24px a side.
+/// Put the body, then [`action_footer`], in `add_contents`. Esc or a backdrop click
+/// sets `should_close` on the response.
+pub fn modal<R>(
+    ctx: &Context,
+    id: Id,
+    title: &str,
+    width: f32,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::ModalResponse<R> {
+    egui::Modal::new(id)
+        .frame(
+            Frame::popup(&ctx.global_style())
+                .corner_radius(radius::DIALOG)
+                .inner_margin(space::S16),
+        )
+        .show(ctx, |ui| {
+            ui.set_width(width.min((ctx.content_rect().width() - 48.0).max(1.0)));
+            ui.label(RichText::new(title).font(theme::headline()));
+            ui.add_space(space::S8);
+            add_contents(ui)
+        })
+}
+
 /// A confirm dialog. `buttons[0]` is the default: drawn rightmost and focused, so Enter
 /// picks it; Tab moves between buttons without leaving the dialog. Esc or a backdrop
 /// click picks `cancel`.
@@ -93,44 +119,33 @@ impl Dialog<'_> {
         let mut picked = None;
         let id = Id::new("suite_ui_dialog");
         let previous_rect = ctx.memory(|m| m.area_rect(id));
-        let modal = egui::Modal::new(id)
-            .frame(
-                Frame::popup(&ctx.global_style())
-                    .corner_radius(radius::DIALOG)
-                    .inner_margin(space::S16),
-            )
-            .show(ctx, |ui| {
-                ui.set_width(
-                    (if self.long { 640.0_f32 } else { 360.0_f32 })
-                        .min((ctx.content_rect().width() - 48.0).max(1.0)),
-                );
-                ui.label(RichText::new(self.title).font(theme::headline()));
-                ui.add_space(space::S8);
-                if self.long {
-                    let height = ctx.content_rect().height() * 0.6;
-                    egui::ScrollArea::vertical()
-                        .min_scrolled_height(height)
-                        .max_height(height)
-                        .show(ui, |ui| ui.label(self.body));
-                } else {
-                    ui.label(self.body);
+        let width = if self.long { 640.0 } else { 360.0 };
+        let modal = modal(ctx, id, self.title, width, |ui| {
+            if self.long {
+                let height = ctx.content_rect().height() * 0.6;
+                egui::ScrollArea::vertical()
+                    .min_scrolled_height(height)
+                    .max_height(height)
+                    .show(ui, |ui| ui.label(self.body));
+            } else {
+                ui.label(self.body);
+            }
+            ui.add_space(space::S16);
+            let buttons = self
+                .buttons
+                .iter()
+                .rev()
+                .map(|&(label, kind)| Button::new(kind, label));
+            let responses = action_footer(ui, buttons);
+            for (i, r) in responses.into_iter().rev().enumerate() {
+                if i == 0 && !ui.is_sizing_pass() && ui.memory(|m| m.focused().is_none()) {
+                    r.request_focus();
                 }
-                ui.add_space(space::S16);
-                let buttons = self
-                    .buttons
-                    .iter()
-                    .rev()
-                    .map(|&(label, kind)| Button::new(kind, label));
-                let responses = action_footer(ui, buttons);
-                for (i, r) in responses.into_iter().rev().enumerate() {
-                    if i == 0 && !ui.is_sizing_pass() && ui.memory(|m| m.focused().is_none()) {
-                        r.request_focus();
-                    }
-                    if r.clicked() {
-                        picked = Some(i);
-                    }
+                if r.clicked() {
+                    picked = Some(i);
                 }
-            });
+            }
+        });
         // The shared Area centres using its previous size. Repaint after a content
         // change so the footer reaches its final position before the next input.
         if previous_rect.is_some_and(|r| r.size() != modal.response.rect.size()) {
