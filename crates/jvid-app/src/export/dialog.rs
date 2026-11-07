@@ -109,6 +109,11 @@ impl ExportDialog {
         self.range.is_some()
     }
 
+    /// Whether the open dialog exports Highlights.
+    pub(crate) fn is_highlights(&self) -> bool {
+        self.range == Some(Range::Highlights)
+    }
+
     /// Dismiss tutorial-owned export guidance without changing the chosen output settings.
     pub(crate) fn close(&mut self) {
         self.range = None;
@@ -369,7 +374,9 @@ impl ExportDialog {
                                     tr!("export.selected"),
                                     tr!("export.highlights"),
                                 ];
-                                if ui.add(Segmented::new(&mut i, &options).off(&off)).changed() {
+                                let r = ui.add(Segmented::new(&mut i, &options).off(&off));
+                                crate::app::tutorial::anchor_in(ui, "export.range", r.rect);
+                                if r.changed() {
                                     *range = RANGES[i];
                                 }
                             });

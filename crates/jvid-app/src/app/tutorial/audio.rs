@@ -2,10 +2,10 @@
 //! the voice and record a voiceover.
 
 use jvid_core::history::{Command, Created};
-use jvid_core::model::{Clip, TrackKind};
+use jvid_core::model::{Clip, ClipId, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 
-use super::{App, Lesson, Step, apply};
+use super::{App, Item, Lesson, STEP, Step, apply, select};
 use crate::i18n::{tr, verbatim};
 
 pub(super) const VOICE: &str = "voice.m4a";
@@ -64,39 +64,32 @@ pub const AUDIO: Lesson = Lesson {
                 a.timeline.select_clip(a.history.project().sequence(), id);
                 apply(a, Command::SetClipProps(vec![(id, x, keys)]));
             },
-            reveal: None,
-            ghost: None,
-            also: &["timeline"],
+            via: &[select!(music)],
+            ..STEP
         },
         Step {
-            anchor: "timeline",
-            text: |_| tr!("tutorial.audio_duck", key = verbatim("Ctrl")),
+            anchor: "clip",
+            item: Some(|a| music(a).map(Item::Clip)),
+            text: |_| tr!("tutorial.audio_point", key = verbatim("Ctrl")),
+            done: |a| clip_of(a, MUSIC).is_some_and(|c| volume_keys(c) >= 1),
+            example: |a| duck(a, 1.0, 1),
+            ..STEP
+        },
+        Step {
+            anchor: "clip",
+            item: Some(|a| music(a).map(Item::Clip)),
+            text: |_| tr!("tutorial.audio_point_again", key = verbatim("Ctrl")),
+            done: |a| clip_of(a, MUSIC).is_some_and(|c| volume_keys(c) >= 2),
+            example: |a| duck(a, 1.0, 2),
+            ..STEP
+        },
+        Step {
+            anchor: "clip",
+            item: Some(|a| music(a).map(Item::Clip)),
+            text: |_| tr!("tutorial.audio_duck").into(),
             done: |a| clip_of(a, MUSIC).is_some_and(ducked),
-            example: |a| {
-                use jvid_core::keyframe::{Easing, Keyframe, Value};
-                let Some(c) = clip_of(a, MUSIC) else { return };
-                let s = FLICKS_PER_SECOND;
-                let v = c.transform.volume;
-                let key = |t, v| Keyframe {
-                    time: Time(t),
-                    value: Value::Scalar(v),
-                    easing: Easing::Linear,
-                };
-                // Down over the half second before the voice comes in at 2 s.
-                let mut keys = c.keyframes.clone();
-                let duck = vec![
-                    key(c.source_in.0 + 3 * s / 2, v),
-                    key(c.source_in.0 + 2 * s, v * 0.3),
-                ];
-                keys.insert("volume".into(), duck);
-                apply(
-                    a,
-                    Command::SetClipProps(vec![(c.id, c.transform.clone(), keys)]),
-                );
-            },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            example: |a| duck(a, 0.3, 2),
+            ..STEP
         },
         Step {
             anchor: "inspector.eq",
@@ -116,30 +109,77 @@ pub const AUDIO: Lesson = Lesson {
                 a.timeline.select_clip(a.history.project().sequence(), id);
                 apply(a, Command::SetClipProps(vec![(id, x, keys)]));
             },
-            reveal: None,
-            ghost: None,
-            also: &["timeline"],
+            via: &[select!(voice)],
+            ..STEP
         },
         // Needs a microphone, so the Show Me test skips it; without one the user skips it too.
         Step {
             anchor: "record",
-            text: |a| tr!("tutorial.audio_record", key = a.keymap.shortcut("record")),
-            // Takes are WAVs; the lesson's samples aren't.
-            done: |a| {
-                let mut assets = a.history.project().assets().iter();
-                assets.any(|x| x.path.extension().is_some_and(|e| e == "wav"))
-            },
+            text: |_| tr!("tutorial.audio_record").into(),
+            done: |a| a.take.is_some() || recorded(a),
             // As pressing Record does: starts a take, or stops the one running.
             example: |a| match a.take.is_some() {
                 true => a.end_take(),
                 false => a.start_take(),
             },
             reveal: Some(|a| a.preview_active = 1),
-            ghost: None,
-            also: &[],
+            ..STEP
+        },
+        Step {
+            anchor: "record",
+            text: |_| tr!("tutorial.audio_stop").into(),
+            done: recorded,
+            example: |a| match a.take.is_some() {
+                true => a.end_take(),
+                false => a.start_take(),
+            },
+            reveal: Some(|a| a.preview_active = 1),
+            ..STEP
         },
     ],
 };
+
+fn music(a: &App) -> Option<ClipId> {
+    clip_of(a, MUSIC).map(|c| c.id)
+}
+
+fn voice(a: &App) -> Option<ClipId> {
+    clip_of(a, VOICE).map(|c| c.id)
+}
+
+/// Whether a take landed: takes are WAVs; the lesson's samples aren't.
+fn recorded(a: &App) -> bool {
+    let mut assets = a.history.project().assets().iter();
+    assets.any(|x| x.path.extension().is_some_and(|e| e == "wav"))
+}
+
+fn volume_keys(c: &Clip) -> usize {
+    c.keyframes.get("volume").map_or(0, Vec::len)
+}
+
+/// Keys the music's volume down to `level` of its gain over the half second before the voice
+/// comes in at 2 s, as Ctrl+clicking the line twice and dragging the second point does; the
+/// first `n` of those.
+fn duck(a: &mut App, level: f64, n: usize) {
+    use jvid_core::keyframe::{Easing, Keyframe, Value};
+    let Some(c) = clip_of(a, MUSIC) else { return };
+    let s = FLICKS_PER_SECOND;
+    let v = c.transform.volume;
+    let key = |t, v| Keyframe {
+        time: Time(t),
+        value: Value::Scalar(v),
+        easing: Easing::Linear,
+    };
+    let mut all = c.keyframes.clone();
+    let mut duck = vec![
+        key(c.source_in.0 + 3 * s / 2, v),
+        key(c.source_in.0 + 2 * s, v * level),
+    ];
+    duck.truncate(n);
+    all.insert("volume".into(), duck);
+    let cmd = Command::SetClipProps(vec![(c.id, c.transform.clone(), all)]);
+    apply(a, cmd);
+}
 
 /// The clip of sample `name` on the timeline.
 pub(super) fn clip_of<'a>(app: &'a App, name: &str) -> Option<&'a Clip> {

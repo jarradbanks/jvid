@@ -312,6 +312,7 @@ const TOAST_SECS: f64 = 6.0;
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, settings: &jvid_core::settings::Settings) -> Self {
         theme::install(&cc.egui_ctx);
+        cc.egui_ctx.add_plugin(tutorial::Blocker);
         jvid_media::hwdec::set_enabled(settings.hardware_decode);
         let mut app = Self::restore(cc.storage);
         app.editor_context = Some(cc.egui_ctx.clone());
@@ -803,6 +804,7 @@ impl App {
     /// The Timeline menu, its left edge at `left`. Returns its right edge.
     fn timeline_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
         let button = menu_button(ui, tr!("menu.timeline"), left);
+        tutorial::anchor(ui.ctx(), "menu.timeline", button.rect);
         let (mut picked, mut transcript, mut export, mut captions) = (false, false, false, false);
         egui::Popup::menu(&button).show(|ui| {
             picked = self.action_menu_item(ui, "generate_subtitles");
@@ -847,6 +849,9 @@ impl App {
         } else {
             response
         };
+        if id == "generate_subtitles" {
+            tutorial::anchor(ui.ctx(), "menu.generate_subtitles", response.rect);
+        }
         response.clicked()
     }
 
@@ -3226,6 +3231,11 @@ impl TabViewer for Viewer<'_> {
                     (self.command, self.gesture) = (Some(c), None);
                 }
                 tutorial::ghost(ui, frame, self.project.settings().width);
+                // With room for the handles just outside the frame.
+                let view = frame
+                    .expand(suite_ui::tokens::space::S12)
+                    .intersect(ui.clip_rect());
+                tutorial::anchor(ui.ctx(), "preview.frame", view);
                 if let Some((id, at)) =
                     crate::handles::double_clicked_text(ui, self.project, t, frame)
                 {

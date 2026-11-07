@@ -376,7 +376,9 @@ impl MediaBin {
         let import = Button::secondary(tr!("action.import"))
             .with_icon(icon::PLUS)
             .width(bar.width());
-        out.import |= ui.put(bar, import).clicked();
+        let import = ui.put(bar, import);
+        crate::app::tutorial::anchor(ui.ctx(), "media.import", import.rect);
+        out.import |= import.clicked();
         let solid = Button::secondary(solid_label).width(solid_w);
         if ui.put(solid_bar, solid).clicked() {
             out.command = if removing {
@@ -489,6 +491,8 @@ impl MediaBin {
                     let a = assets[i - bins.len()];
                     ui.push_id(a.id, |ui| {
                         let r = ui.allocate_response(size, Sense::click_and_drag());
+                        let item = crate::app::tutorial::Item::Asset(a.id);
+                        crate::app::tutorial::item_anchor(ui.ctx(), "asset", item, r.rect);
                         let offline = missing.contains(&a.path);
                         if this.list {
                             this.row(ui, r, a, project, offline, out);
@@ -1265,6 +1269,9 @@ fn text_presets(ui: &mut Ui, tiles: &[Option<egui::TextureId>; 3], out: &mut Bin
                 ui.horizontal(|ui| {
                     for (name, text, tex, n, a) in row {
                         let (rect, r) = ui.allocate_exact_size(vec2(w, h), Sense::click_and_drag());
+                        if *name == laid[0].0 {
+                            crate::app::tutorial::anchor_in(ui, "bin.title", rect);
+                        }
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *name)
                         });

@@ -1399,14 +1399,16 @@ impl Preview {
                     ui.spacing_mut().item_spacing.x = space::S4;
                     for (glyph, name, id) in transport_actions(r.playing) {
                         let name = transport_hint(ui.ctx(), keymap, id, name);
-                        if ui
+                        let b = ui
                             .scope_builder(UiBuilder::new().id(ui.id().with(id)), |ui| {
                                 ui.add(Button::icon(glyph, &name))
                             })
                             .inner
-                            .on_hover_text(&name)
-                            .clicked()
-                        {
+                            .on_hover_text(&name);
+                        if id == "play_stop" && records.is_some() {
+                            crate::app::tutorial::anchor(ui.ctx(), "preview.play", b.rect);
+                        }
+                        if b.clicked() {
                             action = Some(id);
                         }
                     }
@@ -1567,14 +1569,16 @@ impl Preview {
                 for (glyph, name, id) in transport_actions(row.playing) {
                     if navigation || id == "play_stop" {
                         let hint = transport_hint(ui.ctx(), keymap, id, name);
-                        if ui
+                        let b = ui
                             .scope_builder(UiBuilder::new().id(ui.id().with(id)), |ui| {
                                 ui.add(Button::icon(glyph, &hint))
                             })
                             .inner
-                            .on_hover_text(&hint)
-                            .clicked()
-                        {
+                            .on_hover_text(&hint);
+                        if id == "play_stop" && records {
+                            crate::app::tutorial::anchor(ui.ctx(), "preview.play", b.rect);
+                        }
+                        if b.clicked() {
                             action = Some(id);
                         }
                     }

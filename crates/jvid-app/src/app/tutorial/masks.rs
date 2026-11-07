@@ -2,10 +2,10 @@
 //! so it follows them.
 
 use jvid_core::history::Command;
-use jvid_core::model::{Clip, Mask, MaskMode, MaskShape, TrackKind};
+use jvid_core::model::{Clip, ClipId, Mask, MaskMode, MaskShape, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 
-use super::{App, Lesson, Step, apply};
+use super::{App, Item, Lesson, STEP, Step, apply, select};
 use crate::i18n::tr;
 
 /// The subject's head in the first frame and near the last, as a mask's centre and size in
@@ -37,47 +37,70 @@ pub const MASKS: Lesson = Lesson {
     },
     steps: &[
         Step {
-            anchor: "timeline",
-            text: |_| tr!("tutorial.masks_select").into(),
+            anchor: "clip",
+            item: Some(|a| lower_id(a).map(Item::Clip)),
+            text: |_| tr!("tutorial.select_clip").into(),
             done: |a| lower(a).is_some_and(|c| a.timeline.selected().contains(&c.id)),
             example: |a| {
-                if let Some(id) = lower(a).map(|c| c.id) {
+                if let Some(id) = lower_id(a) {
                     a.timeline.select_clip(a.history.project().sequence(), id);
                 }
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            ..STEP
         },
         Step {
-            anchor: "timeline",
+            anchor: "clip",
+            item: Some(|a| lower_id(a).map(Item::Clip)),
             text: |a| {
                 tr!(
                     "tutorial.masks_duplicate",
                     key = a.keymap.shortcut("duplicate")
                 )
             },
-            done: |a| top(a).is_some(),
+            done: |a| copy(a).is_some() || top(a).is_some(),
             example: |a| {
                 let seq = a.history.project().sequence();
                 let Some(c) = lower(a) else { return };
                 let Some((track, _)) = seq.clip(c.id) else {
                     return;
                 };
-                let tracks = seq.tracks();
-                let below = tracks.iter().position(|t| t.id == track).unwrap_or(0);
-                let Some(above) = below.checked_sub(1).map(|i| &tracks[i]) else {
-                    return;
-                };
                 let paste = Command::Paste {
-                    clips: vec![(above.id, c.clone())],
-                    at: c.start,
+                    clips: vec![(track, c.clone())],
+                    at: c.end(),
                 };
                 apply(a, paste);
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            ..STEP
+        },
+        Step {
+            anchor: "clip",
+            item: Some(|a| copy(a).map(|c| Item::Clip(c.id))),
+            text: |_| tr!("tutorial.masks_stack").into(),
+            done: |a| top(a).is_some(),
+            example: |a| {
+                let Some(c) = copy(a).cloned() else { return };
+                let Some(low) = lower(a) else { return };
+                let at = low.start;
+                let seq = a.history.project().sequence();
+                let tracks = seq.tracks();
+                let Some((track, _)) = seq.clip(low.id) else {
+                    return;
+                };
+                let below = tracks.iter().position(|t| t.id == track).unwrap_or(0);
+                let Some(above) = below.checked_sub(1).map(|i| tracks[i].id) else {
+                    return;
+                };
+                apply(a, Command::RemoveClip(c.id));
+                apply(
+                    a,
+                    Command::Paste {
+                        clips: vec![(above, c)],
+                        at,
+                    },
+                );
+            },
+            watch: &["timeline.lanes"],
+            ..STEP
         },
         Step {
             anchor: "inspector.exposure",
@@ -91,9 +114,9 @@ pub const MASKS: Lesson = Lesson {
                 a.timeline.select_clip(a.history.project().sequence(), id);
                 apply(a, Command::SetClipProps(vec![(id, x, keys)]));
             },
-            reveal: None,
-            ghost: None,
-            also: &["timeline"],
+            via: &[select!(lower_id)],
+            watch: &["preview.frame"],
+            ..STEP
         },
         Step {
             anchor: "inspector.add_mask",
@@ -112,31 +135,39 @@ pub const MASKS: Lesson = Lesson {
                 a.timeline.select_clip(a.history.project().sequence(), id);
                 edit_mask(a, |m| *m = mask.clone());
             },
-            reveal: None,
-            ghost: None,
-            also: &["timeline"],
+            via: &[select!(top_id)],
+            ..STEP
         },
         Step {
-            anchor: "preview",
+            anchor: "preview.frame",
             text: |_| tr!("tutorial.masks_place").into(),
             done: |a| mask(a).is_some_and(|m| covers(&m, START)),
             example: |a| edit_mask(a, |m| m.points = START.to_vec()),
-            reveal: None,
+            via: &[select!(top_id)],
             ghost: Some(START),
-            also: &[],
+            ..STEP
         },
         Step {
             anchor: "inspector.feather",
             text: |_| tr!("tutorial.masks_feather").into(),
             done: |a| mask(a).is_some_and(|m| m.feather >= SOFT),
             example: |a| edit_mask(a, |m| m.feather = SOFT * 2.0),
-            reveal: None,
-            ghost: None,
-            also: &[],
+            via: &[select!(top_id)],
+            watch: &["preview.frame"],
+            ..STEP
         },
         Step {
             anchor: "inspector.invert",
             text: |_| tr!("tutorial.masks_invert").into(),
+            done: |a| mask(a).is_some_and(|m| m.invert),
+            example: |a| edit_mask(a, |m| m.invert = true),
+            via: &[select!(top_id)],
+            watch: &["preview.frame"],
+            ..STEP
+        },
+        Step {
+            anchor: "inspector.mask_mode",
+            text: |_| tr!("tutorial.masks_subtract").into(),
             // On one mask, Subtract cuts it out as Invert does, so both together spotlight
             // the subject again.
             done: |a| mask(a).is_some_and(|m| m.invert && m.mode == MaskMode::Subtract),
@@ -145,12 +176,12 @@ pub const MASKS: Lesson = Lesson {
                     (m.invert, m.mode) = (true, MaskMode::Subtract);
                 })
             },
-            reveal: None,
-            ghost: None,
-            also: &["preview"],
+            via: &[select!(top_id)],
+            watch: &["preview.frame"],
+            ..STEP
         },
         Step {
-            anchor: "inspector.mask_position",
+            anchor: "inspector.mask_position_key",
             text: |_| tr!("tutorial.masks_key").into(),
             done: |a| !key_times(a).is_empty(),
             example: |a| {
@@ -160,12 +191,12 @@ pub const MASKS: Lesson = Lesson {
                 let cmd = crate::inspector::toggle_animate(&[c], &[&name], t);
                 apply(a, cmd);
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            via: &[select!(top_id)],
+            ..STEP
         },
         Step {
-            anchor: "timeline",
+            anchor: "timeline.ruler",
+            item: Some(|a| top(a).map(|c| Item::Time(c.start + Time(c.duration().0 * 4 / 5)))),
             text: |_| tr!("tutorial.masks_playhead").into(),
             done: |a| {
                 let (Some(c), keys) = (top(a), key_times(a)) else {
@@ -179,12 +210,10 @@ pub const MASKS: Lesson = Lesson {
                     a.timeline.seek(Time(c.start.0 + 4 * SECOND.0).min(c.end()));
                 }
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            ..STEP
         },
         Step {
-            anchor: "preview",
+            anchor: "preview.frame",
             text: |_| tr!("tutorial.masks_follow").into(),
             done: |a| key_times(a).len() >= 2,
             example: |a| {
@@ -199,13 +228,13 @@ pub const MASKS: Lesson = Lesson {
                 let cmd = crate::inspector::set_props(&[c], &names, &x, t);
                 apply(a, cmd);
             },
-            reveal: None,
+            via: &[select!(top_id)],
             ghost: Some(END),
-            also: &[],
+            ..STEP
         },
         Step {
-            anchor: "preview",
-            text: |a| tr!("tutorial.masks_play", key = a.keymap.shortcut("play_stop")),
+            anchor: "preview.play",
+            text: |_| tr!("tutorial.masks_play").into(),
             done: |a| a.preview.playing(),
             example: |a| {
                 if let Some(c) = top(a) {
@@ -213,12 +242,30 @@ pub const MASKS: Lesson = Lesson {
                 }
                 a.preview.program_action("play_stop");
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            ..STEP
         },
     ],
 };
+
+fn lower_id(a: &App) -> Option<ClipId> {
+    lower(a).map(|c| c.id)
+}
+
+fn top_id(a: &App) -> Option<ClipId> {
+    top(a).map(|c| c.id)
+}
+
+/// A copy of [`lower`] on its own track, not yet stacked over it.
+fn copy(a: &App) -> Option<&Clip> {
+    let low = lower(a)?;
+    let seq = a.history.project().sequence();
+    let (track, _) = seq.clip(low.id)?;
+    let track = seq.tracks().iter().find(|t| t.id == track)?;
+    let clips = track.clips().iter();
+    clips
+        .filter(|c| c.id != low.id)
+        .find(|c| c.asset == low.asset)
+}
 
 /// The original: the first clip on the lowest video track that has one.
 fn lower(a: &App) -> Option<&Clip> {

@@ -20,6 +20,7 @@ mod docking;
 mod subtitle_export;
 mod timeline_recording;
 mod timeline_tools;
+mod tutorials;
 mod ui_polish;
 mod updates;
 mod workflow_integration;

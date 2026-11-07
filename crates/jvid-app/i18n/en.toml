@@ -1072,13 +1072,16 @@ pixelate_block = "Block"
 
 # The lesson step card and Help > Tutorials.
 [tutorial]
+# Each step is one short imperative sentence on a card beside the control it spotlights, so
+# "this" and "these" name that control. Labels in steps are the names the editor shows.
 import_sample = "Import Sample"
-silence_select = "Select the screen recording on the Timeline."
-silence_open = "Open Detect Silence with {key}."
-silence_cut = "Adjust Threshold to mark the quiet section, then click Cut."
-export_settings = "Choose the output settings and destination, then add the video to the queue."
+# A step that needs its clip selected first points at the clip with this.
+select_clip = "Click this clip to select it."
+open_export = "Click Export."
+silence_cut = "Click Cut to remove the quiet part."
+# {action} is the speech dialog's button, Generate or Transcribe.
+speech_start = "Click {action}."
 speech_running = "Wait for speech recognition to finish."
-speech_settings = "Choose a speech model and language, then click {action}."
 
 # Help > Tutorials: a lesson's length; {count} is minutes.
 minutes = "{count} min"
@@ -1095,91 +1098,110 @@ keep_project = "Keep Project"
 # The step card once the last step is done.
 complete = "Lesson complete."
 # Your First Edit, the first-launch tour: import a sample clip, place it, play, mark In and Out,
-# cut that section out, add a title and export. Media, Timeline, Text and Export are the names
-# the editor shows for them; {file} is the sample's file name and the others are shortcuts.
+# cut that section out, add a title and export. Import, Timeline, Play and Export are the names
+# the editor shows for them; {file} is the sample's file name, {title} a title preset's name
+# and the others are shortcuts.
 tour = "Your First Edit"
-tour_import = "Press {key} and open {file}."
-tour_place = "Drag {file} from Media onto the Timeline."
-tour_play = "Press {play} to play, then {back}, {stop} and {forward} to scrub."
-tour_marks = "Press {mark_in} to set an In point, then {mark_out} further on for the Out."
-tour_cut = "Press {key} to split out the section between In and Out and delete it."
-tour_title = "Click a title in Text, then drag it onto the Timeline above your clip."
-tour_export = "Click Export, then Export again to save your video."
-# Markers and Highlights: tap and hold M while playing, jump between markers, name and colour
-# one, then export Highlights. Export, Highlights, Before, After, Add to Queue, Name and Color
-# are the names the editor shows; markers_name is the name Show Me gives a marker.
+tour_import = "Click Import and open {file}."
+tour_place = "Drag {file} onto the Timeline."
+tour_play = "Click Play to watch the clip."
+tour_start = "Click the ruler near the start of the clip."
+tour_in = "Press {key} to set an In point."
+tour_later = "Click the ruler further along."
+tour_out = "Press {key} to set an Out point."
+tour_cut = "Press {key} to cut out the marked section."
+tour_title = "Drag {title} onto the Timeline above your clip."
+tour_export = "Click Export to render your video."
+# Markers and Highlights: play, tap and hold M, jump between markers, name and colour one, then
+# export Highlights. Play, Name, Color, Highlights and Export are the names the editor shows;
+# markers_name is the name Show Me gives a marker.
 markers = "Markers and Highlights"
-markers_tap = "Press {play} to play, then tap {key} at moments you like."
-markers_hold = "While it plays, hold {key} to mark a range."
-markers_jump = "Press {next} and {prev} to jump between markers."
-markers_edit = "Right-click a marker to set its Name and Color."
+markers_play = "Click Play to watch the clips."
+markers_tap = "Tap {key} at a moment you like."
+markers_hold = "Hold {key} while it plays to mark a range."
+markers_jump = "Press {next} or {prev} to jump between markers."
+markers_edit = "Right-click this marker and set its Name and Color."
 markers_name = "Best Moment"
-markers_export = "Click Export, choose Highlights, set Before and After, then click Add to Queue."
+markers_highlights = "Click Highlights to export a clip per marker."
+markers_export = "Click Export to render the highlights."
 # Masks: spotlight the subject by darkening a copy under a masked one, then key the mask to
-# follow them. Inspector labels (Color, Exposure, Add Mask, Ellipse, Feather, Invert, Mode,
-# Subtract, Position) are the names the Inspector shows. {key} is a shortcut.
+# follow them. Inspector labels (Exposure, Add Mask, Ellipse, Feather, Invert, Mode, Subtract,
+# Position) are the names the Inspector shows. {key} is a shortcut.
 masks = "Masks"
-masks_select = "Click the clip on the timeline to select it."
-masks_duplicate = "Press {key}, then drag the copy onto the track above, over the original."
-masks_darken = "Select the lower copy and drag Exposure under Color below -1."
-masks_add = "Select the top copy and choose Add Mask > Ellipse in the Inspector."
-masks_place = "Drag the mask's handles until it covers the dashed outline."
-masks_feather = "Drag Feather past 50 to soften the mask's edge."
-masks_invert = "Tick Invert, then set Mode to Subtract, and watch the spotlight flip each time."
-masks_key = "Click the diamond beside the mask's Position to add a key."
-masks_playhead = "Move the playhead near the end of the clip."
-masks_follow = "Drag the mask over the dashed outline again to add a second key."
-masks_play = "Press {key} to watch the mask follow the subject."
+masks_duplicate = "Press {key} to duplicate the clip."
+masks_stack = "Drag the copy onto the track above, over the original."
+masks_darken = "Drag Exposure below -1 to darken this copy."
+masks_add = "Click Add Mask and choose Ellipse."
+masks_place = "Drag the mask's handles to cover the dashed outline."
+masks_feather = "Drag Feather past 50 to soften the edge."
+masks_invert = "Tick Invert to flip the mask."
+masks_subtract = "Set Mode to Subtract to spotlight the subject again."
+masks_key = "Click this diamond to key the mask's Position."
+masks_playhead = "Click the ruler near the end of the clip."
+masks_follow = "Drag the mask over the dashed outline again."
+masks_play = "Click Play to watch the mask follow the subject."
 # Mixing Audio: lower the music, duck it under the voice with volume keys, EQ the voice and
-# record a voiceover. Volume, EQ and Inspector are the names the editor shows; {key} is a
-# shortcut or modifier key.
+# record a voiceover. Volume, EQ and Record are the names the editor shows; {key} is a
+# modifier key.
 audio = "Mixing Audio"
-audio_levels = "Select the music clip and lower its Volume in the Inspector."
-audio_duck = "{key}+click the music's volume line twice, then drag the second point down."
-audio_eq = "Select the voice clip and drag a band of its EQ in the Inspector."
-audio_record = "Press {key} to record a voiceover, then press it again to stop."
+audio_levels = "Drag Volume below 100% to lower the music."
+audio_point = "{key}+click the volume line to add a point."
+audio_point_again = "{key}+click the line again, a little to the right."
+audio_duck = "Drag the right point down to duck the music."
+audio_eq = "Drag an EQ band up or down to shape the voice."
+audio_record = "Click Record to start a voiceover."
+audio_stop = "Click Record again to stop."
 # Subtitles and Edit by Text: generate subtitles from the voice sample, fix and restyle one,
-# then cut a phrase from the transcript. Generate, Transcribe, Transcript, Inspector, Size and
-# Fill are the names the editor shows; {key} is a shortcut or key.
+# then cut a phrase from the transcript. Timeline, Generate Subtitles, Size and Transcribe are
+# the names the editor shows; {key} is a key.
 subtitles = "Subtitles and Edit by Text"
-subtitles_generate = "With the voice clip selected, press {key}, then click Generate."
-subtitles_fix = "Select a subtitle on the Timeline and fix a misheard word in the Inspector."
-subtitles_style = "Restyle the subtitle in the Inspector, such as its Size or Fill color."
+subtitles_menu = "Click Timeline."
+subtitles_generate = "Click Generate Subtitles."
+subtitles_fix = "Fix a misheard word in this subtitle."
+subtitles_style = "Change the subtitle's Size."
 subtitles_transcribe = "Click Transcribe to read the voice clip's words."
-subtitles_cut = "Drag across a phrase in Transcript and press {key} to cut it from the Timeline."
-# Keyframes and Easing, a lesson that animates a title in. Position, Opacity, Previous
-# Keyframe, Ease Out and Open Graph Editor are the names the editor shows for them.
+subtitles_cut = "Drag across a phrase, then press {key} to cut it."
+# Keyframes and Easing, a lesson that animates a title. Position, Opacity, Previous Keyframe,
+# Ease Out and Open Graph Editor are the names the editor shows for them.
 keys = "Keyframes and Easing"
-keys_add = "Key the title's Position and Opacity at its start and one second in."
-keys_previous = "Right-click the Position diamond and choose Previous Keyframe."
-keys_ease = "Right-click the Position diamond and choose Ease Out."
-keys_graph = "Right-click the keyframe lanes, choose Open Graph Editor and drag a handle."
-# {key} is the Play shortcut, such as Space.
-keys_play = "Press {key} to play the title in."
+keys_position = "Click this diamond to animate Position."
+keys_opacity = "Click this diamond to animate Opacity."
+keys_second = "Click the ruler about one second in."
+keys_move = "Change Position Y to move the title."
+keys_fade = "Change Opacity to fade the title."
+keys_previous = "Right-click this diamond and choose Previous Keyframe."
+keys_ease = "Right-click this diamond and choose Ease Out."
+keys_graph = "Right-click these keyframe lanes and choose Open Graph Editor."
+keys_handle = "Drag a curve handle to reshape the ease."
+keys_play = "Click Play to watch the title animate."
 # Color and Scopes: brighten and neutralise a dark, too-warm shot by reading the Scopes tab,
-# then apply a look. Exposure, Temperature, Tint, LUT, LUT Mix, Waveform, Vectorscope and
-# Histogram are the names the editor shows; {none} is the LUT button's label before one is
-# chosen and {file} the look's file name.
+# then apply a look. Exposure, Temperature, Tint, LUT Mix, Waveform, Vectorscope and Histogram
+# are the names the editor shows; {none} is the LUT button's label before one is chosen and
+# {file} the look's file name.
 color = "Color and Scopes"
-color_exposure = "Raise Exposure until the Waveform's top nears 100%, but stop before it flattens there."
-color_balance = "Lower Temperature and nudge Tint until the grays gather in the Vectorscope's center."
-color_histogram = "Fine-tune Temperature and Tint until the tops of red, green and blue line up in the Histogram."
-color_look = "Click {none} beside LUT, open {file}, then lower LUT Mix to compare before and after."
+color_exposure = "Raise Exposure until the Waveform's top nears 100%."
+color_balance = "Lower Temperature until the grays gather in the Vectorscope's center."
+color_histogram = "Adjust Temperature and Tint until red, green and blue line up in the Histogram."
+color_look = "Click {none} and open {file}."
+color_mix = "Lower LUT Mix to compare before and after."
 # Green Screen: key the green-screen sample over a background, then mask off what the key
-# misses. Timeline, Add Effect, Chroma Key, Tolerance, Edge Softness, Spill Suppression, Add Mask
-# and Rectangle are the names the editor shows for them; {file} is the background's file name.
+# misses. Add Effect, Chroma Key, Tolerance, Edge Softness, Spill Suppression, Add Mask and
+# Rectangle are the names the editor shows for them; {file} is the background's file name.
 green_screen = "Green Screen"
-green_screen_background = "Drag {file} onto the Timeline, on the track under the green-screen clip."
-green_screen_key = "Select the green-screen clip, then pick Chroma Key from Add Effect."
-green_screen_tune = "Raise Tolerance until the green is gone, then adjust Edge Softness and Spill Suppression."
-green_screen_mask = "Pick Rectangle from Add Mask and fit it to cut off the board on the right."
+green_screen_background = "Drag {file} onto the empty track under the green screen."
+green_screen_key = "Click Add Effect and choose Chroma Key."
+green_screen_tolerance = "Raise Tolerance until the green is gone."
+green_screen_softness = "Adjust Edge Softness to smooth the outline."
+green_screen_spill = "Raise Spill Suppression to clear the green fringe."
+green_screen_mask = "Click Add Mask and choose Rectangle."
+green_screen_fit = "Drag the mask's handles to keep the man and cut off the board."
 # Tidy a Screen Recording: cut the sample's dead air with Detect Silence, zoom in with Scale,
-# add a title as a callout. Detect Silence, Cut, Scale, Inspector, Text and Timeline are the
-# names the editor shows for them; {key} is a shortcut.
+# add a title as a callout. Detect Silence, Cut, Scale and Timeline are the names the editor
+# shows for them; {title} is a title preset's name.
 screen = "Tidy a Screen Recording"
-screen_silence = "Select the clip, press {key} for Detect Silence, then click Cut."
-screen_zoom = "Select the clip, then raise Scale in the Inspector to zoom in on the typing."
-screen_callout = "Drag a title from Text onto the Timeline above your clip as a callout."
+screen_silence = "Right-click this clip and choose Detect Silence."
+screen_zoom = "Raise Scale to zoom in on the typing."
+screen_callout = "Drag {title} onto the Timeline above your clip."
 
 [transcript]
 partial = "Some audio has not been transcribed. Transcribe to fill the gaps."
