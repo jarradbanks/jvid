@@ -97,6 +97,37 @@ fn text_tool_click_creates_and_edits_one_real_clip_with_separate_undo_steps() {
     assert_eq!(h.state().timeline.tool(), Tool::Razor);
 }
 
+/// The Program viewer clamps a parked seek to the sequence's end. A text clip added at a
+/// playhead at or past the end must still start on, and show at, the playhead's frame.
+#[test]
+fn text_tool_clip_shows_at_a_playhead_at_or_past_the_sequence_end() {
+    let rate = Project::default().settings().frame_rate;
+    for head in [Time(S), rate.time_floor(rate.index_floor(Time(3 * S)) + 1)] {
+        let mut h = editor([960.0, 600.0], 1.0);
+        crate::playback::tests::add_solid(&mut h.state_mut().history, [0.2; 4], Time(0));
+        h.state_mut().timeline.seek(head);
+        h.run_steps(4);
+        h.state_mut().run_action("focus_program", false);
+        h.key_press(Key::T);
+        h.run();
+        let at = h
+            .get_all_by_label("Text Tool")
+            .find(|n| n.rect().width() > 32.0)
+            .unwrap()
+            .rect()
+            .center();
+        click(&mut h, at);
+        h.key_press(Key::Escape);
+        h.run_steps(8);
+        let id = *h.state().timeline.selected().iter().next().unwrap();
+        let (_, clip) = h.state().history.project().sequence().clip(id).unwrap();
+        assert_eq!(clip.start, head);
+        let shown = h.state().preview.program_shown();
+        assert_eq!(shown.map(|s| s.0), Some(rate.index_floor(head)), "{head:?}");
+        assert!(shown.unwrap().1 > 0, "the new title is composited");
+    }
+}
+
 #[test]
 fn program_effect_drop_takes_priority_over_the_active_text_tool() {
     let library = tempfile::tempdir().unwrap();

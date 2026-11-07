@@ -471,13 +471,12 @@ impl Workspaces {
         };
         let mut accept = false;
         let mut cancel = false;
-        let result = egui::Modal::new(egui::Id::new("workspace_name")).show(ui.ctx(), |ui| {
-            ui.set_width(320.0_f32.min((ui.ctx().content_rect().width() - 48.0).max(1.0)));
-            ui.heading(title);
+        let id = egui::Id::new("workspace_name");
+        let result = suite_ui::dialog::modal(ui.ctx(), id, title, 320.0, |ui| {
             let input = ui.add(
-                egui::TextEdit::singleline(&mut dialog.name)
-                    .hint_text(tr!("workspace.name"))
-                    .desired_width(f32::INFINITY),
+                suite_ui::widgets::TextInput::new(&mut dialog.name)
+                    .hint(tr!("workspace.name"))
+                    .width(ui.available_width()),
             );
             if dialog.focus_name {
                 input.request_focus();
