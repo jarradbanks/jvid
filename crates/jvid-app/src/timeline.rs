@@ -1072,6 +1072,8 @@ impl Timeline {
             ui.ctx().stop_dragging();
         }
         if self.keys.graph.is_some() {
+            let graph = ui.max_rect().intersect(ui.clip_rect());
+            crate::app::tutorial::anchor(ui.ctx(), "timeline.graph", graph);
             return edit.or(self.graph(ui, ui.max_rect(), project.sequence()));
         }
         let rate = self.transport.rate;
@@ -1110,6 +1112,20 @@ impl Timeline {
         let scrub = ui.interact(ruler, id.with("ruler"), Sense::click_and_drag());
         let marquee = ui.interact(lanes, id.with("marquee"), Sense::click_and_drag());
         let seq = project.sequence();
+        {
+            use crate::app::tutorial::anchor;
+            let ctx = ui.ctx();
+            anchor(ctx, "timeline.markers", marker_lane);
+            anchor(ctx, "timeline.ruler", ruler);
+            anchor(ctx, "timeline.lanes", lanes);
+            if let (Some(i), Some(o)) = (seq.in_point(), seq.out_point()) {
+                let x = view.x(i).max(lanes.left())..=view.x(o).min(lanes.right());
+                let range = Rect::from_x_y_ranges(x, ruler.top()..=lanes.bottom());
+                if range.is_positive() {
+                    anchor(ctx, "timeline.range", range);
+                }
+            }
+        }
         for (is_in, mark) in [(true, seq.in_point()), (false, seq.out_point())] {
             let Some(mark) = mark else { continue };
             let x = view.x(mark);
@@ -1375,6 +1391,13 @@ impl Timeline {
                     painter.rect_stroke(r, corner, stroke, egui::StrokeKind::Inside);
                 }
                 let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::click_and_drag());
+                let item = crate::app::tutorial::Item::Clip(clip.id);
+                crate::app::tutorial::item_anchor(ui.ctx(), "clip", item, r.intersect(lanes));
+                if extra > 0.0 {
+                    let keys = Rect::from_x_y_ranges(r.x_range(), r.bottom()..=lane.bottom());
+                    let keys = keys.intersect(lanes);
+                    crate::app::tutorial::item_anchor(ui.ctx(), "timeline.keys", item, keys);
+                }
                 if self.tool == Tool::Razor && cr.hovered() {
                     ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
                 }

@@ -880,14 +880,15 @@ pub fn show(
             index += props.len() as u64;
             continue;
         }
+        let mut balance = None;
         for p in props {
             index += 1;
-            let top = ui.cursor().top();
             if p.name == "lut_intensity"
                 && let Some(e) = lut_row(ui, clips)
             {
                 edit = Some(e);
             }
+            let top = ui.cursor().top();
             if shown(p)
                 && let Some(e) = row(ui, clips, p, t, index, &mut seek)
             {
@@ -895,6 +896,15 @@ pub fn show(
             }
             if let Some(name) = row_anchor(p.name) {
                 crate::app::tutorial::anchor_below(ui, name, top);
+            }
+            // Temperature and Tint, which one step names together.
+            if p.name == "temperature" {
+                balance = Some(top);
+            }
+            if p.name == "tint"
+                && let Some(top) = balance
+            {
+                crate::app::tutorial::anchor_below(ui, "inspector.balance", top);
             }
         }
         if id == "opacity"
@@ -961,8 +971,7 @@ pub fn show(
     (edit, seek)
 }
 
-/// The [`crate::app::tutorial::anchor`] of the rows lessons point at, by property. LUT covers
-/// its button and LUT Mix.
+/// The [`crate::app::tutorial::anchor`] of the rows lessons point at, by property.
 fn row_anchor(prop: &str) -> Option<&'static str> {
     Some(match prop {
         "position" => "inspector.position",
@@ -971,8 +980,28 @@ fn row_anchor(prop: &str) -> Option<&'static str> {
         "exposure" => "inspector.exposure",
         "temperature" => "inspector.temperature",
         "tint" => "inspector.tint",
-        "lut_intensity" => "inspector.lut",
+        "lut_intensity" => "inspector.lut_mix",
         "volume" => "inspector.volume",
+        _ => return None,
+    })
+}
+
+/// The anchors of the effect parameters lessons point at, by name.
+fn param_anchor(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "tolerance" => "inspector.fx_tolerance",
+        "edge_softness" => "inspector.fx_edge_softness",
+        "spill_suppression" => "inspector.fx_spill_suppression",
+        _ => return None,
+    })
+}
+
+/// The anchors of the diamonds lessons point at, by property.
+fn key_anchor(prop: &str) -> Option<&'static str> {
+    Some(match prop {
+        "position" => "inspector.position_key",
+        "opacity" => "inspector.opacity_key",
+        _ if prop == Mask::point(0, 0) => "inspector.mask_position_key",
         _ => return None,
     })
 }
@@ -1299,7 +1328,9 @@ fn lut_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
         let mut edit = None;
         let clear = size::CONTROL + space::S4;
         let w = ui.available_width() - if current.is_some() { clear } else { 0.0 };
-        if ui.add(Button::secondary(&name).width(w)).clicked() {
+        let pick = ui.add(Button::secondary(&name).width(w));
+        crate::app::tutorial::anchor_in(ui, "inspector.lut_button", pick.rect);
+        if pick.clicked() {
             let mut dialog = rfd::FileDialog::new()
                 .set_title(tr!("inspector.choose_lut"))
                 .add_filter(tr!("inspector.cube_filter"), &["cube"]);
@@ -1491,9 +1522,13 @@ fn effects_rows(
                 if let Some(e) = fx_mask_row(ui, clips, i) {
                     edit = Some(e);
                 }
-                for (k, p) in (first + 1..).zip(&props) {
+                for (k, (p, q)) in (first + 1..).zip(props.iter().zip(&params)) {
+                    let top = ui.cursor().top();
                     if let Some(e) = row(ui, clips, p, t, k, seek) {
                         edit = Some(e);
+                    }
+                    if let Some(name) = param_anchor(&q.name).filter(|_| i == 0) {
+                        crate::app::tutorial::anchor_below(ui, name, top);
                     }
                 }
             });
@@ -2018,7 +2053,6 @@ fn masks_rows(
                     crate::app::tutorial::anchor_below(ui, name, top);
                 }
             }
-            // Mode and Invert, which one step names together.
             let top = ui.cursor().top();
             let modes = [MaskMode::Add, MaskMode::Subtract];
             let mut k = usize::from(m.mode == MaskMode::Subtract);
@@ -2031,6 +2065,10 @@ fn masks_rows(
             if changed {
                 edit = Some((edit_mask(clips, i, |m| m.mode = modes[k]), None));
             }
+            if i == 0 {
+                crate::app::tutorial::anchor_below(ui, "inspector.mask_mode", top);
+            }
+            let top = ui.cursor().top();
             let mut invert = m.invert;
             let (changed, _) = prop_row(ui, "", Tools::default(), |ui| {
                 ui.add(Checkbox::new(&mut invert, tr!("inspector.invert")))
@@ -3150,6 +3188,11 @@ fn row(
     if c.reset {
         edit = Some((reset_prop(clips, p), None));
     }
+    if let Some(k) = &c.key
+        && let Some(name) = key_anchor(p.name)
+    {
+        crate::app::tutorial::anchor_in(ui, name, k.rect);
+    }
     key_clicks(clips, &names, c, t, index, seek).or(edit)
 }
 
@@ -3802,6 +3845,7 @@ fn text_props(
                     .margin(vec2(space::S8, space::S4)),
             )
         });
+    crate::app::tutorial::anchor_in(ui, "inspector.text_content", content.inner.rect);
     let mut changed = content.inner.changed();
     ui.add_space(space::S4);
     let mut tool = None;
@@ -3837,7 +3881,11 @@ fn text_props(
         for (n, label) in rows {
             index += 1;
             let row = (*n, caption(label));
+            let top = ui.cursor().top();
             let (ch, e) = text_row(ui, clips, &mut s, row, t, index, seek, &mut dropped);
+            if *n == "text_size" {
+                crate::app::tutorial::anchor_below(ui, "inspector.text_size", top);
+            }
             changed |= ch;
             tool = e.or(tool);
         }

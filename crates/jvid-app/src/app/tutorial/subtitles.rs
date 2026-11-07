@@ -3,11 +3,11 @@
 //! normal download choice; offline, each step can be skipped.
 
 use jvid_core::history::Command;
-use jvid_core::model::{Clip, MediaAsset, Text};
+use jvid_core::model::{Clip, ClipId, MediaAsset, Text};
 use jvid_core::time::Time;
 
 use super::audio::{VOICE, clip_of};
-use super::{App, Lesson, Step, Tab, apply};
+use super::{App, Lesson, STEP, Step, Tab, Via, apply, select};
 use crate::i18n::{tr, verbatim};
 
 /// Show Me's restyle: the classic yellow.
@@ -30,24 +30,34 @@ pub const SUBTITLES: Lesson = Lesson {
     },
     steps: &[
         Step {
-            anchor: "timeline",
-            text: |a| {
-                let key = a.keymap.shortcut("generate_subtitles");
-                tr!("tutorial.subtitles_generate", key = key)
-            },
+            anchor: "subtitles.action",
+            text: |a| speech(a, tr!("subtitles.generate")),
             done: |a| cues(a).next().is_some(),
+            // As picking Generate Subtitles, then clicking Generate, does.
             example: |a| {
                 select_voice(a);
                 a.run_action("generate_subtitles", true);
                 a.subtitles
                     .start_if_ready(a.history.project(), a.timeline.selected());
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            via: &[
+                Via {
+                    anchor: "menu.timeline",
+                    item: None,
+                    text: |_| tr!("tutorial.subtitles_menu").into(),
+                    ready: |_, ctx| super::anchor_rect(ctx, "menu.generate_subtitles").is_some(),
+                },
+                Via {
+                    anchor: "menu.generate_subtitles",
+                    item: None,
+                    text: |_| tr!("tutorial.subtitles_generate").into(),
+                    ready: |a, _| a.subtitles.is_open(),
+                },
+            ],
+            ..STEP
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.text_content",
             text: |_| tr!("tutorial.subtitles_fix").into(),
             // Generate names each cue's asset after its text, which a fix leaves behind.
             done: |a| {
@@ -64,12 +74,12 @@ pub const SUBTITLES: Lesson = Lesson {
                     t.content = first + c.as_str();
                 })
             },
-            reveal: None,
-            ghost: None,
-            also: &["timeline"],
+            via: &[select!(first_cue)],
+            watch: &["preview.frame"],
+            ..STEP
         },
         Step {
-            anchor: "inspector",
+            anchor: "inspector.text_size",
             text: |_| tr!("tutorial.subtitles_style").into(),
             done: |a| {
                 let [.., (_, style)] = Text::presets();
@@ -82,22 +92,15 @@ pub const SUBTITLES: Lesson = Lesson {
                 })
             },
             example: |a| edit_first_cue(a, |t| t.color = YELLOW),
-            reveal: None,
-            ghost: None,
-            also: &["timeline"],
+            via: &[select!(first_cue)],
+            watch: &["preview.frame"],
+            ..STEP
         },
         Step {
-            anchor: "transcript",
-            text: |_| tr!("tutorial.subtitles_transcribe").into(),
-            done: |a| {
-                let project = a.history.project();
-                clip_of(a, VOICE).is_some_and(|c| {
-                    let nth = c.stream.unwrap_or(0) as usize;
-                    let asset = project.asset(c.asset);
-                    asset.is_some_and(|x| a.transcript.heard(&x.path, nth))
-                })
-            },
-            // As clicking Transcribe does.
+            anchor: "subtitles.action",
+            text: |a| speech(a, tr!("transcript.transcribe")),
+            done: heard,
+            // As clicking Transcribe in the Transcript, then in its dialog, does.
             example: |a| {
                 select_voice(a);
                 let missing = (a.transcript).missing(a.history.project(), a.timeline.selected());
@@ -108,11 +111,19 @@ pub const SUBTITLES: Lesson = Lesson {
                 }
             },
             reveal: Some(|a| a.show_panel(Tab::Transcript)),
-            ghost: None,
-            also: &[],
+            via: &[
+                select!(voice),
+                Via {
+                    anchor: "transcript.transcribe",
+                    item: None,
+                    text: |_| tr!("tutorial.subtitles_transcribe").into(),
+                    ready: |a, _| a.subtitles.is_open(),
+                },
+            ],
+            ..STEP
         },
         Step {
-            anchor: "transcript",
+            anchor: "transcript.words",
             text: |_| tr!("tutorial.subtitles_cut", key = verbatim("Delete")),
             done: cut,
             // As picking the second and third words and pressing Delete does.
@@ -124,11 +135,37 @@ pub const SUBTITLES: Lesson = Lesson {
                 }
             },
             reveal: Some(|a| a.show_panel(Tab::Transcript)),
-            ghost: None,
-            also: &["timeline"],
+            ..STEP
         },
     ],
 };
+
+/// The speech dialog's step: click `action`, or wait while recognition runs.
+fn speech(a: &App, action: &str) -> String {
+    match a.subtitles.is_running() {
+        true => tr!("tutorial.speech_running").into(),
+        false => tr!("tutorial.speech_start", action = action),
+    }
+}
+
+fn voice(a: &App) -> Option<ClipId> {
+    clip_of(a, VOICE).map(|c| c.id)
+}
+
+/// The first subtitle on the timeline.
+fn first_cue(a: &App) -> Option<ClipId> {
+    cues(a).next().map(|(c, ..)| c.id)
+}
+
+/// Whether the Transcript has heard the voice clip.
+fn heard(a: &App) -> bool {
+    let project = a.history.project();
+    clip_of(a, VOICE).is_some_and(|c| {
+        let nth = c.stream.unwrap_or(0) as usize;
+        let asset = project.asset(c.asset);
+        asset.is_some_and(|x| a.transcript.heard(&x.path, nth))
+    })
+}
 
 /// Selects the voice clip, so Generate and the Transcript read it.
 fn select_voice(a: &mut App) {

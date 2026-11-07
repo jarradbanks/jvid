@@ -485,7 +485,11 @@ impl TranscriptPanel {
                     )
                     .action(tr!("transcript.transcribe"))
                 };
-                if empty.show(ui).action.is_some_and(|r| r.clicked()) {
+                let shown = empty.show(ui);
+                if let Some(r) = &shown.action {
+                    crate::app::tutorial::anchor(ui.ctx(), "transcript.transcribe", r.rect);
+                }
+                if shown.action.is_some_and(|r| r.clicked()) {
                     out.transcribe =
                         Some(available_sources.into_iter().map(|t| t.source).collect());
                 }
@@ -530,8 +534,13 @@ impl TranscriptPanel {
                             if ui.add(button).clicked() {
                                 self.unticked = (!listing).then(HashSet::new);
                             }
-                            let button = Button::secondary(tr!("transcript.transcribe"));
-                            if ui.add(button).clicked() {
+                            let button = ui.add(Button::secondary(tr!("transcript.transcribe")));
+                            crate::app::tutorial::anchor_in(
+                                ui,
+                                "transcript.transcribe",
+                                button.rect,
+                            );
+                            if button.clicked() {
                                 out.transcribe = Some(
                                     targets(project, &selected, true)
                                         .into_iter()
@@ -577,10 +586,14 @@ impl TranscriptPanel {
                     }
                     let frame = egui::Frame::NONE
                         .inner_margin(Margin::symmetric(space::INSET as i8, space::S4 as i8));
-                    frame.show(ui, |ui| match self.unticked.is_some() {
+                    let text = frame.show(ui, |ui| match self.unticked.is_some() {
                         true => self.hits(ui, words, hits.as_deref().unwrap_or_default(), &mut out),
                         false => self.text(ui, words, playhead, &mut out),
                     });
+                    if !words.is_empty() {
+                        let rect = text.response.rect;
+                        crate::app::tutorial::anchor_in(ui, "transcript.words", rect);
+                    }
                 });
         });
         out.close = r.action == Some(0);
