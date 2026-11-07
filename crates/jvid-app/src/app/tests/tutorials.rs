@@ -48,6 +48,18 @@ fn every_tutorial_step_spotlights_a_drawn_control_beside_its_card() {
                 assert!(screen.intersects(hole), "{at}: target {hole:?} off screen");
                 assert!(screen.contains_rect(card), "{at}: card {card:?} off screen");
                 assert!(!card.intersects(hole), "{at}: card covers its target");
+                if task.anchor == "timeline.ruler" {
+                    assert!(
+                        tutorial::ruler_time(&h.ctx).is_some(),
+                        "{at}: no seek target"
+                    );
+                    // The hole includes 4 points of outline padding on each side.
+                    assert!(hole.width() <= 32.0, "{at}: whole ruler highlighted");
+                    assert!(
+                        (card.center().x - hole.center().x).abs() <= card.width() / 2.0,
+                        "{at}: card too far from seek target"
+                    );
+                }
                 let run = h.state_mut().lesson.as_mut().unwrap();
                 // Needs a microphone.
                 if task.anchor == "record" {

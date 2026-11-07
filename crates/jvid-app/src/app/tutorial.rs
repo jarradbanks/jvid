@@ -42,9 +42,10 @@ pub struct Lesson {
 pub struct Step {
     /// The [`anchor`] the step spotlights: the one control the user acts on. An Inspector
     /// row's, `inspector.<row>`, falls back to the whole panel while the row isn't drawn.
-    /// `clip` and `asset` mean the timeline clip or media item `item` picks.
+    /// `clip` and `asset` mean the timeline clip or media item `item` picks; `timeline.ruler`
+    /// uses its time to point at the intended seek location.
     pub anchor: &'static str,
-    /// The clip or media item a `clip` or `asset` anchor means.
+    /// The clip, media item or ruler time the anchor means.
     pub item: Option<fn(&App) -> Option<Item>>,
     /// The instruction: one short imperative sentence. Shortcuts come from `app.keymap`, so
     /// a remapped key reads right.
@@ -94,11 +95,12 @@ pub struct Via {
     pub ready: fn(&App, &egui::Context) -> bool,
 }
 
-/// A timeline clip or media item a step spotlights, by id.
+/// A timeline clip, media item or ruler time a step spotlights.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Item {
     Clip(jvid_core::model::ClipId),
     Asset(jvid_core::model::AssetId),
+    Time(Time),
 }
 
 /// A [`Via`] that has the user click the clip `item` picks, until it's the only selection.
@@ -183,6 +185,11 @@ const TOUR: Lesson = Lesson {
         },
         Step {
             anchor: "timeline.ruler",
+            item: Some(|a| {
+                Some(Item::Time(Time(
+                    a.history.project().sequence().duration().0 / 3,
+                )))
+            }),
             text: |_| tr!("tutorial.tour_start").into(),
             done: |a| {
                 let length = a.history.project().sequence().duration();
@@ -199,6 +206,7 @@ const TOUR: Lesson = Lesson {
         },
         Step {
             anchor: "timeline.ruler",
+            item: Some(|a| Some(Item::Time(a.timeline.playhead()))),
             text: |a| tr!("tutorial.tour_in", key = a.keymap.shortcut("mark_in")),
             done: |a| a.history.project().sequence().in_point().is_some(),
             example: |a| {
@@ -217,6 +225,11 @@ const TOUR: Lesson = Lesson {
         },
         Step {
             anchor: "timeline.ruler",
+            item: Some(|a| {
+                let seq = a.history.project().sequence();
+                let later = seq.in_point().unwrap_or_default() + SECOND;
+                Some(Item::Time(Time(seq.duration().0 * 2 / 3).max(later)))
+            }),
             text: |_| tr!("tutorial.tour_later").into(),
             done: |a| {
                 let in_point = a.history.project().sequence().in_point();
@@ -230,6 +243,7 @@ const TOUR: Lesson = Lesson {
         },
         Step {
             anchor: "timeline.ruler",
+            item: Some(|a| Some(Item::Time(a.timeline.playhead()))),
             text: |a| tr!("tutorial.tour_out", key = a.keymap.shortcut("mark_out")),
             done: |a| {
                 let seq = a.history.project().sequence();
@@ -790,6 +804,7 @@ const KEYFRAMES: Lesson = Lesson {
         },
         Step {
             anchor: "timeline.ruler",
+            item: Some(|_| Some(Item::Time(SECOND))),
             text: |_| tr!("tutorial.keys_second").into(),
             done: |a| {
                 let at = a.timeline.playhead();
@@ -1039,6 +1054,14 @@ const ITEM: &str = "lesson_item";
 pub fn item_anchor(ctx: &egui::Context, name: &'static str, item: Item, rect: Rect) {
     if ctx.data(|d| d.get_temp::<Item>(Id::new(ITEM))) == Some(item) {
         anchor(ctx, name, rect);
+    }
+}
+
+/// The intended seek location for a ruler step, mapped by the timeline's live view.
+pub(crate) fn ruler_time(ctx: &egui::Context) -> Option<Time> {
+    match ctx.data(|d| d.get_temp::<Item>(Id::new(ITEM))) {
+        Some(Item::Time(at)) => Some(at),
+        _ => None,
     }
 }
 
@@ -3041,6 +3064,58 @@ mod tests {
 
     fn card_bounds(h: &Harness<'_, App>) -> Rect {
         h.ctx.memory(|m| m.area_rect(Id::new(CARD_ID))).unwrap()
+    }
+
+    #[test]
+    fn ruler_guidance_tracks_its_time_through_zoom_and_resize_and_accepts_the_click() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&KEYFRAMES);
+        settle(&mut h);
+        h.state_mut().lesson.as_mut().unwrap().go(2);
+        settle(&mut h);
+        let target = drawn(&h, "timeline.ruler").unwrap();
+        let lanes = drawn(&h, "timeline.lanes").unwrap();
+        let x = h.state().timeline.x_at(SECOND, lanes.left());
+        assert!((target.center().x - x).abs() < 1.0);
+        assert_eq!(target.width(), 24.0);
+
+        // Zoom far enough to put the intended time outside the viewport; guidance reveals it.
+        for _ in 0..20 {
+            let a = h.state_mut();
+            a.timeline.action("zoom_in", a.history.project());
+        }
+        h.set_size(vec2(960.0, 600.0));
+        settle(&mut h);
+        let target = drawn(&h, "timeline.ruler").unwrap();
+        let lanes = drawn(&h, "timeline.lanes").unwrap();
+        let x = h.state().timeline.x_at(SECOND, lanes.left());
+        assert!((target.center().x - x).abs() < 1.0);
+        assert!(lanes.x_range().contains(x));
+        assert!(h.ctx.content_rect().contains_rect(card_bounds(&h)));
+        assert!(!card_bounds(&h).intersects(target));
+
+        let press = |h: &mut Harness<'_, App>, pos| {
+            h.hover_at(pos);
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                });
+            }
+            settle(h);
+        };
+        press(&mut h, pos2(lanes.right() - 2.0, target.center().y));
+        assert_eq!(
+            h.state().timeline.playhead(),
+            Time(0),
+            "unlit ruler took a click"
+        );
+        assert_eq!(step(&h), Some(2));
+        press(&mut h, target.center());
+        assert_eq!(h.state().timeline.playhead(), SECOND);
+        assert_eq!(step(&h), Some(3), "spotlit seek did not advance");
     }
 
     fn screen_lesson() -> Harness<'static, App> {

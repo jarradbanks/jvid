@@ -1106,6 +1106,16 @@ impl Timeline {
             self.follow();
         }
 
+        let ruler_time = crate::app::tutorial::ruler_time(ui.ctx());
+        if let Some(at) = ruler_time
+            && !ui.input(|i| i.pointer.any_down())
+        {
+            let x = self.view(lanes_left).x(at);
+            if x < ruler.left() || x > ruler.right() {
+                self.scroll = (secs(at) - self.span() / 2.0).max(0.0);
+            }
+        }
+
         // Input first, so this frame draws the result.
         let view = self.view(lanes_left);
         let id = ui.id().with("timeline");
@@ -1116,7 +1126,14 @@ impl Timeline {
             use crate::app::tutorial::anchor;
             let ctx = ui.ctx();
             anchor(ctx, "timeline.markers", marker_lane);
-            anchor(ctx, "timeline.ruler", ruler);
+            let target = ruler_time.map_or(ruler, |at| {
+                Rect::from_center_size(
+                    pos2(view.x(at), ruler.center().y),
+                    vec2(24.0, ruler.height()),
+                )
+                .intersect(ruler)
+            });
+            anchor(ctx, "timeline.ruler", target);
             anchor(ctx, "timeline.lanes", lanes);
             if let (Some(i), Some(o)) = (seq.in_point(), seq.out_point()) {
                 let x = view.x(i).max(lanes.left())..=view.x(o).min(lanes.right());

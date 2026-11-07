@@ -196,6 +196,7 @@ pub const MASKS: Lesson = Lesson {
         },
         Step {
             anchor: "timeline.ruler",
+            item: Some(|a| top(a).map(|c| Item::Time(c.start + Time(c.duration().0 * 4 / 5)))),
             text: |_| tr!("tutorial.masks_playhead").into(),
             done: |a| {
                 let (Some(c), keys) = (top(a), key_times(a)) else {
