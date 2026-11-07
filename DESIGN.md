@@ -221,6 +221,69 @@ A 160px column on Panel. The track ID (V1, A1) in Body Strong and Ink, the name 
 - With Reduce Motion on (Edit > Preferences > General), hover fades, overlays and the New Track slot change instantly. Following the OS setting is a follow-up.
 - Every interactive component defines default, hover, focus-visible, pressed and disabled states, plus loading and error wherever they can occur.
 
+## Reference: Components as Built
+
+This section maps every rule above to the code that implements it, so a change starts from an existing helper instead of a new one. Tokens and widgets live in `crates/suite-ui`; reach for them before painting anything by hand. If a pattern you need is missing, add it to `suite-ui` and list it here.
+
+### Tokens
+| Token | Code | Values |
+| --- | --- | --- |
+| Colours | `tokens::color::<key>()` (themed), `color::CLIP_*`, `color::VIEWER` | See Colors. Never a literal hex in app code. |
+| Type scale | `theme::display()`, `headline()`, `title()`, `body()`, `body_strong()`, `small()`, `timecode()`, `content()` (user text) | 22 / 16 / 14 / 12 / 12 Medium / 10 / 16 Medium |
+| Spacing | `tokens::space::{S4, S8, S12, S16, S24, S32, INSET, GUTTER}` | 4, 8, 12, 16, 24, 32; inset 12, gutter 4 |
+| Radius | `tokens::radius::{SMALL, CONTROL, PANEL, DIALOG}` | 4, 6, 8, 12 |
+| Sizes | `tokens::size::{APP_BAR, HEADER, RULER, CONTROL, SMALL_CONTROL, ICON, TRACK, ...}` | 40, 32, 24, 24, 20, 16, 40 |
+| Icons | `theme::icon::*` (Lucide subset), `theme::icon_font()`, `widgets::paint_icon` | 16px in controls; 28px for empty-state and tile art only |
+
+### Controls
+| Pattern | Use | Notes |
+| --- | --- | --- |
+| Buttons | `widgets::Button::{primary, secondary, ghost, destructive, icon}` | 24px tall, 28px in dialog footers (the footer sets it). `.small()` is the 20px inspector tool slot. `.on(bool)` for ghost toggles, `.state(State::Disabled)` to disable, `.loading(true)` keeps the width. One Primary per surface. |
+| Icon button | `Button::icon(glyph, name)` | 24px square ghost. `name` is the accessible name; always add a tooltip with the same name (and the shortcut when there is one). |
+| Text input | `widgets::TextInput::new`, `.hint()`, `.prefix()`, `.error(Some(msg))`, `TextInput::search` | 24px, Field fill. `.error(Some(""))` reddens the border without a message line, for inline fields with no room below (put the message in the tooltip). |
+| Numeric | `widgets::DragField`, `widgets::Slider` | Drag to scrub, double-click or Enter to type. |
+| Dropdown | `widgets::Dropdown::new(&mut i, &options)`, `.width()`, `.placeholder()` | A fixed width keeps rows from reflowing as the selection changes. |
+| Segmented control | `widgets::Segmented::new(&mut i, &labels)` or `::icons` | Use for two to four mutually exclusive views, such as the Media panel's All Media / Bins. Not for actions. |
+| Checkbox | `widgets::Checkbox::new(&mut on, label)` | Label right of the box. |
+| Section head | `widgets::SectionHeader` | The 32px collapsible inspector head. |
+| Timecode | `widgets::Timecode`, `widgets::timecode()` | Tabular, never shifts width. |
+| Fitting text | `widgets::fit_text` (+ `hover_full`) | Truncates with an ellipsis to a width; show the full text on hover. |
+| Menu row | `widgets::MenuRow`, egui `ui.button` inside `Popup::menu` / `context_menu` | 24px rows, 4px menu padding, 8px radius (set globally in `theme.rs`). |
+
+### Surfaces
+| Pattern | Use | Notes |
+| --- | --- | --- |
+| Panel | `panel::Panel::{titled, tabbed, body, toolbar}` | One 32px header; `.actions()` for header icon buttons. |
+| Empty state | `empty_state::EmptyState::new(icon, title, help)`, `.action()`, `.primary_action()` | Centred in the visible body; 28px icon, Title heading, one Body sentence. |
+| Dialog frame | `dialog::modal(ctx, id, title, width, \|ui\| ...)` | The one modal frame: centred over the scrim, 12px radius, 16px padding, Headline title, width capped to the window less 24px a side. Esc and a backdrop click set `should_close`. |
+| Dialog actions | `dialog::action_footer(ui, [secondary.., primary])` | Right-aligned; cancel first, primary last (rightmost). Call after the body, with `S16` above it. |
+| Confirm dialog | `dialog::Dialog { title, body, buttons, cancel, long }.show(ctx)` | Built on `modal` + `action_footer`. `buttons[0]` is drawn rightmost and focused, so Enter picks it. Destructive confirms use `ButtonKind::Destructive` for `buttons[0]` and say in the body what is kept. |
+| Popover / menu | `egui::Popup::menu(&response)`, `response.context_menu` | Anchored to the control that opened it. Raised, 1px Border, 8px radius, overlay shadow. |
+| Tooltip | `.on_hover_text()`, `.on_disabled_hover_text()` | Raised, 4px radius. A disabled control explains why in its tooltip. |
+| Toast | `App::show_toasts` | Errors only: bottom-right, 16px from the edges, stacked 8px apart, Raised, 12px padding, Red alert glyph, a dismiss icon button, 6s. |
+
+### Media tiles and list rows
+- **Grid:** tiles at least 120px wide (`TILE_MIN`), 8px apart, sharing the panel width equally. Each tile is a 16:9 art area (6px radius) over a 24px name row. Hover outlines the art in Border Strong; selection outlines it 2px Light Blue. Badges (duration, HDR) sit 2px inside the art's bottom corners in Small on Ground at 80%.
+- **List:** 24px rows: an 8px type dot, a 16:9 thumbnail 20px tall, the name, then right-aligned Ink 3 details. Hover fills Raised; selection fills Blue at 20%.
+- **Bin tiles:** a bin is a tile like a media tile: Field art, Border outline, 28px Folder glyph, its name and media count. New Bin is the same tile with a Plus glyph. Tiles and media share one grid, so sizes and keyboard order never differ. Double-click opens; right-click offers Rename Bin and Delete Bin; media dropped on a tile files it, with a 2px Light Blue outline while it hovers.
+- **Inline rename:** the name row becomes a `TextInput` in place. Enter or a click elsewhere commits, Esc cancels; an invalid name reddens the field and explains in its tooltip. Request focus once, when the field opens: asking every frame drops keystrokes typed quickly. Prefer this to a dialog for naming things the user can see.
+- **Breadcrumb:** inside a container (a bin), a 24px row under the view switch: a ghost button back to the parent, a Chevron Right in Ink 3, then the current name in Body Strong. Dropping media on the parent crumb moves it out.
+
+### Named Rules
+**The One Line Row Rule.** Everything in a row sits vertically centred on one line: build rows with `Layout::left_to_right(Align::Center)` at `size::CONTROL` height, and centre painted text on the row's `center().y` (as `widgets::fit_text` users do). Icons, labels, checkboxes, dropdowns and buttons in one row never sit on different baselines.
+
+**The Anchored Or Centred Rule.** A floating surface is either anchored to what opened it (menus, popovers, dropdowns, tooltips, inline fields) or a centred modal over the scrim built with `dialog::modal`. Never a free-floating window somewhere else on screen, and never a control floating over the picture that belongs in a toolbar.
+
+**The Right Actions Rule.** Dialog and popover actions are right-aligned through `dialog::action_footer`, cancellation first and the primary or destructive action last.
+
+**The Passive Status Rule.** Read-only state is a label (Body, Ink 3, Amber when it needs attention) with details in its tooltip, never a button that opens nothing useful. A label shows only when it says something the user can act on or needs to know; the preview's media source caption shows only while proxies are on or playback is struggling, beside the Proxies checkbox it describes.
+
+**The Case Rule.** Short labels, buttons, menu items, tabs, tooltips' first line and dialog titles are Title Case; descriptions, help, errors and confirmation bodies are sentence case (see The Title Case Rule).
+
+### Where things live in jvid
+- **Preview row:** time, transport, then the view controls: guides, the status caption, Proxies, preview resolution (Full, ½, ¼), View Selection (zooms to the selected clip's bounds) and zoom (Fit, percentages). Narrow previews move the view controls into the row's More menu.
+- **Media panel:** search, sort and grid/list on the first row; the All Media / Bins switch and Filters on the second; a breadcrumb inside a bin; Import and Add Solid pinned at the bottom.
+
 ## Do's and Don'ts
 
 ### Do:

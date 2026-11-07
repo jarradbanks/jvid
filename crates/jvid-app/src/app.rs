@@ -99,12 +99,9 @@ mod media_library_routing_tests {
                 .favorite
         );
         app.run_action("media_new_bin", false);
-        assert!(app.bin.library_modal_open());
-        assert!(app.modal_owns_input(&egui::Context::default()));
-        assert!(
-            !app.media_library_applicability("media_favorite")
-                .is_enabled()
-        );
+        assert!(app.bin.library_naming());
+        // Naming is inline, not a dialog; Delete Bin's confirmation is the modal.
+        assert!(!app.modal_owns_input(&egui::Context::default()));
     }
 }
 const RECENT_KEY: &str = "recent";
