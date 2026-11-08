@@ -5,6 +5,11 @@ const { pathToFileURL } = require('node:url');
 
 const REPOSITORY = 'https://github.com/jarradbanks/j-ui';
 
+function containerGitConfig(directory = '/github/workspace/.j-ui-ci') {
+    const url = new URL(`file://${directory}`).href;
+    return `[url "${url}"]\n    insteadOf = ${REPOSITORY}\n    insteadOf = ${REPOSITORY}.git\n[safe]\n    directory = ${JSON.stringify(directory)}\n    directory = ${JSON.stringify(`${directory}/.git`)}\n`;
+}
+
 function lockedDependency(lock) {
     const packages = lock.split(/^\[\[package\]\]\r?$/m)
         .filter(block => /^name = "j-ui"\r?$/m.test(block));
@@ -26,6 +31,10 @@ function configureMirror(directory, expectedRevision, env = process.env) {
     // changes, after checkout has authenticated and checked the tag against Cargo.lock.
     git(['config', '--global', '--replace-all', `url.${url}.insteadOf`, REPOSITORY]);
     git(['config', '--global', '--add', `url.${url}.insteadOf`, `${REPOSITORY}.git`]);
+    // Local Git transports discard GIT_CONFIG_COUNT before running upload-pack. A
+    // global config file survives that boundary and scopes Docker's ownership
+    // exception to this verified checkout and its Git directory.
+    fs.writeFileSync(path.join(directory, '.git', 'jvid-docker.gitconfig'), containerGitConfig());
     return url;
 }
 
@@ -42,4 +51,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { lockedDependency, configureMirror, REPOSITORY };
+module.exports = { lockedDependency, configureMirror, containerGitConfig, REPOSITORY };

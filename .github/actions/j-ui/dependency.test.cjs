@@ -5,7 +5,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { test } = require('node:test');
 const { pathToFileURL } = require('node:url');
-const { lockedDependency, configureMirror, REPOSITORY } = require('./dependency.cjs');
+const { lockedDependency, configureMirror, containerGitConfig, REPOSITORY } = require('./dependency.cjs');
 
 const revision = '0123456789abcdef0123456789abcdef01234567';
 const lock = `[[package]]\nname = "j-ui"\nversion = "0.1.0"\nsource = "git+${REPOSITORY}?tag=v0.1.0#${revision}"\n`;
@@ -40,4 +40,14 @@ test('rejects a moved tag and fetches only j-ui through a credential-free local 
     assert.equal(git(['ls-remote', '--get-url', 'https://github.com/jarradbanks/jvid']),
         'https://github.com/jarradbanks/jvid');
     assert.equal(git(['ls-remote', REPOSITORY, 'refs/tags/v0.1.0']).split(/\s+/)[0], head);
+
+    // Reproduce the host/container ownership boundary without a Docker daemon.
+    // upload-pack must retain the exact-directory trust exception in its child process.
+    const containerConfig = path.join(root, 'container-config');
+    fs.writeFileSync(containerConfig, containerGitConfig(mirror));
+    const containerEnv = { ...env, GIT_CONFIG_GLOBAL: containerConfig,
+        GIT_TEST_ASSUME_DIFFERENT_OWNER: '1' };
+    const fetched = execFileSync('git', ['ls-remote', REPOSITORY, 'refs/tags/v0.1.0'],
+        { cwd: root, env: containerEnv, encoding: 'utf8' });
+    assert.equal(fetched.trim().split(/\s+/)[0], head);
 });
