@@ -5,11 +5,11 @@
 use std::path::{Path, PathBuf};
 
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType};
-use suite_ui::i18n::{self, LANGUAGES, SYSTEM};
-use suite_ui::theme::{self, hairline, icon};
-use suite_ui::themes::{self, Choice, Palette};
-use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Checkbox, Dropdown, fit_text, hover_full};
+use j_ui::i18n::{self, LANGUAGES, SYSTEM};
+use j_ui::theme::{self, hairline, icon};
+use j_ui::themes::{self, Choice, Palette};
+use j_ui::tokens::{color, radius, size, space};
+use j_ui::widgets::{Button, Checkbox, Dropdown, fit_text, hover_full};
 
 use crate::i18n::tr;
 
@@ -138,9 +138,8 @@ impl Preferences {
                     egui::pos2(done.right(), done.bottom() - space::S16),
                 );
                 ui.scope_builder(egui::UiBuilder::new().max_rect(done), |ui| {
-                    if suite_ui::dialog::action_footer(ui, [Button::primary(tr!("settings.done"))])
-                        [0]
-                    .clicked()
+                    if j_ui::dialog::action_footer(ui, [Button::primary(tr!("settings.done"))])[0]
+                        .clicked()
                     {
                         ui.close();
                     }
@@ -533,7 +532,7 @@ mod tests {
     #[test]
     fn reduce_motion_turns_animation_off_and_saves() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut fresh = true;
@@ -545,7 +544,7 @@ mod tests {
             .with_size([800.0, 600.0])
             .build_ui_state(
                 move |ui, motion: &mut bool| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     let (mut language, mut theme, mut input) =

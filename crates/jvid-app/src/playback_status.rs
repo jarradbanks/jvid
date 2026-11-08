@@ -71,8 +71,8 @@ impl Health {
 use std::path::PathBuf;
 
 use egui::Ui;
+use j_ui::tokens::color;
 use jvid_media::proxy::Status as ProxyStatus;
-use suite_ui::tokens::color;
 
 use crate::i18n::tr;
 
@@ -135,7 +135,7 @@ pub fn label(
     } else {
         format!("{} …", observation.label())
     };
-    let galley = suite_ui::widgets::fit_text(ui, &caption, suite_ui::theme::body(), ink, 88.0);
+    let galley = j_ui::widgets::fit_text(ui, &caption, j_ui::theme::body(), ink, 88.0);
     let (rect, response) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
     ui.painter().galley(rect.min, galley, ink);
     response.widget_info(|| {
@@ -194,9 +194,7 @@ pub fn label(
     let mut retry = Vec::new();
     if failed
         && ui
-            .add(suite_ui::widgets::Button::ghost(tr!(
-                "preview.status_retry"
-            )))
+            .add(j_ui::widgets::Button::ghost(tr!("preview.status_retry")))
             .clicked()
     {
         retry.extend(
@@ -229,7 +227,7 @@ mod tests {
         };
         let mut h = Harness::builder().with_size([240.0, 120.0]).build_ui_state(
             move |ui, (proxies, failed, retry): &mut (bool, bool, Vec<PathBuf>)| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 let jobs = if *failed { &jobs[..] } else { &[] };
@@ -261,7 +259,7 @@ mod tests {
         let Some(dir) = std::env::var_os("JVID_PLAYBACK_EVIDENCE_DIR").map(PathBuf::from) else {
             return;
         };
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         std::fs::create_dir_all(&dir).unwrap();
@@ -314,7 +312,7 @@ mod tests {
                 .with_size([360.0, 540.0])
                 .wgpu()
                 .build_ui(move |ui| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     ui.horizontal(|ui| {

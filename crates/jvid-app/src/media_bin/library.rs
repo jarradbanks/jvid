@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::keymap::{Applicability, Keymap};
+use j_ui::widgets::ButtonKind;
 use jvid_core::media_library::{BinId, LibraryEdit, LibraryError};
-use suite_ui::widgets::ButtonKind;
 
 pub(crate) const ACTIONS: &[&str] = &[
     "media_new_bin",
@@ -292,7 +292,7 @@ impl MediaBin {
             let mut view = usize::from(self.library.location != Location::All);
             let views = [tr!("bin.all_media"), tr!("bin.bins")];
             if ui
-                .add(suite_ui::widgets::Segmented::new(&mut view, &views))
+                .add(j_ui::widgets::Segmented::new(&mut view, &views))
                 .changed()
             {
                 self.library.location = if view == 0 {
@@ -617,7 +617,7 @@ impl MediaBin {
             self.library.confirm_delete = None;
             return;
         }
-        let picked = suite_ui::dialog::Dialog {
+        let picked = j_ui::dialog::Dialog {
             title: tr!("action.media_delete_bin"),
             body: tr!("bin.delete_bin_help"),
             buttons: &[
@@ -895,7 +895,7 @@ mod tests {
         };
         let mut harness = builder.build_ui_state(
             move |ui, state: &mut State| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 let response =
@@ -1160,9 +1160,7 @@ mod tests {
                         .library_applicability("media_delete_bin", p, true)
                         .is_enabled()
                 );
-                if std::env::var_os("JVID_LIBRARY_CAPTURE").is_some()
-                    && suite_ui::test_support::gpu()
-                {
+                if std::env::var_os("JVID_LIBRARY_CAPTURE").is_some() && j_ui::test_support::gpu() {
                     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                         .join("../../target/media-library-ui");
                     std::fs::create_dir_all(&dir).unwrap();

@@ -18,6 +18,10 @@ use std::rc::Rc;
 
 use egui::text::{CCursor, LayoutJob, TextFormat};
 use egui::{Color32, Key, Margin, Sense, Ui, vec2};
+use j_ui::panel::Panel;
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, space};
+use j_ui::widgets::{Button, Checkbox, State, TextInput};
 use jvid_core::history::Command;
 use jvid_core::model::{ClipId, Project};
 use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
@@ -25,10 +29,6 @@ use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
 use jvid_transcribe::Transcript;
 use jvid_transcribe::store::{Settings, Shared, Store};
 use jvid_transcribe::{Source, Word};
-use suite_ui::panel::Panel;
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, space};
-use suite_ui::widgets::{Button, Checkbox, State, TextInput};
 
 use crate::i18n::tr;
 use crate::subtitles::{AudioSources, targets};
@@ -472,13 +472,13 @@ impl TranscriptPanel {
                     return;
                 }
                 let empty = if available_sources.is_empty() {
-                    suite_ui::empty_state::EmptyState::new(
+                    j_ui::empty_state::EmptyState::new(
                         icon::MIC,
                         tr!("empty.no_audio"),
                         tr!("empty.no_audio_help"),
                     )
                 } else {
-                    suite_ui::empty_state::EmptyState::new(
+                    j_ui::empty_state::EmptyState::new(
                         icon::MIC,
                         tr!("empty.transcript"),
                         tr!("empty.transcript_help"),
@@ -1334,7 +1334,7 @@ mod coverage_tests {
                     HashSet<ClipId>,
                     Vec<Source>,
                 )| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     let out = panel.show_docked(ui, history.project(), selected, Time(0), true);
@@ -1492,7 +1492,7 @@ mod coverage_tests {
                 Vec<String>,
                 Option<String>,
             )| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 let out = panel.show(ui, history.project(), &HashSet::new(), Time(0), true);

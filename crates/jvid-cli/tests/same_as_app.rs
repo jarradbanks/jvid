@@ -13,7 +13,7 @@ fn cli_matches_app_export() {
     let Some(dir) = jvid_media::test_media::corpus() else {
         return;
     };
-    if !suite_ui::test_support::gpu() {
+    if !j_ui::test_support::gpu() {
         return;
     }
     let mut h = History::new(Project::default());

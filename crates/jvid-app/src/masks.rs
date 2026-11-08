@@ -5,11 +5,11 @@
 use std::collections::HashSet;
 
 use egui::{Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2, vec2};
+use j_ui::theme;
+use j_ui::tokens::{color, space};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::model::{Clip, ClipId, Mask, MaskShape, Project, TrackKind, Transform};
 use jvid_core::time::Time;
-use suite_ui::theme;
-use suite_ui::tokens::{color, space};
 
 use crate::i18n::tr;
 use crate::timeline::Edit;
@@ -387,7 +387,7 @@ fn pen_tool(
     );
     let at = clip.center_top() + vec2(-hint.size().x / 2.0, space::S8);
     let back = Rect::from_min_size(at, hint.size()).expand(space::S4);
-    painter.rect_filled(back, suite_ui::tokens::radius::CONTROL, color::panel());
+    painter.rect_filled(back, j_ui::tokens::radius::CONTROL, color::panel());
     painter.galley(at, hint, color::ink());
     ui.data_mut(|d| d.insert_temp(pen_id(), pen));
     None

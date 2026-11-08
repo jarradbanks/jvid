@@ -1,8 +1,8 @@
+use j_ui::test_support::gpu;
 use jvid_core::hdr::{BT709_TO_BT2020, BT2020_TO_BT709, Hdr, nits_to_pq, pq_to_nits};
 use jvid_core::time::Time;
 use jvid_media::decode::VideoDecoder;
 use jvid_media::test_media::corpus;
-use suite_ui::test_support::gpu;
 
 use super::*;
 use crate::composite::read_back;

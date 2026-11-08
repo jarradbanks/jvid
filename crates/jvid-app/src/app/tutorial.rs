@@ -9,13 +9,13 @@ use std::path::PathBuf;
 use egui::{
     Align, Align2, CornerRadius, Id, Key, LayerId, Modifiers, Order, Rect, Stroke, pos2, vec2,
 };
+use j_ui::theme;
+use j_ui::tokens::{color, radius, space};
+use j_ui::widgets::Button;
 use jvid_core::history::{Command, History};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
 use jvid_core::model::{Project, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
-use suite_ui::theme;
-use suite_ui::tokens::{color, radius, space};
-use suite_ui::widgets::Button;
 
 use super::{App, Tab};
 use crate::i18n::{tr, verbatim};
@@ -1939,7 +1939,7 @@ fn card(
                             .push((Button::secondary(tr!("tutorial.keep_project")), Click::Keep));
                     }
                     let (buttons, actions): (Vec<_>, Vec<_>) = buttons.into_iter().unzip();
-                    let responses = suite_ui::dialog::action_footer(ui, buttons);
+                    let responses = j_ui::dialog::action_footer(ui, buttons);
                     for (response, action) in responses.into_iter().zip(actions) {
                         if response.clicked() {
                             response.surrender_focus();
@@ -2217,7 +2217,7 @@ mod tests {
     /// Reference edits exercise all existing lessons, including async scopes and recognition.
     #[test]
     fn every_lesson_advances_on_its_reference_actions_and_reveals_anchors() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let dir = tmp("actions");
@@ -2289,7 +2289,7 @@ mod tests {
         let Some(out) = std::env::var_os("JVID_TUTORIAL_CAPTURE").map(PathBuf::from) else {
             return;
         };
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         std::fs::create_dir_all(&out).unwrap();
@@ -3355,7 +3355,7 @@ mod tests {
 
     #[test]
     fn minimum_layout_renders_guidance_beside_the_open_task_dialog() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness_with(Harness::builder().wgpu(), &Default::default());

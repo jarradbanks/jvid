@@ -5,12 +5,12 @@
 use std::collections::HashSet;
 
 use egui::{Pos2, Rect, Sense, Stroke, Ui, Vec2, vec2};
+use j_ui::themes::DARK;
+use j_ui::tokens::color;
 use jvid_core::history::GestureKey;
 use jvid_core::model::{Clip, ClipId, Project, Text, TrackKind, Transform};
 use jvid_core::time::Time;
 use jvid_render::text;
-use suite_ui::themes::DARK;
-use suite_ui::tokens::color;
 
 use crate::timeline::Edit;
 use crate::viewer_geometry::ViewerGeometry;
@@ -744,7 +744,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_overlay_draws_no_amber() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (h, id) = history();
@@ -770,7 +770,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_reframe_box_dims_the_wide_shot_outside_it() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (h, id) = history();
@@ -1049,7 +1049,7 @@ pub(crate) mod tests {
             harness.run();
         }
         assert_eq!(content(harness.state()), "Title 2", "the text updates live");
-        if suite_ui::test_support::gpu() {
+        if j_ui::test_support::gpu() {
             harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Home);
             harness.run();
             let img = harness.render().unwrap();
@@ -1064,8 +1064,8 @@ pub(crate) mod tests {
 
     #[test]
     fn an_oversized_clip_leaves_the_transport_row_clickable() {
+        use j_ui::tokens::size;
         use jvid_core::history::{Command, History};
-        use suite_ui::tokens::size;
         let (mut h, id) = history();
         let c = h.project().sequence().tracks()[0].clips()[0].clone();
         let x = Transform {

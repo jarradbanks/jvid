@@ -1,6 +1,6 @@
 //! Fails when user-visible text bypasses the translation layer (#210).
 //!
-//! Parses every non-test module of jvid-app, suite-ui and the suite-ui gallery with `syn`
+//! Parses every non-test module of jvid-app with `syn`
 //! and flags string literals that would reach the screen untranslated:
 //!
 //! - **Prose anywhere**: a literal with letters that isn't identifier-shaped (`png`,
@@ -23,8 +23,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use j_ui::i18n::{Catalog, LANGUAGES, placeholders};
 use proc_macro2::{Delimiter, Spacing};
-use suite_ui::i18n::{Catalog, LANGUAGES, placeholders};
 use syn::buffer::{Cursor, TokenBuffer};
 use syn::punctuated::Punctuated;
 use syn::visit_mut::{self, VisitMut};
@@ -248,16 +248,6 @@ const EXEMPT_ITEMS: &[(&str, &str, &str)] = &[
         "untitled",
         "the unsaved project's autosave file; never shown, and a translated name would lose it",
     ),
-    (
-        "suite-ui/src/i18n.rs",
-        "walk",
-        "catalog errors are for translators, reported by tests",
-    ),
-    (
-        "suite-ui/src/i18n.rs",
-        "mismatches",
-        "catalog drift is for translators, reported by tests",
-    ),
 ];
 
 /// A crate's sources and the catalog its `tr!` reads.
@@ -271,33 +261,12 @@ fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn leak_catalog(dir: &str) -> &'static Catalog {
-    let read = |l: &str| -> &'static str {
-        let path = workspace().join(dir).join(format!("{l}.toml"));
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
-        Box::leak(text.into_boxed_str())
-    };
-    Box::leak(Box::new(Catalog::new(LANGUAGES.map(read))))
-}
-
 fn trees() -> Vec<Tree> {
-    vec![
-        Tree {
-            name: "jvid-app",
-            roots: &["crates/jvid-app/src/lib.rs", "crates/jvid-app/src/main.rs"],
-            catalog: &jvid_app::i18n::CATALOG,
-        },
-        Tree {
-            name: "suite-ui",
-            roots: &["crates/suite-ui/src/lib.rs"],
-            catalog: &suite_ui::i18n::CATALOG,
-        },
-        Tree {
-            name: "gallery",
-            roots: &["crates/suite-ui/examples/gallery.rs"],
-            catalog: leak_catalog("crates/suite-ui/i18n/gallery"),
-        },
-    ]
+    vec![Tree {
+        name: "jvid-app",
+        roots: &["crates/jvid-app/src/lib.rs", "crates/jvid-app/src/main.rs"],
+        catalog: &jvid_app::i18n::CATALOG,
+    }]
 }
 
 /// `#[cfg(test)]`, `#[test]` or test-support-only code: never in a shipped UI.
@@ -1125,7 +1094,7 @@ fn exemptions_hold_with_either_path_separator() {
 /// The guard itself: each bypass shape is caught, and the allowed shapes aren't.
 #[test]
 fn guard_catches_every_bypass_shape() {
-    static CATALOG: Catalog = Catalog::new(suite_ui::test_support::en_es(
+    static CATALOG: Catalog = Catalog::new(j_ui::test_support::en_es(
         "known = \"Known\"\nnamed = \"Hi {name}\"\n[clips]\none = \"{count} clip\"\nother = \"{count} clips\"\n",
         "known = \"Conocido\"\nnamed = \"Hola {name} {extra}\"\n[clips]\none = \"{count} clip\"\nother = \"{count} clips\"\n",
     ));
@@ -1379,7 +1348,7 @@ fn guard_catches_every_bypass_shape() {
         const VERSION: &str = "v1";
         macro_rules! salt { ($x:expr) => { egui::Id::new($x) }; }
         macro_rules! tr {
-            ($($args:tt)+) => { suite_ui::tr!($crate::i18n::CATALOG, $($args)+) };
+            ($($args:tt)+) => { j_ui::tr!($crate::i18n::CATALOG, $($args)+) };
         }
         const AGENT: &str = concat!("jvid/", env!("CARGO_PKG_VERSION"));
         const SHADER: &str = include_str!("shader.wgsl");

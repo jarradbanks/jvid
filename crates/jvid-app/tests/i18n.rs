@@ -7,11 +7,11 @@ use std::sync::{Mutex, MutexGuard};
 use egui::accesskit::Role;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
+use j_ui::i18n;
+use j_ui::test_support::install_theme;
 use jvid_app::app::App;
 use jvid_app::export::dialog::ExportDialog;
 use jvid_app::preferences::Preferences;
-use suite_ui::i18n;
-use suite_ui::test_support::install_theme;
 
 static LOCK: Mutex<()> = Mutex::new(());
 
@@ -132,7 +132,7 @@ fn titled_project(labels: [&str; 6]) -> Harness<'static, App> {
     let [new, text, title, track, edit, select_all] = labels;
     let builder = Harness::builder().with_size([1280.0, 720.0]);
     let builder = if std::env::var_os("JVID_I18N_CAPTURE").is_some() {
-        assert!(suite_ui::test_support::gpu());
+        assert!(j_ui::test_support::gpu());
         builder.wgpu()
     } else {
         builder

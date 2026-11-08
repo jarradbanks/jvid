@@ -3,10 +3,10 @@
 //! and equal-power. Edits are `SetClipProps`, as in the inspector, so they undo the same way.
 
 use egui::{CursorIcon, Id, Painter, Rect, Sense, Stroke, Ui, pos2, vec2};
+use j_ui::tokens::color;
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::model::{Clip, FadeCurve};
 use jvid_core::time::Time;
-use suite_ui::tokens::color;
 
 use super::{Edit, Timeline, View};
 

@@ -1,9 +1,9 @@
 //! The editor's strings: `i18n/<code>.toml`, read through [`tr!`] and [`trn!`].
-//! The language, fallback and catalog format live in [`suite_ui::i18n`].
+//! The language, fallback and catalog format live in [`j_ui::i18n`].
 
-pub use suite_ui::i18n::{Label, verbatim};
+pub use j_ui::i18n::{Label, verbatim};
 
-pub static CATALOG: suite_ui::i18n::Catalog = suite_ui::i18n::Catalog::new([
+pub static CATALOG: j_ui::i18n::Catalog = j_ui::i18n::Catalog::new([
     include_str!("../i18n/en.toml"),
     include_str!("../i18n/es.toml"),
     include_str!("../i18n/fr.toml"),
@@ -29,7 +29,7 @@ pub static CATALOG: suite_ui::i18n::Catalog = suite_ui::i18n::Catalog::new([
 /// its `{name}` placeholders. Falls back to English, then to the key.
 macro_rules! tr {
     ($($args:tt)+) => {
-        suite_ui::tr!($crate::i18n::CATALOG, $($args)+)
+        j_ui::tr!($crate::i18n::CATALOG, $($args)+)
     };
 }
 
@@ -37,7 +37,7 @@ macro_rules! tr {
 /// `{count}`; named arguments follow as for [`tr!`].
 macro_rules! trn {
     ($($args:tt)+) => {
-        suite_ui::trn!($crate::i18n::CATALOG, $($args)+)
+        j_ui::trn!($crate::i18n::CATALOG, $($args)+)
     };
 }
 
@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn every_character_has_a_glyph() {
-        let missing = suite_ui::test_support::missing_glyphs(&CATALOG);
+        let missing = j_ui::test_support::missing_glyphs(&CATALOG);
         assert_eq!(missing, Vec::<String>::new());
     }
 }

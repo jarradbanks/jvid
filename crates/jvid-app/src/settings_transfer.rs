@@ -1,12 +1,12 @@
 //! Inspector settings clipboard and translated applicability. Transfer rules live in core.
 
 use egui::Ui;
+use j_ui::tokens::{color, space};
+use j_ui::widgets::{Button, Checkbox};
 use jvid_core::history::Command;
 use jvid_core::model::{ClipId, Project};
 use jvid_core::settings_transfer::{Animation, Category, Error, Resource, Settings};
 use jvid_core::time::Time;
-use suite_ui::tokens::{color, space};
-use suite_ui::widgets::{Button, Checkbox};
 
 use crate::i18n::tr;
 use crate::keymap::Applicability;
@@ -409,17 +409,17 @@ mod tests {
 
     fn controls(scale: f32) {
         use egui_kittest::kittest::Queryable;
-        let previous_language = suite_ui::i18n::language();
+        let previous_language = j_ui::i18n::language();
         let language = std::env::var("JVID_P1_UI_LANGUAGE").ok();
         if let Some(language) = &language {
-            suite_ui::i18n::set_language(language);
+            j_ui::i18n::set_language(language);
         }
         let (history, _, ids) = history();
         let mut fresh = true;
         let artifact_dir = std::env::var_os("JVID_P1_UI_ARTIFACTS").map(std::path::PathBuf::from);
         if artifact_dir.is_some() {
             assert!(
-                suite_ui::test_support::gpu(),
+                j_ui::test_support::gpu(),
                 "UI artifacts require a rendering backend"
             );
         }
@@ -433,7 +433,7 @@ mod tests {
         };
         let mut harness = builder.build_ui_state(
             |ui, history: &mut History| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 ui.painter().rect_filled(ui.max_rect(), 0.0, color::panel());
@@ -486,7 +486,7 @@ mod tests {
                 .unwrap();
         }
         if language.is_some() {
-            suite_ui::i18n::set_language(previous_language);
+            j_ui::i18n::set_language(previous_language);
         }
     }
 }

@@ -7,12 +7,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use egui::{Id, Painter, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use j_ui::theme;
+use j_ui::tokens::color;
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value};
 use jvid_core::model::{Clip, ClipId, Sequence, Track};
 use jvid_core::time::Time;
-use suite_ui::theme;
-use suite_ui::tokens::color;
 
 use crate::i18n::{CATALOG, tr};
 
@@ -913,9 +913,9 @@ mod tests {
     fn expanded_lanes_drag_a_key_and_snapshot() {
         use egui::pos2;
         use egui_kittest::kittest::Queryable;
+        use j_ui::tokens::size;
         use jvid_core::model::Project;
-        use suite_ui::tokens::size;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut p = History::new(project(1));
@@ -950,7 +950,7 @@ mod tests {
         let through = (0..20).any(|dx| {
             (-3..=3).any(|dy| {
                 let p = img.get_pixel((words + dx as f32) as u32, (y + dy as f32) as u32);
-                egui::Color32::from_rgb(p[0], p[1], p[2]) == suite_ui::tokens::color::ink_4()
+                egui::Color32::from_rgb(p[0], p[1], p[2]) == j_ui::tokens::color::ink_4()
             })
         });
         assert!(!through, "the key line shows through the caption");
@@ -994,9 +994,9 @@ mod tests {
     fn selecting_a_keyed_clip_expands_it_and_the_toggle_stays_on_screen() {
         use egui::pos2;
         use egui_kittest::kittest::Queryable;
+        use j_ui::tokens::size;
         use jvid_core::model::Project;
-        use suite_ui::tokens::size;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (p, id) = keyed(1);
@@ -1063,7 +1063,7 @@ mod tests {
     fn height_grip_on_an_expanded_track_sizes_the_clip_row() {
         use egui::pos2;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (p, id) = keyed(1);

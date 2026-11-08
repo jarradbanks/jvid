@@ -29,7 +29,7 @@ Two looks have been tried and rejected: warm greys with an amber accent felt gen
 
 ## Colors
 
-Restrained: neutral darks with a faint cool tint, one blue accent in two tones, and four muted clip colours. These are starting values. Confirm them in the first `suite-ui` build, then re-run `/impeccable document` to make them normative.
+Restrained: neutral darks with a faint cool tint, one blue accent in two tones, and four muted clip colours. These are starting values. Confirm them in the first `j-ui` build, then re-run `/impeccable document` to make them normative.
 
 ### Primary
 - **Blue** (#2368C9; hover #2C70D3, pressed #215DB3): fills. Used for the primary button, the focused panel's border, the in/out band (at 25%) and selected rows in lists (at 20%). White text on it is 4.6:1.
@@ -78,7 +78,7 @@ Every value above is the Dark theme. Light and High Contrast are the other built
 
 ## Typography
 
-**Font:** Inter (OFL), embedded in `suite-ui` with tabular figures made the default (frozen in with fonttools' feature freezer), because egui can't switch OpenType features on.
+**Font:** Inter (OFL), embedded in `j-ui` with tabular figures made the default (frozen in with fonttools' feature freezer), because egui can't switch OpenType features on.
 
 **Character:** One neutral, highly legible UI face at small sizes. Hierarchy comes from weight and colour, not from extra families or capitals. Every digit is tabular, so timecodes and dragged values never change width.
 
@@ -130,7 +130,7 @@ Panels sit in the standard editor layout: media bin on the left, preview in the 
 **The Single Hairline Rule.** Borders and dividers are 1 physical pixel, never doubled. Where a header divider meets a panel border or another rule, there is one line, not two.
 
 ### Checks
-Acceptance criteria for `suite-ui` and the app shell, run as egui_kittest snapshot tests:
+Acceptance criteria for `j-ui` and the app shell, run as egui_kittest snapshot tests:
 - Render the default layout at 1280×720 and 1920×1080, at 100% and 150% scale. In each row of panels, every header divider is at the same y and every header label's baseline is at the same y.
 - Switch a panel between one view and several tabs. Its header height and label position don't move.
 - Sample along each divider and border: no line is wider than 1 physical pixel.
@@ -158,7 +158,7 @@ Keyframes are 8px diamonds (squares turned 45° with 1px rounding). Scrollbars a
 
 ## Components
 
-These specs are for the first `suite-ui` build. The next `/impeccable document` run replaces them with the components as built.
+These specs are for the first `j-ui` build. The next `/impeccable document` run replaces them with the components as built.
 
 ### Panels, headers and tabs
 - **Panel:** Panel fill, 1px Border, 8px radius. A panel with keyboard focus swaps its border to Blue, because focus decides what shortcuts do.
@@ -223,7 +223,7 @@ A 160px column on Panel. The track ID (V1, A1) in Body Strong and Ink, the name 
 
 ## Reference: Components as Built
 
-This section maps every rule above to the code that implements it, so a change starts from an existing helper instead of a new one. Tokens and widgets live in `crates/suite-ui`; reach for them before painting anything by hand. If a pattern you need is missing, add it to `suite-ui` and list it here.
+This section maps every rule above to the code that implements it, so a change starts from an existing helper instead of a new one. Tokens and widgets live in [j-ui](https://github.com/jarradbanks/j-ui); reach for them before painting anything by hand. If a pattern you need is missing, add it to `j-ui` and list it here.
 
 ### Tokens
 | Token | Code | Values |

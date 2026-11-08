@@ -9,14 +9,14 @@ use egui::{
     Align2, CornerRadius, Frame, Key, KeyboardShortcut, Modifiers, Rect, Sense, Stroke, StrokeKind,
     TextureHandle, Ui, WidgetInfo, WidgetType, vec2,
 };
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, radius, size, space};
+use j_ui::widgets::{Button, Segmented, State};
 use jvid_core::model::{ProbeInfo, Project, ProjectSettings, StreamInfo};
 use jvid_core::time::{Rate, Time};
 use jvid_jobs::Pool;
 use jvid_media::thumbnails::Cache;
 use serde::{Deserialize, Serialize};
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Segmented, State};
 
 use crate::i18n::{Label, tr, trn, verbatim};
 
@@ -472,7 +472,7 @@ fn preset_card(
     );
     if r.has_focus() {
         ui.painter()
-            .add(suite_ui::widgets::focus_ring(rect, radius::DIALOG));
+            .add(j_ui::widgets::focus_ring(rect, radius::DIALOG));
     }
     r
 }

@@ -1021,8 +1021,8 @@ mod tests {
     #[test]
     fn collected_font_alias_wins_over_same_named_installed_face() {
         use cosmic_text::fontdb::{Family, Query, Source};
-        let regular = include_bytes!("../../suite-ui/assets/Inter-Regular.ttf").to_vec();
-        let medium = include_bytes!("../../suite-ui/assets/Inter-Medium.ttf").to_vec();
+        let regular = j_ui::theme::INTER_REGULAR.to_vec();
+        let medium = j_ui::theme::INTER_MEDIUM.to_vec();
         let path =
             std::env::temp_dir().join(format!("jvid-collected-font-{}.ttf", std::process::id()));
         std::fs::write(&path, &regular).unwrap();
@@ -1138,11 +1138,7 @@ mod tests {
     #[test]
     fn bundled_cjk_faces_draw_title_presets_without_system_fonts() {
         // The faces jvid-app passes to `set_faces`, linked only into this test.
-        let faces = [
-            include_bytes!("../../suite-ui/assets/NotoSansCJK-ja.otf").as_slice(),
-            include_bytes!("../../suite-ui/assets/NotoSansCJK-zh-Hans.otf"),
-            include_bytes!("../../suite-ui/assets/NotoSansCJK-ko.otf"),
-        ];
+        let faces = j_ui::theme::CJK_FACES.map(|(_, bytes)| bytes);
         let mut db = cosmic_text::fontdb::Database::new();
         for source in sources(&faces) {
             db.load_font_source(source);

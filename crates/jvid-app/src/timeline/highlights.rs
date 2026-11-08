@@ -7,6 +7,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use egui::{Align2, Key, Pos2, Ui};
+use j_ui::theme;
+use j_ui::tokens::{color, radius, size, space};
+use j_ui::widgets::{Button, Checkbox, DragField, State};
 use jvid_core::history::Command;
 use jvid_core::model::{Clip, ClipId, Sequence, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
@@ -14,9 +17,6 @@ use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::audio::SAMPLE_RATE;
 use jvid_media::highlights;
 use jvid_media::waveforms::Peak;
-use suite_ui::theme;
-use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Checkbox, DragField, State};
 
 use crate::i18n::{tr, trn};
 use crate::subtitles::AudioSources;
@@ -370,7 +370,7 @@ impl Highlights {
                 ui.add_space(space::S16);
                 let any = ranges.is_some_and(|r| !r.is_empty()) && self.scanning().is_none();
                 let state = if any { State::Live } else { State::Disabled };
-                let actions = suite_ui::dialog::action_footer(
+                let actions = j_ui::dialog::action_footer(
                     ui,
                     [
                         Button::secondary(tr!("prompt.cancel")),

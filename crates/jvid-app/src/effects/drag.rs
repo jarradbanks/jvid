@@ -4,11 +4,11 @@
 use std::collections::HashSet;
 
 use egui::{Align, DragAndDrop, Layout, Rect, Stroke, Ui, UiBuilder, vec2};
+use j_ui::theme;
+use j_ui::tokens::{color, radius, size, space};
 use jvid_core::history::Command;
 use jvid_core::model::{ClipId, Project, TrackId, TrackKind};
 use jvid_core::time::Time;
-use suite_ui::theme;
-use suite_ui::tokens::{color, radius, size, space};
 
 use super::Drag;
 
@@ -327,7 +327,7 @@ mod tests {
         let mut fresh = true;
         let harness = Harness::builder().with_size([640.0, 360.0]).build_ui_state(
             move |ui, s: &mut State| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 let frame = crate::preview::viewer_rect(ui);

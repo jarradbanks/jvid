@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use egui::{Color32, Rect};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
+use j_ui::test_support::gpu;
 use jvid_core::history::Command;
-use suite_ui::test_support::gpu;
 
 use super::*;
 use crate::import::Importer;
@@ -1327,12 +1327,12 @@ fn translated_edit_menu_scrolls_to_preferences_at_minimum_size_and_high_dpi() {
     struct Restore(&'static str);
     impl Drop for Restore {
         fn drop(&mut self) {
-            suite_ui::i18n::set_language(self.0);
+            j_ui::i18n::set_language(self.0);
         }
     }
-    let _restore = Restore(suite_ui::i18n::language());
+    let _restore = Restore(j_ui::i18n::language());
     for language in ["de", "pt-BR"] {
-        suite_ui::i18n::set_language(language);
+        j_ui::i18n::set_language(language);
         for (size, scale) in [([960.0, 540.0], 1.0), ([640.0, 400.0], 1.5)] {
             let mut h = builder(size, scale).build_eframe(|cc| App::new(cc, &Default::default()));
             h.run();
@@ -1661,7 +1661,6 @@ fn title_harness_sized(
 
 fn snapshot_font_family() -> &'static str {
     const FAMILY: &str = "jvid-collection-ui-snapshot-inter";
-    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../suite-ui/assets");
     let sources: Vec<_> = [
         ("Inter-Regular.ttf", "Inter"),
         ("Inter-SemiBold.ttf", "Inter SemiBold"),
@@ -1670,7 +1669,7 @@ fn snapshot_font_family() -> &'static str {
     .map(|(name, original_family)| jvid_render::text::FontSource {
         family: FAMILY.into(),
         original_family: original_family.into(),
-        path: directory.join(name),
+        path: crate::test_util::font_file(name),
     })
     .collect();
     jvid_render::text::load_project_fonts(&sources).unwrap();
@@ -1957,7 +1956,7 @@ fn a_narrow_bin_opens_scopes_from_the_tab_menu() {
 fn themes_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("jvid-themes-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    suite_ui::themes::install_bundled(&dir).unwrap();
+    j_ui::themes::install_bundled(&dir).unwrap();
     std::fs::write(dir.join("neon.toml"), "panel = \"#12345\"\n").unwrap();
     dir
 }
@@ -2072,9 +2071,9 @@ fn editor_in_light_and_high_contrast() {
                 ..Default::default()
             },
         );
-        h.state_mut().theme = suite_ui::themes::LiveTheme::new(theme);
+        h.state_mut().theme = j_ui::themes::LiveTheme::new(theme);
         h.run();
-        let want = suite_ui::themes::BUILT_IN
+        let want = j_ui::themes::BUILT_IN
             .iter()
             .find(|t| t.0 == theme)
             .unwrap()
