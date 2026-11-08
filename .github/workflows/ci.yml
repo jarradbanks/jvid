@@ -220,11 +220,13 @@ jobs:
         env:
           # Docker actions mount the checkout at this path, rather than the host path.
           # The mirror is already authenticated and checked against Cargo.lock.
-          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_COUNT: '3'
           GIT_CONFIG_KEY_0: url.file:///github/workspace/.j-ui-ci.insteadOf
           GIT_CONFIG_VALUE_0: https://github.com/jarradbanks/j-ui
           GIT_CONFIG_KEY_1: safe.directory
           GIT_CONFIG_VALUE_1: /github/workspace/.j-ui-ci
+          GIT_CONFIG_KEY_2: safe.directory
+          GIT_CONFIG_VALUE_2: /github/workspace/.j-ui-ci/.git
 
   i18n:
     needs: changes
