@@ -52,7 +52,7 @@ Export progress names audio analysis, each encoding pass, software retries and f
 | [`jvid-audio`](crates/jvid-audio) | Mixer, cpal output, resampling, loudness |
 | [`jvid-app`](crates/jvid-app) | eframe desktop app |
 | [`jvid-cli`](crates/jvid-cli) | Headless render |
-| [`suite-ui`](crates/suite-ui) | Shared theme, widgets and keybinding system for the whole suite |
+| [`j-ui`](https://github.com/jarradbanks/j-ui) | Shared themes, widgets and localisation for the suite (external dependency) |
 
 ## Contributing
 

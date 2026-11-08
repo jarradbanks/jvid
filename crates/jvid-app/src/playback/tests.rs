@@ -873,7 +873,7 @@ fn seek_latency_1080p30() {
 
 /// A software device where `gpu()` allows one (lavapipe on Linux); `None` skips.
 pub(crate) fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    if !suite_ui::test_support::gpu() {
+    if !j_ui::test_support::gpu() {
         return None;
     }
     Some(crate::export::headless_gpu().expect("device"))

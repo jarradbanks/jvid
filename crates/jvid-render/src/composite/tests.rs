@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::path::Path;
 
-use suite_ui::test_support::gpu;
+use j_ui::test_support::gpu;
 use wgpu::util::DeviceExt;
 
 use super::*;

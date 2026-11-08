@@ -9,6 +9,10 @@ use egui::{
     Align2, CornerRadius, Key, Rect, Sense, StrokeKind, TextureHandle, Ui, UiBuilder, Vec2, pos2,
     vec2,
 };
+use j_ui::panel::Panel;
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, radius, size, space};
+use j_ui::widgets::{Button, Dropdown, TextInput, fit_text};
 use jvid_core::history::Command;
 use jvid_core::model::{AssetId, MediaAsset, Project, Text};
 use jvid_core::time::FLICKS_PER_SECOND;
@@ -16,10 +20,6 @@ use jvid_jobs::Pool;
 use jvid_media::proxy::Proxies;
 use jvid_media::thumbnails::Cache;
 use jvid_media::waveforms;
-use suite_ui::panel::Panel;
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Dropdown, TextInput, fit_text};
 
 use crate::i18n::{tr, trn, verbatim};
 use crate::preview::Preview;
@@ -414,7 +414,7 @@ impl MediaBin {
                     ui.label(egui::RichText::new(tr!("bin.importing")).color(color::ink_3()));
                 } else if !self.query.trim().is_empty() || self.library.active() {
                     let organized = self.library.active();
-                    if suite_ui::empty_state::EmptyState::new(
+                    if j_ui::empty_state::EmptyState::new(
                         icon::SEARCH,
                         if organized {
                             tr!("bin.no_results")
@@ -442,7 +442,7 @@ impl MediaBin {
                         self.library.keymap = keymap;
                     }
                 } else {
-                    out.import |= suite_ui::empty_state::EmptyState::new(
+                    out.import |= j_ui::empty_state::EmptyState::new(
                         icon::FOLDER,
                         tr!("empty.media"),
                         tr!("bin.empty"),
@@ -1016,7 +1016,7 @@ impl MediaBin {
         } else {
             tr!("bin.remove_title", name = asset.display_name())
         };
-        let modal = suite_ui::dialog::modal(
+        let modal = j_ui::dialog::modal(
             ui.ctx(),
             egui::Id::new("remove_asset"),
             &title,
@@ -1029,7 +1029,7 @@ impl MediaBin {
                     ui.label(trn!("bin.remove_body", n));
                 }
                 ui.add_space(space::S16);
-                let actions = suite_ui::dialog::action_footer(
+                let actions = j_ui::dialog::action_footer(
                     ui,
                     [
                         Button::secondary(tr!("prompt.cancel")),
@@ -1302,7 +1302,7 @@ fn text_presets(ui: &mut Ui, tiles: &[Option<egui::TextureId>; 3], out: &mut Bin
                         p.galley(at, n.clone(), color::ink());
                         p.galley(at + vec2(0.0, n.size().y), a.clone(), color::ink_3());
                         if r.has_focus() {
-                            p.add(suite_ui::widgets::focus_ring(rect, radius::CONTROL));
+                            p.add(j_ui::widgets::focus_ring(rect, radius::CONTROL));
                         }
                         let dragged = r.drag_started();
                         if dragged || r.clicked() {
@@ -1414,13 +1414,13 @@ impl MediaBin {
             });
             if rows.is_empty() {
                 if empty_folder && self.fx_query.trim().is_empty() {
-                    suite_ui::empty_state::EmptyState::new(
+                    j_ui::empty_state::EmptyState::new(
                         icon::SLIDERS,
                         tr!("empty.effects"),
                         tr!("bin.fx_empty"),
                     )
                     .show(ui);
-                } else if suite_ui::empty_state::EmptyState::new(
+                } else if j_ui::empty_state::EmptyState::new(
                     icon::SEARCH,
                     tr!("empty.search_effects"),
                     tr!("empty.search_help"),
@@ -1639,11 +1639,11 @@ impl MediaBin {
     }
 
     /// Apply works on a usable effect with video clips selected.
-    fn apply_state(&self, row: &crate::effects::Row) -> suite_ui::widgets::State {
+    fn apply_state(&self, row: &crate::effects::Row) -> j_ui::widgets::State {
         if self.fx_apply && row.error.is_none() && !row.disabled {
-            suite_ui::widgets::State::Live
+            j_ui::widgets::State::Live
         } else {
-            suite_ui::widgets::State::Disabled
+            j_ui::widgets::State::Disabled
         }
     }
 
@@ -1659,7 +1659,7 @@ impl MediaBin {
     ) {
         if r.has_focus() {
             ui.painter()
-                .add(suite_ui::widgets::focus_ring(r.rect, radius::CONTROL));
+                .add(j_ui::widgets::focus_ring(r.rect, radius::CONTROL));
         }
         if r.clicked() {
             self.fx_selected = Some(row.stem.clone());
@@ -1907,7 +1907,7 @@ mod tests {
 
     #[test]
     fn hovering_a_tile_leaves_the_next_one_where_it_was() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut history = jvid_core::history::History::new(Project::default());
@@ -1928,7 +1928,7 @@ mod tests {
             .wgpu()
             .build_ui_state(
                 move |ui, (bin, project): &mut (MediaBin, Project)| {
-                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh) {
                         bin.show(ui, project, false, false, &HashSet::new());
                     }
                 },

@@ -402,9 +402,9 @@ fn param_spans(desc: &str) -> impl Iterator<Item = (&str, bool)> {
 /// `row`'s description (or error) in `ink`, at most `rows` lines `width` wide, with its
 /// backticked parameter ids as their labels in Ink 2.
 pub fn about(row: &Row, width: f32, rows: usize, ink: egui::Color32) -> egui::text::LayoutJob {
-    use suite_ui::tokens::color;
+    use j_ui::tokens::color;
     let mut job = egui::text::LayoutJob::default();
-    let format = |color| egui::TextFormat::simple(suite_ui::theme::body(), color);
+    let format = |color| egui::TextFormat::simple(j_ui::theme::body(), color);
     match &row.error {
         Some(e) => job.append(e, 0.0, format(ink)),
         None => {
@@ -429,7 +429,7 @@ pub fn about(row: &Row, width: f32, rows: usize, ink: egui::Color32) -> egui::te
 /// `row`'s thumbnail filling `rect`: its effect on the thumbnail frame, black until drawn, or
 /// for one that doesn't load the frame dimmed under a warning.
 pub fn paint_thumb(ui: &egui::Ui, rect: egui::Rect, row: &Row) {
-    use suite_ui::tokens::{color, radius};
+    use j_ui::tokens::{color, radius};
     let t = thumbs(ui.ctx());
     let corner = egui::CornerRadius::same(radius::CONTROL);
     ui.painter().rect_filled(rect, corner, egui::Color32::BLACK);
@@ -447,8 +447,8 @@ pub fn paint_thumb(ui: &egui::Ui, rect: egui::Rect, row: &Row) {
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            suite_ui::theme::icon::CIRCLE_ALERT,
-            suite_ui::theme::icon_font(),
+            j_ui::theme::icon::CIRCLE_ALERT,
+            j_ui::theme::icon_font(),
             color::red(),
         );
     }
@@ -747,7 +747,7 @@ mod tests {
 
     #[test]
     fn a_broken_effect_shows_the_frame_dimmed_and_its_error() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let row = Row {
@@ -766,7 +766,7 @@ mod tests {
             .with_size([100.0, 60.0])
             .wgpu()
             .build_ui(move |ui| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 // A mid-grey frame, as the thumbnail frame.

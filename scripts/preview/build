@@ -49,7 +49,12 @@ motion="$cache/motion"
 rm -rf "$motion"
 mkdir -p "$motion"
 cp "$root/scripts/preview/motion.html" "$motion/index.html"
-cp "$root"/crates/suite-ui/assets/Inter-{Regular,Medium,SemiBold}.ttf "$motion/"
+ui_assets="$(cargo metadata --locked --format-version 1 --manifest-path "$root/Cargo.toml" | python3 -c '
+import json, pathlib, sys
+ui = next(p for p in json.load(sys.stdin)["packages"] if p["name"] == "j-ui")
+print(pathlib.Path(ui["manifest_path"]).parent / "assets")
+')"
+cp "$ui_assets"/Inter-{Regular,Medium,SemiBold}.ttf "$motion/"
 # Stills for the before/after wipe and the theme cards, by reel frame (seconds x 30): the
 # frame before the grade, after it, then the Light, High Contrast and Dark themes.
 while read -r name frame; do

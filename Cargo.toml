@@ -19,7 +19,7 @@ jvid-jobs = { path = "crates/jvid-jobs" }
 jvid-render = { path = "crates/jvid-render" }
 jvid-transcribe = { path = "crates/jvid-transcribe" }
 jvid-updater = { path = "crates/jvid-updater" }
-suite-ui = { path = "crates/suite-ui" }
+j-ui = { git = "https://github.com/jarradbanks/j-ui", tag = "v0.1.0" }
 proptest = "1.5"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 serde = { version = "1", features = ["derive"] }

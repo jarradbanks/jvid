@@ -61,7 +61,7 @@ fn audit_442_whole_group_source_is_visible_and_changeable() {
     let mut fresh = true;
     let mut h = Harness::builder().with_size([480.0, 220.0]).build_ui_state(
         move |ui, sources: &mut AudioSources| {
-            if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+            if !j_ui::test_support::install_theme(ui, &mut fresh) {
                 sources.show(ui, p.sequence(), &selected, false);
             }
         },

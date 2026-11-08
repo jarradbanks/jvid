@@ -9,12 +9,12 @@ use egui::{
     Align, Align2, Color32, CornerRadius, Layout, Rect, RichText, Sense, Ui, UiBuilder, WidgetInfo,
     WidgetType, pos2, vec2,
 };
+use j_ui::panel::Panel;
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, radius, size, space};
+use j_ui::widgets::{Button, State, fit_text, paint_fit};
 use jvid_core::model::ProbeInfo;
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
-use suite_ui::panel::Panel;
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, State, fit_text, paint_fit};
 
 use super::{Error, ExportHandle, Phase};
 use crate::i18n::{tr, trn};
@@ -380,7 +380,7 @@ pub fn menu(ui: &mut Ui, rows: &[Row], confirm: bool, shortcut: &str) -> Option<
     if confirm {
         ui.label(RichText::new(trn!("export.cancel_confirm", live)).color(color::ink()));
         ui.add_space(space::S8);
-        let actions = suite_ui::dialog::action_footer(
+        let actions = j_ui::dialog::action_footer(
             ui,
             [
                 Button::secondary(tr!("export.keep_exporting")),
@@ -601,7 +601,7 @@ fn panel_inner(
     };
     let r = panel.focused(focused).show(ui, |ui| {
         if rows.is_empty() {
-            let empty = suite_ui::empty_state::EmptyState::new(
+            let empty = j_ui::empty_state::EmptyState::new(
                 icon::LIST,
                 tr!("export.empty_title"),
                 tr!("empty.queue_help"),
@@ -1105,12 +1105,12 @@ mod tests {
     }
 
     fn shot(name: &str, size: [f32; 2], mut draw: impl FnMut(&mut Ui) + 'static) {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut fresh = true;
         let mut h = Harness::builder().with_size(size).build_ui(move |ui| {
-            if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+            if !j_ui::test_support::install_theme(ui, &mut fresh) {
                 draw(ui);
             }
         });
@@ -1121,7 +1121,7 @@ mod tests {
     #[test]
     fn phase_labels_have_full_tooltips_and_actions_fit_narrow_panels() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         for width in [240.0, 300.0, 480.0] {
@@ -1150,7 +1150,7 @@ mod tests {
                         .with_size([width, 280.0])
                         .with_pixels_per_point(scale)
                         .build_ui(move |ui| {
-                            if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                            if !j_ui::test_support::install_theme(ui, &mut fresh) {
                                 panel(ui, &rows, false, true);
                             }
                         });
@@ -1208,14 +1208,14 @@ mod tests {
     #[test]
     fn narrow_confirm_asks_its_question_on_hover() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut fresh = true;
         let mut h = Harness::builder()
             .with_size([300.0, 200.0])
             .build_ui(move |ui| {
-                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if !j_ui::test_support::install_theme(ui, &mut fresh) {
                     panel(ui, &rows(), true, true);
                 }
             });

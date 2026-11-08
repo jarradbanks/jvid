@@ -8,16 +8,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use egui::{Align2, Key, Pos2, Ui};
+use j_ui::dialog::action_footer;
+use j_ui::theme;
+use j_ui::tokens::{radius, space};
+use j_ui::widgets::{Button, DragField, State};
 use jvid_core::history::Command;
 use jvid_core::model::{Clip, ClipId, Project, Sequence};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
 use jvid_jobs::{Handle, Pool, Priority};
 use jvid_media::audio::SAMPLE_RATE;
 use jvid_media::waveforms::{BUCKET, Peak, Pyramid};
-use suite_ui::dialog::action_footer;
-use suite_ui::theme;
-use suite_ui::tokens::{radius, space};
-use suite_ui::widgets::{Button, DragField, State};
 
 use crate::i18n::{tr, trn};
 use crate::subtitles::AudioSources;
@@ -918,7 +918,7 @@ mod tests {
                         .with_pixels_per_point(scale)
                         .build_ui_state(
                             move |ui, (s, command, open)| {
-                                if !suite_ui::test_support::install_theme(ui, &mut fresh) && *open {
+                                if !j_ui::test_support::install_theme(ui, &mut fresh) && *open {
                                     let at = ui.ctx().content_rect().max - egui::vec2(12.0, 12.0);
                                     let result = s.show(ui, at, p.sequence(), Some(&spans));
                                     if result.0.is_some() {
@@ -982,7 +982,7 @@ mod tests {
     }
     #[test]
     fn detect_silence_compact_snapshot() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let p = project(2);
@@ -994,7 +994,7 @@ mod tests {
             .with_size([384.0, 420.0])
             .wgpu()
             .build_ui(move |ui| {
-                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if !j_ui::test_support::install_theme(ui, &mut fresh) {
                     let at = ui.ctx().content_rect().max - egui::vec2(16.0, 16.0);
                     silence.show(ui, at, p.sequence(), Some(&spans));
                 }
@@ -1009,14 +1009,14 @@ mod tests {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                suite_ui::i18n::set_pseudo(false);
-                suite_ui::i18n::set_language("en");
+                j_ui::i18n::set_pseudo(false);
+                j_ui::i18n::set_language("en");
             }
         }
         let _restore = Restore;
         for language in ["de", "fr", "ja", "en"] {
-            suite_ui::i18n::set_language(language);
-            suite_ui::i18n::set_pseudo(language == "en");
+            j_ui::i18n::set_language(language);
+            j_ui::i18n::set_pseudo(language == "en");
             compact_dialog_preserves_cut_and_speed_routes_at_narrow_sizes();
         }
     }

@@ -5,13 +5,13 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 
 use egui::{TextureHandle, Ui, vec2};
+use j_ui::tokens::color;
+use j_ui::widgets::Button;
 use jvid_core::history::{Command, History};
 use jvid_core::keyframe::Value;
 use jvid_core::model::{ClipId, MarkerId, Project, TrackKind};
 use jvid_core::preset::Preset;
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
-use suite_ui::tokens::color;
-use suite_ui::widgets::Button;
 
 use crate::highlight_review::{HighlightSelectionSnapshot, ReviewRevision};
 use crate::i18n::tr;
@@ -627,8 +627,7 @@ impl VersionsDialog {
         let modal = egui::Modal::new(egui::Id::new("versions_dialog")).show(ui.ctx(), |ui| {
             ui.set_width(width);
             ui.label(
-                egui::RichText::new(tr!("action.export_versions"))
-                    .font(suite_ui::theme::headline()),
+                egui::RichText::new(tr!("action.export_versions")).font(j_ui::theme::headline()),
             );
             egui::ScrollArea::vertical()
                 .max_height((ui.ctx().content_rect().height() - 150.0).max(100.0))
@@ -662,14 +661,14 @@ impl VersionsDialog {
                 v.codec_error().is_none()
                     && (v.preset.video.is_none() || v.reviewed.len() == v.ranges.len())
             });
-            let buttons = suite_ui::dialog::action_footer(
+            let buttons = j_ui::dialog::action_footer(
                 ui,
                 [
                     Button::secondary(tr!("prompt.cancel")),
                     Button::primary(tr!("export.add_to_queue")).state(if ready {
-                        suite_ui::widgets::State::Live
+                        j_ui::widgets::State::Live
                     } else {
-                        suite_ui::widgets::State::Disabled
+                        j_ui::widgets::State::Disabled
                     }),
                 ],
             );
@@ -1517,7 +1516,7 @@ mod tests {
             .with_size([960.0, 600.0])
             .build_ui_state(
                 move |ui, d: &mut VersionsDialog| {
-                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh) {
                         d.show(ui, 7, &h, Some(gpu.clone()));
                     }
                 },
@@ -1557,7 +1556,7 @@ mod tests {
     #[test]
     fn version_dialog_fits_narrow_window_and_rejects_stale_setup() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let Some(h) = fixture() else {
@@ -1572,7 +1571,7 @@ mod tests {
             .with_size([240.0, 640.0])
             .build_ui_state(
                 move |ui, d: &mut VersionsDialog| {
-                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh) {
                         d.show(ui, 7, &h, None);
                     }
                 },

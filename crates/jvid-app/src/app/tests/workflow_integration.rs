@@ -309,11 +309,11 @@ fn german_workflow_captures_at_required_sizes_and_scales() {
     struct Restore(&'static str);
     impl Drop for Restore {
         fn drop(&mut self) {
-            suite_ui::i18n::set_language(self.0);
+            j_ui::i18n::set_language(self.0);
         }
     }
-    let _restore = Restore(suite_ui::i18n::language());
-    suite_ui::i18n::set_language("de");
+    let _restore = Restore(j_ui::i18n::language());
+    j_ui::i18n::set_language("de");
     let dir =
         PathBuf::from(std::env::var_os("JVID_INTEGRATION_CAPTURES").expect("capture directory"));
     std::fs::create_dir_all(&dir).unwrap();

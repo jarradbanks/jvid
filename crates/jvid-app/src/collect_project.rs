@@ -773,14 +773,12 @@ impl Dialog {
         let modal = egui::Modal::new(egui::Id::new("collect_project"))
             .frame(
                 egui::Frame::popup(&ctx.global_style())
-                    .corner_radius(suite_ui::tokens::radius::DIALOG)
-                    .inner_margin(suite_ui::tokens::space::S16),
+                    .corner_radius(j_ui::tokens::radius::DIALOG)
+                    .inner_margin(j_ui::tokens::space::S16),
             )
             .show(ctx, |ui| {
                 ui.set_width(440.0_f32.min((ctx.content_rect().width() - 48.0).max(1.0)));
-                ui.label(
-                    egui::RichText::new(tr!("collect.title")).font(suite_ui::theme::headline()),
-                );
+                ui.label(egui::RichText::new(tr!("collect.title")).font(j_ui::theme::headline()));
                 ui.set_max_width(ui.available_width());
                 egui::ScrollArea::vertical()
                     .max_height(ctx.content_rect().height() * 0.7)
@@ -928,9 +926,9 @@ impl Dialog {
                 if let Some(error) = &self.report_error {
                     ui.label(tr!("collect.failed", error = error));
                 }
-                use suite_ui::widgets::{Button, ButtonKind, State};
+                use j_ui::widgets::{Button, ButtonKind, State};
                 let can_start = !running && !self.destination.trim().is_empty();
-                let buttons = suite_ui::dialog::action_footer(
+                let buttons = j_ui::dialog::action_footer(
                     ui,
                     [
                         Button::new(
@@ -1122,11 +1120,7 @@ mod tests {
         let (effect, source) = jvid_render::effect::BUNDLED[0];
         fs::write(original.join(effect), source).unwrap();
         let font = original.join("Inter.ttf");
-        fs::copy(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../suite-ui/assets/Inter-Regular.ttf"),
-            &font,
-        )
-        .unwrap();
+        fs::copy(crate::test_util::font_file("Inter-Regular.ttf"), &font).unwrap();
         let baseline_family = "jvid-collection-baseline-inter";
         jvid_render::text::load_project_fonts(&[jvid_render::text::FontSource {
             family: baseline_family.into(),
@@ -1567,10 +1561,10 @@ mod tests {
         }
         use egui_kittest::kittest::Queryable;
         let artifact = std::env::var("JVID_COLLECT_ARTIFACT").ok();
-        let render_artifact = artifact.is_some() && suite_ui::test_support::gpu();
-        let language = suite_ui::i18n::language();
+        let render_artifact = artifact.is_some() && j_ui::test_support::gpu();
+        let language = j_ui::i18n::language();
         if let Ok(value) = std::env::var("JVID_COLLECT_LANGUAGE") {
-            suite_ui::i18n::set_language(&value);
+            j_ui::i18n::set_language(&value);
         }
         let mut dialog = Dialog::default();
         let snapshot = Project::default();
@@ -1581,7 +1575,7 @@ mod tests {
             .with_size([300.0, 720.0])
             .build_ui_state(
                 move |ui, dialog: &mut Dialog| {
-                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh) {
                         dialog.show(ui.ctx(), &pool);
                     }
                 },
@@ -1605,7 +1599,7 @@ mod tests {
             .click();
         harness.run();
         assert!(!harness.state().is_open());
-        suite_ui::i18n::set_language(language);
+        j_ui::i18n::set_language(language);
     }
     #[test]
     fn unbundled_fallback_fonts_are_reported() {
@@ -1625,8 +1619,7 @@ mod tests {
         req.fonts.push(Font {
             family: "Inter".into(),
             original_family: "Inter".into(),
-            path: Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../suite-ui/assets/Inter-Regular.ttf"),
+            path: crate::test_util::font_file("Inter-Regular.ttf"),
             permitted: true,
         });
         let failure = collect(&req, || false, |_| {}).unwrap_err();

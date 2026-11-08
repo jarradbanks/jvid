@@ -1,12 +1,12 @@
 //! The project settings dialog: resolution, frame rate and background, applied as one undoable edit.
 
 use egui::Ui;
+use j_ui::theme;
+use j_ui::tokens::{radius, size, space};
+use j_ui::widgets::{Button, Checkbox, ColorField, DragField, Dropdown, State};
 use jvid_core::history::Command;
 use jvid_core::model::{Project, ProjectSettings};
 use jvid_core::time::Rate;
-use suite_ui::theme;
-use suite_ui::tokens::{radius, size, space};
-use suite_ui::widgets::{Button, Checkbox, ColorField, DragField, Dropdown, State};
 
 use crate::i18n::{Label, tr, trn, verbatim};
 
@@ -153,7 +153,7 @@ impl SettingsDialog {
                     ui.label(w);
                 }
                 ui.add_space(space::S16);
-                let actions = suite_ui::dialog::action_footer(
+                let actions = j_ui::dialog::action_footer(
                     ui,
                     [
                         Button::secondary(tr!("prompt.cancel")),
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn every_dropdown_menu_fits_inside_the_dialog_and_custom_isnt_a_choice() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let project = Project::default();
@@ -231,7 +231,7 @@ mod tests {
             .with_size([1280.0, 720.0])
             .build_ui_state(
                 move |ui, d: &mut SettingsDialog| {
-                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh) {
                         d.show(ui, &project);
                     }
                 },

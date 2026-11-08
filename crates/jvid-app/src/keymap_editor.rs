@@ -2,10 +2,10 @@
 //! Edits apply to the live keymap at once; the app saves them to `keymap.toml`.
 
 use egui::{Event, Key, KeyboardShortcut, Ui};
+use j_ui::theme;
+use j_ui::tokens::{radius, space};
+use j_ui::widgets::{Button, TextInput};
 use rfd::FileDialog;
-use suite_ui::theme;
-use suite_ui::tokens::{radius, space};
-use suite_ui::widgets::{Button, TextInput};
 
 use crate::i18n::tr;
 use crate::keymap::{self, ACTIONS, Keymap};
@@ -217,7 +217,7 @@ fn footer(ui: &mut Ui, error: Option<&str>, measure: bool) -> Option<Footer> {
             Button::secondary(label)
         }
     });
-    let actions = suite_ui::dialog::action_footer(ui, buttons);
+    let actions = j_ui::dialog::action_footer(ui, buttons);
     let mut action = None;
     for (response, value) in
         actions
@@ -319,7 +319,7 @@ mod tests {
         let mut fresh = true;
         let mut h = Harness::new_ui_state(
             move |ui, (ed, map)| {
-                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if !j_ui::test_support::install_theme(ui, &mut fresh) {
                     ed.show(ui, map);
                 }
             },
@@ -362,7 +362,7 @@ mod tests {
                     .with_pixels_per_point(scale)
                     .build_ui_state(
                         move |ui, (ed, map)| {
-                            if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                            if !j_ui::test_support::install_theme(ui, &mut fresh) {
                                 ed.show(ui, map);
                             }
                         },
@@ -419,21 +419,21 @@ mod tests {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                suite_ui::i18n::set_pseudo(false);
-                suite_ui::i18n::set_language("en");
+                j_ui::i18n::set_pseudo(false);
+                j_ui::i18n::set_language("en");
             }
         }
         let _restore = Restore;
         for language in ["de", "fr", "pt-BR", "en"] {
-            suite_ui::i18n::set_language(language);
-            suite_ui::i18n::set_pseudo(language == "en");
+            j_ui::i18n::set_language(language);
+            j_ui::i18n::set_pseudo(language == "en");
             chrome_fits_short_logical_viewports_even_with_an_import_error();
         }
     }
 
     #[test]
     fn list_fills_dialog_width() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut state = (KeymapEditor::default(), Keymap::default());
@@ -441,7 +441,7 @@ mod tests {
         let mut fresh = true;
         let mut h = Harness::builder().with_size([800.0, 600.0]).build_ui_state(
             move |ui, (ed, map)| {
-                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if !j_ui::test_support::install_theme(ui, &mut fresh) {
                     ed.show(ui, map);
                 }
             },

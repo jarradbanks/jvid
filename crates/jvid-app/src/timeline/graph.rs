@@ -9,13 +9,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use egui::{Align2, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, size, space};
+use j_ui::widgets::Button;
 use jvid_core::history::Command;
 use jvid_core::keyframe::{Easing, Keyframe, Value, value_at};
 use jvid_core::model::{Clip, ClipId, Sequence};
 use jvid_core::time::{Time, format_timecode};
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::Button;
 
 use super::keyframes::{caption, diamond, lanes, shift_keys};
 use super::{Edit, Timeline, View, secs, tick_steps};
@@ -753,7 +753,7 @@ mod tests {
 
     #[test]
     fn dragging_a_key_moves_time_and_value_and_undoes_in_one_step() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (mut h, id) = opened();
@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn dragging_a_handle_sets_the_matching_bezier_and_undoes() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (mut h, id) = opened();

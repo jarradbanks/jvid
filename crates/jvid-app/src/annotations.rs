@@ -4,15 +4,15 @@
 use std::collections::HashSet;
 
 use egui::{Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use j_ui::theme;
+use j_ui::themes::DARK;
+use j_ui::tokens::{color, size, space};
+use j_ui::widgets::{ColorField, DragField, KeyButton, Keyed};
 use jvid_core::annotations::{Annotation, AnnotationKind, AnnotationStyle};
 use jvid_core::history::{Command, GestureKey, History};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
 use jvid_core::model::{Clip, ClipId, Edge, ModelError, Project, Transform};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
-use suite_ui::theme;
-use suite_ui::themes::DARK;
-use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{ColorField, DragField, KeyButton, Keyed};
 
 use crate::i18n::{tr, verbatim};
 use crate::timeline::Edit;
@@ -670,7 +670,7 @@ mod tests {
 
     impl eframe::App for Editor {
         fn ui(&mut self, ui: &mut Ui, _: &mut eframe::Frame) {
-            if suite_ui::test_support::install_theme(ui, &mut self.fresh) {
+            if j_ui::test_support::install_theme(ui, &mut self.fresh) {
                 return;
             }
             egui::Panel::right("annotation inspector")
@@ -729,12 +729,12 @@ mod tests {
             return;
         }
         use egui_kittest::{Harness, kittest::Queryable};
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
-        let previous_language = suite_ui::i18n::language();
+        let previous_language = j_ui::i18n::language();
         if let Ok(language) = std::env::var("JVID_N_UI_LANGUAGE") {
-            suite_ui::i18n::set_language(&language);
+            j_ui::i18n::set_language(&language);
         }
         for (dpi, kind) in [1.0, 1.5].into_iter().flat_map(|dpi| {
             [
@@ -814,6 +814,6 @@ mod tests {
                     .unwrap();
             }
         }
-        suite_ui::i18n::set_language(previous_language);
+        j_ui::i18n::set_language(previous_language);
     }
 }

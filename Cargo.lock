@@ -2235,6 +2235,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "j-ui"
+version = "0.1.0"
+source = "git+https://github.com/jarradbanks/j-ui?tag=v0.1.0#0659f5e4ed96228336b566504f1f0d6e275ebbaa"
+dependencies = [
+ "egui",
+ "serde",
+ "sys-locale",
+ "toml",
+]
+
+[[package]]
 name = "jni"
 version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2322,6 +2333,7 @@ dependencies = [
  "egui_dock",
  "egui_kittest",
  "image",
+ "j-ui",
  "jvid-audio",
  "jvid-core",
  "jvid-jobs",
@@ -2337,7 +2349,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "suite-ui",
  "syn 2.0.119",
  "tempfile",
  "toml",
@@ -2362,12 +2373,12 @@ dependencies = [
 name = "jvid-cli"
 version = "1.1.0"
 dependencies = [
+ "j-ui",
  "jvid-app",
  "jvid-core",
  "jvid-jobs",
  "jvid-log",
  "jvid-media",
- "suite-ui",
 ]
 
 [[package]]
@@ -2424,10 +2435,10 @@ version = "1.1.0"
 dependencies = [
  "cosmic-text",
  "image",
+ "j-ui",
  "jvid-core",
  "jvid-media",
  "naga",
- "suite-ui",
  "wgpu",
 ]
 
@@ -4314,19 +4325,6 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
-
-[[package]]
-name = "suite-ui"
-version = "1.1.0"
-dependencies = [
- "eframe",
- "egui",
- "egui_kittest",
- "serde",
- "suite-ui",
- "sys-locale",
- "toml",
-]
 
 [[package]]
 name = "swash"

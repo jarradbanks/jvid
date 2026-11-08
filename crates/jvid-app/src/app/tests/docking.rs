@@ -435,7 +435,7 @@ fn standalone_transcript_keeps_its_title_and_close_action() {
     let mut fresh = true;
     let mut h = Harness::builder().with_size([320.0, 240.0]).build_ui_state(
         move |ui, (panel, closed): &mut (crate::transcript::TranscriptPanel, bool)| {
-            if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+            if !j_ui::test_support::install_theme(ui, &mut fresh) {
                 *closed |= panel
                     .show(ui, &Project::default(), &HashSet::new(), Time(0), true)
                     .close;

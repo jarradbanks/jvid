@@ -7,14 +7,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use egui::Ui;
+use j_ui::tokens::{color, space};
+use j_ui::widgets::{Button, Checkbox, TextInput};
 use jvid_core::history::Command;
 use jvid_core::model::{ClipId, Project};
 use jvid_core::personal_presets::{Preset, Style};
 use jvid_core::settings_transfer::{Animation, Category, PresetError, Resource};
 use jvid_core::time::Time;
 use serde::{Deserialize, Serialize};
-use suite_ui::tokens::{color, space};
-use suite_ui::widgets::{Button, Checkbox, TextInput};
 
 use crate::i18n::tr;
 use crate::keymap::Applicability;
@@ -1320,10 +1320,10 @@ mod tests {
         };
         let (history, ids) = fixture(category);
         let mut fresh = true;
-        let previous = suite_ui::i18n::language();
+        let previous = j_ui::i18n::language();
         let language = std::env::var("JVID_P2_UI_LANGUAGE").ok();
         if let Some(language) = &language {
-            suite_ui::i18n::set_language(language);
+            j_ui::i18n::set_language(language);
         }
         let artifacts = std::env::var_os("JVID_P2_UI_ARTIFACTS").map(PathBuf::from);
         let builder = egui_kittest::Harness::builder()
@@ -1331,7 +1331,7 @@ mod tests {
             .with_pixels_per_point(scale);
         let builder = if artifacts.is_some() {
             assert!(
-                suite_ui::test_support::gpu(),
+                j_ui::test_support::gpu(),
                 "UI artifacts require a rendering backend"
             );
             builder.wgpu()
@@ -1340,7 +1340,7 @@ mod tests {
         };
         let mut harness = builder.build_ui_state(
             |ui, history: &mut History| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 ui.painter().rect_filled(ui.max_rect(), 0.0, color::panel());
@@ -1402,7 +1402,7 @@ mod tests {
         harness.run();
         harness.get_by_label(tr!("personal_presets.confirm_delete"));
         if language.is_some() {
-            suite_ui::i18n::set_language(previous);
+            j_ui::i18n::set_language(previous);
         }
     }
 }

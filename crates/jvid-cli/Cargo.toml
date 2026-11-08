@@ -19,7 +19,7 @@ jvid-log.workspace = true
 
 [dev-dependencies]
 jvid-media = { workspace = true, features = ["test-support"] }
-suite-ui = { workspace = true, features = ["test-support"] }
+j-ui = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

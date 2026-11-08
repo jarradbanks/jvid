@@ -6,13 +6,13 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
 use egui::RichText;
+use j_ui::dialog::action_footer;
+use j_ui::theme;
+use j_ui::tokens::{color, radius, space};
+use j_ui::widgets::{Button, State};
 use jvid_jobs::{Handle, Pool};
 use jvid_transcribe::Error;
 use jvid_transcribe::models::{self, Model};
-use suite_ui::dialog::action_footer;
-use suite_ui::theme;
-use suite_ui::tokens::{color, radius, space};
-use suite_ui::widgets::{Button, State};
 
 use crate::i18n::{tr, verbatim};
 
@@ -300,7 +300,7 @@ mod tests {
         let mut fresh = true;
         let mut h = egui_kittest::Harness::new_ui_state(
             move |ui, c: &mut Components| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 c.show(ui.ctx());
@@ -343,7 +343,7 @@ mod layout_tests {
                     .with_pixels_per_point(scale)
                     .build_ui_state(
                         move |ui, c: &mut Components| {
-                            if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                            if !j_ui::test_support::install_theme(ui, &mut fresh) {
                                 c.show_at(ui.ctx(), Some(path.clone()));
                             }
                         },
@@ -393,7 +393,7 @@ mod layout_tests {
 
     #[test]
     fn optional_components_narrow_snapshot() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut fresh = true;
@@ -407,7 +407,7 @@ mod layout_tests {
             .with_size([384.0, 420.0])
             .wgpu()
             .build_ui(move |ui| {
-                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if !j_ui::test_support::install_theme(ui, &mut fresh) {
                     components.show_at(ui.ctx(), Some(PathBuf::from("models")));
                 }
             });
@@ -421,14 +421,14 @@ mod layout_tests {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                suite_ui::i18n::set_pseudo(false);
-                suite_ui::i18n::set_language("en");
+                j_ui::i18n::set_pseudo(false);
+                j_ui::i18n::set_language("en");
             }
         }
         let _restore = Restore;
         for language in ["de", "fr", "ja", "en"] {
-            suite_ui::i18n::set_language(language);
-            suite_ui::i18n::set_pseudo(language == "en");
+            j_ui::i18n::set_language(language);
+            j_ui::i18n::set_pseudo(language == "en");
             models_sizes_and_actions_align_at_narrow_widths_and_scales();
         }
     }
@@ -451,7 +451,7 @@ mod layout_tests {
         let mut fresh = true;
         let mut h = egui_kittest::Harness::builder().build_ui_state(
             move |ui, c: &mut Components| {
-                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if !j_ui::test_support::install_theme(ui, &mut fresh) {
                     c.show_at(ui.ctx(), Some(path.clone()));
                 }
             },
