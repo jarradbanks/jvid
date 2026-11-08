@@ -1,3 +1,7 @@
+[net]
+# Use Git's configured credentials for private Git dependencies.
+git-fetch-with-cli = true
+
 [env]
 # whisper.cpp (whisper-rs-sys) defaults to -march=native, which crashes on older CPUs and lets
 # CI caches carry one runner's CPU flags to another. OFF builds the x86-64-v3 baseline.

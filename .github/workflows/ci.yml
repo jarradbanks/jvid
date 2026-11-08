@@ -77,6 +77,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch locked private UI dependency
+        uses: ./.github/actions/j-ui
+        with:
+          deploy-key: ${{ secrets.J_UI_DEPLOY_KEY }}
       # rust-toolchain.toml pins stable + rustfmt + clippy; rustup installs it on first cargo call.
       - run: rustup show
       # Only main saves: PR caches are never reused, and they evicted main's under the 10 GB limit.
@@ -208,12 +212,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch locked private UI dependency
+        uses: ./.github/actions/j-ui
+        with:
+          deploy-key: ${{ secrets.J_UI_DEPLOY_KEY }}
       - uses: EmbarkStudios/cargo-deny-action@v2
+        env:
+          # Docker actions mount the checkout at this path, rather than the host path.
+          # The mirror is already authenticated and checked against Cargo.lock.
+          GIT_CONFIG_COUNT: '2'
+          GIT_CONFIG_KEY_0: url.file:///github/workspace/.j-ui-ci.insteadOf
+          GIT_CONFIG_VALUE_0: https://github.com/jarradbanks/j-ui
+          GIT_CONFIG_KEY_1: safe.directory
+          GIT_CONFIG_VALUE_1: /github/workspace/.j-ui-ci
 
   i18n:
     needs: changes
     if: needs.changes.outputs.i18n == 'true'
     uses: ./.github/workflows/i18n.yml
+
+  dependency-auth-tests:
+    name: private dependency setup tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: node --test .github/actions/j-ui/dependency.test.cjs
 
   release-automation:
     name: release automation tests
@@ -229,7 +253,7 @@ jobs:
   # Require this one check in branch protection; the individual jobs may legitimately skip.
   required:
     name: CI required
-    needs: [changes, check, deny, i18n, release-automation]
+    needs: [changes, check, deny, i18n, release-automation, dependency-auth-tests]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -240,6 +264,9 @@ jobs:
         with:
           script: |
             const needs = JSON.parse(process.env.NEEDS);
+            if (needs['dependency-auth-tests'].result !== 'success') {
+              core.setFailed(`Private dependency setup ${needs['dependency-auth-tests'].result}`);
+            }
             if (needs['release-automation'].result !== 'success') {
               core.setFailed(`Release automation ${needs['release-automation'].result}`);
             }

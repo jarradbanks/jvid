@@ -23,6 +23,22 @@ jvid links FFmpeg 4.4 to 8.x dynamically ([ADR 0001](docs/adr/0001-ffmpeg-bindin
 
 The default build expects an LGPL FFmpeg. Build with `--features gpl-ffmpeg` if you link a GPL one (e.g. Homebrew's); otherwise jvid logs a warning at startup. The startup log line `ffmpeg loaded` shows the version, licence and codecs found.
 
+### Private UI dependency
+
+`j-ui` is a private Git dependency pinned by tag and commit in `Cargo.lock`. Developers
+need access to `jarradbanks/j-ui` and Git credentials (for example, `gh auth login` then
+`gh auth setup-git`). Cargo uses the Git CLI through `.cargo/config.toml`.
+
+GitHub-hosted CI uses the `J_UI_DEPLOY_KEY` Actions secret: an SSH deploy key with read-only
+access to j-ui alone. `.github/actions/j-ui` checks out the locked tag, verifies its commit,
+and lets Cargo fetch from that local checkout. Checkout removes the SSH credentials after
+fetching; the original dependency URL, tag and commit remain in Cargo metadata and source
+bundles. Dependency checks in Docker use the same checkout at the container's workspace path.
+
+Fork pull requests do not receive this secret. A maintainer must put the reviewed change on
+a repository branch to run jobs that need the private dependency. Released source bundles
+include the vendored dependency and support offline builds without credentials.
+
 ## Making a change
 
 1. Branch from `main`.

@@ -3,6 +3,8 @@ name: Updater
 on:
   pull_request:
     paths:
+      - '.github/actions/j-ui/**'
+      - '.cargo/config.toml'
       - '.github/workflows/updater.yml'
       - 'crates/jvid-updater/**'
       - 'packaging/windows.iss'
@@ -23,6 +25,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch locked private UI dependency
+        uses: ./.github/actions/j-ui
+        with:
+          deploy-key: ${{ secrets.J_UI_DEPLOY_KEY }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

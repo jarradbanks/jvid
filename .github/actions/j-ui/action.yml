@@ -1,0 +1,37 @@
+name: Private j-ui dependency
+description: Fetch the locked UI kit with a read-only deploy key and make it available to Cargo.
+
+inputs:
+  deploy-key:
+    description: Read-only SSH deploy key for jarradbanks/j-ui.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Read the locked j-ui tag and revision
+      id: locked
+      shell: bash
+      env:
+        J_UI_DEPLOY_KEY: ${{ inputs.deploy-key }}
+      run: |
+        if [[ -z "$J_UI_DEPLOY_KEY" ]]; then
+          echo '::error::J_UI_DEPLOY_KEY is required to fetch private j-ui. Fork pull requests need a maintainer branch with dependency access.'
+          exit 1
+        fi
+        node "$GITHUB_ACTION_PATH/dependency.cjs" resolve
+    - name: Fetch private j-ui
+      uses: actions/checkout@v4
+      with:
+        repository: jarradbanks/j-ui
+        ref: ${{ steps.locked.outputs.tag }}
+        path: .j-ui-ci
+        ssh-key: ${{ inputs.deploy-key }}
+        persist-credentials: false
+        fetch-depth: 0
+        show-progress: false
+    - name: Use the verified checkout for Cargo Git fetches
+      shell: bash
+      env:
+        J_UI_EXPECTED_REVISION: ${{ steps.locked.outputs.revision }}
+      run: node "$GITHUB_ACTION_PATH/dependency.cjs" configure
