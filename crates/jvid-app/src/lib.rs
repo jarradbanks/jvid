@@ -1,8 +1,5 @@
 //! The jvid desktop video editor's code, shared by its binary and the headless `jvid` CLI.
 
-// Preserve the updater module verbatim during the UI kit extraction.
-extern crate j_ui as suite_ui;
-
 mod annotations;
 pub mod app;
 mod autosave;

@@ -1,8 +1,6 @@
 use ed25519_dalek::SigningKey;
-use jvid_updater::{
-    MANIFEST, SIGNATURE,
-    metadata::{self, PACKAGES},
-};
+use j_update::metadata;
+use jvid_update_config::{MANIFEST, PACKAGES, SIGNATURE, with_public_key};
 use std::{fs, process::Command};
 
 #[test]
@@ -38,11 +36,11 @@ fn pipeline_generator_signs_exact_final_artifacts_and_rejects_a_mismatched_key()
     );
     let bytes = fs::read(dir.path().join(MANIFEST)).unwrap();
     let sig = fs::read(dir.path().join(SIGNATURE)).unwrap();
-    let manifest = metadata::verify(&bytes, &sig, &key).unwrap();
+    let manifest = metadata::verify(&bytes, &sig, &with_public_key(key, "external")).unwrap();
     assert_eq!(manifest.assets.len(), PACKAGES.len());
     for asset in &manifest.assets {
         let payload = fs::read(dir.path().join(&asset.name)).unwrap();
-        jvid_updater::network::copy_verified(
+        j_update::network::copy_verified(
             payload.as_slice(),
             std::io::sink(),
             asset,

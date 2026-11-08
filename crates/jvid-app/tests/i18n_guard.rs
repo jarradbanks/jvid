@@ -613,6 +613,21 @@ impl Guard<'_> {
 
     /// Checks a `tr!`/`trn!` key and its named arguments, then the argument values.
     fn translation(&mut self, name: &str, args: Punctuated<Expr, Token![,]>) {
+        // Shared widgets use their own catalog; app macros keep the app catalog.
+        let catalog = match args.first() {
+            Some(Expr::Path(p))
+                if p.path
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::")
+                    == "j_ui::i18n::CATALOG" =>
+            {
+                &j_ui::i18n::CATALOG
+            }
+            _ => self.catalog,
+        };
         let mut key = None;
         let mut names = BTreeSet::new();
         for mut arg in args {
@@ -644,16 +659,13 @@ impl Guard<'_> {
                 .into(),
             _ => vec![key.clone()],
         };
-        let english = forms
-            .iter()
-            .filter_map(|f| self.catalog.get_in("en", f))
-            .count();
-        if english == 0 || (name == "trn" && self.catalog.get_in("en", &forms[2]).is_none()) {
+        let english = forms.iter().filter_map(|f| catalog.get_in("en", f)).count();
+        if english == 0 || (name == "trn" && catalog.get_in("en", &forms[2]).is_none()) {
             return self.report(format!("`{name}!` key {key:?} isn't in en.toml"));
         }
         for lang in LANGUAGES {
             for form in &forms {
-                let Some(text) = self.catalog.get_in(lang, form) else {
+                let Some(text) = catalog.get_in(lang, form) else {
                     continue;
                 };
                 for p in placeholders(text) {
@@ -665,7 +677,7 @@ impl Guard<'_> {
         }
         let used: BTreeSet<&str> = LANGUAGES
             .iter()
-            .flat_map(|l| forms.iter().filter_map(|f| self.catalog.get_in(l, f)))
+            .flat_map(|l| forms.iter().filter_map(|f| catalog.get_in(l, f)))
             .flat_map(placeholders)
             .collect();
         for n in &names {
@@ -1088,6 +1100,37 @@ fn exemptions_hold_with_either_path_separator() {
         }
         let elsewhere = check_source(r"crates\jvid-app\src\welcome.rs", &source, catalog);
         assert_eq!(elsewhere.len(), 2, "{elsewhere:?}");
+    }
+}
+
+#[test]
+fn shared_catalog_keys_and_placeholders_are_checked_separately_from_app_copy() {
+    static APP: Catalog = Catalog::new(j_ui::test_support::en_es(
+        "only_app = \"App text\"\n",
+        "only_app = \"Texto de la app\"\n",
+    ));
+    let allowed = r#"
+        fn ui(ui: &mut egui::Ui, version: &str) {
+            ui.label(j_ui::tr!(j_ui::i18n::CATALOG, "updates.title"));
+            ui.label(j_ui::tr!(j_ui::i18n::CATALOG, "updates.installed", version = version));
+            ui.label(tr!("only_app"));
+        }
+    "#;
+    assert!(check_source("shared.rs", allowed, &APP).is_empty());
+    let invalid = r#"
+        fn ui(ui: &mut egui::Ui) {
+            ui.label(j_ui::tr!(j_ui::i18n::CATALOG, "only_app"));
+            ui.label(j_ui::tr!(j_ui::i18n::CATALOG, "updates.installed"));
+            ui.label(tr!("updates.title"));
+        }
+    "#;
+    let findings = check_source("shared.rs", invalid, &APP).join("\n");
+    for expected in [
+        "key \"only_app\" isn't in en.toml",
+        "uses {version}, not passed",
+        "key \"updates.title\" isn't in en.toml",
+    ] {
+        assert!(findings.contains(expected), "{findings}");
     }
 }
 

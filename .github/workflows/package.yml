@@ -9,7 +9,7 @@ on:
       - 'scripts/packaging/**'
       - 'scripts/release/**'
       - 'crates/jvid-paths/**'
-      - 'crates/jvid-updater/**'
+      - 'crates/jvid-update-config/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'assets/**'
@@ -174,7 +174,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cargo build --locked --release -p jvid-updater --bin jvid-update-helper
+          cargo build --locked --release -p jvid-update-config --bin jvid-update-helper
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Assemble Windows installer and portable ZIP
         if: runner.os == 'Windows'
@@ -342,7 +342,7 @@ jobs:
           JVID_UPDATE_SIGNING_KEY: ${{ secrets.JVID_UPDATE_SIGNING_KEY }}
         run: |
           test -n "$JVID_UPDATE_SIGNING_KEY" && test -n "$JVID_UPDATE_PUBLIC_KEY"
-          cargo run --release --locked -p jvid-updater --bin jvid-update-metadata -- "${GITHUB_REF_NAME#v}" packaging/release-notes.md release-assets
+          cargo run --release --locked -p jvid-update-config --bin jvid-update-metadata -- "${GITHUB_REF_NAME#v}" packaging/release-notes.md release-assets
           test -s release-assets/jvid-update.json
           test "$(wc -c < release-assets/jvid-update.json.sig)" -eq 64
       - name: Verify, upload draft assets and publish

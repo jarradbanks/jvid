@@ -160,7 +160,7 @@ package includes `THIRD-PARTY-NOTICES.txt`, jvid's licenses, runtime license tex
 Portable data is never part of an archive's payload or inventory.
 
 Windows packaging builds
-`cargo build --release --locked -p jvid-updater --bin jvid-update-helper --target x86_64-pc-windows-msvc` and puts
+`cargo build --release --locked -p jvid-update-config --bin jvid-update-helper --target x86_64-pc-windows-msvc` and puts
 `jvid-update-helper.exe` beside the editor. The same repository variable
 `JVID_UPDATE_PUBLIC_KEY` is passed at build time to the app and helper, along with
 `JVID_UPDATE_VERSION` set to the canonical version without `v`. The public key
@@ -172,7 +172,7 @@ assets (and signing/notarization) and before checksums/release creation; the pro
 ```sh
 # JVID_UPDATE_SIGNING_KEY: secret 64-hex raw Ed25519 seed.
 # JVID_UPDATE_PUBLIC_KEY: matching public key used to compile app and helper.
-cargo run --release --locked -p jvid-updater --bin jvid-update-metadata -- \
+cargo run --release --locked -p jvid-update-config --bin jvid-update-metadata -- \
   "$version" packaging/release-notes.md release-assets
 ```
 

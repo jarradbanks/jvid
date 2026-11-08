@@ -126,7 +126,7 @@ impl Welcome {
                     .max_rect()
                     .shrink2(vec2(space::GUTTER + space::INSET, 0.0));
                 let p = ui.painter();
-                let version = jvid_updater::VERSION;
+                let version = jvid_update_config::VERSION;
                 #[cfg(test)]
                 let version = self.snapshot_version.unwrap_or(version);
                 let version = format!("{}{}", verbatim("v"), version);

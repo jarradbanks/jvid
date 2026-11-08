@@ -241,7 +241,7 @@ pub struct App {
     components: crate::components::Components,
     preferences: crate::preferences::Preferences,
     updates: crate::updates::Updates,
-    update_install: std::sync::Arc<std::sync::Mutex<Option<jvid_updater::install::Prepared>>>,
+    update_install: std::sync::Arc<std::sync::Mutex<Option<j_update::install::Prepared>>>,
     /// The `language` setting: `system` or a language code.
     language: String,
     /// The `input_device` setting: a device name, empty for the system default.
@@ -877,12 +877,7 @@ impl App {
                 self.components.open = true;
             }
             if ui.button(tr!("updates.check")).clicked() {
-                // A prepared download stays available when reopening the update window.
-                if matches!(self.updates.state, jvid_updater::state::State::Ready(_)) {
-                    self.updates.open = true;
-                } else {
-                    self.updates.check(true);
-                }
+                self.updates.check(true);
             }
             if ui.button(tr!("menu.about")).clicked() {
                 self.prompts.push(Prompt::About);
@@ -1995,8 +1990,8 @@ impl App {
         self.prompts.push(Prompt::Error(message));
     }
 
-    fn update_work(&self) -> jvid_updater::state::Work {
-        jvid_updater::state::Work {
+    fn update_work(&self) -> j_update::state::Work {
+        j_update::state::Work {
             unsaved: self.history.is_dirty(),
             recording: self.take.is_some(),
             exporting: self.queue.unsettled() || !self.exports.is_idle(),
@@ -2012,7 +2007,7 @@ impl App {
     }
 
     fn install_update_with(&mut self, ctx: &egui::Context, save: impl FnOnce(&mut Self) -> bool) {
-        if !matches!(self.updates.state, jvid_updater::state::State::Ready(_)) {
+        if !matches!(self.updates.state(), j_update::state::State::Ready(_)) {
             return;
         }
         let mut work = self.update_work();
@@ -2076,7 +2071,7 @@ impl App {
                 verbatim("jvid"),
                 format!(
                     "{}\n\n{}\n{}",
-                    tr!("about.version", version = jvid_updater::VERSION),
+                    tr!("about.version", version = jvid_update_config::VERSION),
                     tr!("about.samples"),
                     crate::samples::credits().join("\n")
                 )
