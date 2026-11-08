@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "runtime": {
-    "repository": "BtbN/FFmpeg-Builds",
+    "repository": "FFmpeg-Builds/FFmpeg-Builds",
     "build_scripts_commit": "937868360a21d711ec94a33f5591d345ad9b7754",
     "run_id": 40192150700,
     "target": "win64",
