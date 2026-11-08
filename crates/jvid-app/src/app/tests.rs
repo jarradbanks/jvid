@@ -876,7 +876,7 @@ fn welcome_snapshots() {
     // stable like the recent-project timestamps below; normal UI uses the build version.
     fn snapshot_harness(size: [f32; 2], ppp: f32) -> Harness<'static, App> {
         let mut h = welcome_harness(size, ppp);
-        let actual_version = format!("v{}", jvid_updater::VERSION);
+        let actual_version = format!("v{}", jvid_update_config::VERSION);
         assert!(h.output().shapes.iter().any(|shape| {
             matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == actual_version)
         }));

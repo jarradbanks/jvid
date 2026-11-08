@@ -1,6 +1,6 @@
 [package]
-name = "jvid-updater"
-description = "Authenticated GitHub release updates and an independent installer helper."
+name = "jvid-update-config"
+description = "jvid's pinned release contract and thin shared-updater entry points."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,13 +8,14 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-serde.workspace = true
+j-update.workspace = true
+
+[dev-dependencies]
 serde_json.workspace = true
 semver.workspace = true
 sha2.workspace = true
 ed25519-dalek.workspace = true
 tempfile.workspace = true
-ureq.workspace = true
 
 [lints]
 workspace = true

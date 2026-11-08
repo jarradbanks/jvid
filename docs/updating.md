@@ -7,7 +7,8 @@ when automatic checks are off. Checks require network access to the public GitHu
 API and downloads; offline/rate-limit/TLS errors are shown with retry available.
 
 The updater sorts published stable tags by semantic version, excluding drafts, prerelease
-flags, prerelease version strings, equal versions and downgrades. It selects an exact
+flags, prerelease version strings, equal versions and downgrades. It checks the newest
+stable release and selects an exact
 target/distribution pair from authenticated metadata. Newer releases without a compatible
 asset cannot cause a wrong-platform download or an incorrect “up to date” result.
 
@@ -28,7 +29,8 @@ The Windows install button is disabled while recording, exporting (including can
 still unwinding), downloading/loading/transcribing a model, or in a tutorial. Unsaved edits
 offer **Save, Update and Restart**; cancelling the save dialog or a failed save leaves the
 editor open and the verified download ready. **Later** retains the staged download for this
-session. Closing the editor without installing removes that download. The install guard is
+session. Dismissing an active download cancels it; dismissing a verified download keeps it
+ready. Closing the editor without installing removes that download. The install guard is
 checked again after saving. The helper is launched only after eframe shuts down, waits for
 the editor process to exit, and never force-closes a second instance or reboots Windows.
 
@@ -40,13 +42,31 @@ these properties; see the installation layout in `docs/packaging.md` from #476.
 
 ## Authentication and pipeline integration
 
-`jvid-updater` has no UI/media/FFmpeg dependency. It contains the app's check/download logic,
-`jvid-update-helper` and `jvid-update-metadata`. The [Package workflow](../.github/workflows/package.yml)
+`j-update` from j-ui v0.2.0 owns checks, downloads, verification, worker state, signing and
+installer handoff. `j_ui::update::Prompt` owns the prompt and progress presentation.
+`jvid-update-config` has no UI/media/FFmpeg dependency: it retains jvid's release identity,
+build-time target/version/public-key configuration, and tiny `jvid-update-helper` and
+`jvid-update-metadata` entry points calling the shared implementation. The helper must
+compile in its own trusted config; j-update intentionally provides no generic helper that
+loads a public key from an update stage. The [Package workflow](../.github/workflows/package.yml)
 builds the helper for Windows, passes the same public key/version to the editor and helper,
 asserts all five native assets, and generates metadata in its protected **approve, sign and publish** job.
 The generator reads its seed only from the environment, rejects a mismatched public key,
 hashes final versioned files, signs the exact UTF-8 manifest bytes and verifies its output.
 The detached signature is 64 raw bytes, not hex/base64.
+
+This migration preserves the public `jarradbanks/jvid` repository, anonymous access,
+`JVID_UPDATE_PUBLIC_KEY` / `JVID_UPDATE_SIGNING_KEY`, all five asset names, the schema-1
+wire format, `jvid-distribution`, `jvid.portable`, `jvid-app.exe`, `jvid-update-helper.exe`,
+`automatic_update_checks` and the existing report/data paths. Already-installed builds
+with the production key and working helper need no migration or new credentials. The
+pre-0.2.1 helper's existing manual bootstrap requirement below still applies.
+
+The shared updater reports an incompatible or invalid newest release instead of falling
+back to an older candidate. Install preparation requires a stable installed version without
+build metadata, verifies the parent process identity, and defers while any other jvid
+instance in the installation is running. Automatic checks still only notify; saves,
+active-job guards, preferences, reports and final shutdown remain owned by jvid.
 
 ### Release prerequisites
 
@@ -241,7 +261,7 @@ For a protected pipeline that receives already finalized assets, the exact metad
 
 ```sh
 python scripts/packaging/assert_assets.py release-assets
-cargo run --release --locked -p jvid-updater --bin jvid-update-metadata -- \
+cargo run --release --locked -p jvid-update-config --bin jvid-update-metadata -- \
   "$release_version" packaging/release-notes.md release-assets
 python scripts/packaging/checksums.py release-assets
 ```
@@ -253,7 +273,7 @@ workflow's completeness assertion is mandatory for the production five-package c
 Schema 1 has `schema`, `repository` (`jarradbanks/jvid`), canonical `version`, plain-text
 `notes`, and `assets`. Each asset has `target`, `distribution`, exact versioned `name`,
 `size` in bytes and a hex `sha256`. The recognized filenames and target mapping are in
-`jvid_updater::metadata::PACKAGES`. Unknown fields/schema, duplicate target/format pairs,
+`jvid_update_config::PACKAGES`. Unknown fields/schema, duplicate target/format pairs,
 zero/oversized files, invalid hashes/names, mismatched tags and invalid signatures fail.
 The pinned key authenticates the whole manifest (including notes, version and selection);
 SHA-256 and size bind the installer to it. A checksum supplied with an unsigned download
@@ -266,8 +286,9 @@ release metadata cannot change the app's trust root.
 
 Downloads use a unique private temporary directory and bounded reads. Cancellation,
 truncation, corruption, network errors and disk/write failures never touch the installation.
-Failed/retried downloads do not reuse partial bytes. Network reads time out after 30 seconds;
-a blocked read can take that long to observe Cancel. Permissions/helper/layout failures
+Failed/retried downloads do not reuse partial bytes. Connections have a 10-second budget,
+API requests 30 seconds, and artifact operations 600 seconds including redirects; a blocked
+download can take until its request times out to observe Cancel. Permissions/helper/layout failures
 before shutdown keep the editor open. A helper launch failure leaves the installation
 unchanged and is recorded for the next launch.
 
@@ -297,6 +318,10 @@ still runs its old helper, even when the downloaded installer contains the fix. 
 same installation directory; the installer preserves user data as described above.
 
 ## Validation status
+
+The generic updater's metadata/network/worker/install tests now live in j-update; jvid
+retains release-contract and pipeline-generator tests, preference/report and shared-prompt
+integration tests, final-save/active-work guards, and the production Inno-script fixture.
 
 The original implementation passed GPL workspace tests (**995 passed, 0 failed,
 9 ignored**), strict workspace/all-targets GPL clippy, formatting, translation guard,
@@ -336,7 +361,7 @@ Run the opt-in updater fixture on native Windows with Inno Setup 6:
 
 ```powershell
 $env:JVID_INNO_ISCC = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
-cargo test --locked -p jvid-updater --lib native_inno_upgrade -- --ignored --nocapture
+cargo test --locked -p jvid-update-config --test inno native_inno_upgrade -- --ignored --nocapture
 ```
 
 Not yet exercised: a real installed editor detecting and upgrading from published signed
@@ -346,5 +371,5 @@ reboot-required upgrade, preservation of real installed projects/settings/models
 and macOS/Linux/Windows portable replacement on clean machines. Their manual update routes
 do not implement self-update. These are acceptance limitations, not completed criteria.
 
-New update copy is translated in English and Spanish. Other locales currently show the
-English update copy.
+Shared prompt translations come from j-ui. jvid retains its manual-package instructions
+and Help-menu/link labels in the app catalog.

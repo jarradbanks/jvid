@@ -1,7 +1,25 @@
 //! Opt-in real Inno file-upgrade test. No profile installation, shortcuts or registry
 //! registration: only the installer identity/integration are isolated from windows.iss.
-use super::*;
-use crate::metadata::{Asset, Manifest};
+#![cfg(windows)]
+use j_update::{
+    install::{Plan, run_helper},
+    metadata::{Asset, Manifest},
+};
+use jvid_update_config::{MANIFEST, SIGNATURE, TARGET, VERSION, with_public_key};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+fn run_helper_with_key(stage: &Path, key: &[u8; 32]) -> j_update::Result<()> {
+    run_helper(
+        &with_public_key(*key, "windows-installer"),
+        VERSION,
+        stage,
+        &(),
+    )
+}
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 
@@ -16,7 +34,7 @@ fn command_ok(command: &mut Command) {
 }
 
 fn fixture_script() -> String {
-    let original = include_str!("../../../../packaging/windows.iss");
+    let original = include_str!("../../../packaging/windows.iss");
     let mut script = String::new();
     let mut section = "";
     for line in original.lines() {
@@ -91,7 +109,7 @@ fn sign_stage(stage: &Path, setup: &Path, version: &str, key: &SigningKey) {
     fs::write(stage.join(name), &payload).unwrap();
     let manifest = Manifest {
         schema: 1,
-        repository: crate::REPOSITORY.into(),
+        repository: jvid_update_config::REPOSITORY.into(),
         version: version.into(),
         notes: "Disposable Inno integration fixture".into(),
         assets: vec![Asset {
@@ -130,12 +148,12 @@ fn inno_upgrade(already_exited: bool) {
     fs::write(&script, fixture_script()).unwrap();
     fs::write(
         out.join("fixture-icon.ico"),
-        include_bytes!("../../../../assets/jvid.ico"),
+        include_bytes!("../../../assets/jvid.ico"),
     )
     .unwrap();
     fs::write(
         dir.path().join("whisper-models.iss"),
-        include_str!("../../../../packaging/whisper-models.iss"),
+        include_str!("../../../packaging/whisper-models.iss"),
     )
     .unwrap();
     fs::write(
