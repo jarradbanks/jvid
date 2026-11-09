@@ -1,9 +1,9 @@
 //! The easing picker: presets plus a curve with draggable bezier handles.
 
 use egui::{Pos2, Rect, Sense, Shape, Stroke, Ui, vec2};
+use j_ui::tokens::{color, space};
+use j_ui::widgets::Segmented;
 use jvid_core::keyframe::Easing;
-use suite_ui::tokens::{color, space};
-use suite_ui::widgets::Segmented;
 
 use crate::i18n::tr;
 

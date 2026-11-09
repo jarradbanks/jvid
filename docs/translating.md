@@ -1,5 +1,10 @@
 # Translating jvid
 
+The shared widget and gallery catalogs, fonts and their checks live in the standalone
+[j-ui repository](https://github.com/jarradbanks/j-ui). Paths beginning `../j-ui` assume
+a sibling checkout. Update and tag j-ui, then bump jvid's dependency when shared text or
+font coverage changes. jvid's own catalogs and translation checks stay here.
+
 jvid ships in English and Spanish, and registers 17 more languages whose translations land one
 at a time: French, German, Italian, Brazilian Portuguese, Dutch, Polish, Czech, Turkish,
 Russian, Ukrainian, Swedish, Danish, Norwegian Bokmål, Catalan, Japanese, Simplified Chinese
@@ -13,8 +18,8 @@ in the [glossary](i18n/glossary.md); each language keeps its translation of it i
 | Catalog | Read by |
 | --- | --- |
 | `crates/jvid-app/i18n/<code>.toml` | the editor, through `tr!`/`trn!` in `crates/jvid-app/src/i18n.rs` |
-| `crates/suite-ui/i18n/<code>.toml` | the shared widgets (search fields, tab overflow, theme errors) |
-| `crates/suite-ui/i18n/gallery/<code>.toml` | the component gallery example only |
+| `../j-ui/i18n/<code>.toml` | the shared widgets (search fields, tab overflow, theme errors) |
+| `../j-ui/i18n/gallery/<code>.toml` | the component gallery example only |
 
 `en.toml` is the source: every key exists there, and its text is what any other language
 falls back to. The files are embedded into the binary with `include_str!`, parsed once on first
@@ -43,7 +48,7 @@ yet is picked like any other and shows in English. To try Spanish without changi
 
 ```sh
 LANGUAGE=es cargo run -p jvid-app                      # with language = "system"
-LANGUAGE=es cargo run -p suite-ui --example gallery   # the gallery always follows the system
+LANGUAGE=es cargo run --manifest-path ../j-ui/Cargo.toml --example gallery   # the gallery always follows the system
 ```
 
 ## Keys
@@ -130,7 +135,7 @@ Each language uses the forms of its rule in the
 missing `one`, `few` or `many` falls back to it. In Spanish, give a group a
 `many` form whenever `{count}` comes straight before a noun. A form may leave `{count}` out
 (`bin.remove_body.one` says "1 clip" in words). The rules live in `plural_category` in
-`crates/suite-ui/src/i18n.rs`, the one place to change for a language with other forms, tested
+`../j-ui/src/i18n.rs`, the one place to change for a language with other forms, tested
 by `wave_one_plural_rules_match_cldr`.
 
 ## Fallback
@@ -174,20 +179,20 @@ the queue) keep the language they were made in until they're replaced or go away
 
 ## Translating a registered language
 
-The languages above already have stub catalogs: `language.name` in `crates/suite-ui/i18n/<code>.toml`
+The languages above already have stub catalogs: `language.name` in `../j-ui/i18n/<code>.toml`
 and nothing else. Copy each `en.toml`'s keys into the three `<code>.toml` files and translate
 them, keeping `language.name` as it is. For Japanese, Chinese or Korean, then re-run the CJK subset
 script (below) and commit its new face. No code changes.
 
 ## Adding a language
 
-1. Add its code to `LANGUAGES` in `crates/suite-ui/src/i18n.rs`. The Settings picker lists
+1. Add its code to `LANGUAGES` in `../j-ui/src/i18n.rs`. The Settings picker lists
    languages in this order, after System.
 2. Copy each `en.toml` to `<code>.toml` in all three catalog folders and translate the values.
-   Set `language.name` in `crates/suite-ui/i18n/<code>.toml` to the language's own name
+   Set `language.name` in `../j-ui/i18n/<code>.toml` to the language's own name
    ("Deutsch"); the picker shows that.
 3. Add the new file's `include_str!` to each `Catalog::new([..])`: `crates/jvid-app/src/i18n.rs`,
-   `crates/suite-ui/src/i18n.rs` and `crates/suite-ui/examples/gallery.rs`.
+   `../j-ui/src/i18n.rs` and `../j-ui/examples/gallery.rs`.
 4. Add the language's plural rule to `plural_category` if it isn't English's one/other.
 5. Run the tests below, then look at the editor in the new language at 100% and 150% scaling
    (the editor asks for a minimum window of 960 × 600 points).
@@ -203,17 +208,17 @@ A language whose script isn't Latin also needs a font; see the font policy below
 | `cargo test -p jvid-app --test i18n` | the editor, a selected clip's Inspector, the bundled effects (bin, search, Add Effect, the Inspector) and keyframe lanes, the export dialog and Settings in Spanish and back without a restart; the export dialog fits 640 points wide, narrower than the 960-point minimum the editor asks for (its height isn't tested). A pseudo-locale (every English text about 40% longer) checks that the editor, Preferences, the Export dialog and the Render Queue cut text too long for its spot with an ellipsis rather than clip it or draw it over other text. The tests that open the whole editor run on Linux only, the one place the test can move its folders |
 | `cargo test -p jvid-app --lib -- shipped_examples lane_captions` | bundled effects translate only while their file is as shipped; English lane captions read as before |
 | `cargo test -p jvid-app --lib -- settings_file preferences` | the language setting saves and reads back, including older files |
-| `cargo test -p suite-ui --test i18n` | live switching, fallback, every language listed by its own name, placeholders, plural rules, glyphs (with Polish, Russian and other samples), the Japanese face loading only while Japanese is shown, the CJK size budget, the gallery in Spanish |
-| `cargo test -p suite-ui --lib i18n` | locale matching, each language's CLDR plural rule at 0, 1, 2, 5, 11, 12, 21, 22, 25, 101 and 111 |
-| `cargo test -p suite-ui --test gallery gallery_catalogs_match` | gallery catalogs match English |
+| `cargo test --manifest-path ../j-ui/Cargo.toml --test i18n` | live switching, fallback, every language listed by its own name, placeholders, plural rules, glyphs (with Polish, Russian and other samples), the Japanese face loading only while Japanese is shown, the CJK size budget, the gallery in Spanish |
+| `cargo test --manifest-path ../j-ui/Cargo.toml --lib i18n` | locale matching, each language's CLDR plural rule at 0, 1, 2, 5, 11, 12, 21, 22, 25, 101 and 111 |
+| `cargo test --manifest-path ../j-ui/Cargo.toml --test gallery gallery_catalogs_match` | gallery catalogs match English |
 
 The tests that switch language sit in their own test binaries because the language is global;
 the library's unit tests always run in English, so the English snapshots don't change.
 
 ### The guard
 
-`crates/jvid-app/tests/i18n_guard.rs` parses every shipped module of jvid-app, suite-ui and the
-gallery with `syn` and fails on a string literal that would reach the screen untranslated:
+`crates/jvid-app/tests/i18n_guard.rs` parses every shipped module of jvid-app. The standalone
+j-ui repository runs its own copy of the guard for the kit and gallery with `syn` and fails on a string literal that would reach the screen untranslated:
 
 - any literal with letters passed to something that draws text (`label`, `button`,
   `on_hover_text`, `RichText::new`, `Window::new`, `Dialog::new`, `painter.text`,
@@ -239,17 +244,18 @@ have. There is no fallback to system fonts.
 
 - **Latin and Cyrillic**: the three Inter weights are subset to Basic Latin, Latin-1 Supplement,
   Latin Extended-A, basic Cyrillic with Ukrainian Ґ, and a few punctuation marks (see
-  `crates/suite-ui/assets/README.md`), about 43 KB each. That covers every wave-1 Latin and
+  `../j-ui/assets/README.md`), about 43 KB each. That covers every wave-1 Latin and
   Cyrillic language, including Polish „quotes”. Romanian's ș ț (Latin Extended-B) and Serbian or
   Kazakh extras are outside it: widen the README's `pyftsubset` ranges for those.
 - **CJK**: one Noto Sans CJK Regular face per language (JP, SC, KR), used for every weight, within
   a budget the owner set: **at most 1 MB per CJK language**, about 1.9 MB for all three. A full
-  face is over 15 MB, so each is subset by `crates/suite-ui/assets/subset-cjk.py` to its
-  language's common characters plus whatever else its catalogs use. The common sets come from
+  face is over 15 MB, so each is subset by `../j-ui/assets/subset-cjk.py` to its
+  language's common characters, the shared catalogs and a preserved legacy set from jvid.
+  Add new app-only characters to j-ui's coverage set before bumping the dependency. The common sets come from
   Python's own codecs: JIS X 0208 through level 1 kanji (with kana and punctuation) for `ja`,
   GB 2312 through level 1 hanzi for `zh-Hans`, and KS X 1001 through its 2,350 Hangul syllables
   for `ko`. A catalog edit in those characters needs no new font: the script writes
-  byte-identical output for the same characters and leaves the file untouched, and the i18n
+  byte-identical output for the same characters and leaves the file untouched, and j-ui's i18n
   workflow fails if a committed face differs from what it writes. Re-run it after a `ja`,
   `zh-Hans` or `ko` catalog change and commit any face it rewrites. It fails past the budget, and
   so does `cjk_faces_stay_within_budget`. A language's face is Inter's fallback only while that

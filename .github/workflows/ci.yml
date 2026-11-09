@@ -56,11 +56,9 @@ jobs:
             core.setOutput('rust', all || paths.some(path => !translation.test(path)));
             core.setOutput('i18n', all || paths.some(path =>
               translation.test(path) ||
-              /^crates\/suite-ui\/assets\/NotoSansCJK-/.test(path) ||
               [
                 'scripts/i18n_check.py',
                 'scripts/test_i18n_check.py',
-                'crates/suite-ui/assets/subset-cjk.py',
                 '.github/workflows/i18n.yml',
                 '.github/workflows/ci.yml',
               ].includes(path)
@@ -91,7 +89,7 @@ jobs:
       - run: cargo fmt --all --check
       # FFmpeg libraries and CLI: runtime fixtures need the executable even on media-cache hits.
       # See docs/adr/0001-ffmpeg-binding.md. bindgen's libclang ships on all runners.
-      # suite-ui GPU tests render on Mesa lavapipe; required on Linux so they can't pass by skipping.
+      # j-ui GPU tests render on Mesa lavapipe; required on Linux so they can't pass by skipping.
       # Arabic and CJK fonts for the text shaping tests, also required on Linux.
       - name: Install Linux system packages
         if: runner.os == 'Linux'
@@ -199,7 +197,7 @@ jobs:
       - name: jvid-core boundary
         shell: bash
         run: |
-          if cargo tree -p jvid-core -e normal,build --prefix none | grep -E '^(egui|eframe|epaint|winit|wgpu|ffmpeg[a-z_-]*|rfd|cpal|image|jvid-media|jvid-render|jvid-audio|jvid-transcribe|whisper-rs[a-z-]*|ureq|suite-ui) '; then
+          if cargo tree -p jvid-core -e normal,build --prefix none | grep -E '^(egui|eframe|epaint|winit|wgpu|ffmpeg[a-z_-]*|rfd|cpal|image|jvid-media|jvid-render|jvid-audio|jvid-transcribe|whisper-rs[a-z-]*|ureq|j-ui) '; then
             echo "::error::jvid-core depends on a UI/media/I/O crate"; exit 1
           fi
 

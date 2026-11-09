@@ -20,7 +20,7 @@ fn feedback_harness(
         .with_max_steps(32)
         .build_ui_state(
             move |ui, (t, h): &mut (Timeline, History)| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 let map = Keymap::default();
@@ -271,7 +271,7 @@ fn dragging_a_media_tile_or_row_to_the_zero_seam_places_it_undoably() {
                 .with_size([1000.0, 300.0])
                 .build_ui_state(
                     move |ui, (bin, t, hist): &mut (MediaBin, Timeline, History)| {
-                        if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        if j_ui::test_support::install_theme(ui, &mut fresh) {
                             return;
                         }
                         let (left, right) = ui.max_rect().split_left_right_at_x(300.0);
@@ -824,7 +824,7 @@ fn trim_bounds_clear_snap_labels_when_neighbor_prevents_the_promised_edge() {
 
 #[test]
 fn render_feedback_artifacts() {
-    if !suite_ui::test_support::gpu() {
+    if !j_ui::test_support::gpu() {
         return;
     }
     let dir =
@@ -845,7 +845,7 @@ fn render_feedback_artifacts() {
             .wgpu()
             .build_ui_state(
                 move |ui, (timeline, history): &mut (Timeline, History)| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     let _ =

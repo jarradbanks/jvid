@@ -12,7 +12,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "crates/jvid-app/assets/THIRD-PARTY-NOTICES.txt"
-FONTS = ROOT / "crates/suite-ui/assets"
 # Standard texts, by SPDX id, for crates that publish no licence file.
 STANDARD = ROOT / "crates/jvid-app/assets/notices"
 LICENCE_FILE = re.compile(r"^(licen[cs]e|copying|notice|copyright)([-._].*)?$", re.I)
@@ -58,6 +57,8 @@ def main():
             ["cargo", "metadata", "--format-version", "1", "--locked"], cwd=ROOT
         )
     )
+    ui = next(p for p in meta["packages"] if p["name"] == "j-ui")
+    fonts = Path(ui["manifest_path"]).parent / "assets"
     crates = sorted(
         (p for p in meta["packages"] if p["source"]), key=lambda p: (p["name"], p["version"])
     )
@@ -105,7 +106,7 @@ def main():
         ("Noto Sans CJK (SIL Open Font License 1.1)", "NotoSansCJK-LICENSE.txt"),
         ("Lucide icons (ISC)", "Lucide-LICENSE.txt"),
     ]:
-        out += ["", RULE, title, RULE, (FONTS / file).read_text(encoding="utf-8").strip()]
+        out += ["", RULE, title, RULE, (fonts / file).read_text(encoding="utf-8").strip()]
     out += ["", RULE, "Sample Media", RULE]
     for c in samples():
         out += ["", f"{c['file']}: {c['title']}", f"  By {c['author']}, {c['licence']} ({c['licence_url']})"]

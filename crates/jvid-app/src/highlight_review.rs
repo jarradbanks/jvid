@@ -8,13 +8,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use egui::{Rect, TextureHandle, Ui, pos2, vec2};
+use j_ui::panel::Panel;
+use j_ui::theme::icon;
+use j_ui::tokens::{color, size, space};
+use j_ui::widgets::{Button, Checkbox, DragField, State, TextInput};
 use jvid_core::history::{Command, GestureKey, History};
 use jvid_core::model::{Marker, MarkerId, Project, Sequence, SequenceId, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
-use suite_ui::panel::Panel;
-use suite_ui::theme::icon;
-use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, Checkbox, DragField, State, TextInput};
 
 use crate::export::dialog;
 use crate::i18n::tr;
@@ -334,7 +334,7 @@ impl HighlightReview {
             .embedded(true)
             .show(ui, |ui| {
                 if self.rows.is_empty() {
-                    suite_ui::empty_state::EmptyState::new(
+                    j_ui::empty_state::EmptyState::new(
                         icon::PLAY,
                         tr!("highlights.review"),
                         tr!("highlights.review_empty"),
@@ -346,7 +346,7 @@ impl HighlightReview {
                     ui.colored_label(color::amber(), tr!("highlights.stale"));
                     if ui
                         .push_id("review_refresh", |ui| {
-                            suite_ui::dialog::action_footer(
+                            j_ui::dialog::action_footer(
                                 ui,
                                 [Button::secondary(tr!("highlights.refresh"))],
                             )[0]
@@ -409,9 +409,8 @@ impl HighlightReview {
                 );
                 let response = ui
                     .push_id("review_export", |ui| {
-                        suite_ui::dialog::action_footer(ui, [Button::primary(&label).state(state)])
-                            [0]
-                        .clone()
+                        j_ui::dialog::action_footer(ui, [Button::primary(&label).state(state)])[0]
+                            .clone()
                     })
                     .inner;
                 output.export = response.clicked();
@@ -766,7 +765,7 @@ mod tests {
             .with_size([width, 640.0])
             .build_ui_state(
                 move |ui, state: &mut (History, HighlightReview)| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     if ui.input(|i| i.pointer.any_pressed()) {
@@ -901,7 +900,7 @@ mod tests {
 
     #[test]
     fn narrow_review_panel_snapshot() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         harness(fixture(), HighlightReview::default(), 240.0).snapshot("highlight_review_narrow");

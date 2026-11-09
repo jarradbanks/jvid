@@ -4,24 +4,28 @@ fn app() -> App {
     let mut app = App::restore(None);
     // Keep the font scan out of these install guards; no GPU or real installer is needed.
     app.exports = jvid_jobs::Pool::new(1);
-    app.updates.open = true;
-    app.updates.state = jvid_updater::state::State::Ready(jvid_updater::network::Download {
-        update: jvid_updater::network::Available {
-            version: "1.2.0".into(),
-            notes: "Update fixture".into(),
-            asset: jvid_updater::metadata::Asset {
-                target: jvid_updater::TARGET.into(),
-                distribution: "windows-installer".into(),
-                name: "jvid-1.2.0-windows-x86_64-setup.exe".into(),
-                size: 100,
-                sha256: "00".repeat(32),
+    app.updates = crate::updates::Updates::for_test(
+        j_update::state::State::Ready(j_update::network::Download {
+            update: j_update::network::Available {
+                version: "1.2.0".into(),
+                notes: "Update fixture".into(),
+                asset: j_update::metadata::Asset {
+                    target: jvid_update_config::TARGET.into(),
+                    distribution: "windows-installer".into(),
+                    name: "jvid-1.2.0-windows-x86_64-setup.exe".into(),
+                    size: 100,
+                    sha256: "00".repeat(32),
+                },
+                asset_id: 1,
+                tag: "v1.2.0".into(),
+                manifest: vec![],
+                signature: vec![],
             },
-            tag: "v1.2.0".into(),
-            manifest: vec![],
-            signature: vec![],
-        },
-        dir: tempfile::tempdir().unwrap(),
-    });
+            dir: tempfile::tempdir().unwrap(),
+        }),
+        "windows-installer",
+    );
+    app.updates.open = true;
     app
 }
 
@@ -35,7 +39,7 @@ fn dirty(app: &mut App) {
 }
 
 fn ready_path(app: &App) -> PathBuf {
-    let jvid_updater::state::State::Ready(download) = &app.updates.state else {
+    let j_update::state::State::Ready(download) = app.updates.state() else {
         panic!("expected the verified download to remain ready");
     };
     download.dir.path().to_owned()
@@ -128,8 +132,8 @@ fn saving_for_update_writes_project_before_preparation_and_keeps_editor_on_prepa
     // This test executable has no installed Windows layout or real signed payload.
     // Preparation fails closed before shutdown; nothing can launch an installer.
     assert!(matches!(
-        app.updates.state,
-        jvid_updater::state::State::Failed(_)
+        app.updates.state(),
+        j_update::state::State::Failed(_)
     ));
     assert!(!app.closing && app.update_install.lock().unwrap().is_none());
 }
@@ -156,7 +160,7 @@ fn active_prompt_blocks_save_and_work_started_during_save_blocks_preparation() {
 fn an_install_request_without_a_ready_payload_never_opens_save() {
     let mut app = app();
     dirty(&mut app);
-    app.updates.state = jvid_updater::state::State::Current;
+    *app.updates.state_mut() = j_update::state::State::Current;
     app.install_update_with(&egui::Context::default(), |_| panic!("save without update"));
     assert!(app.history.is_dirty() && !app.closing);
     assert!(app.update_install.lock().unwrap().is_none());

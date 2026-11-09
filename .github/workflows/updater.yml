@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/updater.yml'
-      - 'crates/jvid-updater/**'
+      - 'crates/jvid-update-config/**'
       - 'packaging/windows.iss'
       - 'packaging/whisper-models.iss'
       - 'scripts/packaging/installer_models.py'
@@ -41,8 +41,8 @@ jobs:
         run: python -m unittest discover -s scripts/packaging -p 'test_installer_*.py'
         env:
           JVID_TEST_ISCC: 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
-      - run: cargo test --locked -p jvid-updater
+      - run: cargo test --locked -p jvid-update-config
       - name: Real Inno upgrade in an isolated temporary tree
-        run: cargo test --locked -p jvid-updater --lib native_inno_upgrade -- --ignored --nocapture
+        run: cargo test --locked -p jvid-update-config --test inno native_inno_upgrade -- --ignored --nocapture
         env:
           JVID_INNO_ISCC: 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'

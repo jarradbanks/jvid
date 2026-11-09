@@ -1,6 +1,6 @@
 //! Fails when user-visible text bypasses the translation layer (#210).
 //!
-//! Parses every non-test module of jvid-app, suite-ui and the suite-ui gallery with `syn`
+//! Parses every non-test module of jvid-app with `syn`
 //! and flags string literals that would reach the screen untranslated:
 //!
 //! - **Prose anywhere**: a literal with letters that isn't identifier-shaped (`png`,
@@ -23,8 +23,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use j_ui::i18n::{Catalog, LANGUAGES, placeholders};
 use proc_macro2::{Delimiter, Spacing};
-use suite_ui::i18n::{Catalog, LANGUAGES, placeholders};
 use syn::buffer::{Cursor, TokenBuffer};
 use syn::punctuated::Punctuated;
 use syn::visit_mut::{self, VisitMut};
@@ -248,16 +248,6 @@ const EXEMPT_ITEMS: &[(&str, &str, &str)] = &[
         "untitled",
         "the unsaved project's autosave file; never shown, and a translated name would lose it",
     ),
-    (
-        "suite-ui/src/i18n.rs",
-        "walk",
-        "catalog errors are for translators, reported by tests",
-    ),
-    (
-        "suite-ui/src/i18n.rs",
-        "mismatches",
-        "catalog drift is for translators, reported by tests",
-    ),
 ];
 
 /// A crate's sources and the catalog its `tr!` reads.
@@ -271,33 +261,12 @@ fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn leak_catalog(dir: &str) -> &'static Catalog {
-    let read = |l: &str| -> &'static str {
-        let path = workspace().join(dir).join(format!("{l}.toml"));
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
-        Box::leak(text.into_boxed_str())
-    };
-    Box::leak(Box::new(Catalog::new(LANGUAGES.map(read))))
-}
-
 fn trees() -> Vec<Tree> {
-    vec![
-        Tree {
-            name: "jvid-app",
-            roots: &["crates/jvid-app/src/lib.rs", "crates/jvid-app/src/main.rs"],
-            catalog: &jvid_app::i18n::CATALOG,
-        },
-        Tree {
-            name: "suite-ui",
-            roots: &["crates/suite-ui/src/lib.rs"],
-            catalog: &suite_ui::i18n::CATALOG,
-        },
-        Tree {
-            name: "gallery",
-            roots: &["crates/suite-ui/examples/gallery.rs"],
-            catalog: leak_catalog("crates/suite-ui/i18n/gallery"),
-        },
-    ]
+    vec![Tree {
+        name: "jvid-app",
+        roots: &["crates/jvid-app/src/lib.rs", "crates/jvid-app/src/main.rs"],
+        catalog: &jvid_app::i18n::CATALOG,
+    }]
 }
 
 /// `#[cfg(test)]`, `#[test]` or test-support-only code: never in a shipped UI.
@@ -644,6 +613,21 @@ impl Guard<'_> {
 
     /// Checks a `tr!`/`trn!` key and its named arguments, then the argument values.
     fn translation(&mut self, name: &str, args: Punctuated<Expr, Token![,]>) {
+        // Shared widgets use their own catalog; app macros keep the app catalog.
+        let catalog = match args.first() {
+            Some(Expr::Path(p))
+                if p.path
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::")
+                    == "j_ui::i18n::CATALOG" =>
+            {
+                &j_ui::i18n::CATALOG
+            }
+            _ => self.catalog,
+        };
         let mut key = None;
         let mut names = BTreeSet::new();
         for mut arg in args {
@@ -675,16 +659,13 @@ impl Guard<'_> {
                 .into(),
             _ => vec![key.clone()],
         };
-        let english = forms
-            .iter()
-            .filter_map(|f| self.catalog.get_in("en", f))
-            .count();
-        if english == 0 || (name == "trn" && self.catalog.get_in("en", &forms[2]).is_none()) {
+        let english = forms.iter().filter_map(|f| catalog.get_in("en", f)).count();
+        if english == 0 || (name == "trn" && catalog.get_in("en", &forms[2]).is_none()) {
             return self.report(format!("`{name}!` key {key:?} isn't in en.toml"));
         }
         for lang in LANGUAGES {
             for form in &forms {
-                let Some(text) = self.catalog.get_in(lang, form) else {
+                let Some(text) = catalog.get_in(lang, form) else {
                     continue;
                 };
                 for p in placeholders(text) {
@@ -696,7 +677,7 @@ impl Guard<'_> {
         }
         let used: BTreeSet<&str> = LANGUAGES
             .iter()
-            .flat_map(|l| forms.iter().filter_map(|f| self.catalog.get_in(l, f)))
+            .flat_map(|l| forms.iter().filter_map(|f| catalog.get_in(l, f)))
             .flat_map(placeholders)
             .collect();
         for n in &names {
@@ -1122,10 +1103,41 @@ fn exemptions_hold_with_either_path_separator() {
     }
 }
 
+#[test]
+fn shared_catalog_keys_and_placeholders_are_checked_separately_from_app_copy() {
+    static APP: Catalog = Catalog::new(j_ui::test_support::en_es(
+        "only_app = \"App text\"\n",
+        "only_app = \"Texto de la app\"\n",
+    ));
+    let allowed = r#"
+        fn ui(ui: &mut egui::Ui, version: &str) {
+            ui.label(j_ui::tr!(j_ui::i18n::CATALOG, "updates.title"));
+            ui.label(j_ui::tr!(j_ui::i18n::CATALOG, "updates.installed", version = version));
+            ui.label(tr!("only_app"));
+        }
+    "#;
+    assert!(check_source("shared.rs", allowed, &APP).is_empty());
+    let invalid = r#"
+        fn ui(ui: &mut egui::Ui) {
+            ui.label(j_ui::tr!(j_ui::i18n::CATALOG, "only_app"));
+            ui.label(j_ui::tr!(j_ui::i18n::CATALOG, "updates.installed"));
+            ui.label(tr!("updates.title"));
+        }
+    "#;
+    let findings = check_source("shared.rs", invalid, &APP).join("\n");
+    for expected in [
+        "key \"only_app\" isn't in en.toml",
+        "uses {version}, not passed",
+        "key \"updates.title\" isn't in en.toml",
+    ] {
+        assert!(findings.contains(expected), "{findings}");
+    }
+}
+
 /// The guard itself: each bypass shape is caught, and the allowed shapes aren't.
 #[test]
 fn guard_catches_every_bypass_shape() {
-    static CATALOG: Catalog = Catalog::new(suite_ui::test_support::en_es(
+    static CATALOG: Catalog = Catalog::new(j_ui::test_support::en_es(
         "known = \"Known\"\nnamed = \"Hi {name}\"\n[clips]\none = \"{count} clip\"\nother = \"{count} clips\"\n",
         "known = \"Conocido\"\nnamed = \"Hola {name} {extra}\"\n[clips]\none = \"{count} clip\"\nother = \"{count} clips\"\n",
     ));
@@ -1379,7 +1391,7 @@ fn guard_catches_every_bypass_shape() {
         const VERSION: &str = "v1";
         macro_rules! salt { ($x:expr) => { egui::Id::new($x) }; }
         macro_rules! tr {
-            ($($args:tt)+) => { suite_ui::tr!($crate::i18n::CATALOG, $($args)+) };
+            ($($args:tt)+) => { j_ui::tr!($crate::i18n::CATALOG, $($args)+) };
         }
         const AGENT: &str = concat!("jvid/", env!("CARGO_PKG_VERSION"));
         const SHADER: &str = include_str!("shader.wgsl");

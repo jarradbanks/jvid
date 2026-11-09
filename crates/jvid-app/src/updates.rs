@@ -1,34 +1,22 @@
-//! The update window owns the asynchronous check/download, never an editor job or project.
-use std::path::PathBuf;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-    mpsc::{self, Receiver},
-};
+//! App-owned preferences, notifications, paths and save/shutdown integration.
+//! j-update owns workers and installation; j-ui owns update presentation.
+use std::path::{Path, PathBuf};
 
-use jvid_updater::{
-    TARGET, VERSION, install,
-    network::{Available, Client, Download},
-    state::{State, Work},
+use j_ui::update::{Action, Prompt};
+use j_update::{
+    Client, Config, InstallPaths, install, metadata,
+    state::{State, Updater, Work},
 };
-use suite_ui::tokens::{color, radius, space};
-use suite_ui::widgets::{Button, Checkbox};
+use jvid_update_config::VERSION;
 
 use crate::i18n::{tr, verbatim};
-
-enum Event {
-    Checked(Result<Option<Available>, String>),
-    Progress(u64),
-    Downloaded(Result<Download, String>),
-}
 
 pub struct Updates {
     pub open: bool,
     pub automatic: bool,
-    pub state: State,
-    receiver: Option<Receiver<Event>>,
-    cancel: Arc<AtomicBool>,
-    distribution: String,
+    worker: Result<Updater, String>,
+    unconfigured: State,
+    config: Option<Config>,
     report: Option<PathBuf>,
     previous: Option<String>,
     preference_error: Option<String>,
@@ -36,24 +24,34 @@ pub struct Updates {
 
 impl Default for Updates {
     fn default() -> Self {
+        Self::new(jvid_update_config::current_install())
+    }
+}
+
+impl Updates {
+    fn new(config: j_update::Result<Config>) -> Self {
         Self {
             open: false,
             automatic: true,
-            state: State::Idle,
-            receiver: None,
-            cancel: Arc::new(AtomicBool::new(false)),
-            distribution: std::env::current_exe()
-                .ok()
-                .map(|e| jvid_updater::metadata::distribution(&e))
-                .unwrap_or_else(|| "external".into()),
+            config: config.as_ref().ok().cloned(),
+            // Anonymous only: jvid releases have always been public.
+            worker: config
+                .and_then(Client::new)
+                .map(|c| Updater::new(c, VERSION)),
+            unconfigured: State::Idle,
             report: None,
             previous: None,
             preference_error: None,
         }
     }
-}
 
-impl Updates {
+    pub fn state(&self) -> &State {
+        match &self.worker {
+            Ok(worker) => &worker.state,
+            Err(_) => &self.unconfigured,
+        }
+    }
+
     pub fn init(&mut self, automatic: bool, settings: Option<PathBuf>) {
         self.automatic = automatic;
         self.report = settings.map(|p| p.with_file_name("update-result.txt"));
@@ -68,330 +66,191 @@ impl Updates {
 
     pub fn check(&mut self, manual: bool) {
         self.open |= manual;
-        // Reopening/checking must keep the verified payload available for this session.
-        if self.state.busy() || matches!(self.state, State::Ready(_)) {
-            return;
+        match &mut self.worker {
+            Ok(worker) => worker.check(),
+            Err(e) => self.unconfigured = State::Failed(e.clone()),
         }
-        let key = match jvid_updater::public_key() {
-            Ok(k) => k,
-            Err(e) => {
-                self.state = State::Failed(e);
-                return;
-            }
-        };
-        self.state = State::Checking;
-        let (tx, rx) = mpsc::channel();
-        self.receiver = Some(rx);
-        let distribution = self.distribution.clone();
-        std::thread::spawn(move || {
-            let _ = tx.send(Event::Checked(Client::default().check(
-                VERSION,
-                TARGET,
-                &distribution,
-                &key,
-            )));
-        });
-    }
-
-    fn download(&mut self, update: Available) {
-        self.cancel = Arc::new(AtomicBool::new(false));
-        let cancel = self.cancel.clone();
-        self.state = State::Downloading {
-            update: update.clone(),
-            received: 0,
-        };
-        let (tx, rx) = mpsc::channel();
-        self.receiver = Some(rx);
-        std::thread::spawn(move || {
-            let result = Client::default().download(update, &cancel, |n| {
-                let _ = tx.send(Event::Progress(n));
-            });
-            let _ = tx.send(Event::Downloaded(result));
-        });
     }
 
     pub fn poll(&mut self, ctx: &egui::Context) {
-        let mut finished = false;
-        if let Some(rx) = &self.receiver {
-            loop {
-                let event = match rx.try_recv() {
-                    Ok(event) => event,
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        if !finished {
-                            self.state = State::Failed(tr!("updates.worker_failed").to_string());
-                            finished = true;
-                        }
-                        break;
-                    }
-                };
-                match event {
-                    Event::Checked(Ok(Some(update))) => {
-                        self.state = State::Available(update);
-                        self.open = true;
-                        finished = true;
-                    }
-                    Event::Checked(Ok(None)) => {
-                        self.state = State::Current;
-                        finished = true;
-                    }
-                    Event::Checked(Err(e)) | Event::Downloaded(Err(e)) => {
-                        self.state = State::Failed(e);
-                        finished = true;
-                    }
-                    Event::Progress(n) => self.state.progress(n),
-                    Event::Downloaded(Ok(d)) => {
-                        self.state = State::Ready(d);
-                        finished = true;
-                    }
-                }
+        if let Ok(worker) = &mut self.worker {
+            if worker.poll() && matches!(worker.state, State::Available(_)) {
+                self.open = true;
             }
-        }
-        if finished {
-            self.receiver = None;
-        }
-        if self.state.busy() {
-            ctx.request_repaint_after_secs(0.1);
+            if worker.state.busy() {
+                ctx.request_repaint_after_secs(0.1);
+            }
         }
     }
 
-    /// Rechecks all work immediately before preparation; the caller must also gate Save.
+    /// Called only after the editor finishes its final save and rechecks all active work.
     pub fn prepare(&mut self, work: Work) -> Option<install::Prepared> {
-        if !work.can_install() || !matches!(self.state, State::Ready(_)) {
+        if !work.can_install() || !matches!(self.state(), State::Ready(_)) {
             return None;
         }
-        let State::Ready(download) = std::mem::take(&mut self.state) else {
-            return None;
-        };
-        let result = (|| {
-            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let worker = self.worker.as_mut().ok()?;
+        let paths: j_update::Result<InstallPaths> = (|| {
+            let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+            let helper = executable.with_file_name("jvid-update-helper.exe");
             let report = self
                 .report
-                .as_deref()
+                .clone()
                 .ok_or_else(|| tr!("settings.no_config_dir").to_string())?;
-            install::prepare(download, &exe, report)
+            Ok(InstallPaths {
+                executable,
+                helper,
+                report,
+            })
         })();
-        match result {
-            Ok(prepared) => Some(prepared),
+        match paths {
+            Ok(paths) => worker.prepare(work, &paths)?.ok(),
             Err(e) => {
-                self.state = State::Failed(e);
+                worker.state = State::Failed(e);
                 None
             }
         }
     }
 
-    /// True asks the editor to save if necessary, then recheck the install guard.
-    pub fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        work: Work,
-        settings: Option<&std::path::Path>,
-    ) -> bool {
+    /// Requests the editor's save-before-restart flow; the core still guards preparation.
+    pub fn show(&mut self, ui: &mut egui::Ui, work: Work, settings: Option<&Path>) -> bool {
         if !self.open {
             return false;
         }
-        let mut install = false;
-        let mut download = None;
-        let mut check = false;
-        let mut cancel = false;
-        let modal = egui::Modal::new(egui::Id::new("updates"))
-            .frame(
-                egui::Frame::popup(ui.style())
-                    .fill(color::panel())
-                    .corner_radius(radius::DIALOG)
-                    .inner_margin(space::S16),
-            )
-            .show(ui.ctx(), |ui| {
-                ui.set_width(540.0_f32.min(ui.ctx().content_rect().width() - 48.0));
-                ui.heading(tr!("updates.title"));
-                ui.label(tr!("updates.installed", version = VERSION));
-                if !jvid_updater::metadata::self_update(TARGET, &self.distribution) {
-                    ui.label(if self.distribution == verbatim("external") {
-                        tr!("updates.external")
-                    } else {
-                        tr!("updates.manual")
-                    });
-                    ui.hyperlink_to(
-                        tr!("updates.release_page"),
-                        verbatim("https://github.com/jarradbanks/jvid/releases"),
-                    );
-                }
-                if ui
-                    .add(Checkbox::new(&mut self.automatic, tr!("updates.automatic")))
-                    .changed()
-                {
-                    self.preference_error = settings
-                        .ok_or_else(|| std::io::Error::other(tr!("settings.no_config_dir")))
-                        .and_then(|p| {
-                            crate::settings_file::save_value_to(
-                                p,
-                                "automatic_update_checks",
-                                self.automatic.into(),
-                            )
-                        })
-                        .err()
-                        .map(|e| e.to_string());
+        let automatic = self.automatic;
+        let installed = self
+            .config
+            .as_ref()
+            .is_some_and(|c| metadata::self_update(&c.target, &c.distribution));
+        let state = match &self.worker {
+            Ok(worker) => &worker.state,
+            Err(_) => &self.unconfigured,
+        };
+        // The inline shared prompt lets jvid retain its manual-package instructions and
+        // preference-save diagnostics in the same modal.
+        let id = egui::Id::new("updates");
+        let previous_rect = ui.ctx().memory(|m| m.area_rect(id));
+        let modal = j_ui::dialog::modal(
+            ui.ctx(),
+            id,
+            j_ui::tr!(j_ui::i18n::CATALOG, "updates.title"),
+            540.0,
+            |ui| {
+                if !installed {
+                    if self
+                        .config
+                        .as_ref()
+                        .is_some_and(|c| c.distribution != "external")
+                    {
+                        ui.label(tr!("updates.manual"));
+                    }
+                    if !matches!(state, State::Available(_)) {
+                        ui.hyperlink_to(
+                            tr!("updates.release_page"),
+                            verbatim("https://github.com/jarradbanks/jvid/releases"),
+                        );
+                    }
                 }
                 if let Some(e) = &self.preference_error {
                     ui.label(tr!("settings.save_failed", error = e));
                 }
-                ui.separator();
-                match &self.state {
-                    State::Idle => {
-                        ui.label(tr!("updates.idle"));
-                    }
-                    State::Checking => {
-                        ui.spinner();
-                        ui.label(tr!("updates.checking"));
-                    }
-                    State::Current => {
-                        ui.label(tr!("updates.current"));
-                    }
-                    State::Failed(e) => {
-                        ui.label(tr!("updates.failed", error = e));
-                    }
-                    State::Available(update) | State::Downloading { update, .. } => {
-                        release(ui, update);
-                        if let State::Downloading { received, .. } = &self.state {
-                            ui.label(if *received == update.asset.size {
-                                tr!("updates.verifying")
-                            } else {
-                                tr!("updates.downloading")
-                            });
-                            ui.add(
-                                egui::ProgressBar::new(*received as f32 / update.asset.size as f32)
-                                    .show_percentage(),
-                            );
-                            ui.label(tr!(
-                                "updates.progress",
-                                received = received,
-                                total = update.asset.size
-                            ));
-                            ui.label(tr!("updates.download_later"));
-                        } else if !jvid_updater::metadata::self_update(TARGET, &self.distribution) {
-                            ui.hyperlink_to(tr!("updates.release_page"), update.release_url());
-                        }
-                    }
-                    State::Ready(d) => {
-                        release(ui, &d.update);
-                        ui.label(tr!("updates.verified"));
-                        ui.label(tr!("updates.ready_later"));
-                        let mut allowed = work;
-                        allowed.unsaved = false;
-                        if !allowed.can_install() {
-                            ui.label(tr!("updates.busy"));
-                        }
-                    }
+                Prompt {
+                    state,
+                    current_version: VERSION,
+                    installed,
+                    work,
+                    save_before_restart: true,
+                    previous: self.previous.as_deref(),
                 }
-                if let Some(previous) = &self.previous {
-                    ui.collapsing(tr!("updates.previous"), |ui| {
-                        ui.label(previous);
-                    });
-                }
-                ui.separator();
-                let check_state = if self.state.busy() || matches!(self.state, State::Ready(_)) {
-                    suite_ui::widgets::State::Disabled
-                } else {
-                    suite_ui::widgets::State::Live
-                };
-                let mut buttons = vec![
-                    Button::secondary(tr!("updates.later")),
-                    Button::secondary(tr!("updates.check")).state(check_state),
-                ];
-                let mut allowed = work;
-                allowed.unsaved = false;
-                let primary = match &self.state {
-                    State::Available(_)
-                        if jvid_updater::metadata::self_update(TARGET, &self.distribution) =>
-                    {
-                        Some(Button::primary(tr!("updates.download")))
-                    }
-                    State::Downloading { .. } => Some(Button::secondary(tr!("updates.cancel"))),
-                    State::Ready(_) => Some(
-                        Button::primary(if work.unsaved {
-                            tr!("updates.save_restart")
-                        } else {
-                            tr!("updates.restart")
-                        })
-                        .state(if allowed.can_install() {
-                            suite_ui::widgets::State::Live
-                        } else {
-                            suite_ui::widgets::State::Disabled
-                        }),
-                    ),
-                    _ => None,
-                };
-                if let Some(primary) = primary {
-                    buttons.push(primary);
-                }
-                let actions = suite_ui::dialog::action_footer(ui, buttons);
-                if actions[0].clicked() {
-                    ui.close();
-                }
-                check = actions[1].clicked();
-                if actions.get(2).is_some_and(|r| r.clicked()) {
-                    match &self.state {
-                        State::Available(update) => download = Some(update.clone()),
-                        State::Downloading { .. } => cancel = true,
-                        State::Ready(_) => install = true,
-                        _ => {}
-                    }
-                }
-            });
-        if modal.should_close() {
+                .contents(ui, &mut self.automatic)
+            },
+        );
+        if previous_rect.is_some_and(|r| r.size() != modal.response.rect.size()) {
+            ui.ctx().request_repaint();
+        }
+        let (action, dismiss) = modal.inner;
+        if dismiss || modal.should_close() {
             self.open = false;
+            if let Ok(worker) = &mut self.worker {
+                worker.cancel();
+            }
         }
-        if cancel {
-            self.cancel_download();
+        if automatic != self.automatic {
+            self.preference_error = settings
+                .ok_or_else(|| std::io::Error::other(tr!("settings.no_config_dir")))
+                .and_then(|p| {
+                    crate::settings_file::save_value_to(
+                        p,
+                        "automatic_update_checks",
+                        self.automatic.into(),
+                    )
+                })
+                .err()
+                .map(|e| e.to_string());
         }
-        if let Some(update) = download {
-            self.download(update);
+        match action {
+            Some(Action::Check) => self.check(true),
+            Some(Action::Download) => {
+                if let Ok(worker) = &mut self.worker {
+                    worker.download();
+                }
+            }
+            Some(Action::Cancel) => {
+                if let Ok(worker) = &mut self.worker {
+                    worker.cancel();
+                }
+            }
+            Some(Action::OpenRelease) => {
+                if let (Some(config), State::Available(update)) = (&self.config, self.state())
+                    && let Ok(url) = update.release_url(config)
+                {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                }
+            }
+            Some(Action::Install) => return true,
+            None => {}
         }
-        if check {
-            self.check(true);
-        }
-        install
+        false
     }
 
-    fn cancel_download(&mut self) {
-        self.cancel.store(true, Ordering::Relaxed);
-        self.receiver = None;
-        self.state.cancel();
+    #[cfg(test)]
+    pub(crate) fn for_test(state: State, distribution: &str) -> Self {
+        let mut config = jvid_update_config::with_public_key([0; 32], distribution);
+        config.target = "x86_64-pc-windows-msvc".into();
+        let mut updates = Self::new(Ok(config));
+        *updates.state_mut() = state;
+        updates
     }
-}
 
-impl Drop for Updates {
-    fn drop(&mut self) {
-        self.cancel.store(true, Ordering::Relaxed);
+    #[cfg(test)]
+    pub(crate) fn state_mut(&mut self) -> &mut State {
+        match &mut self.worker {
+            Ok(worker) => &mut worker.state,
+            Err(_) => &mut self.unconfigured,
+        }
     }
-}
-
-fn release(ui: &mut egui::Ui, update: &Available) {
-    ui.label(tr!("updates.available", version = &update.version));
-    egui::ScrollArea::vertical()
-        .max_height(240.0)
-        .show(ui, |ui| {
-            ui.label(&update.notes);
-        });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui_kittest::Harness;
-    use egui_kittest::kittest::{NodeT, Queryable};
+    use egui_kittest::{
+        Harness,
+        kittest::{NodeT, Queryable},
+    };
+    use j_update::network::{Available, Download};
 
     fn available() -> Available {
         Available {
             version: "1.2.0".into(),
-            notes: "Notes".into(),
-            asset: jvid_updater::metadata::Asset {
-                target: TARGET.into(),
+            notes: "Update fixture".into(),
+            asset: j_update::metadata::Asset {
+                target: "x86_64-pc-windows-msvc".into(),
                 distribution: "windows-installer".into(),
                 name: "jvid-1.2.0-windows-x86_64-setup.exe".into(),
                 size: 100,
                 sha256: "00".repeat(32),
             },
+            asset_id: 1,
             tag: "v1.2.0".into(),
             manifest: vec![],
             signature: vec![],
@@ -401,137 +260,92 @@ mod tests {
     struct Window {
         updates: Updates,
         work: Work,
+        settings: Option<PathBuf>,
         install: bool,
     }
 
-    fn window(state: State, work: Work) -> Harness<'static, Window> {
+    fn window(state: State, distribution: &str) -> Harness<'static, Window> {
         let mut fresh = true;
-        let mut updates = Updates::default();
+        let mut updates = Updates::for_test(state, distribution);
         updates.open = true;
-        updates.state = state;
-        Harness::builder().with_size([800.0, 640.0]).build_ui_state(
+        Harness::builder().with_size([820.0, 720.0]).build_ui_state(
             move |ui, state: &mut Window| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
-                state.updates.poll(ui.ctx());
-                state.install |= state.updates.show(ui, state.work, None);
+                state.install |= state
+                    .updates
+                    .show(ui, state.work, state.settings.as_deref());
             },
             Window {
                 updates,
-                work,
+                work: Work::default(),
+                settings: None,
                 install: false,
             },
         )
     }
 
-    fn capture(h: &mut Harness<'_, Window>, name: &str) {
-        if let Some(dir) = std::env::var_os("JVID_UPDATE_SCREENSHOTS") {
-            assert!(suite_ui::test_support::gpu());
-            let dir = PathBuf::from(dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            h.render()
-                .unwrap()
-                .save(dir.join(format!("{name}.png")))
-                .unwrap();
-        }
+    fn label(key: &str) -> String {
+        j_ui::i18n::CATALOG.get_in("en", key).unwrap().to_owned()
     }
 
     #[test]
-    fn disabling_automatic_checks_is_persisted_and_manual_action_remains_available() {
-        let dir =
-            std::env::temp_dir().join(format!("jvid-477-update-setting-{}", std::process::id()));
-        let path = dir.join("settings.toml");
-        crate::settings_file::save_value_to(&path, "automatic_update_checks", false.into())
-            .unwrap();
-        let settings = crate::settings_file::load_from(&path);
-        assert!(!settings.automatic_update_checks);
-        let mut updates = Updates::default();
-        updates.init(settings.automatic_update_checks, Some(path));
-        assert!(matches!(updates.state, State::Idle));
-        assert!(updates.receiver.is_none());
-        updates.check(true);
-        assert!(updates.open);
-        // An unconfigured development build fails closed; a configured build starts checking.
-        assert!(!matches!(updates.state, State::Idle));
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn progress_ready_error_retry_and_cancelled_worker_results_have_explicit_states() {
-        let mut updates = Updates::default();
-        let (tx, rx) = mpsc::channel();
-        updates.receiver = Some(rx);
-        updates.state = State::Checking;
-        tx.send(Event::Checked(Ok(Some(available())))).unwrap();
-        updates.poll(&egui::Context::default());
-        assert!(updates.open && matches!(updates.state, State::Available(_)));
-        updates.state = State::Downloading {
-            update: available(),
-            received: 0,
-        };
-        let (tx, rx) = mpsc::channel();
-        updates.receiver = Some(rx);
-        tx.send(Event::Progress(30)).unwrap();
-        tx.send(Event::Progress(20)).unwrap();
-        updates.poll(&egui::Context::default());
-        assert!(matches!(
-            updates.state,
-            State::Downloading { received: 30, .. }
-        ));
-        updates.cancel_download();
-        assert!(updates.cancel.load(Ordering::Relaxed));
-        assert!(
-            tx.send(Event::Downloaded(Err("late failure".into())))
-                .is_err()
-        );
-        updates.poll(&egui::Context::default());
-        assert!(matches!(updates.state, State::Available(_)));
-        let (tx, rx) = mpsc::channel();
-        updates.receiver = Some(rx);
-        tx.send(Event::Downloaded(Err("disk full".into()))).unwrap();
-        updates.poll(&egui::Context::default());
-        assert!(matches!(updates.state, State::Failed(_)) && updates.receiver.is_none());
-        // Installer preparation outside Ready must preserve the diagnostic.
-        assert!(updates.prepare(Work::default()).is_none());
-        assert!(matches!(updates.state, State::Failed(_)));
-        let (tx, rx) = mpsc::channel();
-        updates.receiver = Some(rx);
+    fn automatic_preference_and_previous_report_keep_their_existing_paths() {
         let dir = tempfile::tempdir().unwrap();
-        let stage = dir.path().to_owned();
-        tx.send(Event::Downloaded(Ok(Download {
-            update: available(),
-            dir,
-        })))
+        let settings = dir.path().join("settings.toml");
+        std::fs::write(&settings, "automatic_update_checks = true\n").unwrap();
+        std::fs::write(
+            dir.path().join("update-result.txt"),
+            "Previous installer result",
+        )
         .unwrap();
-        updates.poll(&egui::Context::default());
-        assert!(matches!(updates.state, State::Ready(_)));
-        assert!(
-            updates
-                .prepare(Work {
-                    unsaved: true,
-                    ..Work::default()
-                })
-                .is_none()
+        let mut h = window(State::Current, "windows-installer");
+        h.state_mut().settings = Some(settings.clone());
+        h.state_mut().updates.init(false, Some(settings.clone()));
+        assert_eq!(
+            h.state().updates.previous.as_deref(),
+            Some("Previous installer result")
         );
-        assert!(matches!(updates.state, State::Ready(_)) && stage.exists());
-        drop(updates);
-        assert!(!stage.exists());
+        // Start from the saved preference, without starting a network request.
+        h.state_mut().updates.automatic = true;
+        h.run();
+        h.get_by_label(&label("updates.automatic")).click();
+        h.run();
+        assert!(!crate::settings_file::load_from(&settings).automatic_update_checks);
+        assert!(h.state().updates.preference_error.is_none());
+        assert!(
+            !h.get_by_label(&label("updates.check"))
+                .accesskit_node()
+                .is_disabled()
+        );
+        let mut reopened = Updates::new(Err("Unconfigured fixture".into()));
+        reopened.init(
+            crate::settings_file::load_from(&settings).automatic_update_checks,
+            Some(settings),
+        );
+        assert!(matches!(reopened.state(), State::Idle));
+        assert!(!reopened.open);
+        reopened.check(true);
+        assert!(reopened.open && matches!(reopened.state(), State::Failed(_)));
     }
 
     #[test]
-    fn a_disconnected_worker_becomes_a_retryable_error() {
-        let mut updates = Updates::default();
-        let (tx, rx) = mpsc::channel();
-        updates.receiver = Some(rx);
-        updates.state = State::Checking;
-        drop(tx);
-        updates.poll(&egui::Context::default());
-        assert!(matches!(updates.state, State::Failed(_)) && updates.receiver.is_none());
+    fn preference_save_failure_stays_visible_and_does_not_start_a_check() {
+        let mut h = window(State::Idle, "external");
+        h.run();
+        h.get_by_label(&label("updates.automatic")).click();
+        h.run();
+        assert!(h.state().updates.preference_error.is_some());
+        assert!(matches!(h.state().updates.state(), State::Idle));
+        h.get_by_label(&tr!(
+            "settings.save_failed",
+            error = h.state().updates.preference_error.as_ref().unwrap()
+        ));
     }
 
     #[test]
-    fn update_window_blocks_restart_for_work_and_retains_a_download_when_deferred() {
+    fn shared_prompt_requests_jvid_save_and_keeps_ready_when_deferred() {
         let dir = tempfile::tempdir().unwrap();
         let stage = dir.path().to_owned();
         let mut h = window(
@@ -539,8 +353,14 @@ mod tests {
                 update: available(),
                 dir,
             }),
-            Work::default(),
+            "windows-installer",
         );
+        h.state_mut().work.unsaved = true;
+        h.run();
+        h.get_by_label(&label("updates.later")).click();
+        h.run();
+        assert!(!h.state().updates.open && stage.exists());
+        h.state_mut().updates.check(true);
         for work in [
             Work {
                 recording: true,
@@ -554,53 +374,30 @@ mod tests {
                 other_job: true,
                 ..Work::default()
             },
-            Work {
-                unsaved: true,
-                other_job: true,
-                ..Work::default()
-            },
         ] {
-            h.state_mut().work = work;
-            h.run();
-            h.get_by_label(tr!("updates.busy"));
-            let label = if work.unsaved {
-                tr!("updates.save_restart")
-            } else {
-                tr!("updates.restart")
+            h.state_mut().work = Work {
+                unsaved: true,
+                ..work
             };
-            assert!(h.get_by_label(label).accesskit_node().is_disabled());
+            h.run();
+            assert!(
+                h.get_by_label(&label("updates.save_restart"))
+                    .accesskit_node()
+                    .is_disabled()
+            );
             assert!(!h.state().install);
         }
-        h.get_by_label(tr!("updates.later")).click();
-        h.run();
-        assert!(!h.state().updates.open && stage.exists());
-
-        // Both reopening and a direct check keep the same verified download.
-        h.state_mut().updates.check(true);
         h.state_mut().work = Work {
             unsaved: true,
             ..Work::default()
         };
         h.run();
         assert!(
-            h.get_by_label(tr!("updates.check"))
+            h.get_by_label(&label("updates.check"))
                 .accesskit_node()
                 .is_disabled()
         );
-        assert!(matches!(h.state().updates.state, State::Ready(_)) && stage.exists());
-        let install = h.get_by_label(tr!("updates.save_restart"));
-        assert!(!install.accesskit_node().is_disabled());
-        let install_rect = install.rect();
-        let later = h.get_by_label(tr!("updates.later")).rect();
-        let check = h.get_by_label(tr!("updates.check")).rect();
-        assert!(later.right() <= check.left() && check.right() <= install_rect.left());
-        let modal = h
-            .ctx
-            .memory(|m| m.area_rect(egui::Id::new("updates")))
-            .unwrap();
-        assert!((modal.right() - space::S16 - install_rect.right()).abs() <= 1.0);
-        capture(&mut h, "updates-save-install-restart");
-        h.get_by_label(tr!("updates.save_restart")).click();
+        h.get_by_label(&label("updates.save_restart")).click();
         h.run();
         assert!(h.state().install && stage.exists());
         drop(h);
@@ -608,92 +405,38 @@ mod tests {
     }
 
     #[test]
-    fn download_can_continue_when_deferred_and_only_verified_completion_offers_install() {
+    fn dismissing_a_download_uses_the_shared_cancellation_policy() {
         let mut h = window(
             State::Downloading {
                 update: available(),
                 received: 30,
             },
-            Work::default(),
+            "windows-installer",
         );
-        let (tx, rx) = mpsc::channel();
-        h.state_mut().updates.receiver = Some(rx);
         h.run_steps(4);
-        h.get_by_label(tr!("updates.downloading"));
-        h.get_by_label(&tr!("updates.progress", received = 30, total = 100));
-        h.get_by_label(tr!("updates.download_later"));
-        assert!(h.query_by_label(tr!("updates.restart")).is_none());
-        assert!(
-            h.get_by_label(tr!("updates.check"))
-                .accesskit_node()
-                .is_disabled()
-        );
-        capture(&mut h, "updates-downloading");
-        tx.send(Event::Progress(100)).unwrap();
+        assert!(h.query_by_label(&label("updates.restart")).is_none());
+        h.get_by_label(&label("updates.later")).click();
         h.run_steps(4);
-        h.get_by_label(tr!("updates.verifying"));
-        assert!(h.query_by_label(tr!("updates.restart")).is_none());
-        capture(&mut h, "updates-verifying");
-
-        h.get_by_label(tr!("updates.later")).click();
-        h.run_steps(4);
-        assert!(!h.state().updates.open && h.state().updates.receiver.is_some());
-        assert!(!h.state().updates.cancel.load(Ordering::Relaxed));
-        let dir = tempfile::tempdir().unwrap();
-        let stage = dir.path().to_owned();
-        tx.send(Event::Downloaded(Ok(Download {
-            update: available(),
-            dir,
-        })))
-        .unwrap();
-        h.run();
-        assert!(!h.state().updates.open && matches!(h.state().updates.state, State::Ready(_)));
-        assert!(h.state().updates.receiver.is_none() && stage.exists());
-        h.state_mut().updates.check(true);
-        h.run();
-        h.get_by_label(tr!("updates.verified"));
-        h.get_by_label(tr!("updates.ready_later"));
-        capture(&mut h, "updates-install-restart");
-        h.get_by_label(tr!("updates.restart")).click();
-        h.run();
-        assert!(h.state().install);
+        assert!(!h.state().updates.open);
+        assert!(matches!(h.state().updates.state(), State::Available(_)));
+        assert!(!h.state().install);
     }
 
     #[test]
-    fn cancelling_download_rejects_late_results_and_failure_leaves_retry_available() {
-        let mut h = window(
-            State::Downloading {
-                update: available(),
-                received: 30,
-            },
-            Work::default(),
-        );
-        let (tx, rx) = mpsc::channel();
-        h.state_mut().updates.receiver = Some(rx);
-        h.run_steps(4);
-        h.get_by_label(tr!("updates.cancel")).click();
-        h.run();
-        assert!(matches!(h.state().updates.state, State::Available(_)));
-        assert!(h.state().updates.cancel.load(Ordering::Relaxed));
-        let dir = tempfile::tempdir().unwrap();
-        let stage = dir.path().to_owned();
-        let late = tx.send(Event::Downloaded(Ok(Download {
-            update: available(),
-            dir,
-        })));
-        assert!(late.is_err());
-        drop(late);
-        assert!(!stage.exists());
-        assert!(!h.state().install && h.query_by_label(tr!("updates.restart")).is_none());
-
-        h.state_mut().updates.state = State::Failed("disk full".into());
-        h.run();
-        h.get_by_label(&tr!("updates.failed", error = "disk full"));
-        assert!(
-            !h.get_by_label(tr!("updates.check"))
-                .accesskit_node()
-                .is_disabled()
-        );
-        assert!(h.query_by_label(tr!("updates.restart")).is_none());
+    fn manual_packages_keep_release_links_without_self_install_actions() {
+        for distribution in [
+            "external",
+            "windows-portable",
+            "macos-dmg",
+            "macos-portable",
+            "linux-portable",
+        ] {
+            let mut h = window(State::Available(available()), distribution);
+            h.run();
+            h.get_by_label(&label("updates.release_page"));
+            assert!(h.query_by_label(&label("updates.download")).is_none());
+            assert!(h.query_by_label(&label("updates.restart")).is_none());
+            assert!(!h.state().install);
+        }
     }
 }

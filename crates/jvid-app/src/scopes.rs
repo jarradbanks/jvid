@@ -5,9 +5,9 @@
 use egui::{
     Align2, Color32, ColorImage, Pos2, Rect, TextureHandle, TextureOptions, Ui, pos2, vec2,
 };
+use j_ui::theme;
+use j_ui::tokens::{color, radius, space};
 use jvid_render::scope::{Analysis, RANGE, VECTOR, vector_at};
-use suite_ui::theme;
-use suite_ui::tokens::{color, radius, space};
 
 use crate::i18n::tr;
 
@@ -17,8 +17,8 @@ pub const MOVING_INTERVAL: f64 = 0.25;
 const HISTOGRAM_H: usize = 128;
 /// Scopes share the fixed dark Viewer surface, independently of the panel theme. Keeping
 /// their palette fixed also makes cached textures correct when the theme changes paused.
-const TRACE: Color32 = suite_ui::themes::DARK.ink;
-const LABEL: Color32 = suite_ui::themes::DARK.ink_3;
+const TRACE: Color32 = j_ui::themes::DARK.ink;
+const LABEL: Color32 = j_ui::themes::DARK.ink_3;
 /// 100% primaries and secondaries, the vectorscope's targets.
 const TARGETS: [[u8; 3]; 6] = [
     [255, 0, 0],
@@ -172,7 +172,7 @@ pub fn show(ui: &mut Ui) {
             });
             return;
         }
-        suite_ui::empty_state::EmptyState::new(
+        j_ui::empty_state::EmptyState::new(
             theme::icon::SLIDERS,
             tr!("empty.scopes"),
             tr!("bin.scopes_empty"),
@@ -287,7 +287,7 @@ mod tests {
     /// #456: trace density remains readable on Viewer black in all panel themes.
     #[test]
     fn scope_images_keep_the_dark_viewer_palette_in_every_theme() {
-        use suite_ui::themes::{DARK, HIGH_CONTRAST, LIGHT, apply};
+        use j_ui::themes::{DARK, HIGH_CONTRAST, LIGHT, apply};
         let ctx = egui::Context::default();
         let gray = [220, 220, 220, 255].repeat(64 * 32);
         let ramp: Vec<_> = (0..32)
@@ -325,7 +325,7 @@ mod tests {
     /// #456: a cached frame and all guides remain correct after a paused theme switch.
     #[test]
     fn paused_theme_switch_keeps_cached_scope_textures_and_viewer_guides() {
-        use suite_ui::themes::{DARK, HIGH_CONTRAST, LIGHT, apply};
+        use j_ui::themes::{DARK, HIGH_CONTRAST, LIGHT, apply};
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let pixels = [220, 220, 220, 255].repeat(16 * 9);

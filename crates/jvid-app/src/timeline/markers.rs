@@ -8,12 +8,12 @@ use egui::{
     Align, Color32, CursorIcon, Id, Label, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, pos2,
     vec2,
 };
+use j_ui::themes::DARK;
+use j_ui::tokens::{color, size, space};
+use j_ui::widgets::{Button, Swatches, TextInput};
 use jvid_core::history::Command;
 use jvid_core::model::{Marker, Sequence};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
-use suite_ui::themes::DARK;
-use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, Swatches, TextInput};
 
 use crate::i18n::tr;
 
@@ -139,7 +139,7 @@ fn popup(ui: &mut Ui, m: &Marker, id: Id) -> Option<Edit> {
             .changed()
     });
     ui.add_space(space::S8);
-    if suite_ui::dialog::action_footer(ui, [Button::destructive(tr!("timeline.delete_marker"))])[0]
+    if j_ui::dialog::action_footer(ui, [Button::destructive(tr!("timeline.delete_marker"))])[0]
         .clicked()
     {
         ui.close();
@@ -243,7 +243,7 @@ impl Timeline {
                 lane.left_center() + vec2(space::S8, 0.0),
                 egui::Align2::LEFT_CENTER,
                 tr!("timeline.marker_lane"),
-                suite_ui::theme::small(),
+                j_ui::theme::small(),
                 color::ink_3(),
             );
         }
@@ -557,7 +557,7 @@ mod tests {
     /// click still seeks.
     #[test]
     fn dragging_a_flag_moves_it_as_one_undo_step() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = with_marker(3, 0);
@@ -592,7 +592,7 @@ mod tests {
     /// #415: a range's end resizes it, never below zero; its body moves it whole.
     #[test]
     fn dragging_a_range_end_changes_only_its_duration() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = with_marker(3, 2);
@@ -611,7 +611,7 @@ mod tests {
     /// #415: the Markers lane above the ruler, with a point and a range marker.
     #[test]
     fn marker_lane_snapshot() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = with_marker(1, 0);
@@ -636,7 +636,7 @@ mod tests {
         h.state_mut().1.apply(c).unwrap();
         h.run();
         // The flag in the Markers lane, past the 8pt margin and the headers.
-        let left = 8.0 + suite_ui::tokens::size::TRACK_HEADER;
+        let left = 8.0 + j_ui::tokens::size::TRACK_HEADER;
         let at = pos2(h.state().0.view(left).x(Time(S)), 8.0 + LANE / 2.0);
         h.hover_at(at);
         h.run();
@@ -657,7 +657,7 @@ mod tests {
     fn marker_popup_takes_a_name() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = popup_open();
@@ -679,7 +679,7 @@ mod tests {
     fn marker_popup_edits_are_one_undo_step_each() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = popup_open();

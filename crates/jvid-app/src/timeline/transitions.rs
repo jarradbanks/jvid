@@ -4,10 +4,10 @@
 //! outgoing clip and its linked clips, as with fades, so they undo the same way.
 
 use egui::{CornerRadius, CursorIcon, Id, Painter, Rect, Sense, Stroke, Ui};
+use j_ui::tokens::color;
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::model::{Clip, ClipId, ModelError, Project, Transition, TransitionKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
-use suite_ui::tokens::color;
 
 use crate::i18n::tr;
 

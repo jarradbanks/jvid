@@ -39,12 +39,12 @@ The default build expects an LGPL FFmpeg. Build with `--features gpl-ffmpeg` if 
 
 ### GPU tests
 
-`suite-ui`'s snapshot and layout tests render headless through wgpu on Mesa's lavapipe (software Vulkan, no GPU needed). Install it with `sudo apt install mesa-vulkan-drivers`; the tests then select it themselves, which also avoids the default WSL2 Vulkan driver, which segfaults. Without lavapipe they print one line and skip. Set `JVID_GPU_TESTS=required` to make them run on whatever driver is present instead (CI does this so it can't pass by skipping), or set `VK_ICD_FILENAMES` to pick a driver yourself. Snapshots are recorded with lavapipe; `UPDATE_SNAPSHOTS=1 cargo test -p suite-ui` rewrites them. `jvid-render` compositor goldens (`crates/jvid-render/testdata`) fail when missing; `JVID_BLESS=1 cargo test -p jvid-render` writes them.
+The standalone [j-ui](https://github.com/jarradbanks/j-ui) repository's snapshot and layout tests render headless through wgpu on Mesa's lavapipe (software Vulkan, no GPU needed). Install it with `sudo apt install mesa-vulkan-drivers`; the tests then select it themselves, which also avoids the default WSL2 Vulkan driver, which segfaults. Without lavapipe they print one line and skip. Set `JVID_GPU_TESTS=required` to make them run on whatever driver is present instead (CI does this so it can't pass by skipping), or set `VK_ICD_FILENAMES` to pick a driver yourself. Snapshots are recorded with lavapipe; clone j-ui alongside jvid to update its own baselines: `UPDATE_SNAPSHOTS=1 cargo test --manifest-path ../j-ui/Cargo.toml` rewrites them. `jvid-render` compositor goldens (`crates/jvid-render/testdata`) fail when missing; `JVID_BLESS=1 cargo test -p jvid-render` writes them.
 
 ## Ground rules
 
 - **`jvid-core` has no I/O and no UI.** It must not depend on another jvid crate, a UI library or anything that touches files, devices or the GPU. That keeps it testable in isolation and lets both the app and the CLI drive it. Check with `cargo tree -p jvid-core`.
-- **`suite-ui` is shared by the whole suite**, so it must not depend on any `jvid-*` crate.
+- **`j-ui` is shared by the whole suite**, so it must not depend on any `jvid-*` crate.
 - **Dependencies:** shared versions go in the root `Cargo.toml` under `[workspace.dependencies]`, and crates opt in with `name.workspace = true`. New dependencies outside the stack in [PLAN.md](docs/PLAN.md#stack) need a reason in the pull request.
 - **Lints** are set once for the workspace in the root `Cargo.toml`; every crate opts in with `[lints] workspace = true`. `unsafe` code needs an explicit `#[allow(unsafe_code)]` and a `// SAFETY:` comment on every block.
 - **Formatting** follows `rustfmt.toml` and `.editorconfig`.

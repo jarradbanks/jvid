@@ -9,6 +9,9 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, wgpu};
 use egui::{Align, Align2, Layout, Pos2, Rect, Stroke, Ui, UiBuilder, pos2, vec2};
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, size, space};
+use j_ui::widgets::{Button, Checkbox, Dropdown};
 use jvid_audio::{CpalBackend, Output};
 use jvid_core::history::Command;
 use jvid_core::model::{AssetId, MediaAsset, Project, ProjectSettings, Sequence};
@@ -21,9 +24,6 @@ use jvid_render::preview::{self as render, Yuv};
 use jvid_render::scope::{Analysis, Scopes};
 use jvid_render::thumb::Thumbs;
 use jvid_render::{solid, text};
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, Checkbox, Dropdown};
 
 #[cfg(test)]
 use crate::i18n::verbatim;
@@ -514,7 +514,7 @@ impl Preview {
             let viewer = viewer_rect(ui);
             ui.painter().rect_filled(viewer, 0.0, color::VIEWER);
             ui.scope_builder(egui::UiBuilder::new().max_rect(viewer), |ui| {
-                suite_ui::empty_state::EmptyState::new(
+                j_ui::empty_state::EmptyState::new(
                     icon::PLAY,
                     tr!("empty.source"),
                     tr!("preview.source_empty"),
@@ -773,7 +773,7 @@ impl Preview {
         if empty {
             let viewer = viewer_rect(ui);
             ui.scope_builder(egui::UiBuilder::new().max_rect(viewer), |ui| {
-                suite_ui::empty_state::EmptyState::new(
+                j_ui::empty_state::EmptyState::new(
                     icon::PLAY,
                     tr!("empty.preview"),
                     tr!("empty.preview_help"),
@@ -1649,9 +1649,9 @@ impl Preview {
         let selection = offered_selection(ui, view_id);
         let button =
             Button::icon(icon::SCAN, tr!("preview.view_selection")).state(if selection.is_some() {
-                suite_ui::widgets::State::Live
+                j_ui::widgets::State::Live
             } else {
-                suite_ui::widgets::State::Disabled
+                j_ui::widgets::State::Disabled
             });
         let response = ui.add(button);
         let tip = format!(
@@ -2430,7 +2430,7 @@ mod program_tests {
 
     impl eframe::App for Program {
         fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-            if suite_ui::test_support::install_theme(ui, &mut self.fresh) {
+            if j_ui::test_support::install_theme(ui, &mut self.fresh) {
                 return;
             }
             let project = self.history.project();
@@ -2442,7 +2442,7 @@ mod program_tests {
     #[test]
     fn the_thumbnail_frame_is_the_fallback_then_the_program_frame() {
         use jvid_render::composite::read_back;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = egui_kittest::Harness::builder()
@@ -2544,7 +2544,7 @@ mod program_tests {
     /// within 1 physical pixel of the row's centre, at 100% and 150% scale.
     #[test]
     fn transport_items_share_the_rows_centre_line() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         for ppp in [1.0, 1.5] {
@@ -2571,7 +2571,7 @@ mod program_tests {
         let Some(dir) = std::env::var_os("JVID_PLAYBACK_EVIDENCE_DIR").map(PathBuf::from) else {
             return;
         };
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         std::fs::create_dir_all(&dir).unwrap();
@@ -2605,7 +2605,7 @@ mod program_tests {
 
     #[test]
     fn open_scopes_copy_the_program_frame_as_it_draws() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = egui_kittest::Harness::builder()
@@ -2667,7 +2667,7 @@ mod program_tests {
             .with_size([640.0, 360.0])
             .build_ui_state(
                 move |ui, p: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     p.show_source(ui, &project, &HashSet::new(), &Keymap::default());
@@ -2709,7 +2709,7 @@ mod program_tests {
             .with_size([640.0, 360.0])
             .build_ui_state(
                 move |ui, p: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     p.show_source(ui, &project, &HashSet::new(), &Keymap::default());
@@ -2777,7 +2777,7 @@ mod program_tests {
                 .with_size([640.0, 360.0])
                 .build_ui_state(
                     move |ui, p: &mut Preview| {
-                        if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        if j_ui::test_support::install_theme(ui, &mut fresh) {
                             return;
                         }
                         p.show_source(ui, &project, &HashSet::new(), &Keymap::default());
@@ -2856,7 +2856,7 @@ mod program_tests {
             .with_size([640.0, 360.0])
             .build_ui_state(
                 move |ui, preview: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     preview.show_source(ui, &drawn_project, &HashSet::new(), &Keymap::default());
@@ -2898,7 +2898,7 @@ mod frame_export_tests {
 
     #[test]
     fn export_frame_renders_a_title_without_ever_opening_source() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut harness = egui_kittest::Harness::builder()
@@ -3017,11 +3017,11 @@ mod viewer_fit_tests {
         let mut fresh = true;
         let mut h = Harness::builder().with_size([640.0, 480.0]).build_ui_state(
             move |ui, state: &mut State| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 let source = state.active == 1;
-                suite_ui::panel::Panel::tabbed(&["Program", "Source"], &mut state.active)
+                j_ui::panel::Panel::tabbed(&["Program", "Source"], &mut state.active)
                     .embedded(true)
                     .show(ui, |ui| {
                         if source {
@@ -3126,7 +3126,7 @@ mod viewer_fit_tests {
 
     impl eframe::App for Viewer {
         fn ui(&mut self, ui: &mut Ui, _: &mut eframe::Frame) {
-            if suite_ui::test_support::install_theme(ui, &mut self.fresh) {
+            if j_ui::test_support::install_theme(ui, &mut self.fresh) {
                 return;
             }
             self.key = view_id(ui);
@@ -3230,7 +3230,7 @@ mod viewer_fit_tests {
 
     #[test]
     fn fit_corner_edge_and_rotation_targets_work_for_all_project_shapes() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         for (width, height) in [(1920, 1080), (1080, 1920), (1080, 1080)] {
@@ -3293,7 +3293,7 @@ mod viewer_fit_tests {
 
     #[test]
     fn fitted_controls_and_recovered_rotated_selection_are_editable_at_high_dpi() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (mut history, selected) = crate::handles::tests::title();
@@ -3370,7 +3370,7 @@ mod viewer_fit_tests {
 
     #[test]
     fn fit_pan_selection_and_source_leave_saved_project_and_export_pixels_unchanged() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (history, selected) = crate::handles::tests::title();
@@ -3460,7 +3460,7 @@ mod viewer_fit_tests {
     /// model data; the after images use the new Fit and explicit recovery.
     #[test]
     fn viewer_fit_ui_evidence() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let destination = std::env::var_os("JVID_VIEWER_EVIDENCE_DIR").map(PathBuf::from);
@@ -3600,7 +3600,7 @@ mod audit_transport_tests {
             .with_pixels_per_point(scale)
             .build_ui_state(
                 move |ui, s: &mut RowState| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     s.bounds = ui.max_rect();
@@ -4010,14 +4010,14 @@ mod audit_transport_tests {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                suite_ui::i18n::set_language("en");
+                j_ui::i18n::set_language("en");
             }
         }
         let _restore = Restore;
         let mut h = row_harness(800.0, 1.0, true, false, None);
         h.state_mut().keymap = Keymap::from_toml("play_stop = \"P\"\nrecord = \"\"").unwrap();
         for language in ["en", "de", "fr"] {
-            suite_ui::i18n::set_language(language);
+            j_ui::i18n::set_language(language);
             for program in [false, true] {
                 h.state_mut().program = program;
                 h.run_steps(2);
@@ -4039,14 +4039,14 @@ mod audit_transport_tests {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                suite_ui::i18n::set_pseudo(false);
-                suite_ui::i18n::set_language("en");
+                j_ui::i18n::set_pseudo(false);
+                j_ui::i18n::set_language("en");
             }
         }
         let _restore = Restore;
         for language in ["de", "fr", "pt-BR", "en"] {
-            suite_ui::i18n::set_language(language);
-            suite_ui::i18n::set_pseudo(language == "en");
+            j_ui::i18n::set_language(language);
+            j_ui::i18n::set_pseudo(language == "en");
             audit_454_transport_hit_bounds_fit_without_intersections();
         }
     }
@@ -4069,7 +4069,7 @@ mod status_summary_tests {
             .with_size([480.0, 540.0])
             .build_ui_state(
                 move |ui, preview: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     preview.status_label(ui, true);
@@ -4160,7 +4160,7 @@ mod status_summary_tests {
             .with_size([480.0, 540.0])
             .build_ui_state(
                 move |ui, preview: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     preview.status_label(ui, true);

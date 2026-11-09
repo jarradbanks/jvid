@@ -14,7 +14,7 @@ use crate::keymap::Applicability;
 use crate::subtitles::AudioSources;
 use crate::timeline::{Timeline, silence::Silence};
 use crate::transcript::TranscriptPanel;
-use suite_ui::widgets::{Button, Checkbox, DragField, State};
+use j_ui::widgets::{Button, Checkbox, DragField, State};
 
 pub(crate) fn applicability(project: &Project, selected: &HashSet<ClipId>) -> Applicability {
     Applicability::when(
@@ -271,7 +271,7 @@ mod tests {
             let mut fresh = true;
             let mut h = Harness::builder().with_size(size).build_ui_state(
                 move |ui, (review, timeline, transcript, output)| {
-                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh) {
                         let next = review.show(ui.ctx(), &p, rev(), timeline, transcript);
                         if next.close {
                             *output = next;
@@ -324,16 +324,16 @@ mod tests {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                suite_ui::i18n::set_pseudo(false);
-                suite_ui::i18n::set_language("en");
+                j_ui::i18n::set_pseudo(false);
+                j_ui::i18n::set_language("en");
             }
         }
         let _restore = Restore;
         for language in ["en", "de", "fr", "ja"] {
-            suite_ui::i18n::set_language(language);
+            j_ui::i18n::set_language(language);
             narrow_review_accept_reject_cancel_and_apply();
             if let Some(dir) = std::env::var_os("JVID_SPEECH_CAPTURE") {
-                assert!(suite_ui::test_support::gpu());
+                assert!(j_ui::test_support::gpu());
                 let (p, mic, _) = crate::subtitles::test_support::two_streams(false);
                 let mut review = Review::open(&p, rev(), &HashSet::from([mic]));
                 review
@@ -348,7 +348,7 @@ mod tests {
                     .with_size([384.0, 520.0])
                     .wgpu()
                     .build_ui(move |ui| {
-                        if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        if !j_ui::test_support::install_theme(ui, &mut fresh) {
                             review.show(ui.ctx(), &p, rev(), &mut timeline, &mut transcript);
                         }
                     });
@@ -360,7 +360,7 @@ mod tests {
                     .unwrap();
             }
         }
-        suite_ui::i18n::set_pseudo(true);
+        j_ui::i18n::set_pseudo(true);
         narrow_review_accept_reject_cancel_and_apply();
     }
 
@@ -784,7 +784,7 @@ impl Review {
         timeline: &mut Timeline,
         transcript: &mut TranscriptPanel,
     ) -> Output {
-        use suite_ui::tokens::{color, space};
+        use j_ui::tokens::{color, space};
         let mut out = Output::default();
         let current = self.plan.current(project, revision) && self.error != Some(Refusal::Stale);
         if !current {
@@ -836,9 +836,7 @@ impl Review {
         let current = self.plan.current(project, revision) && self.error != Some(Refusal::Stale);
         let modal = egui::Modal::new(egui::Id::new("speech_review")).show(ctx, |ui| {
             ui.set_width(440.0_f32.min((ctx.content_rect().width() - 48.0).max(160.0)));
-            ui.label(
-                egui::RichText::new(tr!("speech_review.title")).font(suite_ui::theme::headline()),
-            );
+            ui.label(egui::RichText::new(tr!("speech_review.title")).font(j_ui::theme::headline()));
             ui.add_space(space::S8);
             let mut changed = false;
             egui::ScrollArea::vertical()
@@ -1021,7 +1019,7 @@ impl Review {
                     },
                 );
             }
-            let actions = suite_ui::dialog::action_footer(
+            let actions = j_ui::dialog::action_footer(
                 ui,
                 [
                     Button::secondary(tr!("prompt.cancel")),

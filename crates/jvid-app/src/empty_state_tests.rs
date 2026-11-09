@@ -2,11 +2,11 @@
 use crate::media_bin::MediaBin;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
+use j_ui::test_support::install_theme;
 use jvid_core::history::{Command, History};
 use jvid_core::model::{ProbeInfo, Project};
 use jvid_core::time::Time;
 use std::collections::HashSet;
-use suite_ui::test_support::install_theme;
 
 fn bin_harness(importing: bool) -> Harness<'static, (MediaBin, bool)> {
     let mut fresh = true;

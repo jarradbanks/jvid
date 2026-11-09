@@ -10,6 +10,10 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use egui::{RichText, Ui};
+use j_ui::i18n::{self, LANGUAGES};
+use j_ui::theme;
+use j_ui::tokens::{color, radius, space};
+use j_ui::widgets::{Button, Checkbox, Dropdown, State};
 use jvid_core::history::Command;
 use jvid_core::model::{Clip, ClipId, Project, Sequence, Text, TrackKind};
 use jvid_core::srt::Cue;
@@ -19,10 +23,6 @@ use jvid_media::audio::SAMPLE_RATE;
 use jvid_transcribe::models::{self, Model};
 use jvid_transcribe::store::{Request, Settings, Shared, merge_sources};
 use jvid_transcribe::{Error, Options, Source, Transcriber, Transcript, Whisper, Word};
-use suite_ui::i18n::{self, LANGUAGES};
-use suite_ui::theme;
-use suite_ui::tokens::{color, radius, space};
-use suite_ui::widgets::{Button, Checkbox, Dropdown, State};
 
 use crate::i18n::{tr, verbatim};
 
@@ -979,7 +979,7 @@ impl Subtitles {
                 } else {
                     State::Disabled
                 };
-                let actions = suite_ui::dialog::action_footer(
+                let actions = j_ui::dialog::action_footer(
                     ui,
                     [
                         Button::secondary(tr!("prompt.cancel")),
