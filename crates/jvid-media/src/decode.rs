@@ -364,6 +364,16 @@ impl VideoDecoder {
     }
 
     /// Floors, so a frame at exactly `t` counts as shown.
+    /// Ticks decoded forward to reach `t` without a seek; `i64::MAX` when it must seek.
+    fn distance(&self, t: Time) -> i64 {
+        let target = self.to_ticks(t);
+        let near = self.to_ticks(Time(FLICKS_PER_SECOND));
+        match self.cur.as_ref().map(pts) {
+            Some(p) if p <= target && target - p <= near => target - p,
+            _ => i64::MAX,
+        }
+    }
+
     fn to_ticks(&self, t: Time) -> i64 {
         let (num, den) = (self.time_base.0 as i128, self.time_base.1 as i128);
         (t.0 as i128 * den).div_euclid(num * FLICKS_PER_SECOND as i128) as i64
@@ -541,7 +551,9 @@ fn turn<T: Copy>(p: &[T], w: usize, h: usize, rotation: u32) -> Vec<T> {
 
 // shortcut: fixed caps of 2 idle decoders per asset and 8 assets (LRU), so a long timeline doesn't
 // hold every file open; size them from memory profiles once multicam/4K timelines exist.
-const IDLE_PER_ASSET: usize = 2;
+/// Enough for each decode thread to keep its own place, e.g. both sides of a crossfade cut
+/// from one file.
+const IDLE_PER_ASSET: usize = 4;
 const IDLE_ASSETS: usize = 8;
 
 type Done = Box<dyn FnOnce(Result<Frame, Error>) + Send>;
@@ -553,6 +565,10 @@ type Request = (u64, Handle, Vec<Done>);
 pub struct DecoderPool {
     /// Least recently used asset first.
     idle: Mutex<Vec<(PathBuf, Vec<VideoDecoder>)>>,
+    /// Decoders out on a decode, by path and target; locked inside `idle`.
+    busy: Mutex<Vec<(PathBuf, Time)>>,
+    /// Signalled with `idle` whenever a decoder goes back.
+    returned: std::sync::Condvar,
     /// Submitted requests by path and time.
     live: Mutex<HashMap<String, Request>>,
     seq: std::sync::atomic::AtomicU64,
@@ -570,35 +586,71 @@ impl DecoderPool {
 
     /// Decodes on the calling thread with an idle decoder for `path`, opening one if none is free.
     pub fn frame_at(&self, path: &Path, t: Time) -> Result<Frame, Error> {
-        self.with(path, |d| d.frame_at(t))
+        self.with(path, t, |d| d.frame_at(t))
     }
 
     /// [`VideoDecoder::keyframe_at`] with a pooled decoder.
     pub fn keyframe_at(&self, path: &Path, t: Time) -> Result<Frame, Error> {
-        self.with(path, |d| d.keyframe_at(t))
+        self.with(path, t, |d| d.keyframe_at(t))
     }
 
     fn with(
         &self,
         path: &Path,
+        t: Time,
         f: impl FnOnce(&mut VideoDecoder) -> Result<Frame, Error>,
     ) -> Result<Frame, Error> {
-        let idle = self
-            .idle
-            .lock()
-            .unwrap()
-            .iter_mut()
-            .find(|(p, _)| p == path)
-            .and_then(|(_, v)| v.pop());
-        let mut dec = match idle {
+        let mut idle = self.idle.lock().unwrap();
+        let taken =
+            loop {
+                let list = idle.iter_mut().find(|(p, _)| p == path).map(|(_, v)| v);
+                // The decoder that reaches `t` by decoding forward least; any other must seek.
+                let best = list.as_ref().and_then(|v| {
+                    (0..v.len())
+                        .filter(|&i| v[i].distance(t) < i64::MAX)
+                        .min_by_key(|&i| v[i].distance(t))
+                });
+                // Playback decodes a run of frames on several threads: a decoder out on a frame just
+                // before `t` lands behind it, so wait for it rather than seek or open another, which
+                // made a crossfade between two clips of one file decode at a few frames a second.
+                let behind =
+                    best.is_none()
+                        && self.busy.lock().unwrap().iter().any(|(p, b)| {
+                            p == path && *b <= t && t - *b <= Time(FLICKS_PER_SECOND)
+                        });
+                if behind {
+                    let (guard, wait) = self
+                        .returned
+                        .wait_timeout(idle, std::time::Duration::from_secs(2))
+                        .unwrap();
+                    idle = guard;
+                    if !wait.timed_out() {
+                        continue;
+                    }
+                }
+                let v = idle.iter_mut().find(|(p, _)| p == path).map(|(_, v)| v);
+                break v.and_then(|v| {
+                    let i = best.or_else(|| v.len().checked_sub(1))?;
+                    Some(v.swap_remove(i))
+                });
+            };
+        self.busy.lock().unwrap().push((path.to_owned(), t));
+        drop(idle);
+        let mut dec = match taken {
             Some(d) => d,
             None if self.hdr => VideoDecoder::open_hdr(path)?,
             None => VideoDecoder::open(path)?,
         };
         let frame = f(&mut dec);
+        let mut idle = self.idle.lock().unwrap();
+        {
+            let mut busy = self.busy.lock().unwrap();
+            if let Some(i) = busy.iter().position(|(p, b)| p == path && *b == t) {
+                busy.swap_remove(i);
+            }
+        }
         // After a hard error the decoder may be half-advanced, so it isn't reused.
         if frame.is_ok() {
-            let mut idle = self.idle.lock().unwrap();
             let mut entry = match idle.iter().position(|(p, _)| p == path) {
                 Some(i) => idle.remove(i),
                 None => (path.to_owned(), Vec::new()),
@@ -611,6 +663,8 @@ impl DecoderPool {
                 idle.remove(0);
             }
         }
+        drop(idle);
+        self.returned.notify_all();
         frame
     }
 
@@ -944,13 +998,40 @@ mod tests {
         }
         // Concurrent requests on one asset open extra decoders; only IDLE_PER_ASSET go back.
         std::thread::scope(|s| {
-            for _ in 0..3 {
+            for _ in 0..=IDLE_PER_ASSET {
                 s.spawn(|| pool.frame_at(&dir.join("no-audio.mp4"), Time(0)).unwrap());
             }
         });
         let idle = pool.idle.lock().unwrap();
         assert!(idle.len() <= IDLE_ASSETS);
         assert!(idle.iter().all(|(_, v)| v.len() <= IDLE_PER_ASSET));
+    }
+
+    #[test]
+    fn pool_keeps_a_decoder_at_each_side_of_a_crossfade() {
+        let Some(dir) = corpus() else { return };
+        crate::ffmpeg::init().unwrap();
+        let pool = DecoderPool::default();
+        let path = dir.join("frame-index-1080p30.mp4");
+        let frame = |i: i64| Time(i * FLICKS_PER_SECOND / 30);
+        // Both clips of a crossfade cut from one file, decoded in turn as playback does.
+        std::thread::scope(|s| {
+            s.spawn(|| pool.frame_at(&path, frame(0)).unwrap());
+            s.spawn(|| pool.frame_at(&path, frame(150)).unwrap());
+        });
+        for i in 1..10 {
+            for base in [0, 150] {
+                let t = frame(base + i);
+                let idle = pool.idle.lock().unwrap();
+                let v = &idle.iter().find(|(p, _)| *p == path).unwrap().1;
+                assert!(
+                    v.iter().any(|d| d.distance(t) < i64::MAX),
+                    "would seek at {t:?}"
+                );
+                drop(idle);
+                pool.frame_at(&path, t).unwrap();
+            }
+        }
     }
 
     #[test]
