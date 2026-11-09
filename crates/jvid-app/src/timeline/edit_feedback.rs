@@ -105,6 +105,8 @@ pub(super) struct Plan {
     pub ghosts: Vec<Span>,
     pub erased: Vec<Span>,
     pub overwritten: Vec<Span>,
+    /// Alt held on a move that overwrites: the drop adds a crossfade at the cut.
+    pub crossfade: bool,
 }
 
 impl Plan {
@@ -199,12 +201,14 @@ impl Plan {
             ghosts,
             erased,
             overwritten,
+            crossfade: false,
         })
     }
 
     pub fn label(&self, rate: Rate) -> String {
         match &self.command {
             Command::Place(p) if p.insert => tr!("timeline_feedback.insert").to_owned(),
+            _ if self.crossfade => tr!("timeline_feedback.crossfade").to_owned(),
             Command::Trim { trims, ripple } => {
                 let by = trims[0].2;
                 let sign = if by < Time(0) { "−" } else { "+" };
@@ -507,7 +511,8 @@ impl Timeline {
             start,
         };
         match edit_feedback::Plan::new(project, command) {
-            Ok(plan) => {
+            Ok(mut plan) => {
+                plan.crossfade = ui.input(|i| i.modifiers.alt) && !plan.overwritten.is_empty();
                 // A linked clip earlier than the anchor can clamp the common shift.
                 // Clear the indicator unless a resulting primary edge really hit it.
                 if self.snapped.is_some_and(|at| {
@@ -521,7 +526,10 @@ impl Timeline {
                 self.drag_to = Some((to, start));
                 if r.drag_stopped() {
                     if start != clip.start || to != from.id {
-                        *edit = Some((plan.command, None));
+                        let fade = plan.crossfade.then(|| {
+                            transitions::on_drop(project, &plan.command, clip.id, &plan.overwritten)
+                        });
+                        *edit = Some((fade.flatten().unwrap_or(plan.command), None));
                     }
                     self.clear_snap();
                 } else {
