@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-  # Nightly and manual runs cover all three OSes; PRs and branch pushes run Linux.
+  # Nightly runs cover new commits on all three OSes; manual runs always cover all three.
   schedule:
     - cron: '0 17 * * *'
   workflow_dispatch:
@@ -28,8 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      actions: read
       pull-requests: read
     outputs:
+      skip: ${{ steps.filter.outputs.skip }}
       rust: ${{ steps.filter.outputs.rust }}
       i18n: ${{ steps.filter.outputs.i18n }}
     steps:
@@ -37,6 +39,25 @@ jobs:
         id: filter
         with:
           script: |
+            core.setOutput('skip', 'false');
+            // A successful nightly already covers all three OSes; push runs only cover Linux.
+            if (context.eventName === 'schedule') {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                ...context.repo,
+                workflow_id: 'ci.yml',
+                event: 'schedule',
+                head_sha: context.sha,
+                status: 'success',
+                per_page: 1,
+              });
+              if (data.workflow_runs.length > 0) {
+                core.info(`Commit ${context.sha} already passed nightly CI; skipping unchanged nightly.`);
+                core.setOutput('skip', 'true');
+                core.setOutput('rust', 'false');
+                core.setOutput('i18n', 'false');
+                return;
+              }
+            }
             // Keep translation-only PRs lightweight (#309), but always report CI required.
             if (context.eventName !== 'pull_request') {
               core.setOutput('rust', 'true');
@@ -217,6 +238,8 @@ jobs:
 
   release-automation:
     name: release automation tests
+    needs: changes
+    if: needs.changes.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -230,7 +253,7 @@ jobs:
   required:
     name: CI required
     needs: [changes, check, deny, i18n, release-automation]
-    if: ${{ always() }}
+    if: ${{ always() && needs.changes.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
