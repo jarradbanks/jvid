@@ -3,8 +3,8 @@
 //! headers on the left hold the lock, hide or mute, and solo toggles, the target, a height
 //! grip, and a menu to add, rename, reorder and remove tracks. Media dropped from the bin
 //! overwrites at the drop point, on a new track when dropped off every lane; dragged clips
-//! overwrite where they land. Clicks and a marquee select clips, which copy, cut, paste at
-//! the playhead, duplicate and delete.
+//! overwrite where they land, or with Alt cross-fade into the clip they overlap. Clicks and a
+//! marquee select clips, which copy, cut, paste at the playhead, duplicate and delete.
 //! Clip edges drag to trim (Ctrl ripples), the razor tool and Ctrl+K split, a clicked gap
 //! ripple deletes, and Q/W ripple trim to the playhead. In/out marks shade the ruler and
 //! lanes, drag by their ruler flags, and lift (`;`) or extract (`'`) their range.

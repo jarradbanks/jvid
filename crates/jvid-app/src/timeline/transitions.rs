@@ -62,6 +62,44 @@ pub fn set(project: &Project, id: ClipId, x: Option<Transition>) -> Result<Comma
     Ok(Command::SetClipProps(edits.collect()))
 }
 
+/// A move dropped with Alt over a neighbour: the move, then a crossfade at the cut it made, as
+/// long as the overlap. `None` when the move leaves no cut beside `anchor`.
+pub(super) fn on_drop(
+    project: &Project,
+    moved: &Command,
+    anchor: ClipId,
+    overwritten: &[super::edit_feedback::Span],
+) -> Option<Command> {
+    let after = moved.preview(project).ok()?;
+    let seq = after.sequence();
+    let (t, c) = seq.clip(anchor)?;
+    let clips = seq.track(t)?.clips();
+    let lap = |edge: fn(&super::edit_feedback::Span) -> Time, at: Time| {
+        overwritten
+            .iter()
+            .filter(|s| edge(s) == at)
+            .map(|s| s.end - s.start)
+            .max()
+    };
+    let (out, len) = if let Some(p) = clips.iter().find(|p| p.end() == c.start)
+        && let Some(len) = lap(|s| s.start, c.start)
+    {
+        (p.id, len)
+    } else if clips.iter().any(|n| n.start == c.end())
+        && let Some(len) = lap(|s| s.end, c.end())
+    {
+        (c.id, len)
+    } else {
+        return None;
+    };
+    let x = Transition {
+        kind: TransitionKind::Crossfade,
+        duration: len,
+    };
+    let fade = set(&after, out, Some(x)).ok()?;
+    Some(Command::Batch(vec![moved.clone(), fade]))
+}
+
 impl Timeline {
     /// The outgoing clip for a transition action: the first selected clip ending on a cut, else
     /// the clip ending on the cut nearest the playhead on an unlocked track.
