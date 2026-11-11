@@ -109,7 +109,7 @@ jobs:
           env-vars: CARGO CC CFLAGS CXX CMAKE RUST ImageOS
       - run: cargo fmt --all --check
       # FFmpeg libraries and CLI: runtime fixtures need the executable even on media-cache hits.
-      # See docs/adr/0001-ffmpeg-binding.md. bindgen's libclang ships on all runners.
+      # See docs/PLAN.md "Licensing". bindgen's libclang ships on all runners.
       # j-ui GPU tests render on Mesa lavapipe; required on Linux so they can't pass by skipping.
       # Arabic and CJK fonts for the text shaping tests, also required on Linux.
       - name: Install Linux system packages

@@ -54,7 +54,6 @@ Supporting truths, which back the lead claim rather than compete with it: free a
 ## Evidence on Hand
 
 - [docs/PLAN.md](docs/PLAN.md) and [docs/ROADMAP.md](docs/ROADMAP.md), with the issues they link to.
-- The README preview (`docs/media/`) is the real app, rendered by `scripts/preview/build`. There are no users, testimonials or benchmarks yet. Performance numbers are targets, not measurements. Do not present any of these as real.
 
 ## Product Principles
 
