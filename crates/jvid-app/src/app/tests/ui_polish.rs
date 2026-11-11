@@ -1,6 +1,6 @@
 //! Review captures for the UI polish pass: the Bins view, the passive playback status,
 //! View Selection in the preview toolbar and a title typed at a playhead past the end.
-//! `JVID_UI_POLISH_CAPTURES=docs/screenshots/ui-polish cargo test -p jvid-app ui_polish -- --ignored`
+//! `JVID_UI_POLISH_CAPTURES=target/ui-polish cargo test -p jvid-app ui_polish -- --ignored`
 
 use egui::{Key, Pos2};
 use jvid_core::media_library::LibraryEdit;

@@ -1,5 +1,5 @@
 //! FFmpeg startup: initialise the dynamically linked libraries and log what they can do.
-//! The supported version range and licensing split are in docs/adr/0001-ffmpeg-binding.md.
+//! The supported version range and licensing split are in docs/PLAN.md "Licensing".
 
 use ffmpeg_next::codec::{self, Id};
 use ffmpeg_next::{decoder, encoder};
