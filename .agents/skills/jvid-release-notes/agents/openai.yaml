@@ -1,4 +1,0 @@
-interface:
-  display_name: "jvid release notes"
-  short_description: "Write simple jvid release notes and download links"
-  default_prompt: "Use $jvid-release-notes to simplify the next jvid release description."
