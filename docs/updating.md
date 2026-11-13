@@ -21,7 +21,7 @@ for maintainers. the flow is **develop → release/vX.Y.Z → main → tag → a
 
 1. merge features into `develop`. normal PRs don't bump the version.
 2. on main's actions page, run **Prepare release** (patch/minor/major). it branches `release/vX.Y.Z` off develop, bumps the version, drafts notes in `packaging/release-notes.md`, opens a PR to main and kicks off CI and Package on all three OSes.
-3. tidy the notes (the `jvid-release-notes` skill helps; old examples are in `packaging/release-notes-examples/`). download the candidate and try it on each platform:
+3. tidy the notes (the `release-notes` skill helps; old examples are in `packaging/release-notes-examples/`). download the candidate and try it on each platform:
 
    ```sh
    gh run download "$RUN_ID" --repo jarradbanks/jvid --name release-candidate --dir candidate
