@@ -1,5 +1,11 @@
-- Retain audited monthly FFmpeg inputs
-- Follow system theme and show app icon
+- The Windows installer uses the jvid app icon and follows your Windows light or dark preference when setup starts.
+- Updated the bundled Windows FFmpeg 8.1 runtime to the October 31 monthly build.
+
+**macOS:** this release requires macOS 15.8.1 or newer.
+
+**Project compatibility:** projects saved with annotations or collected fonts require jvid 1.1.0 or newer.
+
+**Windows users on 0.2.0 or earlier:** run the installer manually once to replace the older update helper. Keep the same installation folder to preserve your settings, projects and models.
 
 ### Downloads
 
