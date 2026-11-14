@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "version": "1.1.0",
-  "previous_version": "1.0.0",
-  "bump": "minor",
-  "source_commit": "f11e2df044ab26cbff8fd345cb5eaa5d6b3b2b17",
+  "version": "1.1.1",
+  "previous_version": "1.1.0",
+  "bump": "patch",
+  "source_commit": "4260f2fc29bf19dc388d0bfe63b79f2c56b0d4c5",
   "source_branch": "develop",
-  "main_commit": "737afa14fd9760652ce004b8a59ac63e00aed28a",
-  "base_commit": "f11e2df044ab26cbff8fd345cb5eaa5d6b3b2b17",
-  "notes_sha256": "f36466c68ce57fafec31be68931bfbc1c53c26f8f21f029e1ddff2ed9124abaf"
+  "main_commit": "0f839145b3047df86ae25057ef0cee06840cf0be",
+  "base_commit": "4260f2fc29bf19dc388d0bfe63b79f2c56b0d4c5",
+  "notes_sha256": "73dbb8dd7a44b33c74bddc028237ead9b477da24661bc97b59426e2b599f11d5"
 }

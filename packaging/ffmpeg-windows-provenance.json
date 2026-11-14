@@ -1,0 +1,182 @@
+{
+  "schema": 1,
+  "captured_at": "2026-11-14T05:07:25.727585+00:00",
+  "records": {
+    "repos/FFmpeg-Builds/FFmpeg-Builds/actions/runs/41199749965": {
+      "id": 41199749965,
+      "head_sha": "5031c6f1082414e53688d39e521849905071070d",
+      "run_attempt": 1,
+      "path": ".github/workflows/build.yml",
+      "event": "schedule",
+      "status": "completed",
+      "conclusion": "success",
+      "repository": {
+        "full_name": "FFmpeg-Builds/FFmpeg-Builds",
+        "id": 292087234
+      }
+    },
+    "repos/FFmpeg-Builds/FFmpeg-Builds/actions/artifacts/13042311561": {
+      "id": 13042311561,
+      "name": "download-cache",
+      "size_in_bytes": 2240577198,
+      "digest": "sha256:3de9f854a07aef24a0029b206e9ef43d674cbd957249575342e9a728d59c2c4d",
+      "expired": false,
+      "workflow_run": {
+        "id": 41199749965,
+        "head_sha": "5031c6f1082414e53688d39e521849905071070d",
+        "repository_id": 292087234
+      },
+      "created_at": "2026-10-31T12:12:55Z",
+      "expires_at": "2026-11-14T12:08:09Z"
+    },
+    "repos/FFmpeg-Builds/FFmpeg-Builds/actions/jobs/124536872099": {
+      "id": 124536872099,
+      "name": "Build ffmpeg (win64, gpl-shared 8.1)",
+      "run_id": 41199749965,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    "repos/FFmpeg-Builds/FFmpeg-Builds/actions/jobs/124534586835": {
+      "id": 124534586835,
+      "name": "Build target-variant image (ubuntu-latest, win64, gpl-shared 8.1)",
+      "run_id": 41199749965,
+      "status": "completed",
+      "conclusion": "success"
+    }
+  },
+  "audit": {
+    "variant_build_record": {
+      "artifact_id": 13041869714,
+      "sha256": "0e552d510d5b30009fef2fcd1b1d5e14fba3f34739a3c6fda59e12aa6ba530fa",
+      "image_manifest_sha256": "e73b3c600bccedbf87ec38188fcc97bbe908db4f457cbf75a203e7843fe5ea56",
+      "predicate_sha256": "f495819ddc92fdb73b0bb2b0997eccdd25a84da37334f982cc6d096e835e95c3"
+    },
+    "toolchain_comparison": {
+      "original_count": 4908,
+      "monthly_count": 4908,
+      "identical": 4897,
+      "differences": {
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/lib/libatomic-1.dll": {
+          "before": {
+            "size": 37035,
+            "sha256": "3554f850c0acd96a98947f97e2c1291a218cf5c6a44df967613cf22f516c8740"
+          },
+          "after": {
+            "size": 37035,
+            "sha256": "1d64f0691161a9b28413692a54a52f3334b0dfc9a95d05a8a1f9882682240ba9"
+          }
+        },
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/lib/libatomic.dll.a": {
+          "before": {
+            "size": 66386,
+            "sha256": "14caad43f512a0cb22c58448d69e2e26964634f44d987973769cb1dc0b404468"
+          },
+          "after": {
+            "size": 66386,
+            "sha256": "187fdc35dc9bcae6500222bcce00d0fcd6274957f66198a1efd881bcb2c17aca"
+          }
+        },
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/lib/libgcc_s.a": {
+          "before": {
+            "size": 82390,
+            "sha256": "aa508e4d8a0c118cf0bc83b3f08c2cf4bcb47cec62de52f2acfc58874430d95e"
+          },
+          "after": {
+            "size": 82390,
+            "sha256": "aa6f9d4046b69adf66bf395ec666fb5594fe1d7f9913a54766467c91e33063b6"
+          }
+        },
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/lib/libgcc_s_seh-1.dll": {
+          "before": {
+            "size": 1000762,
+            "sha256": "599d0b1430b03d7dd2f30ac4ce99c1e0aa3a1b81bb30deda4a02812cd64f63c4"
+          },
+          "after": {
+            "size": 1000762,
+            "sha256": "ca3fd4dddbfebb8d26c41e76b7c496f26666f8bf683e57f2c97fad671a03e50e"
+          }
+        },
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/lib/libgomp-1.dll": {
+          "before": {
+            "size": 305276,
+            "sha256": "e2586caa5c6ebab11162616e1939be166e10843682d1b32ce6cfd54443350f60"
+          },
+          "after": {
+            "size": 305276,
+            "sha256": "2c876ee1b2abb78f6898182e815945de81a733f03ed342b08552d54922ad82fa"
+          }
+        },
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/lib/libgomp.dll.a": {
+          "before": {
+            "size": 284910,
+            "sha256": "1cb1921aa85e5cb4b94da3e7ec9c338063d26084dfe48fea183ab116bd912a88"
+          },
+          "after": {
+            "size": 284910,
+            "sha256": "b630b688b5369789a3bd34264ddb565cb086255fa3f8bae7e724c678a093cfdd"
+          }
+        },
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/lib/libstdc++-6.dll": {
+          "before": {
+            "size": 2576394,
+            "sha256": "c0482c6d791d726986a56d2b0eb17795e7cea71632112aae2c2590fcec6a25ff"
+          },
+          "after": {
+            "size": 2576394,
+            "sha256": "c6c0fb55b57d5171191c362e09369b5cc2d83ace0dcf56e620bdc603d84714f4"
+          }
+        },
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/lib/libstdc++.dll.a": {
+          "before": {
+            "size": 4919258,
+            "sha256": "1d8c415db5a1fe4767b619e78284d635bd5374fcdabb7557d2c4fe5dad3c3fc3"
+          },
+          "after": {
+            "size": 4919258,
+            "sha256": "5c0bce184d6009587f2db9c72bc2280983f02017406cabec55e431c097e45791"
+          }
+        },
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/usr/x86_64-w64-mingw32/bin/libwinpthread-1.dll": {
+          "before": {
+            "size": 193663,
+            "sha256": "9aa8e4c15cd52b157e556c684fe341b909747333db8d8efdf632bd0dcec2bdf5"
+          },
+          "after": {
+            "size": 193663,
+            "sha256": "4dcba6e88fd267406ef4eee4722c1e29782525c93f52230d2df0686746c6e308"
+          }
+        },
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/usr/x86_64-w64-mingw32/lib/libpthread.dll.a": {
+          "before": {
+            "size": 107618,
+            "sha256": "0d2ae5774b051d2b1cd4b573aaca866d4ac78b73dfcd00d964a5b26e73fadf30"
+          },
+          "after": {
+            "size": 107618,
+            "sha256": "bd5ca1b3a39a3739d79f194e071c5c2c9f6ec34ba2297438ad3fae9379cb1fd4"
+          }
+        },
+        "opt/ct-ng/x86_64-w64-mingw32/sysroot/usr/x86_64-w64-mingw32/lib/libwinpthread.dll.a": {
+          "before": {
+            "size": 107618,
+            "sha256": "0d2ae5774b051d2b1cd4b573aaca866d4ac78b73dfcd00d964a5b26e73fadf30"
+          },
+          "after": {
+            "size": 107618,
+            "sha256": "bd5ca1b3a39a3739d79f194e071c5c2c9f6ec34ba2297438ad3fae9379cb1fd4"
+          }
+        }
+      }
+    },
+    "rav1e_cache": {
+      "manifest_sha256": "952cbf6f3b7d6626115d56e5886a741a8a646aad49e336a383edf86c2b15e83f",
+      "config_sha256": "581dd600667014a27eeadcb7f00ee3be8b4109f6c67b3c9e53fa828d05148a58",
+      "exec_cache_map_sha256": "60f22467580182dbffd89504e7c4f24becf13b61f7f7b572254ac5194d83931c",
+      "record_sha256": "f5e83d6c1491c8814d9c7bd591f9057b46fa6e8548443ddbf3231bec968be891",
+      "layer_sha256": "e5f29915ba9d29f4fbf3c2e56bd69973b81c359d593c468cfd34454da84381cb",
+      "layer_size": 99071984,
+      "crate_count": 275,
+      "reconstructed_lock_sha256": "d031d0ff0d17c3fe603473dcb4d56eec4a41f38ef0120b6633cc90ed227d7168"
+    }
+  }
+}

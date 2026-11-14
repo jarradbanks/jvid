@@ -50,6 +50,10 @@ python3 scripts/packaging/smoke.py dist/jvid-<version>-linux-x86_64-portable.tar
 python3 -m unittest discover -s scripts/packaging -p 'test_*.py'
 ```
 
-linux needs `patchelf`, `ldd` and `ldconfig`. macos needs xcode's tools and homebrew `ffmpeg@7`. windows needs inno setup 6 and `--ffmpeg-dir` (`fetch_ffmpeg.py` downloads the pinned build). the [package workflow](../.github/workflows/package.yml) is the source of truth.
+linux needs `patchelf`, `ldd` and `ldconfig`. macos needs xcode's tools and homebrew `ffmpeg@7`. windows needs inno setup 6.6 or newer and `--ffmpeg-dir` (`fetch_ffmpeg.py` downloads the pinned build). the [package workflow](../.github/workflows/package.yml) is the source of truth.
 
 release packages link GPL FFmpeg with x264/x265 - see [PLAN.md · Licensing](PLAN.md#licensing). every package carries its third-party notices, and the full corresponding source for each version sits in the matching `sources-v<version>` release.
+
+the Windows SDK and dependency source cache are retained in a pinned, separate `runtime-inputs-ffmpeg-2026-10-31` prerelease. it is never the latest app release. `packaging/ffmpeg-windows.json` records the upstream monthly SDK, identical retained SDK bytes, and individually hashed source-cache parts; reassembly also checks the original whole-artifact digest. the reviewed `ffmpeg-windows-provenance.json` captures GitHub metadata before artifact expiry and is itself hash-pinned. collection applies the same run, job, repository, recipe, source and completeness checks to those retained facts and inputs.
+
+changing this runtime requires reviewing its binary and complete corresponding source together, including Rust and compiler runtime evidence. publish a new input tag with `--prerelease --latest=false` only after that review, then require green Package candidates before merging. never replace inputs under an existing hash or published tag. app releases continue through the [develop release flow](updating.md#releasing).

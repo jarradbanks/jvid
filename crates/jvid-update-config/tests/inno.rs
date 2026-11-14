@@ -58,6 +58,7 @@ fn fixture_script() -> String {
             // Map only the reviewed jvid data roots; any new profile constant must
             // still fail the isolation assertions below instead of escaping silently.
             let line = line
+                .replace("..\\assets\\jvid.png", "{#OutputDir}\\fixture-icon.png")
                 .replace(
                     "{localappdata}\\jvid\\",
                     "{#OutputDir}\\profile-local\\jvid\\",
@@ -80,6 +81,7 @@ fn fixture_script() -> String {
     assert!(!script.contains("[Registry]") && !script.contains("[UninstallRun]"));
     assert!(script.contains("#include \"whisper-models.iss\""));
     assert!(script.contains("SetupIconFile={#OutputDir}\\fixture-icon.ico"));
+    assert!(!script.contains("..\\assets\\"));
     script
 }
 
@@ -149,6 +151,11 @@ fn inno_upgrade(already_exited: bool) {
     fs::write(
         out.join("fixture-icon.ico"),
         include_bytes!("../../../assets/jvid.ico"),
+    )
+    .unwrap();
+    fs::write(
+        out.join("fixture-icon.png"),
+        include_bytes!("../../../assets/jvid.png"),
     )
     .unwrap();
     fs::write(

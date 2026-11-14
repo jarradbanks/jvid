@@ -55,6 +55,8 @@ class WindowsSourcesTests(unittest.TestCase):
         self.out = self.root / 'out'
         self.out.mkdir()
         self.lock = json.loads(windows.LOCK.read_text())
+        self.lock['source'].pop('provenance', None)
+        self.lock['source']['cache'].pop('retained_parts', None)
         self.write_stage()
 
     def write_stage(self, extra=''):
