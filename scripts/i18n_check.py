@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Seconds-long catalog check for translation-only PRs (#309), stdlib only.
 
-Mirrors `Catalog::mismatches` in crates/suite-ui/src/i18n.rs: every catalog parses as
+Mirrors `Catalog::mismatches` in j-ui/src/i18n.rs: every catalog parses as
 strings and tables, has English's keys (stubs aside) and no others, keeps English's
 {placeholders}, and each plural group has `other` plus the forms the language's rule picks
 (`plural_category`; `many` for exact millions is optional, it falls back to `other`).
@@ -14,7 +14,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-DIRS = ["crates/jvid-app/i18n", "crates/suite-ui/i18n", "crates/suite-ui/i18n/gallery"]
+DIRS = ["crates/jvid-app/i18n"]
 FORMS = ("one", "few", "many", "other")
 # Forms each language's rule picks for some count below a million, from `plural_category`.
 NEEDS = {"ja": {"other"}, "zh-Hans": {"other"}, "ko": {"other"}, "cs": {"one", "few", "other"}}

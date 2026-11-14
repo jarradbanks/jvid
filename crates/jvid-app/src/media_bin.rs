@@ -9,6 +9,10 @@ use egui::{
     Align2, CornerRadius, Key, Rect, Sense, StrokeKind, TextureHandle, Ui, UiBuilder, Vec2, pos2,
     vec2,
 };
+use j_ui::panel::Panel;
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, radius, size, space};
+use j_ui::widgets::{Button, Dropdown, TextInput, fit_text};
 use jvid_core::history::Command;
 use jvid_core::model::{AssetId, MediaAsset, Project, Text};
 use jvid_core::time::FLICKS_PER_SECOND;
@@ -16,10 +20,6 @@ use jvid_jobs::Pool;
 use jvid_media::proxy::Proxies;
 use jvid_media::thumbnails::Cache;
 use jvid_media::waveforms;
-use suite_ui::panel::Panel;
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Dropdown, TextInput, fit_text};
 
 use crate::i18n::{tr, trn, verbatim};
 use crate::preview::Preview;
@@ -343,7 +343,7 @@ impl MediaBin {
         if let Some(id) = self.confirm_remove {
             out.command = out.command.or(self.remove_warning(ui, project, id));
         }
-        self.library_dialog(ui, project, &mut out);
+        self.delete_dialog(ui, project, &mut out);
         out
     }
 
@@ -376,7 +376,9 @@ impl MediaBin {
         let import = Button::secondary(tr!("action.import"))
             .with_icon(icon::PLUS)
             .width(bar.width());
-        out.import |= ui.put(bar, import).clicked();
+        let import = ui.put(bar, import);
+        crate::app::tutorial::anchor(ui.ctx(), "media.import", import.rect);
+        out.import |= import.clicked();
         let solid = Button::secondary(solid_label).width(solid_w);
         if ui.put(solid_bar, solid).clicked() {
             out.command = if removing {
@@ -406,12 +408,13 @@ impl MediaBin {
             let ids: Vec<_> = assets.iter().map(|a| a.id).collect();
             self.visible_ids = Some(ids.clone());
             self.retain_visible(&ids);
-            if assets.is_empty() {
+            let bins = self.library.tiles(project, &self.query);
+            if assets.is_empty() && bins.is_empty() {
                 if importing {
                     ui.label(egui::RichText::new(tr!("bin.importing")).color(color::ink_3()));
                 } else if !self.query.trim().is_empty() || self.library.active() {
                     let organized = self.library.active();
-                    if suite_ui::empty_state::EmptyState::new(
+                    if j_ui::empty_state::EmptyState::new(
                         icon::SEARCH,
                         if organized {
                             tr!("bin.no_results")
@@ -439,7 +442,7 @@ impl MediaBin {
                         self.library.keymap = keymap;
                     }
                 } else {
-                    out.import |= suite_ui::empty_state::EmptyState::new(
+                    out.import |= j_ui::empty_state::EmptyState::new(
                         icon::FOLDER,
                         tr!("empty.media"),
                         tr!("bin.empty"),
@@ -464,34 +467,52 @@ impl MediaBin {
             } else {
                 tile_w * 9.0 / 16.0 + ROW
             };
-            let mut scroll = egui::ScrollArea::vertical().auto_shrink(false);
+            // No 64px minimum: in a short panel the grid scrolls in what's left rather than
+            // spilling over the pinned Import bar.
+            let mut scroll = egui::ScrollArea::vertical()
+                .auto_shrink(false)
+                .min_scrolled_height(0.0);
             // Virtual rows still honor Reveal without waiting for an off-screen widget.
             if let Some(index) = self.reveal.and_then(|id| ids.iter().position(|a| *a == id)) {
+                let index = index + bins.len();
                 scroll = scroll.vertical_scroll_offset((index / cols) as f32 * (row_h + space::S8));
             }
-            scroll.show_rows(ui, row_h, assets.len().div_ceil(cols), |ui, rows| {
-                if self.list {
-                    for a in &assets[rows] {
-                        ui.push_id(a.id, |ui| {
-                            let r = ui.allocate_response(
-                                vec2(ui.available_width(), ROW),
-                                Sense::click_and_drag(),
-                            );
-                            self.row(ui, r, a, project, missing.contains(&a.path), out);
+            // Bin tiles come first and share the media's grid, rows and virtual scrolling.
+            let count = bins.len() + assets.len();
+            let item =
+                |this: &mut Self, ui: &mut Ui, i: usize, size: Vec2, out: &mut BinResponse| {
+                    if let Some(&tile) = bins.get(i) {
+                        ui.push_id(tile, |ui| {
+                            let r = ui.allocate_response(size, Sense::click());
+                            this.bin_tile(ui, r, tile, project, out);
                         });
+                        return;
+                    }
+                    let a = assets[i - bins.len()];
+                    ui.push_id(a.id, |ui| {
+                        let r = ui.allocate_response(size, Sense::click_and_drag());
+                        let item = crate::app::tutorial::Item::Asset(a.id);
+                        crate::app::tutorial::item_anchor(ui.ctx(), "asset", item, r.rect);
+                        let offline = missing.contains(&a.path);
+                        if this.list {
+                            this.row(ui, r, a, project, offline, out);
+                        } else {
+                            this.tile(ui, r, a, project, offline, out);
+                        }
+                    });
+                };
+            scroll.show_rows(ui, row_h, count.div_ceil(cols), |ui, rows| {
+                if self.list {
+                    for i in rows {
+                        item(self, ui, i, vec2(ui.available_width(), ROW), out);
                     }
                 } else {
                     let tile = vec2(tile_w, row_h);
-                    let first = rows.start * cols;
-                    let last = (rows.end * cols).min(assets.len());
-                    for chunk in assets[first..last].chunks(cols) {
+                    for row in rows {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = gap;
-                            for a in chunk {
-                                ui.push_id(a.id, |ui| {
-                                    let r = ui.allocate_response(tile, Sense::click_and_drag());
-                                    self.tile(ui, r, a, project, missing.contains(&a.path), out);
-                                });
+                            for i in row * cols..((row + 1) * cols).min(count) {
+                                item(self, ui, i, tile, out);
                             }
                         });
                     }
@@ -502,6 +523,7 @@ impl MediaBin {
             if focused
                 && !ui.ctx().text_edit_focused()
                 && self.renaming.is_none()
+                && !self.library_naming()
                 && !self.library_modal_open()
                 && self.confirm_remove.is_none()
                 && ui.ctx().memory(|m| m.top_modal_layer().is_none())
@@ -520,6 +542,7 @@ impl MediaBin {
             }
         });
         self.finish_rename(ui, project, out);
+        self.finish_naming(ui, project, out);
         self.drag_preview(ui, project, missing);
     }
 
@@ -753,9 +776,12 @@ impl MediaBin {
                 pos2(rect.left(), rect.center().y - size::CONTROL / 2.0),
                 vec2(w, size::CONTROL),
             );
-            self.rename_field = Some(field);
+            // Focus once, when the field opens; asking every frame can drop fast typing.
+            let opened = self.rename_field.replace(field).is_none();
             let r = put_over(ui, field, TextInput::new(text).width(w));
-            r.request_focus();
+            if opened {
+                r.request_focus();
+            }
             let pos = pos2(
                 field.right() + space::S4,
                 rect.center().y - g.size().y / 2.0,
@@ -813,6 +839,7 @@ impl MediaBin {
             }
             if ui.button(tr!("bin.rename")).clicked() {
                 self.renaming = Some((a.id, stem.to_owned()));
+                self.rename_field = None;
             }
             self.library_asset_menu(ui, project, out);
             let label = if self.selected_ids.len() > 1 {
@@ -858,6 +885,7 @@ impl MediaBin {
             }
             if enter || esc {
                 self.renaming = None;
+                self.rename_field = None;
             }
         }
     }
@@ -983,23 +1011,17 @@ impl MediaBin {
             .map(|id| usage.get(id).copied().unwrap_or(0))
             .sum();
         let mut command = None;
-        let modal = egui::Modal::new(egui::Id::new("remove_asset"))
-            .frame(
-                egui::Frame::popup(ui.style())
-                    .corner_radius(radius::DIALOG)
-                    .inner_margin(space::S16),
-            )
-            .show(ui.ctx(), |ui| {
-                ui.set_width(320.0);
-                ui.label(
-                    egui::RichText::new(if ids.len() > 1 {
-                        trn!("bin.remove_selected_title", ids.len())
-                    } else {
-                        tr!("bin.remove_title", name = asset.display_name())
-                    })
-                    .font(theme::headline()),
-                );
-                ui.add_space(space::S8);
+        let title = if ids.len() > 1 {
+            trn!("bin.remove_selected_title", ids.len())
+        } else {
+            tr!("bin.remove_title", name = asset.display_name())
+        };
+        let modal = j_ui::dialog::modal(
+            ui.ctx(),
+            egui::Id::new("remove_asset"),
+            &title,
+            320.0,
+            |ui| {
                 if ids.len() > 1 {
                     ui.label(trn!("bin.remove_selected_body", n, used = used));
                     ui.label(tr!("bin.files_retained"));
@@ -1007,7 +1029,7 @@ impl MediaBin {
                     ui.label(trn!("bin.remove_body", n));
                 }
                 ui.add_space(space::S16);
-                let actions = suite_ui::dialog::action_footer(
+                let actions = j_ui::dialog::action_footer(
                     ui,
                     [
                         Button::secondary(tr!("prompt.cancel")),
@@ -1021,7 +1043,8 @@ impl MediaBin {
                 if actions[0].clicked() {
                     ui.close();
                 }
-            });
+            },
+        );
         if modal.should_close() {
             self.confirm_remove = None;
             self.pending_remove.clear();
@@ -1246,6 +1269,9 @@ fn text_presets(ui: &mut Ui, tiles: &[Option<egui::TextureId>; 3], out: &mut Bin
                 ui.horizontal(|ui| {
                     for (name, text, tex, n, a) in row {
                         let (rect, r) = ui.allocate_exact_size(vec2(w, h), Sense::click_and_drag());
+                        if *name == laid[0].0 {
+                            crate::app::tutorial::anchor_in(ui, "bin.title", rect);
+                        }
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *name)
                         });
@@ -1276,7 +1302,7 @@ fn text_presets(ui: &mut Ui, tiles: &[Option<egui::TextureId>; 3], out: &mut Bin
                         p.galley(at, n.clone(), color::ink());
                         p.galley(at + vec2(0.0, n.size().y), a.clone(), color::ink_3());
                         if r.has_focus() {
-                            p.add(suite_ui::widgets::focus_ring(rect, radius::CONTROL));
+                            p.add(j_ui::widgets::focus_ring(rect, radius::CONTROL));
                         }
                         let dragged = r.drag_started();
                         if dragged || r.clicked() {
@@ -1388,13 +1414,13 @@ impl MediaBin {
             });
             if rows.is_empty() {
                 if empty_folder && self.fx_query.trim().is_empty() {
-                    suite_ui::empty_state::EmptyState::new(
+                    j_ui::empty_state::EmptyState::new(
                         icon::SLIDERS,
                         tr!("empty.effects"),
                         tr!("bin.fx_empty"),
                     )
                     .show(ui);
-                } else if suite_ui::empty_state::EmptyState::new(
+                } else if j_ui::empty_state::EmptyState::new(
                     icon::SEARCH,
                     tr!("empty.search_effects"),
                     tr!("empty.search_help"),
@@ -1613,11 +1639,11 @@ impl MediaBin {
     }
 
     /// Apply works on a usable effect with video clips selected.
-    fn apply_state(&self, row: &crate::effects::Row) -> suite_ui::widgets::State {
+    fn apply_state(&self, row: &crate::effects::Row) -> j_ui::widgets::State {
         if self.fx_apply && row.error.is_none() && !row.disabled {
-            suite_ui::widgets::State::Live
+            j_ui::widgets::State::Live
         } else {
-            suite_ui::widgets::State::Disabled
+            j_ui::widgets::State::Disabled
         }
     }
 
@@ -1633,7 +1659,7 @@ impl MediaBin {
     ) {
         if r.has_focus() {
             ui.painter()
-                .add(suite_ui::widgets::focus_ring(r.rect, radius::CONTROL));
+                .add(j_ui::widgets::focus_ring(r.rect, radius::CONTROL));
         }
         if r.clicked() {
             self.fx_selected = Some(row.stem.clone());
@@ -1881,7 +1907,7 @@ mod tests {
 
     #[test]
     fn hovering_a_tile_leaves_the_next_one_where_it_was() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut history = jvid_core::history::History::new(Project::default());
@@ -1902,7 +1928,7 @@ mod tests {
             .wgpu()
             .build_ui_state(
                 move |ui, (bin, project): &mut (MediaBin, Project)| {
-                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh) {
                         bin.show(ui, project, false, false, &HashSet::new());
                     }
                 },

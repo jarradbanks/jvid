@@ -238,9 +238,13 @@ def validate_stage(stage: Path, lock: dict):
 
 def validate_provenance(lock: dict) -> dict:
     source = lock['source']
+    metadata = api_json
+    if 'provenance' in source:
+        import retained_windows_inputs
+        metadata = retained_windows_inputs.metadata(lock)
     repo = source['repository']
     prefix = f'repos/{repo}/actions'
-    run = api_json(f"{prefix}/runs/{source['run_id']}")
+    run = metadata(f"{prefix}/runs/{source['run_id']}")
     expected = {'id': source['run_id'], 'head_sha': lock['build_scripts_commit'],
                 'run_attempt': source['run_attempt'], 'path': source['workflow'],
                 'event': source['event'], 'status': 'completed', 'conclusion': 'success'}
@@ -248,7 +252,7 @@ def validate_provenance(lock: dict) -> dict:
         _match(run.get(key), value, 'BtbN run ' + key)
     _match(run.get('repository', {}).get('full_name'), repo, 'BtbN run repository')
     _match(run.get('repository', {}).get('id'), source['repository_id'], 'BtbN repository id')
-    artifact = api_json(f"{prefix}/artifacts/{source['cache']['id']}")
+    artifact = metadata(f"{prefix}/artifacts/{source['cache']['id']}")
     for key in ('id', 'name', 'size_in_bytes', 'digest'):
         _match(artifact.get(key), source['cache'][key], 'BtbN cache ' + key)
     _match(artifact.get('expired'), False, 'BtbN cache expiration')
@@ -258,15 +262,18 @@ def validate_provenance(lock: dict) -> dict:
     jobs = {}
     for field in ('build_job', 'variant_job'):
         expected = source[field]
-        job = api_json(f"{prefix}/jobs/{expected['id']}")
+        job = metadata(f"{prefix}/jobs/{expected['id']}")
         for key, value in {**expected, 'run_id': source['run_id'],
                            'conclusion': 'success', 'status': 'completed'}.items():
             _match(job.get(key), value, 'BtbN ' + field + ' ' + key)
         jobs[field] = {key: job[key] for key in ('id', 'name', 'run_id', 'status', 'conclusion')}
     # Retain a deliberate allowlist. Do not store archive_download_url or signed URLs.
-    return {'run': {**expected_run(source, lock), 'repository': repo},
-            'cache': {key: artifact[key] for key in ('id', 'name', 'size_in_bytes', 'digest', 'expired')},
-            **jobs}
+    proof = {'run': {**expected_run(source, lock), 'repository': repo},
+             'cache': {key: artifact[key] for key in ('id', 'name', 'size_in_bytes', 'digest', 'expired')},
+             **jobs}
+    if 'provenance' in source:
+        proof['retained_provenance'] = source['provenance']
+    return proof
 
 
 def expected_run(source, lock):
@@ -581,6 +588,9 @@ def collect_pinned_inputs(stage: Path, out: Path, lock: dict) -> list[dict]:
     provenance = validate_provenance(lock)
     _write_json(out / 'runtime-source-lock.json', lock)
     _write_json(out / 'github-provenance.json', provenance)
+    if 'provenance' in source:
+        name = source['provenance']['file']
+        shutil.copy2(ROOT / 'packaging' / name, out / name)
     shutil.copy2(stage / 'SOURCE-INFO.txt', out / 'SOURCE-INFO.txt')
     records = []
     for key, filename in (('ffmpeg', 'ffmpeg.tar.gz'), ('build_scripts', 'btbn-build-scripts.tar.gz')):
@@ -593,11 +603,14 @@ def collect_pinned_inputs(stage: Path, out: Path, lock: dict) -> list[dict]:
     records.append(collect_rust_std(out, lock))
     cache = source['cache']
     endpoint = f"repos/{source['repository']}/actions/artifacts/{cache['id']}/zip"
-    # Resolve the API redirect even with a local cache, so artifact access and
-    # retention are revalidated on every actual collection.
-    fetch(artifact_url(endpoint, cache['public_url']), out / 'dependency-source-cache.zip',
-             cache['digest'].removeprefix('sha256:'), cache['size_in_bytes'],
-             exact_size=cache['size_in_bytes'])
+    if 'retained_parts' in cache:
+        from retained_windows_inputs import fetch_cache
+        fetch_cache(cache, out / 'dependency-source-cache.zip')
+    else:
+        # Live inputs must still validate artifact access, even with a local cache.
+        fetch(artifact_url(endpoint, cache['public_url']), out / 'dependency-source-cache.zip',
+              cache['digest'].removeprefix('sha256:'), cache['size_in_bytes'],
+              exact_size=cache['size_in_bytes'])
     coverage = validate_cache(out / 'dependency-source-cache.zip', lock)
     rav1e_files = collect_rav1e(out, lock)
     _write_json(out / 'recipe-source-coverage.json', {'recipes': coverage, 'patches': patches,
@@ -628,6 +641,8 @@ def collect_pinned_inputs(stage: Path, out: Path, lock: dict) -> list[dict]:
         'OS build-tool prerequisites.\n', encoding='utf-8')
     shared = ['runtime-source-lock.json', 'github-provenance.json', 'SOURCE-INFO.txt',
               'btbn-build-scripts.tar.gz', 'recipe-source-coverage.json', 'REBUILD-SOURCES.txt']
+    if 'provenance' in source:
+        shared.append(source['provenance']['file'])
     records.append({'id': 'windows-ffmpeg', 'source': 'https://github.com/FFmpeg/FFmpeg',
                     'version': source['ffmpeg']['revision'], 'provider': 'BtbN/FFmpeg-Builds',
                     'runtime_url': lock['url'], 'runtime_sha256': lock['sha256'],

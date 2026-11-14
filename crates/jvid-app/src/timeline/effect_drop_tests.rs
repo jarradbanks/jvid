@@ -9,7 +9,7 @@ fn harness(project: Project) -> Harness<'static, (Timeline, History)> {
         .with_size([1000.0, 240.0])
         .build_ui_state(
             move |ui, (t, h): &mut (Timeline, History)| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 if let Some((cmd, _)) = t.show(ui, h.project(), &HashSet::new(), &Keymap::default())

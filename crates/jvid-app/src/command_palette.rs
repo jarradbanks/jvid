@@ -2,9 +2,9 @@
 //! This owns only temporary view state; opening it never changes the focused dock panel.
 
 use egui::{Id, Key, Modifiers, Ui};
-use suite_ui::theme;
-use suite_ui::tokens::{radius, size, space};
-use suite_ui::widgets::TextInput;
+use j_ui::theme;
+use j_ui::tokens::{radius, size, space};
+use j_ui::widgets::TextInput;
 
 use crate::i18n::{CATALOG, tr};
 use crate::keymap::{ACTIONS, Applicability, Keymap};
@@ -237,7 +237,7 @@ mod tests {
         let mut fresh = true;
         Harness::new_ui_state(
             move |ui, (palette, map, fired)| {
-                if !suite_ui::test_support::install_theme(ui, &mut fresh)
+                if !j_ui::test_support::install_theme(ui, &mut fresh)
                     && let Some(id) = palette.show(ui, map, |id| {
                         Applicability::when(id != "export", "export.nothing")
                     })
@@ -308,7 +308,7 @@ mod tests {
         let mut fresh = true;
         let mut h = Harness::new_ui_state(
             move |ui, (palette, text)| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 ui.add(egui::TextEdit::singleline(text).id(Id::new("prior_input")));
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     #[ignore = "renders review artifacts; run explicitly with JVID_PALETTE_ARTIFACT_DIR"]
     fn render_review_artifacts() {
-        assert!(suite_ui::test_support::gpu());
+        assert!(j_ui::test_support::gpu());
         let directory = std::path::PathBuf::from(
             std::env::var_os("JVID_PALETTE_ARTIFACT_DIR").expect("artifact directory"),
         );
@@ -395,14 +395,14 @@ mod tests {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                suite_ui::i18n::set_language("en");
+                j_ui::i18n::set_language("en");
             }
         }
         let _restore = Restore;
         let mut h = harness("");
         h.run_steps(2);
         for language in ["es", "de", "fr", "ja", "en"] {
-            suite_ui::i18n::set_language(language);
+            j_ui::i18n::set_language(language);
             modal_fits_narrow_short_viewports();
             let name = CATALOG.get("action.export").unwrap();
             assert!(

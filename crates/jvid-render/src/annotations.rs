@@ -15,7 +15,7 @@ fn digits(a: &Annotation, size: (u32, u32), rgba: &mut [u8]) {
     static FONTS: OnceLock<Mutex<(FontSystem, SwashCache)>> = OnceLock::new();
     let fonts = FONTS.get_or_init(|| {
         let mut db = cosmic_text::fontdb::Database::new();
-        db.load_font_data(include_bytes!("../../suite-ui/assets/Inter-Regular.ttf").to_vec());
+        db.load_font_data(j_ui::theme::INTER_REGULAR.to_vec());
         db.set_sans_serif_family("Inter");
         Mutex::new((
             FontSystem::new_with_locale_and_db("en-US".into(), db),

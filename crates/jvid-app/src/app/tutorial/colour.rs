@@ -6,7 +6,7 @@ use jvid_core::model::{Clip, Transform};
 use jvid_core::time::Time;
 use jvid_render::scope::{Analysis, VECTOR};
 
-use super::{App, Lesson, Step, apply, sample};
+use super::{App, Lesson, STEP, Step, apply, sample, select};
 use crate::i18n::{tr, verbatim};
 
 const CLIP: &str = "dark-warm.mp4";
@@ -43,55 +43,67 @@ pub const COLOUR: Lesson = Lesson {
     },
     steps: &[
         Step {
-            anchor: "scope.waveform",
+            anchor: "inspector.exposure",
             text: |_| tr!("tutorial.color_exposure").into(),
             done: |a| a.preview.analysis.as_ref().is_some_and(exposed),
             example: |a| grade(a, |x| x.exposure = 1.0),
             reveal: Some(open_scopes),
-            ghost: None,
-            also: &["inspector.exposure"],
+            via: &[select!(clip_id)],
+            watch: &["scope.waveform"],
+            ..STEP
         },
         Step {
-            anchor: "scope.vectorscope",
+            anchor: "inspector.temperature",
             text: |_| tr!("tutorial.color_balance").into(),
             done: |a| a.preview.analysis.as_ref().is_some_and(centred),
             example: |a| grade(a, |x| (x.temperature, x.tint) = (-0.4, 0.0)),
             reveal: Some(open_scopes),
-            ghost: None,
-            also: &["inspector.temperature", "inspector.tint"],
+            via: &[select!(clip_id)],
+            watch: &["scope.vectorscope"],
+            ..STEP
         },
         Step {
-            anchor: "scope.histogram",
+            anchor: "inspector.balance",
             text: |_| tr!("tutorial.color_histogram").into(),
             done: |a| a.preview.analysis.as_ref().is_some_and(lined_up),
             example: |a| grade(a, |x| (x.temperature, x.tint) = (-0.7, -0.25)),
             reveal: Some(open_scopes),
-            ghost: None,
-            also: &["inspector.temperature", "inspector.tint"],
+            via: &[select!(clip_id)],
+            watch: &["scope.histogram"],
+            ..STEP
         },
         Step {
-            anchor: "inspector.lut",
+            anchor: "inspector.lut_button",
             text: |_| {
                 let none = tr!("inspector.lut_none");
                 tr!("tutorial.color_look", none = none, file = verbatim(LOOK))
             },
+            done: |a| clip(a).is_some_and(|c| c.transform.lut.is_some()),
+            example: |a| match sample(LOOK) {
+                Ok(path) => grade(a, |x| x.lut = Some(path.to_string_lossy().into())),
+                Err(e) => a.error(tr!("app.open_failed", path = verbatim(LOOK), error = e)),
+            },
+            via: &[select!(clip_id)],
+            ..STEP
+        },
+        Step {
+            anchor: "inspector.lut_mix",
+            text: |_| tr!("tutorial.color_mix").into(),
             done: |a| {
                 clip(a)
                     .is_some_and(|c| c.transform.lut.is_some() && c.transform.lut_intensity < 1.0)
             },
-            example: |a| match sample(LOOK) {
-                Ok(path) => grade(a, |x| {
-                    x.lut = Some(path.to_string_lossy().into());
-                    x.lut_intensity = 0.5;
-                }),
-                Err(e) => a.error(tr!("app.open_failed", path = verbatim(LOOK), error = e)),
-            },
-            reveal: None,
-            ghost: None,
-            also: &["preview"],
+            example: |a| grade(a, |x| x.lut_intensity = 0.5),
+            via: &[select!(clip_id)],
+            watch: &["preview.frame"],
+            ..STEP
         },
     ],
 };
+
+fn clip_id(app: &App) -> Option<jvid_core::model::ClipId> {
+    clip(app).map(|c| c.id)
+}
 
 fn open_scopes(app: &mut App) {
     app.bin.tab = SCOPES;

@@ -71,8 +71,8 @@ impl Health {
 use std::path::PathBuf;
 
 use egui::Ui;
+use j_ui::tokens::color;
 use jvid_media::proxy::Status as ProxyStatus;
-use suite_ui::tokens::color;
 
 use crate::i18n::tr;
 
@@ -96,142 +96,115 @@ impl Observation {
     }
 }
 
-/// Fixed-width caption, with full translated text and explanations in its popup.
-/// Returns sources explicitly requested for retry. All inputs are already observed data.
-pub fn control(
+/// A passive caption beside the Proxies checkbox: which media the viewer shows, shown
+/// while proxies are on or something needs attention, with the details in its tooltip.
+/// A failed proxy adds Retry Proxies; returns the sources it asked to retry.
+pub fn label(
     ui: &mut Ui,
     observation: Observation,
     health: &Health,
     quality: &str,
     jobs: &[(PathBuf, ProxyStatus)],
-    compact: bool,
+    proxies: bool,
 ) -> Vec<PathBuf> {
     let failed = jobs
         .iter()
         .any(|(_, s)| matches!(s, ProxyStatus::Failed(_) | ProxyStatus::Cancelled));
-    let generating = jobs
+    let generating: Vec<_> = jobs
         .iter()
-        .any(|(_, s)| matches!(s, ProxyStatus::Generating(_)));
-    if generating {
+        .filter_map(|(_, state)| match state {
+            ProxyStatus::Generating(progress) => Some(*progress),
+            _ => None,
+        })
+        .collect();
+    if !generating.is_empty() {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(250));
     }
     let warning = health.troubled() || failed || observation.picture == Picture::Failed;
+    if !proxies && !warning {
+        return Vec::new();
+    }
     let ink = if warning {
         color::amber()
     } else {
-        color::ink_2()
+        color::ink_3()
     };
-    let response = if compact {
-        let glyph = if warning {
-            suite_ui::theme::icon::CIRCLE_ALERT
-        } else if generating {
-            suite_ui::theme::icon::LOADER
-        } else {
-            suite_ui::theme::icon::CLOCK
-        };
-        ui.add(suite_ui::widgets::Button::icon(glyph, tr!("preview.status")).ink(ink))
+    let caption = if generating.is_empty() {
+        observation.label().into()
     } else {
-        let response = ui.add(suite_ui::widgets::Button::ghost("").width(112.0));
-        let caption = if generating {
-            format!("{} …", observation.label())
-        } else {
-            observation.label().into()
-        };
-        let galley =
-            suite_ui::widgets::fit_text(ui, &caption, suite_ui::theme::body_strong(), ink, 88.0);
-        ui.painter().galley(
-            response.rect.center() - galley.mesh_bounds.center().to_vec2(),
-            galley,
-            ink,
-        );
-        response
+        format!("{} …", observation.label())
     };
+    let galley = j_ui::widgets::fit_text(ui, &caption, j_ui::theme::body(), ink, 88.0);
+    let (rect, response) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+    ui.painter().galley(rect.min, galley, ink);
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("preview.status"))
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, observation.label())
     });
-    let response = response.on_hover_text(tr!(
-        "preview.status_quality",
-        quality = quality,
-        source = observation.source_label()
-    ));
-    let mut retry = Vec::new();
-    egui::Popup::menu(&response).show(|ui| {
-        ui.set_width((ui.ctx().content_rect().width() - 32.0).clamp(160.0, 320.0));
+    response.on_hover_ui(|ui| {
+        ui.set_max_width(320.0);
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-        egui::ScrollArea::vertical()
-            .max_height((ui.ctx().content_rect().height() - 64.0).max(80.0))
-            .show(ui, |ui| {
-                ui.strong(tr!("preview.status"));
-                ui.label(observation.label());
-                ui.label(tr!(
-                    "preview.status_quality",
-                    quality = quality,
-                    source = observation.source_label()
-                ));
-                ui.label(tr!("preview.status_export"));
-                if health.troubled() {
-                    ui.colored_label(
-                        color::amber(),
-                        tr!("preview.status_trouble", count = health.misses()),
-                    );
-                }
-                if observation.picture == Picture::Failed {
-                    ui.label(tr!("preview.status_decode_failed"));
-                }
-                let generating: Vec<_> = jobs
-                    .iter()
-                    .filter_map(|(_, state)| match state {
-                        ProxyStatus::Generating(progress) => Some(*progress),
-                        _ => None,
-                    })
-                    .collect();
-                if !generating.is_empty() {
-                    let progress = (generating.iter().sum::<f32>() / generating.len() as f32
-                        * 100.0)
-                        .round() as u32;
+        ui.label(tr!(
+            "preview.status_quality",
+            quality = quality,
+            source = observation.source_label()
+        ));
+        ui.label(tr!("preview.status_export"));
+        if health.troubled() {
+            ui.colored_label(
+                color::amber(),
+                tr!("preview.status_trouble", count = health.misses()),
+            );
+        }
+        if observation.picture == Picture::Failed {
+            ui.label(tr!("preview.status_decode_failed"));
+        }
+        if !generating.is_empty() {
+            let progress =
+                (generating.iter().sum::<f32>() / generating.len() as f32 * 100.0).round() as u32;
+            ui.label(tr!(
+                "preview.status_generating",
+                count = generating.len(),
+                progress = progress
+            ));
+        }
+        let ready = jobs
+            .iter()
+            .filter(|(_, s)| *s == ProxyStatus::Ready)
+            .count();
+        if ready > 0 {
+            ui.label(tr!("preview.status_ready", count = ready));
+        }
+        for (path, state) in jobs {
+            match state {
+                ProxyStatus::Failed(error) => {
                     ui.label(tr!(
-                        "preview.status_generating",
-                        count = generating.len(),
-                        progress = progress
+                        "preview.status_proxy_failed",
+                        source = path.display(),
+                        error = error
                     ));
-                    ui.ctx()
-                        .request_repaint_after(std::time::Duration::from_millis(250));
                 }
-                let ready = jobs
-                    .iter()
-                    .filter(|(_, s)| *s == ProxyStatus::Ready)
-                    .count();
-                if ready > 0 {
-                    ui.label(tr!("preview.status_ready", count = ready));
+                ProxyStatus::Cancelled => {
+                    ui.label(tr!("preview.status_cancelled"));
                 }
-                for (path, state) in jobs {
-                    match state {
-                        ProxyStatus::Failed(error) => {
-                            ui.label(tr!(
-                                "preview.status_proxy_failed",
-                                source = path.display(),
-                                error = error
-                            ));
-                        }
-                        ProxyStatus::Cancelled => {
-                            ui.label(tr!("preview.status_cancelled"));
-                        }
-                        _ => {}
-                    }
-                }
-                if failed && ui.button(tr!("preview.status_retry")).clicked() {
-                    retry.extend(
-                        jobs.iter()
-                            .filter(|(_, state)| {
-                                matches!(state, ProxyStatus::Failed(_) | ProxyStatus::Cancelled)
-                            })
-                            .map(|(path, _)| path.clone()),
-                    );
-                    ui.close();
-                }
-            });
+                _ => {}
+            }
+        }
     });
+    let mut retry = Vec::new();
+    if failed
+        && ui
+            .add(j_ui::widgets::Button::ghost(tr!("preview.status_retry")))
+            .clicked()
+    {
+        retry.extend(
+            jobs.iter()
+                .filter(|(_, state)| {
+                    matches!(state, ProxyStatus::Failed(_) | ProxyStatus::Cancelled)
+                })
+                .map(|(path, _)| path.clone()),
+        );
+    }
     retry
 }
 
@@ -241,50 +214,44 @@ mod tests {
     use egui_kittest::{Harness, kittest::Queryable};
 
     #[test]
-    fn status_control_wraps_long_details_and_retries_in_narrow_panels() {
-        for compact in [false, true] {
-            let mut fresh = true;
-            let jobs = vec![(
-                PathBuf::from(
-                    "a very long source name with many words and a tall portrait recording.mov",
-                ),
-                ProxyStatus::Failed(
-                    "A detailed decoder error explaining why the source could not be read".into(),
-                ),
-            )];
-            let mut h = Harness::builder().with_size([240.0, 540.0]).build_ui_state(
-                move |ui, retry: &mut Vec<PathBuf>| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
-                        return;
-                    }
-                    retry.extend(control(
-                        ui,
-                        Observation {
-                            picture: Picture::Approximate,
-                            originals: 1,
-                            proxies: 0,
-                        },
-                        &Health::default(),
-                        "¼",
-                        &jobs,
-                        compact,
-                    ));
-                },
-                Vec::new(),
-            );
-            h.run();
-            let button =
-                h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status"));
-            assert!(button.rect().width() <= 112.1);
-            button.click();
-            h.run();
-            let retry =
-                h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status_retry"));
-            assert!(retry.rect().right() <= 240.0);
-            retry.click();
-            h.run();
-            assert_eq!(h.state().len(), 1);
-        }
+    fn label_is_passive_shows_with_proxies_or_trouble_and_retries_failures() {
+        let mut fresh = true;
+        let jobs = [(
+            PathBuf::from("a long source name.mov"),
+            ProxyStatus::Failed("The decoder could not read the source".into()),
+        )];
+        let ready = Observation {
+            picture: Picture::Ready,
+            originals: 1,
+            proxies: 0,
+        };
+        let mut h = Harness::builder().with_size([240.0, 120.0]).build_ui_state(
+            move |ui, (proxies, failed, retry): &mut (bool, bool, Vec<PathBuf>)| {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
+                    return;
+                }
+                let jobs = if *failed { &jobs[..] } else { &[] };
+                ui.horizontal(|ui| {
+                    retry.extend(label(ui, ready, &Health::default(), "Full", jobs, *proxies));
+                });
+            },
+            (false, false, Vec::new()),
+        );
+        h.run();
+        // Proxies off and nothing wrong: nothing to say.
+        assert!(h.query_by_label(tr!("preview.status_original")).is_none());
+        h.state_mut().0 = true;
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::Label, tr!("preview.status_original"));
+        assert!(
+            h.query_by_label(tr!("preview.status")).is_none(),
+            "no status button"
+        );
+        h.state_mut().1 = true;
+        h.run();
+        h.get_by_label(tr!("preview.status_retry")).click();
+        h.run();
+        assert_eq!(h.state().2.len(), 1);
     }
 
     #[test]
@@ -292,7 +259,7 @@ mod tests {
         let Some(dir) = std::env::var_os("JVID_PLAYBACK_EVIDENCE_DIR").map(PathBuf::from) else {
             return;
         };
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         std::fs::create_dir_all(&dir).unwrap();
@@ -345,21 +312,22 @@ mod tests {
                 .with_size([360.0, 540.0])
                 .wgpu()
                 .build_ui(move |ui| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
-                    control(
-                        ui,
-                        observation,
-                        &Health::default(),
-                        tr!("preview.full"),
-                        &jobs,
-                        false,
-                    );
+                    ui.horizontal(|ui| {
+                        label(
+                            ui,
+                            observation,
+                            &Health::default(),
+                            tr!("preview.full"),
+                            &jobs,
+                            true,
+                        );
+                    });
                 });
             h.run_steps(4);
-            h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status"))
-                .click();
+            h.get_by_label(observation.label()).hover();
             h.run_steps(4);
             h.render()
                 .unwrap()

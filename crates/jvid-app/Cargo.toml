@@ -15,12 +15,13 @@ jvid-log.workspace = true
 jvid-media.workspace = true
 jvid-transcribe.workspace = true
 jvid-paths.workspace = true
-jvid-updater.workspace = true
+jvid-update-config.workspace = true
+j-update.workspace = true
 same-file.workspace = true
 tracing.workspace = true
 image.workspace = true
 jvid-render.workspace = true
-suite-ui.workspace = true
+j-ui.workspace = true
 eframe = { workspace = true, features = ["persistence"] }
 egui.workspace = true
 egui_dock = { version = "0.21", features = ["serde"] }
@@ -36,7 +37,7 @@ gpl-ffmpeg = ["jvid-media/gpl-ffmpeg"]
 [dev-dependencies]
 tempfile.workspace = true
 egui_kittest = { workspace = true, features = ["eframe"] }
-suite-ui = { workspace = true, features = ["test-support"] }
+j-ui = { workspace = true, features = ["test-support"] }
 jvid-media = { workspace = true, features = ["test-support"] }
 # The translation guard in tests/i18n_guard.rs parses the UI sources.
 syn = { version = "2.0.119", features = ["full", "visit-mut"] }

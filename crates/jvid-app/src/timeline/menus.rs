@@ -3,10 +3,10 @@
 //! [`Timeline::action`], the code its shortcut runs, so it undoes the same way.
 
 use egui::{Rect, Ui, Vec2, pos2};
+use j_ui::theme::icon;
+use j_ui::tokens::{color, size, space};
+use j_ui::widgets::{Button, State};
 use jvid_core::model::{ClipId, Project, Sequence};
-use suite_ui::theme::icon;
-use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, State};
 
 use super::{Edit, Timeline, Tool, add_menu};
 use crate::i18n::tr;
@@ -284,7 +284,7 @@ impl Timeline {
                     response.rect.center(),
                     egui::Align2::CENTER_CENTER,
                     crate::i18n::verbatim("T"),
-                    suite_ui::theme::body_strong(),
+                    j_ui::theme::body_strong(),
                     if on || response.hovered() {
                         color::ink()
                     } else {
@@ -392,7 +392,7 @@ mod tests {
     /// Right-click an unselected clip, pick Ripple Delete: the same edit and undo as the key.
     #[test]
     fn clip_menu_runs_the_shortcut_edit() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let p = project(4);
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn timeline_framing_context_menu_changes_only_the_clicked_clip() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (history, ids) = crate::framing::tests::fixture(2);

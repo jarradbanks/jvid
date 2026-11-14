@@ -18,6 +18,10 @@ use std::rc::Rc;
 
 use egui::text::{CCursor, LayoutJob, TextFormat};
 use egui::{Color32, Key, Margin, Sense, Ui, vec2};
+use j_ui::panel::Panel;
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, space};
+use j_ui::widgets::{Button, Checkbox, State, TextInput};
 use jvid_core::history::Command;
 use jvid_core::model::{ClipId, Project};
 use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
@@ -25,10 +29,6 @@ use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
 use jvid_transcribe::Transcript;
 use jvid_transcribe::store::{Settings, Shared, Store};
 use jvid_transcribe::{Source, Word};
-use suite_ui::panel::Panel;
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, space};
-use suite_ui::widgets::{Button, Checkbox, State, TextInput};
 
 use crate::i18n::tr;
 use crate::subtitles::{AudioSources, targets};
@@ -472,20 +472,24 @@ impl TranscriptPanel {
                     return;
                 }
                 let empty = if available_sources.is_empty() {
-                    suite_ui::empty_state::EmptyState::new(
+                    j_ui::empty_state::EmptyState::new(
                         icon::MIC,
                         tr!("empty.no_audio"),
                         tr!("empty.no_audio_help"),
                     )
                 } else {
-                    suite_ui::empty_state::EmptyState::new(
+                    j_ui::empty_state::EmptyState::new(
                         icon::MIC,
                         tr!("empty.transcript"),
                         tr!("empty.transcript_help"),
                     )
                     .action(tr!("transcript.transcribe"))
                 };
-                if empty.show(ui).action.is_some_and(|r| r.clicked()) {
+                let shown = empty.show(ui);
+                if let Some(r) = &shown.action {
+                    crate::app::tutorial::anchor(ui.ctx(), "transcript.transcribe", r.rect);
+                }
+                if shown.action.is_some_and(|r| r.clicked()) {
                     out.transcribe =
                         Some(available_sources.into_iter().map(|t| t.source).collect());
                 }
@@ -530,8 +534,13 @@ impl TranscriptPanel {
                             if ui.add(button).clicked() {
                                 self.unticked = (!listing).then(HashSet::new);
                             }
-                            let button = Button::secondary(tr!("transcript.transcribe"));
-                            if ui.add(button).clicked() {
+                            let button = ui.add(Button::secondary(tr!("transcript.transcribe")));
+                            crate::app::tutorial::anchor_in(
+                                ui,
+                                "transcript.transcribe",
+                                button.rect,
+                            );
+                            if button.clicked() {
                                 out.transcribe = Some(
                                     targets(project, &selected, true)
                                         .into_iter()
@@ -577,10 +586,14 @@ impl TranscriptPanel {
                     }
                     let frame = egui::Frame::NONE
                         .inner_margin(Margin::symmetric(space::INSET as i8, space::S4 as i8));
-                    frame.show(ui, |ui| match self.unticked.is_some() {
+                    let text = frame.show(ui, |ui| match self.unticked.is_some() {
                         true => self.hits(ui, words, hits.as_deref().unwrap_or_default(), &mut out),
                         false => self.text(ui, words, playhead, &mut out),
                     });
+                    if !words.is_empty() {
+                        let rect = text.response.rect;
+                        crate::app::tutorial::anchor_in(ui, "transcript.words", rect);
+                    }
                 });
         });
         out.close = r.action == Some(0);
@@ -1321,7 +1334,7 @@ mod coverage_tests {
                     HashSet<ClipId>,
                     Vec<Source>,
                 )| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     let out = panel.show_docked(ui, history.project(), selected, Time(0), true);
@@ -1479,7 +1492,7 @@ mod coverage_tests {
                 Vec<String>,
                 Option<String>,
             )| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 let out = panel.show(ui, history.project(), &HashSet::new(), Time(0), true);

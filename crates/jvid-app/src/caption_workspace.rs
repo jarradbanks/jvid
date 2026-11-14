@@ -5,14 +5,14 @@
 use std::collections::{HashMap, HashSet};
 
 use egui::{RichText, Ui};
+use j_ui::panel::Panel;
+use j_ui::theme;
+use j_ui::tokens::{color, space};
+use j_ui::widgets::{Button, Checkbox, DragField, Dropdown, State, TextInput};
 use jvid_core::captions::{self, Edit, Overrides, Scope};
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::model::{ClipId, Project, SequenceId, Text};
 use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
-use suite_ui::panel::Panel;
-use suite_ui::theme;
-use suite_ui::tokens::{color, space};
-use suite_ui::widgets::{Button, Checkbox, DragField, Dropdown, State, TextInput};
 
 use crate::i18n::tr;
 
@@ -78,7 +78,7 @@ impl CaptionWorkspace {
             .focused(focused)
             .show(ui, |ui| {
                 if rows.is_empty() {
-                    suite_ui::empty_state::EmptyState::new(
+                    j_ui::empty_state::EmptyState::new(
                         theme::icon::LIST,
                         tr!("captions.empty"),
                         tr!("captions.empty_help"),
@@ -163,7 +163,7 @@ impl CaptionWorkspace {
                             egui::CollapsingHeader::new(tr!("captions.style")).show(ui, |ui| {
                                 if ui
                                     .push_id("caption_reference", |ui| {
-                                        suite_ui::dialog::action_footer(
+                                        j_ui::dialog::action_footer(
                                             ui,
                                             [Button::secondary(tr!("captions.use_style"))],
                                         )[0]
@@ -209,7 +209,7 @@ impl CaptionWorkspace {
                                 }
                                 if ui
                                     .push_id("caption_apply_style", |ui| {
-                                        suite_ui::dialog::action_footer(
+                                        j_ui::dialog::action_footer(
                                             ui,
                                             [Button::secondary(tr!("captions.apply_style"))
                                                 .state(state(ready))],
@@ -455,7 +455,7 @@ mod tests {
         let builder = if gpu { builder.wgpu() } else { builder };
         builder.build_ui_state(
             |ui, editor: &mut Editor| {
-                if suite_ui::test_support::install_theme(ui, &mut editor.fresh) {
+                if j_ui::test_support::install_theme(ui, &mut editor.fresh) {
                     return;
                 }
                 if ui.ctx().input(|i| i.pointer.any_pressed()) {
@@ -489,7 +489,7 @@ mod tests {
         if crate::test_util::isolate_locale() {
             return;
         }
-        suite_ui::i18n::set_language("en");
+        j_ui::i18n::set_language("en");
         let mut h = harness(240.0, 800.0, 1.0, false);
         h.run();
         let before = h.state().history.project().clone();
@@ -541,7 +541,7 @@ mod tests {
         if crate::test_util::isolate_locale() {
             return;
         }
-        suite_ui::i18n::set_language("en");
+        j_ui::i18n::set_language("en");
         let mut h = harness(600.0, 1400.0, 1.0, false);
         h.run();
         let before = h.state().history.project().clone();
@@ -581,14 +581,14 @@ mod tests {
         if crate::test_util::isolate_locale() {
             return;
         }
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let dir =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../dist/caption-workspace");
         std::fs::create_dir_all(&dir).unwrap();
         for language in ["en", "de", "ja"] {
-            suite_ui::i18n::set_language(language);
+            j_ui::i18n::set_language(language);
             for scale in [1.0, 1.5] {
                 let mut h = harness(240.0, 800.0, scale, true);
                 h.run();
@@ -639,15 +639,15 @@ mod tests {
                 assert!(!h.state().history.can_undo());
             }
         }
-        suite_ui::i18n::set_language("en");
+        j_ui::i18n::set_language("en");
     }
 
     #[test]
     fn caption_edits_change_burned_program_export_frames_and_undo_restores_pixels() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
-        jvid_render::text::set_faces(suite_ui::theme::CJK_FACES.map(|(_, bytes)| bytes).to_vec());
+        jvid_render::text::set_faces(j_ui::theme::CJK_FACES.map(|(_, bytes)| bytes).to_vec());
         let (device, queue) = crate::export::headless_gpu().unwrap();
         let mut renderer = crate::export::FrameRenderer::new(&device);
         let mut h = fixture();

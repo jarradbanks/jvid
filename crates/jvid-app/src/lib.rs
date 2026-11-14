@@ -54,6 +54,23 @@ mod zoom;
 mod test_util {
     use egui_kittest::kittest::Queryable;
 
+    /// Materialize the dependency's embedded fonts for tests that need real file paths.
+    pub fn font_file(name: &str) -> std::path::PathBuf {
+        static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let dir = DIR.get_or_init(|| {
+            let dir = tempfile::tempdir().unwrap();
+            for (name, bytes) in [
+                ("Inter-Regular.ttf", j_ui::theme::INTER_REGULAR),
+                ("Inter-Medium.ttf", j_ui::theme::INTER_MEDIUM),
+                ("Inter-SemiBold.ttf", j_ui::theme::INTER_SEMIBOLD),
+            ] {
+                std::fs::write(dir.path().join(name), bytes).unwrap();
+            }
+            dir
+        });
+        dir.path().join(name)
+    }
+
     /// Locale is process-global; readers outside a locale test do not take its lock.
     /// Returns true in the parent after the exact test passed in a fresh process.
     pub fn isolate_locale() -> bool {
@@ -86,11 +103,11 @@ mod test_util {
     ) -> Vec<(String, egui::Rect)> {
         let mut out = Vec::new();
         for l in labels {
-            let before = suite_ui::test_support::area_rects(&h.ctx);
+            let before = j_ui::test_support::area_rects(&h.ctx);
             h.get_by_role_and_label(egui::accesskit::Role::ComboBox, l)
                 .click();
             h.run();
-            let after = suite_ui::test_support::area_rects(&h.ctx);
+            let after = j_ui::test_support::area_rects(&h.ctx);
             let menu = after.into_iter().find(|a| !before.contains(a));
             let (_, r) = menu.unwrap_or_else(|| panic!("{l} opens a menu"));
             out.push((l.to_string(), r));

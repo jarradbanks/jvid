@@ -3,8 +3,8 @@
 //! headers on the left hold the lock, hide or mute, and solo toggles, the target, a height
 //! grip, and a menu to add, rename, reorder and remove tracks. Media dropped from the bin
 //! overwrites at the drop point, on a new track when dropped off every lane; dragged clips
-//! overwrite where they land. Clicks and a marquee select clips, which copy, cut, paste at
-//! the playhead, duplicate and delete.
+//! overwrite where they land, or with Alt cross-fade into the clip they overlap. Clicks and a
+//! marquee select clips, which copy, cut, paste at the playhead, duplicate and delete.
 //! Clip edges drag to trim (Ctrl ripples), the razor tool and Ctrl+K split, a clicked gap
 //! ripple deletes, and Q/W ripple trim to the playhead. In/out marks shade the ruler and
 //! lanes, drag by their ruler flags, and lift (`;`) or extract (`'`) their range.
@@ -17,6 +17,9 @@ use egui::{
     Align2, Color32, CornerRadius, CursorIcon, FontId, Key, Pos2, Rect, Sense, Stroke,
     TextureHandle, Ui, pos2, vec2,
 };
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, radius, size, space};
+use j_ui::widgets::{Button, Slider, TextInput};
 use jvid_core::history::{Command, GestureKey, History};
 use jvid_core::model::{
     AssetId, Clip, ClipId, Edge, Marker, MediaAsset, ModelError, Placement, ProbeInfo, Project,
@@ -25,9 +28,6 @@ use jvid_core::model::{
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_media::thumbnails;
 use jvid_media::waveforms::{self, BUCKET, Peak, Pyramid};
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Slider, TextInput};
 
 use crate::i18n::{tr, trn, verbatim};
 use crate::keymap::Keymap;
@@ -1072,6 +1072,8 @@ impl Timeline {
             ui.ctx().stop_dragging();
         }
         if self.keys.graph.is_some() {
+            let graph = ui.max_rect().intersect(ui.clip_rect());
+            crate::app::tutorial::anchor(ui.ctx(), "timeline.graph", graph);
             return edit.or(self.graph(ui, ui.max_rect(), project.sequence()));
         }
         let rate = self.transport.rate;
@@ -1104,12 +1106,43 @@ impl Timeline {
             self.follow();
         }
 
+        let ruler_time = crate::app::tutorial::ruler_time(ui.ctx());
+        if let Some(at) = ruler_time
+            && !ui.input(|i| i.pointer.any_down())
+        {
+            let x = self.view(lanes_left).x(at);
+            if x < ruler.left() || x > ruler.right() {
+                self.scroll = (secs(at) - self.span() / 2.0).max(0.0);
+            }
+        }
+
         // Input first, so this frame draws the result.
         let view = self.view(lanes_left);
         let id = ui.id().with("timeline");
         let scrub = ui.interact(ruler, id.with("ruler"), Sense::click_and_drag());
         let marquee = ui.interact(lanes, id.with("marquee"), Sense::click_and_drag());
         let seq = project.sequence();
+        {
+            use crate::app::tutorial::anchor;
+            let ctx = ui.ctx();
+            anchor(ctx, "timeline.markers", marker_lane);
+            let target = ruler_time.map_or(ruler, |at| {
+                Rect::from_center_size(
+                    pos2(view.x(at), ruler.center().y),
+                    vec2(24.0, ruler.height()),
+                )
+                .intersect(ruler)
+            });
+            anchor(ctx, "timeline.ruler", target);
+            anchor(ctx, "timeline.lanes", lanes);
+            if let (Some(i), Some(o)) = (seq.in_point(), seq.out_point()) {
+                let x = view.x(i).max(lanes.left())..=view.x(o).min(lanes.right());
+                let range = Rect::from_x_y_ranges(x, ruler.top()..=lanes.bottom());
+                if range.is_positive() {
+                    anchor(ctx, "timeline.range", range);
+                }
+            }
+        }
         for (is_in, mark) in [(true, seq.in_point()), (false, seq.out_point())] {
             let Some(mark) = mark else { continue };
             let x = view.x(mark);
@@ -1375,6 +1408,13 @@ impl Timeline {
                     painter.rect_stroke(r, corner, stroke, egui::StrokeKind::Inside);
                 }
                 let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::click_and_drag());
+                let item = crate::app::tutorial::Item::Clip(clip.id);
+                crate::app::tutorial::item_anchor(ui.ctx(), "clip", item, r.intersect(lanes));
+                if extra > 0.0 {
+                    let keys = Rect::from_x_y_ranges(r.x_range(), r.bottom()..=lane.bottom());
+                    let keys = keys.intersect(lanes);
+                    crate::app::tutorial::item_anchor(ui.ctx(), "timeline.keys", item, keys);
+                }
                 if self.tool == Tool::Razor && cr.hovered() {
                     ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
                 }
@@ -1591,7 +1631,7 @@ impl Timeline {
             && !egui::DragAndDrop::has_any_payload(ui.ctx())
         {
             ui.scope_builder(egui::UiBuilder::new().max_rect(lanes), |ui| {
-                suite_ui::empty_state::EmptyState::new(
+                j_ui::empty_state::EmptyState::new(
                     icon::LIST,
                     tr!("empty.timeline"),
                     tr!("timeline.empty"),
@@ -1676,7 +1716,7 @@ impl Timeline {
         let mut z = self.zoom.ln();
         let r = ui.put(
             slider,
-            suite_ui::widgets::Slider::new(
+            j_ui::widgets::Slider::new(
                 &mut z,
                 MIN_ZOOM.ln()..=MAX_ZOOM.ln(),
                 tr!("timeline.zoom_tooltip"),
@@ -2659,7 +2699,7 @@ fn toggle(
     painter.rect_filled(rect, CornerRadius::same(radius::SMALL), fill);
     painter.text(rect.center(), Align2::CENTER_CENTER, glyph, font, ink);
     if r.has_focus() {
-        painter.add(suite_ui::widgets::focus_ring(rect, radius::SMALL));
+        painter.add(j_ui::widgets::focus_ring(rect, radius::SMALL));
     }
     // Above the toggle, so the bottom track's tooltips don't cover + Track under it.
     let mut tip = egui::Tooltip::for_enabled(&r);
@@ -2957,7 +2997,7 @@ mod tests {
                 .with_pixels_per_point(scale)
                 .build_ui_state(
                     move |ui, timeline: &mut Timeline| {
-                        if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        if !j_ui::test_support::install_theme(ui, &mut fresh) {
                             timeline.show_with_tools(
                                 ui,
                                 &project,
@@ -3474,7 +3514,7 @@ mod tests {
     #[test]
     fn dragging_a_clip_edge_trims_in_one_step() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(2));
@@ -3503,7 +3543,7 @@ mod tests {
     #[test]
     fn ctrl_dragging_a_tail_ripples_later_clips() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(4));
@@ -3546,7 +3586,7 @@ mod tests {
             .wgpu()
             .build_ui_state(
                 move |ui, (t, h): &mut (Timeline, History)| {
-                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh) {
                         ui.painter().rect_filled(ui.max_rect(), 0.0, color::panel());
                         let edit = t.show(ui, h.project(), &HashSet::new(), &Keymap::default());
                         match edit {
@@ -3564,7 +3604,7 @@ mod tests {
 
     #[test]
     fn snapshots() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut results = egui_kittest::SnapshotResults::new();
@@ -3590,7 +3630,7 @@ mod tests {
     fn clip_decorations_paint_no_amber() {
         use jvid_core::keyframe::{Easing, Keyframe, Value};
         use jvid_core::model::{Transition, TransitionKind};
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut p = History::new(project(4));
@@ -3639,7 +3679,7 @@ mod tests {
     fn audio_effects_popover() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(2));
@@ -3778,7 +3818,7 @@ mod tests {
     #[test]
     fn audio_headers_arm_one_track_for_recording() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(2));
@@ -3816,7 +3856,7 @@ mod tests {
     #[test]
     fn the_bottom_tracks_tooltips_leave_add_track_clear() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(2));
@@ -3839,7 +3879,7 @@ mod tests {
     #[test]
     fn header_toggles_and_height_drag_are_undoable() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(2));
@@ -3887,7 +3927,7 @@ mod tests {
     #[test]
     fn track_volume_drag_is_one_undo_step() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(2));
@@ -3919,7 +3959,7 @@ mod tests {
     #[test]
     fn dragging_a_clip_near_the_playhead_snaps_onto_it() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let at = Time(5 * S + S / 3);
@@ -3953,7 +3993,7 @@ mod tests {
 
     #[test]
     fn dragging_in_out_flags_snaps_to_clip_starts_and_ends() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         // One clip over 0..2s at 20pt/s; In at 1s, Out at 3s, playhead well clear.
@@ -4017,7 +4057,7 @@ mod tests {
     #[test]
     fn dropping_an_effect_on_a_clip_adds_it() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let tmp = std::env::temp_dir().join(format!("jvid-fx-drop-{}", std::process::id()));
@@ -4055,7 +4095,7 @@ mod tests {
     #[test]
     fn holding_a_clip_at_the_right_edge_scrolls_and_drops_at_the_scrolled_time() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(1));
@@ -4088,7 +4128,7 @@ mod tests {
     #[test]
     fn bin_drop_and_clip_drag_place_clips() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(2));
@@ -4144,7 +4184,7 @@ mod tests {
     #[test]
     fn bin_drop_below_the_lanes_adds_a_top_track_in_one_step() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut p = History::new(project(2));
@@ -4204,7 +4244,7 @@ mod tests {
     #[test]
     fn reduce_motion_opens_the_new_track_slot_at_once() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut p = History::new(project(2));
@@ -4235,7 +4275,7 @@ mod tests {
     #[test]
     fn bin_drop_at_the_top_edge_opens_a_new_track_slot() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut p = History::new(project(2));
@@ -4326,7 +4366,7 @@ mod tests {
     /// A locked clip keeps its fade line but loses the fade handles and its keyframe lanes.
     #[test]
     fn a_locked_clip_shows_no_fade_or_keyframe_handles() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         // Fade and key V1's clip, then lock V1: a locked track refuses both edits.
@@ -4381,7 +4421,7 @@ mod tests {
     /// change only A1's clip, which history allows.
     #[test]
     fn a_clip_linked_to_a_locked_track_keeps_its_fades_and_lanes() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut p = History::new(locked_v1());
@@ -4425,7 +4465,7 @@ mod tests {
     /// Lanes open when V1 locks hide with its lock and come back when it unlocks.
     #[test]
     fn unlocking_a_track_brings_its_open_lanes_back() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut p = History::new(project(2));
@@ -4469,7 +4509,7 @@ mod tests {
     #[test]
     fn a_refused_drag_at_the_edge_doesnt_scroll() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(locked_v1());
@@ -4491,7 +4531,7 @@ mod tests {
     #[test]
     fn dragging_a_clip_tied_to_a_locked_track_is_refused() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(locked_v1());
@@ -4526,7 +4566,7 @@ mod tests {
     #[test]
     fn wheel_scrolls_and_zooms_over_clips_and_empty_lanes() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(2));
@@ -4591,7 +4631,7 @@ mod tests {
 
     #[test]
     fn scrollbar_drag_scrolls_and_zoom_to_fit_shows_every_clip() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness(project(20));
@@ -4637,7 +4677,7 @@ mod tests {
     fn bin_drag_onto_an_empty_timeline_adds_tracks() {
         use crate::media_bin::MediaBin;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut results = egui_kittest::SnapshotResults::new();
@@ -4657,7 +4697,7 @@ mod tests {
                 .wgpu()
                 .build_ui_state(
                     move |ui, (b, t, h): &mut (MediaBin, Timeline, History)| {
-                        if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        if j_ui::test_support::install_theme(ui, &mut fresh) {
                             return;
                         }
                         let r = ui.max_rect();
@@ -4716,7 +4756,7 @@ mod tests {
     fn five_hundred_clips_fit_a_frame() {
         let p = project(500);
         let ctx = egui::Context::default();
-        suite_ui::theme::install(&ctx);
+        j_ui::theme::install(&ctx);
         // 20pt clips, so a 1920pt-wide panel shows about 175 of them across both tracks.
         let mut t = Timeline {
             zoom: 10.0,
@@ -4908,7 +4948,7 @@ mod audit_b04_tests {
             .with_step_dt(0.1)
             .build_ui_state(
                 move |ui, (t, h): &mut (Timeline, History)| {
-                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh) {
                         if let Some((c, key)) =
                             t.show(ui, h.project(), &HashSet::new(), &Keymap::default())
                         {

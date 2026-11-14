@@ -1,72 +1,48 @@
 # jvid
 
-[![A quick tour of jvid: cutting a clip, grading it with a Vignette, keyframing a push-in, a crossfade, typing a title, switching themes and languages, and exporting](docs/media/preview.webp)](docs/media/preview.mp4)
+a small, fast video editor for quick edits
 
-jvid is a small, fast video editor for quick edits: pull a highlight out of a long recording, trim a screen capture, add a title and export. It's written in Rust, draws its UI on the GPU and runs on Windows, macOS and Linux. Free and open source, no account.
+## what it can do
 
-It's in early development and isn't packaged yet; you [build it from source](#building).
+- **keyboard-first editing.** in/out points, J/K/L, insert and overwrite, ripple trims, razor, markers. every shortcut is remappable
+- **quick to start.** drag media onto the window. projects are plain JSON, autosaved, and relink when you move files around.
+- **proxies.** low-res copies of 4K and HEVC sources get made in the background so scrubbing stays smooth. export uses the originals.
+- **titles and solids.** text presets with font, outline, shadow and box, all in the inspector.
+- **keyframes.** transform, opacity, blend mode, crop, color and volume, with an easing editor and zoom-to-region on the program monitor.
+- **transitions and audio.** crossfades and dips on cuts, clip fades, a volume line on each clip.
+- **effects.** WGSL shaders with keyframeable parameters - [write your own](docs/effects.md).
+- **export.** presets for highlights, screen recordings, youtube, shorts/reels and prores, a background render queue, and `jvid render` when you'd rather not open the app at all.
 
-- [User guide](docs/guide.md) and [shortcut cheat sheet](docs/shortcuts.md)
-- [Plan](docs/PLAN.md): feature set, architecture and licensing
-- [Roadmap](docs/ROADMAP.md): implementation order, milestones and issues
+the [user guide](docs/guide.md) covers the rest, and see the [shortcut cheat sheet](docs/shortcuts.md)
 
-## What it does
+## getting it
 
-- **Fast, keyboard-first editing.** In/out points, J/K/L, insert and overwrite, ripple trims, razor and split, markers. Every shortcut is remappable.
-- **Quick to start.** Drag media onto the window; projects are plain JSON, autosaved, with relinking for moved files.
-- **Proxies.** Low-res copies of 4K and HEVC sources made in the background for smooth scrubbing; export uses the originals.
-- **Titles and solids.** Text presets with font, outline, shadow and box in the Inspector.
-- **Keyframes.** Transform, opacity, blend mode, crop, color and volume, with an easing editor and zoom-to-region on the Program monitor.
-- **Transitions and audio.** Crossfades and dips on cuts, clip fades, and a volume line on each clip.
-- **Effects.** WGSL shader effects with keyframeable parameters; [write your own](docs/effects.md).
-- **Export.** Presets for highlights, screen recordings, YouTube, Shorts/Reels and ProRes, a background Render Queue, and `jvid render` for exporting from the command line.
+grab it from the [releases page](https://github.com/jarradbanks/jvid/releases/latest):
 
-## Building
+- **windows** - `setup.exe` (per-user, no admin) or a portable zip
+- **macos** (apple silicon) - a dmg or a portable zip
+- **linux** (x86_64, glibc 2.35+) - a portable tarball, run `./AppRun`
 
-jvid needs a Rust toolchain from [rustup](https://rustup.rs). `rust-toolchain.toml` pins the stable channel, so rustup installs the right toolchain, with `rustfmt` and `clippy`, the first time you run `cargo` in the repo.
+FFmpeg comes bundled. the windows installer updates itself from **Help → Check for Updates**; everything else links you to the new download. more in [the install guide](docs/packaging.md) and [the update guide](docs/updating.md).
 
-It also needs the FFmpeg 4.4 to 8.x development libraries, `pkg-config` and libclang; the per-OS commands are in [CONTRIBUTING.md](CONTRIBUTING.md#developer-setup).
+<details>
+<summary>build it yourself</summary>
+
+you need rust from [rustup](https://rustup.rs) (`rust-toolchain.toml` pins the channel), plus FFmpeg 4.4-8.x dev libraries, `pkg-config` and libclang.
+
+- **debian/ubuntu:** `sudo apt install clang libclang-dev pkg-config libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libavfilter-dev`
+- **macos:** `brew install ffmpeg pkg-config`
+- **windows:** `winget install LLVM.LLVM`, unzip an LGPL shared build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases) to `C:\ffmpeg`, set `FFMPEG_DIR=C:\ffmpeg` and `LIBCLANG_PATH=C:\Program Files\LLVM\bin`, and add `C:\ffmpeg\bin` to `PATH`
+
+linking a GPL FFmpeg (like homebrew's)? build with `--features gpl-ffmpeg`.
 
 ```sh
-cargo build --workspace
-cargo test --workspace
-cargo run --release -p jvid-app    # the desktop app
-cargo run --release -p jvid-cli -- render project.jvid -o out.mp4    # headless render
+cargo run --release -p jvid-app                                    # the editor
+cargo run --release -p jvid-cli -- render project.jvid -o out.mp4  # headless render
 ```
 
-H.264 export needs working hardware encoding or an FFmpeg build with OpenH264 (`libopenh264`). Software x264/x265 require a GPL FFmpeg build and jvid built with `--features gpl-ffmpeg`; installing a GPL FFmpeg alone does not enable them. Export never substitutes MPEG-4 Part 2 for H.264. If no encoder supports the requested family and settings, install a supported build or explicitly choose another preset such as ProRes Master or GIF. The export dialog lists encoder candidates in preference order; the log records the encoder actually opened.
+</details>
 
-Headless audio presets (including WAV) and `--lossless`/`--smart` use CPU/media dependencies and do not initialize or probe wgpu. Composited video needs a rendering device; adapter/device failure exits with code 4 and leaves existing output intact. Install a working graphics driver or a software Vulkan adapter such as Mesa lavapipe for video rendering on a headless Linux host.
+## license
 
-Export progress names audio analysis, each encoding pass, software retries and finalization. CLI `--json` emits `phase`, `pass`, `retry`, phase `progress` (or `null` when unknown), and `phase_eta_seconds`; this ETA covers the current phase. Completion is reported after output validation and publication.
-
-`scripts/preview/build` regenerates the preview at the top of this page. It drives the real app frame by frame, then lays the capture out with [HyperFrames](https://github.com/heygen-com/hyperframes) from `scripts/preview/motion.html`. It needs the FFmpeg command line tools, Node 22 or later and a Vulkan driver (Mesa's lavapipe works), and downloads its footage once into `target/preview/`.
-
-## Workspace
-
-| Crate | Role |
-| --- | --- |
-| [`jvid-core`](crates/jvid-core) | Project model, timeline, keyframes, commands and undo, serialization. No I/O, no UI. |
-| [`jvid-media`](crates/jvid-media) | FFmpeg probe, decode and encode, thumbnails, waveforms, proxies |
-| [`jvid-render`](crates/jvid-render) | wgpu compositor, transforms, blend modes, color, WGSL effects |
-| [`jvid-audio`](crates/jvid-audio) | Mixer, cpal output, resampling, loudness |
-| [`jvid-app`](crates/jvid-app) | eframe desktop app |
-| [`jvid-cli`](crates/jvid-cli) | Headless render |
-| [`suite-ui`](crates/suite-ui) | Shared theme, widgets and keybinding system for the whole suite |
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Credits
-
-The preview uses footage from [Tears of Steel](https://mango.blender.org), (CC) Blender Foundation | mango.blender.org, licensed [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
-
-## License
-
-Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Release builds bundle FFmpeg, which has its own license; see [PLAN.md · Licensing](docs/PLAN.md#licensing).
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in jvid by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
-
-Packaging candidates and portable data locations are described in the [installation guide](docs/packaging.md). Native package CI does not publish a release.
-The [update guide](docs/updating.md) describes in-app checks, supported install paths, recovery, and release signing.
+MIT or Apache-2.0, your pick ([MIT](LICENSE-MIT), [Apache](LICENSE-APACHE)). release builds bundle FFmpeg, which brings its own license - see [PLAN.md · Licensing](docs/PLAN.md#licensing).

@@ -380,6 +380,13 @@ impl Command {
     /// is copied; assets, media libraries and other sequences are never cloned. Application
     /// uses the same planner, including source markers, linked ripple closure and locks.
     /// Other commands return `None`.
+    /// The project after this command, leaving `p` unchanged.
+    pub fn preview(&self, p: &Project) -> Result<Project, ModelError> {
+        let mut p = p.clone();
+        self.clone().apply(&mut p)?;
+        Ok(p)
+    }
+
     pub fn preview_timeline(&self, p: &Project) -> Result<Option<Sequence>, ModelError> {
         Ok(self.plan_timeline(p)?.map(|(sequence, _)| sequence))
     }

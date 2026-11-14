@@ -6,16 +6,16 @@ use std::path::{Path, PathBuf};
 
 use egui::{Align, Align2, Frame, Layout, Margin, Stroke, Ui, UiBuilder, ViewportCommand, vec2};
 use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
+use j_ui::dialog::Dialog;
+use j_ui::panel::Panel;
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, size, space};
+use j_ui::widgets::{Button, ButtonKind, State};
 use jvid_core::history::{Command, History};
 use jvid_core::model::{AssetId, MAX_NEST_DEPTH, ModelError, Project, ProjectSettings, TrackKind};
 use jvid_core::time::Time;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
-use suite_ui::dialog::Dialog;
-use suite_ui::panel::Panel;
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, ButtonKind, State};
 
 use crate::export::queue::Action as QueueAction;
 use crate::export::{Error as ExportError, Request};
@@ -99,12 +99,9 @@ mod media_library_routing_tests {
                 .favorite
         );
         app.run_action("media_new_bin", false);
-        assert!(app.bin.library_modal_open());
-        assert!(app.modal_owns_input(&egui::Context::default()));
-        assert!(
-            !app.media_library_applicability("media_favorite")
-                .is_enabled()
-        );
+        assert!(app.bin.library_naming());
+        // Naming is inline, not a dialog; Delete Bin's confirmation is the modal.
+        assert!(!app.modal_owns_input(&egui::Context::default()));
     }
 }
 const RECENT_KEY: &str = "recent";
@@ -167,7 +164,7 @@ fn view_title(id: &str) -> &'static str {
 pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
     let startup_path = std::env::args_os().nth(1).map(PathBuf::from);
     // Here rather than in App::new, so tests and embedders pick their own language.
-    suite_ui::i18n::set_language(suite_ui::i18n::resolve(&settings.language));
+    j_ui::i18n::set_language(j_ui::i18n::resolve(&settings.language));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(verbatim("jvid"))
@@ -244,7 +241,7 @@ pub struct App {
     components: crate::components::Components,
     preferences: crate::preferences::Preferences,
     updates: crate::updates::Updates,
-    update_install: std::sync::Arc<std::sync::Mutex<Option<jvid_updater::install::Prepared>>>,
+    update_install: std::sync::Arc<std::sync::Mutex<Option<j_update::install::Prepared>>>,
     /// The `language` setting: `system` or a language code.
     language: String,
     /// The `input_device` setting: a device name, empty for the system default.
@@ -257,7 +254,7 @@ pub struct App {
     input: Option<Box<dyn jvid_audio::InputBackend>>,
     /// The `theme` setting: a built-in name or a theme file's path.
     theme_setting: String,
-    theme: suite_ui::themes::LiveTheme,
+    theme: j_ui::themes::LiveTheme,
     keymap_editor: crate::keymap_editor::KeymapEditor,
     command_palette: crate::command_palette::CommandPalette,
     exports: jvid_jobs::Pool,
@@ -315,6 +312,7 @@ const TOAST_SECS: f64 = 6.0;
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, settings: &jvid_core::settings::Settings) -> Self {
         theme::install(&cc.egui_ctx);
+        cc.egui_ctx.add_plugin(tutorial::Blocker);
         jvid_media::hwdec::set_enabled(settings.hardware_decode);
         let mut app = Self::restore(cc.storage);
         app.editor_context = Some(cc.egui_ctx.clone());
@@ -325,7 +323,7 @@ impl App {
         app.set_recognition_cache(crate::transcript::Cache::new(caches.transcripts.clone()));
         app.highlight_review = crate::highlight_review::HighlightReview::new(caches.clone());
         app.timeline = Timeline::new(caches);
-        app.theme = suite_ui::themes::LiveTheme::new(&settings.theme);
+        app.theme = j_ui::themes::LiveTheme::new(&settings.theme);
         app.theme_setting = settings.theme.clone();
         app.language = settings.language.clone();
         app.input_device = settings.input_device.clone();
@@ -359,7 +357,7 @@ impl App {
         let (workspaces, dock) = crate::settings_file::load_workspaces(storage);
         let exports = jvid_jobs::Pool::new(1);
         // Titles share the UI's CJK faces, so the binary links one copy of them.
-        jvid_render::text::set_faces(suite_ui::theme::CJK_FACES.map(|(_, b)| b).to_vec());
+        jvid_render::text::set_faces(j_ui::theme::CJK_FACES.map(|(_, b)| b).to_vec());
         // The system font scan can take seconds; done here, the first text frame doesn't stall.
         exports.submit("fonts", jvid_jobs::Priority::Preview, |_| {
             jvid_render::text::warm()
@@ -406,7 +404,7 @@ impl App {
             take: None,
             input: None,
             theme_setting: "dark".into(),
-            theme: suite_ui::themes::LiveTheme::new("dark"),
+            theme: j_ui::themes::LiveTheme::new("dark"),
             keymap_editor: Default::default(),
             command_palette: Default::default(),
             exports,
@@ -699,7 +697,7 @@ impl App {
         tutorial::anchor(ui.ctx(), "menu.edit", button.rect);
         let mut picked = None;
         egui::Popup::menu(&button).show(|ui| {
-            let height = (ui.ctx().content_rect().height() - suite_ui::tokens::space::S16).max(1.0);
+            let height = (ui.ctx().content_rect().height() - j_ui::tokens::space::S16).max(1.0);
             egui::ScrollArea::vertical()
                 .max_height(height)
                 .show(ui, |ui| {
@@ -806,6 +804,7 @@ impl App {
     /// The Timeline menu, its left edge at `left`. Returns its right edge.
     fn timeline_menu(&mut self, ui: &mut Ui, left: f32) -> f32 {
         let button = menu_button(ui, tr!("menu.timeline"), left);
+        tutorial::anchor(ui.ctx(), "menu.timeline", button.rect);
         let (mut picked, mut transcript, mut export, mut captions) = (false, false, false, false);
         egui::Popup::menu(&button).show(|ui| {
             picked = self.action_menu_item(ui, "generate_subtitles");
@@ -850,6 +849,9 @@ impl App {
         } else {
             response
         };
+        if id == "generate_subtitles" {
+            tutorial::anchor(ui.ctx(), "menu.generate_subtitles", response.rect);
+        }
         response.clicked()
     }
 
@@ -875,12 +877,7 @@ impl App {
                 self.components.open = true;
             }
             if ui.button(tr!("updates.check")).clicked() {
-                // A prepared download stays available when reopening the update window.
-                if matches!(self.updates.state, jvid_updater::state::State::Ready(_)) {
-                    self.updates.open = true;
-                } else {
-                    self.updates.check(true);
-                }
+                self.updates.check(true);
             }
             if ui.button(tr!("menu.about")).clicked() {
                 self.prompts.push(Prompt::About);
@@ -1993,8 +1990,8 @@ impl App {
         self.prompts.push(Prompt::Error(message));
     }
 
-    fn update_work(&self) -> jvid_updater::state::Work {
-        jvid_updater::state::Work {
+    fn update_work(&self) -> j_update::state::Work {
+        j_update::state::Work {
             unsaved: self.history.is_dirty(),
             recording: self.take.is_some(),
             exporting: self.queue.unsettled() || !self.exports.is_idle(),
@@ -2010,7 +2007,7 @@ impl App {
     }
 
     fn install_update_with(&mut self, ctx: &egui::Context, save: impl FnOnce(&mut Self) -> bool) {
-        if !matches!(self.updates.state, jvid_updater::state::State::Ready(_)) {
+        if !matches!(self.updates.state(), j_update::state::State::Ready(_)) {
             return;
         }
         let mut work = self.update_work();
@@ -2074,7 +2071,7 @@ impl App {
                 verbatim("jvid"),
                 format!(
                     "{}\n\n{}\n{}",
-                    tr!("about.version", version = jvid_updater::VERSION),
+                    tr!("about.version", version = jvid_update_config::VERSION),
                     tr!("about.samples"),
                     crate::samples::credits().join("\n")
                 )
@@ -2593,7 +2590,7 @@ impl eframe::App for App {
                         crate::settings_file::save_value_to(&path, key, value)
                     });
             if changed {
-                self.theme = suite_ui::themes::LiveTheme::new(&self.theme_setting);
+                self.theme = j_ui::themes::LiveTheme::new(&self.theme_setting);
             }
             let work = self.update_work();
             if self.updates.show(ui, work, self.settings_path.as_deref()) {
@@ -2768,10 +2765,10 @@ fn dock_bottom_target(ui: &Ui, dock: &mut DockState<Tab>) {
             );
             painter.rect_filled(preview, 0.0, color::light_blue().gamma_multiply(0.3));
         }
-        painter.rect_filled(target, suite_ui::tokens::radius::CONTROL, color::raised());
+        painter.rect_filled(target, j_ui::tokens::radius::CONTROL, color::raised());
         painter.rect_stroke(
             target,
-            suite_ui::tokens::radius::CONTROL,
+            j_ui::tokens::radius::CONTROL,
             Stroke::new(1.0, color::light_blue()),
             egui::StrokeKind::Inside,
         );
@@ -2826,8 +2823,8 @@ fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
     s.tab_bar.inner_margin = Margin::same(space::S4 as i8);
     s.tab_bar.bg_fill = color::panel();
     s.tab_bar.corner_radius = egui::CornerRadius {
-        nw: suite_ui::tokens::radius::PANEL,
-        ne: suite_ui::tokens::radius::PANEL,
+        nw: j_ui::tokens::radius::PANEL,
+        ne: j_ui::tokens::radius::PANEL,
         ..Default::default()
     };
     s.tab_bar.hline_color = egui::Color32::TRANSPARENT;
@@ -2858,7 +2855,7 @@ fn dock_style(egui_style: &egui::Style) -> egui_dock::Style {
         state.text_color = ink;
         state.bg_fill = fill;
         state.outline_color = egui::Color32::TRANSPARENT;
-        state.corner_radius = egui::CornerRadius::same(suite_ui::tokens::radius::CONTROL);
+        state.corner_radius = egui::CornerRadius::same(j_ui::tokens::radius::CONTROL);
     }
     s.buttons.close_tab_color = color::ink_2();
     s.buttons.close_tab_active_color = color::ink();
@@ -2893,7 +2890,7 @@ fn paint_dock_frames(ui: &Ui, dock: &DockState<Tab>) {
         };
         ui.painter().rect_stroke(
             rect,
-            suite_ui::tokens::radius::PANEL,
+            j_ui::tokens::radius::PANEL,
             theme::hairline(ui.ctx(), ink),
             egui::StrokeKind::Inside,
         );
@@ -2915,7 +2912,7 @@ fn dock_titles(ui: &Ui, dock: &DockState<Tab>) -> std::collections::HashMap<Tab,
             } else {
                 0.0
             };
-            let galley = suite_ui::widgets::fit_text(
+            let galley = j_ui::widgets::fit_text(
                 ui,
                 tab.title(),
                 theme::body_strong(),
@@ -3038,8 +3035,8 @@ impl TabViewer for Viewer<'_> {
         ui.painter().rect_filled(
             rect,
             egui::CornerRadius {
-                sw: suite_ui::tokens::radius::PANEL,
-                se: suite_ui::tokens::radius::PANEL,
+                sw: j_ui::tokens::radius::PANEL,
+                se: j_ui::tokens::radius::PANEL,
                 ..Default::default()
             },
             color::panel(),
@@ -3229,6 +3226,11 @@ impl TabViewer for Viewer<'_> {
                     (self.command, self.gesture) = (Some(c), None);
                 }
                 tutorial::ghost(ui, frame, self.project.settings().width);
+                // With room for the handles just outside the frame.
+                let view = frame
+                    .expand(j_ui::tokens::space::S12)
+                    .intersect(ui.clip_rect());
+                tutorial::anchor(ui.ctx(), "preview.frame", view);
                 if let Some((id, at)) =
                     crate::handles::double_clicked_text(ui, self.project, t, frame)
                 {
@@ -3311,7 +3313,7 @@ fn drop_overlay(ctx: &egui::Context) {
         egui::Id::new("drop"),
     ));
     let rect = ctx.content_rect().shrink(space::GUTTER);
-    let corner = egui::CornerRadius::same(suite_ui::tokens::radius::PANEL);
+    let corner = egui::CornerRadius::same(j_ui::tokens::radius::PANEL);
     painter.rect_filled(rect, corner, color::blue().gamma_multiply(0.08));
     painter.rect_stroke(
         rect,
@@ -3413,7 +3415,7 @@ mod palette_tests {
 
     #[test]
     fn export_versions_uses_shared_dispatch_and_closes_stale_modal() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = Harness::builder()
@@ -3476,7 +3478,7 @@ mod palette_tests {
     #[test]
     fn highlight_review_dispatch_opens_panel_and_rejects_export_after_edit() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = Harness::builder()
@@ -3928,7 +3930,7 @@ mod workspace_tests {
         if crate::test_util::isolate_locale() {
             return;
         }
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let artifacts = std::env::var_os("JVID_A2_ARTIFACT_DIR").map(PathBuf::from);
@@ -3936,7 +3938,7 @@ mod workspace_tests {
             std::fs::create_dir_all(dir).unwrap();
         }
         for (size, scale, language) in [([1280.0, 720.0], 1.0, "en"), ([960.0, 600.0], 1.5, "de")] {
-            suite_ui::i18n::set_language(language);
+            j_ui::i18n::set_language(language);
             let mut h = Harness::builder()
                 .with_size(size)
                 .with_pixels_per_point(scale)
@@ -4002,7 +4004,7 @@ mod workspace_tests {
                 4
             );
         }
-        suite_ui::i18n::set_language("en");
+        j_ui::i18n::set_language("en");
     }
 
     #[test]

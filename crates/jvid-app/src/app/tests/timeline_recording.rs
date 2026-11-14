@@ -391,7 +391,7 @@ fn seeking_during_capture_finalizes_the_take_at_its_original_start() {
             let marker = h.get_by_label(tr!("timeline.marker_lane")).rect();
             egui::pos2(
                 marker.left() + 10.0,
-                marker.bottom() + suite_ui::tokens::size::RULER / 2.0,
+                marker.bottom() + j_ui::tokens::size::RULER / 2.0,
             )
         };
         h.hover_at(at);

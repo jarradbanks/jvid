@@ -3,6 +3,13 @@
 use std::collections::{BTreeMap, HashSet};
 
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, size, space};
+use j_ui::widgets::{
+    Button, Checkbox, ColorField, ColorWheel, CurveEditor, CurveNeutral, DragField, Dropdown,
+    KeyButton, Keyed, MenuRow, SectionHeader, Segmented, Slider, State, TextInput, fit_text,
+    paint_fit,
+};
 use jvid_core::curve::Kind as CurveKind;
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, SPEED, Value};
@@ -12,13 +19,6 @@ use jvid_core::model::{
     Transform, Wheels,
 };
 use jvid_core::time::Time;
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{
-    Button, Checkbox, ColorField, ColorWheel, CurveEditor, CurveNeutral, DragField, Dropdown,
-    KeyButton, Keyed, MenuRow, SectionHeader, Segmented, Slider, State, TextInput, fit_text,
-    paint_fit,
-};
 
 use crate::i18n::{CATALOG, Label, tr, verbatim};
 use crate::timeline::Edit;
@@ -805,7 +805,7 @@ pub fn show(
     t: Time,
 ) -> (Option<Edit>, Option<Time>) {
     let Some(pane) = pane else {
-        suite_ui::empty_state::EmptyState::new(
+        j_ui::empty_state::EmptyState::new(
             icon::POINTER,
             tr!("empty.select_clip"),
             tr!("inspector.empty"),
@@ -880,14 +880,15 @@ pub fn show(
             index += props.len() as u64;
             continue;
         }
+        let mut balance = None;
         for p in props {
             index += 1;
-            let top = ui.cursor().top();
             if p.name == "lut_intensity"
                 && let Some(e) = lut_row(ui, clips)
             {
                 edit = Some(e);
             }
+            let top = ui.cursor().top();
             if shown(p)
                 && let Some(e) = row(ui, clips, p, t, index, &mut seek)
             {
@@ -895,6 +896,15 @@ pub fn show(
             }
             if let Some(name) = row_anchor(p.name) {
                 crate::app::tutorial::anchor_below(ui, name, top);
+            }
+            // Temperature and Tint, which one step names together.
+            if p.name == "temperature" {
+                balance = Some(top);
+            }
+            if p.name == "tint"
+                && let Some(top) = balance
+            {
+                crate::app::tutorial::anchor_below(ui, "inspector.balance", top);
             }
         }
         if id == "opacity"
@@ -961,8 +971,7 @@ pub fn show(
     (edit, seek)
 }
 
-/// The [`crate::app::tutorial::anchor`] of the rows lessons point at, by property. LUT covers
-/// its button and LUT Mix.
+/// The [`crate::app::tutorial::anchor`] of the rows lessons point at, by property.
 fn row_anchor(prop: &str) -> Option<&'static str> {
     Some(match prop {
         "position" => "inspector.position",
@@ -971,8 +980,28 @@ fn row_anchor(prop: &str) -> Option<&'static str> {
         "exposure" => "inspector.exposure",
         "temperature" => "inspector.temperature",
         "tint" => "inspector.tint",
-        "lut_intensity" => "inspector.lut",
+        "lut_intensity" => "inspector.lut_mix",
         "volume" => "inspector.volume",
+        _ => return None,
+    })
+}
+
+/// The anchors of the effect parameters lessons point at, by name.
+fn param_anchor(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "tolerance" => "inspector.fx_tolerance",
+        "edge_softness" => "inspector.fx_edge_softness",
+        "spill_suppression" => "inspector.fx_spill_suppression",
+        _ => return None,
+    })
+}
+
+/// The anchors of the diamonds lessons point at, by property.
+fn key_anchor(prop: &str) -> Option<&'static str> {
+    Some(match prop {
+        "position" => "inspector.position_key",
+        "opacity" => "inspector.opacity_key",
+        _ if prop == Mask::point(0, 0) => "inspector.mask_position_key",
         _ => return None,
     })
 }
@@ -1299,7 +1328,9 @@ fn lut_row(ui: &mut Ui, clips: &[&Clip]) -> Option<Edit> {
         let mut edit = None;
         let clear = size::CONTROL + space::S4;
         let w = ui.available_width() - if current.is_some() { clear } else { 0.0 };
-        if ui.add(Button::secondary(&name).width(w)).clicked() {
+        let pick = ui.add(Button::secondary(&name).width(w));
+        crate::app::tutorial::anchor_in(ui, "inspector.lut_button", pick.rect);
+        if pick.clicked() {
             let mut dialog = rfd::FileDialog::new()
                 .set_title(tr!("inspector.choose_lut"))
                 .add_filter(tr!("inspector.cube_filter"), &["cube"]);
@@ -1491,9 +1522,13 @@ fn effects_rows(
                 if let Some(e) = fx_mask_row(ui, clips, i) {
                     edit = Some(e);
                 }
-                for (k, p) in (first + 1..).zip(&props) {
+                for (k, (p, q)) in (first + 1..).zip(props.iter().zip(&params)) {
+                    let top = ui.cursor().top();
                     if let Some(e) = row(ui, clips, p, t, k, seek) {
                         edit = Some(e);
+                    }
+                    if let Some(name) = param_anchor(&q.name).filter(|_| i == 0) {
+                        crate::app::tutorial::anchor_below(ui, name, top);
                     }
                 }
             });
@@ -1752,7 +1787,7 @@ fn menu_entry(ui: &mut Ui, row: &crate::effects::Row) -> egui::Response {
     let (rect, r) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &row.name));
     if r.hovered() || r.has_focus() {
-        let corner = suite_ui::tokens::radius::CONTROL;
+        let corner = j_ui::tokens::radius::CONTROL;
         ui.painter().rect_filled(rect, corner, color::border());
     }
     let thumb = Rect::from_min_size(
@@ -2018,7 +2053,6 @@ fn masks_rows(
                     crate::app::tutorial::anchor_below(ui, name, top);
                 }
             }
-            // Mode and Invert, which one step names together.
             let top = ui.cursor().top();
             let modes = [MaskMode::Add, MaskMode::Subtract];
             let mut k = usize::from(m.mode == MaskMode::Subtract);
@@ -2031,6 +2065,10 @@ fn masks_rows(
             if changed {
                 edit = Some((edit_mask(clips, i, |m| m.mode = modes[k]), None));
             }
+            if i == 0 {
+                crate::app::tutorial::anchor_below(ui, "inspector.mask_mode", top);
+            }
+            let top = ui.cursor().top();
             let mut invert = m.invert;
             let (changed, _) = prop_row(ui, "", Tools::default(), |ui| {
                 ui.add(Checkbox::new(&mut invert, tr!("inspector.invert")))
@@ -2645,7 +2683,7 @@ fn slider_bank(ui: &mut Ui, eq: &Equalizer) -> Option<(usize, f32, egui::Respons
         };
         painter.rect_filled(thumb, 2.0, ink);
         if r.has_focus() {
-            painter.add(suite_ui::widgets::focus_ring(thumb, 2));
+            painter.add(j_ui::widgets::focus_ring(thumb, 2));
         }
         let (font, ink) = match () {
             _ if drag => (medium.clone(), color::light_blue()),
@@ -3150,6 +3188,11 @@ fn row(
     if c.reset {
         edit = Some((reset_prop(clips, p), None));
     }
+    if let Some(k) = &c.key
+        && let Some(name) = key_anchor(p.name)
+    {
+        crate::app::tutorial::anchor_in(ui, name, k.rect);
+    }
     key_clicks(clips, &names, c, t, index, seek).or(edit)
 }
 
@@ -3439,7 +3482,7 @@ fn font_field(ui: &mut Ui, family: &mut String, list: &[String]) -> bool {
     let bounds = ui.clip_rect().intersect(ui.ctx().content_rect());
     let row = size::CONTROL + ui.spacing().item_spacing.y;
     let wanted = (matches.len() as f32).min(8.0) * row + row;
-    let (align, max_height) = suite_ui::widgets::menu_place(r.rect, bounds, wanted);
+    let (align, max_height) = j_ui::widgets::menu_place(r.rect, bounds, wanted);
     let menu = egui::Popup::menu(&r)
         .id(id.with("menu"))
         .open(true)
@@ -3543,8 +3586,8 @@ fn off_default(s: &Text, id: &str) -> bool {
 /// A collapsed section's summary of `s`, such as `4 px · #000000`.
 fn text_summary(s: &Text, id: &str) -> String {
     let px = |n: f32| tr!("inspector.px", n = format!("{n:.0}"));
-    let color = |c: [f64; 4]| match suite_ui::widgets::color_text(jvid_render::solid::rgba8(c)) {
-        None => suite_ui::i18n::CATALOG.tr("color.none").to_owned(),
+    let color = |c: [f64; 4]| match j_ui::widgets::color_text(jvid_render::solid::rgba8(c)) {
+        None => j_ui::i18n::CATALOG.tr("color.none").to_owned(),
         Some((hex, None)) => format!("#{hex}"),
         Some((_, Some(alpha))) => alpha,
     };
@@ -3802,6 +3845,7 @@ fn text_props(
                     .margin(vec2(space::S8, space::S4)),
             )
         });
+    crate::app::tutorial::anchor_in(ui, "inspector.text_content", content.inner.rect);
     let mut changed = content.inner.changed();
     ui.add_space(space::S4);
     let mut tool = None;
@@ -3837,7 +3881,11 @@ fn text_props(
         for (n, label) in rows {
             index += 1;
             let row = (*n, caption(label));
+            let top = ui.cursor().top();
             let (ch, e) = text_row(ui, clips, &mut s, row, t, index, seek, &mut dropped);
+            if *n == "text_size" {
+                crate::app::tutorial::anchor_below(ui, "inspector.text_size", top);
+            }
             changed |= ch;
             tool = e.or(tool);
         }
@@ -3968,10 +4016,7 @@ mod tests {
             );
         for id in ids {
             let key = format!("inspector.{id}");
-            for lang in suite_ui::i18n::LANGUAGES
-                .iter()
-                .filter(|l| !CATALOG.is_stub(l))
-            {
+            for lang in j_ui::i18n::LANGUAGES.iter().filter(|l| !CATALOG.is_stub(l)) {
                 assert!(CATALOG.get_in(lang, &key).is_some(), "{lang} lacks {key}");
             }
         }
@@ -4514,7 +4559,7 @@ mod tests {
         let builder = if render { builder.wgpu() } else { builder };
         let mut harness = builder.build_ui_state(
             move |ui, h: &mut History| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 ui.painter().rect_filled(ui.max_rect(), 0.0, color::panel());
@@ -4621,7 +4666,7 @@ mod tests {
     #[test]
     fn linked_scale_240px_snapshot_shows_both_modes() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = inspector_harness(history_of(TrackKind::Video), Pane::Video, true);
@@ -4959,7 +5004,7 @@ mod tests {
                 );
                 let mut fresh = true;
                 let mut h = egui_kittest::Harness::new_ui(|ui| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     show(ui, &sel, Some(Pane::Video), Time(0));
@@ -5040,7 +5085,7 @@ mod tests {
                 .with_size([340.0, 720.0])
                 .build_ui_state(
                     move |ui, history: &mut History| {
-                        if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        if j_ui::test_support::install_theme(ui, &mut fresh) {
                             return;
                         }
                         let sel = Selection::new(
@@ -5191,7 +5236,7 @@ mod tests {
                     .with_size([width - 24.0 + 16.0, 1800.0])
                     .build_ui_state(
                         move |ui, bounds: &mut Rect| {
-                            if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                            if j_ui::test_support::install_theme(ui, &mut fresh) {
                                 return;
                             }
                             let gutter = ui.spacing().scroll.allocated_width() + space::S4;
@@ -5330,7 +5375,7 @@ mod tests {
     fn narrow_numeric_field_types_and_drags_in_one_undo_step() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness();
@@ -5380,7 +5425,7 @@ mod tests {
     #[test]
     fn row_buttons_leave_a_gutter_for_the_scroll_bar() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let h = harness();
@@ -5398,7 +5443,7 @@ mod tests {
     #[test]
     fn snapshot_and_separate_drags_are_separate_steps() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness();
@@ -5435,7 +5480,7 @@ mod tests {
     fn independent_scale_axes_display_and_edit_without_changing_the_other_axis() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::{NodeT, Queryable};
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness();
@@ -5553,7 +5598,7 @@ mod tests {
     #[test]
     fn changing_scale_shows_reset_on_its_row_and_head_and_moves_nothing() {
         use egui_kittest::kittest::{NodeT, Queryable};
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness();
@@ -5583,7 +5628,7 @@ mod tests {
     fn every_tab_keeps_its_slider_widths_when_reset_shows() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::{NodeT, Queryable};
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let sliders = |h: &egui_kittest::Harness<'_, History>| -> Vec<_> {
@@ -5640,7 +5685,7 @@ mod tests {
     #[test]
     fn the_diamond_animates_then_keys_and_its_menu_has_the_arrows() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness();
@@ -5673,7 +5718,7 @@ mod tests {
     #[test]
     fn the_crop_and_speed_rows_fit_a_288px_inspector() {
         use egui_kittest::kittest::{NodeT, Queryable};
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness();
@@ -5699,7 +5744,7 @@ mod tests {
     #[test]
     fn the_speed_diamond_keys_the_ramp_in_one_step_each() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness();
@@ -5733,7 +5778,7 @@ mod tests {
     fn a_slider_drag_is_one_undo_step() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness();
@@ -5765,7 +5810,7 @@ mod tests {
     fn audio_fx_edit_in_one_step_and_bypass() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness_of(TrackKind::Audio, Pane::Audio);
@@ -5858,7 +5903,7 @@ mod tests {
         use egui::accesskit::Role;
         use egui::{Key, Modifiers};
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness_of(TrackKind::Audio, Pane::Audio);
@@ -5920,7 +5965,7 @@ mod tests {
     #[test]
     fn the_eye_bypasses_an_effect_in_place_and_undoes() {
         use egui_kittest::kittest::{NodeT, Queryable};
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = fx_harness();
@@ -5953,7 +5998,7 @@ mod tests {
     fn the_more_menu_disables_moves_at_the_ends_and_moves_in_one_step() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::{NodeT, Queryable};
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = fx_harness();
@@ -5995,7 +6040,7 @@ mod tests {
     #[test]
     fn dragging_a_header_moves_its_block_in_one_step() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = fx_harness();
@@ -6020,7 +6065,7 @@ mod tests {
     fn removing_a_block_moves_nothing_above_it() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::{NodeT, Queryable};
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = fx_harness();
@@ -6047,7 +6092,7 @@ mod tests {
     fn masks_add_edit_and_remove_in_one_step_each() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness();
@@ -6108,7 +6153,7 @@ mod tests {
     fn add_effect_searches_names_and_descriptions() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = fx_harness();
@@ -6181,7 +6226,7 @@ mod tests {
             .wgpu()
             .build_ui_state(
                 move |ui, h: &mut History| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     ui.painter().rect_filled(ui.max_rect(), 0.0, color::panel());
@@ -6211,7 +6256,7 @@ mod tests {
     fn lines_up(width: f32, name: &str, sliders: bool) {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         {
@@ -6247,8 +6292,8 @@ mod tests {
     fn a_swatch_keeps_its_edge_against_a_panel_of_its_own_colour() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        use suite_ui::themes::{HIGH_CONTRAST, LIGHT};
-        if !suite_ui::test_support::gpu() {
+        use j_ui::themes::{HIGH_CONTRAST, LIGHT};
+        if !j_ui::test_support::gpu() {
             return;
         }
         // White on Light and black on High Contrast, each about the colour of its panel.
@@ -6257,7 +6302,7 @@ mod tests {
             (HIGH_CONTRAST, "Outline Color 000000"),
         ] {
             let mut h = text_harness(264.0, sample());
-            suite_ui::themes::apply(&h.ctx, &theme);
+            j_ui::themes::apply(&h.ctx, &theme);
             // Outline starts collapsed.
             h.get_by_label("Outline").click();
             h.run();
@@ -6288,7 +6333,7 @@ mod tests {
     fn text_edits_are_one_undo_step_each() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = text_harness(264.0, Text::default());
@@ -6332,7 +6377,7 @@ mod tests {
     #[test]
     fn the_text_diamond_keys_and_its_menu_has_the_arrows() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = text_harness(264.0, Text::default());
@@ -6357,7 +6402,7 @@ mod tests {
     #[test]
     fn reset_on_an_animated_style_drops_its_keys_and_restores_it_in_one_step() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let style = Text {
@@ -6444,7 +6489,7 @@ mod tests {
         let mut fresh = true;
         let mut h = egui_kittest::Harness::builder().build_ui_state(
             move |ui, f: &mut String| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 font_field(ui, f, &list);
@@ -6459,7 +6504,7 @@ mod tests {
     #[test]
     fn the_font_menu_fits_inside_the_inspector() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let list: Vec<String> = (1..=30).map(|i| format!("Family {i}")).collect();
@@ -6469,7 +6514,7 @@ mod tests {
             .with_size([240.0, 480.0])
             .build_ui_state(
                 move |ui, f: &mut String| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     ui.set_clip_rect(panel);

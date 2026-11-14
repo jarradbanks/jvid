@@ -9,13 +9,13 @@ use std::path::PathBuf;
 use egui::{
     Align, Align2, CornerRadius, Id, Key, LayerId, Modifiers, Order, Rect, Stroke, pos2, vec2,
 };
+use j_ui::theme;
+use j_ui::tokens::{color, radius, space};
+use j_ui::widgets::Button;
 use jvid_core::history::{Command, History};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
 use jvid_core::model::{Project, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND, Time};
-use suite_ui::theme;
-use suite_ui::tokens::{color, radius, space};
-use suite_ui::widgets::Button;
 
 use super::{App, Tab};
 use crate::i18n::{tr, verbatim};
@@ -40,11 +40,15 @@ pub struct Lesson {
 }
 
 pub struct Step {
-    /// The [`anchor`] the step points at. An Inspector row's, `inspector.<row>`, falls back to
-    /// the whole panel while the row isn't drawn.
+    /// The [`anchor`] the step spotlights: the one control the user acts on. An Inspector
+    /// row's, `inspector.<row>`, falls back to the whole panel while the row isn't drawn.
+    /// `clip` and `asset` mean the timeline clip or media item `item` picks; `timeline.ruler`
+    /// uses its time to point at the intended seek location.
     pub anchor: &'static str,
-    /// The instruction, one or two short sentences. Shortcuts come from `app.keymap`, so a
-    /// remapped key reads right.
+    /// The clip, media item or ruler time the anchor means.
+    pub item: Option<fn(&App) -> Option<Item>>,
+    /// The instruction: one short imperative sentence. Shortcuts come from `app.keymap`, so
+    /// a remapped key reads right.
     pub text: fn(&App) -> String,
     /// Whether the task is complete. A newly satisfied goal advances automatically; a goal
     /// already satisfied on entry (including Back) waits for Next.
@@ -55,13 +59,65 @@ pub struct Step {
     /// Brings the anchor into view when it isn't drawn, such as by switching tabs. The Render
     /// Queue reveals itself.
     pub reveal: Option<fn(&mut App)>,
+    /// What the user does first, in order, while `anchor` can't be used yet: selecting a
+    /// clip, opening a menu or the dialog the control is in.
+    pub via: &'static [Via],
     /// A target ellipse, its centre and size in project pixels from the frame's centre,
     /// drawn dashed on the Program view while the step shows.
     pub ghost: Option<[[f64; 2]; 2]>,
-    /// More controls highlighted beside `anchor`, such as a scope to read while editing in
-    /// the Inspector.
-    pub also: &'static [&'static str],
+    /// Anchors left bright but not clickable beside `anchor`: where a drag lands, or a view
+    /// to watch while editing.
+    pub watch: &'static [&'static str],
 }
+
+/// The defaults every lesson step starts from.
+pub const STEP: Step = Step {
+    anchor: "",
+    item: None,
+    text: |_| String::new(),
+    done: |_| false,
+    example: |_| {},
+    reveal: None,
+    via: &[],
+    ghost: None,
+    watch: &[],
+};
+
+/// An action before a step's own, spotlit instead of what comes after it while that isn't
+/// ready.
+#[derive(Clone, Copy)]
+pub struct Via {
+    pub anchor: &'static str,
+    pub item: Option<fn(&App) -> Option<Item>>,
+    pub text: fn(&App) -> String,
+    /// Whether what comes after is ready to use, such as a clip being selected, a dialog
+    /// open or a menu item drawn.
+    pub ready: fn(&App, &egui::Context) -> bool,
+}
+
+/// A timeline clip, media item or ruler time a step spotlights.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Item {
+    Clip(jvid_core::model::ClipId),
+    Asset(jvid_core::model::AssetId),
+    Time(Time),
+}
+
+/// A [`Via`] that has the user click the clip `item` picks, until it's the only selection.
+macro_rules! select {
+    ($item:expr) => {
+        $crate::app::tutorial::Via {
+            anchor: "clip",
+            item: Some(|a| $item(a).map($crate::app::tutorial::Item::Clip)),
+            text: |_| $crate::i18n::tr!("tutorial.select_clip").into(),
+            ready: |a, _| {
+                let s = a.timeline.selected();
+                $item(a).is_some_and(|id| s.len() == 1 && s.contains(&id))
+            },
+        }
+    };
+}
+pub(crate) use select;
 
 pub const LESSONS: &[Lesson] = &[
     TOUR,
@@ -87,15 +143,8 @@ const TOUR: Lesson = Lesson {
     setup: |_| {},
     steps: &[
         Step {
-            anchor: "media",
-            text: |a| {
-                let key = a.keymap.shortcut("import");
-                tr!(
-                    "tutorial.tour_import",
-                    key = key,
-                    file = verbatim(TOUR_CLIP)
-                )
-            },
+            anchor: "media.import",
+            text: |_| tr!("tutorial.tour_import", file = verbatim(TOUR_CLIP)),
             done: |a| clip_named(a, TOUR_CLIP).is_some(),
             example: |a| match sample(TOUR_CLIP) {
                 Ok(path) => a.import([path]),
@@ -105,12 +154,11 @@ const TOUR: Lesson = Lesson {
                     error = e
                 )),
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            ..STEP
         },
         Step {
-            anchor: "timeline",
+            anchor: "asset",
+            item: Some(|a| clip_named(a, TOUR_CLIP).map(|x| Item::Asset(x.id))),
             text: |_| tr!("tutorial.tour_place", file = verbatim(TOUR_CLIP)),
             done: |a| first_clip(a).is_some(),
             example: |a| {
@@ -122,55 +170,90 @@ const TOUR: Lesson = Lesson {
                     apply(a, Command::Place(p));
                 }
             },
-            reveal: None,
-            ghost: None,
-            also: &["media"],
+            watch: &["timeline.lanes"],
+            ..STEP
         },
         Step {
-            anchor: "preview",
-            text: |a| {
-                let k = |id| a.keymap.shortcut(id);
-                let (play, back) = (k("play_stop"), k("shuttle_left"));
-                let (stop, forward) = (k("shuttle_stop"), k("shuttle_right"));
-                tr!(
-                    "tutorial.tour_play",
-                    play = play,
-                    back = back,
-                    stop = stop,
-                    forward = forward
-                )
-            },
+            anchor: "preview.play",
+            text: |_| tr!("tutorial.tour_play").into(),
             done: |a| a.timeline.playhead() > Time(0),
             example: |a| {
                 let length = a.history.project().sequence().duration();
-                a.timeline.seek(Time(length.0 / 3));
+                a.timeline.seek(Time(length.0 * 2 / 3));
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            ..STEP
         },
         Step {
-            anchor: "timeline",
-            text: |a| {
-                let (mark_in, mark_out) =
-                    (a.keymap.shortcut("mark_in"), a.keymap.shortcut("mark_out"));
-                tr!(
-                    "tutorial.tour_marks",
-                    mark_in = mark_in,
-                    mark_out = mark_out
-                )
+            anchor: "timeline.ruler",
+            item: Some(|a| {
+                Some(Item::Time(Time(
+                    a.history.project().sequence().duration().0 / 3,
+                )))
+            }),
+            text: |_| tr!("tutorial.tour_start").into(),
+            done: |a| {
+                let length = a.history.project().sequence().duration();
+                !a.preview.playing() && a.timeline.playhead() < Time(length.0 / 2)
             },
+            example: |a| {
+                if a.preview.playing() {
+                    a.preview.program_action("shuttle_stop");
+                }
+                let length = a.history.project().sequence().duration();
+                a.timeline.seek(Time(length.0 / 3));
+            },
+            ..STEP
+        },
+        Step {
+            anchor: "timeline.ruler",
+            item: Some(|a| Some(Item::Time(a.timeline.playhead()))),
+            text: |a| tr!("tutorial.tour_in", key = a.keymap.shortcut("mark_in")),
+            done: |a| a.history.project().sequence().in_point().is_some(),
+            example: |a| {
+                let at = a.timeline.playhead();
+                let out_point = a.history.project().sequence().out_point();
+                let in_point = Some(at);
+                apply(
+                    a,
+                    Command::SetInOut {
+                        in_point,
+                        out_point,
+                    },
+                );
+            },
+            ..STEP
+        },
+        Step {
+            anchor: "timeline.ruler",
+            item: Some(|a| {
+                let seq = a.history.project().sequence();
+                let later = seq.in_point().unwrap_or_default() + SECOND;
+                Some(Item::Time(Time(seq.duration().0 * 2 / 3).max(later)))
+            }),
+            text: |_| tr!("tutorial.tour_later").into(),
+            done: |a| {
+                let in_point = a.history.project().sequence().in_point();
+                in_point.is_some_and(|i| a.timeline.playhead() > i + Time(SECOND.0 / 2))
+            },
+            example: |a| {
+                let length = a.history.project().sequence().duration();
+                a.timeline.seek(Time(length.0 * 2 / 3));
+            },
+            ..STEP
+        },
+        Step {
+            anchor: "timeline.ruler",
+            item: Some(|a| Some(Item::Time(a.timeline.playhead()))),
+            text: |a| tr!("tutorial.tour_out", key = a.keymap.shortcut("mark_out")),
             done: |a| {
                 let seq = a.history.project().sequence();
                 matches!((seq.in_point(), seq.out_point()), (Some(i), Some(o)) if o > i)
             },
             example: mark,
-            reveal: None,
-            ghost: None,
-            also: &[],
+            ..STEP
         },
         Step {
-            anchor: "timeline",
+            anchor: "timeline.range",
             text: |a| tr!("tutorial.tour_cut", key = a.keymap.shortcut("extract")),
             done: |a| shortened(a, TOUR_CLIP),
             example: |a| {
@@ -180,21 +263,24 @@ const TOUR: Lesson = Lesson {
                 }
                 apply(a, Command::RemoveRange { ripple: true });
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            ..STEP
         },
         Step {
-            anchor: "bin.titles",
-            text: |_| tr!("tutorial.tour_title").into(),
+            anchor: "bin.title",
+            text: |_| {
+                tr!(
+                    "tutorial.tour_title",
+                    title = crate::media_bin::presets()[0].0
+                )
+            },
             done: has_title,
             example: add_title,
             reveal: Some(|a| a.bin.tab = 2),
-            ghost: None,
-            also: &["timeline"],
+            watch: &["timeline.lanes"],
+            ..STEP
         },
         Step {
-            anchor: "export",
+            anchor: "export.action",
             text: |_| tr!("tutorial.tour_export").into(),
             done: |a| queued(a).next().is_some(),
             example: |a| {
@@ -207,11 +293,18 @@ const TOUR: Lesson = Lesson {
                     .entire(a.history.project().sequence(), &name);
                 a.queue_export(req, gpu, 0.0);
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            via: &[OPEN_EXPORT],
+            ..STEP
         },
     ],
+};
+
+/// Opens the export dialog, for a step whose control is in it.
+pub(super) const OPEN_EXPORT: Via = Via {
+    anchor: "export",
+    item: None,
+    text: |_| tr!("tutorial.open_export").into(),
+    ready: |a, _| a.export_dialog.is_open(),
 };
 
 /// The screen recording lesson's sample.
@@ -222,6 +315,18 @@ const DEAD_AIR: (f64, f64) = (2.4, 7.0);
 
 /// Where the typing sits in the 1280x720 sample, for the zoom.
 const TYPING: [f64; 2] = [400.0, 180.0];
+
+/// The screen recording's first clip on a `kind` track.
+fn screen_clip(app: &App, kind: TrackKind) -> Option<jvid_core::model::ClipId> {
+    let asset = clip_named(app, SCREEN_CLIP)?.id;
+    let seq = app.history.project().sequence();
+    let mut tracks = seq.tracks().iter().filter(|t| t.kind == kind);
+    tracks.find_map(|t| t.clips().iter().find(|c| c.asset == asset).map(|c| c.id))
+}
+
+fn screen_video(app: &App) -> Option<jvid_core::model::ClipId> {
+    screen_clip(app, TrackKind::Video)
+}
 
 /// Tidies a screen recording: cut its dead air, zoom in on the typing, add a callout.
 const SCREEN: Lesson = Lesson {
@@ -240,34 +345,32 @@ const SCREEN: Lesson = Lesson {
     },
     steps: &[
         Step {
-            anchor: "timeline",
-            text: |a| {
-                tr!(
-                    "tutorial.screen_silence",
-                    key = a.keymap.shortcut("detect_silence")
-                )
-            },
+            anchor: "silence.cut",
+            text: |_| tr!("tutorial.silence_cut").into(),
             done: |a| shortened(a, SCREEN_CLIP) && a.lesson.as_ref().is_some_and(|r| r.silence_cut),
             example: |a| {
-                let Some(asset) = clip_named(a, SCREEN_CLIP).map(|x| x.id) else {
+                a.timeline.dismiss_dialogs();
+                let Some(id) = screen_clip(a, TrackKind::Audio) else {
                     return;
                 };
                 let seq = a.history.project().sequence();
-                let audio = seq.tracks().iter().filter(|t| t.kind == TrackKind::Audio);
-                let Some(c) = audio.flat_map(|t| t.clips()).find(|c| c.asset == asset) else {
+                let Some((_, c)) = seq.clip(id) else {
                     return;
                 };
                 // The span Detect Silence finds at its defaults: the dead air less 0.15 s padding.
                 let at = |s: f64| c.timeline_at(Time((s * FLICKS_PER_SECOND as f64) as i64));
                 let span = (c.id, at(DEAD_AIR.0 + 0.15), at(DEAD_AIR.1 - 0.15));
-                let id = c.id;
                 a.timeline.select_clip(seq, id);
                 let spans = vec![span];
                 apply(a, Command::CutSpans { spans, speed: None });
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            via: &[Via {
+                anchor: "clip",
+                item: Some(|a| screen_video(a).map(Item::Clip)),
+                text: |_| tr!("tutorial.screen_silence").into(),
+                ready: |a, _| a.timeline.dialog_open(),
+            }],
+            ..STEP
         },
         Step {
             anchor: "inspector.scale",
@@ -304,18 +407,23 @@ const SCREEN: Lesson = Lesson {
                 a.timeline.select_clip(seq, first);
                 apply(a, Command::SetClipProps(edits));
             },
-            reveal: None,
-            ghost: None,
-            also: &["timeline"],
+            via: &[select!(screen_video)],
+            watch: &["preview.frame"],
+            ..STEP
         },
         Step {
-            anchor: "bin.titles",
-            text: |_| tr!("tutorial.screen_callout").into(),
+            anchor: "bin.title",
+            text: |_| {
+                tr!(
+                    "tutorial.screen_callout",
+                    title = crate::media_bin::presets()[0].0
+                )
+            },
             done: has_title,
             example: add_title,
             reveal: Some(|a| a.bin.tab = 2),
-            ghost: None,
-            also: &["timeline"],
+            watch: &["timeline.lanes"],
+            ..STEP
         },
     ],
 };
@@ -360,7 +468,8 @@ const GREEN_SCREEN: Lesson = Lesson {
     },
     steps: &[
         Step {
-            anchor: "timeline",
+            anchor: "asset",
+            item: Some(|a| clip_named(a, BACKGROUND).map(|x| Item::Asset(x.id))),
             text: |_| {
                 tr!(
                     "tutorial.green_screen_background",
@@ -397,90 +506,128 @@ const GREEN_SCREEN: Lesson = Lesson {
                     apply(a, Command::Place(p));
                 }
             },
-            reveal: None,
-            ghost: None,
-            also: &["media"],
+            watch: &["timeline.lanes"],
+            ..STEP
         },
         Step {
             anchor: "inspector.add_effect",
             text: |_| tr!("tutorial.green_screen_key").into(),
             done: |a| key_index(a).is_some(),
             example: |a| {
-                if let Some((_, id)) = keyed_clip(a) {
+                if let Some(id) = keyed_id(a) {
                     a.timeline.select_clip(a.history.project().sequence(), id);
                 }
                 add_key(a);
             },
-            reveal: None,
-            ghost: None,
-            also: &["timeline"],
+            via: &[select!(keyed_id)],
+            ..STEP
         },
         Step {
-            anchor: "inspector.effect",
-            text: |_| tr!("tutorial.green_screen_tune").into(),
-            done: |a| {
-                let (Some(i), Some(shader)) = (key_index(a), chroma_key()) else {
-                    return false;
-                };
-                let Some((_, id)) = keyed_clip(a) else {
-                    return false;
-                };
-                let Some((_, c)) = a.history.project().sequence().clip(id) else {
-                    return false;
-                };
-                let params = &c.transform.effects[i].params;
-                let tuned = |name: &str| {
-                    let default = shader.params.iter().find(|p| p.name == name);
-                    params.get(name).copied() != default.map(|p| p.default)
-                };
-                ["tolerance", "edge_softness", "spill_suppression"]
-                    .into_iter()
-                    .all(tuned)
-            },
-            example: |a| {
-                if key_index(a).is_none() {
-                    add_key(a);
-                }
-                let Some(i) = key_index(a) else {
-                    return;
-                };
-                // Clears the green screen while the board on the right still shows through.
-                edit_keyed(a, |_, x| {
-                    let params = &mut x.effects[i].params;
-                    params.insert("tolerance".into(), 0.8);
-                    params.insert("edge_softness".into(), 0.15);
-                    params.insert("spill_suppression".into(), 0.7);
-                });
-            },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            anchor: "inspector.fx_tolerance",
+            text: |_| tr!("tutorial.green_screen_tolerance").into(),
+            done: |a| tuned(a, "tolerance"),
+            // Clears the green screen while the board on the right still shows through.
+            example: |a| tune(a, "tolerance", 0.8),
+            via: &[select!(keyed_id)],
+            watch: &["preview.frame"],
+            ..STEP
+        },
+        Step {
+            anchor: "inspector.fx_edge_softness",
+            text: |_| tr!("tutorial.green_screen_softness").into(),
+            done: |a| tuned(a, "edge_softness"),
+            example: |a| tune(a, "edge_softness", 0.15),
+            via: &[select!(keyed_id)],
+            watch: &["preview.frame"],
+            ..STEP
+        },
+        Step {
+            anchor: "inspector.fx_spill_suppression",
+            text: |_| tr!("tutorial.green_screen_spill").into(),
+            done: |a| tuned(a, "spill_suppression"),
+            example: |a| tune(a, "spill_suppression", 0.7),
+            via: &[select!(keyed_id)],
+            watch: &["preview.frame"],
+            ..STEP
         },
         Step {
             anchor: "inspector.add_mask",
             text: |_| tr!("tutorial.green_screen_mask").into(),
-            done: |a| {
-                let Some((_, id)) = keyed_clip(a) else {
-                    return false;
-                };
-                let seq = a.history.project().sequence();
-                seq.clip(id)
-                    .is_some_and(|(_, c)| c.transform.masks.iter().any(|m| m.enabled))
-            },
+            done: |a| keyed_mask(a).is_some(),
             example: |a| {
                 use jvid_core::model::{Mask, MaskShape};
-                // Keeps the left 65% of the frame, which ends just before the board.
+                // As Add Mask > Rectangle makes it: centred, half the image's size.
                 edit_keyed(a, |[w, h], x| {
-                    let points = vec![[-0.2 * w, 0.0], [0.7 * w, 1.1 * h]];
+                    let points = vec![[0.0, 0.0], [w / 2.0, h / 2.0]];
                     x.masks.push(Mask::new(MaskShape::Rectangle, points));
                 });
             },
-            reveal: None,
-            ghost: None,
-            also: &["preview"],
+            via: &[select!(keyed_id)],
+            ..STEP
+        },
+        Step {
+            anchor: "preview.frame",
+            text: |_| tr!("tutorial.green_screen_fit").into(),
+            done: |a| {
+                let Some((m, [w, h])) = keyed_mask(a) else {
+                    return false;
+                };
+                let ([cx, _], [sx, sy]) = (m.points[0], m.points[1]);
+                // The board starts at 70% of the width; the man fills most of the height.
+                cx + sx.abs() / 2.0 <= 0.2 * w && sy.abs() >= 0.7 * h
+            },
+            example: |a| {
+                // Keeps the left 65% of the frame, which ends just before the board.
+                edit_keyed(a, |[w, h], x| {
+                    if let Some(m) = x.masks.first_mut() {
+                        m.points = vec![[-0.2 * w, 0.0], [0.7 * w, 1.1 * h]];
+                    }
+                });
+            },
+            via: &[select!(keyed_id)],
+            ..STEP
         },
     ],
 };
+
+/// The green-screen clip's id.
+fn keyed_id(app: &App) -> Option<jvid_core::model::ClipId> {
+    keyed_clip(app).map(|(_, id)| id)
+}
+
+/// The green-screen clip's first rectangle mask, while on, with the clip's fitted size.
+fn keyed_mask(app: &App) -> Option<(jvid_core::model::Mask, [f64; 2])> {
+    use jvid_core::model::MaskShape;
+    let project = app.history.project();
+    let (_, c) = project.sequence().clip(keyed_id(app)?)?;
+    let m = c.transform.masks.iter().find(|m| m.enabled)?;
+    (m.shape == MaskShape::Rectangle).then(|| (m.clone(), crate::masks::fitted(project, c)))
+}
+
+/// Whether Chroma Key's parameter `name` is off its default.
+fn tuned(app: &App, name: &str) -> bool {
+    let (Some(i), Some(shader), Some(id)) = (key_index(app), chroma_key(), keyed_id(app)) else {
+        return false;
+    };
+    let Some((_, c)) = app.history.project().sequence().clip(id) else {
+        return false;
+    };
+    let default = shader.params.iter().find(|p| p.name == name);
+    c.transform.effects[i].params.get(name).copied() != default.map(|p| p.default)
+}
+
+/// Sets Chroma Key's parameter `name`, adding the key first if needed, as its slider does.
+fn tune(app: &mut App, name: &str, value: f64) {
+    if key_index(app).is_none() {
+        add_key(app);
+    }
+    let Some(i) = key_index(app) else {
+        return;
+    };
+    edit_keyed(app, |_, x| {
+        x.effects[i].params.insert(name.into(), value);
+    });
+}
 
 /// The topmost green-screen clip: its track's index and its id.
 fn keyed_clip(app: &App) -> Option<(usize, jvid_core::model::ClipId)> {
@@ -640,50 +787,58 @@ const KEYFRAMES: Lesson = Lesson {
     },
     steps: &[
         Step {
-            anchor: "inspector.position",
-            text: |_| tr!("tutorial.keys_add").into(),
+            anchor: "inspector.position_key",
+            text: |_| tr!("tutorial.keys_position").into(),
+            done: |a| keys(a, "position") >= 1,
+            example: |a| key_title(a, "position", Value::Vec2([0.0, 100.0]), Time(0)),
+            via: &[select!(first_clip)],
+            ..STEP
+        },
+        Step {
+            anchor: "inspector.opacity_key",
+            text: |_| tr!("tutorial.keys_opacity").into(),
+            done: |a| keys(a, "opacity") >= 1,
+            example: |a| key_title(a, "opacity", Value::Scalar(0.0), Time(0)),
+            via: &[select!(first_clip)],
+            ..STEP
+        },
+        Step {
+            anchor: "timeline.ruler",
+            item: Some(|_| Some(Item::Time(SECOND))),
+            text: |_| tr!("tutorial.keys_second").into(),
             done: |a| {
-                title(a).is_some_and(|c| {
-                    let n = |p| c.keyframes.get(p).map_or(0, Vec::len);
-                    n("position") >= 2 && n("opacity") >= 2
-                })
+                let at = a.timeline.playhead();
+                title(a).is_some_and(|c| at >= Time(SECOND.0 / 2) && at < c.end())
             },
-            example: |a| {
-                let Some(c) = title(a) else { return };
-                let (start, second) = (c.source_at(c.start), c.source_at(c.start + SECOND));
-                let x = &c.transform;
-                let [px, py] = x.position;
-                let key = |time, value| Keyframe {
-                    time,
-                    value,
-                    easing: Easing::Linear,
-                };
-                let mut keys = c.keyframes.clone();
-                // Rises 100 px into place as it fades in.
-                keys.insert(
-                    "position".into(),
-                    vec![
-                        key(start, Value::Vec2([px, py + 100.0])),
-                        key(second, Value::Vec2([px, py])),
-                    ],
-                );
-                keys.insert(
-                    "opacity".into(),
-                    vec![
-                        key(start, Value::Scalar(0.0)),
-                        key(second, Value::Scalar(x.opacity)),
-                    ],
-                );
-                let at = c.start + SECOND;
-                apply(a, Command::SetClipProps(vec![(c.id, x.clone(), keys)]));
-                a.timeline.seek(at);
-            },
-            reveal: None,
-            ghost: None,
-            also: &["inspector.opacity", "timeline"],
+            example: |a| a.timeline.seek(SECOND),
+            ..STEP
         },
         Step {
             anchor: "inspector.position",
+            text: |_| tr!("tutorial.keys_move").into(),
+            done: |a| keys(a, "position") >= 2,
+            example: |a| {
+                let at = a.timeline.playhead();
+                key_title(a, "position", Value::Vec2([0.0, 0.0]), at);
+            },
+            via: &[select!(first_clip)],
+            watch: &["preview.frame"],
+            ..STEP
+        },
+        Step {
+            anchor: "inspector.opacity",
+            text: |_| tr!("tutorial.keys_fade").into(),
+            done: |a| keys(a, "opacity") >= 2,
+            example: |a| {
+                let at = a.timeline.playhead();
+                key_title(a, "opacity", Value::Scalar(1.0), at);
+            },
+            via: &[select!(first_clip)],
+            watch: &["preview.frame"],
+            ..STEP
+        },
+        Step {
+            anchor: "inspector.position_key",
             text: |_| tr!("tutorial.keys_previous").into(),
             done: |a| first_key(a).is_some_and(|t| a.timeline.playhead() == t),
             example: |a| {
@@ -691,43 +846,51 @@ const KEYFRAMES: Lesson = Lesson {
                     a.timeline.seek(t);
                 }
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            via: &[select!(first_clip)],
+            ..STEP
         },
         Step {
-            anchor: "inspector.position",
+            anchor: "inspector.position_key",
             text: |_| tr!("tutorial.keys_ease").into(),
             done: |a| {
                 let eased = |e| e != Easing::Linear;
                 title_keys(a).any(|k| eased(k.easing))
             },
             example: |a| ease_first(a, Easing::EaseOut),
-            reveal: None,
-            ghost: None,
-            also: &[],
+            via: &[select!(first_clip)],
+            ..STEP
         },
         Step {
-            anchor: "timeline",
+            anchor: "timeline.keys",
+            item: Some(|a| first_clip(a).map(Item::Clip)),
             text: |_| tr!("tutorial.keys_graph").into(),
-            done: |a| {
-                let custom = |e| matches!(e, Easing::Bezier(_));
-                a.timeline.graph_open() && title_keys(a).any(|k| custom(k.easing))
-            },
+            done: |a| a.timeline.graph_open(),
             example: |a| {
                 if let Some(id) = first_clip(a) {
                     a.timeline.open_graph(id);
                 }
-                // A steeper ease out than the preset, as dragging its first handle left gives.
-                ease_first(a, Easing::Bezier([0.0, 0.0, 0.2, 1.0]));
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            ..STEP
         },
         Step {
-            anchor: "preview",
-            text: |a| tr!("tutorial.keys_play", key = a.keymap.shortcut("play_stop")),
+            anchor: "timeline.graph",
+            text: |_| tr!("tutorial.keys_handle").into(),
+            done: |a| {
+                let custom = |e| matches!(e, Easing::Bezier(_));
+                a.timeline.graph_open() && title_keys(a).any(|k| custom(k.easing))
+            },
+            // A steeper ease out than the preset, as dragging its first handle left gives.
+            example: |a| ease_first(a, Easing::Bezier([0.0, 0.0, 0.2, 1.0])),
+            reveal: Some(|a| {
+                if let Some(id) = first_clip(a) {
+                    a.timeline.open_graph(id);
+                }
+            }),
+            ..STEP
+        },
+        Step {
+            anchor: "preview.play",
+            text: |_| tr!("tutorial.keys_play").into(),
             done: |a| a.preview.playing(),
             example: |a| {
                 if let Some(t) = first_key(a) {
@@ -736,12 +899,41 @@ const KEYFRAMES: Lesson = Lesson {
                 a.preview_active = 1;
                 a.preview.program_action("play_stop");
             },
-            reveal: None,
-            ghost: None,
-            also: &[],
+            ..STEP
         },
     ],
 };
+
+/// How many keys the title's property `prop` has.
+fn keys(app: &App, prop: &str) -> usize {
+    title(app).map_or(0, |c| c.keyframes.get(prop).map_or(0, Vec::len))
+}
+
+/// Keys the title's `prop` to `value` at timeline time `at`, as its diamond or field does;
+/// a position is relative to where the title sits.
+fn key_title(app: &mut App, prop: &str, value: Value, at: Time) {
+    let Some(c) = title(app) else { return };
+    let value = match value {
+        Value::Vec2([x, y]) => {
+            Value::Vec2([c.transform.position[0] + x, c.transform.position[1] + y])
+        }
+        v => v,
+    };
+    let key = Keyframe {
+        time: c.source_at(at),
+        value,
+        easing: Easing::Linear,
+    };
+    let mut keys = c.keyframes.clone();
+    let lane = keys.entry(prop.into()).or_default();
+    lane.retain(|k| k.time != key.time);
+    lane.push(key);
+    lane.sort_by_key(|k| k.time);
+    apply(
+        app,
+        Command::SetClipProps(vec![(c.id, c.transform.clone(), keys)]),
+    );
+}
 
 const SECOND: Time = Time(jvid_core::time::FLICKS_PER_SECOND);
 
@@ -855,25 +1047,51 @@ pub fn anchor_rect(ctx: &egui::Context, name: &str) -> Option<Rect> {
     })
 }
 
+/// The clip or media item the current step means, for [`item_anchor`].
+const ITEM: &str = "lesson_item";
+
+/// Records `rect` as anchor `name` when `item` is the one the current step means.
+pub fn item_anchor(ctx: &egui::Context, name: &'static str, item: Item, rect: Rect) {
+    if ctx.data(|d| d.get_temp::<Item>(Id::new(ITEM))) == Some(item) {
+        anchor(ctx, name, rect);
+    }
+}
+
+/// The intended seek location for a ruler step, mapped by the timeline's live view.
+pub(crate) fn ruler_time(ctx: &egui::Context) -> Option<Time> {
+    match ctx.data(|d| d.get_temp::<Item>(Id::new(ITEM))) {
+        Some(Item::Time(at)) => Some(at),
+        _ => None,
+    }
+}
+
 /// The Inspector row a step wants scrolled into view, once it's drawn.
 const SCROLL: &str = "lesson_scroll";
 
-/// Records the rows `ui` laid out below `top` as anchor `name`, cut to what shows of them.
-/// The first time a step wants them, they scroll into view.
+/// Records the rows `ui` laid out below `top` as anchor `name`, through [`anchor_in`].
 pub fn anchor_below(ui: &egui::Ui, name: &'static str, top: f32) {
+    let r = ui.min_rect();
+    anchor_in(
+        ui,
+        name,
+        Rect::from_x_y_ranges(r.x_range(), top..=r.bottom()),
+    );
+}
+
+/// Records `rect`, laid out in `ui`, as anchor `name`, cut to what shows of it. The first
+/// time a step wants it, it scrolls into view.
+pub fn anchor_in(ui: &egui::Ui, name: &'static str, rect: Rect) {
     let ctx = ui.ctx();
     if !running(ctx) {
         return;
     }
-    let r = ui.min_rect();
-    let rows = Rect::from_x_y_ranges(r.x_range(), top..=r.bottom());
     if ctx.data(|d| d.get_temp::<&'static str>(Id::new(SCROLL))) == Some(name) {
-        ui.scroll_to_rect(rows, Some(Align::Center));
+        ui.scroll_to_rect(rect, Some(Align::Center));
         ctx.data_mut(|d| d.remove::<&'static str>(Id::new(SCROLL)));
     }
-    let rows = rows.intersect(ui.clip_rect());
-    if rows.is_positive() {
-        anchor(ui.ctx(), name, rows);
+    let shown = rect.intersect(ui.clip_rect());
+    if shown.is_positive() {
+        anchor(ctx, name, shown);
     }
 }
 
@@ -887,9 +1105,31 @@ fn pane_of(row: &str) -> crate::inspector::Pane {
     use crate::inspector::Pane;
     match row {
         "add_effect" | "effect" => Pane::Effects,
+        _ if row.starts_with("fx_") => Pane::Effects,
         "volume" | "eq" => Pane::Audio,
+        _ if row.starts_with("text_") => Pane::Text,
         _ => Pane::Video,
     }
+}
+
+/// The dock panel anchor `name` is drawn in, revealed while it's hidden.
+fn tab_of(name: &str) -> Option<Tab> {
+    let panel = name.split('.').next().unwrap_or_default();
+    [
+        Tab::Media,
+        Tab::Preview,
+        Tab::Inspector,
+        Tab::Timeline,
+        Tab::Transcript,
+        Tab::RenderQueue,
+    ]
+    .into_iter()
+    .find(|t| match panel {
+        "clip" | "marker" => *t == Tab::Timeline,
+        "asset" | "bin" | "scope" => *t == Tab::Media,
+        "record" => *t == Tab::Preview,
+        _ => t.anchor() == panel,
+    })
 }
 
 /// The current step's [`Step::ghost`], for [`ghost`] to draw.
@@ -931,7 +1171,7 @@ pub struct Run {
     /// The current step; `steps.len()` once finished.
     pub step: usize,
     /// The current step's goal, measured on entry and after each frame.
-    done: bool,
+    pub(crate) done: bool,
     /// The goal has been false during this visit, so satisfying it can advance.
     armed: bool,
     /// A successful Detect Silence Cut of the lesson sample, never a trim or deletion.
@@ -991,7 +1231,6 @@ impl App {
         if cut
             && let Some(run) = &mut self.lesson
             && run.lesson.id == SCREEN.id
-            && run.step == 0
         {
             run.silence_cut = true;
         }
@@ -1091,12 +1330,18 @@ impl App {
     }
 
     /// Runs the lesson a frame, after the panels drew their anchors: checks the step, reveals a
-    /// hidden anchor, and draws contextual highlights and the task card.
+    /// hidden anchor, and spotlights the step's control with its card beside it.
     pub(super) fn lesson_frame(&mut self, ctx: &egui::Context) {
         let recorded = running(ctx);
         if recorded != self.lesson.is_some() {
             ctx.data_mut(|d| d.insert_temp(Id::new(RUNNING), self.lesson.is_some()));
             ctx.request_repaint();
+        }
+        if self.lesson.is_none() {
+            ctx.data_mut(|d| {
+                d.remove::<Item>(Id::new(ITEM));
+                d.remove::<Vec<Rect>>(Id::new(ALLOWED));
+            });
         }
         // Without this frame's anchors, a step would look hidden.
         if !recorded {
@@ -1134,29 +1379,29 @@ impl App {
             });
             ctx.request_repaint();
         }
-        let guidance = step.map(|s| self.lesson_guidance(ctx, &run, s));
+        let guidance = step.map(|s| self.lesson_guidance(ctx, s));
+        let item = guidance.as_ref().and_then(|g| g.item);
+        if item != ctx.data(|d| d.get_temp(Id::new(ITEM))) {
+            ctx.data_mut(|d| match item {
+                Some(i) => {
+                    d.insert_temp(Id::new(ITEM), i);
+                }
+                None => d.remove::<Item>(Id::new(ITEM)),
+            });
+            ctx.request_repaint();
+        }
         let anchor = guidance.as_ref().map(|g| g.anchor);
         let exact = anchor.and_then(|a| anchor_rect(ctx, a));
         let panel = || row_name(anchor?).and(anchor_rect(ctx, Tab::Inspector.anchor()));
         let target = exact.or_else(panel);
-        if let Some(s) = step.filter(|_| !self.modal_owns_input(ctx)) {
-            let reveal = s.reveal.filter(|_| exact.is_none());
-            let tab = [
-                Tab::Media,
-                Tab::Preview,
-                Tab::Inspector,
-                Tab::Timeline,
-                Tab::Transcript,
-                Tab::RenderQueue,
-            ]
-            .into_iter()
-            .find(|tab| {
-                s.anchor == tab.anchor() || (*tab == Tab::Inspector && row_name(s.anchor).is_some())
-            })
-            .filter(|_| exact.is_none());
+        if let Some(g) = guidance.as_ref().filter(|_| !self.modal_owns_input(ctx)) {
+            let unseen = g.watch.iter().any(|w| anchor_rect(ctx, w).is_none());
+            let reveal = step
+                .and_then(|s| s.reveal)
+                .filter(|_| exact.is_none() || unseen);
+            let tab = tab_of(g.anchor).filter(|_| exact.is_none());
             // A hidden Inspector row the step names: its tab shows, and it scrolls into view.
-            let mut names = std::iter::once(s.anchor).chain(s.also.iter().copied());
-            let row = names.find(|a| row_name(a).is_some() && anchor_rect(ctx, a).is_none());
+            let row = Some(g.anchor).filter(|a| row_name(a).is_some() && exact.is_none());
             let first = !run.revealed;
             let pending = ctx.data(|d| d.get_temp::<&'static str>(Id::new(SCROLL)));
             // Adding controls can move a previously revealed row below the viewport again.
@@ -1176,34 +1421,43 @@ impl App {
                 ctx.request_repaint();
             } else if target.is_none() && !run.warned {
                 run.warned = true;
-                let (id, n, anchor) = (run.lesson.id, run.step, s.anchor);
+                let (id, n, anchor) = (run.lesson.id, run.step, g.anchor);
                 tracing::warn!("lesson {id} step {n}: anchor `{anchor}` isn't drawn");
             }
         }
-        let dialogs = dialog_rects(ctx);
-        let mut targets = Vec::new();
-        // A dialog supersedes its launcher. Unrelated dialogs suppress editor highlights.
-        if dialogs.is_empty()
-            || anchor.is_some_and(|a| {
-                matches!(
-                    a,
-                    "silence.threshold" | "export.action" | "subtitles.dialog" | "subtitles.action"
-                )
-            }) && exact.is_some()
-        {
-            targets.extend(target);
-            if dialogs.is_empty()
-                && let Some(s) = step
-            {
-                targets.extend(s.also.iter().filter_map(|a| anchor_rect(ctx, a)));
-            }
+        // A modal the step doesn't use, such as a save prompt, takes over until it closes.
+        let modal = ctx.memory(|m| m.top_modal_layer().and_then(|l| m.area_rect(l.id)));
+        let spot = target.filter(|t| modal.is_none_or(|m| m.contains(t.center())));
+        let popups = spot.map_or_else(Vec::new, |t| popup_rects(ctx, t));
+        let watch: Vec<Rect> = match (&guidance, spot) {
+            (Some(g), Some(_)) => g.watch.iter().filter_map(|a| anchor_rect(ctx, a)).collect(),
+            _ => Vec::new(),
+        };
+        if let Some(t) = spot {
+            let bright: Vec<Rect> = watch.iter().chain(&popups).copied().collect();
+            spotlight(ctx, t, &bright);
         }
-        if anchor == Some("silence.threshold") {
-            targets.extend(anchor_rect(ctx, "silence.cut"));
-        }
-        highlight(ctx, &targets);
         let text = guidance.map_or_else(|| tr!("tutorial.complete").into(), |g| g.text);
-        let Some(click) = card(ctx, &run, &text, &targets, &dialogs) else {
+        let mut avoid: Vec<Rect> = watch.iter().chain(&popups).copied().collect();
+        avoid.extend(windows(ctx));
+        let (click, card) = card(ctx, &run, &text, spot, &avoid);
+        if spot.is_some() {
+            // Always straight above the scrim, whichever showed first.
+            let layer = |id| LayerId::new(Order::Foreground, Id::new(id));
+            ctx.set_sublayer(layer(SCRIM_ID), layer(CARD_ID));
+        }
+        // Next frame's presses and wheel land only on the control, its popups and the card.
+        let allowed = spot.map(|t| {
+            let hole = t.expand(space::S4);
+            [hole, card].into_iter().chain(popups).collect::<Vec<_>>()
+        });
+        ctx.data_mut(|d| match allowed {
+            Some(a) => {
+                d.insert_temp(Id::new(ALLOWED), a);
+            }
+            None => d.remove::<Vec<Rect>>(Id::new(ALLOWED)),
+        });
+        let Some(click) = click else {
             self.lesson = Some(run);
             return;
         };
@@ -1211,7 +1465,7 @@ impl App {
         match click {
             Click::Next => self.next_step(&mut run),
             Click::Back => {
-                self.dismiss_lesson_dialog(&run);
+                self.dismiss_lesson_dialogs(&run);
                 run.go(run.step.saturating_sub(1));
             }
             Click::ImportSample => match sample(TOUR_CLIP) {
@@ -1223,7 +1477,7 @@ impl App {
                 )),
             },
             Click::Skip => {
-                self.dismiss_lesson_dialog(&run);
+                self.dismiss_lesson_dialogs(&run);
                 run.done = false;
                 self.next_step(&mut run);
             }
@@ -1242,69 +1496,33 @@ impl App {
         self.lesson = Some(run);
     }
 
-    fn lesson_guidance(&self, ctx: &egui::Context, run: &Run, step: &Step) -> Guidance {
-        let guide = |anchor, text| Guidance { anchor, text };
-        if run.lesson.id == SCREEN.id && run.step == 0 {
-            if anchor_rect(ctx, "silence.dialog").is_some() {
-                return guide("silence.threshold", tr!("tutorial.silence_cut").into());
+    /// What the card says and spotlights: the step, or the earliest of its [`Via`]s the user
+    /// still has to do.
+    fn lesson_guidance(&self, ctx: &egui::Context, step: &Step) -> Guidance {
+        let mut guide = Guidance {
+            anchor: step.anchor,
+            item: step.item.and_then(|f| f(self)),
+            text: (step.text)(self),
+            watch: step.watch,
+        };
+        for via in step.via.iter().rev() {
+            if (via.ready)(self, ctx) {
+                break;
             }
-            let selected = self.timeline.selected();
-            let sample_selected = self
-                .history
-                .project()
-                .sequence()
-                .tracks()
-                .iter()
-                .flat_map(|t| t.clips())
-                .any(|c| {
-                    selected.contains(&c.id)
-                        && self
-                            .history
-                            .project()
-                            .asset(c.asset)
-                            .is_some_and(|a| a.path.ends_with(SCREEN_CLIP))
-                });
-            if !sample_selected {
-                return guide("timeline", tr!("tutorial.silence_select").into());
-            }
-            return guide(
-                "menu.edit",
-                tr!(
-                    "tutorial.silence_open",
-                    key = self.keymap.shortcut("detect_silence")
-                ),
-            );
-        }
-        if step.anchor == "export" && self.export_dialog.is_open() {
-            return guide("export.action", tr!("tutorial.export_settings").into());
-        }
-        if run.lesson.id == subtitles::SUBTITLES.id && self.subtitles.is_open() {
-            let text = if self.subtitles.is_running() {
-                tr!("tutorial.speech_running").into()
-            } else {
-                let action = if step.anchor == "transcript" {
-                    tr!("transcript.transcribe")
-                } else {
-                    tr!("subtitles.generate")
-                };
-                tr!("tutorial.speech_settings", action = action)
+            guide = Guidance {
+                anchor: via.anchor,
+                item: via.item.and_then(|f| f(self)),
+                text: (via.text)(self),
+                watch: &[],
             };
-            return guide(
-                if self.subtitles.is_running() {
-                    "subtitles.dialog"
-                } else {
-                    "subtitles.action"
-                },
-                text,
-            );
         }
-        guide(step.anchor, (step.text)(self))
+        guide
     }
 
     /// Establish a fresh baseline on each visit. Back and a prior action satisfying a later
     /// goal must not cascade through lessons, while newly completed tasks need no Next click.
     fn check_lesson_step(&mut self, mut run: Run) -> Run {
-        if run.lesson.id == SCREEN.id && run.step == 0 && !shortened(self, SCREEN_CLIP) {
+        if run.lesson.id == SCREEN.id && !shortened(self, SCREEN_CLIP) {
             run.silence_cut = false;
         }
         let Some(step) = run.lesson.steps.get(run.step) else {
@@ -1318,17 +1536,21 @@ impl App {
         run
     }
 
-    fn dismiss_lesson_dialog(&mut self, run: &Run) {
+    /// Closes the dialogs the current step works in, so Back and Skip Step don't leave them
+    /// behind. Others stay for the user to finish.
+    fn dismiss_lesson_dialogs(&mut self, run: &Run) {
         let Some(step) = run.lesson.steps.get(run.step) else {
             return;
         };
-        if run.lesson.id == SCREEN.id && run.step == 0 {
+        let names = std::iter::once(step.anchor).chain(step.via.iter().map(|v| v.anchor));
+        let uses = |prefix| names.clone().any(|n: &str| n.starts_with(prefix));
+        if uses("silence.") {
             self.timeline.dismiss_dialogs();
         }
-        if run.lesson.id == subtitles::SUBTITLES.id {
+        if uses("subtitles.") && self.subtitles.is_open() {
             self.subtitles.close();
         }
-        if step.anchor == "export" {
+        if uses("export.") {
             self.export_dialog.close();
         }
     }
@@ -1395,41 +1617,136 @@ impl App {
 
 struct Guidance {
     anchor: &'static str,
+    item: Option<Item>,
     text: String,
+    watch: &'static [&'static str],
 }
 
-/// Paint only outlines; there is no backdrop and no input-capturing tutorial layer.
-fn highlight(ctx: &egui::Context, targets: &[Rect]) {
-    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("lesson_highlight")));
-    for &target in targets {
-        painter.rect_stroke(
-            target.expand(2.0).intersect(ctx.content_rect()),
-            CornerRadius::same(radius::CONTROL),
-            Stroke::new(2.0, color::light_blue()),
-            egui::StrokeKind::Inside,
-        );
+/// The input a spotlit step lets through, for [`Blocker`]: its control, the card and the
+/// popups the control opened.
+const ALLOWED: &str = "lesson_allowed";
+
+/// The spotlit step's hole and card, as last laid out, for layout tests.
+#[cfg(test)]
+pub(crate) fn spotlit(ctx: &egui::Context) -> Option<(Rect, Rect)> {
+    let allowed = ctx.data(|d| d.get_temp::<Vec<Rect>>(Id::new(ALLOWED)))?;
+    Some((allowed[0], allowed[1]))
+}
+
+/// Drops pointer presses, wheel and touch input outside a spotlit step's [`ALLOWED`] rects
+/// before egui sees them, so only the step's control, its popups and the card respond.
+/// Moves and releases pass, so a drag that started on the control can land anywhere; keys
+/// pass, so steps can teach shortcuts.
+pub(crate) struct Blocker;
+
+impl egui::Plugin for Blocker {
+    fn debug_name(&self) -> &'static str {
+        "lesson_blocker"
+    }
+
+    fn input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        let Some(allowed) = ctx.data(|d| d.get_temp::<Vec<Rect>>(Id::new(ALLOWED))) else {
+            return;
+        };
+        let inside = |p: egui::Pos2| allowed.iter().any(|r| r.contains(p));
+        let mut at = ctx.input(|i| i.pointer.latest_pos());
+        input.events.retain(|e| match *e {
+            egui::Event::PointerMoved(p) => {
+                at = Some(p);
+                true
+            }
+            egui::Event::PointerButton {
+                pos, pressed: true, ..
+            } => inside(pos),
+            egui::Event::Touch { pos, .. } => inside(pos),
+            egui::Event::MouseWheel { .. } | egui::Event::Zoom(_) => at.is_some_and(inside),
+            _ => true,
+        });
     }
 }
 
-/// Current-frame dialog bounds, including dialogs unrelated to this lesson. The card must
-/// leave their controls and footers clear even when a dialog is moved or resized.
-fn dialog_rects(ctx: &egui::Context) -> Vec<Rect> {
+/// The open popups and menus outside `target`, such as the one it opened: what the user
+/// picks from next. Dialogs, which stay dim unless they hold the target, aren't popups.
+fn popup_rects(ctx: &egui::Context, target: Rect) -> Vec<Rect> {
+    if !egui::Popup::is_any_open(ctx) {
+        return Vec::new();
+    }
+    let ours = [Id::new(CARD_ID), Id::new(SCRIM_ID)];
     let max_width = ctx.content_rect().width() * 0.95;
-    let mut rects: Vec<_> = ["silence.dialog", "export.dialog", "subtitles.dialog"]
-        .into_iter()
-        .filter_map(|a| anchor_rect(ctx, a))
-        .collect();
-    rects.extend(ctx.memory(|m| {
-        m.areas().visible_layer_ids().into_iter()
-        .filter(|l| matches!(l.order, Order::Middle | Order::Foreground)
-            && l.id != Id::new(CARD_ID))
-        .filter_map(|l| m.area_rect(l.id))
-        // The dock and modal backdrops may cover the whole viewport.
-        .filter(|r| r.width() < max_width)
-        .collect::<Vec<_>>()
-    }));
-    rects
+    ctx.memory(|m| {
+        let modal = m.top_modal_layer();
+        m.areas()
+            .visible_layer_ids()
+            .into_iter()
+            .filter(|l| l.order == Order::Foreground && !ours.contains(&l.id))
+            .filter(|l| Some(*l) != modal)
+            .filter_map(|l| m.area_rect(l.id))
+            .filter(|r| r.width() < max_width && !r.contains(target.center()))
+            .collect()
+    })
 }
+
+/// The open windows, dialogs and popups: what the card keeps clear of when it can.
+fn windows(ctx: &egui::Context) -> Vec<Rect> {
+    let ours = [Id::new(CARD_ID), Id::new(SCRIM_ID)];
+    let max_width = ctx.content_rect().width() * 0.95;
+    ctx.memory(|m| {
+        let layers = m.areas().visible_layer_ids().into_iter();
+        layers
+            .filter(|l| matches!(l.order, Order::Middle | Order::Foreground))
+            .filter(|l| !ours.contains(&l.id))
+            .filter_map(|l| m.area_rect(l.id))
+            // The dock and modal backdrops may cover the whole window.
+            .filter(|r| r.width() < max_width)
+            .collect()
+    })
+}
+
+const SCRIM_ID: &str = "lesson_scrim";
+
+/// Dims the window but `target` and `bright`, and outlines `target` with a slow pulse.
+fn spotlight(ctx: &egui::Context, target: Rect, bright: &[Rect]) {
+    let screen = ctx.content_rect();
+    let hole = |r: Rect| r.expand(space::S4).intersect(screen);
+    let target = hole(target);
+    let holes: Vec<Rect> = std::iter::once(target)
+        .chain(bright.iter().map(|&r| hole(r)))
+        .collect();
+    let id = Id::new(SCRIM_ID);
+    // Reduce Motion sets the animation time to zero; the outline then holds still.
+    let motion = ctx.global_style().animation_time > 0.0;
+    egui::Area::new(id)
+        .order(Order::Foreground)
+        .interactable(false)
+        .fixed_pos(screen.min)
+        .show(ctx, |ui| {
+            let painter = ui.painter().with_clip_rect(screen);
+            for r in shaded(screen, &holes) {
+                painter.rect_filled(r, 0, color::ground().gamma_multiply(SCRIM));
+            }
+            let corner = CornerRadius::same(radius::CONTROL);
+            let line = |width, alpha| Stroke::new(width, color::light_blue().gamma_multiply(alpha));
+            painter.rect_stroke(target, corner, line(2.0, 1.0), egui::StrokeKind::Outside);
+            if motion {
+                let t = ctx.input(|i| i.time) / PULSE;
+                let phase = (t - t.floor()) as f32;
+                let ring = target.expand(2.0 + space::S8 * phase);
+                painter.rect_stroke(
+                    ring,
+                    corner,
+                    line(2.0, 1.0 - phase),
+                    egui::StrokeKind::Outside,
+                );
+                ctx.request_repaint_after(std::time::Duration::from_millis(33));
+            }
+        });
+    ctx.move_to_top(LayerId::new(Order::Foreground, id));
+}
+
+/// The scrim's opacity over the ground colour.
+const SCRIM: f32 = 0.72;
+/// Seconds per pulse of the target's outline.
+const PULSE: f64 = 1.6;
 
 /// `screen` less `holes`, as rects: in each band between hole edges, the gaps between the
 /// holes crossing it.
@@ -1460,119 +1777,137 @@ pub(crate) fn shaded(screen: Rect, holes: &[Rect]) -> Vec<Rect> {
     out
 }
 
-const CARD_W: f32 = 296.0;
+const CARD_W: f32 = 280.0;
+/// The card's width when the full one won't fit clear of a dialog.
+const NARROW: f32 = 208.0;
 const CARD_ID: &str = "lesson_card";
+/// How far the card's pointer reaches toward its target.
+const ARROW: f32 = 8.0;
 
-/// Choose a stable corner clear of the active controls, focused widget and whole dialogs.
-/// Try narrower cards beside dialogs before allowing any overlap at small window sizes.
-fn card_rect(screen: Rect, size: egui::Vec2, avoid: &[Rect], previous: Option<Rect>) -> Rect {
-    let screen = screen.shrink(space::S8);
-    let fits = |r: Rect| {
-        screen.contains_rect(r) && avoid.iter().all(|a| !r.intersects(a.expand(space::S8)))
-    };
-    if let Some(r) = previous.map(|r| Rect::from_min_size(r.min, size))
-        && fits(r)
-    {
-        return r;
-    }
-    let mut candidates = Vec::new();
-    for width in [size.x, 208.0_f32.min(size.x)] {
-        // Account for extra text and footer wrapping in a narrow card.
-        let height = (size.y * size.x / width).min(screen.height());
-        let size = vec2(width, height);
-        for align in [
-            Align2::LEFT_TOP,
-            Align2::RIGHT_TOP,
-            Align2::LEFT_BOTTOM,
-            Align2::RIGHT_BOTTOM,
-        ] {
-            let r = align.align_size_within_rect(size, screen);
-            if fits(r) {
-                return r;
-            }
-            candidates.push(r);
-        }
-    }
-    candidates
-        .into_iter()
-        .min_by(|a, b| {
-            let overlap = |r: Rect| {
-                avoid
-                    .iter()
-                    .filter(|a| r.intersects(a.expand(space::S8)))
-                    .map(|a| r.intersect(a.expand(space::S8)).area())
-                    .sum::<f32>()
-            };
-            overlap(*a).total_cmp(&overlap(*b))
-        })
-        .unwrap_or(screen)
+/// The side of its target the card sits on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Side {
+    Below,
+    Above,
+    Right,
+    Left,
 }
 
-/// A compact, non-modal task card. Buttons retain normal Tab/Enter/Space behavior and let
-/// go of focus after activation so subsequent editor shortcuts still reach their panel.
+/// Where the card goes: beside `target`, on the first side where it fits on `screen` whole
+/// without covering the target, sliding along that edge to stay on screen. It keeps clear of
+/// `avoid` if it can. Failing every side, it takes the corner covering the target least and
+/// points nowhere.
+fn card_rect(
+    screen: Rect,
+    size: egui::Vec2,
+    target: Option<Rect>,
+    avoid: &[Rect],
+) -> (Rect, Option<Side>) {
+    let screen = screen.shrink(space::S8);
+    let overlap = |r: Rect, others: &[Rect]| -> f32 {
+        let o = others.iter().filter(|a| r.intersects(**a));
+        o.map(|a| r.intersect(*a).area()).sum()
+    };
+    let slide = |r: egui::Rangef, within: egui::Rangef| {
+        (within.min - r.min).max(0.0) + (within.max - r.max).min(0.0)
+    };
+    if let Some(t) = target {
+        let gap = ARROW + space::S4;
+        for clear in [avoid, &[]] {
+            for side in [Side::Below, Side::Above, Side::Right, Side::Left] {
+                let min = match side {
+                    Side::Below => pos2(t.center().x - size.x / 2.0, t.bottom() + gap),
+                    Side::Above => pos2(t.center().x - size.x / 2.0, t.top() - gap - size.y),
+                    Side::Right => pos2(t.right() + gap, t.center().y - size.y / 2.0),
+                    Side::Left => pos2(t.left() - gap - size.x, t.center().y - size.y / 2.0),
+                };
+                let r = Rect::from_min_size(min, size);
+                let r = match side {
+                    Side::Below | Side::Above => {
+                        r.translate(vec2(slide(r.x_range(), screen.x_range()), 0.0))
+                    }
+                    Side::Right | Side::Left => {
+                        r.translate(vec2(0.0, slide(r.y_range(), screen.y_range())))
+                    }
+                };
+                if screen.contains_rect(r) && !r.intersects(t) && overlap(r, clear) == 0.0 {
+                    return (r, Some(side));
+                }
+            }
+        }
+    }
+    // A narrower card, its text wrapping taller, fits beside a centred dialog.
+    let narrow = vec2(
+        NARROW.min(size.x),
+        (size.y * size.x / NARROW).min(screen.height()),
+    );
+    let corners = [size, narrow].into_iter().flat_map(|size| {
+        [
+            Align2::RIGHT_BOTTOM,
+            Align2::LEFT_BOTTOM,
+            Align2::RIGHT_TOP,
+            Align2::LEFT_TOP,
+        ]
+        .map(|a| a.align_size_within_rect(size, screen))
+    });
+    let covered =
+        |r: Rect| overlap(r, &[target.unwrap_or(Rect::NOTHING)]) * 4.0 + overlap(r, avoid);
+    let best = corners.min_by(|a, b| covered(*a).total_cmp(&covered(*b)));
+    (best.unwrap_or(screen), None)
+}
+
+/// The task card beside `target`, pointing at it. Buttons retain normal Tab/Enter/Space
+/// behavior and let go of focus after activation so editor shortcuts still reach their panel.
+/// Returns the button clicked and where the card is.
 fn card(
     ctx: &egui::Context,
     run: &Run,
     text: &str,
-    targets: &[Rect],
-    dialogs: &[Rect],
-) -> Option<Click> {
+    target: Option<Rect>,
+    avoid: &[Rect],
+) -> (Option<Click>, Rect) {
     let id = Id::new(CARD_ID);
     let previous = ctx.memory(|m| m.area_rect(id));
-    let size = previous.map_or(vec2(CARD_W, 160.0), |r| vec2(CARD_W, r.height()));
-    let mut avoid = dialogs.to_vec();
-    avoid.extend_from_slice(targets);
-    let focused = ctx
-        .memory(|m| m.focused())
-        .and_then(|id| ctx.read_response(id));
-    if let Some(r) = focused
-        && r.layer_id.id != id
-    {
-        avoid.push(r.rect);
-    }
+    let size = previous.map_or(vec2(CARD_W, 140.0), |r| vec2(CARD_W, r.height()));
     let mut bounds = ctx.content_rect();
     if let Some(bar) = anchor_rect(ctx, "appbar") {
         bounds.min.y = bounds.min.y.max(bar.bottom());
     }
-    let rect = card_rect(bounds, size, &avoid, previous);
+    let (rect, side) = card_rect(bounds, size, target, avoid);
     let steps = run.lesson.steps;
     let step = steps.get(run.step);
     let mut click = None;
     let layer = LayerId::new(Order::Foreground, id);
-    // Keep Skip and Exit reachable above a modal's backdrop without becoming a modal.
+    // Above the scrim and any modal's backdrop, without becoming a modal.
     ctx.move_to_top(layer);
-    egui::Area::new(id)
+    let shown = egui::Area::new(id)
         .order(Order::Foreground)
         .sense(egui::Sense::hover())
         .movable(false)
         .fixed_pos(rect.min)
         .show(ctx, |ui| {
+            // Light Blue edged, like the outline it points at, so it stands off the scrim.
             egui::Frame::popup(ui.style())
                 .fill(color::raised())
+                .stroke(Stroke::new(1.0, color::light_blue()))
+                .corner_radius(radius::PANEL)
                 .inner_margin(space::S12)
                 .show(ui, |ui| {
-                    ui.set_width((rect.width() - 2.0 * space::S12).max(120.0));
+                    ui.set_width(rect.width() - 2.0 * space::S12);
+                    let heading = match step {
+                        Some(_) => tr!("tutorial.step", n = run.step + 1, total = steps.len()),
+                        None => (run.lesson.title)().into(),
+                    };
                     ui.label(
-                        egui::RichText::new((run.lesson.title)())
-                            .font(theme::body_strong())
-                            .color(color::ink()),
-                    );
-                    if step.is_some() {
-                        ui.label(
-                            egui::RichText::new(tr!(
-                                "tutorial.step",
-                                n = run.step + 1,
-                                total = steps.len()
-                            ))
+                        egui::RichText::new(heading)
                             .font(theme::small())
                             .color(color::ink_3()),
-                        );
-                    }
+                    );
                     ui.add_space(space::S4);
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(text)
-                                .font(theme::body())
+                                .font(theme::body_strong())
                                 .color(color::ink()),
                         )
                         .wrap(),
@@ -1604,7 +1939,7 @@ fn card(
                             .push((Button::secondary(tr!("tutorial.keep_project")), Click::Keep));
                     }
                     let (buttons, actions): (Vec<_>, Vec<_>) = buttons.into_iter().unzip();
-                    let responses = suite_ui::dialog::action_footer(ui, buttons);
+                    let responses = j_ui::dialog::action_footer(ui, buttons);
                     for (response, action) in responses.into_iter().zip(actions) {
                         if response.clicked() {
                             response.surrender_focus();
@@ -1613,7 +1948,62 @@ fn card(
                     }
                 });
         });
-    click
+    let card = shown.response.rect;
+    if let (Some(t), Some(side)) = (target, side) {
+        pointer(&ctx.layer_painter(layer), card, t, side);
+    }
+    (click, card)
+}
+
+/// The card's pointer: a triangle on the `card` edge facing `target`, aimed at its centre.
+fn pointer(painter: &egui::Painter, card: Rect, target: Rect, side: Side) {
+    let inset = f32::from(radius::PANEL) + ARROW;
+    let along = |lo: f32, hi: f32, at: f32| at.clamp(lo + inset, (hi - inset).max(lo + inset));
+    let (base, tip, across) = match side {
+        Side::Below => {
+            let x = along(card.left(), card.right(), target.center().x);
+            (
+                pos2(x, card.top()),
+                pos2(x, card.top() - ARROW),
+                vec2(ARROW, 0.0),
+            )
+        }
+        Side::Above => {
+            let x = along(card.left(), card.right(), target.center().x);
+            (
+                pos2(x, card.bottom()),
+                pos2(x, card.bottom() + ARROW),
+                vec2(ARROW, 0.0),
+            )
+        }
+        Side::Right => {
+            let y = along(card.top(), card.bottom(), target.center().y);
+            (
+                pos2(card.left(), y),
+                pos2(card.left() - ARROW, y),
+                vec2(0.0, ARROW),
+            )
+        }
+        Side::Left => {
+            let y = along(card.top(), card.bottom(), target.center().y);
+            (
+                pos2(card.right(), y),
+                pos2(card.right() + ARROW, y),
+                vec2(0.0, ARROW),
+            )
+        }
+    };
+    let points = vec![base - across, tip, base + across];
+    let fill = color::raised();
+    painter.add(egui::Shape::convex_polygon(
+        points.clone(),
+        fill,
+        Stroke::NONE,
+    ));
+    // The card's edge, on the two outer sides only, so the seam stays open.
+    let edge = Stroke::new(1.0, color::light_blue());
+    painter.line_segment([points[0], points[1]], edge);
+    painter.line_segment([points[1], points[2]], edge);
 }
 
 #[cfg(test)]
@@ -1682,7 +2072,7 @@ mod tests {
                 },
                 reveal: Some(|a| a.bin.tab = 2),
                 ghost: None,
-                also: &[],
+                ..STEP
             },
             Step {
                 anchor: "timeline",
@@ -1699,7 +2089,7 @@ mod tests {
                 },
                 reveal: None,
                 ghost: None,
-                also: &[],
+                ..STEP
             },
             Step {
                 anchor: "timeline",
@@ -1712,7 +2102,7 @@ mod tests {
                 },
                 reveal: None,
                 ghost: None,
-                also: &[],
+                ..STEP
             },
             Step {
                 anchor: "inspector",
@@ -1735,7 +2125,7 @@ mod tests {
                 },
                 reveal: None,
                 ghost: None,
-                also: &[],
+                ..STEP
             },
         ],
     };
@@ -1760,7 +2150,7 @@ mod tests {
                 example: |_| {},
                 reveal: None,
                 ghost: None,
-                also: &[],
+                ..STEP
             },
             Step {
                 anchor: "nowhere",
@@ -1769,7 +2159,7 @@ mod tests {
                 example: |_| {},
                 reveal: None,
                 ghost: None,
-                also: &[],
+                ..STEP
             },
         ],
     };
@@ -1827,10 +2217,12 @@ mod tests {
     /// Reference edits exercise all existing lessons, including async scopes and recognition.
     #[test]
     fn every_lesson_advances_on_its_reference_actions_and_reveals_anchors() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let dir = tmp("actions");
+        // A fresh effects folder holding the bundled ones, as tests have no real one.
+        crate::effects::scan_for_test(&dir.join("effects"));
         for lesson in LESSONS.iter().chain([&BASICS]) {
             let mut h = harness_with(Harness::builder().wgpu(), &Default::default());
             h.state_mut().set_recognition_cache(Default::default());
@@ -1839,13 +2231,23 @@ mod tests {
             for (i, task) in lesson.steps.iter().enumerate() {
                 settle(&mut h);
                 assert_eq!(step(&h), Some(i), "{}: on task {i}", lesson.id);
-                for anchor in [task.anchor].iter().chain(task.also) {
-                    assert!(
-                        drawn(&h, anchor).is_some()
-                            || row_name(anchor).is_some() && drawn(&h, "inspector").is_some(),
-                        "{} task {i}: `{anchor}` never drawn",
-                        lesson.id
-                    );
+                // The step's control, or the first action toward it.
+                let vias = task.via.iter().map(|v| v.anchor);
+                let mut targets = std::iter::once(task.anchor).chain(vias);
+                assert!(
+                    targets.any(|a| drawn(&h, a).is_some()),
+                    "{} task {i}: `{}` and its vias never drawn",
+                    lesson.id,
+                    task.anchor
+                );
+                if drawn(&h, task.anchor).is_some() {
+                    for anchor in task.watch {
+                        assert!(
+                            drawn(&h, anchor).is_some(),
+                            "{} task {i}: `{anchor}` never drawn",
+                            lesson.id
+                        );
+                    }
                 }
                 if task.anchor == "record" {
                     click(&mut h, tr!("tutorial.skip_step"));
@@ -1876,6 +2278,57 @@ mod tests {
             click(&mut h, tr!("tutorial.exit"));
             assert!(h.state().lesson.is_none());
             assert!(!h.state().preview.playing());
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Saves every lesson step as `<lesson>-<nn>.png` under `JVID_TUTORIAL_CAPTURE`, walking
+    /// each lesson by its reference edits.
+    #[test]
+    fn capture_every_step() {
+        let Some(out) = std::env::var_os("JVID_TUTORIAL_CAPTURE").map(PathBuf::from) else {
+            return;
+        };
+        if !j_ui::test_support::gpu() {
+            return;
+        }
+        std::fs::create_dir_all(&out).unwrap();
+        let dir = tmp("capture");
+        crate::effects::scan_for_test(&dir.join("effects"));
+        for lesson in LESSONS {
+            let mut h = harness_with(Harness::builder().wgpu(), &Default::default());
+            h.state_mut().set_recognition_cache(Default::default());
+            h.state_mut().export_dialog.set_path(dir.join("x.mp4"));
+            h.state_mut().start_lesson(lesson);
+            for (i, task) in lesson.steps.iter().enumerate() {
+                settle(&mut h);
+                for _ in 0..20 {
+                    h.step();
+                }
+                let image = h.render().unwrap();
+                image
+                    .save(out.join(format!("{}-{:02}.png", lesson.id, i + 1)))
+                    .unwrap();
+                if task.anchor == "record" {
+                    click(&mut h, tr!("tutorial.skip_step"));
+                    continue;
+                }
+                h.state_mut().subtitles.engine = Some(fake());
+                (task.example)(h.state_mut());
+                for _ in 0..300 {
+                    h.step();
+                    h.render().unwrap();
+                    if step(&h) != Some(i) {
+                        break;
+                    }
+                    if h.state().lesson.as_ref().unwrap().done {
+                        next(&mut h);
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
+            click(&mut h, tr!("tutorial.exit"));
         }
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1948,7 +2401,7 @@ mod tests {
             example: |a| fake_export(a),
             reveal: None,
             ghost: None,
-            also: &[],
+            ..STEP
         }],
     };
 
@@ -2001,18 +2454,23 @@ mod tests {
         let mut h = harness();
         h.state_mut().start_lesson(&KEYFRAMES);
         settle(&mut h);
-        perform(&mut h);
-        perform(&mut h);
-        // Custom in the diamond's easing menu passes the easing step but not the graph step.
+        for _ in 0..6 {
+            perform(&mut h);
+        }
+        // Custom in the diamond's easing menu passes the easing step but not the graph steps.
         ease_first(h.state_mut(), Easing::Bezier([0.1, 0.0, 0.3, 1.0]));
         settle(&mut h);
         let done = |h: &Harness<'_, App>| h.state().lesson.as_ref().is_some_and(|r| r.done);
-        assert_eq!(step(&h), Some(3));
+        assert_eq!(step(&h), Some(7));
         assert!(!done(&h));
         let id = first_clip(h.state()).unwrap();
         h.state_mut().timeline.open_graph(id);
         settle(&mut h);
-        assert_eq!(step(&h), Some(4));
+        assert_eq!(step(&h), Some(8));
+        assert!(
+            done(&h),
+            "the earlier custom curve counts once the graph is open"
+        );
     }
 
     #[test]
@@ -2427,7 +2885,8 @@ mod tests {
         );
         assert!(h.query_by_label(&fast).is_some(), "the model's size shows");
         assert!(h.query_by_label(tr!("subtitles.downloading")).is_none());
-        click(&mut h, tr!("prompt.cancel"));
+        h.key_press(Key::Escape);
+        settle(&mut h);
         assert!(!h.state().subtitles.is_open());
         click(&mut h, tr!("tutorial.skip_step"));
         assert_eq!(step(&h), Some(1));
@@ -2555,7 +3014,7 @@ mod tests {
                 example: |_| {},
                 reveal: None,
                 ghost: Some([[10.0, 20.0], [300.0, 400.0]]),
-                also: &[],
+                ..STEP
             }],
             ..PREPARED
         };
@@ -2607,6 +3066,58 @@ mod tests {
         h.ctx.memory(|m| m.area_rect(Id::new(CARD_ID))).unwrap()
     }
 
+    #[test]
+    fn ruler_guidance_tracks_its_time_through_zoom_and_resize_and_accepts_the_click() {
+        let mut h = harness();
+        h.state_mut().start_lesson(&KEYFRAMES);
+        settle(&mut h);
+        h.state_mut().lesson.as_mut().unwrap().go(2);
+        settle(&mut h);
+        let target = drawn(&h, "timeline.ruler").unwrap();
+        let lanes = drawn(&h, "timeline.lanes").unwrap();
+        let x = h.state().timeline.x_at(SECOND, lanes.left());
+        assert!((target.center().x - x).abs() < 1.0);
+        assert_eq!(target.width(), 24.0);
+
+        // Zoom far enough to put the intended time outside the viewport; guidance reveals it.
+        for _ in 0..20 {
+            let a = h.state_mut();
+            a.timeline.action("zoom_in", a.history.project());
+        }
+        h.set_size(vec2(960.0, 600.0));
+        settle(&mut h);
+        let target = drawn(&h, "timeline.ruler").unwrap();
+        let lanes = drawn(&h, "timeline.lanes").unwrap();
+        let x = h.state().timeline.x_at(SECOND, lanes.left());
+        assert!((target.center().x - x).abs() < 1.0);
+        assert!(lanes.x_range().contains(x));
+        assert!(h.ctx.content_rect().contains_rect(card_bounds(&h)));
+        assert!(!card_bounds(&h).intersects(target));
+
+        let press = |h: &mut Harness<'_, App>, pos| {
+            h.hover_at(pos);
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                });
+            }
+            settle(h);
+        };
+        press(&mut h, pos2(lanes.right() - 2.0, target.center().y));
+        assert_eq!(
+            h.state().timeline.playhead(),
+            Time(0),
+            "unlit ruler took a click"
+        );
+        assert_eq!(step(&h), Some(2));
+        press(&mut h, target.center());
+        assert_eq!(h.state().timeline.playhead(), SECOND);
+        assert_eq!(step(&h), Some(3), "spotlit seek did not advance");
+    }
+
     fn screen_lesson() -> Harness<'static, App> {
         let mut h = harness();
         h.set_size(vec2(960.0, 600.0));
@@ -2630,44 +3141,78 @@ mod tests {
     }
 
     #[test]
-    fn guidance_highlights_automatically_without_dimming_or_blocking_the_editor() {
+    fn a_step_spotlights_its_control_and_only_it_takes_clicks() {
         let mut h = harness();
         h.state_mut().start_lesson(&BASICS);
         settle(&mut h);
-        let target = drawn(&h, "bin.titles")
-            .unwrap()
-            .expand(2.0)
-            .intersect(h.ctx.content_rect());
-        assert!(h.output().shapes.iter().any(|s| matches!(&s.shape,
-            egui::Shape::Rect(r) if r.rect == target && r.fill == egui::Color32::TRANSPARENT
-                && r.stroke == Stroke::new(2.0, color::light_blue()))));
-        assert!(!h.output().shapes.iter().any(|s| matches!(&s.shape,
-            egui::Shape::Rect(r) if r.fill == color::ground().gamma_multiply(0.8))));
-        let before = card_bounds(&h);
+        let target = drawn(&h, "bin.titles").unwrap();
+        let hole = target.expand(space::S4).intersect(h.ctx.content_rect());
+        let shade = color::ground().gamma_multiply(SCRIM);
+        let rects = |fill: Option<egui::Color32>| -> Vec<Rect> {
+            let shapes = h.output().shapes.iter().filter_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if fill.is_none_or(|f| r.fill == f) => Some(r.clone()),
+                _ => None,
+            });
+            shapes.map(|r| r.rect).collect()
+        };
+        let dim = rects(Some(shade));
+        assert!(
+            dim.iter().all(|r| !r.intersect(hole).is_positive()),
+            "the target is dimmed"
+        );
+        let timeline = drawn(&h, "timeline").unwrap().center();
+        assert!(dim.iter().any(|r| r.contains(timeline)), "the rest isn't");
+        let outlined = h.output().shapes.iter().any(|s| {
+            matches!(&s.shape,
+            egui::Shape::Rect(r) if r.rect == hole && r.stroke.color == color::light_blue())
+        });
+        assert!(outlined);
+        let card = card_bounds(&h);
+        assert!(!card.intersects(target), "the card covers its target");
+        assert!(h.ctx.content_rect().contains_rect(card));
         h.run_ok();
-        assert_eq!(card_bounds(&h), before, "idle guidance moved");
+        assert_eq!(card_bounds(&h), card, "idle guidance moved");
+        // A press outside the spotlight never reaches the menu.
+        h.get_by_label(tr!("menu.file")).click();
+        settle(&mut h);
+        assert!(
+            !egui::Popup::is_any_open(&h.ctx),
+            "a click outside got through"
+        );
         click(&mut h, crate::media_bin::presets()[0].0);
         assert_eq!(
             step(&h),
             Some(1),
-            "guidance blocked the actual title button"
+            "the spotlit control didn't take the click"
         );
+        // Without a lesson nothing is blocked.
+        click(&mut h, tr!("tutorial.exit"));
+        h.get_by_label(tr!("menu.file")).click();
+        h.run_ok();
+        assert!(egui::Popup::is_any_open(&h.ctx));
     }
 
     #[test]
-    fn silence_guidance_tracks_selection_dialog_and_dismissal_at_960_by_600() {
-        let mut h = screen_lesson();
-        assert!(h.query_by_label(tr!("tutorial.silence_select")).is_some());
-        select_screen(&mut h);
-        let open_text = tr!(
-            "tutorial.silence_open",
-            key = h.state().keymap.shortcut("detect_silence")
-        );
-        assert!(h.query_by_label(&open_text).is_some());
+    fn every_step_target_and_its_vias_are_drawn_and_spotlit() {
+        // Each step's own target, then each via's while it's still needed.
+        let mut h = harness();
+        h.state_mut().start_lesson(&SCREEN);
+        settle(&mut h);
+        assert_eq!(step(&h), Some(0));
+        assert!(h.query_by_label(tr!("tutorial.screen_silence")).is_some());
+        assert!(drawn(&h, "clip").is_some(), "the via's clip isn't spotlit");
         open_silence(&mut h);
         assert!(h.query_by_label(tr!("tutorial.silence_cut")).is_some());
-        assert!(h.query_by_label(&open_text).is_none());
-        let dialog = drawn(&h, "silence.dialog").unwrap();
+        assert!(h.query_by_label(tr!("tutorial.screen_silence")).is_none());
+    }
+
+    #[test]
+    fn silence_guidance_follows_the_dialog_and_its_dismissal_at_960_by_600() {
+        let mut h = screen_lesson();
+        let pick = tr!("tutorial.screen_silence");
+        assert!(h.query_by_label(pick).is_some());
+        open_silence(&mut h);
+        assert!(h.query_by_label(tr!("tutorial.silence_cut")).is_some());
         let card = card_bounds(&h);
         assert!(
             !card.intersects(drawn(&h, "appbar").unwrap()),
@@ -2676,10 +3221,6 @@ mod tests {
         assert!(
             h.ctx.content_rect().contains_rect(card),
             "card outside viewport: {card:?}"
-        );
-        assert!(
-            !card.intersects(dialog),
-            "card {card:?} covers dialog {dialog:?}"
         );
         assert!(!card.intersects(drawn(&h, "silence.cut").unwrap()));
         assert_eq!(step(&h), Some(0), "opening the dialog completed a cut");
@@ -2691,11 +3232,10 @@ mod tests {
             "Escape exited rather than dismissing the dialog"
         );
         assert!(!h.state().timeline.dialog_open());
-        assert!(h.query_by_label(&open_text).is_some());
-        open_silence(&mut h);
-        click(&mut h, tr!("prompt.cancel"));
-        assert_eq!(step(&h), Some(0));
-        assert!(h.query_by_label(&open_text).is_some());
+        assert!(
+            h.query_by_label(pick).is_some(),
+            "the step lost its first action"
+        );
     }
 
     #[test]
@@ -2794,17 +3334,14 @@ mod tests {
         settle(&mut h);
         h.state_mut().run_action("generate_subtitles", true);
         settle(&mut h);
-        let text = tr!(
-            "tutorial.speech_settings",
-            action = tr!("subtitles.generate")
-        );
+        let text = tr!("tutorial.speech_start", action = tr!("subtitles.generate"));
         assert!(h.query_by_label(&text).is_some());
         assert_eq!(
             step(&h),
             Some(0),
             "opening a model choice completed generation"
         );
-        assert!(!card_bounds(&h).intersects(drawn(&h, "subtitles.dialog").unwrap()));
+        assert!(!card_bounds(&h).intersects(drawn(&h, "subtitles.action").unwrap()));
         h.get_by_label(tr!("tutorial.exit")).focus();
         settle(&mut h);
         h.key_press(Key::Enter);
@@ -2817,23 +3354,8 @@ mod tests {
     }
 
     #[test]
-    fn task_card_leaves_app_menus_and_their_keyboard_dismissal_usable() {
-        let mut h = harness();
-        h.set_size(vec2(960.0, 600.0));
-        h.state_mut().start_lesson(&BASICS);
-        settle(&mut h);
-        assert!(!card_bounds(&h).intersects(drawn(&h, "appbar").unwrap()));
-        click(&mut h, tr!("menu.file"));
-        assert!(egui::Popup::is_any_open(&h.ctx));
-        h.key_press(Key::Escape);
-        settle(&mut h);
-        assert!(h.state().lesson.is_some(), "menu Escape exited the lesson");
-        assert!(!egui::Popup::is_any_open(&h.ctx));
-    }
-
-    #[test]
     fn minimum_layout_renders_guidance_beside_the_open_task_dialog() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = harness_with(Harness::builder().wgpu(), &Default::default());
@@ -2841,8 +3363,7 @@ mod tests {
         h.state_mut().start_lesson(&SCREEN);
         settle(&mut h);
         open_silence(&mut h);
-        let dialog = drawn(&h, "silence.dialog").unwrap();
-        assert!(!card_bounds(&h).intersects(dialog));
+        assert!(!card_bounds(&h).intersects(drawn(&h, "silence.cut").unwrap()));
         let image = h.render().unwrap();
         assert_eq!(image.dimensions(), (960, 600));
         if let Some(dir) = std::env::var_os("JVID_TUTORIAL_CAPTURE") {
@@ -2865,7 +3386,7 @@ mod tests {
                     example: |_| {},
                     reveal: None,
                     ghost: None,
-                    also: &[],
+                    ..STEP
                 },
                 Step {
                     anchor: "preview",
@@ -2874,7 +3395,7 @@ mod tests {
                     example: |_| {},
                     reveal: None,
                     ghost: None,
-                    also: &[],
+                    ..STEP
                 },
             ],
             ..PREPARED
@@ -2912,20 +3433,38 @@ mod tests {
     }
 
     #[test]
-    fn card_placement_avoids_controls_dialogs_and_focused_fields() {
-        for size in [vec2(960.0, 600.0), vec2(1280.0, 720.0)] {
-            let screen = Rect::from_min_size(pos2(0.0, 0.0), size);
-            let dialog = Align2::CENTER_CENTER.align_size_within_rect(vec2(480.0, 530.0), screen);
-            let control = Rect::from_min_size(pos2(10.0, 12.0), vec2(160.0, 24.0));
-            let card = card_rect(screen, vec2(CARD_W, 160.0), &[dialog, control], None);
-            assert!(screen.contains_rect(card));
-            assert!(!card.intersects(dialog));
-            assert!(!card.intersects(control));
-            assert_eq!(
-                card_rect(screen, card.size(), &[dialog, control], Some(card)),
-                card
-            );
-        }
+    fn the_card_sits_beside_its_target_and_flips_to_stay_on_screen() {
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(960.0, 600.0));
+        let size = vec2(CARD_W, 120.0);
+        let at = |min: [f32; 2], s: [f32; 2]| {
+            Rect::from_min_size(pos2(min[0], min[1]), vec2(s[0], s[1]))
+        };
+        // Room below: under it, pointing up, centred on it.
+        let button = at([400.0, 100.0], [80.0, 24.0]);
+        let (card, side) = card_rect(screen, size, Some(button), &[]);
+        assert_eq!(side, Some(Side::Below));
+        assert!(card.top() > button.bottom() && (card.center().x - button.center().x).abs() < 1.0);
+        // At the bottom edge it flips above; at the right edge it slides left to stay on.
+        let low = at([900.0, 560.0], [50.0, 24.0]);
+        let (card, side) = card_rect(screen, size, Some(low), &[]);
+        assert_eq!(side, Some(Side::Above));
+        assert!(screen.shrink(space::S8).contains_rect(card) && card.bottom() < low.top());
+        // A tall panel down the left: beside it.
+        let panel = at([0.0, 0.0], [300.0, 600.0]);
+        assert_eq!(
+            card_rect(screen, size, Some(panel), &[]).1,
+            Some(Side::Right)
+        );
+        // What to keep clear of pushes it to another side if one fits.
+        let button = at([400.0, 300.0], [80.0, 24.0]);
+        let watch = at([300.0, 330.0], [400.0, 150.0]);
+        let (card, side) = card_rect(screen, size, Some(button), &[watch]);
+        assert_eq!(side, Some(Side::Above));
+        assert!(!card.intersects(watch) && !card.intersects(button));
+        // The whole window: no side fits, so a corner, pointing nowhere.
+        let (card, side) = card_rect(screen, size, Some(screen), &[]);
+        assert_eq!(side, None);
+        assert!(screen.contains_rect(card));
     }
 
     #[test]

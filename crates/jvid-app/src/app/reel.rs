@@ -286,8 +286,8 @@ fn reel() {
     ) else {
         panic!("run scripts/preview/build");
     };
-    assert!(suite_ui::test_support::gpu(), "the reel needs a GPU");
-    suite_ui::i18n::set_language("en");
+    assert!(j_ui::test_support::gpu(), "the reel needs a GPU");
+    j_ui::i18n::set_language("en");
     // A fresh effects folder holding the bundled examples, as tests have no real one.
     let effects = Path::new(&media).with_file_name("effects");
     let _ = std::fs::remove_dir_all(&effects);
@@ -576,12 +576,12 @@ impl Reel {
         self.mark("themes");
         self.move_to(start(), 0.6);
         for theme in ["light", "high-contrast", "dark"] {
-            self.h.state_mut().theme = suite_ui::themes::LiveTheme::new(theme);
+            self.h.state_mut().theme = j_ui::themes::LiveTheme::new(theme);
             self.hold(1.0);
         }
         self.mark("languages");
         for lang in ["ja", "de", "es", "ko", "fr", "zh-Hans", "tr", "sv", "en"] {
-            suite_ui::i18n::set_language(lang);
+            j_ui::i18n::set_language(lang);
             self.hold(0.4);
         }
     }

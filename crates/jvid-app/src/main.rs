@@ -1,4 +1,4 @@
-//! The jvid desktop video editor, built with eframe and suite-ui.
+//! The jvid desktop video editor, built with eframe and j-ui.
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
@@ -23,7 +23,7 @@ fn main() -> eframe::Result {
     if let Err(error) = jvid_paths::check_portable_writable() {
         rfd::MessageDialog::new()
             .set_title(jvid_app::i18n::verbatim("jvid"))
-            .set_description(suite_ui::tr!(
+            .set_description(j_ui::tr!(
                 jvid_app::i18n::CATALOG,
                 "components.portable_error",
                 error = error
@@ -38,7 +38,7 @@ fn main() -> eframe::Result {
         tracing::error!("ffmpeg failed to initialise: {e}");
     }
     if let Some(dir) = settings_file::themes_dir()
-        && let Err(e) = suite_ui::themes::install_bundled(&dir)
+        && let Err(e) = j_ui::themes::install_bundled(&dir)
     {
         tracing::warn!("themes: can't set up {}: {e}", dir.display());
     }

@@ -39,7 +39,7 @@ fn harness(list: bool) -> Harness<'static, State> {
         .with_step_dt(1.0 / 60.0)
         .build_ui_state(
             move |ui, state: &mut State| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 // Keep interaction timing realistic without waiting for theme/modal fades.

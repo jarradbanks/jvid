@@ -20,7 +20,7 @@ fn feedback_harness(
         .with_max_steps(32)
         .build_ui_state(
             move |ui, (t, h): &mut (Timeline, History)| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 let map = Keymap::default();
@@ -271,7 +271,7 @@ fn dragging_a_media_tile_or_row_to_the_zero_seam_places_it_undoably() {
                 .with_size([1000.0, 300.0])
                 .build_ui_state(
                     move |ui, (bin, t, hist): &mut (MediaBin, Timeline, History)| {
-                        if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        if j_ui::test_support::install_theme(ui, &mut fresh) {
                             return;
                         }
                         let (left, right) = ui.max_rect().split_left_right_at_x(300.0);
@@ -824,7 +824,7 @@ fn trim_bounds_clear_snap_labels_when_neighbor_prevents_the_promised_edge() {
 
 #[test]
 fn render_feedback_artifacts() {
-    if !suite_ui::test_support::gpu() {
+    if !j_ui::test_support::gpu() {
         return;
     }
     let dir =
@@ -845,7 +845,7 @@ fn render_feedback_artifacts() {
             .wgpu()
             .build_ui_state(
                 move |ui, (timeline, history): &mut (Timeline, History)| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     let _ =
@@ -883,4 +883,31 @@ fn render_feedback_artifacts() {
             .save(dir.join(format!("{name}.png")))
             .unwrap();
     }
+}
+
+#[test]
+fn alt_drop_over_a_neighbour_adds_a_crossfade_in_one_undo() {
+    let before = super::tests::project(4);
+    let moving = before.sequence().tracks()[0].clips()[0].id;
+    let mut h = harness(before.clone());
+    h.state_mut().0.snapping = false;
+    let y = h.get_all_by_label("Lock").next().unwrap().rect().center().y;
+    let from = pos2(8.0 + size::TRACK_HEADER + 20.0, y);
+    let to = from + vec2(20.0, 0.0);
+    begin_clip(&mut h, from, to);
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::ALT));
+    h.run();
+    assert!(h.state().0.feedback.as_ref().unwrap().crossfade);
+    h.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::ALT,
+    });
+    h.run();
+    let (_, c) = h.state().1.project().sequence().clip(moving).unwrap();
+    let x = c.transform.transition.expect("crossfade at the cut");
+    assert_eq!(x.kind, jvid_core::model::TransitionKind::Crossfade);
+    assert!(h.state_mut().1.undo());
+    assert_eq!(h.state().1.project(), &before);
 }

@@ -5,16 +5,15 @@
 use std::collections::HashSet;
 
 use egui::{Pos2, Rect, Sense, Stroke, Ui, Vec2, vec2};
+use j_ui::themes::DARK;
+use j_ui::tokens::color;
 use jvid_core::history::GestureKey;
 use jvid_core::model::{Clip, ClipId, Project, Text, TrackKind, Transform};
 use jvid_core::time::Time;
 use jvid_render::text;
-use suite_ui::themes::DARK;
-use suite_ui::tokens::color;
 
-use crate::i18n::tr;
 use crate::timeline::Edit;
-use crate::viewer_geometry::{View, ViewerGeometry};
+use crate::viewer_geometry::ViewerGeometry;
 
 /// Undo gesture for handle drags, xored with the drag count.
 const GESTURE: GestureKey = 0x6861_6e64_0000; // "hand"
@@ -576,71 +575,10 @@ pub fn show(
     edit
 }
 
-/// A foreground icon stays clickable even when an oversized body/mask covers the viewer.
-/// Capture bounds once on click, so the view remains fixed throughout the next edit.
+/// Offers the selection's bounds to the preview toolbar's View Selection button, which
+/// captures them once on click, so the view stays fixed throughout the next edit.
 fn view_selection(ui: &Ui, geometry: ViewerGeometry, bounds: Rect) {
-    use suite_ui::tokens::{size, space};
-    let body = geometry.body.intersect(ui.clip_rect());
-    if body.width() < size::CONTROL + 2.0 * space::S4
-        || body.height() < size::CONTROL + 2.0 * space::S4
-    {
-        return;
-    }
-    egui::Area::new(ui.id().with("view selection"))
-        .order(egui::Order::Foreground)
-        .fixed_pos(body.right_top() + vec2(-size::CONTROL - space::S4, space::S4))
-        .movable(false)
-        .constrain_to(body)
-        .show(ui.ctx(), |button_ui| {
-            button_ui.set_clip_rect(body);
-            // Like the transform handles, this overlay has no font dependency. Its four
-            // corners use screen points; translated text is the accessible name/tooltip.
-            let (rect, response) =
-                button_ui.allocate_exact_size(Vec2::splat(size::CONTROL), Sense::click());
-            response.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Button,
-                    true,
-                    tr!("preview.view_selection"),
-                )
-            });
-            let response = response.on_hover_text(tr!("preview.view_selection"));
-            if response.hovered() || response.has_focus() {
-                button_ui.painter().rect_filled(rect, 6.0, color::raised());
-            }
-            let centre = rect.center();
-            let stroke = Stroke::new(
-                1.0,
-                if response.has_focus() {
-                    DARK.light_blue
-                } else {
-                    DARK.ink
-                },
-            );
-            for sign in [
-                vec2(-1.0, -1.0),
-                vec2(1.0, -1.0),
-                vec2(-1.0, 1.0),
-                vec2(1.0, 1.0),
-            ] {
-                let corner = centre + sign * 6.0;
-                button_ui
-                    .painter()
-                    .line_segment([corner - vec2(sign.x * 3.0, 0.0), corner], stroke);
-                button_ui
-                    .painter()
-                    .line_segment([corner, corner - vec2(0.0, sign.y * 3.0)], stroke);
-            }
-            if response.clicked() {
-                crate::preview::set_view(
-                    ui,
-                    View {
-                        selection: Some(geometry.screen_rect_to_project(bounds)),
-                        pan: Vec2::ZERO,
-                    },
-                );
-            }
-        });
+    crate::preview::offer_selection(ui, geometry.screen_rect_to_project(bounds));
 }
 
 #[cfg(test)]
@@ -806,7 +744,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_overlay_draws_no_amber() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (h, id) = history();
@@ -832,7 +770,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_reframe_box_dims_the_wide_shot_outside_it() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (h, id) = history();
@@ -1111,7 +1049,7 @@ pub(crate) mod tests {
             harness.run();
         }
         assert_eq!(content(harness.state()), "Title 2", "the text updates live");
-        if suite_ui::test_support::gpu() {
+        if j_ui::test_support::gpu() {
             harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Home);
             harness.run();
             let img = harness.render().unwrap();
@@ -1126,8 +1064,8 @@ pub(crate) mod tests {
 
     #[test]
     fn an_oversized_clip_leaves_the_transport_row_clickable() {
+        use j_ui::tokens::size;
         use jvid_core::history::{Command, History};
-        use suite_ui::tokens::size;
         let (mut h, id) = history();
         let c = h.project().sequence().tracks()[0].clips()[0].clone();
         let x = Transform {

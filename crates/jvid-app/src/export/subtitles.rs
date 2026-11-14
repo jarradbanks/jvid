@@ -4,12 +4,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use egui::{RichText, Ui};
+use j_ui::theme;
+use j_ui::tokens::{color, radius, space};
+use j_ui::widgets::Button;
 use jvid_core::model::Project;
 use jvid_core::srt;
 use rfd::FileDialog;
-use suite_ui::theme;
-use suite_ui::tokens::{color, radius, space};
-use suite_ui::widgets::Button;
 
 use super::dialog::{Range, span};
 use crate::i18n::{tr, verbatim};
@@ -75,14 +75,14 @@ impl SubtitleExport {
                     ui.label(RichText::new(error).color(color::red()));
                 }
                 ui.add_space(space::S16);
-                let actions = suite_ui::dialog::action_footer(
+                let actions = j_ui::dialog::action_footer(
                     ui,
                     [
                         Button::secondary(tr!("prompt.cancel")),
                         Button::primary(tr!("subtitle_export.save")).state(if content.is_ok() {
-                            suite_ui::widgets::State::Live
+                            j_ui::widgets::State::Live
                         } else {
-                            suite_ui::widgets::State::Disabled
+                            j_ui::widgets::State::Disabled
                         }),
                     ],
                 );

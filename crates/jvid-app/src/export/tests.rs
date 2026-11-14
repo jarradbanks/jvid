@@ -1889,7 +1889,7 @@ fn export_menu_cancels_one_or_all() {
         .with_size([960.0, 240.0])
         .build_ui_state(
             move |ui, q: &mut queue::Queue| {
-                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if !j_ui::test_support::install_theme(ui, &mut fresh) {
                     q.panel(ui, true);
                 }
             },
@@ -1942,7 +1942,7 @@ fn export_menu_rows_act() {
         .with_size([320.0, 300.0])
         .build_ui_state(
             move |ui, (q, a): &mut (queue::Queue, Option<queue::Action>)| {
-                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if !j_ui::test_support::install_theme(ui, &mut fresh) {
                     *a = q.menu(ui, "Ctrl+E").or(*a);
                 }
             },
@@ -1990,7 +1990,7 @@ fn failed_job_shows_its_error_on_hover() {
         .with_size([960.0, 240.0])
         .build_ui_state(
             move |ui, q: &mut queue::Queue| {
-                if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if !j_ui::test_support::install_theme(ui, &mut fresh) {
                     q.panel(ui, true);
                 }
             },

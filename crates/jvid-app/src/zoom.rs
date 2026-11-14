@@ -6,11 +6,11 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 use egui::{Pos2, Rect, Stroke, Ui, Vec2};
+use j_ui::themes::DARK;
 use jvid_core::history::Command;
 use jvid_core::keyframe::{Easing, Keyframe, Value};
 use jvid_core::model::{Clip, ClipId, Project, TrackKind};
 use jvid_core::time::{FLICKS_PER_SECOND as S, Time};
-use suite_ui::themes::DARK;
 
 use crate::i18n::tr;
 use crate::viewer_geometry::ViewerGeometry;

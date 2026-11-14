@@ -1,3 +1,6 @@
+#if Ver < EncodeVer(6, 6, 0)
+  #error Inno Setup 6.6 or newer is required for system light/dark styling
+#endif
 ; Per-user setup, one stable AppId across versions. User data survives uninstall.
 #ifndef AppVersion
   #error AppVersion required
@@ -26,7 +29,9 @@ OutputDir={#OutputDir}
 OutputBaseFilename=jvid-{#AppVersion}-windows-x86_64-setup
 Compression=lzma2
 SolidCompression=yes
-WizardStyle=modern
+WizardStyle=modern dynamic
+WizardSmallImageFile=..\assets\jvid.png
+WizardSmallImageFileDynamicDark=..\assets\jvid.png
 UninstallDisplayIcon={app}\jvid-app.exe
 CloseApplications=yes
 RestartApplications=no

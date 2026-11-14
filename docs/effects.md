@@ -1,19 +1,10 @@
-# Writing effects
+# writing effects
 
-An effect is one `.wgsl` file in the effects folder (`effects/` in jvid's config directory;
-the bin's Effects tab has a button that opens it). jvid creates the folder with its examples
-the first time it runs: vignette, chromatic aberration, film grain, chroma key, gaussian blur and
-pixelate. Read those next to this.
+an effect is one `.wgsl` file in the effects folder (`effects/` in jvid's config directory - the bin's effects tab has a button that opens it). jvid ships a few to crib from: vignette, chromatic aberration, film grain, chroma key, gaussian blur and pixelate.
 
-New and edited files are picked up within a second while jvid runs; no restart. Deleting the
-whole folder brings the examples back on the next check. An export uses the effects as they
-were when it started; edits made during it show in the next one.
+edits are picked up within a second, no restart. delete the whole folder and the examples come back.
 
-To hide one region (an email, a key, a face), put a copy of the clip on the track above, mask
-the copy to the region and add Gaussian Blur or Pixelate to it. Both keep the clip's alpha, so
-pixels outside the mask stay as they were.
-
-## The file
+## the file
 
 ```wgsl
 // @jvid effect "Vignette"
@@ -28,71 +19,36 @@ fn effect(uv: vec2<f32>) -> vec4<f32> {
 }
 ```
 
-- `// @jvid effect "Name"` names the effect in the Inspector. Required.
-- `// @param name float min..max = default`, one per parameter. Each becomes a keyframeable
-  slider in the Inspector. Only `float` is supported; `size`, `texel_size`, `jvid_padding`, `frame` and `pass_index` are
-  reserved names.
-- `// @passes N` (1 to 8, default 1) runs the effect N times, each over the last one's output.
-  `fx.pass_index` says which run this is, from 0. Gaussian blur uses two: x, then y.
-- `fn effect(uv: vec2<f32>) -> vec4<f32>` returns the colour at `uv` (0,0 top left to 1,1
-  bottom right) as straight (not premultiplied) RGBA in 0..1.
+- `// @jvid effect "Name"` - required, names it in the inspector.
+- `// @param name float min..max = default` - one per slider, all keyframeable. only `float`. `size`, `texel_size`, `jvid_padding`, `frame` and `pass_index` are taken.
+- `// @passes N` - run it N times (1-8), each over the last. gaussian blur does x then y.
+- `fn effect(uv)` - return the colour at `uv` (0,0 top left) as straight, not premultiplied, RGBA.
 
-The file can declare its own helper functions and constants, but not its own bindings
-(`@group`/`@binding`): only the ones below exist, and a file that uses another fails to load. It
-can read:
+helper functions and constants are fine; your own bindings aren't. what you get:
 
-| Name | What |
+| name | what |
 | --- | --- |
-| `src` | The clip's image (`texture_2d<f32>`), straight RGBA, after earlier effects. |
-| `smp` | A linear, clamping sampler. |
-| `fx.size` | Baseline Full-quality effect-input dimensions in logical pixels (`vec2<f32>`), stable across preview quality and proxies. |
-| `fx.texel_size` | Actual sampled texture dimensions (`vec2<f32>`), for texel-level operations. |
-| `fx.frame` | The timeline frame number (`f32`), for animated noise. |
-| `fx.pass_index` | Which `@passes` run this is (`f32`), from 0. |
-| `fx.<param>` | Each `@param`'s current value (`f32`), keyframes applied. |
+| `src` | the clip's image after earlier effects, straight RGBA |
+| `smp` | linear, clamping sampler |
+| `jvid_sample(uv)` | alpha-aware bilinear sample of `src` - use this when blurring |
+| `fx.size` | full-quality input size in pixels. stays the same at half/quarter preview and with proxies |
+| `fx.texel_size` | the actual texture size, for per-texel work |
+| `fx.frame` | timeline frame number, for animated noise |
+| `fx.pass_index` | which pass this is, from 0 |
+| `fx.<param>` | each slider's current value |
 
-## Where it runs
+effects run on the clip's own image, before its transform and grade, in inspector order.
 
-Effects run on the clip's own image, before its transform, color adjustments and LUT, in the
-order they're stacked in the Inspector. They show in the viewer and in exports.
+when averaging samples, weight RGB by alpha and divide by total alpha, or invisible pixels tint your edges.
 
-## Errors
+## no loops
 
-A file that doesn't parse or validate (with naga, the compiler wgpu uses) is listed in red in
-the Effects tab with the compiler's message; line numbers are your file's. Clips using it draw as
-if the effect weren't there ("passthrough" in the Inspector) until the file is fixed.
+`loop`, `for` and `while` are rejected. a runaway loop on the GPU stalls everything until the driver resets, sometimes taking the desktop with it. unroll a fixed number of samples by hand instead, like chromatic aberration does.
 
-## No loops
+## errors
 
-`loop`, `for` and `while` are rejected (`line N: loops aren't allowed in effects`). A shader runs
-once per pixel per frame, and one long or endless loop stalls the whole GPU until the driver
-resets it, which can take the app (and on some systems the desktop) down with it. Write a fixed
-number of samples out by hand instead, as chromatic aberration does.
+a file that won't compile shows in red in the effects tab with naga's message and your line numbers. clips using it just skip it until it's fixed.
 
-Imported stills and effect inputs use upright **straight RGBA**. The compositor interpolates
-straight-alpha layers by weighting their colours by alpha, then unpremultiplies before grading
-and premultiplies for source-over blending. Nested sequence outputs remain premultiplied.
-For spatial sampling in a user effect, `jvid_sample(uv)` provides alpha-aware, bilinear,
-clamped sampling of `src` and returns straight RGBA. Raw `textureSample` remains available
-with its existing WGSL behaviour. Weight RGB by alpha when averaging samples and divide by
-the accumulated alpha; invisible RGB must not tint an edge. Effects still return straight RGBA.
+## hiding something
 
-Pixel parameters (blur radius, pixelation block size and chromatic split distance) use the
-logical pixels of the **baseline Full-quality effect input**, before the clip's transform.
-For unmasked sources this is the original image size; generated layers and nested sequences
-use project dimensions. Preview quality and proxies retain that fixed reference while the
-actual texture may be smaller. Both effect dispatch branches use that same reference.
-
-Compatibility: ordinary alpha masks historically enlarged a smaller source to its full fitted
-project extent before effects. That enlarged Full-quality input remains the fixed logical
-reference when such a mask is present. For example, a 64×32 source in a 256×128 project with
-blur radius 16 keeps a 16-project-pixel radius with an ordinary mask and a 64-project-pixel
-radius without one, matching existing Full output. Effect-specific masks and secondary
-coverage masks retain their original image reference and project-space geometry. Attaching
-or removing an ordinary alpha mask can therefore retain this historical unit difference;
-quality and proxy switches never introduce an additional difference.
-
-Existing user shaders dividing pixel offsets by `fx.size` retain their Full appearance and
-now keep that spatial extent at Half/Quarter or with proxies. Use `fx.texel_size` or
-`textureDimensions(src)` when an operation intentionally addresses actual texels. Saved
-parameters are unchanged, with no project migration or per-effect unit mode.
+to blur an email or a face: copy the clip to the track above, mask the copy to the region, add gaussian blur or pixelate to it.

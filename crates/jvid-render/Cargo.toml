@@ -11,6 +11,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+j-ui.workspace = true
 jvid-core.workspace = true
 wgpu.workspace = true
 naga.workspace = true
@@ -19,4 +20,4 @@ cosmic-text.workspace = true
 
 [dev-dependencies]
 jvid-media = { workspace = true, features = ["test-support"] }
-suite-ui = { workspace = true, features = ["test-support"] }
+j-ui = { workspace = true, features = ["test-support"] }

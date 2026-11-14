@@ -471,13 +471,12 @@ impl Workspaces {
         };
         let mut accept = false;
         let mut cancel = false;
-        let result = egui::Modal::new(egui::Id::new("workspace_name")).show(ui.ctx(), |ui| {
-            ui.set_width(320.0_f32.min((ui.ctx().content_rect().width() - 48.0).max(1.0)));
-            ui.heading(title);
+        let id = egui::Id::new("workspace_name");
+        let result = j_ui::dialog::modal(ui.ctx(), id, title, 320.0, |ui| {
             let input = ui.add(
-                egui::TextEdit::singleline(&mut dialog.name)
-                    .hint_text(tr!("workspace.name"))
-                    .desired_width(f32::INFINITY),
+                j_ui::widgets::TextInput::new(&mut dialog.name)
+                    .hint(tr!("workspace.name"))
+                    .width(ui.available_width()),
             );
             if dialog.focus_name {
                 input.request_focus();
@@ -485,7 +484,7 @@ impl Workspaces {
             }
             if let Some(error) = dialog.error {
                 ui.colored_label(
-                    suite_ui::tokens::color::red(),
+                    j_ui::tokens::color::red(),
                     match error {
                         NameError::Empty => tr!("workspace.empty_name"),
                         NameError::Duplicate => tr!("workspace.duplicate_name"),
@@ -493,11 +492,11 @@ impl Workspaces {
                     },
                 );
             }
-            let buttons = suite_ui::dialog::action_footer(
+            let buttons = j_ui::dialog::action_footer(
                 ui,
                 [
-                    suite_ui::widgets::Button::secondary(tr!("prompt.cancel")),
-                    suite_ui::widgets::Button::primary(title),
+                    j_ui::widgets::Button::secondary(tr!("prompt.cancel")),
+                    j_ui::widgets::Button::primary(title),
                 ],
             );
             cancel = buttons[0].clicked();

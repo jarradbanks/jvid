@@ -32,6 +32,7 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+allow-git = ["https://github.com/jarradbanks/j-ui"]
 
 # egui's bundled default fonts; font licences, not code copyleft.
 [[licenses.exceptions]]
@@ -44,7 +45,7 @@ crate = "option-ext"
 allow = ["MPL-2.0"]
 
 # WTFPL is permissive (no copyleft). The FFmpeg libraries these bind to are
-# dynamically linked, never compiled in (PLAN.md "Licensing", docs/adr/0001).
+# dynamically linked, never compiled in (PLAN.md "Licensing").
 [[licenses.exceptions]]
 crate = "ffmpeg-next"
 allow = ["WTFPL"]

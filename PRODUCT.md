@@ -10,7 +10,7 @@ web
 
 A native desktop app for Windows, macOS and Linux, written in Rust: `egui`/`eframe` with `egui_dock` on `wgpu`, FFmpeg for media, `cpal` for audio. The full stack and crate layout are in [docs/PLAN.md](docs/PLAN.md).
 
-Platform is recorded as `web` because Impeccable's platform field names the design language the app renders, not the toolchain. jvid draws its own UI and looks the same on every OS; it does not use native iOS, Android, Windows or macOS widgets. Browser-only guidance (CSS, the DOM, responsive breakpoints, live browser mode) does not apply. The shared visual language lives in the `suite-ui` crate.
+Platform is recorded as `web` because Impeccable's platform field names the design language the app renders, not the toolchain. jvid draws its own UI and looks the same on every OS; it does not use native iOS, Android, Windows or macOS widgets. Browser-only guidance (CSS, the DOM, responsive breakpoints, live browser mode) does not apply. The shared visual language lives in the `j-ui` crate.
 
 ## Users
 
@@ -47,14 +47,13 @@ Supporting truths, which back the lead claim rather than compete with it: free a
 ## Brand Commitments
 
 - The name is **jvid**, always lowercase.
-- jvid is the first tool in a suite. The suite shares one design language through `suite-ui`; each tool keeps its own name.
+- jvid is the first tool in a suite. The suite shares one design language through `j-ui`; each tool keeps its own name.
 - UI direction is **dark, pro and minimal** (stated by the owner).
 - In/out marking and default shortcuts follow the standard pro-editor conventions.
 
 ## Evidence on Hand
 
 - [docs/PLAN.md](docs/PLAN.md) and [docs/ROADMAP.md](docs/ROADMAP.md), with the issues they link to.
-- The README preview (`docs/media/`) is the real app, rendered by `scripts/preview/build`. There are no users, testimonials or benchmarks yet. Performance numbers are targets, not measurements. Do not present any of these as real.
 
 ## Product Principles
 
@@ -62,4 +61,4 @@ Supporting truths, which back the lead claim rather than compete with it: free a
 2. **Quick edits, not heavy workflows.** Prefer one obvious way to do something. Multicam, node compositing, 3D and collaboration stay out.
 3. **Muscle memory over novelty.** Familiar pro-editor defaults, and everything remappable.
 4. **Open and inspectable.** Plain-text projects, a CLI renderer, user shaders; no account and no lock-in.
-5. **One look across the suite.** Visual decisions are made in `suite-ui` so the next tool inherits them.
+5. **One look across the suite.** Visual decisions are made in `j-ui` so the next tool inherits them.

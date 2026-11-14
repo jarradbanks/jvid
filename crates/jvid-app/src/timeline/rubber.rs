@@ -3,11 +3,11 @@
 //! moves it between its neighbours. Edits are `SetClipProps`, as in the inspector.
 
 use egui::{CursorIcon, Id, Painter, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use j_ui::tokens::color;
 use jvid_core::history::{Command, GestureKey};
 use jvid_core::keyframe::{Easing, Keyframe, Value};
 use jvid_core::model::Clip;
 use jvid_core::time::Time;
-use suite_ui::tokens::color;
 
 use super::{Edit, Timeline, View};
 

@@ -1,9 +1,6 @@
-# Performance budgets
+# performance budgets
 
-The one place the budgets live. Targets come from [PLAN.md · Performance targets](PLAN.md#performance-targets).
-CI reports every number in the PR's job summary (the `perf` steps of the Linux `check` job). It
-does not fail on them: hosted runners are noisy and render on lavapipe, a software rasterizer.
-Hard gates that already existed stay as plain tests and still fail CI (marked *gated*).
+targets from [PLAN.md](PLAN.md#performance-targets). CI reports every number in the PR's job summary but only fails on the *gated* ones - hosted runners are noisy and render on lavapipe.
 
 | Measure | Budget | Where | Gate |
 |---|---|---|---|
@@ -20,7 +17,7 @@ Hard gates that already existed stay as plain tests and still fail CI (marked *g
 | Timeline evaluation, 8 tracks × 500 clips | report | `cargo bench -p jvid-core` `video_at` | report |
 | Keyframe interpolation, 1000 keys | report | `cargo bench -p jvid-core` `value_at` | report |
 
-The release tests print a `PERF …` line each. Run them all locally (needs `scripts/gen-test-media`):
+each release test prints a `PERF …` line. run them locally (needs `scripts/gen-test-media`):
 
 ```sh
 cargo test --release -p jvid-app --bin jvid-app -- perf_cold_start --nocapture   # alone, so RSS is clean
@@ -29,5 +26,4 @@ cargo test --release -p jvid-media -p jvid-audio -- one_hour_query sixteen_track
 cargo bench -p jvid-core --bench core
 ```
 
-Cold start and memory are measured in-process, so they leave out exec and dynamic linking and
-include the test harness: a ceiling on the real numbers' trend, not the user-visible value.
+cold start and memory are measured in-process, so treat them as a trend, not the real user-facing number.

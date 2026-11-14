@@ -10,7 +10,7 @@ use crate::composite::{Compositor, FORMAT};
 pub const SIZE: (u32, u32) = (160, 90);
 
 /// The frame shown with nothing on the timeline: the owner's own footage, see the assets README.
-const FALLBACK: &[u8] = include_bytes!("../../../docs/prototypes/v3/sample.jpg");
+const FALLBACK: &[u8] = include_bytes!("../assets/sample.jpg");
 
 const BLACK: [u8; 4] = [0, 0, 0, 255];
 

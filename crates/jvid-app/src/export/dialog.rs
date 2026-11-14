@@ -4,14 +4,14 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use egui::{Align, FontId, Layout, Margin, Rect, RichText, Ui, vec2};
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, radius, size, space};
+use j_ui::widgets::{Button, Checkbox, DragField, Dropdown, Segmented, State, TextInput};
 use jvid_core::model::{ClipId, Marker, MarkerId, Project, Sequence};
 use jvid_core::preset::{AudioCodec, Preset, VideoCodec};
 use jvid_core::time::{FLICKS_PER_SECOND, Rate, Time, format_timecode};
 use jvid_media::remux::{Cut, SMART_ENCODER};
 use rfd::FileDialog;
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, radius, size, space};
-use suite_ui::widgets::{Button, Checkbox, DragField, Dropdown, Segmented, State, TextInput};
 
 use super::lossless::{self, Lossless};
 use super::{Request, preset_name};
@@ -107,6 +107,11 @@ impl ExportDialog {
     /// Whether the export modal currently owns input, including before its first draw.
     pub fn is_open(&self) -> bool {
         self.range.is_some()
+    }
+
+    /// Whether the open dialog exports Highlights.
+    pub(crate) fn is_highlights(&self) -> bool {
+        self.range == Some(Range::Highlights)
     }
 
     /// Dismiss tutorial-owned export guidance without changing the chosen output settings.
@@ -369,7 +374,9 @@ impl ExportDialog {
                                     tr!("export.selected"),
                                     tr!("export.highlights"),
                                 ];
-                                if ui.add(Segmented::new(&mut i, &options).off(&off)).changed() {
+                                let r = ui.add(Segmented::new(&mut i, &options).off(&off));
+                                crate::app::tutorial::anchor_in(ui, "export.range", r.rect);
+                                if r.changed() {
                                     *range = RANGES[i];
                                 }
                             });
@@ -548,7 +555,7 @@ impl ExportDialog {
                             && path.file_name().is_some()
                             && (kind != Range::Highlights || !chosen.is_empty());
                         let state = if ok { State::Live } else { State::Disabled };
-                        let actions = suite_ui::dialog::action_footer(
+                        let actions = j_ui::dialog::action_footer(
                             ui,
                             [
                                 Button::secondary(tr!("prompt.cancel")),
@@ -1260,7 +1267,7 @@ mod tests {
             .with_size([960.0, 600.0])
             .build_ui_state(
                 move |ui, d: &mut ExportDialog| {
-                    if !suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh) {
                         d.show(ui, &project, &HashSet::new());
                     }
                 },
@@ -1278,7 +1285,7 @@ mod tests {
     fn custom_loudness_adds_a_field_and_a_preset_takes_it_away() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (project, dialog) = scenario();
@@ -1304,7 +1311,7 @@ mod tests {
     /// Size by Export.
     #[test]
     fn export_dialog_960x600() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (project, dialog) = scenario();
@@ -1314,7 +1321,7 @@ mod tests {
     #[test]
     fn unavailable_codec_preflight_explains_choices_in_dialog() {
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (project, mut dialog) = scenario();
@@ -1329,7 +1336,7 @@ mod tests {
     fn every_dropdown_menu_fits_inside_the_dialog() {
         use egui::accesskit::Role;
         use egui_kittest::kittest::Queryable;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         // Highlights' marker list pushes Loudness and Target Size down the body.
@@ -1361,7 +1368,7 @@ mod tests {
     /// Highlights lists the markers; the body scrolls and the footer stays pinned.
     #[test]
     fn export_dialog_highlights_960x600() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (project, mut dialog) = scenario();

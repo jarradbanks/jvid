@@ -167,8 +167,9 @@ crates/
   jvid-transcribe/ speech-to-text with word timings, whisper model downloads
   jvid-app/      eframe desktop app
   jvid-cli/      headless render
-  suite-ui/      shared theme, widgets, keybinding system — reused by the rest of the suite
 ```
+
+[j-ui](https://github.com/jarradbanks/j-ui) supplies shared themes, widgets and localisation as a tagged Git dependency.
 
 `jvid-core` stays free of I/O and UI so it can be tested in isolation and driven by both the app and the CLI.
 
@@ -183,7 +184,7 @@ crates/
 
 ## Licensing
 
-- **jvid source:** `MIT OR Apache-2.0`, the Rust ecosystem convention. Anyone can reuse `jvid-core` or `suite-ui` in other projects, including the rest of the suite.
+- **jvid source:** `MIT OR Apache-2.0`, the Rust ecosystem convention. Anyone can reuse `jvid-core` or `j-ui` in other projects, including the rest of the suite.
 - **FFmpeg:** dynamically linked, never compiled into jvid's own crates.
 - **Release builds** bundle an FFmpeg with x264/x265 for the best software encoding. That FFmpeg is GPL, so the release bundle as a whole is distributed under GPL terms, which permissive code allows.
 - **Permissive-only builds:** a build option links an LGPL FFmpeg and relies on hardware encoders (plus OpenH264) instead of x264/x265.

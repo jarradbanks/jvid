@@ -9,6 +9,9 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, wgpu};
 use egui::{Align, Align2, Layout, Pos2, Rect, Stroke, Ui, UiBuilder, pos2, vec2};
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, size, space};
+use j_ui::widgets::{Button, Checkbox, Dropdown};
 use jvid_audio::{CpalBackend, Output};
 use jvid_core::history::Command;
 use jvid_core::model::{AssetId, MediaAsset, Project, ProjectSettings, Sequence};
@@ -21,9 +24,6 @@ use jvid_render::preview::{self as render, Yuv};
 use jvid_render::scope::{Analysis, Scopes};
 use jvid_render::thumb::Thumbs;
 use jvid_render::{solid, text};
-use suite_ui::theme::{self, icon};
-use suite_ui::tokens::{color, size, space};
-use suite_ui::widgets::{Button, Checkbox, Dropdown};
 
 #[cfg(test)]
 use crate::i18n::verbatim;
@@ -514,7 +514,7 @@ impl Preview {
             let viewer = viewer_rect(ui);
             ui.painter().rect_filled(viewer, 0.0, color::VIEWER);
             ui.scope_builder(egui::UiBuilder::new().max_rect(viewer), |ui| {
-                suite_ui::empty_state::EmptyState::new(
+                j_ui::empty_state::EmptyState::new(
                     icon::PLAY,
                     tr!("empty.source"),
                     tr!("preview.source_empty"),
@@ -773,7 +773,7 @@ impl Preview {
         if empty {
             let viewer = viewer_rect(ui);
             ui.scope_builder(egui::UiBuilder::new().max_rect(viewer), |ui| {
-                suite_ui::empty_state::EmptyState::new(
+                j_ui::empty_state::EmptyState::new(
                     icon::PLAY,
                     tr!("empty.preview"),
                     tr!("empty.preview_help"),
@@ -814,11 +814,16 @@ impl Preview {
         {
             pb.refresh_media();
         }
-        if self.program_seq.as_ref().map(|(s, a)| (s, a.as_slice())) != Some(now) {
+        let edited = self.program_seq.as_ref().map(|(s, a)| (s, a.as_slice())) != Some(now);
+        if edited {
             self.program_seq = Some((seq.clone(), project.assets().to_vec()));
             pb.refresh();
         }
-        if playhead != self.program_head {
+        // A parked seek clamps to the sequence's end, so a playhead past the end (where a new
+        // title or clip is about to start) parks early. Seek again once an edit moves the end.
+        let parked_early =
+            edited && pb.transport.speed() == 0 && pb.transport.position(0) != playhead;
+        if playhead != self.program_head || parked_early {
             let clock = self.output.as_mut().map_or(0, |o| {
                 o.flush();
                 o.clock()
@@ -1336,8 +1341,16 @@ impl Preview {
             } else {
                 0.0
             };
-            let secondary_width =
-                88.0 + 72.0 + proxy_text + 24.0 + 32.0 + 112.0 + 6.0 * space::S8 + reset_width;
+            // The status caption is at most 88 wide; View Selection is one icon button.
+            let secondary_width = 88.0
+                + 72.0
+                + proxy_text
+                + 24.0
+                + 32.0
+                + 88.0
+                + size::CONTROL
+                + 7.0 * space::S8
+                + reset_width;
             let full_width = time_width
                 + 5.0 * 28.0
                 + record_extra
@@ -1363,7 +1376,7 @@ impl Preview {
             let rtl = Layout::right_to_left(Align::Center);
             let right = ui.scope_builder(UiBuilder::new().max_rect(inner).layout(rtl), |ui| {
                 ui.spacing_mut().item_spacing.x = space::S8;
-                self.dropdowns(ui, view_id, true);
+                self.dropdowns(ui, view_id);
                 ui.min_rect().left()
             });
             let x = bar
@@ -1386,14 +1399,16 @@ impl Preview {
                     ui.spacing_mut().item_spacing.x = space::S4;
                     for (glyph, name, id) in transport_actions(r.playing) {
                         let name = transport_hint(ui.ctx(), keymap, id, name);
-                        if ui
+                        let b = ui
                             .scope_builder(UiBuilder::new().id(ui.id().with(id)), |ui| {
                                 ui.add(Button::icon(glyph, &name))
                             })
                             .inner
-                            .on_hover_text(&name)
-                            .clicked()
-                        {
+                            .on_hover_text(&name);
+                        if id == "play_stop" && records.is_some() {
+                            crate::app::tutorial::anchor(ui.ctx(), "preview.play", b.rect);
+                        }
+                        if b.clicked() {
                             action = Some(id);
                         }
                     }
@@ -1407,7 +1422,7 @@ impl Preview {
             ui.scope_builder(UiBuilder::new().max_rect(bar), |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = space::S8;
-                    self.dropdowns(ui, view_id, true);
+                    self.dropdowns(ui, view_id);
                 });
             });
         }
@@ -1506,7 +1521,6 @@ impl Preview {
             >= 140.0 + record_width + 2.0 * (left_budget.max(right_budget) + space::S8);
         let buttons_width = if navigation { 140.0 } else { size::CONTROL } + record_width;
         let more_rect = row_rect.with_min_x(row_rect.right() - size::CONTROL);
-        let status_rect = more_rect.translate(vec2(-size::CONTROL - space::S8, 0.0));
         let min_x = row_rect.left()
             + if stacked {
                 0.0
@@ -1532,7 +1546,7 @@ impl Preview {
                     .with_min_x(controls.right() + space::S8)
                     .with_max_x(
                         (controls.right() + space::S8 + take_budget)
-                            .min(status_rect.left() - space::S8),
+                            .min(more_rect.left() - space::S8),
                     )
             };
             ui.scope_builder(
@@ -1544,12 +1558,6 @@ impl Preview {
                 },
             );
         }
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(status_rect)
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| self.status_control(ui, true),
-        );
         let mut action = None;
         ui.scope_builder(
             UiBuilder::new()
@@ -1561,14 +1569,16 @@ impl Preview {
                 for (glyph, name, id) in transport_actions(row.playing) {
                     if navigation || id == "play_stop" {
                         let hint = transport_hint(ui.ctx(), keymap, id, name);
-                        if ui
+                        let b = ui
                             .scope_builder(UiBuilder::new().id(ui.id().with(id)), |ui| {
                                 ui.add(Button::icon(glyph, &hint))
                             })
                             .inner
-                            .on_hover_text(&hint)
-                            .clicked()
-                        {
+                            .on_hover_text(&hint);
+                        if id == "play_stop" && records {
+                            crate::app::tutorial::anchor(ui.ctx(), "preview.play", b.rect);
+                        }
+                        if b.clicked() {
                             action = Some(id);
                         }
                     }
@@ -1600,14 +1610,14 @@ impl Preview {
                         }
                         ui.separator();
                     }
-                    self.dropdowns(ui, view_id, false);
+                    self.dropdowns(ui, view_id);
                 });
             },
         );
         action
     }
 
-    fn dropdowns(&mut self, ui: &mut Ui, view_id: egui::Id, status: bool) {
+    fn dropdowns(&mut self, ui: &mut Ui, view_id: egui::Id) {
         let zooms = ZOOMS.map(|z| z.0());
         let recovered = ui
             .data(|d| d.get_temp::<View>(view_id))
@@ -1635,6 +1645,39 @@ impl Preview {
             self.zoom = 0;
             ui.data_mut(|d| d.insert_temp(view_id, View::default()));
         }
+        // Zooms to the selected clip's bounds; disabled, with its tooltip, until one is selected.
+        let selection = offered_selection(ui, view_id);
+        let button =
+            Button::icon(icon::SCAN, tr!("preview.view_selection")).state(if selection.is_some() {
+                j_ui::widgets::State::Live
+            } else {
+                j_ui::widgets::State::Disabled
+            });
+        let response = ui.add(button);
+        let tip = format!(
+            "{}\n{}",
+            tr!("preview.view_selection"),
+            tr!("preview.view_selection_tip")
+        );
+        let response = if selection.is_some() {
+            response.on_hover_text(tip)
+        } else {
+            response.on_disabled_hover_text(tip)
+        };
+        if response.clicked()
+            && let Some(bounds) = selection
+        {
+            ui.data_mut(|d| {
+                d.insert_temp(
+                    view_id,
+                    View {
+                        selection: Some(bounds),
+                        pan: egui::Vec2::ZERO,
+                    },
+                )
+            });
+            ui.ctx().request_repaint();
+        }
         let qualities = QUALITIES.map(|q| q.0());
         if ui
             .add(Dropdown::new(&mut self.quality, &qualities).width(72.0))
@@ -1658,9 +1701,8 @@ impl Preview {
             self.program.refresh_sources();
             self.requested = None;
         }
-        if status {
-            self.status_control(ui, false);
-        }
+        // Beside the checkbox it describes; passive, so it never reads as a button.
+        self.status_label(ui, on);
         let glyph = egui::RichText::new(icon::GRID).font(theme::icon_font());
         let guides = ui.menu_button(glyph, |ui| {
             let o = &mut self.overlays;
@@ -1707,20 +1749,20 @@ impl Preview {
         true
     }
 
-    fn status_control(&mut self, ui: &mut Ui, compact: bool) {
+    fn status_label(&mut self, ui: &mut Ui, proxies: bool) {
         self.refresh_status_jobs(std::time::Instant::now());
         let (observation, health) = if self.status_source {
             (self.source_status, &self.source_health)
         } else {
             (self.program.status, &self.program.health)
         };
-        for path in playback_status::control(
+        for path in playback_status::label(
             ui,
             observation,
             health,
             QUALITIES[self.quality].0(),
             &self.status_jobs,
-            compact,
+            proxies,
         ) {
             self.proxied.remove(&path);
             self.status_updated = None;
@@ -1899,6 +1941,20 @@ fn view_id(ui: &Ui) -> egui::Id {
 
 pub(crate) fn view(ui: &Ui) -> View {
     ui.data(|d| d.get_temp(view_id(ui))).unwrap_or_default()
+}
+
+/// The selected clip's bounds in project points, for View Selection. The transform handles
+/// offer them each pass; the toolbar, drawn before or after them, takes this or the last pass's.
+pub(crate) fn offer_selection(ui: &Ui, bounds: Rect) {
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.data_mut(|d| d.insert_temp(view_id(ui).with("selection"), (pass, bounds)));
+}
+
+fn offered_selection(ui: &Ui, view_id: egui::Id) -> Option<Rect> {
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.data(|d| d.get_temp::<(u64, Rect)>(view_id.with("selection")))
+        .filter(|(offered, _)| offered + 1 >= pass)
+        .map(|(_, bounds)| bounds)
 }
 
 pub(crate) fn set_view(ui: &Ui, view: View) {
@@ -2153,6 +2209,14 @@ impl Preview {
         self.program.transport.speed() != 0
     }
 
+    /// The timeline frame index and layer count the Program viewer shows.
+    #[cfg(test)]
+    pub fn program_shown(&self) -> Option<(i64, usize)> {
+        self.program_shown
+            .as_ref()
+            .map(|s| (s.index, s.layers.len()))
+    }
+
     /// The Program tab has a composited frame with at least one layer.
     pub fn has_program_frame(&self) -> bool {
         self.program_shown
@@ -2366,7 +2430,7 @@ mod program_tests {
 
     impl eframe::App for Program {
         fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-            if suite_ui::test_support::install_theme(ui, &mut self.fresh) {
+            if j_ui::test_support::install_theme(ui, &mut self.fresh) {
                 return;
             }
             let project = self.history.project();
@@ -2378,7 +2442,7 @@ mod program_tests {
     #[test]
     fn the_thumbnail_frame_is_the_fallback_then_the_program_frame() {
         use jvid_render::composite::read_back;
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = egui_kittest::Harness::builder()
@@ -2480,18 +2544,19 @@ mod program_tests {
     /// within 1 physical pixel of the row's centre, at 100% and 150% scale.
     #[test]
     fn transport_items_share_the_rows_centre_line() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         for ppp in [1.0, 1.5] {
             let (centre, items) = transport_ink([1280.0, 360.0], ppp, None);
             // Current time, separator and total; 5 buttons, Record, guides, checkbox box
-            // and label, 2 dropdowns, and the playback status caption.
-            assert_eq!(items.len(), 15, "@{ppp}x: {items:?}");
+            // and label, 2 dropdowns, and View Selection's glyph (two runs of ink). With
+            // proxies off the passive status caption has nothing to say.
+            assert_eq!(items.len(), 16, "@{ppp}x: {items:?}");
             // While recording: Stop, its elapsed time and meter join the row.
             let take = Some((std::time::Duration::from_secs(72), 0.5));
             let (_, recording) = transport_ink([1280.0, 360.0], ppp, take);
-            assert_eq!(recording.len(), 17, "@{ppp}x: {recording:?}");
+            assert_eq!(recording.len(), 18, "@{ppp}x: {recording:?}");
             for i in items.iter().chain(&recording) {
                 assert!(
                     (i.1 - centre).abs() <= 1.0,
@@ -2503,11 +2568,10 @@ mod program_tests {
 
     #[test]
     fn playback_status_viewer_evidence() {
-        use egui_kittest::kittest::Queryable;
         let Some(dir) = std::env::var_os("JVID_PLAYBACK_EVIDENCE_DIR").map(PathBuf::from) else {
             return;
         };
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         std::fs::create_dir_all(&dir).unwrap();
@@ -2530,9 +2594,8 @@ mod program_tests {
                 .unwrap()
                 .save(dir.join(format!("{name}-control.png")))
                 .unwrap();
-            h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status"))
-                .click();
-            h.run();
+            h.state_mut().preview.proxies.set_enabled(true);
+            h.run_steps(4);
             h.render()
                 .unwrap()
                 .save(dir.join(format!("{name}.png")))
@@ -2542,7 +2605,7 @@ mod program_tests {
 
     #[test]
     fn open_scopes_copy_the_program_frame_as_it_draws() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut h = egui_kittest::Harness::builder()
@@ -2604,7 +2667,7 @@ mod program_tests {
             .with_size([640.0, 360.0])
             .build_ui_state(
                 move |ui, p: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     p.show_source(ui, &project, &HashSet::new(), &Keymap::default());
@@ -2646,7 +2709,7 @@ mod program_tests {
             .with_size([640.0, 360.0])
             .build_ui_state(
                 move |ui, p: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     p.show_source(ui, &project, &HashSet::new(), &Keymap::default());
@@ -2714,7 +2777,7 @@ mod program_tests {
                 .with_size([640.0, 360.0])
                 .build_ui_state(
                     move |ui, p: &mut Preview| {
-                        if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                        if j_ui::test_support::install_theme(ui, &mut fresh) {
                             return;
                         }
                         p.show_source(ui, &project, &HashSet::new(), &Keymap::default());
@@ -2793,7 +2856,7 @@ mod program_tests {
             .with_size([640.0, 360.0])
             .build_ui_state(
                 move |ui, preview: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     preview.show_source(ui, &drawn_project, &HashSet::new(), &Keymap::default());
@@ -2835,7 +2898,7 @@ mod frame_export_tests {
 
     #[test]
     fn export_frame_renders_a_title_without_ever_opening_source() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let mut harness = egui_kittest::Harness::builder()
@@ -2954,11 +3017,11 @@ mod viewer_fit_tests {
         let mut fresh = true;
         let mut h = Harness::builder().with_size([640.0, 480.0]).build_ui_state(
             move |ui, state: &mut State| {
-                if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                if j_ui::test_support::install_theme(ui, &mut fresh) {
                     return;
                 }
                 let source = state.active == 1;
-                suite_ui::panel::Panel::tabbed(&["Program", "Source"], &mut state.active)
+                j_ui::panel::Panel::tabbed(&["Program", "Source"], &mut state.active)
                     .embedded(true)
                     .show(ui, |ui| {
                         if source {
@@ -3063,7 +3126,7 @@ mod viewer_fit_tests {
 
     impl eframe::App for Viewer {
         fn ui(&mut self, ui: &mut Ui, _: &mut eframe::Frame) {
-            if suite_ui::test_support::install_theme(ui, &mut self.fresh) {
+            if j_ui::test_support::install_theme(ui, &mut self.fresh) {
                 return;
             }
             self.key = view_id(ui);
@@ -3134,6 +3197,17 @@ mod viewer_fit_tests {
         h
     }
 
+    /// Clicks the toolbar's View Selection, in the More menu when the row is compact.
+    fn view_selection(h: &mut Harness<'_, Viewer>) {
+        if let Some(more) = h.query_by_label(tr!("preview.more")) {
+            more.click();
+            h.run();
+        }
+        h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.view_selection"))
+            .click();
+        h.run();
+    }
+
     fn set_state(h: &mut Harness<'_, Viewer>, view: View) {
         let id = h.state().key;
         h.ctx.data_mut(|d| d.insert_temp(id, view));
@@ -3156,7 +3230,7 @@ mod viewer_fit_tests {
 
     #[test]
     fn fit_corner_edge_and_rotation_targets_work_for_all_project_shapes() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         for (width, height) in [(1920, 1080), (1080, 1920), (1080, 1080)] {
@@ -3219,7 +3293,7 @@ mod viewer_fit_tests {
 
     #[test]
     fn fitted_controls_and_recovered_rotated_selection_are_editable_at_high_dpi() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (mut history, selected) = crate::handles::tests::title();
@@ -3244,9 +3318,7 @@ mod viewer_fit_tests {
             .unwrap();
         let mut h = harness([240.0, 400.0], 1.5, history, selected);
         let before = h.state().history.project().clone();
-        h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.view_selection"))
-            .click();
-        h.run();
+        view_selection(&mut h);
         let captured = h.ctx.data(|d| d.get_temp::<View>(h.state().key)).unwrap();
         let frame = h.state().frame;
         let body = h.state().body;
@@ -3298,7 +3370,7 @@ mod viewer_fit_tests {
 
     #[test]
     fn fit_pan_selection_and_source_leave_saved_project_and_export_pixels_unchanged() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let (history, selected) = crate::handles::tests::title();
@@ -3388,7 +3460,7 @@ mod viewer_fit_tests {
     /// model data; the after images use the new Fit and explicit recovery.
     #[test]
     fn viewer_fit_ui_evidence() {
-        if !suite_ui::test_support::gpu() {
+        if !j_ui::test_support::gpu() {
             return;
         }
         let destination = std::env::var_os("JVID_VIEWER_EVIDENCE_DIR").map(PathBuf::from);
@@ -3486,12 +3558,7 @@ mod viewer_fit_tests {
                 }
                 set_state(&mut h, View::default());
                 if name == "rotated" || name == "off-frame" {
-                    h.get_by_role_and_label(
-                        egui::accesskit::Role::Button,
-                        tr!("preview.view_selection"),
-                    )
-                    .click();
-                    h.run();
+                    view_selection(&mut h);
                 }
                 if let Some(dir) = &destination {
                     h.render()
@@ -3533,7 +3600,7 @@ mod audit_transport_tests {
             .with_pixels_per_point(scale)
             .build_ui_state(
                 move |ui, s: &mut RowState| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
                     s.bounds = ui.max_rect();
@@ -3943,14 +4010,14 @@ mod audit_transport_tests {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                suite_ui::i18n::set_language("en");
+                j_ui::i18n::set_language("en");
             }
         }
         let _restore = Restore;
         let mut h = row_harness(800.0, 1.0, true, false, None);
         h.state_mut().keymap = Keymap::from_toml("play_stop = \"P\"\nrecord = \"\"").unwrap();
         for language in ["en", "de", "fr"] {
-            suite_ui::i18n::set_language(language);
+            j_ui::i18n::set_language(language);
             for program in [false, true] {
                 h.state_mut().program = program;
                 h.run_steps(2);
@@ -3972,14 +4039,14 @@ mod audit_transport_tests {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                suite_ui::i18n::set_pseudo(false);
-                suite_ui::i18n::set_language("en");
+                j_ui::i18n::set_pseudo(false);
+                j_ui::i18n::set_language("en");
             }
         }
         let _restore = Restore;
         for language in ["de", "fr", "pt-BR", "en"] {
-            suite_ui::i18n::set_language(language);
-            suite_ui::i18n::set_pseudo(language == "en");
+            j_ui::i18n::set_language(language);
+            j_ui::i18n::set_pseudo(language == "en");
             audit_454_transport_hit_bounds_fit_without_intersections();
         }
     }
@@ -4002,10 +4069,10 @@ mod status_summary_tests {
             .with_size([480.0, 540.0])
             .build_ui_state(
                 move |ui, preview: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
-                    preview.status_control(ui, false);
+                    preview.status_label(ui, true);
                 },
                 preview,
             );
@@ -4093,16 +4160,13 @@ mod status_summary_tests {
             .with_size([480.0, 540.0])
             .build_ui_state(
                 move |ui, preview: &mut Preview| {
-                    if suite_ui::test_support::install_theme(ui, &mut fresh) {
+                    if j_ui::test_support::install_theme(ui, &mut fresh) {
                         return;
                     }
-                    preview.status_control(ui, false);
+                    preview.status_label(ui, true);
                 },
                 preview,
             );
-        h.run();
-        h.get_by_role_and_label(egui::accesskit::Role::Button, tr!("preview.status"))
-            .click();
         h.run();
         h.get_by_label(tr!("preview.status_retry")).click();
         h.run();
