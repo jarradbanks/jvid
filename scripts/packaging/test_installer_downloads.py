@@ -48,6 +48,7 @@ def fixture_script(source, local, roaming, url):
     script = script.replace('SetupMutex=jvid-setup', 'SetupMutex=jvid-isolated-model-fixture')
     script = script.replace('SetupIconFile=..\\assets\\jvid.ico',
                             'SetupIconFile={#OutputDir}\\fixture-icon.ico')
+    script = script.replace('..\\assets\\jvid.png', '{#OutputDir}\\fixture-icon.png')
     script = re.sub(r'(?ms)^\[Icons\]\n.*?(?=^\[Run\])', '', script)
     script = re.sub(r'(?ms)^\[Run\]\n.*?(?=^\[Code\])', '', script)
     script = script.replace('{localappdata}\\Programs\\jvid', local + '\\Programs\\jvid')
@@ -148,6 +149,7 @@ class InstallerDownloadTests(unittest.TestCase):
 
     def build_installer(self):
         shutil.copy2(ROOT / 'assets/jvid.ico', self.root / 'fixture-icon.ico')
+        shutil.copy2(ROOT / 'assets/jvid.png', self.root / 'fixture-icon.png')
         definitions = ['#define WhisperRevision "' + '0' * 40 + '"']
         for index, name in enumerate(self.files):
             prefix = '#define Whisper' + str(index)

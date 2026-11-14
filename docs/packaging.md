@@ -50,6 +50,6 @@ python3 scripts/packaging/smoke.py dist/jvid-<version>-linux-x86_64-portable.tar
 python3 -m unittest discover -s scripts/packaging -p 'test_*.py'
 ```
 
-linux needs `patchelf`, `ldd` and `ldconfig`. macos needs xcode's tools and homebrew `ffmpeg@7`. windows needs inno setup 6 and `--ffmpeg-dir` (`fetch_ffmpeg.py` downloads the pinned build). the [package workflow](../.github/workflows/package.yml) is the source of truth.
+linux needs `patchelf`, `ldd` and `ldconfig`. macos needs xcode's tools and homebrew `ffmpeg@7`. windows needs inno setup 6.6 or newer and `--ffmpeg-dir` (`fetch_ffmpeg.py` downloads the pinned build). the [package workflow](../.github/workflows/package.yml) is the source of truth.
 
 release packages link GPL FFmpeg with x264/x265 - see [PLAN.md · Licensing](PLAN.md#licensing). every package carries its third-party notices, and the full corresponding source for each version sits in the matching `sources-v<version>` release.
