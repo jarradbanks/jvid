@@ -180,8 +180,8 @@
     },
     {
       "name": "cc",
-      "version": "1.8.0",
-      "sha256": "6651c9ed80effdc7db0ff72512157f901af5e3549e341e24b1dd4887d836d838"
+      "version": "1.10.0",
+      "sha256": "86e055fa6e3e40ad6187ba25b6855eeb635d5271f8e0f0e1e9a5826b8d75bea0"
     },
     {
       "name": "cexpr",
@@ -400,8 +400,8 @@
     },
     {
       "name": "find-msvc-tools",
-      "version": "0.1.14",
-      "sha256": "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
+      "version": "0.1.15",
+      "sha256": "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
     },
     {
       "name": "flate2",
@@ -1381,29 +1381,29 @@
   ],
   "provenance": {
     "repository": "btbn/ffmpeg-builds/win64-gpl-shared-8.1",
-    "run_id": 40192150700,
-    "build_scripts_revision": "937868360a21d711ec94a33f5591d345ad9b7754",
-    "image_manifest": "sha256:fd3ab3f58b6f61804f68ca038f5872b67755429604aeb5ccb18a1804114e130a",
-    "build_attestation": "sha256:cceb8e202fef13cfbc3eb858b554187f9bded9f8670d90167406d61e05aebdf1",
-    "cache_manifest": "sha256:1bc922a87cc8aeeca1858d79c1484c89a03e9a947dbe6383f085e7572ca9944d",
-    "cache_config": "sha256:40eb405160e48d96fd2b4b186697d69fdd4d558d2a650d4b98dc90e4a5044571",
+    "run_id": 41199749965,
+    "build_scripts_revision": "5031c6f1082414e53688d39e521849905071070d",
+    "image_manifest": "sha256:e73b3c600bccedbf87ec38188fcc97bbe908db4f457cbf75a203e7843fe5ea56",
+    "build_attestation": "sha256:f495819ddc92fdb73b0bb2b0997eccdd25a84da37334f982cc6d096e835e95c3",
+    "cache_manifest": "sha256:952cbf6f3b7d6626115d56e5886a741a8a646aad49e336a383edf86c2b15e83f",
+    "cache_config": "sha256:581dd600667014a27eeadcb7f00ee3be8b4109f6c67b3c9e53fa828d05148a58",
     "build_step": "step95",
-    "llb_digest": "sha256:a8f37bab540e1d79831dbfe598874678b2634e352712dac5738455c2dbbbc194",
+    "llb_digest": "sha256:bb712929345fb57232b8fc62d786c508322069684db956b88b0d979fcbc07192",
     "exec_cache_map": "sha256:60f22467580182dbffd89504e7c4f24becf13b61f7f7b572254ac5194d83931c",
     "cache_record": "sha256:f5e83d6c1491c8814d9c7bd591f9057b46fa6e8548443ddbf3231bec968be891",
-    "cache_layer": "sha256:e767d43e4ec93bbeb5c67e6f29a44f1af6fe32a32b0864cd18e2b333e0ff2a47",
-    "cache_layer_bytes": 99033247,
+    "cache_layer": "sha256:e5f29915ba9d29f4fbf3c2e56bd69973b81c359d593c468cfd34454da84381cb",
+    "cache_layer_bytes": 99071984,
     "registry_path": "opt/cargo/registry/cache/index.crates.io-1949cf8c6b5b557f",
-    "method": "The attested rav1e run_stage operation and its source-cache selector identify step95; BuildKit exec.v0 cache-map serialization followed by sha256(cache-map + @0) selects the cache record and layer. Retained 275 .crate archives match all original registry Cargo.lock checksums except cc 1.2.26, replaced by cc 1.8.0 plus find-msvc-tools 0.1.14 and shlex 2.0.1. No other original package version changed. These extra packages are build tools; all original runtime crate versions are retained.",
+    "method": "The monthly upstream BuildKit record retains the exact exported image manifest and provenance predicate. Its step95 rav1e operation plus source-cache selector and byte-identical monthly base ancestry select the exec.v0 cache record and October 29 layer. Independently rehashed all 275 retained .crate archives; all original runtime crate versions/bytes remain unchanged, with cc upgraded to 1.10.0 and find-msvc-tools 0.1.15 (shlex 2.0.1 remains). These extra packages are build tools.",
     "original_lock_sha256": "4dc33950691aaf914acc9fd06b533170b73f93b3de5c0bb9abe48a7ed9276401",
     "build_lock_status": "Reconstructed from original Cargo.lock and exact cached crate inventory; original post-update Cargo.lock was deleted by run_stage. Kept separately and never described as an original receipt.",
     "changes": {
       "cc": {
         "from": "1.2.26",
-        "to": "1.8.0"
+        "to": "1.10.0"
       },
       "added": [
-        "find-msvc-tools 0.1.14",
+        "find-msvc-tools 0.1.15",
         "shlex 2.0.1"
       ]
     }
