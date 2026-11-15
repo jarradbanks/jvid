@@ -3,7 +3,12 @@
 `jvid-app` has two explicit developer features. `hot-reload` connects Dioxus
 Devtools and calls the editor frame through Subsecond 0.7. `debug-ui` installs
 the shared `j-ui-debug` egui plugin when `JUI_DEBUG=1` and
-`JUI_DEBUG_CONNECTION` names a unique absolute connection file. Both integrations
+`JUI_DEBUG_CONNECTION` names a unique absolute connection file. `JUI_DEBUG_PROFILE`
+must name the disposable profile's absolute directory; config, data, cache,
+recovery, themes, logs, models and window persistence stay below it on every OS.
+Missing, invalid or unwritable opted-in profiles fail startup without a fallback
+to installed folders. A portable package marker rejects developer mode.
+Both integrations
 are compiled out unless debug assertions are enabled, including release builds
 with both features selected. Neither feature changes the normal app's profile,
 palette, persistence, editor shortcuts or project recovery.

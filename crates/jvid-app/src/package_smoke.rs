@@ -9,6 +9,7 @@ use jvid_core::time::{Rate, Time};
 use jvid_media::{decode::VideoDecoder, encode::Encoder};
 
 pub fn run(output: &Path) -> Result<(), Box<dyn Error>> {
+    jvid_paths::check_developer_profile()?;
     jvid_paths::check_portable_writable()?;
     std::fs::create_dir_all(output)?;
     let info = jvid_media::ffmpeg::init()?;

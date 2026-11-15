@@ -162,6 +162,8 @@ fn view_title(id: &str) -> &'static str {
 }
 
 pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
+    let profile_root =
+        jvid_paths::profile_root().map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
     let startup_path = std::env::args_os().nth(1).map(PathBuf::from);
     // Here rather than in App::new, so tests and embedders pick their own language.
     j_ui::i18n::set_language(j_ui::i18n::resolve(&settings.language));
@@ -173,7 +175,7 @@ pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
             .with_inner_size([1280.0, 720.0])
             .with_min_inner_size([960.0, 600.0]),
         renderer: eframe::Renderer::Wgpu,
-        persistence_path: jvid_paths::portable_root()
+        persistence_path: profile_root
             .and_then(|_| jvid_paths::config_dir().map(|d| d.join("window.ron"))),
         ..Default::default()
     };

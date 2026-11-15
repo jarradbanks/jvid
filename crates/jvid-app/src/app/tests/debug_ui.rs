@@ -92,6 +92,7 @@ fn native_targets_follow_clip_identity_across_resize_delete_and_undo() {
             ])
             .env(CHILD, "1")
             .env("JUI_DEBUG", "1")
+            .env("JUI_DEBUG_PROFILE", dir.path().join("profile"))
             .env("JUI_DEBUG_CONNECTION", dir.path().join("connection.json"))
             .output()
             .unwrap();
@@ -106,6 +107,20 @@ fn native_targets_follow_clip_identity_across_resize_delete_and_undo() {
     if !gpu() {
         return;
     }
+    jvid_paths::check_developer_profile().unwrap();
+    let profile = PathBuf::from(std::env::var_os("JUI_DEBUG_PROFILE").unwrap());
+    assert_eq!(
+        crate::settings_file::path(),
+        Some(profile.join("config/settings.toml"))
+    );
+    assert_eq!(
+        crate::settings_file::themes_dir(),
+        Some(profile.join("config/themes"))
+    );
+    assert_eq!(
+        crate::autosave::untitled(),
+        Some(profile.join("data/autosave/Untitled.jvid"))
+    );
     let mut harness = builder([1280.0, 720.0], 1.0).wgpu().build_eframe(|cc| {
         j_ui_debug::install_from_env(&cc.egui_ctx, "jvid-test").unwrap();
         App::new(cc, &Default::default())

@@ -36,7 +36,7 @@ j-ui-debug = { git = "https://github.com/jarradbanks/j-ui.git", rev = "1ab837487
 
 [features]
 gpl-ffmpeg = ["jvid-media/gpl-ffmpeg"]
-debug-ui = ["dep:j-ui-debug"]
+debug-ui = ["dep:j-ui-debug", "jvid-paths/debug-ui"]
 hot-reload = ["dep:subsecond", "dep:dioxus-devtools"]
 
 [dev-dependencies]

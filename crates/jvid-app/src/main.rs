@@ -27,6 +27,9 @@ fn main() -> eframe::Result {
             }
         }
     }
+    #[cfg(all(debug_assertions, feature = "debug-ui"))]
+    jvid_paths::check_developer_profile()
+        .map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
     #[cfg(all(debug_assertions, feature = "hot-reload"))]
     dioxus_devtools::connect_subsecond();
     if let Err(error) = jvid_paths::check_portable_writable() {
