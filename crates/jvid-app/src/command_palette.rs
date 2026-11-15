@@ -148,11 +148,15 @@ impl CommandPalette {
                 }
                 let moved = up || down || search.changed();
                 let mut list_ui = ui.new_child(UiBuilder::new().max_rect(list));
+                // Rows paint and hit-test only inside the list, even when it is shorter than a row.
+                list_ui.shrink_clip_rect(list);
+                // ScrollArea pads scroll targets by this spacing, which would push a lone row off.
+                list_ui.spacing_mut().item_spacing.y = 0.0;
                 egui::ScrollArea::vertical()
                     .max_height(list.height())
+                    .min_scrolled_height(0.0)
                     .auto_shrink(false)
                     .show(&mut list_ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
                         if found.is_empty() {
                             ui.add_space(space::S16);
                             ui.vertical_centered(|ui| {
@@ -645,7 +649,13 @@ mod tests {
 
     #[test]
     fn layout_keeps_40pt_rows_inside_a_fixed_frame_and_reaches_the_last_result() {
-        for size in [[1280.0, 720.0], [1920.0, 1080.0], [640.0, 400.0]] {
+        for size in [
+            [1280.0, 720.0],
+            [1920.0, 1080.0],
+            [640.0, 400.0],
+            [320.0, 240.0],
+            [240.0, 240.0],
+        ] {
             for scale in [1.0, 1.5] {
                 let mut h = sized_harness("", size, scale);
                 h.run_steps(4);
@@ -670,7 +680,16 @@ mod tests {
                 let visible = first
                     .iter()
                     .filter(|(_, r)| r.bottom() <= list_bottom + 0.5);
-                assert!(visible.count() >= 2, "{at}");
+                // Small windows fit one 40pt row: list = 192 - 56 - 40 - 16 - 40.
+                let fits = if size[1] > 240.0 { 2 } else { 1 };
+                assert!(visible.count() >= fits, "{at}");
+                // The row under the footer is clipped: clicking the footer dispatches nothing.
+                let below = egui::pos2(area.center().x, list_bottom + 4.0);
+                h.hover_at(below);
+                h.drag_at(below);
+                h.drop_at(below);
+                h.run_steps(2);
+                assert!(h.state().2.is_empty(), "{at}: footer click hit a row");
 
                 h.key_press(Key::ArrowUp);
                 h.run_steps(3);
