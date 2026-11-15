@@ -1,13 +1,22 @@
 //! Search registered actions, then return an ID to the app's existing action executor.
 //! This owns only temporary view state; opening it never changes the focused dock panel.
 
-use egui::{Id, Key, Modifiers, Ui};
-use j_ui::theme;
-use j_ui::tokens::{radius, size, space};
-use j_ui::widgets::TextInput;
+use egui::{Id, Key, Modifiers, Rect, Response, Sense, Ui, UiBuilder, vec2};
+use j_ui::theme::{self, icon};
+use j_ui::tokens::{color, radius, space};
+use j_ui::widgets::{Button, fit_text, focus_ring, hover_full, paint_icon};
 
 use crate::i18n::{CATALOG, tr};
 use crate::keymap::{ACTIONS, Applicability, Keymap};
+use crate::timeline::menus;
+
+/// The approved outer size; smaller viewports shrink it, never the 40pt rows.
+const MAX_SIZE: egui::Vec2 = vec2(720.0, 560.0);
+const HEADER: f32 = 56.0;
+const FOOTER: f32 = 40.0;
+/// Result rows and the search field share one height.
+const ROW: f32 = 40.0;
+const KEYCAP: f32 = 20.0;
 
 #[derive(Default)]
 pub struct CommandPalette {
@@ -98,25 +107,32 @@ impl CommandPalette {
         }
         let frame = egui::Frame::popup(ui.style())
             .corner_radius(radius::DIALOG)
-            .inner_margin(space::S16);
-        let budget = (ui.ctx().content_rect().size()
-            - egui::Vec2::splat(2.0 * space::S8)
-            - frame.total_margin().sum())
-        .max(egui::Vec2::ZERO);
-        let width = budget.x.min(560.0);
+            .inner_margin(0);
+        let size = (ui.ctx().content_rect().size() - egui::Vec2::splat(2.0 * space::S24))
+            .min(MAX_SIZE)
+            .max(egui::Vec2::ZERO);
         let mut picked = None;
+        let mut dismiss = false;
         let modal = egui::Modal::new(Id::new("command_palette"))
             .frame(frame)
             .show(ui.ctx(), |ui| {
-                ui.set_width(width);
-                let top = ui.cursor().top();
-                ui.label(egui::RichText::new(tr!("palette.title")).font(theme::headline()));
-                ui.add_space(space::S8);
-                let search = ui.add(TextInput::search(&mut self.query).width(width));
-                if self.focus_search {
-                    search.request_focus();
-                    self.focus_search = false;
-                }
+                let (outer, _) = ui.allocate_exact_size(size, Sense::hover());
+                let header = Rect::from_min_size(outer.min, vec2(size.x, HEADER));
+                let field = Rect::from_min_size(
+                    outer.min + vec2(space::S16, HEADER),
+                    vec2(size.x - 2.0 * space::S16, ROW),
+                )
+                .intersect(outer);
+                let footer = Rect::from_min_max(
+                    egui::pos2(outer.left(), (outer.bottom() - FOOTER).max(outer.top())),
+                    outer.max,
+                );
+                let list = Rect::from_x_y_ranges(
+                    outer.left() + space::S8..=outer.right() - space::S8,
+                    (field.bottom() + space::S16).min(footer.top())..=footer.top(),
+                );
+                dismiss = paint_header(ui, header);
+                let search = self.search(ui, field, map);
                 if search.changed() {
                     self.selected = 0;
                 }
@@ -130,49 +146,279 @@ impl CommandPalette {
                         self.selected = (self.selected + found.len() - 1) % found.len();
                     }
                 }
-                ui.add_space(space::S8);
-                let height = (budget.y - (ui.cursor().top() - top)).clamp(0.0, 400.0);
+                let moved = up || down || search.changed();
+                let mut list_ui = ui.new_child(UiBuilder::new().max_rect(list));
                 egui::ScrollArea::vertical()
-                    .max_height(height)
-                    .min_scrolled_height(0.0)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
+                    .max_height(list.height())
+                    .auto_shrink(false)
+                    .show(&mut list_ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         if found.is_empty() {
-                            ui.label(tr!("palette.no_results"));
+                            ui.add_space(space::S16);
+                            ui.vertical_centered(|ui| {
+                                ui.add(egui::Label::new(tr!("palette.no_results")).wrap())
+                            });
                         }
                         for (row, &index) in found.iter().enumerate() {
-                            let action = &ACTIONS[index];
-                            let available = applicability(action.id);
                             let selected = row == self.selected;
-                            let shortcut = map.bindings.get(index).copied().flatten();
-                            let shortcut =
-                                shortcut.map_or_else(String::new, |s| ui.ctx().format_shortcut(&s));
-                            let mut button = egui::Button::selectable(selected, action.name())
-                                .wrap()
-                                .min_size(egui::vec2(ui.available_width(), size::CONTROL));
-                            if !shortcut.is_empty() {
-                                button = button.shortcut_text(shortcut);
-                            }
-                            let response = ui.add_enabled(available.is_enabled(), button);
-                            if selected && (up || down || search.changed()) {
-                                response.scroll_to_me(Some(egui::Align::Center));
+                            let available = applicability(ACTIONS[index].id);
+                            let response = result_row(ui, map, index, available, selected);
+                            if selected && moved {
+                                response.scroll_to_me(None);
                             }
                             if available.is_enabled() && (response.clicked() || (enter && selected))
                             {
-                                picked = Some(action.id);
-                            }
-                            if let Some(reason) = available.reason() {
-                                ui.add(egui::Label::new(reason).wrap());
+                                picked = Some(ACTIONS[index].id);
                             }
                         }
                     });
+                let selected = found
+                    .get(self.selected)
+                    .map_or("", |&i| category(ACTIONS[i].id));
+                paint_footer(ui, footer, selected);
             });
+        if dismiss {
+            self.close(ui.ctx());
+            return None;
+        }
         if picked.is_some() || modal.should_close() {
             self.close(ui.ctx());
             self.pending_action = picked;
         }
         None
     }
+}
+
+impl CommandPalette {
+    /// A 40pt search field: j-ui's TextInput is fixed at control height, so its frame is
+    /// repainted here around a frameless TextEdit with the same colours.
+    fn search(&mut self, ui: &mut Ui, rect: Rect, map: &Keymap) -> Response {
+        let painter = ui.painter().clone();
+        let frame = painter.add(egui::Shape::Noop);
+        paint_icon(
+            &painter,
+            egui::pos2(rect.left() + space::S12 + space::S8, rect.center().y),
+            icon::SEARCH,
+            color::ink_3(),
+        );
+        let keys = keycaps(
+            ui,
+            rect.right() - space::S12,
+            rect.center().y,
+            &map.shortcut("command_palette"),
+        );
+        let text = Rect::from_x_y_ranges(
+            rect.left() + space::S12 + space::S16 + space::S8..=keys - space::S8,
+            rect.y_range(),
+        );
+        let response = ui.put(
+            text,
+            egui::TextEdit::singleline(&mut self.query)
+                .frame(egui::Frame::NONE)
+                .margin(0)
+                .vertical_align(egui::Align::Center)
+                .font(theme::body())
+                .text_color(color::ink())
+                .hint_text(tr!("palette.search")),
+        );
+        if self.focus_search {
+            response.request_focus();
+            self.focus_search = false;
+        }
+        let focused = response.has_focus();
+        let border = if focused {
+            color::blue()
+        } else {
+            color::border_strong()
+        };
+        let mut shapes = vec![
+            egui::Shape::rect_filled(rect, radius::CONTROL, color::field()),
+            egui::Shape::rect_stroke(
+                rect,
+                radius::CONTROL,
+                theme::hairline(ui.ctx(), border),
+                egui::StrokeKind::Inside,
+            ),
+        ];
+        if focused {
+            shapes.push(focus_ring(rect, radius::CONTROL));
+        }
+        painter.set(frame, egui::Shape::Vec(shapes));
+        response
+    }
+}
+
+/// Title and close button; returns true when the close button was clicked.
+fn paint_header(ui: &mut Ui, rect: Rect) -> bool {
+    let title = fit_text(
+        ui,
+        tr!("palette.title"),
+        theme::headline(),
+        color::ink(),
+        rect.width() - 3.0 * space::S16 - space::S24,
+    );
+    let pos = egui::pos2(
+        rect.left() + space::S16,
+        rect.center().y - title.size().y / 2.0,
+    );
+    j_ui::widgets::paint_fit(ui, pos, title, color::ink());
+    let close = Rect::from_center_size(
+        egui::pos2(rect.right() - space::S16 - space::S12, rect.center().y),
+        egui::Vec2::splat(space::S24),
+    );
+    ui.put(close, Button::icon(icon::X, tr!("palette.close")))
+        .clicked()
+}
+
+/// One 40pt result: name over category or disabled reason, shortcut keycaps on the right.
+/// Hover and selection only tint the background; no accent strip.
+fn result_row(
+    ui: &mut Ui,
+    map: &Keymap,
+    index: usize,
+    available: Applicability,
+    selected: bool,
+) -> Response {
+    let action = &ACTIONS[index];
+    let sense = if available.is_enabled() {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), sense);
+    let shortcut = map
+        .bindings
+        .get(index)
+        .copied()
+        .flatten()
+        .map_or_else(String::new, |s| ui.ctx().format_shortcut(&s));
+    let detail = available.reason().unwrap_or_else(|| category(action.id));
+    let label = [action.name(), detail, &shortcut].join(" ");
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            available.is_enabled(),
+            selected,
+            label.trim(),
+        )
+    });
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    if selected || response.hovered() {
+        ui.painter()
+            .rect_filled(rect, radius::CONTROL, color::border());
+    }
+    if response.has_focus() {
+        ui.painter().add(focus_ring(rect, radius::CONTROL));
+    }
+    let keys = keycaps(ui, rect.right() - space::S12, rect.center().y, &shortcut);
+    let width = keys - space::S16 - (rect.left() + space::S12);
+    let ink = if available.is_enabled() {
+        color::ink()
+    } else {
+        color::ink_3()
+    };
+    let name = fit_text(ui, action.name(), theme::body(), ink, width);
+    let detail = fit_text(ui, detail, theme::small(), color::ink_3(), width);
+    let top = rect.center().y - (name.size().y + detail.size().y) / 2.0;
+    let left = rect.left() + space::S12;
+    let elided = name.elided || detail.elided;
+    let full = format!("{}\n{}", name.text(), detail.text());
+    ui.painter()
+        .galley(egui::pos2(left, top), name.clone(), ink);
+    ui.painter().galley(
+        egui::pos2(left, top + name.size().y),
+        detail,
+        color::ink_3(),
+    );
+    if elided {
+        return response.on_hover_text(full);
+    }
+    hover_full(response, &name)
+}
+
+/// Paints `shortcut` as keycaps ending at `right`; returns their left edge.
+/// shortcut: splits egui's formatted text on '+', so a bare Plus key shows as one empty cap pair; upgrade if Plus is ever bound by default.
+fn keycaps(ui: &Ui, right: f32, center_y: f32, shortcut: &str) -> f32 {
+    let mut x = right;
+    for key in shortcut
+        .split('+')
+        .rev()
+        .filter(|k| !shortcut.is_empty() && !k.is_empty())
+    {
+        let galley = ui
+            .painter()
+            .layout_no_wrap(key.into(), theme::small(), color::ink_2());
+        let width = (galley.size().x + 2.0 * space::S4 + 2.0).max(KEYCAP);
+        let rect = Rect::from_min_max(
+            egui::pos2(x - width, center_y - KEYCAP / 2.0),
+            egui::pos2(x, center_y + KEYCAP / 2.0),
+        );
+        let painter = ui.painter();
+        painter.rect_stroke(
+            rect,
+            radius::SMALL,
+            theme::hairline(ui.ctx(), color::border_strong()),
+            egui::StrokeKind::Inside,
+        );
+        painter.galley(rect.center() - galley.size() / 2.0, galley, color::ink_2());
+        x = rect.left() - space::S4;
+    }
+    x
+}
+
+/// Keyboard hints on the left, the selected result's category on the right.
+fn paint_footer(ui: &Ui, rect: Rect, category: &str) {
+    let painter = ui.painter();
+    let line = theme::hairline(ui.ctx(), color::border());
+    painter.hline(rect.x_range(), rect.top(), line);
+    let side = rect.shrink2(vec2(space::S16, 0.0));
+    let category = fit_text(
+        ui,
+        category,
+        theme::small(),
+        color::ink_3(),
+        side.width() / 3.0,
+    );
+    let hints = fit_text(
+        ui,
+        tr!("palette.hints"),
+        theme::small(),
+        color::ink_3(),
+        side.width() - category.size().x - space::S16,
+    );
+    let y = rect.center().y;
+    let hint_pos = egui::pos2(side.left(), y - hints.size().y / 2.0);
+    let category_pos = egui::pos2(
+        side.right() - category.size().x,
+        y - category.size().y / 2.0,
+    );
+    j_ui::widgets::paint_fit(ui, hint_pos, hints, color::ink_3());
+    j_ui::widgets::paint_fit(ui, category_pos, category, color::ink_3());
+}
+
+/// The group a result belongs to, as the menus that hold it name it.
+fn category(id: &str) -> &'static str {
+    if id.starts_with("workspace_") || ["maximize_panel", "reset_layout"].contains(&id) {
+        return tr!("workspace.menu");
+    }
+    if id.starts_with("focus_") || id == "command_palette" {
+        return tr!("palette.navigation");
+    }
+    if id.starts_with("media_") {
+        return tr!("panel.media");
+    }
+    if menus::FILE.contains(&id) {
+        return tr!("palette.project");
+    }
+    if let Some((label, _)) = menus::EDIT_GROUPS.iter().find(|(_, ids)| ids.contains(&id)) {
+        return CATALOG.tr(label);
+    }
+    if menus::EDIT.contains(&id) {
+        return tr!("menu.edit");
+    }
+    tr!("menu.timeline")
 }
 
 /// Resolve names, aliases and bindings each frame; never cache a locale or default key.
@@ -210,7 +456,7 @@ fn matches(query: &str, map: &Keymap) -> Vec<usize> {
 mod tests {
     use super::*;
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
 
     #[test]
     fn search_uses_aliases_ids_and_current_custom_or_unbound_shortcuts() {
@@ -231,29 +477,40 @@ mod tests {
     }
 
     fn harness(query: &str) -> Harness<'static, (CommandPalette, Keymap, Vec<&'static str>)> {
+        sized_harness(query, [800.0, 600.0], 1.0)
+    }
+
+    fn sized_harness(
+        query: &str,
+        size: [f32; 2],
+        scale: f32,
+    ) -> Harness<'static, (CommandPalette, Keymap, Vec<&'static str>)> {
         let mut palette = CommandPalette::default();
         palette.open(&egui::Context::default());
         palette.query = query.into();
         let mut fresh = true;
-        Harness::new_ui_state(
-            move |ui, (palette, map, fired)| {
-                if !j_ui::test_support::install_theme(ui, &mut fresh)
-                    && let Some(id) = palette.show(ui, map, |id| {
-                        Applicability::when(id != "export", "export.nothing")
-                    })
-                {
-                    fired.push(id);
-                }
-            },
-            (palette, Keymap::default(), Vec::new()),
-        )
+        Harness::builder()
+            .with_size(size)
+            .with_pixels_per_point(scale)
+            .build_ui_state(
+                move |ui, (palette, map, fired)| {
+                    if !j_ui::test_support::install_theme(ui, &mut fresh)
+                        && let Some(id) = palette.show(ui, map, |id| {
+                            Applicability::when(id != "export", "export.nothing")
+                        })
+                    {
+                        fired.push(id);
+                    }
+                },
+                (palette, Keymap::default(), Vec::new()),
+            )
     }
 
     #[test]
     fn disabled_enter_stays_open_navigation_wraps_and_escape_cancels() {
         let mut h = harness("export");
         h.run_steps(3);
-        h.get_by_label(tr!("export.nothing"));
+        h.get_by_label_contains(tr!("export.nothing"));
         h.key_press(Key::ArrowDown);
         h.run();
         assert_eq!(
@@ -295,10 +552,12 @@ mod tests {
         let shortcut = h
             .ctx
             .format_shortcut(&crate::keymap::parse("Ctrl+Shift+F9").unwrap());
-        h.get_by_label(&format!("{name} {shortcut}"));
+        let row = h.get_by_label_contains(name);
+        assert!(row.accesskit_node().label().unwrap().ends_with(&shortcut));
         h.state_mut().1 = Keymap::from_toml("mark_in = \"\"").unwrap();
         h.run();
-        h.get_by_label(name);
+        let row = h.get_by_label_contains(name);
+        assert!(!row.accesskit_node().label().unwrap().contains(&shortcut));
         assert!(h.state().0.is_open());
     }
 
@@ -369,6 +628,111 @@ mod tests {
         }
     }
 
+    /// The rendered result rows, top to bottom, as (label, rect).
+    fn rows(h: &Harness<'_, (CommandPalette, Keymap, Vec<&'static str>)>) -> Vec<(String, Rect)> {
+        let mut rows: Vec<_> = h
+            .get_all_by_role(egui::accesskit::Role::Button)
+            .filter(|n| {
+                n.accesskit_node()
+                    .label()
+                    .is_some_and(|l| l != tr!("palette.close"))
+            })
+            .map(|n| (n.accesskit_node().label().unwrap(), n.rect()))
+            .collect();
+        rows.sort_by(|a, b| a.1.top().total_cmp(&b.1.top()));
+        rows
+    }
+
+    #[test]
+    fn layout_keeps_40pt_rows_inside_a_fixed_frame_and_reaches_the_last_result() {
+        for size in [[1280.0, 720.0], [1920.0, 1080.0], [640.0, 400.0]] {
+            for scale in [1.0, 1.5] {
+                let mut h = sized_harness("", size, scale);
+                h.run_steps(4);
+                let screen = h.ctx.content_rect();
+                let area = h
+                    .ctx
+                    .memory(|m| m.area_rect(Id::new("command_palette")))
+                    .unwrap();
+                let at = format!("{size:?}@{scale}");
+                assert!(screen.contains_rect(area), "{at}: {area:?}");
+                let wanted = (screen.size() - egui::Vec2::splat(2.0 * space::S24)).min(MAX_SIZE);
+                // The popup frame adds up to a 1pt stroke on each side.
+                let extra = area.size() - wanted;
+                assert!((0.0..=2.5).contains(&extra.min_elem()), "{at}: {area:?}");
+                assert!(extra.max_elem() <= 2.5, "{at}: {area:?}");
+                let first = rows(&h);
+                assert!(
+                    first.iter().all(|(_, r)| (r.height() - ROW).abs() < 0.5),
+                    "{at}"
+                );
+                let list_bottom = area.bottom() - FOOTER;
+                let visible = first
+                    .iter()
+                    .filter(|(_, r)| r.bottom() <= list_bottom + 0.5);
+                assert!(visible.count() >= 2, "{at}");
+
+                h.key_press(Key::ArrowUp);
+                h.run_steps(3);
+                assert_eq!(h.state().0.selected, ACTIONS.len() - 1);
+                let last = ACTIONS[ACTIONS.len() - 1].name();
+                let rect = h.get_by_label_contains(last).rect();
+                assert!(rect.top() >= area.top() + HEADER + ROW, "{at}: {rect:?}");
+                assert!(rect.bottom() <= list_bottom + 0.5, "{at}: {rect:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn empty_results_are_explained_and_enter_dispatches_nothing() {
+        let mut h = harness("NoSuchCommand");
+        h.run_steps(3);
+        h.get_by_label(tr!("palette.no_results"));
+        h.key_press(Key::Enter);
+        h.run_steps(2);
+        assert!(h.state().0.is_open());
+        assert!(h.state().2.is_empty());
+    }
+
+    #[test]
+    fn close_button_dismisses_without_dispatch() {
+        let mut h = harness("");
+        h.run_steps(3);
+        h.get_by_label(tr!("palette.close")).click();
+        h.run_steps(2);
+        assert!(!h.state().0.is_open());
+        assert!(h.state().2.is_empty());
+    }
+
+    /// Selected and hovered rows tint only their background: the 3pt strip at a row's left
+    /// edge matches the row's middle, so no accent is drawn.
+    #[test]
+    fn selected_and_hovered_rows_have_no_left_accent() {
+        if !j_ui::test_support::gpu() {
+            return;
+        }
+        for scale in [1.0, 1.5] {
+            let mut h = sized_harness("mark", [1280.0, 720.0], scale);
+            h.run_steps(4);
+            let found = rows(&h);
+            let hovered = found[1].1;
+            h.hover_at(hovered.center());
+            h.run_steps(2);
+            let image = h.render().unwrap();
+            for (_, rect) in &found[..2] {
+                let pixel = |x: f32| {
+                    let p = (egui::pos2(x, rect.top() + 4.0) * scale).round();
+                    *image.get_pixel(p.x as u32, p.y as u32)
+                };
+                let middle = pixel(rect.left() + space::S8 + 1.0);
+                for x in [rect.left() + 1.0, rect.left() + 2.0] {
+                    assert_eq!(pixel(x), middle, "{scale}: {rect:?}");
+                }
+                assert_ne!(middle, pixel(rect.left() - 4.0), "row is tinted");
+            }
+        }
+    }
+
     #[test]
     #[ignore = "renders review artifacts; run explicitly with JVID_PALETTE_ARTIFACT_DIR"]
     fn render_review_artifacts() {
@@ -377,12 +741,24 @@ mod tests {
             std::env::var_os("JVID_PALETTE_ARTIFACT_DIR").expect("artifact directory"),
         );
         std::fs::create_dir_all(&directory).unwrap();
-        for (size, query, name) in [
-            ([640.0, 400.0], "export", "command-palette-disabled.png"),
-            ([320.0, 240.0], "", "command-palette-narrow.png"),
+        for (size, scale, query, name) in [
+            ([1280.0, 720.0], 1.0, "", "command-palette-1280.png"),
+            ([1920.0, 1080.0], 1.5, "", "command-palette-1920@1.5.png"),
+            (
+                [640.0, 400.0],
+                1.0,
+                "export",
+                "command-palette-disabled.png",
+            ),
+            ([320.0, 240.0], 1.0, "", "command-palette-narrow.png"),
+            (
+                [1280.0, 720.0],
+                1.0,
+                "NoSuchCommand",
+                "command-palette-empty.png",
+            ),
         ] {
-            let mut h = harness(query);
-            h.set_size(size.into());
+            let mut h = sized_harness(query, size, scale);
             h.run_steps(4);
             h.render().unwrap().save(directory.join(name)).unwrap();
         }
@@ -412,7 +788,7 @@ mod tests {
             );
             h.state_mut().0.query = "render".into();
             h.run();
-            h.get_by_label(tr!("export.nothing"));
+            h.get_by_label_contains(tr!("export.nothing"));
             assert_eq!(
                 Applicability::Disabled("export.nothing").reason(),
                 CATALOG.get("export.nothing")

@@ -159,6 +159,11 @@ unsupported_codec = "unsupported codec: {codec}"
 
 # The app bar menus.
 [menu]
+clip_edits = "Clip Edits"
+in_out = "In/Out"
+markers = "Markers"
+annotations = "Annotations"
+clip_settings = "Clip Settings"
 reset_layout = "Reset Panel Layout"
 project_tooltip = "New, open and save"
 new_project = "New Project"
@@ -1276,6 +1281,11 @@ no_audio = "No Audio to Transcribe"
 no_audio_help = "Add a clip with audio to the timeline to start a transcript."
 
 [palette]
+search = "Search commands…"
+project = "Project"
+navigation = "Navigation"
+close = "Close Palette"
+hints = "Up/Down Navigate    Enter Run    Esc Close"
 title = "Command Palette"
 no_results = "No matching commands"
 focus_timeline = "Focus the timeline to use this command"

@@ -151,6 +151,11 @@ no_media = "inga video- eller ljudströmmar"
 unsupported_codec = "kodek som inte stöds: {codec}"
 
 [menu]
+clip_edits = "Klippredigering"
+in_out = "In/Ut"
+markers = "Markörer"
+annotations = "Anteckningar"
+clip_settings = "Klippinställningar"
 reset_layout = "Återställ panellayout"
 project_tooltip = "Skapa, öppna och spara"
 new_project = "Nytt projekt"
@@ -1166,6 +1171,11 @@ no_audio = "Inget ljud att transkribera"
 no_audio_help = "Lägg till ett klipp med ljud på tidslinjen för att börja transkribera."
 
 [palette]
+search = "Sök kommandon…"
+project = "Projekt"
+navigation = "Navigering"
+close = "Stäng Paletten"
+hints = "Up/Down Navigera    Enter Kör    Esc Stäng"
 title = "Kommandopalett"
 no_results = "Inga matchande kommandon"
 focus_timeline = "Aktivera tidslinjen för att använda kommandot"

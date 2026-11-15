@@ -153,6 +153,11 @@ no_media = "video veya ses akışı yok"
 unsupported_codec = "desteklenmeyen kodek: {codec}"
 
 [menu]
+clip_edits = "Klip Düzenlemeleri"
+in_out = "Giriş/Çıkış"
+markers = "İşaretçiler"
+annotations = "Açıklamalar"
+clip_settings = "Klip Ayarları"
 reset_layout = "Panel Düzenini Sıfırla"
 project_tooltip = "Yeni proje, açma ve kaydetme"
 new_project = "Yeni Proje"
@@ -1169,6 +1174,11 @@ no_audio = "Yazıya Dökülecek Ses Yok"
 no_audio_help = "Döküm başlatmak için zaman çizelgesine ses içeren bir klip ekleyin."
 
 [palette]
+search = "Komut ara…"
+project = "Proje"
+navigation = "Gezinme"
+close = "Paleti Kapat"
+hints = "Up/Down Gezin    Enter Çalıştır    Esc Kapat"
 title = "Komut Paleti"
 no_results = "Eşleşen komut yok"
 focus_timeline = "Bu komutu kullanmak için zaman çizelgesini etkinleştirin"

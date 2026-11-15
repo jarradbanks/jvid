@@ -151,6 +151,11 @@ no_media = "aucun flux vidéo ni audio"
 unsupported_codec = "codec non pris en charge : {codec}"
 
 [menu]
+clip_edits = "Montage du Clip"
+in_out = "Entrée/Sortie"
+markers = "Marqueurs"
+annotations = "Annotations"
+clip_settings = "Réglages du Clip"
 reset_layout = "Réinitialiser la disposition des panneaux"
 project_tooltip = "Créer, ouvrir et enregistrer"
 new_project = "Nouveau projet"
@@ -1189,6 +1194,11 @@ no_audio = "Aucun audio à transcrire"
 no_audio_help = "Ajoutez un clip avec du son à la timeline pour commencer une transcription."
 
 [palette]
+search = "Rechercher des commandes…"
+project = "Projet"
+navigation = "Navigation"
+close = "Fermer la Palette"
+hints = "Up/Down Parcourir    Entrée Exécuter    Échap Fermer"
 title = "Palette de Commandes"
 no_results = "Aucune commande correspondante"
 focus_timeline = "Activez la timeline pour utiliser cette commande"

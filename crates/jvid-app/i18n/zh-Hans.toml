@@ -158,6 +158,11 @@ no_media = "没有视频流或音频流"
 unsupported_codec = "不支持的编解码器：{codec}"
 
 [menu]
+clip_edits = "剪辑编辑"
+in_out = "入点/出点"
+markers = "标记"
+annotations = "注释"
+clip_settings = "剪辑设置"
 reset_layout = "重置面板布局"
 project_tooltip = "新建、打开和保存"
 new_project = "新建项目"
@@ -1199,6 +1204,11 @@ no_audio = "没有可转录的音频"
 no_audio_help = "将带有音频的片段添加到时间线以开始转录。"
 
 [palette]
+search = "搜索命令…"
+project = "项目"
+navigation = "导航"
+close = "关闭命令面板"
+hints = "Up/Down 导航    Enter 运行    Esc 关闭"
 title = "命令面板"
 no_results = "没有匹配的命令"
 focus_timeline = "请先激活时间线以使用此命令"

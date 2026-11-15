@@ -151,6 +151,11 @@ no_media = "sem fluxos de vídeo ou áudio"
 unsupported_codec = "codec sem suporte: {codec}"
 
 [menu]
+clip_edits = "Edição de Clipes"
+in_out = "Entrada/Saída"
+markers = "Marcadores"
+annotations = "Anotações"
+clip_settings = "Configurações do Clipe"
 reset_layout = "Redefinir layout dos painéis"
 project_tooltip = "Criar, abrir e salvar"
 new_project = "Novo projeto"
@@ -1182,6 +1187,11 @@ no_audio = "Nenhum áudio para transcrever"
 no_audio_help = "Adicione um clipe com áudio à linha do tempo para iniciar uma transcrição."
 
 [palette]
+search = "Buscar comandos…"
+project = "Projeto"
+navigation = "Navegação"
+close = "Fechar Paleta"
+hints = "Up/Down Navegar    Enter Executar    Esc Fechar"
 title = "Paleta de Comandos"
 no_results = "Nenhum comando correspondente"
 focus_timeline = "Ative a linha do tempo para usar este comando"

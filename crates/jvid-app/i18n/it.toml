@@ -151,6 +151,11 @@ no_media = "nessun flusso video o audio"
 unsupported_codec = "codec non supportato: {codec}"
 
 [menu]
+clip_edits = "Modifica Clip"
+in_out = "Ingresso/Uscita"
+markers = "Marcatori"
+annotations = "Annotazioni"
+clip_settings = "Impostazioni Clip"
 reset_layout = "Ripristina disposizione pannelli"
 project_tooltip = "Crea, apri e salva"
 new_project = "Nuovo progetto"
@@ -1178,6 +1183,11 @@ no_audio = "Nessun audio da trascrivere"
 no_audio_help = "Aggiungi una clip con audio alla timeline per avviare una trascrizione."
 
 [palette]
+search = "Cerca comandi…"
+project = "Progetto"
+navigation = "Navigazione"
+close = "Chiudi Tavolozza"
+hints = "Up/Down Naviga    Invio Esegui    Esc Chiudi"
 title = "Tavolozza dei Comandi"
 no_results = "Nessun comando corrispondente"
 focus_timeline = "Attiva la timeline per usare questo comando"

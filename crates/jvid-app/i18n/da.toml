@@ -151,6 +151,11 @@ no_media = "ingen video- eller lydstrømme"
 unsupported_codec = "codec understøttes ikke: {codec}"
 
 [menu]
+clip_edits = "Klipredigering"
+in_out = "Ind/Ud"
+markers = "Markører"
+annotations = "Anmærkninger"
+clip_settings = "Klipindstillinger"
 reset_layout = "Nulstil panellayout"
 project_tooltip = "Opret, åbn og gem"
 new_project = "Nyt projekt"
@@ -1166,6 +1171,11 @@ no_audio = "Ingen lyd at transskribere"
 no_audio_help = "Tilføj et klip med lyd til tidslinjen for at starte en transskription."
 
 [palette]
+search = "Søg efter kommandoer…"
+project = "Projekt"
+navigation = "Navigation"
+close = "Luk Paletten"
+hints = "Up/Down Naviger    Enter Kør    Esc Luk"
 title = "Kommandopalet"
 no_results = "Ingen matchende kommandoer"
 focus_timeline = "Aktivér tidslinjen for at bruge kommandoen"

@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>jvid — Menu Review</title>
+        <link rel="stylesheet" href="prototype.css" />
+        <link rel="stylesheet" href="review.css" />
+        <link rel="stylesheet" href="palette.css" />
+        <script src="catalog.js" defer></script>
+        <script src="palette-data.js" defer></script>
+        <script src="menu-data.js" defer></script>
+        <script src="context-menus.js" defer></script>
+        <script src="panel-menus.js" defer></script>
+        <script src="menu-view.js" defer></script>
+        <script src="prototype.js" defer></script>
+        <script src="palette.js" defer></script>
+    </head>
+    <body>
+        <header class="appbar">
+            <strong class="wordmark">jvid</strong>
+            <nav aria-label="Application">
+                <button
+                    data-menu="file"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                >
+                    File
+                </button>
+                <button
+                    id="edit"
+                    data-menu="edit"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                >
+                    Edit
+                </button>
+                <button
+                    data-menu="timeline"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                >
+                    Timeline
+                </button>
+                <button
+                    data-menu="help"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                >
+                    Help
+                </button>
+            </nav>
+            <button
+                class="project-name"
+                data-menu="project"
+                aria-haspopup="menu"
+                aria-expanded="false"
+            >
+                Untitled
+            </button>
+            <div class="comparison" role="group" aria-label="Edit Menu Design">
+                <button data-mode="current" aria-pressed="false">
+                    Current
+                </button>
+                <button data-mode="grouped" aria-pressed="true">Grouped</button>
+            </div>
+            <button id="palette-trigger" aria-label="Command Palette">
+                Ctrl+K
+            </button>
+            <button
+                class="queue-trigger"
+                data-menu="export"
+                aria-label="Export Queue"
+                aria-haspopup="menu"
+                aria-expanded="false"
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6" />
+                </svg>
+            </button>
+            <button class="primary export-trigger" data-action="export">
+                Export
+            </button>
+        </header>
+        <main class="editor" aria-label="Editor Context">
+            <section class="panel media" data-context="media">
+                <h2>Media</h2>
+                <div class="panel-actions">
+                    <button data-menu="sort">Added</button
+                    ><button data-menu="filters">Filters</button>
+                </div>
+                <div class="asset" data-context="media" tabindex="0">
+                    subject.mp4
+                </div>
+                <div class="bin-target" data-context="media-bin" tabindex="0">
+                    Example Bin
+                </div>
+                <div
+                    class="effect-target"
+                    data-context="effect-file"
+                    tabindex="0"
+                >
+                    Gaussian Blur
+                </div>
+                <p class="context-hint">Right-click an item.</p>
+            </section>
+            <section class="panel preview">
+                <h2>Preview</h2>
+                <div class="viewer" data-context="program" tabindex="0"></div>
+                <div class="panel-actions preview-actions">
+                    <button data-menu="preview-zoom">Fit</button
+                    ><button data-menu="guides">Guides</button
+                    ><button data-menu="preview-more">More</button>
+                </div>
+            </section>
+            <section class="panel inspector">
+                <h2>Inspector</h2>
+                <div class="panel-actions inspector-actions">
+                    <button data-menu="paste-options">Paste Options</button
+                    ><button data-menu="effect-stack">More</button>
+                </div>
+                <div
+                    class="property-context"
+                    data-context="keyframe"
+                    tabindex="0"
+                >
+                    <span>Scale</span><span>100% ◇</span>
+                </div>
+                <div class="panel-actions inspector-actions">
+                    <button data-menu="add-effect">Add Effect</button
+                    ><button data-menu="add-mask">Add Mask</button>
+                </div>
+                <p class="context-hint">Right-click a keyframe.</p>
+            </section>
+            <section class="panel timeline">
+                <h2>Timeline</h2>
+                <div class="timeline-context" data-context="lane">
+                    <button
+                        class="tools-trigger"
+                        data-menu="tools"
+                        aria-label="Timeline Tools"
+                    >
+                        …
+                    </button>
+                    <div
+                        class="track-name"
+                        data-context="video-track"
+                        tabindex="0"
+                    >
+                        V1
+                    </div>
+                    <div class="demo-clip" data-context="clip" tabindex="0">
+                        subject.mp4
+                    </div>
+                    <div
+                        class="track-name audio-name"
+                        data-context="audio-track"
+                        tabindex="0"
+                    >
+                        A1
+                    </div>
+                    <div
+                        class="demo-clip audio-clip"
+                        data-context="clip"
+                        tabindex="0"
+                    >
+                        Audio
+                    </div>
+                    <button
+                        class="marker-target"
+                        data-menu="marker"
+                        aria-label="Marker"
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                                d="M4 22V3M4 3c4-4 8 4 12 0v12c-4 4-8-4-12 0"
+                            />
+                        </svg>
+                    </button>
+                </div>
+            </section>
+        </main>
+        <footer class="study-note">
+            <div>
+                <h1>Menu Review</h1>
+                <p id="description">
+                    Current app menus. Edit includes the approved grouping.
+                </p>
+            </div>
+            <div class="review-controls">
+                <label
+                    >Browse Menus<select
+                        id="browse"
+                        aria-label="Browse Menus"
+                    ></select
+                ></label>
+                <label
+                    >Project State<select
+                        id="scenario"
+                        aria-label="Project State"
+                    >
+                        <option value="example">Example Project</option>
+                        <option value="empty">Empty Project</option>
+                    </select></label
+                >
+                <label
+                    >Queue State<select
+                        id="queue-state"
+                        aria-label="Queue State"
+                    >
+                        <option value="running">Running</option>
+                        <option value="empty">Empty</option>
+                        <option value="finished">Finished</option>
+                        <option value="failed">Failed</option>
+                    </select></label
+                >
+            </div>
+        </footer>
+        <p id="feedback" class="review-feedback" role="status">
+            Example data. Browse menus or right-click a panel.
+        </p>
+        <div
+            id="edit-menu"
+            class="menu"
+            role="menu"
+            aria-label="Edit"
+            hidden
+        ></div>
+        <div id="submenu" class="menu submenu" role="menu" hidden></div>
+        <dialog id="command-palette" aria-labelledby="palette-title">
+            <div class="palette-header">
+                <h2 id="palette-title">Command Palette</h2>
+                <button id="palette-close" aria-label="Close Palette">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="m18 6-12 12M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="palette-search">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8" />
+                    <path d="m21 21-4.35-4.35" /></svg
+                ><input
+                    id="palette-query"
+                    aria-label="Search Commands"
+                    placeholder="Search commands…"
+                    role="combobox"
+                    aria-controls="palette-results"
+                    aria-expanded="true"
+                    autocomplete="off"
+                /><kbd>Ctrl+K</kbd>
+            </div>
+            <div
+                id="palette-results"
+                role="listbox"
+                aria-label="Commands"
+            ></div>
+            <div class="palette-footer">
+                <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span
+                ><span><kbd>Enter</kbd> Run</span
+                ><span><kbd>Esc</kbd> Close</span
+                ><span id="palette-context">Timeline</span>
+            </div>
+        </dialog>
+        <dialog id="preferences" aria-labelledby="preferences-title">
+            <div class="dialog-body">
+                <aside>
+                    <h2 id="preferences-title">Preferences</h2>
+                    <div class="selected-section">General</div>
+                </aside>
+                <section class="general">
+                    <h2>General</h2>
+                    <h3>Theme</h3>
+                    <div class="theme-options" role="group" aria-label="Theme">
+                        <button data-theme="dark" aria-pressed="true">
+                            <span class="swatch dark"></span>Dark
+                        </button>
+                        <button data-theme="light" aria-pressed="false">
+                            <span class="swatch light"></span>Light
+                        </button>
+                        <button data-theme="contrast" aria-pressed="false">
+                            <span class="swatch contrast"></span>High Contrast
+                        </button>
+                    </div>
+                    <p>Theme changes apply to this preview.</p>
+                </section>
+            </div>
+            <form method="dialog" class="dialog-footer">
+                <button class="primary">Done</button>
+            </form>
+        </dialog>
+    </body>
+</html>

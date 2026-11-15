@@ -151,6 +151,11 @@ no_media = "keine Video- oder Audiostreams"
 unsupported_codec = "nicht unterstützter Codec: {codec}"
 
 [menu]
+clip_edits = "Clip-Bearbeitung"
+in_out = "In/Out"
+markers = "Marker"
+annotations = "Anmerkungen"
+clip_settings = "Clip-Einstellungen"
 reset_layout = "Bereichsanordnung zurücksetzen"
 project_tooltip = "Neu, Öffnen und Speichern"
 new_project = "Neues Projekt"
@@ -1166,6 +1171,11 @@ no_audio = "Kein Audio zum Transkribieren"
 no_audio_help = "Füge einen Clip mit Audio zur Timeline hinzu, um ein Transkript zu erstellen."
 
 [palette]
+search = "Befehle suchen…"
+project = "Projekt"
+navigation = "Navigation"
+close = "Palette Schließen"
+hints = "Up/Down Navigieren    Enter Ausführen    Esc Schließen"
 title = "Befehlspalette"
 no_results = "Keine passenden Befehle"
 focus_timeline = "Aktiviere die Zeitleiste, um diesen Befehl zu verwenden"

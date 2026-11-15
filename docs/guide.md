@@ -31,7 +31,7 @@ every panel has a draggable tab. drag one onto another panel's tabs to share, or
 **cutting.**
 
 - drag a clip edge to trim, hold Ctrl to ripple.
-- `Ctrl+K` splits at the playhead. `C` is razor, `V` back to selection.
+- Split at Playhead (Edit > Clip Edits) splits at the playhead; give it a key in Keyboard Shortcuts. `C` is razor, `V` back to selection.
 - `Q`/`W` ripple trim the previous or next edit to the playhead.
 - `Shift+Delete` ripple deletes. click a gap and `Shift+Delete` to close it.
 - with in/out set, `;` lifts (leaves a gap) and `'` extracts (closes it).

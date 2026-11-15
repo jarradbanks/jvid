@@ -381,6 +381,12 @@ impl Reel {
         self.frame();
     }
 
+    /// Split at Playhead has no default key, so run the action the Edit menu runs.
+    fn split(&mut self) {
+        self.h.state_mut().run_action("add_edit", true);
+        self.frame();
+    }
+
     /// Clicks the ruler at `secs`, moving the playhead there.
     fn seek(&mut self, secs: f64, travel: f32) {
         self.move_to(pos2(self.x_at(secs), self.ruler()), travel);
@@ -406,10 +412,10 @@ impl Reel {
         self.mark("cut");
         let before = self.duration();
         self.seek(1.0, 0.6);
-        self.key(egui::Modifiers::COMMAND, egui::Key::K);
+        self.split();
         self.hold(0.2);
         self.seek(1.6, 0.4);
-        self.key(egui::Modifiers::COMMAND, egui::Key::K);
+        self.split();
         self.hold(0.2);
         let (_, v1) = self.lane();
         self.move_to(pos2(self.x_at(1.3), v1), 0.4);

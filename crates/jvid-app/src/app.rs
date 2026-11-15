@@ -697,6 +697,7 @@ impl App {
         tutorial::anchor(ui.ctx(), "menu.edit", button.rect);
         let mut picked = None;
         egui::Popup::menu(&button).show(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             let height = (ui.ctx().content_rect().height() - j_ui::tokens::space::S16).max(1.0);
             egui::ScrollArea::vertical()
                 .max_height(height)
@@ -705,23 +706,15 @@ impl App {
                         picked = Some("command_palette");
                     }
                     ui.separator();
-                    for &id in menus::EDIT {
-                        if id.is_empty() {
-                            ui.separator();
-                            continue;
-                        }
-                        if self.action_menu_item(ui, id) {
-                            picked = Some(id);
-                        }
+                    picked = picked.or(self.action_menu_items(ui, menus::EDIT));
+                    ui.separator();
+                    for &(label, items) in menus::EDIT_GROUPS {
+                        ui.menu_button(crate::i18n::CATALOG.tr(label), |ui| {
+                            picked = picked.or(self.action_menu_items(ui, items));
+                        });
                     }
                     ui.separator();
                     ui.menu_button(tr!("workspace.menu"), |ui| self.workspaces_menu(ui));
-                    if self.action_menu_item(ui, "maximize_panel") {
-                        picked = Some("maximize_panel");
-                    }
-                    if self.action_menu_item(ui, "reset_layout") {
-                        picked = Some("reset_layout");
-                    }
                     if ui.button(tr!("menu.preferences")).clicked() {
                         use jvid_audio::InputBackend;
                         self.preferences.open(
@@ -748,7 +741,9 @@ impl App {
                 self.run_action(id, true);
             }
         }
-        ui.separator();
+        if !self.workspaces.personal.is_empty() {
+            ui.separator();
+        }
         let mut apply = None;
         let mut rename = None;
         let mut delete = None;
@@ -767,6 +762,12 @@ impl App {
                     ui.close();
                 }
             });
+        }
+        ui.separator();
+        for id in ["maximize_panel", "reset_layout"] {
+            if self.action_menu_item(ui, id) {
+                self.run_action(id, true);
+            }
         }
         if let Some(index) = apply {
             let layout = self.workspaces.personal[index]
@@ -833,6 +834,20 @@ impl App {
     fn can_generate_subtitles(&self) -> bool {
         let selected = self.timeline.selected();
         crate::subtitles::Subtitles::can_open(self.history.project(), selected)
+    }
+
+    fn action_menu_items(&mut self, ui: &mut Ui, ids: &[&'static str]) -> Option<&'static str> {
+        let mut picked = None;
+        for &id in ids {
+            if id.is_empty() {
+                ui.separator();
+                continue;
+            }
+            if self.action_menu_item(ui, id) {
+                picked = Some(id);
+            }
+        }
+        picked
     }
 
     /// App menus and dispatch share the same availability and translated explanation.
@@ -3652,7 +3667,7 @@ mod palette_tests {
         h.run_steps(2);
         assert!(!h.state().command_palette.is_open());
         h.state_mut().keymap = Keymap::from_toml("command_palette = \"\"").unwrap();
-        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::P);
+        h.key_press_modifiers(Modifiers::COMMAND, Key::K);
         h.run();
         assert!(!h.state().command_palette.is_open());
     }
