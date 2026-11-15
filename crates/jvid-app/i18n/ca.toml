@@ -151,6 +151,11 @@ no_media = "no té cap flux de vídeo ni d'àudio"
 unsupported_codec = "còdec no compatible: {codec}"
 
 [menu]
+clip_edits = "Edició de Clips"
+in_out = "Entrada/Sortida"
+markers = "Marcadors"
+annotations = "Anotacions"
+clip_settings = "Configuració del Clip"
 reset_layout = "Restableix la disposició dels plafons"
 project_tooltip = "Crea, obre i desa"
 new_project = "Projecte nou"
@@ -1178,6 +1183,11 @@ no_audio = "Cap àudio per transcriure"
 no_audio_help = "Afegeix un clip amb àudio a la línia de temps per iniciar una transcripció."
 
 [palette]
+search = "Cerca ordres…"
+project = "Projecte"
+navigation = "Navegació"
+close = "Tanca la Paleta"
+hints = "Up/Down Navega    Retorn Executa    Esc Tanca"
 title = "Paleta d’Ordres"
 no_results = "No hi ha ordres coincidents"
 focus_timeline = "Activa la línia de temps per fer servir aquesta ordre"

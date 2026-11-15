@@ -34,7 +34,7 @@ pub const FILE: &[&str] = &[
     "quit",
 ];
 
-/// The app bar's Edit menu; "" is a separator.
+/// Direct Edit actions; "" separates related rows.
 pub const EDIT: &[&str] = &[
     "undo",
     "redo",
@@ -43,34 +43,47 @@ pub const EDIT: &[&str] = &[
     "copy",
     "paste",
     "duplicate",
-    "copy_settings",
-    "paste_settings",
-    "personal_presets",
-    "",
-    "delete",
-    "ripple_delete",
-    "review_speech_cuts",
-    "add_edit",
-    "ripple_trim_prev",
-    "ripple_trim_next",
-    "link",
-    "",
-    "mark_in",
-    "mark_out",
-    "mark_clip",
-    "mark_selection",
-    "clear_in_out",
-    "lift",
-    "extract",
-    "",
-    "add_marker",
-    "add_range_marker",
-    "",
-    "add_arrow",
-    "add_rectangle",
-    "add_callout",
-    "",
     "select_all",
+];
+
+/// The remaining Edit actions grouped under translated submenu labels.
+pub const EDIT_GROUPS: &[(&str, &[&str])] = &[
+    (
+        "menu.clip_edits",
+        &[
+            "delete",
+            "ripple_delete",
+            "",
+            "add_edit",
+            "ripple_trim_prev",
+            "ripple_trim_next",
+            "",
+            "link",
+            "review_speech_cuts",
+        ],
+    ),
+    (
+        "menu.in_out",
+        &[
+            "mark_in",
+            "mark_out",
+            "mark_clip",
+            "mark_selection",
+            "clear_in_out",
+            "",
+            "lift",
+            "extract",
+        ],
+    ),
+    ("menu.markers", &["add_marker", "add_range_marker"]),
+    (
+        "menu.annotations",
+        &["add_arrow", "add_rectangle", "add_callout"],
+    ),
+    (
+        "menu.clip_settings",
+        &["copy_settings", "paste_settings", "personal_presets"],
+    ),
 ];
 
 const CLIP: &[&str] = &[
@@ -355,6 +368,7 @@ mod tests {
             .iter()
             .chain(CLIP)
             .copied()
+            .chain(EDIT_GROUPS.iter().flat_map(|(_, ids)| ids.iter().copied()))
             .chain(TOOLBAR.iter().map(|(id, _)| *id))
             .chain(crate::framing::ACTIONS)
             .collect();

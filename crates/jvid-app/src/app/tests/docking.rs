@@ -501,6 +501,8 @@ fn dock_tabs_close_optional_panels_and_toolbar_drag_does_not_move_timeline() {
     // Reset is a real, translated menu action.
     h.get_by_label("Edit").click();
     h.run();
+    h.get_by_label("Workspaces ⏵").hover();
+    h.run();
     h.get_by_label("Reset Panel Layout").click();
     h.run();
     h.key_press_modifiers(Modifiers::SHIFT, Key::Num3);

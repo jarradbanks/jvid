@@ -5,7 +5,7 @@
 //! overwrites at the drop point, on a new track when dropped off every lane; dragged clips
 //! overwrite where they land, or with Alt cross-fade into the clip they overlap. Clicks and a
 //! marquee select clips, which copy, cut, paste at the playhead, duplicate and delete.
-//! Clip edges drag to trim (Ctrl ripples), the razor tool and Ctrl+K split, a clicked gap
+//! Clip edges drag to trim (Ctrl ripples), the razor tool and Split at Playhead, a clicked gap
 //! ripple deletes, and Q/W ripple trim to the playhead. In/out marks shade the ruler and
 //! lanes, drag by their ruler flags, and lift (`;`) or extract (`'`) their range.
 
@@ -785,7 +785,7 @@ impl Timeline {
         Some(cmd)
     }
 
-    /// Ctrl+K splits the selected clips under the playhead, or every unlocked track's when
+    /// Split at Playhead splits the selected clips under the playhead, or every unlocked track's when
     /// none are selected. Q/W ripple trim the clips under it to the playhead, Q then moving
     /// the playhead back to where they now start.
     fn cut_action(&mut self, id: &str, seq: &Sequence) -> Option<Command> {
@@ -3494,7 +3494,7 @@ mod tests {
         assert_eq!(spans(&h), vec![vec![(0, 2), (2, 3)]; 2]);
         assert!(h.undo());
 
-        // Ctrl+K with nothing selected cuts every track; with a selection, only it.
+        // Split at Playhead with nothing selected cuts every track; with a selection, only it.
         run(&mut t, &mut h, "add_edit", 1);
         assert_eq!(spans(&h), vec![vec![(0, 1), (1, 2), (2, 4)]; 2]);
         assert!(h.undo());

@@ -154,6 +154,11 @@ no_media = "geen video- of audiostreams"
 unsupported_codec = "niet-ondersteunde codec: {codec}"
 
 [menu]
+clip_edits = "Clipbewerkingen"
+in_out = "In/Uit"
+markers = "Markeringen"
+annotations = "Annotaties"
+clip_settings = "Clipinstellingen"
 reset_layout = "Paneelindeling herstellen"
 project_tooltip = "Nieuw, openen en opslaan"
 new_project = "Nieuw project"
@@ -1181,6 +1186,11 @@ no_audio = "Geen audio om te transcriberen"
 no_audio_help = "Voeg een clip met audio toe aan de tijdlijn om een transcript te starten."
 
 [palette]
+search = "Opdrachten zoeken…"
+project = "Project"
+navigation = "Navigatie"
+close = "Palet Sluiten"
+hints = "Up/Down Navigeren    Enter Uitvoeren    Esc Sluiten"
 title = "Opdrachtenpalet"
 no_results = "Geen overeenkomende opdrachten"
 focus_timeline = "Activeer de tijdlijn om deze opdracht te gebruiken"

@@ -151,6 +151,11 @@ no_media = "brak strumieni wideo i audio"
 unsupported_codec = "nieobsługiwany kodek: {codec}"
 
 [menu]
+clip_edits = "Edycja Klipu"
+in_out = "Wejście/Wyjście"
+markers = "Znaczniki"
+annotations = "Adnotacje"
+clip_settings = "Ustawienia Klipu"
 reset_layout = "Przywróć układ paneli"
 project_tooltip = "Tworzenie, otwieranie i zapisywanie"
 new_project = "Nowy projekt"
@@ -1194,6 +1199,11 @@ no_audio = "Brak dźwięku do transkrypcji"
 no_audio_help = "Dodaj klip z dźwiękiem do osi czasu, aby rozpocząć transkrypcję."
 
 [palette]
+search = "Szukaj poleceń…"
+project = "Projekt"
+navigation = "Nawigacja"
+close = "Zamknij Paletę"
+hints = "Up/Down Nawigacja    Enter Uruchom    Esc Zamknij"
 title = "Paleta Poleceń"
 no_results = "Brak pasujących poleceń"
 focus_timeline = "Aktywuj oś czasu, aby użyć tego polecenia"

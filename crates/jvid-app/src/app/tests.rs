@@ -1324,6 +1324,65 @@ fn edit_menu_opens_preferences_and_the_project_menu_keeps_project_settings() {
 }
 
 #[test]
+fn grouped_edit_menu_shows_preferences_and_opens_nested_groups_at_standard_sizes() {
+    for (size, scale) in [
+        ([1280.0, 720.0], 1.0),
+        ([1280.0, 720.0], 1.5),
+        ([1920.0, 1080.0], 1.0),
+        ([1920.0, 1080.0], 1.5),
+    ] {
+        let mut h = builder(size, scale).build_eframe(|cc| App::new(cc, &Default::default()));
+        h.run();
+        h.state_mut().on_welcome = false;
+        h.run();
+        h.get_by_label("Edit").click();
+        h.run();
+        let at = format!("{size:?}@{scale}");
+        let viewport = h.ctx.content_rect();
+        // Direct rows, top to bottom; egui suffixes submenu rows with ⏵.
+        let direct = [
+            "Command Palette Ctrl+K",
+            "Clip Edits ⏵",
+            "In/Out ⏵",
+            "Markers ⏵",
+            "Annotations ⏵",
+            "Clip Settings ⏵",
+            "Workspaces ⏵",
+            "Preferences…",
+        ];
+        let tops: Vec<f32> = direct
+            .iter()
+            .map(|label| {
+                let row = h.get_by_label(label).rect();
+                assert!(viewport.contains_rect(row), "{at}: {label} {row:?}");
+                row.top()
+            })
+            .collect();
+        assert!(tops.windows(2).all(|w| w[0] < w[1]), "{at}: {tops:?}");
+        assert!(h.query_by_label_contains("Ripple Delete").is_none(), "{at}");
+
+        // The timeline toolbar names Split too; the submenu adds a second, unbound row.
+        let splits = |h: &Harness<'_, App>| h.query_all_by_label("Split at Playhead").count();
+        let before = splits(&h);
+        h.get_by_label("Clip Edits ⏵").hover();
+        h.run_steps(2);
+        assert_eq!(splits(&h), before + 1, "{at}");
+        assert!(
+            h.query_by_label_contains("Split at Playhead Ctrl")
+                .is_none(),
+            "{at}"
+        );
+        h.get_by_label("Workspaces ⏵").hover();
+        h.run_steps(2);
+        assert!(
+            h.query_by_label_contains("Reset Panel Layout").is_some(),
+            "{at}"
+        );
+        assert!(h.query_by_label_contains("Maximize").is_some(), "{at}");
+    }
+}
+
+#[test]
 #[ignore = "changes global locale; run this test in isolation"]
 fn translated_edit_menu_scrolls_to_preferences_at_minimum_size_and_high_dpi() {
     struct Restore(&'static str);

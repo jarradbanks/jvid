@@ -153,6 +153,11 @@ no_media = "ビデオまたはオーディオのストリームがありませ�
 unsupported_codec = "未対応のコーデック：{codec}"
 
 [menu]
+clip_edits = "クリップ編集"
+in_out = "イン/アウト"
+markers = "マーカー"
+annotations = "注釈"
+clip_settings = "クリップ設定"
 reset_layout = "パネルの配置をリセット"
 project_tooltip = "新規作成、開く、保存"
 new_project = "新規プロジェクト"
@@ -1168,6 +1173,11 @@ no_audio = "文字起こしする音声がありません"
 no_audio_help = "音声のあるクリップをタイムラインに追加して文字起こしを始めてください。"
 
 [palette]
+search = "コマンドを検索…"
+project = "プロジェクト"
+navigation = "ナビゲーション"
+close = "パレットを閉じる"
+hints = "Up/Down 移動    Enter 実行    Esc 閉じる"
 title = "コマンドパレット"
 no_results = "一致するコマンドがありません"
 focus_timeline = "このコマンドを使うにはタイムラインを選択してください"

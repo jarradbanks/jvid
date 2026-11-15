@@ -151,6 +151,11 @@ no_media = "žádný video ani zvukový stream"
 unsupported_codec = "nepodporovaný kodek: {codec}"
 
 [menu]
+clip_edits = "Úpravy Klipu"
+in_out = "Vstup/Výstup"
+markers = "Značky"
+annotations = "Anotace"
+clip_settings = "Nastavení Klipu"
 reset_layout = "Obnovit rozložení panelů"
 project_tooltip = "Vytvořit, otevřít a uložit"
 new_project = "Nový projekt"
@@ -1185,6 +1190,11 @@ no_audio = "Žádný zvuk k přepisu"
 no_audio_help = "Přidejte klip se zvukem na časovou osu a začněte přepis."
 
 [palette]
+search = "Hledat příkazy…"
+project = "Projekt"
+navigation = "Navigace"
+close = "Zavřít Paletu"
+hints = "Up/Down Procházet    Enter Spustit    Esc Zavřít"
 title = "Paleta Příkazů"
 no_results = "Žádné odpovídající příkazy"
 focus_timeline = "Aktivujte časovou osu, abyste mohli použít tento příkaz"

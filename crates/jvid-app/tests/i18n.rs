@@ -95,6 +95,8 @@ fn editor_menus_inspector_and_dialogs_show_spanish() {
 
     h.get_by_label("Edición").click();
     h.run();
+    h.get_by_label("Espacios de trabajo ⏵").hover();
+    h.run();
     assert!(has(&h, "Restablecer distribución de paneles"));
     h.get_by_label("Preferencias…").scroll_to_me();
     h.run();
