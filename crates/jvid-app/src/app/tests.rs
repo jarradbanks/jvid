@@ -16,6 +16,8 @@ use crate::import::Importer;
 mod audit_b08;
 mod audit_b09;
 mod audit_b11;
+#[cfg(all(debug_assertions, feature = "debug-ui"))]
+mod debug_ui;
 mod docking;
 mod subtitle_export;
 mod timeline_recording;

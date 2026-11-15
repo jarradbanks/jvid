@@ -1464,3 +1464,6 @@ crossfade = "Crossfade"
 trim = "Trim {delta}"
 ripple_trim = "Ripple Trim {delta}"
 unavailable = "Edit unavailable here"
+
+[debug]
+audio_disabled = "Audio devices are disabled in debug display sessions."

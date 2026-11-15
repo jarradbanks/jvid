@@ -1408,6 +1408,23 @@ impl Timeline {
                     painter.rect_stroke(r, corner, stroke, egui::StrokeKind::Inside);
                 }
                 let cr = ui.interact(r, id.with(("clip", clip.id)), Sense::click_and_drag());
+                #[cfg(all(debug_assertions, feature = "debug-ui"))]
+                {
+                    let path = format!(
+                        "jvid/sequences/{}/tracks/{}/clips/{}",
+                        project.sequence().id().0,
+                        track.id.0,
+                        clip.id.0
+                    );
+                    let name = asset.map_or_else(
+                        || tr!("timeline.missing_asset").to_owned(),
+                        MediaAsset::display_name,
+                    );
+                    let mut target = cr.clone();
+                    target.rect = r.intersect(lanes);
+                    target.interact_rect = target.rect;
+                    j_ui_debug::target(ui, &target, &path, &name);
+                }
                 let item = crate::app::tutorial::Item::Clip(clip.id);
                 crate::app::tutorial::item_anchor(ui.ctx(), "clip", item, r.intersect(lanes));
                 if extra > 0.0 {
@@ -2119,6 +2136,15 @@ impl Timeline {
         // Clipped to the column so a part-scrolled header can't cover the ruler.
         let shown = rect.intersect(column);
         let body = ui.interact(shown, id, Sense::click());
+        #[cfg(all(debug_assertions, feature = "debug-ui"))]
+        {
+            let path = format!(
+                "jvid/sequences/{}/tracks/{}",
+                project.sequence().id().0,
+                track.id.0
+            );
+            j_ui_debug::target(ui, &body, &path, &track_label(tracks, index));
+        }
         if body.hovered() {
             painter.rect_filled(rect, 0.0, color::raised().gamma_multiply(0.5));
         }

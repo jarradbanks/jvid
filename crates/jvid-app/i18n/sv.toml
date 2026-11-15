@@ -1354,3 +1354,6 @@ crossfade = "Övertoning"
 trim = "Trimma {delta}"
 ripple_trim = "Trimma med Förskjutning {delta}"
 unavailable = "Redigering är inte tillgänglig här"
+
+[debug]
+audio_disabled = "Ljudenheter är avstängda under felsökningssessioner."

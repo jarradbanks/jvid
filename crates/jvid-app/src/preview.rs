@@ -12,7 +12,7 @@ use egui::{Align, Align2, Layout, Pos2, Rect, Stroke, Ui, UiBuilder, pos2, vec2}
 use j_ui::theme::{self, icon};
 use j_ui::tokens::{color, size, space};
 use j_ui::widgets::{Button, Checkbox, Dropdown};
-use jvid_audio::{CpalBackend, Output};
+use jvid_audio::Output;
 use jvid_core::history::Command;
 use jvid_core::model::{AssetId, MediaAsset, Project, ProjectSettings, Sequence};
 use jvid_core::settings::PreviewQuality;
@@ -441,7 +441,7 @@ impl Preview {
     pub fn source_action(&mut self, id: &str, project: &Project) -> Option<Command> {
         let starts = matches!(id, "play_stop" | "shuttle_left" | "shuttle_right");
         if starts && self.player.is_some() && self.output.is_none() {
-            self.output = Some(Output::new(Box::new(CpalBackend::default()), None));
+            self.output = Some(Output::new(crate::devices::output(), None));
         }
         let marking = id.starts_with("mark_") || id.starts_with("clear_");
         if !marking
@@ -627,7 +627,7 @@ impl Preview {
         }
         let out = self
             .output
-            .get_or_insert_with(|| Output::new(Box::new(CpalBackend::default()), None));
+            .get_or_insert_with(|| Output::new(crate::devices::output(), None));
         out.flush();
         let clock = out.clock();
         let t = &mut self.program.transport;
@@ -643,7 +643,7 @@ impl Preview {
     pub(crate) fn record(&mut self, start: Time) {
         let out = self
             .output
-            .get_or_insert_with(|| Output::new(Box::new(CpalBackend::default()), None));
+            .get_or_insert_with(|| Output::new(crate::devices::output(), None));
         out.flush();
         self.program.transport.record(start, out.clock());
         self.program_head = start;
@@ -835,7 +835,7 @@ impl Preview {
             if dragging && pb.scrub_audio && pb.transport.speed() == 0 {
                 let out = self
                     .output
-                    .get_or_insert_with(|| Output::new(Box::new(CpalBackend::default()), None));
+                    .get_or_insert_with(|| Output::new(crate::devices::output(), None));
                 pb.scrub(project, out);
             }
         }

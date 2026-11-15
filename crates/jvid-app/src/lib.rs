@@ -1,57 +1,59 @@
 //! The jvid desktop video editor's code, shared by its binary and the headless `jvid` CLI.
 
-mod annotations;
+// The hot-reload binary reexports internal modules to retain their crate:: paths.
+pub(crate) mod annotations;
 pub mod app;
-mod autosave;
-mod caption_workspace;
+pub(crate) mod autosave;
+pub(crate) mod caption_workspace;
 pub mod collect_project;
-mod command_palette;
-mod components;
-mod easing;
-mod effects;
+pub(crate) mod command_palette;
+pub(crate) mod components;
+pub(crate) mod devices;
+pub(crate) mod easing;
+pub(crate) mod effects;
 #[cfg(test)]
-mod empty_state_tests;
+pub(crate) mod empty_state_tests;
 pub mod export;
-mod framing;
-mod handles;
-mod hide_region;
+pub(crate) mod framing;
+pub(crate) mod handles;
+pub(crate) mod hide_region;
 pub mod highlight_review;
 pub mod i18n;
-mod import;
-mod inspector;
-mod keymap;
-mod keymap_editor;
-mod masks;
-mod media_bin;
-mod notices;
+pub(crate) mod import;
+pub(crate) mod inspector;
+pub(crate) mod keymap;
+pub(crate) mod keymap_editor;
+pub(crate) mod masks;
+pub(crate) mod media_bin;
+pub(crate) mod notices;
 pub mod package_smoke;
-mod personal_presets;
-mod playback;
-mod playback_status;
+pub(crate) mod personal_presets;
+pub(crate) mod playback;
+pub(crate) mod playback_status;
 pub mod preferences;
-mod preview;
+pub(crate) mod preview;
 pub mod project_file;
-mod project_settings;
-mod record;
-mod relink;
+pub(crate) mod project_settings;
+pub(crate) mod record;
+pub(crate) mod relink;
 pub mod samples;
-mod scopes;
+pub(crate) mod scopes;
 pub mod settings_file;
 pub mod settings_transfer;
-mod speech_review;
-mod subtitles;
-mod timeline;
-mod transcript;
-mod transport;
-mod updates;
-mod viewer_geometry;
-mod welcome;
+pub(crate) mod speech_review;
+pub(crate) mod subtitles;
+pub(crate) mod timeline;
+pub(crate) mod transcript;
+pub(crate) mod transport;
+pub(crate) mod updates;
+pub(crate) mod viewer_geometry;
+pub(crate) mod welcome;
 pub mod workspaces;
-mod zoom;
+pub(crate) mod zoom;
 
 /// Test helpers the modules share.
 #[cfg(test)]
-mod test_util {
+pub(crate) mod test_util {
     use egui_kittest::kittest::Queryable;
 
     /// Materialize the dependency's embedded fonts for tests that need real file paths.

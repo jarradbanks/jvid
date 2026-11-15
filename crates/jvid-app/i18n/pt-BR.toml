@@ -1370,3 +1370,6 @@ crossfade = "Dissolução cruzada"
 trim = "Aparar {delta}"
 ripple_trim = "Aparar com Deslocamento {delta}"
 unavailable = "Edição indisponível aqui"
+
+[debug]
+audio_disabled = "Os dispositivos de áudio estão desativados nas sessões de depuração."

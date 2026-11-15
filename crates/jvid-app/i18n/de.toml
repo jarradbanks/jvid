@@ -1354,3 +1354,6 @@ crossfade = "Überblendung"
 trim = "Trimmen {delta}"
 ripple_trim = "Ripple-Trimmen {delta}"
 unavailable = "Bearbeitung hier nicht verfügbar"
+
+[debug]
+audio_disabled = "Audiogeräte sind in Debug-Sitzungen deaktiviert."

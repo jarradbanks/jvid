@@ -1382,3 +1382,6 @@ crossfade = "Przenikanie"
 trim = "Przycięcie {delta}"
 ripple_trim = "Przycięcie z Przesunięciem {delta}"
 unavailable = "Edycja jest tutaj niedostępna"
+
+[debug]
+audio_disabled = "Urządzenia audio są wyłączone podczas sesji debugowania."

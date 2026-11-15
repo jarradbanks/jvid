@@ -1354,3 +1354,6 @@ crossfade = "Overtoning"
 trim = "Trim {delta}"
 ripple_trim = "Trim med Forskyvning {delta}"
 unavailable = "Redigering er ikke tilgjengelig her"
+
+[debug]
+audio_disabled = "Lydenheter er deaktivert under feilsøkingsøkter."

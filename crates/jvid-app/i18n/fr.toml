@@ -1377,3 +1377,6 @@ crossfade = "Fondu enchaîné"
 trim = "Raccord {delta}"
 ripple_trim = "Raccord avec Décalage {delta}"
 unavailable = "Modification indisponible ici"
+
+[debug]
+audio_disabled = "Les périphériques audio sont désactivés pendant les sessions de débogage."
