@@ -1366,3 +1366,6 @@ crossfade = "Fosa creuada"
 trim = "Retalla {delta}"
 ripple_trim = "Retall amb Desplaçament {delta}"
 unavailable = "L’edició no està disponible aquí"
+
+[debug]
+audio_disabled = "Els dispositius d’àudio estan desactivats durant les sessions de depuració."

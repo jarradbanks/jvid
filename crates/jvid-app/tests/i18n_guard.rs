@@ -1016,6 +1016,27 @@ fn module_files(root: &Path) -> Vec<PathBuf> {
             if m.content.is_some() || is_test(&m.attrs) {
                 continue;
             }
+            let explicit = m.attrs.iter().find_map(|attr| {
+                if !attr.path().is_ident("path") {
+                    return None;
+                }
+                let syn::Meta::NameValue(value) = &attr.meta else {
+                    return None;
+                };
+                let Expr::Lit(value) = &value.value else {
+                    return None;
+                };
+                let Lit::Str(path) = &value.lit else {
+                    return None;
+                };
+                Some(path.value())
+            });
+            if let Some(relative) = explicit {
+                let path = dir.join(relative);
+                assert!(path.exists(), "{file:?}: missing source {path:?}");
+                queue.push((path, true));
+                continue;
+            }
             let name = m.ident.to_string();
             let flat = children.join(format!("{name}.rs"));
             let nested = children.join(&name).join("mod.rs");
@@ -1027,6 +1048,20 @@ fn module_files(root: &Path) -> Vec<PathBuf> {
     }
     out.sort();
     out
+}
+
+#[test]
+fn module_tree_follows_explicit_source_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("main.rs");
+    let shared = dir.path().join("shared");
+    std::fs::create_dir(&shared).unwrap();
+    let library = shared.join("lib.rs");
+    let screen = shared.join("screen.rs");
+    std::fs::write(&root, "#[path = \"shared/lib.rs\"] mod desktop;").unwrap();
+    std::fs::write(&library, "mod screen;").unwrap();
+    std::fs::write(&screen, "").unwrap();
+    assert_eq!(module_files(&root), vec![root, library, screen]);
 }
 
 #[test]

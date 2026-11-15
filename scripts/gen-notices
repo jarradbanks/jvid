@@ -54,7 +54,7 @@ def samples():
 def main():
     meta = json.loads(
         subprocess.check_output(
-            ["cargo", "metadata", "--format-version", "1", "--locked"], cwd=ROOT
+            ["cargo", "metadata", "--all-features", "--format-version", "1", "--locked"], cwd=ROOT
         )
     )
     ui = next(p for p in meta["packages"] if p["name"] == "j-ui")

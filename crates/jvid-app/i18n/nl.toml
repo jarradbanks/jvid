@@ -1369,3 +1369,6 @@ crossfade = "Overvloeier"
 trim = "Trimmen {delta}"
 ripple_trim = "Trimmen met Verschuiving {delta}"
 unavailable = "Bewerking hier niet beschikbaar"
+
+[debug]
+audio_disabled = "Audioapparaten zijn uitgeschakeld tijdens foutopsporingssessies."

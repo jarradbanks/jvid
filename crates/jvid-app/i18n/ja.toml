@@ -1356,3 +1356,6 @@ crossfade = "クロスフェード"
 trim = "トリム {delta}"
 ripple_trim = "リップルトリム {delta}"
 unavailable = "ここでは編集できません"
+
+[debug]
+audio_disabled = "デバッグセッションではオーディオデバイスが無効になります。"

@@ -2,7 +2,14 @@
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-use jvid_app::{app, settings_file};
+// Subsecond patches the binary crate; the CLI and normal app still share the library.
+#[cfg(all(debug_assertions, feature = "hot-reload", not(test)))]
+#[path = "lib.rs"]
+pub mod desktop;
+#[cfg(all(debug_assertions, feature = "hot-reload", not(test)))]
+pub(crate) use desktop::*;
+#[cfg(not(all(debug_assertions, feature = "hot-reload", not(test))))]
+use jvid_app as desktop;
 
 fn main() -> eframe::Result {
     let mut args = std::env::args_os().skip(1);
@@ -11,7 +18,7 @@ fn main() -> eframe::Result {
             eprintln!("--smoke-test requires an output directory");
             std::process::exit(2);
         };
-        let result = jvid_app::package_smoke::run(std::path::Path::new(&dir));
+        let result = desktop::package_smoke::run(std::path::Path::new(&dir));
         match result {
             Ok(()) => return Ok(()),
             Err(error) => {
@@ -20,11 +27,16 @@ fn main() -> eframe::Result {
             }
         }
     }
+    #[cfg(all(debug_assertions, feature = "debug-ui"))]
+    jvid_paths::check_developer_profile()
+        .map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
+    #[cfg(all(debug_assertions, feature = "hot-reload"))]
+    dioxus_devtools::connect_subsecond();
     if let Err(error) = jvid_paths::check_portable_writable() {
         rfd::MessageDialog::new()
-            .set_title(jvid_app::i18n::verbatim("jvid"))
+            .set_title(desktop::i18n::verbatim("jvid"))
             .set_description(j_ui::tr!(
-                jvid_app::i18n::CATALOG,
+                desktop::i18n::CATALOG,
                 "components.portable_error",
                 error = error
             ))
@@ -37,10 +49,10 @@ fn main() -> eframe::Result {
     if let Err(e) = jvid_media::ffmpeg::init() {
         tracing::error!("ffmpeg failed to initialise: {e}");
     }
-    if let Some(dir) = settings_file::themes_dir()
+    if let Some(dir) = desktop::settings_file::themes_dir()
         && let Err(e) = j_ui::themes::install_bundled(&dir)
     {
         tracing::warn!("themes: can't set up {}: {e}", dir.display());
     }
-    app::run(settings_file::load())
+    desktop::app::run(desktop::settings_file::load())
 }

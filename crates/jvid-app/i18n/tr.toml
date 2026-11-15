@@ -1357,3 +1357,6 @@ crossfade = "Çapraz Geçiş"
 trim = "Kırp {delta}"
 ripple_trim = "Kaydırarak Kırp {delta}"
 unavailable = "Burada düzenleme kullanılamıyor"
+
+[debug]
+audio_disabled = "Hata ayıklama oturumlarında ses aygıtları devre dışıdır."

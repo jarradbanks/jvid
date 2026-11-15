@@ -162,6 +162,8 @@ fn view_title(id: &str) -> &'static str {
 }
 
 pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
+    let profile_root =
+        jvid_paths::profile_root().map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
     let startup_path = std::env::args_os().nth(1).map(PathBuf::from);
     // Here rather than in App::new, so tests and embedders pick their own language.
     j_ui::i18n::set_language(j_ui::i18n::resolve(&settings.language));
@@ -173,7 +175,7 @@ pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
             .with_inner_size([1280.0, 720.0])
             .with_min_inner_size([960.0, 600.0]),
         renderer: eframe::Renderer::Wgpu,
-        persistence_path: jvid_paths::portable_root()
+        persistence_path: profile_root
             .and_then(|_| jvid_paths::config_dir().map(|d| d.join("window.ron"))),
         ..Default::default()
     };
@@ -183,6 +185,13 @@ pub fn run(settings: jvid_core::settings::Settings) -> eframe::Result {
         "jvid",
         options,
         Box::new(move |cc| {
+            #[cfg(all(debug_assertions, feature = "debug-ui"))]
+            j_ui_debug::install_from_env(&cc.egui_ctx, "jvid")?;
+            #[cfg(all(debug_assertions, feature = "hot-reload"))]
+            {
+                let ctx = cc.egui_ctx.clone();
+                subsecond::register_handler(std::sync::Arc::new(move || ctx.request_repaint()));
+            }
             let mut app = App::new(cc, &settings);
             app.open_startup(startup_path);
             app.components.offer();
@@ -723,9 +732,8 @@ impl App {
                         picked = Some("reset_layout");
                     }
                     if ui.button(tr!("menu.preferences")).clicked() {
-                        use jvid_audio::InputBackend;
                         self.preferences.open(
-                            jvid_audio::CpalInput::default().devices(),
+                            crate::devices::input().devices(),
                             crate::settings_file::themes_dir(),
                         );
                     }
@@ -844,6 +852,8 @@ impl App {
             button = button.shortcut_text(shortcut);
         }
         let response = ui.add_enabled(available.is_enabled(), button);
+        #[cfg(all(debug_assertions, feature = "debug-ui"))]
+        j_ui_debug::target(ui, &response, &format!("jvid/actions/{id}"), name);
         let response = if let Some(reason) = available.reason() {
             response.on_disabled_hover_text(reason)
         } else {
@@ -1741,9 +1751,7 @@ impl App {
                 }),
         };
         let device = Some(self.input_device.as_str()).filter(|d| !d.is_empty());
-        let input = self
-            .input
-            .get_or_insert_with(|| Box::new(jvid_audio::CpalInput::default()));
+        let input = self.input.get_or_insert_with(crate::devices::input);
         let start = self.timeline.playhead();
         let take = track.and_then(|track| {
             crate::record::Take::start(input.as_mut(), device, &dir, track, start)
@@ -2137,8 +2145,8 @@ impl App {
     }
 }
 
-impl eframe::App for App {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+impl App {
+    fn frame(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.editor_context = Some(ctx.clone());
         self.updates.poll(&ctx);
@@ -2638,6 +2646,15 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(ViewportCommand::Title(title.clone()));
             self.window_title = title;
         }
+    }
+}
+
+impl eframe::App for App {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+        #[cfg(all(debug_assertions, feature = "hot-reload"))]
+        subsecond::call(|| self.frame(ui, frame));
+        #[cfg(not(all(debug_assertions, feature = "hot-reload")))]
+        self.frame(ui, frame);
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

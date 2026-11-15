@@ -674,7 +674,7 @@ impl Audition {
             Box::new(move |start, out| source.fill(start, out))
         }));
         audio.prime(&project, start);
-        let output = jvid_audio::Output::new(Box::new(jvid_audio::CpalBackend::default()), None);
+        let output = jvid_audio::Output::new(crate::devices::output(), None);
         let mut transport = crate::transport::Transport::new(end, project.settings().frame_rate);
         transport.seek(start, output.clock());
         transport.toggle(output.clock());

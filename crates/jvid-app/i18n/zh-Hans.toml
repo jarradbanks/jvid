@@ -1387,3 +1387,6 @@ crossfade = "交叉淡化"
 trim = "修剪 {delta}"
 ripple_trim = "波纹修剪 {delta}"
 unavailable = "此处无法编辑"
+
+[debug]
+audio_disabled = "调试会话中已禁用音频设备。"

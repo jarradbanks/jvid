@@ -1354,3 +1354,6 @@ crossfade = "Krydstoning"
 trim = "Beskær {delta}"
 ripple_trim = "Beskær med Forskydning {delta}"
 unavailable = "Redigering er ikke tilgængelig her"
+
+[debug]
+audio_disabled = "Lydenheder er deaktiveret under fejlfindingssessioner."

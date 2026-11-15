@@ -10,5 +10,8 @@ publish.workspace = true
 [dependencies]
 directories.workspace = true
 
+[features]
+debug-ui = []
+
 [lints]
 workspace = true
