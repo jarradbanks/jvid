@@ -117,10 +117,10 @@ jobs:
         timeout-minutes: 10
         shell: bash
         run: |
-          # Hosted Ubuntu uses this mirror list; fail visibly if a new image changes that integration.
+          # The archive uses this mirror list; security updates may use their own URI.
           cat /etc/apt/sources.list.d/ubuntu.sources
           cat /etc/apt/apt-mirrors.txt
-          if [[ "$(grep '^URIs:' /etc/apt/sources.list.d/ubuntu.sources | sort -u)" != 'URIs: mirror+file:/etc/apt/apt-mirrors.txt' ]]; then
+          if ! grep -Fqx 'URIs: mirror+file:/etc/apt/apt-mirrors.txt' /etc/apt/sources.list.d/ubuntu.sources; then
             echo '::error::Unexpected Ubuntu APT sources; review the runner mirror configuration'
             exit 1
           fi
