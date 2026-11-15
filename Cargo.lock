@@ -2606,7 +2606,7 @@ dependencies = [
 [[package]]
 name = "j-ui-debug"
 version = "0.1.0"
-source = "git+https://github.com/jarradbanks/j-ui.git?rev=1ab837487597e6c7a43625e4a2010fe3f77354bd#1ab837487597e6c7a43625e4a2010fe3f77354bd"
+source = "git+https://github.com/jarradbanks/j-ui.git?rev=7a1acf8abd8c2ea762eb4a27a4b16ea8409637f9#7a1acf8abd8c2ea762eb4a27a4b16ea8409637f9"
 dependencies = [
  "egui",
  "getrandom 0.4.3",
