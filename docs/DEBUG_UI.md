@@ -60,3 +60,21 @@ Linux verification uses an isolated Xvfb display and lavapipe. Compilation does
 not prove a live Subsecond patch or Orca Annotate/Draw acceptance. Windows GPU,
 hardware and hot-patch acceptance require PC testing; Windows Dioxus CLI builds
 also require the stub RAX fix from DioxusLabs/dioxus#5967.
+
+The Dioxus CLI must include the captured-crate graph fix from
+[DioxusLabs/dioxus#5903](https://github.com/DioxusLabs/dioxus/pull/5903).
+Stock CLI 0.7.10 includes unrelated workspace dependents in the patch graph:
+editing the shared app source fails with `Missing rustc args for replay:
+'jvid_cli'`, because the served app build never compiled that sibling binary.
+Use a corrected developer CLI without changing the production workspace graph
+or downgrading Subsecond.
+
+The isolated Linux tool was built from official CLI commit
+`57d6794ad60b949e5bd8aa282f6f8c3dc97a365e` with a ten-line backport of that
+captured `.lib`/`.bin` guard. Its version is
+`0.7.10 (57d6794+graph-0cf7878)`; the patch SHA-256 is
+`0cf78788b104cbf118835521c4082273ddcfec078f00310096942621dda35f87`
+and the binary SHA-256 is
+`11e083a92c53cf7b892b92ad1c371d5b44fd2dc19db9400fdeb5acbed5be25a2`.
+The source, patch, provenance and binary remain in the debug task's ticket
+directory; the installed CLI is unchanged.

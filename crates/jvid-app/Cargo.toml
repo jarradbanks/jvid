@@ -32,7 +32,7 @@ sha2.workspace = true
 toml.workspace = true
 subsecond = { version = "0.7", optional = true }
 dioxus-devtools = { version = "0.7", optional = true }
-j-ui-debug = { git = "https://github.com/jarradbanks/j-ui.git", rev = "7a1acf8abd8c2ea762eb4a27a4b16ea8409637f9", optional = true }
+j-ui-debug = { git = "https://github.com/jarradbanks/j-ui.git", rev = "ccf435618d4bb42f8fc7635c8e38336ea120b90c", optional = true }
 
 [features]
 gpl-ffmpeg = ["jvid-media/gpl-ffmpeg"]
